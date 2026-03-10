@@ -130,8 +130,8 @@ Module {
                     Comment {
                         content: "=> true",
                         span: Span {
-                            start: 705,
-                            end: 711,
+                            start: 700,
+                            end: 706,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -143,8 +143,8 @@ Module {
                     Identifier {
                         name: "result2",
                         span: Span {
-                            start: 691,
-                            end: 698,
+                            start: 686,
+                            end: 693,
                         },
                     },
                 ),
@@ -154,8 +154,8 @@ Module {
                             42,
                         ),
                         Span {
-                            start: 702,
-                            end: 704,
+                            start: 697,
+                            end: 699,
                         },
                     ),
                     selector: Unary(
@@ -164,13 +164,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 702,
-                        end: 711,
+                        start: 697,
+                        end: 706,
                     },
                 },
                 span: Span {
-                    start: 691,
-                    end: 711,
+                    start: 686,
+                    end: 706,
                 },
             },
             preceding_blank_line: false,
@@ -182,8 +182,8 @@ Module {
                     Comment {
                         content: "=> false (zero is not nil!)",
                         span: Span {
-                            start: 741,
-                            end: 746,
+                            start: 732,
+                            end: 737,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -195,8 +195,8 @@ Module {
                     Identifier {
                         name: "result3",
                         span: Span {
-                            start: 728,
-                            end: 735,
+                            start: 719,
+                            end: 726,
                         },
                     },
                 ),
@@ -206,8 +206,8 @@ Module {
                             0,
                         ),
                         Span {
-                            start: 739,
-                            end: 740,
+                            start: 730,
+                            end: 731,
                         },
                     ),
                     selector: Unary(
@@ -216,13 +216,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 739,
-                        end: 746,
+                        start: 730,
+                        end: 737,
                     },
                 },
                 span: Span {
-                    start: 728,
-                    end: 746,
+                    start: 719,
+                    end: 737,
                 },
             },
             preceding_blank_line: false,
@@ -233,8 +233,8 @@ Module {
                     Comment {
                         content: "Test isNil / notNil on strings",
                         span: Span {
-                            start: 820,
-                            end: 827,
+                            start: 805,
+                            end: 812,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -244,8 +244,8 @@ Module {
                     Comment {
                         content: "=> false",
                         span: Span {
-                            start: 839,
-                            end: 844,
+                            start: 824,
+                            end: 829,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -257,8 +257,8 @@ Module {
                     Identifier {
                         name: "result4",
                         span: Span {
-                            start: 820,
-                            end: 827,
+                            start: 805,
+                            end: 812,
                         },
                     },
                 ),
@@ -268,8 +268,8 @@ Module {
                             "hello",
                         ),
                         Span {
-                            start: 831,
-                            end: 838,
+                            start: 816,
+                            end: 823,
                         },
                     ),
                     selector: Unary(
@@ -278,13 +278,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 831,
-                        end: 844,
+                        start: 816,
+                        end: 829,
                     },
                 },
                 span: Span {
-                    start: 820,
-                    end: 844,
+                    start: 805,
+                    end: 829,
                 },
             },
             preceding_blank_line: true,
@@ -296,8 +296,8 @@ Module {
                     Comment {
                         content: "=> true",
                         span: Span {
-                            start: 878,
-                            end: 884,
+                            start: 862,
+                            end: 868,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -309,8 +309,8 @@ Module {
                     Identifier {
                         name: "result5",
                         span: Span {
-                            start: 859,
-                            end: 866,
+                            start: 843,
+                            end: 850,
                         },
                     },
                 ),
@@ -320,8 +320,8 @@ Module {
                             "hello",
                         ),
                         Span {
-                            start: 870,
-                            end: 877,
+                            start: 854,
+                            end: 861,
                         },
                     ),
                     selector: Unary(
@@ -330,13 +330,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 870,
-                        end: 884,
+                        start: 854,
+                        end: 868,
                     },
                 },
                 span: Span {
-                    start: 859,
-                    end: 884,
+                    start: 843,
+                    end: 868,
                 },
             },
             preceding_blank_line: false,
@@ -348,8 +348,8 @@ Module {
                     Comment {
                         content: "=> false (empty string is not nil!)",
                         span: Span {
-                            start: 911,
-                            end: 916,
+                            start: 895,
+                            end: 900,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -361,8 +361,8 @@ Module {
                     Identifier {
                         name: "result6",
                         span: Span {
-                            start: 897,
-                            end: 904,
+                            start: 881,
+                            end: 888,
                         },
                     },
                 ),
@@ -372,8 +372,8 @@ Module {
                             "",
                         ),
                         Span {
-                            start: 908,
-                            end: 910,
+                            start: 892,
+                            end: 894,
                         },
                     ),
                     selector: Unary(
@@ -382,13 +382,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 908,
-                        end: 916,
+                        start: 892,
+                        end: 900,
                     },
                 },
                 span: Span {
-                    start: 897,
-                    end: 916,
+                    start: 881,
+                    end: 900,
                 },
             },
             preceding_blank_line: false,
@@ -399,8 +399,8 @@ Module {
                     Comment {
                         content: "Test isNil / notNil on booleans",
                         span: Span {
-                            start: 999,
-                            end: 1006,
+                            start: 977,
+                            end: 984,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -410,8 +410,8 @@ Module {
                     Comment {
                         content: "=> false",
                         span: Span {
-                            start: 1015,
-                            end: 1020,
+                            start: 993,
+                            end: 998,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -423,8 +423,8 @@ Module {
                     Identifier {
                         name: "result7",
                         span: Span {
-                            start: 999,
-                            end: 1006,
+                            start: 977,
+                            end: 984,
                         },
                     },
                 ),
@@ -433,8 +433,8 @@ Module {
                         Identifier {
                             name: "true",
                             span: Span {
-                                start: 1010,
-                                end: 1014,
+                                start: 988,
+                                end: 992,
                             },
                         },
                     ),
@@ -444,13 +444,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 1010,
-                        end: 1020,
+                        start: 988,
+                        end: 998,
                     },
                 },
                 span: Span {
-                    start: 999,
-                    end: 1020,
+                    start: 977,
+                    end: 998,
                 },
             },
             preceding_blank_line: true,
@@ -462,8 +462,8 @@ Module {
                     Comment {
                         content: "=> true",
                         span: Span {
-                            start: 1054,
-                            end: 1060,
+                            start: 1028,
+                            end: 1034,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -475,8 +475,8 @@ Module {
                     Identifier {
                         name: "result8",
                         span: Span {
-                            start: 1038,
-                            end: 1045,
+                            start: 1012,
+                            end: 1019,
                         },
                     },
                 ),
@@ -485,8 +485,8 @@ Module {
                         Identifier {
                             name: "true",
                             span: Span {
-                                start: 1049,
-                                end: 1053,
+                                start: 1023,
+                                end: 1027,
                             },
                         },
                     ),
@@ -496,13 +496,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 1049,
-                        end: 1060,
+                        start: 1023,
+                        end: 1034,
                     },
                 },
                 span: Span {
-                    start: 1038,
-                    end: 1060,
+                    start: 1012,
+                    end: 1034,
                 },
             },
             preceding_blank_line: false,
@@ -514,8 +514,8 @@ Module {
                     Comment {
                         content: "=> false (false is not nil!)",
                         span: Span {
-                            start: 1093,
-                            end: 1098,
+                            start: 1064,
+                            end: 1069,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -527,8 +527,8 @@ Module {
                     Identifier {
                         name: "result9",
                         span: Span {
-                            start: 1076,
-                            end: 1083,
+                            start: 1047,
+                            end: 1054,
                         },
                     },
                 ),
@@ -537,8 +537,8 @@ Module {
                         Identifier {
                             name: "false",
                             span: Span {
-                                start: 1087,
-                                end: 1092,
+                                start: 1058,
+                                end: 1063,
                             },
                         },
                     ),
@@ -548,13 +548,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 1087,
-                        end: 1098,
+                        start: 1058,
+                        end: 1069,
                     },
                 },
                 span: Span {
-                    start: 1076,
-                    end: 1098,
+                    start: 1047,
+                    end: 1069,
                 },
             },
             preceding_blank_line: false,
@@ -566,8 +566,8 @@ Module {
                     Comment {
                         content: "=> true",
                         span: Span {
-                            start: 1153,
-                            end: 1159,
+                            start: 1121,
+                            end: 1127,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -579,8 +579,8 @@ Module {
                     Identifier {
                         name: "result10",
                         span: Span {
-                            start: 1135,
-                            end: 1143,
+                            start: 1103,
+                            end: 1111,
                         },
                     },
                 ),
@@ -589,8 +589,8 @@ Module {
                         Identifier {
                             name: "false",
                             span: Span {
-                                start: 1147,
-                                end: 1152,
+                                start: 1115,
+                                end: 1120,
                             },
                         },
                     ),
@@ -600,13 +600,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 1147,
-                        end: 1159,
+                        start: 1115,
+                        end: 1127,
                     },
                 },
                 span: Span {
-                    start: 1135,
-                    end: 1159,
+                    start: 1103,
+                    end: 1127,
                 },
             },
             preceding_blank_line: false,
@@ -617,8 +617,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 1704,
-                            end: 1712,
+                            start: 1671,
+                            end: 1679,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -626,8 +626,8 @@ Module {
                     Comment {
                         content: "Control Flow Methods (Non-Nil Objects)",
                         span: Span {
-                            start: 1704,
-                            end: 1712,
+                            start: 1671,
+                            end: 1679,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -635,8 +635,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 1704,
-                            end: 1712,
+                            start: 1671,
+                            end: 1679,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -644,8 +644,8 @@ Module {
                     Comment {
                         content: "Test ifNil: returns self without evaluating block",
                         span: Span {
-                            start: 1704,
-                            end: 1712,
+                            start: 1671,
+                            end: 1679,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -655,8 +655,8 @@ Module {
                     Comment {
                         content: "=> 42",
                         span: Span {
-                            start: 1736,
-                            end: 1737,
+                            start: 1703,
+                            end: 1704,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -668,8 +668,8 @@ Module {
                     Identifier {
                         name: "result11",
                         span: Span {
-                            start: 1704,
-                            end: 1712,
+                            start: 1671,
+                            end: 1679,
                         },
                     },
                 ),
@@ -679,8 +679,8 @@ Module {
                             42,
                         ),
                         Span {
-                            start: 1716,
-                            end: 1718,
+                            start: 1683,
+                            end: 1685,
                         },
                     ),
                     selector: Keyword(
@@ -688,8 +688,8 @@ Module {
                             KeywordPart {
                                 keyword: "ifNil:",
                                 span: Span {
-                                    start: 1719,
-                                    end: 1725,
+                                    start: 1686,
+                                    end: 1692,
                                 },
                             },
                         ],
@@ -709,29 +709,29 @@ Module {
                                                 "default",
                                             ),
                                             Span {
-                                                start: 1727,
-                                                end: 1736,
+                                                start: 1694,
+                                                end: 1703,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 1726,
-                                    end: 1737,
+                                    start: 1693,
+                                    end: 1704,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 1716,
-                        end: 1737,
+                        start: 1683,
+                        end: 1704,
                     },
                 },
                 span: Span {
-                    start: 1704,
-                    end: 1737,
+                    start: 1671,
+                    end: 1704,
                 },
             },
             preceding_blank_line: true,
@@ -742,8 +742,8 @@ Module {
                     Comment {
                         content: "Test ifNotNil: evaluates block with receiver as argument",
                         span: Span {
-                            start: 1809,
-                            end: 1817,
+                            start: 1776,
+                            end: 1784,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -753,8 +753,8 @@ Module {
                     Comment {
                         content: "=> 43",
                         span: Span {
-                            start: 1849,
-                            end: 1850,
+                            start: 1816,
+                            end: 1817,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -766,8 +766,8 @@ Module {
                     Identifier {
                         name: "result12",
                         span: Span {
-                            start: 1809,
-                            end: 1817,
+                            start: 1776,
+                            end: 1784,
                         },
                     },
                 ),
@@ -777,8 +777,8 @@ Module {
                             42,
                         ),
                         Span {
-                            start: 1821,
-                            end: 1823,
+                            start: 1788,
+                            end: 1790,
                         },
                     ),
                     selector: Keyword(
@@ -786,8 +786,8 @@ Module {
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 1824,
-                                    end: 1833,
+                                    start: 1791,
+                                    end: 1800,
                                 },
                             },
                         ],
@@ -799,8 +799,8 @@ Module {
                                     BlockParameter {
                                         name: "val",
                                         span: Span {
-                                            start: 1836,
-                                            end: 1839,
+                                            start: 1803,
+                                            end: 1806,
                                         },
                                     },
                                 ],
@@ -815,8 +815,8 @@ Module {
                                                 Identifier {
                                                     name: "val",
                                                     span: Span {
-                                                        start: 1842,
-                                                        end: 1845,
+                                                        start: 1809,
+                                                        end: 1812,
                                                     },
                                                 },
                                             ),
@@ -829,36 +829,36 @@ Module {
                                                         1,
                                                     ),
                                                     Span {
-                                                        start: 1848,
-                                                        end: 1849,
+                                                        start: 1815,
+                                                        end: 1816,
                                                     },
                                                 ),
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 1842,
-                                                end: 1849,
+                                                start: 1809,
+                                                end: 1816,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 1834,
-                                    end: 1850,
+                                    start: 1801,
+                                    end: 1817,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 1821,
-                        end: 1850,
+                        start: 1788,
+                        end: 1817,
                     },
                 },
                 span: Span {
-                    start: 1809,
-                    end: 1850,
+                    start: 1776,
+                    end: 1817,
                 },
             },
             preceding_blank_line: true,
@@ -869,8 +869,8 @@ Module {
                     Comment {
                         content: "Test ifNil:ifNotNil: evaluates notNilBlock with receiver",
                         span: Span {
-                            start: 1922,
-                            end: 1930,
+                            start: 1889,
+                            end: 1897,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -880,8 +880,8 @@ Module {
                     Comment {
                         content: "=> \"HELLO\"",
                         span: Span {
-                            start: 1992,
-                            end: 1993,
+                            start: 1963,
+                            end: 1964,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -893,8 +893,8 @@ Module {
                     Identifier {
                         name: "result13",
                         span: Span {
-                            start: 1922,
-                            end: 1930,
+                            start: 1889,
+                            end: 1897,
                         },
                     },
                 ),
@@ -904,8 +904,8 @@ Module {
                             "hello",
                         ),
                         Span {
-                            start: 1934,
-                            end: 1941,
+                            start: 1901,
+                            end: 1908,
                         },
                     ),
                     selector: Keyword(
@@ -913,15 +913,15 @@ Module {
                             KeywordPart {
                                 keyword: "ifNil:",
                                 span: Span {
-                                    start: 1942,
-                                    end: 1948,
+                                    start: 1909,
+                                    end: 1915,
                                 },
                             },
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 1961,
-                                    end: 1970,
+                                    start: 1932,
+                                    end: 1941,
                                 },
                             },
                         ],
@@ -941,16 +941,16 @@ Module {
                                                 "was nil",
                                             ),
                                             Span {
-                                                start: 1950,
-                                                end: 1959,
+                                                start: 1920,
+                                                end: 1929,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 1949,
-                                    end: 1960,
+                                    start: 1916,
+                                    end: 1931,
                                 },
                             },
                         ),
@@ -960,8 +960,8 @@ Module {
                                     BlockParameter {
                                         name: "val",
                                         span: Span {
-                                            start: 1973,
-                                            end: 1976,
+                                            start: 1944,
+                                            end: 1947,
                                         },
                                     },
                                 ],
@@ -976,8 +976,8 @@ Module {
                                                 Identifier {
                                                     name: "val",
                                                     span: Span {
-                                                        start: 1979,
-                                                        end: 1982,
+                                                        start: 1950,
+                                                        end: 1953,
                                                     },
                                                 },
                                             ),
@@ -987,29 +987,29 @@ Module {
                                             arguments: [],
                                             is_cast: false,
                                             span: Span {
-                                                start: 1979,
-                                                end: 1992,
+                                                start: 1950,
+                                                end: 1963,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 1971,
-                                    end: 1993,
+                                    start: 1942,
+                                    end: 1964,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 1934,
-                        end: 1993,
+                        start: 1901,
+                        end: 1964,
                     },
                 },
                 span: Span {
-                    start: 1922,
-                    end: 1993,
+                    start: 1889,
+                    end: 1964,
                 },
             },
             preceding_blank_line: true,
@@ -1020,8 +1020,8 @@ Module {
                     Comment {
                         content: "Test ifNotNil:ifNil: (reversed order) evaluates notNilBlock with receiver",
                         span: Span {
-                            start: 2087,
-                            end: 2095,
+                            start: 2058,
+                            end: 2066,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1031,8 +1031,8 @@ Module {
                     Comment {
                         content: "=> 20",
                         span: Span {
-                            start: 2138,
-                            end: 2139,
+                            start: 2109,
+                            end: 2110,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1044,8 +1044,8 @@ Module {
                     Identifier {
                         name: "result14",
                         span: Span {
-                            start: 2087,
-                            end: 2095,
+                            start: 2058,
+                            end: 2066,
                         },
                     },
                 ),
@@ -1055,8 +1055,8 @@ Module {
                             10,
                         ),
                         Span {
-                            start: 2099,
-                            end: 2101,
+                            start: 2070,
+                            end: 2072,
                         },
                     ),
                     selector: Keyword(
@@ -1064,15 +1064,15 @@ Module {
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 2102,
-                                    end: 2111,
+                                    start: 2073,
+                                    end: 2082,
                                 },
                             },
                             KeywordPart {
                                 keyword: "ifNil:",
                                 span: Span {
-                                    start: 2129,
-                                    end: 2135,
+                                    start: 2100,
+                                    end: 2106,
                                 },
                             },
                         ],
@@ -1084,8 +1084,8 @@ Module {
                                     BlockParameter {
                                         name: "val",
                                         span: Span {
-                                            start: 2114,
-                                            end: 2117,
+                                            start: 2085,
+                                            end: 2088,
                                         },
                                     },
                                 ],
@@ -1100,8 +1100,8 @@ Module {
                                                 Identifier {
                                                     name: "val",
                                                     span: Span {
-                                                        start: 2120,
-                                                        end: 2123,
+                                                        start: 2091,
+                                                        end: 2094,
                                                     },
                                                 },
                                             ),
@@ -1114,23 +1114,23 @@ Module {
                                                         2,
                                                     ),
                                                     Span {
-                                                        start: 2126,
-                                                        end: 2127,
+                                                        start: 2097,
+                                                        end: 2098,
                                                     },
                                                 ),
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 2120,
-                                                end: 2127,
+                                                start: 2091,
+                                                end: 2098,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 2112,
-                                    end: 2128,
+                                    start: 2083,
+                                    end: 2099,
                                 },
                             },
                         ),
@@ -1148,29 +1148,29 @@ Module {
                                                 0,
                                             ),
                                             Span {
-                                                start: 2137,
-                                                end: 2138,
+                                                start: 2108,
+                                                end: 2109,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 2136,
-                                    end: 2139,
+                                    start: 2107,
+                                    end: 2110,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 2099,
-                        end: 2139,
+                        start: 2070,
+                        end: 2110,
                     },
                 },
                 span: Span {
-                    start: 2087,
-                    end: 2139,
+                    start: 2058,
+                    end: 2110,
                 },
             },
             preceding_blank_line: true,
@@ -1181,8 +1181,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 2675,
-                            end: 2683,
+                            start: 2646,
+                            end: 2654,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1190,8 +1190,8 @@ Module {
                     Comment {
                         content: "Edge Cases: Block Receives Receiver",
                         span: Span {
-                            start: 2675,
-                            end: 2683,
+                            start: 2646,
+                            end: 2654,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1199,8 +1199,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 2675,
-                            end: 2683,
+                            start: 2646,
+                            end: 2654,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1208,8 +1208,8 @@ Module {
                     Comment {
                         content: "Verify block receives the receiver as argument",
                         span: Span {
-                            start: 2675,
-                            end: 2683,
+                            start: 2646,
+                            end: 2654,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1219,8 +1219,8 @@ Module {
                     Comment {
                         content: "=> 150",
                         span: Span {
-                            start: 2713,
-                            end: 2714,
+                            start: 2684,
+                            end: 2685,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1232,8 +1232,8 @@ Module {
                     Identifier {
                         name: "result15",
                         span: Span {
-                            start: 2675,
-                            end: 2683,
+                            start: 2646,
+                            end: 2654,
                         },
                     },
                 ),
@@ -1243,8 +1243,8 @@ Module {
                             100,
                         ),
                         Span {
-                            start: 2687,
-                            end: 2690,
+                            start: 2658,
+                            end: 2661,
                         },
                     ),
                     selector: Keyword(
@@ -1252,8 +1252,8 @@ Module {
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 2691,
-                                    end: 2700,
+                                    start: 2662,
+                                    end: 2671,
                                 },
                             },
                         ],
@@ -1265,8 +1265,8 @@ Module {
                                     BlockParameter {
                                         name: "x",
                                         span: Span {
-                                            start: 2703,
-                                            end: 2704,
+                                            start: 2674,
+                                            end: 2675,
                                         },
                                     },
                                 ],
@@ -1281,8 +1281,8 @@ Module {
                                                 Identifier {
                                                     name: "x",
                                                     span: Span {
-                                                        start: 2707,
-                                                        end: 2708,
+                                                        start: 2678,
+                                                        end: 2679,
                                                     },
                                                 },
                                             ),
@@ -1295,36 +1295,36 @@ Module {
                                                         50,
                                                     ),
                                                     Span {
-                                                        start: 2711,
-                                                        end: 2713,
+                                                        start: 2682,
+                                                        end: 2684,
                                                     },
                                                 ),
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 2707,
-                                                end: 2713,
+                                                start: 2678,
+                                                end: 2684,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 2701,
-                                    end: 2714,
+                                    start: 2672,
+                                    end: 2685,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 2687,
-                        end: 2714,
+                        start: 2658,
+                        end: 2685,
                     },
                 },
                 span: Span {
-                    start: 2675,
-                    end: 2714,
+                    start: 2646,
+                    end: 2685,
                 },
             },
             preceding_blank_line: true,
@@ -1336,8 +1336,8 @@ Module {
                     Comment {
                         content: "=> 4",
                         span: Span {
-                            start: 2771,
-                            end: 2772,
+                            start: 2742,
+                            end: 2743,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1349,8 +1349,8 @@ Module {
                     Identifier {
                         name: "result16",
                         span: Span {
-                            start: 2726,
-                            end: 2734,
+                            start: 2697,
+                            end: 2705,
                         },
                     },
                 ),
@@ -1360,8 +1360,8 @@ Module {
                             "test",
                         ),
                         Span {
-                            start: 2738,
-                            end: 2744,
+                            start: 2709,
+                            end: 2715,
                         },
                     ),
                     selector: Keyword(
@@ -1369,8 +1369,8 @@ Module {
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 2745,
-                                    end: 2754,
+                                    start: 2716,
+                                    end: 2725,
                                 },
                             },
                         ],
@@ -1382,8 +1382,8 @@ Module {
                                     BlockParameter {
                                         name: "str",
                                         span: Span {
-                                            start: 2757,
-                                            end: 2760,
+                                            start: 2728,
+                                            end: 2731,
                                         },
                                     },
                                 ],
@@ -1398,8 +1398,8 @@ Module {
                                                 Identifier {
                                                     name: "str",
                                                     span: Span {
-                                                        start: 2763,
-                                                        end: 2766,
+                                                        start: 2734,
+                                                        end: 2737,
                                                     },
                                                 },
                                             ),
@@ -1409,29 +1409,29 @@ Module {
                                             arguments: [],
                                             is_cast: false,
                                             span: Span {
-                                                start: 2763,
-                                                end: 2771,
+                                                start: 2734,
+                                                end: 2742,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 2755,
-                                    end: 2772,
+                                    start: 2726,
+                                    end: 2743,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 2738,
-                        end: 2772,
+                        start: 2709,
+                        end: 2743,
                     },
                 },
                 span: Span {
-                    start: 2726,
-                    end: 2772,
+                    start: 2697,
+                    end: 2743,
                 },
             },
             preceding_blank_line: false,
@@ -1442,8 +1442,8 @@ Module {
                     Comment {
                         content: "Multiple operations on the passed value",
                         span: Span {
-                            start: 2826,
-                            end: 2834,
+                            start: 2797,
+                            end: 2805,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1453,8 +1453,8 @@ Module {
                     Comment {
                         content: "=> 13",
                         span: Span {
-                            start: 2867,
-                            end: 2868,
+                            start: 2838,
+                            end: 2839,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1466,8 +1466,8 @@ Module {
                     Identifier {
                         name: "result17",
                         span: Span {
-                            start: 2826,
-                            end: 2834,
+                            start: 2797,
+                            end: 2805,
                         },
                     },
                 ),
@@ -1477,8 +1477,8 @@ Module {
                             5,
                         ),
                         Span {
-                            start: 2838,
-                            end: 2839,
+                            start: 2809,
+                            end: 2810,
                         },
                     ),
                     selector: Keyword(
@@ -1486,8 +1486,8 @@ Module {
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 2840,
-                                    end: 2849,
+                                    start: 2811,
+                                    end: 2820,
                                 },
                             },
                         ],
@@ -1499,8 +1499,8 @@ Module {
                                     BlockParameter {
                                         name: "n",
                                         span: Span {
-                                            start: 2852,
-                                            end: 2853,
+                                            start: 2823,
+                                            end: 2824,
                                         },
                                     },
                                 ],
@@ -1517,8 +1517,8 @@ Module {
                                                         Identifier {
                                                             name: "n",
                                                             span: Span {
-                                                                start: 2857,
-                                                                end: 2858,
+                                                                start: 2828,
+                                                                end: 2829,
                                                             },
                                                         },
                                                     ),
@@ -1531,20 +1531,20 @@ Module {
                                                                 2,
                                                             ),
                                                             Span {
-                                                                start: 2861,
-                                                                end: 2862,
+                                                                start: 2832,
+                                                                end: 2833,
                                                             },
                                                         ),
                                                     ],
                                                     is_cast: false,
                                                     span: Span {
-                                                        start: 2857,
-                                                        end: 2862,
+                                                        start: 2828,
+                                                        end: 2833,
                                                     },
                                                 },
                                                 span: Span {
-                                                    start: 2856,
-                                                    end: 2863,
+                                                    start: 2827,
+                                                    end: 2834,
                                                 },
                                             },
                                             selector: Binary(
@@ -1556,36 +1556,36 @@ Module {
                                                         3,
                                                     ),
                                                     Span {
-                                                        start: 2866,
-                                                        end: 2867,
+                                                        start: 2837,
+                                                        end: 2838,
                                                     },
                                                 ),
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 2856,
-                                                end: 2867,
+                                                start: 2827,
+                                                end: 2838,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 2850,
-                                    end: 2868,
+                                    start: 2821,
+                                    end: 2839,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 2838,
-                        end: 2868,
+                        start: 2809,
+                        end: 2839,
                     },
                 },
                 span: Span {
-                    start: 2826,
-                    end: 2868,
+                    start: 2797,
+                    end: 2839,
                 },
             },
             preceding_blank_line: true,
@@ -1596,8 +1596,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 3408,
-                            end: 3416,
+                            start: 3379,
+                            end: 3387,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1605,8 +1605,8 @@ Module {
                     Comment {
                         content: "Edge Cases: Chaining and Composition",
                         span: Span {
-                            start: 3408,
-                            end: 3416,
+                            start: 3379,
+                            end: 3387,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1614,8 +1614,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 3408,
-                            end: 3416,
+                            start: 3379,
+                            end: 3387,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1623,8 +1623,8 @@ Module {
                     Comment {
                         content: "Chaining: ifNotNil: result in further computation",
                         span: Span {
-                            start: 3408,
-                            end: 3416,
+                            start: 3379,
+                            end: 3387,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1634,8 +1634,8 @@ Module {
                     Comment {
                         content: "=> 94",
                         span: Span {
-                            start: 3450,
-                            end: 3452,
+                            start: 3421,
+                            end: 3423,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1647,8 +1647,8 @@ Module {
                     Identifier {
                         name: "result18",
                         span: Span {
-                            start: 3408,
-                            end: 3416,
+                            start: 3379,
+                            end: 3387,
                         },
                     },
                 ),
@@ -1660,8 +1660,8 @@ Module {
                                     42,
                                 ),
                                 Span {
-                                    start: 3421,
-                                    end: 3423,
+                                    start: 3392,
+                                    end: 3394,
                                 },
                             ),
                             selector: Keyword(
@@ -1669,8 +1669,8 @@ Module {
                                     KeywordPart {
                                         keyword: "ifNotNil:",
                                         span: Span {
-                                            start: 3424,
-                                            end: 3433,
+                                            start: 3395,
+                                            end: 3404,
                                         },
                                     },
                                 ],
@@ -1682,8 +1682,8 @@ Module {
                                             BlockParameter {
                                                 name: "v",
                                                 span: Span {
-                                                    start: 3436,
-                                                    end: 3437,
+                                                    start: 3407,
+                                                    end: 3408,
                                                 },
                                             },
                                         ],
@@ -1698,8 +1698,8 @@ Module {
                                                         Identifier {
                                                             name: "v",
                                                             span: Span {
-                                                                start: 3440,
-                                                                end: 3441,
+                                                                start: 3411,
+                                                                end: 3412,
                                                             },
                                                         },
                                                     ),
@@ -1712,36 +1712,36 @@ Module {
                                                                 2,
                                                             ),
                                                             Span {
-                                                                start: 3444,
-                                                                end: 3445,
+                                                                start: 3415,
+                                                                end: 3416,
                                                             },
                                                         ),
                                                     ],
                                                     is_cast: false,
                                                     span: Span {
-                                                        start: 3440,
-                                                        end: 3445,
+                                                        start: 3411,
+                                                        end: 3416,
                                                     },
                                                 },
                                                 preceding_blank_line: false,
                                             },
                                         ],
                                         span: Span {
-                                            start: 3434,
-                                            end: 3446,
+                                            start: 3405,
+                                            end: 3417,
                                         },
                                     },
                                 ),
                             ],
                             is_cast: false,
                             span: Span {
-                                start: 3421,
-                                end: 3446,
+                                start: 3392,
+                                end: 3417,
                             },
                         },
                         span: Span {
-                            start: 3420,
-                            end: 3447,
+                            start: 3391,
+                            end: 3418,
                         },
                     },
                     selector: Binary(
@@ -1753,20 +1753,20 @@ Module {
                                 10,
                             ),
                             Span {
-                                start: 3450,
-                                end: 3452,
+                                start: 3421,
+                                end: 3423,
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 3420,
-                        end: 3452,
+                        start: 3391,
+                        end: 3423,
                     },
                 },
                 span: Span {
-                    start: 3408,
-                    end: 3452,
+                    start: 3379,
+                    end: 3423,
                 },
             },
             preceding_blank_line: true,
@@ -1777,8 +1777,8 @@ Module {
                     Comment {
                         content: "Nested ifNotNil: - both evaluate",
                         span: Span {
-                            start: 3500,
-                            end: 3508,
+                            start: 3471,
+                            end: 3479,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1788,8 +1788,8 @@ Module {
                     Comment {
                         content: "=> 15",
                         span: Span {
-                            start: 3571,
-                            end: 3572,
+                            start: 3545,
+                            end: 3546,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1801,8 +1801,8 @@ Module {
                     Identifier {
                         name: "result19",
                         span: Span {
-                            start: 3500,
-                            end: 3508,
+                            start: 3471,
+                            end: 3479,
                         },
                     },
                 ),
@@ -1812,8 +1812,8 @@ Module {
                             10,
                         ),
                         Span {
-                            start: 3512,
-                            end: 3514,
+                            start: 3483,
+                            end: 3485,
                         },
                     ),
                     selector: Keyword(
@@ -1821,8 +1821,8 @@ Module {
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 3515,
-                                    end: 3524,
+                                    start: 3486,
+                                    end: 3495,
                                 },
                             },
                         ],
@@ -1834,8 +1834,8 @@ Module {
                                     BlockParameter {
                                         name: "outer",
                                         span: Span {
-                                            start: 3527,
-                                            end: 3532,
+                                            start: 3498,
+                                            end: 3503,
                                         },
                                     },
                                 ],
@@ -1850,8 +1850,8 @@ Module {
                                                 Identifier {
                                                     name: "outer",
                                                     span: Span {
-                                                        start: 3535,
-                                                        end: 3540,
+                                                        start: 3508,
+                                                        end: 3513,
                                                     },
                                                 },
                                             ),
@@ -1860,8 +1860,8 @@ Module {
                                                     KeywordPart {
                                                         keyword: "ifNotNil:",
                                                         span: Span {
-                                                            start: 3541,
-                                                            end: 3550,
+                                                            start: 3514,
+                                                            end: 3523,
                                                         },
                                                     },
                                                 ],
@@ -1873,8 +1873,8 @@ Module {
                                                             BlockParameter {
                                                                 name: "inner",
                                                                 span: Span {
-                                                                    start: 3553,
-                                                                    end: 3558,
+                                                                    start: 3526,
+                                                                    end: 3531,
                                                                 },
                                                             },
                                                         ],
@@ -1889,8 +1889,8 @@ Module {
                                                                         Identifier {
                                                                             name: "inner",
                                                                             span: Span {
-                                                                                start: 3561,
-                                                                                end: 3566,
+                                                                                start: 3534,
+                                                                                end: 3539,
                                                                             },
                                                                         },
                                                                     ),
@@ -1903,52 +1903,52 @@ Module {
                                                                                 5,
                                                                             ),
                                                                             Span {
-                                                                                start: 3569,
-                                                                                end: 3570,
+                                                                                start: 3542,
+                                                                                end: 3543,
                                                                             },
                                                                         ),
                                                                     ],
                                                                     is_cast: false,
                                                                     span: Span {
-                                                                        start: 3561,
-                                                                        end: 3570,
+                                                                        start: 3534,
+                                                                        end: 3543,
                                                                     },
                                                                 },
                                                                 preceding_blank_line: false,
                                                             },
                                                         ],
                                                         span: Span {
-                                                            start: 3551,
-                                                            end: 3571,
+                                                            start: 3524,
+                                                            end: 3544,
                                                         },
                                                     },
                                                 ),
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 3535,
-                                                end: 3571,
+                                                start: 3508,
+                                                end: 3544,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 3525,
-                                    end: 3572,
+                                    start: 3496,
+                                    end: 3546,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 3512,
-                        end: 3572,
+                        start: 3483,
+                        end: 3546,
                     },
                 },
                 span: Span {
-                    start: 3500,
-                    end: 3572,
+                    start: 3471,
+                    end: 3546,
                 },
             },
             preceding_blank_line: true,
@@ -1959,8 +1959,8 @@ Module {
                     Comment {
                         content: "ifNil: on non-nil returns self, can chain",
                         span: Span {
-                            start: 3629,
-                            end: 3637,
+                            start: 3603,
+                            end: 3611,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1970,8 +1970,8 @@ Module {
                     Comment {
                         content: "=> 150",
                         span: Span {
-                            start: 3660,
-                            end: 3662,
+                            start: 3634,
+                            end: 3636,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -1983,8 +1983,8 @@ Module {
                     Identifier {
                         name: "result20",
                         span: Span {
-                            start: 3629,
-                            end: 3637,
+                            start: 3603,
+                            end: 3611,
                         },
                     },
                 ),
@@ -1996,8 +1996,8 @@ Module {
                                     100,
                                 ),
                                 Span {
-                                    start: 3642,
-                                    end: 3645,
+                                    start: 3616,
+                                    end: 3619,
                                 },
                             ),
                             selector: Keyword(
@@ -2005,8 +2005,8 @@ Module {
                                     KeywordPart {
                                         keyword: "ifNil:",
                                         span: Span {
-                                            start: 3646,
-                                            end: 3652,
+                                            start: 3620,
+                                            end: 3626,
                                         },
                                     },
                                 ],
@@ -2026,29 +2026,29 @@ Module {
                                                         0,
                                                     ),
                                                     Span {
-                                                        start: 3654,
-                                                        end: 3655,
+                                                        start: 3628,
+                                                        end: 3629,
                                                     },
                                                 ),
                                                 preceding_blank_line: false,
                                             },
                                         ],
                                         span: Span {
-                                            start: 3653,
-                                            end: 3656,
+                                            start: 3627,
+                                            end: 3630,
                                         },
                                     },
                                 ),
                             ],
                             is_cast: false,
                             span: Span {
-                                start: 3642,
-                                end: 3656,
+                                start: 3616,
+                                end: 3630,
                             },
                         },
                         span: Span {
-                            start: 3641,
-                            end: 3657,
+                            start: 3615,
+                            end: 3631,
                         },
                     },
                     selector: Binary(
@@ -2060,20 +2060,20 @@ Module {
                                 50,
                             ),
                             Span {
-                                start: 3660,
-                                end: 3662,
+                                start: 3634,
+                                end: 3636,
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 3641,
-                        end: 3662,
+                        start: 3615,
+                        end: 3636,
                     },
                 },
                 span: Span {
-                    start: 3629,
-                    end: 3662,
+                    start: 3603,
+                    end: 3636,
                 },
             },
             preceding_blank_line: true,
@@ -2084,8 +2084,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 4190,
-                            end: 4198,
+                            start: 4164,
+                            end: 4172,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2093,8 +2093,8 @@ Module {
                     Comment {
                         content: "Edge Cases: Boolean Logic Integration",
                         span: Span {
-                            start: 4190,
-                            end: 4198,
+                            start: 4164,
+                            end: 4172,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2102,8 +2102,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 4190,
-                            end: 4198,
+                            start: 4164,
+                            end: 4172,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2111,8 +2111,8 @@ Module {
                     Comment {
                         content: "Combining notNil with boolean logic",
                         span: Span {
-                            start: 4190,
-                            end: 4198,
+                            start: 4164,
+                            end: 4172,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2122,8 +2122,8 @@ Module {
                     Comment {
                         content: "=> true",
                         span: Span {
-                            start: 4222,
-                            end: 4223,
+                            start: 4196,
+                            end: 4197,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2135,8 +2135,8 @@ Module {
                     Identifier {
                         name: "result21",
                         span: Span {
-                            start: 4190,
-                            end: 4198,
+                            start: 4164,
+                            end: 4172,
                         },
                     },
                 ),
@@ -2147,8 +2147,8 @@ Module {
                                 42,
                             ),
                             Span {
-                                start: 4202,
-                                end: 4204,
+                                start: 4176,
+                                end: 4178,
                             },
                         ),
                         selector: Unary(
@@ -2157,8 +2157,8 @@ Module {
                         arguments: [],
                         is_cast: false,
                         span: Span {
-                            start: 4202,
-                            end: 4211,
+                            start: 4176,
+                            end: 4185,
                         },
                     },
                     selector: Keyword(
@@ -2166,8 +2166,8 @@ Module {
                             KeywordPart {
                                 keyword: "and:",
                                 span: Span {
-                                    start: 4212,
-                                    end: 4216,
+                                    start: 4186,
+                                    end: 4190,
                                 },
                             },
                         ],
@@ -2186,8 +2186,8 @@ Module {
                                             Identifier {
                                                 name: "true",
                                                 span: Span {
-                                                    start: 4218,
-                                                    end: 4222,
+                                                    start: 4192,
+                                                    end: 4196,
                                                 },
                                             },
                                         ),
@@ -2195,21 +2195,21 @@ Module {
                                     },
                                 ],
                                 span: Span {
-                                    start: 4217,
-                                    end: 4223,
+                                    start: 4191,
+                                    end: 4197,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 4202,
-                        end: 4223,
+                        start: 4176,
+                        end: 4197,
                     },
                 },
                 span: Span {
-                    start: 4190,
-                    end: 4223,
+                    start: 4164,
+                    end: 4197,
                 },
             },
             preceding_blank_line: true,
@@ -2221,8 +2221,8 @@ Module {
                     Comment {
                         content: "=> false",
                         span: Span {
-                            start: 4272,
-                            end: 4273,
+                            start: 4245,
+                            end: 4246,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2234,8 +2234,8 @@ Module {
                     Identifier {
                         name: "result22",
                         span: Span {
-                            start: 4237,
-                            end: 4245,
+                            start: 4210,
+                            end: 4218,
                         },
                     },
                 ),
@@ -2246,8 +2246,8 @@ Module {
                                 "test",
                             ),
                             Span {
-                                start: 4249,
-                                end: 4255,
+                                start: 4222,
+                                end: 4228,
                             },
                         ),
                         selector: Unary(
@@ -2256,8 +2256,8 @@ Module {
                         arguments: [],
                         is_cast: false,
                         span: Span {
-                            start: 4249,
-                            end: 4261,
+                            start: 4222,
+                            end: 4234,
                         },
                     },
                     selector: Keyword(
@@ -2265,8 +2265,8 @@ Module {
                             KeywordPart {
                                 keyword: "or:",
                                 span: Span {
-                                    start: 4262,
-                                    end: 4265,
+                                    start: 4235,
+                                    end: 4238,
                                 },
                             },
                         ],
@@ -2285,8 +2285,8 @@ Module {
                                             Identifier {
                                                 name: "false",
                                                 span: Span {
-                                                    start: 4267,
-                                                    end: 4272,
+                                                    start: 4240,
+                                                    end: 4245,
                                                 },
                                             },
                                         ),
@@ -2294,21 +2294,21 @@ Module {
                                     },
                                 ],
                                 span: Span {
-                                    start: 4266,
-                                    end: 4273,
+                                    start: 4239,
+                                    end: 4246,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 4249,
-                        end: 4273,
+                        start: 4222,
+                        end: 4246,
                     },
                 },
                 span: Span {
-                    start: 4237,
-                    end: 4273,
+                    start: 4210,
+                    end: 4246,
                 },
             },
             preceding_blank_line: false,
@@ -2319,8 +2319,8 @@ Module {
                     Comment {
                         content: "Using notNil result in ifTrue:ifFalse:",
                         span: Span {
-                            start: 4330,
-                            end: 4338,
+                            start: 4303,
+                            end: 4311,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2330,8 +2330,8 @@ Module {
                     Comment {
                         content: "=> \"is not nil\"",
                         span: Span {
-                            start: 4394,
-                            end: 4395,
+                            start: 4371,
+                            end: 4372,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2343,8 +2343,8 @@ Module {
                     Identifier {
                         name: "result23",
                         span: Span {
-                            start: 4330,
-                            end: 4338,
+                            start: 4303,
+                            end: 4311,
                         },
                     },
                 ),
@@ -2355,8 +2355,8 @@ Module {
                                 100,
                             ),
                             Span {
-                                start: 4342,
-                                end: 4345,
+                                start: 4315,
+                                end: 4318,
                             },
                         ),
                         selector: Unary(
@@ -2365,8 +2365,8 @@ Module {
                         arguments: [],
                         is_cast: false,
                         span: Span {
-                            start: 4342,
-                            end: 4352,
+                            start: 4315,
+                            end: 4325,
                         },
                     },
                     selector: Keyword(
@@ -2374,15 +2374,15 @@ Module {
                             KeywordPart {
                                 keyword: "ifTrue:",
                                 span: Span {
-                                    start: 4353,
-                                    end: 4360,
+                                    start: 4326,
+                                    end: 4333,
                                 },
                             },
                             KeywordPart {
                                 keyword: "ifFalse:",
                                 span: Span {
-                                    start: 4376,
-                                    end: 4384,
+                                    start: 4353,
+                                    end: 4361,
                                 },
                             },
                         ],
@@ -2402,16 +2402,16 @@ Module {
                                                 "is not nil",
                                             ),
                                             Span {
-                                                start: 4362,
-                                                end: 4374,
+                                                start: 4338,
+                                                end: 4350,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 4361,
-                                    end: 4375,
+                                    start: 4334,
+                                    end: 4352,
                                 },
                             },
                         ),
@@ -2429,29 +2429,29 @@ Module {
                                                 "is nil",
                                             ),
                                             Span {
-                                                start: 4386,
-                                                end: 4394,
+                                                start: 4363,
+                                                end: 4371,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 4385,
-                                    end: 4395,
+                                    start: 4362,
+                                    end: 4372,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 4342,
-                        end: 4395,
+                        start: 4315,
+                        end: 4372,
                     },
                 },
                 span: Span {
-                    start: 4330,
-                    end: 4395,
+                    start: 4303,
+                    end: 4372,
                 },
             },
             preceding_blank_line: true,
@@ -2462,8 +2462,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 4912,
-                            end: 4920,
+                            start: 4889,
+                            end: 4897,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2471,8 +2471,8 @@ Module {
                     Comment {
                         content: "Edge Cases: Different Object Types",
                         span: Span {
-                            start: 4912,
-                            end: 4920,
+                            start: 4889,
+                            end: 4897,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2480,8 +2480,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 4912,
-                            end: 4920,
+                            start: 4889,
+                            end: 4897,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2489,8 +2489,8 @@ Module {
                     Comment {
                         content: "Blocks are not nil",
                         span: Span {
-                            start: 4912,
-                            end: 4920,
+                            start: 4889,
+                            end: 4897,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2500,8 +2500,8 @@ Module {
                     Comment {
                         content: "=> false",
                         span: Span {
-                            start: 4929,
-                            end: 4934,
+                            start: 4906,
+                            end: 4911,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2513,8 +2513,8 @@ Module {
                     Identifier {
                         name: "result24",
                         span: Span {
-                            start: 4912,
-                            end: 4920,
+                            start: 4889,
+                            end: 4897,
                         },
                     },
                 ),
@@ -2533,16 +2533,16 @@ Module {
                                             42,
                                         ),
                                         Span {
-                                            start: 4925,
-                                            end: 4927,
+                                            start: 4902,
+                                            end: 4904,
                                         },
                                     ),
                                     preceding_blank_line: false,
                                 },
                             ],
                             span: Span {
-                                start: 4924,
-                                end: 4928,
+                                start: 4901,
+                                end: 4905,
                             },
                         },
                     ),
@@ -2552,13 +2552,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 4924,
-                        end: 4934,
+                        start: 4901,
+                        end: 4911,
                     },
                 },
                 span: Span {
-                    start: 4912,
-                    end: 4934,
+                    start: 4889,
+                    end: 4911,
                 },
             },
             preceding_blank_line: true,
@@ -2570,8 +2570,8 @@ Module {
                     Comment {
                         content: "=> false",
                         span: Span {
-                            start: 4974,
-                            end: 4979,
+                            start: 4946,
+                            end: 4951,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2583,8 +2583,8 @@ Module {
                     Identifier {
                         name: "result25",
                         span: Span {
-                            start: 4953,
-                            end: 4961,
+                            start: 4925,
+                            end: 4933,
                         },
                     },
                 ),
@@ -2595,8 +2595,8 @@ Module {
                                 BlockParameter {
                                     name: "x",
                                     span: Span {
-                                        start: 4967,
-                                        end: 4968,
+                                        start: 4939,
+                                        end: 4940,
                                     },
                                 },
                             ],
@@ -2610,8 +2610,8 @@ Module {
                                         Identifier {
                                             name: "x",
                                             span: Span {
-                                                start: 4971,
-                                                end: 4972,
+                                                start: 4943,
+                                                end: 4944,
                                             },
                                         },
                                     ),
@@ -2619,8 +2619,8 @@ Module {
                                 },
                             ],
                             span: Span {
-                                start: 4965,
-                                end: 4973,
+                                start: 4937,
+                                end: 4945,
                             },
                         },
                     ),
@@ -2630,13 +2630,13 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 4965,
-                        end: 4979,
+                        start: 4937,
+                        end: 4951,
                     },
                 },
                 span: Span {
-                    start: 4953,
-                    end: 4979,
+                    start: 4925,
+                    end: 4951,
                 },
             },
             preceding_blank_line: false,
@@ -2647,8 +2647,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 5547,
-                            end: 5555,
+                            start: 5518,
+                            end: 5526,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2656,8 +2656,8 @@ Module {
                     Comment {
                         content: "Edge Cases: ifNil: Should NOT Evaluate Block",
                         span: Span {
-                            start: 5547,
-                            end: 5555,
+                            start: 5518,
+                            end: 5526,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2665,8 +2665,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 5547,
-                            end: 5555,
+                            start: 5518,
+                            end: 5526,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2674,8 +2674,8 @@ Module {
                     Comment {
                         content: "Verify ifNil: doesn't evaluate by checking return equals receiver",
                         span: Span {
-                            start: 5547,
-                            end: 5555,
+                            start: 5518,
+                            end: 5526,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2685,8 +2685,8 @@ Module {
                     Comment {
                         content: "=> true",
                         span: Span {
-                            start: 5582,
-                            end: 5584,
+                            start: 5553,
+                            end: 5555,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2698,8 +2698,8 @@ Module {
                     Identifier {
                         name: "result26",
                         span: Span {
-                            start: 5547,
-                            end: 5555,
+                            start: 5518,
+                            end: 5526,
                         },
                     },
                 ),
@@ -2711,8 +2711,8 @@ Module {
                                     42,
                                 ),
                                 Span {
-                                    start: 5560,
-                                    end: 5562,
+                                    start: 5531,
+                                    end: 5533,
                                 },
                             ),
                             selector: Keyword(
@@ -2720,8 +2720,8 @@ Module {
                                     KeywordPart {
                                         keyword: "ifNil:",
                                         span: Span {
-                                            start: 5563,
-                                            end: 5569,
+                                            start: 5534,
+                                            end: 5540,
                                         },
                                     },
                                 ],
@@ -2741,29 +2741,29 @@ Module {
                                                         9999,
                                                     ),
                                                     Span {
-                                                        start: 5571,
-                                                        end: 5575,
+                                                        start: 5542,
+                                                        end: 5546,
                                                     },
                                                 ),
                                                 preceding_blank_line: false,
                                             },
                                         ],
                                         span: Span {
-                                            start: 5570,
-                                            end: 5576,
+                                            start: 5541,
+                                            end: 5547,
                                         },
                                     },
                                 ),
                             ],
                             is_cast: false,
                             span: Span {
-                                start: 5560,
-                                end: 5576,
+                                start: 5531,
+                                end: 5547,
                             },
                         },
                         span: Span {
-                            start: 5559,
-                            end: 5577,
+                            start: 5530,
+                            end: 5548,
                         },
                     },
                     selector: Binary(
@@ -2775,20 +2775,20 @@ Module {
                                 42,
                             ),
                             Span {
-                                start: 5582,
-                                end: 5584,
+                                start: 5553,
+                                end: 5555,
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 5559,
-                        end: 5584,
+                        start: 5530,
+                        end: 5555,
                     },
                 },
                 span: Span {
-                    start: 5547,
-                    end: 5584,
+                    start: 5518,
+                    end: 5555,
                 },
             },
             preceding_blank_line: true,
@@ -2799,8 +2799,8 @@ Module {
                     Comment {
                         content: "ifNil: with complex block expression (should not evaluate)",
                         span: Span {
-                            start: 5660,
-                            end: 5668,
+                            start: 5631,
+                            end: 5639,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2810,8 +2810,8 @@ Module {
                     Comment {
                         content: "=> 10 (not 7)",
                         span: Span {
-                            start: 5692,
-                            end: 5693,
+                            start: 5663,
+                            end: 5664,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2823,8 +2823,8 @@ Module {
                     Identifier {
                         name: "result27",
                         span: Span {
-                            start: 5660,
-                            end: 5668,
+                            start: 5631,
+                            end: 5639,
                         },
                     },
                 ),
@@ -2834,8 +2834,8 @@ Module {
                             10,
                         ),
                         Span {
-                            start: 5672,
-                            end: 5674,
+                            start: 5643,
+                            end: 5645,
                         },
                     ),
                     selector: Keyword(
@@ -2843,8 +2843,8 @@ Module {
                             KeywordPart {
                                 keyword: "ifNil:",
                                 span: Span {
-                                    start: 5675,
-                                    end: 5681,
+                                    start: 5646,
+                                    end: 5652,
                                 },
                             },
                         ],
@@ -2865,8 +2865,8 @@ Module {
                                                     1,
                                                 ),
                                                 Span {
-                                                    start: 5683,
-                                                    end: 5684,
+                                                    start: 5654,
+                                                    end: 5655,
                                                 },
                                             ),
                                             selector: Binary(
@@ -2879,8 +2879,8 @@ Module {
                                                             2,
                                                         ),
                                                         Span {
-                                                            start: 5687,
-                                                            end: 5688,
+                                                            start: 5658,
+                                                            end: 5659,
                                                         },
                                                     ),
                                                     selector: Binary(
@@ -2892,43 +2892,43 @@ Module {
                                                                 3,
                                                             ),
                                                             Span {
-                                                                start: 5691,
-                                                                end: 5692,
+                                                                start: 5662,
+                                                                end: 5663,
                                                             },
                                                         ),
                                                     ],
                                                     is_cast: false,
                                                     span: Span {
-                                                        start: 5687,
-                                                        end: 5692,
+                                                        start: 5658,
+                                                        end: 5663,
                                                     },
                                                 },
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 5683,
-                                                end: 5692,
+                                                start: 5654,
+                                                end: 5663,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 5682,
-                                    end: 5693,
+                                    start: 5653,
+                                    end: 5664,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 5672,
-                        end: 5693,
+                        start: 5643,
+                        end: 5664,
                     },
                 },
                 span: Span {
-                    start: 5660,
-                    end: 5693,
+                    start: 5631,
+                    end: 5664,
                 },
             },
             preceding_blank_line: true,
@@ -2939,8 +2939,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 6236,
-                            end: 6241,
+                            start: 6207,
+                            end: 6212,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2948,8 +2948,8 @@ Module {
                     Comment {
                         content: "Edge Cases: Mixed nil and non-nil in Expressions",
                         span: Span {
-                            start: 6236,
-                            end: 6241,
+                            start: 6207,
+                            end: 6212,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2957,8 +2957,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 6236,
-                            end: 6241,
+                            start: 6207,
+                            end: 6212,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -2966,8 +2966,8 @@ Module {
                     Comment {
                         content: "Assign value based on isNil test",
                         span: Span {
-                            start: 6236,
-                            end: 6241,
+                            start: 6207,
+                            end: 6212,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2980,8 +2980,8 @@ Module {
                     Identifier {
                         name: "value",
                         span: Span {
-                            start: 6236,
-                            end: 6241,
+                            start: 6207,
+                            end: 6212,
                         },
                     },
                 ),
@@ -2990,13 +2990,13 @@ Module {
                         42,
                     ),
                     Span {
-                        start: 6245,
-                        end: 6247,
+                        start: 6216,
+                        end: 6218,
                     },
                 ),
                 span: Span {
-                    start: 6236,
-                    end: 6247,
+                    start: 6207,
+                    end: 6218,
                 },
             },
             preceding_blank_line: true,
@@ -3008,8 +3008,8 @@ Module {
                     Comment {
                         content: "=> 42",
                         span: Span {
-                            start: 6299,
-                            end: 6300,
+                            start: 6270,
+                            end: 6271,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3021,8 +3021,8 @@ Module {
                     Identifier {
                         name: "result28",
                         span: Span {
-                            start: 6248,
-                            end: 6256,
+                            start: 6219,
+                            end: 6227,
                         },
                     },
                 ),
@@ -3032,8 +3032,8 @@ Module {
                             Identifier {
                                 name: "value",
                                 span: Span {
-                                    start: 6260,
-                                    end: 6265,
+                                    start: 6231,
+                                    end: 6236,
                                 },
                             },
                         ),
@@ -3043,8 +3043,8 @@ Module {
                         arguments: [],
                         is_cast: false,
                         span: Span {
-                            start: 6260,
-                            end: 6271,
+                            start: 6231,
+                            end: 6242,
                         },
                     },
                     selector: Keyword(
@@ -3052,15 +3052,15 @@ Module {
                             KeywordPart {
                                 keyword: "ifTrue:",
                                 span: Span {
-                                    start: 6272,
-                                    end: 6279,
+                                    start: 6243,
+                                    end: 6250,
                                 },
                             },
                             KeywordPart {
                                 keyword: "ifFalse:",
                                 span: Span {
-                                    start: 6284,
-                                    end: 6292,
+                                    start: 6255,
+                                    end: 6263,
                                 },
                             },
                         ],
@@ -3080,16 +3080,16 @@ Module {
                                                 0,
                                             ),
                                             Span {
-                                                start: 6281,
-                                                end: 6282,
+                                                start: 6252,
+                                                end: 6253,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 6280,
-                                    end: 6283,
+                                    start: 6251,
+                                    end: 6254,
                                 },
                             },
                         ),
@@ -3106,8 +3106,8 @@ Module {
                                             Identifier {
                                                 name: "value",
                                                 span: Span {
-                                                    start: 6294,
-                                                    end: 6299,
+                                                    start: 6265,
+                                                    end: 6270,
                                                 },
                                             },
                                         ),
@@ -3115,21 +3115,21 @@ Module {
                                     },
                                 ],
                                 span: Span {
-                                    start: 6293,
-                                    end: 6300,
+                                    start: 6264,
+                                    end: 6271,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 6260,
-                        end: 6300,
+                        start: 6231,
+                        end: 6271,
                     },
                 },
                 span: Span {
-                    start: 6248,
-                    end: 6300,
+                    start: 6219,
+                    end: 6271,
                 },
             },
             preceding_blank_line: false,
@@ -3140,8 +3140,8 @@ Module {
                     Comment {
                         content: "Use ifNotNil: to safely transform",
                         span: Span {
-                            start: 6349,
-                            end: 6355,
+                            start: 6320,
+                            end: 6326,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -3154,8 +3154,8 @@ Module {
                     Identifier {
                         name: "value2",
                         span: Span {
-                            start: 6349,
-                            end: 6355,
+                            start: 6320,
+                            end: 6326,
                         },
                     },
                 ),
@@ -3164,13 +3164,13 @@ Module {
                         10,
                     ),
                     Span {
-                        start: 6359,
-                        end: 6361,
+                        start: 6330,
+                        end: 6332,
                     },
                 ),
                 span: Span {
-                    start: 6349,
-                    end: 6361,
+                    start: 6320,
+                    end: 6332,
                 },
             },
             preceding_blank_line: true,
@@ -3182,8 +3182,8 @@ Module {
                     Comment {
                         content: "=> 30",
                         span: Span {
-                            start: 6402,
-                            end: 6403,
+                            start: 6373,
+                            end: 6374,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3195,8 +3195,8 @@ Module {
                     Identifier {
                         name: "result29",
                         span: Span {
-                            start: 6362,
-                            end: 6370,
+                            start: 6333,
+                            end: 6341,
                         },
                     },
                 ),
@@ -3205,8 +3205,8 @@ Module {
                         Identifier {
                             name: "value2",
                             span: Span {
-                                start: 6374,
-                                end: 6380,
+                                start: 6345,
+                                end: 6351,
                             },
                         },
                     ),
@@ -3215,8 +3215,8 @@ Module {
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 6381,
-                                    end: 6390,
+                                    start: 6352,
+                                    end: 6361,
                                 },
                             },
                         ],
@@ -3228,8 +3228,8 @@ Module {
                                     BlockParameter {
                                         name: "v",
                                         span: Span {
-                                            start: 6393,
-                                            end: 6394,
+                                            start: 6364,
+                                            end: 6365,
                                         },
                                     },
                                 ],
@@ -3244,8 +3244,8 @@ Module {
                                                 Identifier {
                                                     name: "v",
                                                     span: Span {
-                                                        start: 6397,
-                                                        end: 6398,
+                                                        start: 6368,
+                                                        end: 6369,
                                                     },
                                                 },
                                             ),
@@ -3258,36 +3258,36 @@ Module {
                                                         3,
                                                     ),
                                                     Span {
-                                                        start: 6401,
-                                                        end: 6402,
+                                                        start: 6372,
+                                                        end: 6373,
                                                     },
                                                 ),
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 6397,
-                                                end: 6402,
+                                                start: 6368,
+                                                end: 6373,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 6391,
-                                    end: 6403,
+                                    start: 6362,
+                                    end: 6374,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 6374,
-                        end: 6403,
+                        start: 6345,
+                        end: 6374,
                     },
                 },
                 span: Span {
-                    start: 6362,
-                    end: 6403,
+                    start: 6333,
+                    end: 6374,
                 },
             },
             preceding_blank_line: false,
@@ -3298,8 +3298,8 @@ Module {
                     Comment {
                         content: "Compare with nil's behavior (for contrast)",
                         span: Span {
-                            start: 6461,
-                            end: 6469,
+                            start: 6432,
+                            end: 6440,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -3309,8 +3309,8 @@ Module {
                     Comment {
                         content: "=> \"nil case\"",
                         span: Span {
-                            start: 6527,
-                            end: 6528,
+                            start: 6502,
+                            end: 6503,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3322,8 +3322,8 @@ Module {
                     Identifier {
                         name: "result30",
                         span: Span {
-                            start: 6461,
-                            end: 6469,
+                            start: 6432,
+                            end: 6440,
                         },
                     },
                 ),
@@ -3332,8 +3332,8 @@ Module {
                         Identifier {
                             name: "nil",
                             span: Span {
-                                start: 6473,
-                                end: 6476,
+                                start: 6444,
+                                end: 6447,
                             },
                         },
                     ),
@@ -3342,15 +3342,15 @@ Module {
                             KeywordPart {
                                 keyword: "ifNil:",
                                 span: Span {
-                                    start: 6477,
-                                    end: 6483,
+                                    start: 6448,
+                                    end: 6454,
                                 },
                             },
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 6497,
-                                    end: 6506,
+                                    start: 6472,
+                                    end: 6481,
                                 },
                             },
                         ],
@@ -3370,16 +3370,16 @@ Module {
                                                 "nil case",
                                             ),
                                             Span {
-                                                start: 6485,
-                                                end: 6495,
+                                                start: 6459,
+                                                end: 6469,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 6484,
-                                    end: 6496,
+                                    start: 6455,
+                                    end: 6471,
                                 },
                             },
                         ),
@@ -3389,8 +3389,8 @@ Module {
                                     BlockParameter {
                                         name: "v",
                                         span: Span {
-                                            start: 6509,
-                                            end: 6510,
+                                            start: 6484,
+                                            end: 6485,
                                         },
                                     },
                                 ],
@@ -3405,29 +3405,29 @@ Module {
                                                 "not nil case",
                                             ),
                                             Span {
-                                                start: 6513,
-                                                end: 6527,
+                                                start: 6488,
+                                                end: 6502,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 6507,
-                                    end: 6528,
+                                    start: 6482,
+                                    end: 6503,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 6473,
-                        end: 6528,
+                        start: 6444,
+                        end: 6503,
                     },
                 },
                 span: Span {
-                    start: 6461,
-                    end: 6528,
+                    start: 6432,
+                    end: 6503,
                 },
             },
             preceding_blank_line: true,
@@ -3439,8 +3439,8 @@ Module {
                     Comment {
                         content: "=> \"not nil case\"",
                         span: Span {
-                            start: 6612,
-                            end: 6613,
+                            start: 6591,
+                            end: 6592,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3452,8 +3452,8 @@ Module {
                     Identifier {
                         name: "result31",
                         span: Span {
-                            start: 6547,
-                            end: 6555,
+                            start: 6522,
+                            end: 6530,
                         },
                     },
                 ),
@@ -3463,8 +3463,8 @@ Module {
                             42,
                         ),
                         Span {
-                            start: 6559,
-                            end: 6561,
+                            start: 6534,
+                            end: 6536,
                         },
                     ),
                     selector: Keyword(
@@ -3472,15 +3472,15 @@ Module {
                             KeywordPart {
                                 keyword: "ifNil:",
                                 span: Span {
-                                    start: 6562,
-                                    end: 6568,
+                                    start: 6537,
+                                    end: 6543,
                                 },
                             },
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 6582,
-                                    end: 6591,
+                                    start: 6561,
+                                    end: 6570,
                                 },
                             },
                         ],
@@ -3500,16 +3500,16 @@ Module {
                                                 "nil case",
                                             ),
                                             Span {
-                                                start: 6570,
-                                                end: 6580,
+                                                start: 6548,
+                                                end: 6558,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 6569,
-                                    end: 6581,
+                                    start: 6544,
+                                    end: 6560,
                                 },
                             },
                         ),
@@ -3519,8 +3519,8 @@ Module {
                                     BlockParameter {
                                         name: "v",
                                         span: Span {
-                                            start: 6594,
-                                            end: 6595,
+                                            start: 6573,
+                                            end: 6574,
                                         },
                                     },
                                 ],
@@ -3535,29 +3535,29 @@ Module {
                                                 "not nil case",
                                             ),
                                             Span {
-                                                start: 6598,
-                                                end: 6612,
+                                                start: 6577,
+                                                end: 6591,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 6592,
-                                    end: 6613,
+                                    start: 6571,
+                                    end: 6592,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 6559,
-                        end: 6613,
+                        start: 6534,
+                        end: 6592,
                     },
                 },
                 span: Span {
-                    start: 6547,
-                    end: 6613,
+                    start: 6522,
+                    end: 6592,
                 },
             },
             preceding_blank_line: false,
@@ -3568,8 +3568,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 7148,
-                            end: 7156,
+                            start: 7126,
+                            end: 7134,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -3577,8 +3577,8 @@ Module {
                     Comment {
                         content: "Edge Cases: Return Value Verification",
                         span: Span {
-                            start: 7148,
-                            end: 7156,
+                            start: 7126,
+                            end: 7134,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3586,8 +3586,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 7148,
-                            end: 7156,
+                            start: 7126,
+                            end: 7134,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3595,8 +3595,8 @@ Module {
                     Comment {
                         content: "ifNotNil: returns block result",
                         span: Span {
-                            start: 7148,
-                            end: 7156,
+                            start: 7126,
+                            end: 7134,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -3606,8 +3606,8 @@ Module {
                     Comment {
                         content: "=> true",
                         span: Span {
-                            start: 7192,
-                            end: 7194,
+                            start: 7170,
+                            end: 7172,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3619,8 +3619,8 @@ Module {
                     Identifier {
                         name: "result32",
                         span: Span {
-                            start: 7148,
-                            end: 7156,
+                            start: 7126,
+                            end: 7134,
                         },
                     },
                 ),
@@ -3632,8 +3632,8 @@ Module {
                                     5,
                                 ),
                                 Span {
-                                    start: 7161,
-                                    end: 7162,
+                                    start: 7139,
+                                    end: 7140,
                                 },
                             ),
                             selector: Keyword(
@@ -3641,8 +3641,8 @@ Module {
                                     KeywordPart {
                                         keyword: "ifNotNil:",
                                         span: Span {
-                                            start: 7163,
-                                            end: 7172,
+                                            start: 7141,
+                                            end: 7150,
                                         },
                                     },
                                 ],
@@ -3654,8 +3654,8 @@ Module {
                                             BlockParameter {
                                                 name: "x",
                                                 span: Span {
-                                                    start: 7175,
-                                                    end: 7176,
+                                                    start: 7153,
+                                                    end: 7154,
                                                 },
                                             },
                                         ],
@@ -3670,8 +3670,8 @@ Module {
                                                         Identifier {
                                                             name: "x",
                                                             span: Span {
-                                                                start: 7179,
-                                                                end: 7180,
+                                                                start: 7157,
+                                                                end: 7158,
                                                             },
                                                         },
                                                     ),
@@ -3684,36 +3684,36 @@ Module {
                                                                 10,
                                                             ),
                                                             Span {
-                                                                start: 7183,
-                                                                end: 7185,
+                                                                start: 7161,
+                                                                end: 7163,
                                                             },
                                                         ),
                                                     ],
                                                     is_cast: false,
                                                     span: Span {
-                                                        start: 7179,
-                                                        end: 7185,
+                                                        start: 7157,
+                                                        end: 7163,
                                                     },
                                                 },
                                                 preceding_blank_line: false,
                                             },
                                         ],
                                         span: Span {
-                                            start: 7173,
-                                            end: 7186,
+                                            start: 7151,
+                                            end: 7164,
                                         },
                                     },
                                 ),
                             ],
                             is_cast: false,
                             span: Span {
-                                start: 7161,
-                                end: 7186,
+                                start: 7139,
+                                end: 7164,
                             },
                         },
                         span: Span {
-                            start: 7160,
-                            end: 7187,
+                            start: 7138,
+                            end: 7165,
                         },
                     },
                     selector: Binary(
@@ -3725,20 +3725,20 @@ Module {
                                 50,
                             ),
                             Span {
-                                start: 7192,
-                                end: 7194,
+                                start: 7170,
+                                end: 7172,
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 7160,
-                        end: 7194,
+                        start: 7138,
+                        end: 7172,
                     },
                 },
                 span: Span {
-                    start: 7148,
-                    end: 7194,
+                    start: 7126,
+                    end: 7172,
                 },
             },
             preceding_blank_line: true,
@@ -3749,8 +3749,8 @@ Module {
                     Comment {
                         content: "ifNil: returns self unchanged",
                         span: Span {
-                            start: 7241,
-                            end: 7249,
+                            start: 7219,
+                            end: 7227,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -3760,8 +3760,8 @@ Module {
                     Comment {
                         content: "=> true",
                         span: Span {
-                            start: 7274,
-                            end: 7277,
+                            start: 7252,
+                            end: 7255,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3773,8 +3773,8 @@ Module {
                     Identifier {
                         name: "result33",
                         span: Span {
-                            start: 7241,
-                            end: 7249,
+                            start: 7219,
+                            end: 7227,
                         },
                     },
                 ),
@@ -3786,8 +3786,8 @@ Module {
                                     100,
                                 ),
                                 Span {
-                                    start: 7254,
-                                    end: 7257,
+                                    start: 7232,
+                                    end: 7235,
                                 },
                             ),
                             selector: Keyword(
@@ -3795,8 +3795,8 @@ Module {
                                     KeywordPart {
                                         keyword: "ifNil:",
                                         span: Span {
-                                            start: 7258,
-                                            end: 7264,
+                                            start: 7236,
+                                            end: 7242,
                                         },
                                     },
                                 ],
@@ -3816,29 +3816,29 @@ Module {
                                                         0,
                                                     ),
                                                     Span {
-                                                        start: 7266,
-                                                        end: 7267,
+                                                        start: 7244,
+                                                        end: 7245,
                                                     },
                                                 ),
                                                 preceding_blank_line: false,
                                             },
                                         ],
                                         span: Span {
-                                            start: 7265,
-                                            end: 7268,
+                                            start: 7243,
+                                            end: 7246,
                                         },
                                     },
                                 ),
                             ],
                             is_cast: false,
                             span: Span {
-                                start: 7254,
-                                end: 7268,
+                                start: 7232,
+                                end: 7246,
                             },
                         },
                         span: Span {
-                            start: 7253,
-                            end: 7269,
+                            start: 7231,
+                            end: 7247,
                         },
                     },
                     selector: Binary(
@@ -3850,20 +3850,20 @@ Module {
                                 100,
                             ),
                             Span {
-                                start: 7274,
-                                end: 7277,
+                                start: 7252,
+                                end: 7255,
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 7253,
-                        end: 7277,
+                        start: 7231,
+                        end: 7255,
                     },
                 },
                 span: Span {
-                    start: 7241,
-                    end: 7277,
+                    start: 7219,
+                    end: 7255,
                 },
             },
             preceding_blank_line: true,
@@ -3874,8 +3874,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 7793,
-                            end: 7801,
+                            start: 7771,
+                            end: 7779,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -3883,8 +3883,8 @@ Module {
                     Comment {
                         content: "Real-World Usage Patterns",
                         span: Span {
-                            start: 7793,
-                            end: 7801,
+                            start: 7771,
+                            end: 7779,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3892,8 +3892,8 @@ Module {
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
-                            start: 7793,
-                            end: 7801,
+                            start: 7771,
+                            end: 7779,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3901,8 +3901,8 @@ Module {
                     Comment {
                         content: "Safe access pattern with ifNotNil:",
                         span: Span {
-                            start: 7793,
-                            end: 7801,
+                            start: 7771,
+                            end: 7779,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -3915,8 +3915,8 @@ Module {
                     Identifier {
                         name: "userName",
                         span: Span {
-                            start: 7793,
-                            end: 7801,
+                            start: 7771,
+                            end: 7779,
                         },
                     },
                 ),
@@ -3925,13 +3925,13 @@ Module {
                         "Alice",
                     ),
                     Span {
-                        start: 7805,
-                        end: 7812,
+                        start: 7783,
+                        end: 7790,
                     },
                 ),
                 span: Span {
-                    start: 7793,
-                    end: 7812,
+                    start: 7771,
+                    end: 7790,
                 },
             },
             preceding_blank_line: true,
@@ -3943,8 +3943,8 @@ Module {
                     Comment {
                         content: "=> \"Hello, Alice!\"",
                         span: Span {
-                            start: 7875,
-                            end: 7876,
+                            start: 7856,
+                            end: 7857,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -3956,8 +3956,8 @@ Module {
                     Identifier {
                         name: "greeting",
                         span: Span {
-                            start: 7813,
-                            end: 7821,
+                            start: 7791,
+                            end: 7799,
                         },
                     },
                 ),
@@ -3966,8 +3966,8 @@ Module {
                         Identifier {
                             name: "userName",
                             span: Span {
-                                start: 7825,
-                                end: 7833,
+                                start: 7803,
+                                end: 7811,
                             },
                         },
                     ),
@@ -3976,8 +3976,8 @@ Module {
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 7834,
-                                    end: 7843,
+                                    start: 7812,
+                                    end: 7821,
                                 },
                             },
                         ],
@@ -3989,8 +3989,8 @@ Module {
                                     BlockParameter {
                                         name: "name",
                                         span: Span {
-                                            start: 7846,
-                                            end: 7850,
+                                            start: 7824,
+                                            end: 7828,
                                         },
                                     },
                                 ],
@@ -4007,8 +4007,8 @@ Module {
                                                         "Hello, ",
                                                     ),
                                                     Span {
-                                                        start: 7853,
-                                                        end: 7862,
+                                                        start: 7833,
+                                                        end: 7842,
                                                     },
                                                 ),
                                                 selector: Binary(
@@ -4019,16 +4019,16 @@ Module {
                                                         Identifier {
                                                             name: "name",
                                                             span: Span {
-                                                                start: 7865,
-                                                                end: 7869,
+                                                                start: 7845,
+                                                                end: 7849,
                                                             },
                                                         },
                                                     ),
                                                 ],
                                                 is_cast: false,
                                                 span: Span {
-                                                    start: 7853,
-                                                    end: 7869,
+                                                    start: 7833,
+                                                    end: 7849,
                                                 },
                                             },
                                             selector: Binary(
@@ -4040,36 +4040,36 @@ Module {
                                                         "!",
                                                     ),
                                                     Span {
-                                                        start: 7872,
-                                                        end: 7875,
+                                                        start: 7852,
+                                                        end: 7855,
                                                     },
                                                 ),
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 7853,
-                                                end: 7875,
+                                                start: 7833,
+                                                end: 7855,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 7844,
-                                    end: 7876,
+                                    start: 7822,
+                                    end: 7857,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 7825,
-                        end: 7876,
+                        start: 7803,
+                        end: 7857,
                     },
                 },
                 span: Span {
-                    start: 7813,
-                    end: 7876,
+                    start: 7791,
+                    end: 7857,
                 },
             },
             preceding_blank_line: false,
@@ -4080,8 +4080,8 @@ Module {
                     Comment {
                         content: "Default value pattern with ifNil:",
                         span: Span {
-                            start: 7938,
-                            end: 7947,
+                            start: 7919,
+                            end: 7928,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -4094,8 +4094,8 @@ Module {
                     Identifier {
                         name: "userInput",
                         span: Span {
-                            start: 7938,
-                            end: 7947,
+                            start: 7919,
+                            end: 7928,
                         },
                     },
                 ),
@@ -4104,13 +4104,13 @@ Module {
                         42,
                     ),
                     Span {
-                        start: 7951,
-                        end: 7953,
+                        start: 7932,
+                        end: 7934,
                     },
                 ),
                 span: Span {
-                    start: 7938,
-                    end: 7953,
+                    start: 7919,
+                    end: 7934,
                 },
             },
             preceding_blank_line: true,
@@ -4122,8 +4122,8 @@ Module {
                     Comment {
                         content: "=> 42",
                         span: Span {
-                            start: 7991,
-                            end: 7992,
+                            start: 7972,
+                            end: 7973,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -4135,8 +4135,8 @@ Module {
                     Identifier {
                         name: "processedValue",
                         span: Span {
-                            start: 7954,
-                            end: 7968,
+                            start: 7935,
+                            end: 7949,
                         },
                     },
                 ),
@@ -4145,8 +4145,8 @@ Module {
                         Identifier {
                             name: "userInput",
                             span: Span {
-                                start: 7972,
-                                end: 7981,
+                                start: 7953,
+                                end: 7962,
                             },
                         },
                     ),
@@ -4155,8 +4155,8 @@ Module {
                             KeywordPart {
                                 keyword: "ifNil:",
                                 span: Span {
-                                    start: 7982,
-                                    end: 7988,
+                                    start: 7963,
+                                    end: 7969,
                                 },
                             },
                         ],
@@ -4176,29 +4176,29 @@ Module {
                                                 0,
                                             ),
                                             Span {
-                                                start: 7990,
-                                                end: 7991,
+                                                start: 7971,
+                                                end: 7972,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 7989,
-                                    end: 7992,
+                                    start: 7970,
+                                    end: 7973,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 7972,
-                        end: 7992,
+                        start: 7953,
+                        end: 7973,
                     },
                 },
                 span: Span {
-                    start: 7954,
-                    end: 7992,
+                    start: 7935,
+                    end: 7973,
                 },
             },
             preceding_blank_line: false,
@@ -4209,8 +4209,8 @@ Module {
                     Comment {
                         content: "Transformation with default pattern",
                         span: Span {
-                            start: 8043,
-                            end: 8054,
+                            start: 8024,
+                            end: 8035,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -4223,8 +4223,8 @@ Module {
                     Identifier {
                         name: "maybeNumber",
                         span: Span {
-                            start: 8043,
-                            end: 8054,
+                            start: 8024,
+                            end: 8035,
                         },
                     },
                 ),
@@ -4233,13 +4233,13 @@ Module {
                         7,
                     ),
                     Span {
-                        start: 8058,
-                        end: 8059,
+                        start: 8039,
+                        end: 8040,
                     },
                 ),
                 span: Span {
-                    start: 8043,
-                    end: 8059,
+                    start: 8024,
+                    end: 8040,
                 },
             },
             preceding_blank_line: true,
@@ -4251,8 +4251,8 @@ Module {
                     Comment {
                         content: "=> 14",
                         span: Span {
-                            start: 8115,
-                            end: 8116,
+                            start: 8096,
+                            end: 8097,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -4264,8 +4264,8 @@ Module {
                     Identifier {
                         name: "doubled",
                         span: Span {
-                            start: 8060,
-                            end: 8067,
+                            start: 8041,
+                            end: 8048,
                         },
                     },
                 ),
@@ -4274,8 +4274,8 @@ Module {
                         Identifier {
                             name: "maybeNumber",
                             span: Span {
-                                start: 8071,
-                                end: 8082,
+                                start: 8052,
+                                end: 8063,
                             },
                         },
                     ),
@@ -4284,15 +4284,15 @@ Module {
                             KeywordPart {
                                 keyword: "ifNil:",
                                 span: Span {
-                                    start: 8083,
-                                    end: 8089,
+                                    start: 8064,
+                                    end: 8070,
                                 },
                             },
                             KeywordPart {
                                 keyword: "ifNotNil:",
                                 span: Span {
-                                    start: 8094,
-                                    end: 8103,
+                                    start: 8075,
+                                    end: 8084,
                                 },
                             },
                         ],
@@ -4312,16 +4312,16 @@ Module {
                                                 0,
                                             ),
                                             Span {
-                                                start: 8091,
-                                                end: 8092,
+                                                start: 8072,
+                                                end: 8073,
                                             },
                                         ),
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 8090,
-                                    end: 8093,
+                                    start: 8071,
+                                    end: 8074,
                                 },
                             },
                         ),
@@ -4331,8 +4331,8 @@ Module {
                                     BlockParameter {
                                         name: "n",
                                         span: Span {
-                                            start: 8106,
-                                            end: 8107,
+                                            start: 8087,
+                                            end: 8088,
                                         },
                                     },
                                 ],
@@ -4347,8 +4347,8 @@ Module {
                                                 Identifier {
                                                     name: "n",
                                                     span: Span {
-                                                        start: 8110,
-                                                        end: 8111,
+                                                        start: 8091,
+                                                        end: 8092,
                                                     },
                                                 },
                                             ),
@@ -4361,36 +4361,36 @@ Module {
                                                         2,
                                                     ),
                                                     Span {
-                                                        start: 8114,
-                                                        end: 8115,
+                                                        start: 8095,
+                                                        end: 8096,
                                                     },
                                                 ),
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 8110,
-                                                end: 8115,
+                                                start: 8091,
+                                                end: 8096,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 8104,
-                                    end: 8116,
+                                    start: 8085,
+                                    end: 8097,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 8071,
-                        end: 8116,
+                        start: 8052,
+                        end: 8097,
                     },
                 },
                 span: Span {
-                    start: 8060,
-                    end: 8116,
+                    start: 8041,
+                    end: 8097,
                 },
             },
             preceding_blank_line: false,
@@ -4398,7 +4398,7 @@ Module {
     ],
     span: Span {
         start: 653,
-        end: 8116,
+        end: 8097,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

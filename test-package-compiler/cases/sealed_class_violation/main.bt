@@ -5,4 +5,5 @@
 // Integer is a built-in sealed class.
 
 Integer subclass: MyInt
+
   doubled => self * 2

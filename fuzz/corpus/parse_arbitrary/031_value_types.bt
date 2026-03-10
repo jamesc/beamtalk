@@ -27,10 +27,8 @@ Point new
 // Access fields via instance methods (BT-354)
 p := Point new
 // => _
-
 p getX
 // => 0
-
 p getY
 // => 0
 
@@ -39,8 +37,7 @@ p getY
 // ===========================================================================
 
 // Inherited Object base methods work on value types (BT-354)
-p class
-// => Point
+p class// => Point
 
 // ===========================================================================
 // IMMUTABILITY

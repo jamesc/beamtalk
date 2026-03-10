@@ -8,14 +8,14 @@ Token { kind: LeftBracket, span: Span { start: 184, end: 185 }, leading_trivia: 
 Token { kind: RightBracket, span: Span { start: 185, end: 186 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("emptyWithSpace"), span: Span { start: 221, end: 235 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Empty block with single space"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 236, end: 238 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 239, end: 240 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: RightBracket, span: Span { start: 241, end: 242 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("emptyWithNewlines"), span: Span { start: 273, end: 290 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Empty block with newlines"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 291, end: 293 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 294, end: 295 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 297, end: 298 }, leading_trivia: [Whitespace("\n\n")], trailing_trivia: [] }
-Token { kind: Identifier("collection"), span: Span { start: 332, end: 342 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Empty block used as argument"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("do:"), span: Span { start: 343, end: 346 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 347, end: 348 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 348, end: 349 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 350, end: 350 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: LeftBracket, span: Span { start: 239, end: 240 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 240, end: 241 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("emptyWithNewlines"), span: Span { start: 272, end: 289 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Empty block with newlines"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 290, end: 292 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 293, end: 294 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 294, end: 295 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("collection"), span: Span { start: 329, end: 339 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Empty block used as argument"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("do:"), span: Span { start: 340, end: 343 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 344, end: 345 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 345, end: 346 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 347, end: 347 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

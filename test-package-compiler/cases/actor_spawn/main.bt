@@ -3,8 +3,7 @@
 
 // Test actor spawn compilation
 // The syntax "Counter spawn" should compile to gen_server:start_link
-
-value := 0.
-increment := [ self.value := self.value + 1 ].
+value := 0
+increment := [self.value := self.value + 1]
 
 counter := Counter spawn

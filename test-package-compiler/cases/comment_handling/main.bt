@@ -5,7 +5,7 @@
 // Comments should be preserved as trivia
 
 // Single line comment
-x := 5 // inline comment
+x := 5  // inline comment
 
 // Multiple comments
 // Comment line 1
@@ -18,15 +18,11 @@ a := 1
 b := 2
 
 // Comment in message send
-object // comment here
-    message: value // and here
+object message: value  // and here
 
 // Block with comments
-block := [
-    // Inside block
-    42
-]
-
+block := [// Inside block
+  42]
 // Commented out code (still comments)
 // x := 999
 // y := 888

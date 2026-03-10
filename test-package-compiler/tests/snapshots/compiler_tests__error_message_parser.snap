@@ -45,8 +45,8 @@ Module {
                                     Identifier {
                                         name: "self",
                                         span: Span {
-                                            start: 225,
-                                            end: 229,
+                                            start: 226,
+                                            end: 230,
                                         },
                                     },
                                 ),
@@ -55,8 +55,8 @@ Module {
                                         KeywordPart {
                                             keyword: "error:",
                                             span: Span {
-                                                start: 230,
-                                                end: 236,
+                                                start: 231,
+                                                end: 237,
                                             },
                                         },
                                     ],
@@ -67,15 +67,15 @@ Module {
                                             "This is a test error",
                                         ),
                                         Span {
-                                            start: 237,
-                                            end: 259,
+                                            start: 238,
+                                            end: 260,
                                         },
                                     ),
                                 ],
                                 is_cast: false,
                                 span: Span {
-                                    start: 225,
-                                    end: 259,
+                                    start: 226,
+                                    end: 260,
                                 },
                             },
                             preceding_blank_line: false,
@@ -90,8 +90,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 214,
-                        end: 259,
+                        start: 215,
+                        end: 260,
                     },
                 },
                 MethodDefinition {
@@ -110,8 +110,8 @@ Module {
                                     Identifier {
                                         name: "msg",
                                         span: Span {
-                                            start: 291,
-                                            end: 294,
+                                            start: 289,
+                                            end: 292,
                                         },
                                     },
                                 ),
@@ -120,13 +120,13 @@ Module {
                                         "Dynamic error message",
                                     ),
                                     Span {
-                                        start: 298,
-                                        end: 321,
+                                        start: 296,
+                                        end: 319,
                                     },
                                 ),
                                 span: Span {
-                                    start: 291,
-                                    end: 321,
+                                    start: 289,
+                                    end: 319,
                                 },
                             },
                             preceding_blank_line: false,
@@ -141,8 +141,8 @@ Module {
                                     Identifier {
                                         name: "self",
                                         span: Span {
-                                            start: 327,
-                                            end: 331,
+                                            start: 324,
+                                            end: 328,
                                         },
                                     },
                                 ),
@@ -151,8 +151,8 @@ Module {
                                         KeywordPart {
                                             keyword: "error:",
                                             span: Span {
-                                                start: 332,
-                                                end: 338,
+                                                start: 329,
+                                                end: 335,
                                             },
                                         },
                                     ],
@@ -162,16 +162,16 @@ Module {
                                         Identifier {
                                             name: "msg",
                                             span: Span {
-                                                start: 339,
-                                                end: 342,
+                                                start: 336,
+                                                end: 339,
                                             },
                                         },
                                     ),
                                 ],
                                 is_cast: false,
                                 span: Span {
-                                    start: 327,
-                                    end: 342,
+                                    start: 324,
+                                    end: 339,
                                 },
                             },
                             preceding_blank_line: false,
@@ -186,8 +186,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 265,
-                        end: 342,
+                        start: 264,
+                        end: 339,
                     },
                 },
             ],
@@ -237,7 +237,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 186,
-                end: 342,
+                end: 339,
             },
         },
     ],
@@ -245,11 +245,8 @@ Module {
     expressions: [],
     span: Span {
         start: 186,
-        end: 342,
+        end: 339,
     },
     file_leading_comments: [],
     file_trailing_comments: [],
 }
-
-Diagnostics:
-Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 321, end: 322 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }

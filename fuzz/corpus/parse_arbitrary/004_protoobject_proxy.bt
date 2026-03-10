@@ -22,7 +22,7 @@
 // $ cargo run -- repl
 // > :load examples/protoobject_proxy.bt
 // > :load tests/e2e/fixtures/counter.bt
-// 
+//
 // # Create a counter and increment it
 // > counter := Counter spawn
 // > counter increment
@@ -58,17 +58,16 @@
 //
 // This demonstrates ProtoObject's doesNotUnderstand:args: and perform:withArguments:
 // working together to create a proxy that's indistinguishable from the target.
+
 Actor subclass: TransparentProxy
   state: target = nil
-  
+
   // Set the target object that receives forwarded messages
-  setTarget: newTarget =>
-    self.target := newTarget
-  
+  setTarget: newTarget => self.target := newTarget
+
   // Get the class of the target (for debugging)
-  targetClass =>
-    self.target class
-  
+  targetClass => self.target class
+
   // ProtoObject's doesNotUnderstand:args: catches unknown messages
   // This is called when TransparentProxy receives a message it doesn't have
   doesNotUnderstand: selector args: arguments =>

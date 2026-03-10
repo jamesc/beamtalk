@@ -13,13 +13,15 @@ result := innerBlock value: 5
 deeplyNested := [[[42]]]
 
 // Block with nested block in body
-blockWithNested := [:x | 
-    inner := [:y | y * 2]
-    inner value: x
+blockWithNested := [:x |
+  inner := [:y | y * 2]
+  inner value: x
 ]
 
 // Multiple nested blocks in arguments
-processor forEach: items with: [:item |
+processor
+  forEach: items
+  with: [:item |
     mapper := [:val | val + 1]
     mapper value: item
-]
+  ]

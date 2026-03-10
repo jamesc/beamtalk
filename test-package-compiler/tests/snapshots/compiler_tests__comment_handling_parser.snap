@@ -100,8 +100,8 @@ Module {
                     Comment {
                         content: "Multiple comments",
                         span: Span {
-                            start: 244,
-                            end: 245,
+                            start: 245,
+                            end: 246,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -109,8 +109,8 @@ Module {
                     Comment {
                         content: "Comment line 1",
                         span: Span {
-                            start: 244,
-                            end: 245,
+                            start: 245,
+                            end: 246,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -118,8 +118,8 @@ Module {
                     Comment {
                         content: "Comment line 2",
                         span: Span {
-                            start: 244,
-                            end: 245,
+                            start: 245,
+                            end: 246,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -132,8 +132,8 @@ Module {
                     Identifier {
                         name: "y",
                         span: Span {
-                            start: 244,
-                            end: 245,
+                            start: 245,
+                            end: 246,
                         },
                     },
                 ),
@@ -142,13 +142,13 @@ Module {
                         10,
                     ),
                     Span {
-                        start: 249,
-                        end: 251,
+                        start: 250,
+                        end: 252,
                     },
                 ),
                 span: Span {
-                    start: 244,
-                    end: 251,
+                    start: 245,
+                    end: 252,
                 },
             },
             preceding_blank_line: true,
@@ -159,8 +159,8 @@ Module {
                     Comment {
                         content: "Comment between expressions",
                         span: Span {
-                            start: 284,
-                            end: 285,
+                            start: 285,
+                            end: 286,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -173,8 +173,8 @@ Module {
                     Identifier {
                         name: "a",
                         span: Span {
-                            start: 284,
-                            end: 285,
+                            start: 285,
+                            end: 286,
                         },
                     },
                 ),
@@ -183,13 +183,13 @@ Module {
                         1,
                     ),
                     Span {
-                        start: 289,
-                        end: 290,
+                        start: 290,
+                        end: 291,
                     },
                 ),
                 span: Span {
-                    start: 284,
-                    end: 290,
+                    start: 285,
+                    end: 291,
                 },
             },
             preceding_blank_line: true,
@@ -200,8 +200,8 @@ Module {
                     Comment {
                         content: "Middle comment",
                         span: Span {
-                            start: 309,
-                            end: 310,
+                            start: 310,
+                            end: 311,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -214,8 +214,8 @@ Module {
                     Identifier {
                         name: "b",
                         span: Span {
-                            start: 309,
-                            end: 310,
+                            start: 310,
+                            end: 311,
                         },
                     },
                 ),
@@ -224,13 +224,13 @@ Module {
                         2,
                     ),
                     Span {
-                        start: 314,
-                        end: 315,
+                        start: 315,
+                        end: 316,
                     },
                 ),
                 span: Span {
-                    start: 309,
-                    end: 315,
+                    start: 310,
+                    end: 316,
                 },
             },
             preceding_blank_line: false,
@@ -241,8 +241,8 @@ Module {
                     Comment {
                         content: "Comment in message send",
                         span: Span {
-                            start: 344,
-                            end: 350,
+                            start: 345,
+                            end: 351,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -252,8 +252,8 @@ Module {
                     Comment {
                         content: "and here",
                         span: Span {
-                            start: 380,
-                            end: 385,
+                            start: 361,
+                            end: 366,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -265,8 +265,8 @@ Module {
                     Identifier {
                         name: "object",
                         span: Span {
-                            start: 344,
-                            end: 350,
+                            start: 345,
+                            end: 351,
                         },
                     },
                 ),
@@ -275,8 +275,8 @@ Module {
                         KeywordPart {
                             keyword: "message:",
                             span: Span {
-                                start: 371,
-                                end: 379,
+                                start: 352,
+                                end: 360,
                             },
                         },
                     ],
@@ -286,16 +286,16 @@ Module {
                         Identifier {
                             name: "value",
                             span: Span {
-                                start: 380,
-                                end: 385,
+                                start: 361,
+                                end: 366,
                             },
                         },
                     ),
                 ],
                 is_cast: false,
                 span: Span {
-                    start: 344,
-                    end: 385,
+                    start: 345,
+                    end: 366,
                 },
             },
             preceding_blank_line: true,
@@ -306,8 +306,8 @@ Module {
                     Comment {
                         content: "Block with comments",
                         span: Span {
-                            start: 422,
-                            end: 427,
+                            start: 404,
+                            end: 409,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -320,8 +320,8 @@ Module {
                     Identifier {
                         name: "block",
                         span: Span {
-                            start: 422,
-                            end: 427,
+                            start: 404,
+                            end: 409,
                         },
                     },
                 ),
@@ -331,17 +331,7 @@ Module {
                         body: [
                             ExpressionStatement {
                                 comments: CommentAttachment {
-                                    leading: [
-                                        Comment {
-                                            content: "Inside block",
-                                            span: Span {
-                                                start: 457,
-                                                end: 459,
-                                            },
-                                            kind: Line,
-                                            preceding_blank_line: false,
-                                        },
-                                    ],
+                                    leading: [],
                                     trailing: None,
                                 },
                                 expression: Literal(
@@ -349,22 +339,22 @@ Module {
                                         42,
                                     ),
                                     Span {
-                                        start: 457,
-                                        end: 459,
+                                        start: 432,
+                                        end: 434,
                                     },
                                 ),
                                 preceding_blank_line: false,
                             },
                         ],
                         span: Span {
-                            start: 431,
-                            end: 461,
+                            start: 413,
+                            end: 435,
                         },
                     },
                 ),
                 span: Span {
-                    start: 422,
-                    end: 461,
+                    start: 404,
+                    end: 435,
                 },
             },
             preceding_blank_line: true,
@@ -372,24 +362,24 @@ Module {
     ],
     span: Span {
         start: 161,
-        end: 461,
+        end: 435,
     },
     file_leading_comments: [],
     file_trailing_comments: [
         Comment {
             content: "Commented out code (still comments)",
             span: Span {
-                start: 526,
-                end: 526,
+                start: 499,
+                end: 499,
             },
             kind: Line,
-            preceding_blank_line: true,
+            preceding_blank_line: false,
         },
         Comment {
             content: "x := 999",
             span: Span {
-                start: 526,
-                end: 526,
+                start: 499,
+                end: 499,
             },
             kind: Line,
             preceding_blank_line: false,
@@ -397,8 +387,8 @@ Module {
         Comment {
             content: "y := 888",
             span: Span {
-                start: 526,
-                end: 526,
+                start: 499,
+                end: 499,
             },
             kind: Line,
             preceding_blank_line: false,

@@ -5,4 +5,4 @@
 // Sends multiple messages to the same receiver
 
 // Method that uses a cascade - all messages go to counter
-runCascade := [ counter increment; increment; getValue ]
+runCascade := [counter increment; increment; getValue]

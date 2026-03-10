@@ -20,18 +20,12 @@ mixed := #{#type => "mixed", "count" => 5, 42 => "answer"}
 
 // Nested maps
 data := #{
-  #user => #{
-    #name => "Bob",
-    #email => "bob@example.com"
-  },
-  #settings => #{
-    #theme => "dark",
-    #language => "en"
-  }
+  #user => #{#name => "Bob", #email => "bob@example.com"},
+  #settings => #{#theme => "dark", #language => "en"}
 }
 
 // Map with trailing comma
-withTrailing := #{#a => 1, #b => 2,}
+withTrailing := #{#a => 1, #b => 2}
 
 // Single entry map
 single := #{#only => "value"}

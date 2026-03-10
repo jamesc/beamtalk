@@ -42,7 +42,11 @@ Collection subclass: Interval
   /// ```beamtalk
   /// (1 to: 3) do: [:i | Transcript show: i]
   /// ```
-  do: block :: Block -> Nil => self.from to: self.to by: self.step do: block
+  do: block :: Block -> Nil =>
+    self.from
+      to: self.to
+      by: self.step
+      do: block
 
   /// First element of the interval.
   ///

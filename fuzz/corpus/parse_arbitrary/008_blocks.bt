@@ -75,16 +75,12 @@
 // Simple closure capturing outer variable
 outerVar := 10
 // => 10
-
 [:x | x + outerVar] value: 5
 // => 15
 
 // Nested closure with capture
 makeAdder := [:n | [:x | x + n]]
 // => a Block/1
-
 addFive := makeAdder value: 5
 // => a Block/1
-
-addFive value: 10
-// => 15
+addFive value: 10// => 15

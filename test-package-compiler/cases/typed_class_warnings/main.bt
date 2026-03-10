@@ -14,10 +14,10 @@ typed Actor subclass: TypedCounter
 
   // Missing return type annotation — warning expected
   increment =>
-    self.value := self.value + 1.
+    self.value := self.value + 1
     self.value
 
   // Missing parameter type annotation — warning expected
   add: amount -> Integer =>
-    self.value := self.value + amount.
+    self.value := self.value + amount
     self.value

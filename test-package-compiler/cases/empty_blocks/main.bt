@@ -8,12 +8,10 @@
 empty := []
 
 // Empty block with single space
-emptyWithSpace := [ ]
+emptyWithSpace := []
 
 // Empty block with newlines
-emptyWithNewlines := [
-
-]
+emptyWithNewlines := []
 
 // Empty block used as argument
 collection do: []

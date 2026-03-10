@@ -23,27 +23,22 @@
 // ---------------------------------------------------------------------------
 // Look up existing primitive class
 // ---------------------------------------------------------------------------
-
 stringClass := Beamtalk classNamed: #String
 // => _
-
 stringClass class_name
 // => String
 
 // ---------------------------------------------------------------------------
 // Look up existing actor class
 // ---------------------------------------------------------------------------
-
 counterClass := Beamtalk classNamed: #Counter
 // => _
-
 counterClass class_name
 // => Counter
 
 // ---------------------------------------------------------------------------
 // Look up non-existent class returns nil
 // ---------------------------------------------------------------------------
-
 Beamtalk classNamed: #NonExistentClass
 // => nil
 
@@ -54,10 +49,8 @@ Beamtalk classNamed: #NonExistentClass
 // ---------------------------------------------------------------------------
 // Get methods list from String class
 // ---------------------------------------------------------------------------
-
 stringClass := Beamtalk classNamed: #String
 // => _
-
 methods := stringClass methods
 // => _
 
@@ -87,10 +80,8 @@ methods isEmpty
 // ---------------------------------------------------------------------------
 // Get methods list from Integer class
 // ---------------------------------------------------------------------------
-
 intClass := Beamtalk classNamed: #Integer
 // => _
-
 intMethods := intClass methods
 // => _
 
@@ -105,30 +96,24 @@ intMethods isEmpty
 // ---------------------------------------------------------------------------
 // String superclass is Object
 // ---------------------------------------------------------------------------
-
 stringClass := Beamtalk classNamed: #String
 // => _
-
 stringClass superclass
 // => Object
 
 // ---------------------------------------------------------------------------
 // Counter superclass is Actor
 // ---------------------------------------------------------------------------
-
 counterClass := Beamtalk classNamed: #Counter
 // => _
-
 counterClass superclass
 // => Actor
 
 // ---------------------------------------------------------------------------
 // Actor superclass is Object
 // ---------------------------------------------------------------------------
-
 actorClass := Beamtalk classNamed: #Actor
 // => _
-
 actorClass superclass
 // => Object
 
@@ -139,20 +124,16 @@ actorClass superclass
 // ---------------------------------------------------------------------------
 // Get module name for primitive class
 // ---------------------------------------------------------------------------
-
 stringClass := Beamtalk classNamed: #String
 // => _
-
 stringClass module_name
 // => beamtalk_string
 
 // ---------------------------------------------------------------------------
 // Get module name for actor class
 // ---------------------------------------------------------------------------
-
 counterClass := Beamtalk classNamed: #Counter
 // => _
-
 counterClass module_name
 // => counter
 
@@ -163,24 +144,17 @@ counterClass module_name
 // ---------------------------------------------------------------------------
 // Class name matches the lookup name
 // ---------------------------------------------------------------------------
-
 stringClass := Beamtalk classNamed: #String
 // => _
-
 stringClass class_name
 // => String
-
 integerClass := Beamtalk classNamed: #Integer
 // => _
-
 integerClass class_name
 // => Integer
-
 trueClass := Beamtalk classNamed: #True
 // => _
-
-trueClass class_name
-// => True
+trueClass class_name// => True
 
 // ===========================================================================
 // IMPLEMENTATION STATUS
