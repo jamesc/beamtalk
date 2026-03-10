@@ -5,9 +5,18 @@
 //!
 //! **DDD Context:** Build System — Program Execution
 //!
-//! Compiles a Beamtalk package and starts a BEAM node to execute the
-//! start module's `start` method. The node keeps running after the
-//! method returns so that supervised actors remain alive.
+//! Two modes (ADR 0061):
+//!
+//! **Script mode** (`beamtalk run ClassName selector`): starts a run-mode workspace
+//! (no REPL server, not registered in `~/.beamtalk/workspaces/`), calls
+//! `ClassName>>selector` via the class registry, and exits when the method returns.
+//! If a workspace for the project is already running, connects to it instead and
+//! evaluates there.
+//!
+//! **Service mode** (`beamtalk run .`): starts a persistent workspace (with REPL
+//! server), starts the `[application]` supervisor, prints the REPL port, and
+//! returns the shell. If the service is already running, reports the existing port
+//! and exits 0 (idempotent).
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -24,72 +33,84 @@ use super::workspace;
 
 /// Compile and run a beamtalk package.
 ///
-/// In package mode (beamtalk.toml with `start` field): compiles the package,
-/// starts a BEAM node with the runtime, stdlib, and package code paths, then
-/// calls the start module's `start` method. The BEAM node stays alive so
-/// actors remain supervised.
-///
-/// Errors if no manifest is found or if the manifest lacks a `start` field.
-#[instrument(skip_all, fields(path = %path))]
-pub fn run(path: &str) -> Result<()> {
+/// - `class_or_dot`: either `"."` (service mode) or a class name (script mode).
+/// - `selector`: required when `class_or_dot` is a class name; the method to call.
+#[instrument(skip_all, fields(class_or_dot = %class_or_dot))]
+pub fn run(class_or_dot: &str, selector: Option<&str>) -> Result<()> {
     info!("Starting run command");
-    let input_path = Utf8PathBuf::from(path);
 
-    // Derive project root: directory uses itself, file uses parent
-    let project_root = if input_path.is_dir() {
-        input_path
-    } else {
-        input_path
-            .parent()
-            .map_or_else(|| Utf8PathBuf::from("."), camino::Utf8Path::to_path_buf)
+    // Determine project root (always current directory for run)
+    let project_root = Utf8PathBuf::from(".");
+
+    let Some(pkg) = manifest::find_manifest(&project_root)? else {
+        return Err(miette!(
+            "No beamtalk.toml found in the current directory.\n\
+             The run command requires a package manifest.\n\
+             Create one with: beamtalk new <project_name>"
+        ));
     };
 
-    // Look for package manifest
-    match manifest::find_manifest(&project_root)? {
-        Some(pkg) => run_package(&project_root, &pkg),
-        None => {
-            // No manifest — error with helpful message
+    match (class_or_dot, selector) {
+        (".", None) => {
+            // Service mode: requires [application] section
+            let app_config = manifest::find_application_config(&project_root)?;
+            match app_config {
+                Some(app) => run_package_as_otp_application(&project_root, &pkg, &app),
+                None => Err(miette!(
+                    "No entry point defined for `beamtalk run .`\n\
+                     \n\
+                     For a supervised OTP service, add to beamtalk.toml:\n\
+                     \n\
+                       [application]\n\
+                       supervisor = \"MyRootSup\"\n\
+                     \n\
+                     For a script, use: beamtalk run ClassName selector"
+                )),
+            }
+        }
+        (class_name, Some(sel)) => {
+            // Script mode: beamtalk run ClassName selector
+            run_script(&project_root, &pkg, class_name, sel)
+        }
+        (class_name, None) if class_name != "." => {
+            // Got class name but no selector
             Err(miette!(
-                "No beamtalk.toml found in '{}'.\n\
-                 The run command requires a package manifest.\n\
-                 Create one with: beamtalk new <project_name>",
-                project_root
+                "Missing selector for script mode.\n\
+                 Usage: beamtalk run {class_name} <selector>\n\
+                 Example: beamtalk run {class_name} run"
             ))
         }
+        _ => unreachable!(),
     }
 }
 
-/// Run a package.
+/// Run a package script: start a run-mode workspace and call `ClassName>>selector`.
 ///
-/// If `[application] supervisor` is set, starts the package as a proper OTP
-/// application via `application:ensure_all_started/1`. Otherwise, falls back
-/// to calling the `start` module's `start` method imperatively.
-fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> Result<()> {
-    // Check for OTP application mode (BT-1191)
-    let app_config = manifest::find_application_config(project_root)?;
-    if let Some(app_config) = app_config {
-        return run_package_as_otp_application(project_root, pkg, &app_config);
-    }
-
-    let start_module = pkg.start.as_deref().ok_or_else(|| {
-        miette!(
-            "No start module defined — add start = \"module_name\" to [package] in beamtalk.toml\n\
-             Or use [application] supervisor = \"MyRootSup\" for a supervised OTP application"
-        )
-    })?;
-
-    // Validate start module name (same rules as file stems in build.rs)
-    if start_module.is_empty()
-        || !start_module
-            .chars()
-            .all(|c| c == '_' || c.is_ascii_alphanumeric())
-    {
+/// If a persistent workspace is already running for this project, connects to it
+/// and evaluates the call there (so scripts run against live services naturally).
+/// Otherwise, starts a fresh run-mode workspace (no REPL server), executes the
+/// method, and exits when it returns.
+fn run_script(
+    project_root: &Utf8PathBuf,
+    _pkg: &manifest::PackageManifest,
+    class_name: &str,
+    selector: &str,
+) -> Result<()> {
+    // Validate class name: must start with uppercase letter (Beamtalk convention)
+    if class_name.is_empty() || !class_name.chars().next().is_some_and(char::is_uppercase) {
         miette::bail!(
-            "Invalid start module '{start_module}': must be non-empty and contain only alphanumeric characters and underscores"
+            "Invalid class name '{class_name}': class names must start with an uppercase letter"
         );
     }
 
-    info!(start = %start_module, "Found start module in manifest");
+    // Validate selector: must be a valid Erlang atom (simple identifier or keyword form)
+    if selector.is_empty() || selector.contains(|c: char| !c.is_alphanumeric() && c != '_') {
+        miette::bail!(
+            "Invalid selector '{selector}': selectors must contain only alphanumeric characters and underscores"
+        );
+    }
+
+    info!(class = %class_name, selector = %selector, "Running script");
 
     // Build the project
     println!("Building...");
@@ -98,24 +119,9 @@ fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> R
         &beamtalk_core::CompilerOptions::default(),
     )?;
 
-    // Resolve the Erlang module name: bt@{package}@{start_module}
-    let erlang_module = format!(
-        "bt@{}@{}",
-        pkg.name,
-        beamtalk_core::codegen::core_erlang::to_module_name(start_module),
-    );
-
-    info!(erlang_module = %erlang_module, "Starting BEAM node");
-    println!(
-        "\nRunning {} v{} (start module: {start_module})...",
-        pkg.name, pkg.version
-    );
-
-    // Start BEAM node with runtime + stdlib + package code paths
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
-    // Auto-build runtime if needed (dev mode only)
     if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
         info!("Building Beamtalk runtime...");
         let status = Command::new("rebar3")
@@ -129,14 +135,43 @@ fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> R
         }
     }
 
+    let ebin_dir = project_root.join("_build").join("dev").join("ebin");
+
+    println!("\nRunning {class_name}>>{selector}...");
+
+    // Build run-mode eval command:
+    // 1. Start beamtalk_workspace application
+    // 2. Start workspace supervisor in run mode (repl=false, no TCP server, not registered)
+    // 3. Look up class in registry and dispatch the message
+    // 4. Halt when done
+    let project_path_escaped =
+        crate::beam_compiler::escape_erlang_string(&project_root.canonicalize().map_or_else(
+            |_| project_root.to_string(),
+            |p| p.to_string_lossy().into_owned(),
+        ));
+
+    let eval_cmd = format!(
+        "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+         {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"run_mode\">>, \
+                                                          project_path => <<\"{project_path_escaped}\">>, \
+                                                          repl => false}}), \
+         ClassPid = beamtalk_class_registry:whereis_class('{class_name}'), \
+         case ClassPid of \
+             undefined -> \
+                 io:format(standard_error, \"Error: class '{class_name}' not found~n\", []), \
+                 halt(1); \
+             _ -> \
+                 beamtalk_class_dispatch:class_send(ClassPid, {selector}, []), \
+                 halt(0) \
+         end."
+    );
+
     let mut args = repl_startup::beam_pa_args(&paths);
 
     // Add package ebin to code path
-    let ebin_dir = project_root.join("_build").join("dev").join("ebin");
     args.push(OsString::from("-pa"));
     #[cfg(windows)]
     {
-        // Convert Windows backslashes to forward slashes for Erlang (BT-661)
         let ebin_path = ebin_dir.as_str().replace('\\', "/");
         args.push(OsString::from(ebin_path));
     }
@@ -145,20 +180,9 @@ fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> R
         args.push(OsString::from(ebin_dir.as_str()));
     }
 
-    // Build eval command:
-    // 1. Start beamtalk_runtime application (for object system, actors, etc.)
-    // 2. Call the start module's start method
-    // 3. Keep the node alive (actors are supervised)
-    let eval_cmd = format!(
-        "{{ok, _}} = application:ensure_all_started(beamtalk_runtime), \
-         '{erlang_module}':'start'(), \
-         receive stop -> ok end."
-    );
-
     args.push(OsString::from("-eval"));
     args.push(OsString::from(&eval_cmd));
 
-    // Set compiler port binary path (for runtime compilation support)
     let mut cmd = Command::new("erl");
     cmd.arg("-noshell")
         .args(&args)
@@ -180,7 +204,6 @@ fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> R
         .spawn()
         .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
 
-    // Wait for the BEAM node to exit (Ctrl+C will propagate to child)
     let status = child
         .wait()
         .map_err(|e| miette!("Failed to wait for BEAM node: {e}"))?;
@@ -192,7 +215,7 @@ fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> R
         // Signal-terminated (e.g. Ctrl+C) — exit silently
     }
 
-    info!("Run command completed");
+    info!("Script run completed");
     Ok(())
 }
 
@@ -213,8 +236,6 @@ fn run_package_as_otp_application(
     info!(name = %pkg.name, "Running as OTP service (workspace-first)");
 
     // Early probe: if the workspace+app is already running, skip building entirely.
-    // This ensures `beamtalk run .` reports "already running" even when the current
-    // checkout has compile errors (e.g. work in progress that hasn't been committed).
     if let Some(port) = probe_running_workspace_app(project_root.as_std_path(), &pkg.name) {
         println!(
             "{} v{} is already running (REPL port {})\nConnect with: beamtalk repl",
@@ -245,8 +266,6 @@ fn run_package_as_otp_application(
         }
     }
 
-    // Include the package ebin on the workspace code path so bootstrap can load
-    // all bt@*.beam project classes before the OTP supervisor starts.
     let ebin_dir: PathBuf = project_root
         .join("_build")
         .join("dev")
@@ -254,9 +273,6 @@ fn run_package_as_otp_application(
         .into_std_path_buf();
     let extra_code_paths = vec![ebin_dir.clone()];
 
-    // Start or reconnect to a persistent workspace for this project.
-    // otp_app_name causes application:ensure_all_started(app_name) to be
-    // injected into the workspace eval after class bootstrap completes (BT-1319).
     let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
         project_root.as_std_path(),
         None,
@@ -272,8 +288,6 @@ fn run_package_as_otp_application(
     )?;
 
     if !is_new {
-        // Workspace already exists but the app was not yet running (the early probe
-        // above would have returned if it was). Ensure the app is running via RPC.
         let already_running = ensure_otp_app_in_workspace(
             &node_info.node_name,
             &workspace_id,
@@ -308,13 +322,6 @@ fn run_package_as_otp_application(
 
 /// Probe whether the named OTP application is already running in the project's workspace.
 ///
-/// Performs two cheap checks before launching any Erlang process:
-/// 1. Is there a workspace node for this project?
-/// 2. Is the OS process for that node still alive?
-///
-/// If both pass, spawns a short-lived hidden Erlang node that RPCs
-/// `application:which_applications/0` into the workspace to check the app list.
-///
 /// Returns `Some(port)` if the application is running, `None` otherwise.
 /// Failures are swallowed — callers fall through to the normal startup path.
 fn probe_running_workspace_app(project_root: &std::path::Path, app_name: &str) -> Option<u16> {
@@ -324,7 +331,6 @@ fn probe_running_workspace_app(project_root: &std::path::Path, app_name: &str) -
         return None;
     }
 
-    // Workspace is live — RPC to check if the OTP app is already started.
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().ok()?;
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
     let cookie = workspace::read_workspace_cookie(&workspace_id).ok()?;
@@ -374,11 +380,6 @@ fn probe_running_workspace_app(project_root: &std::path::Path, app_name: &str) -
 
 /// Ensure the named OTP application is running inside an existing workspace node.
 ///
-/// Uses a short-lived hidden BEAM node to RPC `application:ensure_all_started/1`
-/// into the workspace. Also adds the package ebin to the workspace code path so
-/// the app is loadable even if the workspace was started without it (e.g. via a
-/// plain `beamtalk repl` session).
-///
 /// Returns `true` if the app was already running, `false` if it was just started.
 fn ensure_otp_app_in_workspace(
     workspace_node: &str,
@@ -392,7 +393,6 @@ fn ensure_otp_app_in_workspace(
     let cookie = cookie.trim();
 
     let pid = std::process::id();
-    // Must use -name (not -sname) to connect to the workspace which also uses -name.
     let client_node = format!("beamtalk_run_rpc_{pid}@localhost");
 
     #[cfg(windows)]
@@ -409,12 +409,6 @@ fn ensure_otp_app_in_workspace(
     let project_path_escaped =
         crate::beam_compiler::escape_erlang_string(&project_root.to_string_lossy());
 
-    // RPC into the workspace: add package ebin, rescan project classes so that
-    // any bt@*.beam compiled after the workspace started are registered before
-    // ensure_all_started is called (BT-1319: class_not_found during init/1).
-    // {ok, []} = app already running; {ok, [_|_]} = freshly started.
-    // rpc:call/5 with 30 s timeout prevents hanging if startup blocks.
-    // app_name is single-quoted so hyphenated names (e.g. my-app) are valid atoms.
     let eval_cmd = format!(
         "rpc:call('{workspace_node}', code, add_path, [\"{ebin_escaped}\"]), \
          rpc:call('{workspace_node}', beamtalk_workspace_bootstrap, activate_project_modules, [<<\"{project_path_escaped}\">>], 30000), \
@@ -465,7 +459,6 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_test_project_with_manifest(temp: &TempDir, manifest: &str) -> String {
-        let project_path = temp.path().to_string_lossy().to_string();
         let src_path = temp.path().join("src");
         fs::create_dir_all(&src_path).unwrap();
         fs::write(
@@ -474,19 +467,26 @@ mod tests {
         )
         .unwrap();
         fs::write(temp.path().join("beamtalk.toml"), manifest).unwrap();
-        project_path
+        temp.path().to_string_lossy().to_string()
+    }
+
+    // Helper: temporarily set CWD for tests that need a manifest in "."
+    fn with_project_dir<F: FnOnce() -> R, R>(dir: &std::path::Path, f: F) -> R {
+        let orig = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir).unwrap();
+        let result = f();
+        std::env::set_current_dir(&orig).unwrap();
+        result
     }
 
     #[test]
     fn test_run_no_manifest() {
         let temp = TempDir::new().unwrap();
-        let project_path = temp.path().to_string_lossy().to_string();
         let src_path = temp.path().join("src");
         fs::create_dir_all(&src_path).unwrap();
         fs::write(src_path.join("main.bt"), "main := [42].").unwrap();
-        // No beamtalk.toml
 
-        let result = run(&project_path);
+        let result = with_project_dir(temp.path(), || run(".", None));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -496,104 +496,94 @@ mod tests {
     }
 
     #[test]
-    fn test_run_no_start_field() {
+    fn test_run_dot_no_application() {
         let temp = TempDir::new().unwrap();
-        let project_path = create_test_project_with_manifest(
+        create_test_project_with_manifest(
             &temp,
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = run(&project_path);
+        let result = with_project_dir(temp.path(), || run(".", None));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
-            err.contains("No start module defined"),
-            "Should mention missing start field: {err}"
+            err.contains("No entry point defined"),
+            "Should mention missing entry point: {err}"
+        );
+    }
+
+    #[test]
+    fn test_run_class_missing_selector() {
+        let temp = TempDir::new().unwrap();
+        create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = with_project_dir(temp.path(), || run("Main", None));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Missing selector"),
+            "Should mention missing selector: {err}"
+        );
+    }
+
+    #[test]
+    fn test_run_invalid_class_name_lowercase() {
+        let temp = TempDir::new().unwrap();
+        create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = with_project_dir(temp.path(), || run("main", Some("run")));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Invalid class name"),
+            "Should reject lowercase class name: {err}"
         );
     }
 
     #[test]
     fn test_run_with_invalid_path() {
-        let result = run("/nonexistent/path");
+        let result = run("/nonexistent/path", None);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_run_with_start_field_builds() {
-        let temp = TempDir::new().unwrap();
-        let project_path = create_test_project_with_manifest(
-            &temp,
-            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"main\"\n",
-        );
-
-        let result = run(&project_path);
-
-        // The build should succeed but the BEAM node start may fail
-        // (no runtime in test environment). That's expected.
-        if let Err(e) = result {
-            let error_msg = format!("{e:?}");
-            // These are acceptable failures in test environment
-            if error_msg.contains("escript not found")
-                || error_msg.contains("Could not find Beamtalk runtime")
-                || error_msg.contains("Failed to build runtime")
-                || error_msg.contains("Failed to build Beamtalk runtime")
-                || error_msg.contains("Failed to start BEAM node")
-                || error_msg.contains("Program exited with code")
-            {
-                return;
-            }
-            panic!("Run failed with unexpected error: {e:?}");
-        }
     }
 
     #[test]
     fn test_run_with_syntax_error() {
         let temp = TempDir::new().unwrap();
-        let project_path = temp.path().to_string_lossy().to_string();
         let src_path = temp.path().join("src");
         fs::create_dir_all(&src_path).unwrap();
         fs::write(src_path.join("main.bt"), "main := [1 + ].").unwrap();
         fs::write(
             temp.path().join("beamtalk.toml"),
-            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"main\"\n",
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         )
         .unwrap();
 
-        let result = run(&project_path);
+        let result = with_project_dir(temp.path(), || run("Main", Some("run")));
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_run_invalid_start_module_name() {
+    fn test_run_old_package_start_field_ignored() {
+        // Old [package] start = "module" manifests should parse without error
+        // (TOML ignores unknown fields); `run "."` then fails with no-entry-point error.
         let temp = TempDir::new().unwrap();
-        let project_path = create_test_project_with_manifest(
+        create_test_project_with_manifest(
             &temp,
-            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"foo'bar\"\n",
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"main\"\n",
         );
 
-        let result = run(&project_path);
+        let result = with_project_dir(temp.path(), || run(".", None));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
-            err.contains("Invalid start module"),
-            "Should reject invalid start module name: {err}"
-        );
-    }
-
-    #[test]
-    fn test_run_empty_start_module_name() {
-        let temp = TempDir::new().unwrap();
-        let project_path = create_test_project_with_manifest(
-            &temp,
-            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"\"\n",
-        );
-
-        let result = run(&project_path);
-        assert!(result.is_err());
-        let err = format!("{:?}", result.unwrap_err());
-        assert!(
-            err.contains("Invalid start module"),
-            "Should reject empty start module name: {err}"
+            err.contains("No entry point defined"),
+            "Old [package] start should not be used: {err}"
         );
     }
 }
