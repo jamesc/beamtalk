@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% **DDD Context:** Runtime benchmark — block state-threading and maybe_await overhead
+%%% **DDD Context:** Runtime benchmark — block state-threading overhead
 %%%
 %%% @doc Erlang simulations of Beamtalk's block state-threading patterns.
 %%%
@@ -10,11 +10,8 @@
 %%% This module provides both the naive Erlang equivalent and the StateAcc
 %%% simulation so the overhead can be measured directly.
 %%%
-%%% Also measures historical `beamtalk_future:maybe_await/1` overhead: prior to
-%%% BT-1321, codegen wrapped every arithmetic operand in a maybe_await call.
-%%% Since ADR-0043 all actor sends are synchronous, binary op codegen no longer
-%%% emits maybe_await. The _maybe_await variants below remain as historical
-%%% benchmarks showing the overhead that was eliminated.
+%%% All benchmarks reflect post-BT-1321 codegen: binary op codegen no longer
+%%% emits maybe_await (ADR-0043: all actor sends are synchronous).
 
 -module(bench_block_threading).
 
@@ -22,13 +19,9 @@
     %% timesRepeat: equivalents
     sum_native/1,
     sum_stateacc/1,
-    sum_stateacc_maybe_await/1,
-    sum_procdict/1,
     sum_direct_params/1,
-    sum_direct_params_maybe_await/1,
     %% scale loop: multiply-by-literal, 1 variable + 1 literal per op
     scale_native/1,
-    scale_direct_params_all_wrapped/1,
     scale_direct_params_literal_opt/1,
     %% collect: / lists:map equivalents
     double_native/1,
@@ -36,7 +29,11 @@
     %% inject:into: equivalents
     fold_native/1,
     fold_stateacc_block/1,
+    %% BT-1329: nested list op inside counted loop — StateAcc fallback vs tuple target
+    nested_stateacc_list_op/2,
+    nested_tuple_list_op/2,
     %% BT-1276: list-op with LOCAL VARIABLE mutation — tuple-acc vs StateAcc map
+    do_native_mutation/1,
     do_stateacc_mutation/1,
     do_tuple_acc_mutation/1,
     collect_stateacc_mutation/1,
@@ -92,50 +89,6 @@ sum_stateacc_loop(I, StateAcc) ->
     StateAcc1 = maps:put('__local__sum', NewSum, StateAcc),
     sum_stateacc_loop(I - 1, StateAcc1).
 
-%% @doc Like sum_stateacc but also wraps each arithmetic operand in maybe_await,
-%% simulating the full generated output including the future-await guard on
-%% every operand.
-%%
-%% Generated Core Erlang actually emits:
-%%   let NewSum = call 'erlang':'+'(
-%%       call 'beamtalk_future':'maybe_await'(Sum),
-%%       call 'beamtalk_future':'maybe_await'(1)) in ...
--spec sum_stateacc_maybe_await(non_neg_integer()) -> integer().
-sum_stateacc_maybe_await(N) ->
-    InitState = #{'__local__sum' => 0},
-    {_, FinalState} = sum_stateacc_maybe_await_loop(N, InitState),
-    maps:get('__local__sum', FinalState).
-
-sum_stateacc_maybe_await_loop(0, StateAcc) ->
-    {nil, StateAcc};
-sum_stateacc_maybe_await_loop(I, StateAcc) ->
-    Sum = maps:get('__local__sum', StateAcc),
-    NewSum = beamtalk_future:maybe_await(Sum) + beamtalk_future:maybe_await(1),
-    StateAcc1 = maps:put('__local__sum', NewSum, StateAcc),
-    sum_stateacc_maybe_await_loop(beamtalk_future:maybe_await(I) - 1, StateAcc1).
-
-%% @doc Uses process dictionary instead of StateAcc map.
-%% put/get are O(1) hash ops on the process heap with no allocation on read.
-%% No new map is created per iteration — mutations are destructive updates.
--spec sum_procdict(non_neg_integer()) -> integer().
-sum_procdict(N) ->
-    OldSum = get('__local__sum'),
-    try
-        put('__local__sum', 0),
-        sum_procdict_loop(N),
-        get('__local__sum')
-    after
-        case OldSum of
-            undefined -> erase('__local__sum');
-            _         -> put('__local__sum', OldSum)
-        end
-    end.
-
-sum_procdict_loop(0) -> ok;
-sum_procdict_loop(I) ->
-    put('__local__sum', get('__local__sum') + 1),
-    sum_procdict_loop(I - 1).
-
 %% @doc Simulates what Beamtalk's timesRepeat: codegen produces after BT-1275.
 %%
 %% Direct-params pattern (no per-iteration maps:get/put):
@@ -166,36 +119,18 @@ sum_direct_params_loop(I, Sum) ->
     Sum1 = Sum + 1,
     sum_direct_params_loop(I - 1, Sum1).
 
-%% @doc Like sum_direct_params but also wraps arithmetic in maybe_await,
-%% simulating the full generated output (BT-1275 + maybe_await guards).
--spec sum_direct_params_maybe_await(non_neg_integer()) -> integer().
-sum_direct_params_maybe_await(N) ->
-    {_, FinalState} = sum_direct_params_await_loop(N, 0),
-    maps:get('__local__sum', FinalState).
-
-sum_direct_params_await_loop(0, Sum) ->
-    ExitSA = maps:put('__local__sum', Sum, maps:new()),
-    {nil, ExitSA};
-sum_direct_params_await_loop(I, Sum) ->
-    Sum1 = beamtalk_future:maybe_await(Sum) + beamtalk_future:maybe_await(1),
-    sum_direct_params_await_loop(beamtalk_future:maybe_await(I) - 1, Sum1).
-
 %%====================================================================
 %% Scale loop: multiply-by-literal
 %%
-%% This is the best-case benchmark for the BT-1286 literal-skipping
-%% optimisation: every binary op has exactly one variable operand and
-%% one literal operand, so BT-1286 eliminates 50% of the maybe_await
-%% calls (1 saved out of 2 per op).
+%% Best-case benchmark for the BT-1286 literal-skipping optimisation:
+%% every binary op has exactly one variable operand and one literal operand.
 %%
 %%   N timesRepeat: [:i | result := result * 2]
 %%
-%% Three variants:
+%% Two variants:
 %%   scale_native              — idiomatic Erlang, zero overhead
-%%   scale_direct_params_all_wrapped  — BT-1275 shape, ALL operands wrapped
-%%                                      (pre-BT-1286 codegen)
-%%   scale_direct_params_literal_opt  — BT-1275 + BT-1286: literal 2 not wrapped
-%%                                      (post-BT-1286 codegen)
+%%   scale_direct_params_literal_opt  — BT-1275 + BT-1286: literals not wrapped
+%%                                      (post-BT-1286 + post-BT-1321 codegen)
 %%====================================================================
 
 %% @doc Idiomatic Erlang baseline.
@@ -209,39 +144,13 @@ scale_native_loop(0, Result) -> Result;
 scale_native_loop(I, _Result) ->
     scale_native_loop(I - 1, I * 2).
 
-%% @doc Pre-BT-1286: all operands wrapped in maybe_await.
+%% @doc Post-BT-1286 + post-BT-1321: direct params, no maybe_await on any operand.
 %%
 %% Simulates (result := I * 2 each iteration):
-%%   let Result1 = call 'erlang':'*'(
-%%       call 'beamtalk_future':'maybe_await'(I),
-%%       call 'beamtalk_future':'maybe_await'(2)) in
-%%   apply 'repeat'/2 (call 'erlang':'-'(
-%%       call 'beamtalk_future':'maybe_await'(I),
-%%       call 'beamtalk_future':'maybe_await'(1)), Result1)
+%%   let Result1 = call 'erlang':'*'(I, 2) in
+%%   apply 'repeat'/2 (call 'erlang':'-'(I, 1), Result1)
 %%
-%% 4 maybe_await calls per iteration.
--spec scale_direct_params_all_wrapped(non_neg_integer()) -> integer().
-scale_direct_params_all_wrapped(N) ->
-    {_, FinalState} = scale_all_wrapped_loop(N, 0),
-    maps:get('__local__result', FinalState).
-
-scale_all_wrapped_loop(0, Result) ->
-    {nil, maps:put('__local__result', Result, maps:new())};
-scale_all_wrapped_loop(I, _Result) ->
-    Result1 = beamtalk_future:maybe_await(I) * beamtalk_future:maybe_await(2),
-    scale_all_wrapped_loop(beamtalk_future:maybe_await(I) - beamtalk_future:maybe_await(1), Result1).
-
-%% @doc Post-BT-1286: literal operands (2, 1) not wrapped.
-%%
-%% Simulates (result := I * 2 each iteration, literals skip maybe_await):
-%%   let Result1 = call 'erlang':'*'(
-%%       call 'beamtalk_future':'maybe_await'(I),
-%%       2) in                                         %% literal — no wrap
-%%   apply 'repeat'/2 (call 'erlang':'-'(
-%%       call 'beamtalk_future':'maybe_await'(I),
-%%       1), Result1)                                  %% literal — no wrap
-%%
-%% 2 maybe_await calls per iteration (50% reduction vs all_wrapped).
+%% Zero maybe_await calls per iteration.
 -spec scale_direct_params_literal_opt(non_neg_integer()) -> integer().
 scale_direct_params_literal_opt(N) ->
     {_, FinalState} = scale_literal_opt_loop(N, 0),
@@ -250,8 +159,8 @@ scale_direct_params_literal_opt(N) ->
 scale_literal_opt_loop(0, Result) ->
     {nil, maps:put('__local__result', Result, maps:new())};
 scale_literal_opt_loop(I, _Result) ->
-    Result1 = beamtalk_future:maybe_await(I) * 2,
-    scale_literal_opt_loop(beamtalk_future:maybe_await(I) - 1, Result1).
+    Result1 = I * 2,
+    scale_literal_opt_loop(I - 1, Result1).
 
 %%====================================================================
 %% collect: / lists:map pattern
@@ -273,7 +182,7 @@ double_native(List) ->
 double_stateacc_block(List) ->
     InitState = #{},
     BlockFun = fun(X, StateAcc) ->
-        {beamtalk_future:maybe_await(X) * beamtalk_future:maybe_await(2), StateAcc}
+        {X * 2, StateAcc}
     end,
     {Results, _} = lists:mapfoldl(BlockFun, InitState, List),
     Results.
@@ -299,11 +208,75 @@ fold_stateacc_block(List) ->
     %% User block: [:acc :x | acc + x] — accumulator (AccIn) first, element (X) second.
     %% Wrapped for lists:foldl which passes element first, accumulator second.
     BlockFun = fun(X, {AccIn, StateAcc}) ->
-        NewAcc = beamtalk_future:maybe_await(AccIn) + beamtalk_future:maybe_await(X),
+        NewAcc = AccIn + X,
         {NewAcc, StateAcc}
     end,
     {Result, _} = lists:foldl(BlockFun, {0, InitState}, List),
     Result.
+
+%%====================================================================
+%% BT-1329: nested list op inside counted loop
+%%
+%% Simulates the pattern:
+%%   count := 0. total := 0.
+%%   1 to: N do: [:i |
+%%       total := items inject: 0 into: [:acc :x | count := count + 1. acc + x]].
+%%   count
+%%
+%% The inner inject:into: block mutates `count` from the outer scope on every
+%% element. This makes it a Tier-2 call returning {Result, NewStateAcc}, which
+%% forces the outer loop off direct-params (BT-1275) and onto full StateAcc map
+%% threading even though `total` and `count` could both be direct params.
+%%
+%% BT-1329 target: inner block emits {Result, Count1} as an expanded tuple
+%% (no StateAcc map). Outer loop unpacks Count1 directly as a fun parameter.
+%%====================================================================
+
+%% @doc Current StateAcc fallback for nested list op with outer variable mutation.
+%%
+%% Outer loop: maps:get('__local__count') + maps:put per outer iteration.
+%% Inner foldl block: maps:get('__local__count') + maps:put per element (Tier-2).
+%%
+%% Total maps:get/put: N_outer * (1 outer read + N_items inner reads/writes + 1 outer write).
+-spec nested_stateacc_list_op(non_neg_integer(), list()) -> integer().
+nested_stateacc_list_op(Outer, Items) ->
+    InitState = maps:put('__local__total', 0, maps:put('__local__count', 0, #{})),
+    {_, FinalState} = nested_stateacc_loop(Outer, InitState, Items),
+    maps:get('__local__count', FinalState).
+
+nested_stateacc_loop(0, StateAcc, _Items) ->
+    {nil, StateAcc};
+nested_stateacc_loop(I, StateAcc, Items) ->
+    %% Inner foldl block mutates 'count' from outer scope on every element.
+    %% Returns {Result, NewStateAcc} (Tier-2): outer loop must use NewStateAcc.
+    InnerFun = fun(X, {AccIn, SA}) ->
+        C = maps:get('__local__count', SA),
+        NewSA = maps:put('__local__count', C + 1, SA),
+        {AccIn + X, NewSA}
+    end,
+    {NewTotal, NewStateAcc} = lists:foldl(InnerFun, {0, StateAcc}, Items),
+    StateAcc1 = maps:put('__local__total', NewTotal, NewStateAcc),
+    nested_stateacc_loop(I - 1, StateAcc1, Items).
+
+%% @doc BT-1329 target: expanded tuple eliminates StateAcc at both levels.
+%%
+%% Inner foldl block returns {Result, Count1} — the mutated outer var as a
+%% tuple position rather than packed in a map. Outer loop threads {Total, Count}
+%% as direct fun parameters.
+%%
+%% Total maps operations: zero. Per element: Count + 1 + tuple construction only.
+-spec nested_tuple_list_op(non_neg_integer(), list()) -> integer().
+nested_tuple_list_op(Outer, Items) ->
+    {_, {_Total, Count}} = nested_tuple_loop(Outer, {0, 0}, Items),
+    Count.
+
+nested_tuple_loop(0, {Total, Count}, _Items) ->
+    {nil, {Total, Count}};
+nested_tuple_loop(I, {_Total, Count}, Items) ->
+    %% Inner foldl: accumulator is {AccIn, Count} — expanded tuple, no StateAcc.
+    InnerFun = fun(X, {AccIn, C}) -> {AccIn + X, C + 1} end,
+    {NewTotal, NewCount} = lists:foldl(InnerFun, {0, Count}, Items),
+    nested_tuple_loop(I - 1, {NewTotal, NewCount}, Items).
 
 %%====================================================================
 %% BT-1276: list-op with LOCAL VARIABLE mutation
@@ -313,6 +286,12 @@ fold_stateacc_block(List) ->
 %% StateAcc approach: maps:get / maps:put per iteration (pre-BT-1276).
 %% Tuple-acc approach: element(N, T) / {V1, ..., VN} per iteration (BT-1276).
 %%====================================================================
+
+%% @doc Idiomatic Erlang baseline for `do:` with a local mutation.
+%% Equivalent to: total := 0. list do: [:item | total := total + item]. total
+-spec do_native_mutation(list()) -> integer().
+do_native_mutation(List) ->
+    lists:foldl(fun(Item, Total) -> Total + Item end, 0, List).
 
 %% @doc Simulates `do:` with a local mutation using old StateAcc map approach.
 %%
@@ -324,8 +303,7 @@ do_stateacc_mutation(List) ->
     InitState = maps:put('__local__total', Total0, #{}),
     BlockFun = fun(Item, StateAcc) ->
         Total = maps:get('__local__total', StateAcc),
-        NewTotal =
-            beamtalk_future:maybe_await(Total) + beamtalk_future:maybe_await(Item),
+        NewTotal = Total + Item,
         maps:put('__local__total', NewTotal, StateAcc)
     end,
     FinalState = lists:foldl(BlockFun, InitState, List),
@@ -336,7 +314,7 @@ do_stateacc_mutation(List) ->
 %% Generated pattern (accumulator is a flat tuple {Total}):
 %%   fun(Item, StateAcc) ->
 %%       Total = element(1, StateAcc),
-%%       NewTotal = maybe_await(Total) + maybe_await(Item),
+%%       NewTotal = Total + Item,
 %%       {NewTotal}
 %% After foldl: element(1, FoldResult) extracts the final value.
 %% (The one-time maps:put repack for the outer method body is omitted here
@@ -346,8 +324,7 @@ do_tuple_acc_mutation(List) ->
     Total0 = 0,
     BlockFun = fun(Item, StateAcc) ->
         Total = erlang:element(1, StateAcc),
-        NewTotal =
-            beamtalk_future:maybe_await(Total) + beamtalk_future:maybe_await(Item),
+        NewTotal = Total + Item,
         {NewTotal}
     end,
     FoldResult = lists:foldl(BlockFun, {Total0}, List),
@@ -366,7 +343,7 @@ collect_stateacc_mutation(List) ->
         Count = maps:get('__local__count', StateAcc),
         NewCount = Count + 1,
         NewStateAcc = maps:put('__local__count', NewCount, StateAcc),
-        Result = beamtalk_future:maybe_await(X) * 2,
+        Result = X * 2,
         {[Result | AccList], NewStateAcc}
     end,
     {RevResults, _} = lists:foldl(BlockFun, {[], InitState}, List),
@@ -380,21 +357,19 @@ collect_tuple_acc_mutation(List) ->
     Count0 = 0,
     BlockFun = fun(X, {AccList, Count}) ->
         NewCount = Count + 1,
-        Result = beamtalk_future:maybe_await(X) * 2,
+        Result = X * 2,
         {[Result | AccList], NewCount}
     end,
     {RevResults, _} = lists:foldl(BlockFun, {[], Count0}, List),
     lists:reverse(RevResults).
 
-%% @doc Simulates `inject:into:` with a local mutation (count) using StateAcc map approach,
-%% post-BT-1304 optimisation.
+%% @doc Simulates `inject:into:` with a local mutation (count) using StateAcc map approach.
 %%
 %% Beamtalk source equivalent:
 %%   count := 0.
 %%   list inject: 0 into: [:acc :x | count := count + 1. acc + x]
 %%
-%% BT-1304: AccIn starts from a literal (0) so it is provably sync; maybe_await is elided
-%% on AccIn. X (the list element) still requires maybe_await.
+%% Per-iteration cost: maps:get + maps:put (allocates new map) + arithmetic.
 -spec fold_stateacc_mutation(list()) -> integer().
 fold_stateacc_mutation(List) ->
     Count0 = 0,
@@ -403,24 +378,22 @@ fold_stateacc_mutation(List) ->
         Count = maps:get('__local__count', StateAcc),
         NewCount = Count + 1,
         NewStateAcc = maps:put('__local__count', NewCount, StateAcc),
-        NewAcc = AccIn + beamtalk_future:maybe_await(X),
+        NewAcc = AccIn + X,
         {NewAcc, NewStateAcc}
     end,
     {Result, _} = lists:foldl(BlockFun, {0, InitState}, List),
     Result.
 
-%% @doc Simulates `inject:into:` with a local mutation using BT-1276 tuple-acc approach,
-%% post-BT-1304 optimisation.
+%% @doc Simulates `inject:into:` with a local mutation using BT-1276 tuple-acc approach.
 %%
 %% Accumulator is {Acc, Count} — no StateAcc map allocation per iteration.
-%% BT-1304: AccIn starts from a literal (0) so it is provably sync; maybe_await is elided
-%% on AccIn. X (the list element) still requires maybe_await.
+%% Per-iteration cost: arithmetic + tuple construction only.
 -spec fold_tuple_acc_mutation(list()) -> integer().
 fold_tuple_acc_mutation(List) ->
     Count0 = 0,
     BlockFun = fun(X, {AccIn, Count}) ->
         NewCount = Count + 1,
-        NewAcc = AccIn + beamtalk_future:maybe_await(X),
+        NewAcc = AccIn + X,
         {NewAcc, NewCount}
     end,
     {Result, _} = lists:foldl(BlockFun, {0, Count0}, List),
