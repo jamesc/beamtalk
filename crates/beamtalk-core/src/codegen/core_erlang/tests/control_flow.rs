@@ -4,7 +4,8 @@
 //! Tests for control-flow Core Erlang code generation.
 //!
 //! Covers loop constructs (whileTrue, whileFalse, repeat), stored-closure
-//! validation, and conditional inline-case generation for ifTrue/ifFalse.
+//! validation, conditional inline-case generation for ifTrue/ifFalse, and
+//! match: arms with array/map destructuring patterns (BT-1296).
 
 use super::*;
 
@@ -736,5 +737,108 @@ fn test_nested_if_true_with_field_mutation_threads_state() {
     assert!(
         code.contains("maps':'put'('count'"),
         "Inner branch should update 'count' via maps:put. Got:\n{code}"
+    );
+}
+
+// BT-1296: match: arms with array and map patterns
+
+#[test]
+fn test_match_array_pattern_arm_generates_is_map_guard_chain() {
+    // BT-1296: `arr match: [#[h, t] -> h + t; _ -> 0]` should compile to a
+    // conditional chain using is_map + map_get('$beamtalk_class') + size check.
+    let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[h, t] -> h + t;\n      _ -> 0\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for array pattern match:\n{code}");
+
+    assert!(
+        code.contains("call 'erlang':'is_map'("),
+        "Should emit is_map guard check for array pattern. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'$beamtalk_class'"),
+        "Should check '$beamtalk_class' key for array type guard. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_array':'size'("),
+        "Should check array size. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'at:'"),
+        "Should extract elements via at: dispatch. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_map_pattern_arm_generates_core_erlang_map_pattern() {
+    // BT-1296: `d match: [#{#event => evName} -> evName; _ -> "none"]`
+    // should compile to a native Core Erlang map pattern `~{'event' := EvName}~`.
+    let src = "Object subclass: Foo\n  test: d =>\n    d match: [\n      #{#event => evName} -> evName;\n      _ -> \"none\"\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for map pattern match:\n{code}");
+
+    assert!(
+        code.contains("~{"),
+        "Should emit Core Erlang map pattern ~{{...}}~. Got:\n{code}"
+    );
+    assert!(
+        code.contains(":="),
+        "Should use := binding syntax in map pattern. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'event'"),
+        "Should include the 'event' key in the map pattern. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_array_pattern_fallthrough_to_wildcard() {
+    // BT-1296: When the array pattern fails (wrong type/size), execution must
+    // fall through to the next arm — not crash.
+    // Wildcard fallback arm should be present in the generated code.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #[a, b] -> a + b;\n      _ -> 42\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    // The fallback (42) should appear in the generated code
+    assert!(
+        code.contains("42"),
+        "Fallback value should appear in generated code. Got:\n{code}"
+    );
+    // The is_map check should be present — if false, falls through to 42
+    assert!(
+        code.contains("call 'erlang':'is_map'("),
+        "Should emit is_map check. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_nested_array_pattern_arm() {
+    // BT-1296: `arr match: [#[#[a, b], c] -> a+b+c; _ -> 0]`
+    // should generate nested is_map + size checks for the inner array.
+    let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[#[a, b], c] -> a + b + c;\n      _ -> 0\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for nested array pattern match:\n{code}");
+
+    // Should have multiple is_map checks (outer + inner array)
+    let is_map_count = code.matches("call 'erlang':'is_map'(").count();
+    assert!(
+        is_map_count >= 2,
+        "Should emit at least 2 is_map checks for nested array. Found {is_map_count}. Got:\n{code}"
+    );
+    // Should have multiple beamtalk_array:size calls (outer + inner)
+    let size_count = code.matches("call 'beamtalk_array':'size'(").count();
+    assert!(
+        size_count >= 2,
+        "Should emit at least 2 size checks for nested array. Found {size_count}. Got:\n{code}"
     );
 }

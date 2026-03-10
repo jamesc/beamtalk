@@ -1693,6 +1693,11 @@ impl CoreErlangGenerator {
     ///
     /// `value match: [pattern -> body ...]` compiles to Core Erlang:
     /// `let _Match1 = <value> in case _Match1 of <Pattern1> when Guard1 -> Body1 ... end`
+    ///
+    /// When the match contains a `Pattern::Array` arm, each arm is compiled as a
+    /// chain of conditional case expressions instead of a single native case, because
+    /// Beamtalk arrays are opaque tagged maps that cannot be matched structurally in
+    /// Core Erlang patterns. See [`Self::generate_match_chain`].
     pub(super) fn generate_match(
         &mut self,
         value: &Expression,
@@ -1708,48 +1713,262 @@ impl CoreErlangGenerator {
         let match_var = self.fresh_temp_var("Match");
         let value_doc = self.expression_doc(value)?;
 
-        let mut parts: Vec<Document<'static>> = Vec::new();
-        parts.push(docvec!["let ", Document::String(match_var.clone()), " = "]);
-        parts.push(value_doc);
-        parts.push(docvec![" in case ", Document::String(match_var), " of "]);
+        let has_array_arm = arms.iter().any(|arm| matches!(arm.pattern, Pattern::Array { .. }));
 
-        for (i, arm) in arms.iter().enumerate() {
-            if i > 0 {
-                parts.push(Document::Str(" "));
+        let inner_doc = if has_array_arm {
+            self.generate_match_chain(&match_var, arms)?
+        } else {
+            // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
+            let mut parts: Vec<Document<'static>> = Vec::new();
+            parts.push(docvec!["case ", Document::String(match_var.clone()), " of "]);
+            for (i, arm) in arms.iter().enumerate() {
+                if i > 0 {
+                    parts.push(Document::Str(" "));
+                }
+                let pattern_doc = self.generate_pattern(&arm.pattern)?;
+                parts.push(Document::Str("<"));
+                parts.push(pattern_doc);
+                parts.push(Document::Str(">"));
+                self.push_scope();
+                Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+                    self.bind_var(name, core_var);
+                });
+                if let Some(guard) = &arm.guard {
+                    parts.push(Document::Str(" when "));
+                    let guard_doc = self.generate_guard_expression(guard)?;
+                    parts.push(guard_doc);
+                } else {
+                    parts.push(Document::Str(" when 'true'"));
+                }
+                parts.push(Document::Str(" -> "));
+                let body_doc = self.expression_doc(&arm.body)?;
+                parts.push(body_doc);
+                self.pop_scope();
             }
+            parts.push(Document::Str(" end"));
+            Document::Vec(parts)
+        };
 
-            // Generate pattern
-            let pattern_doc = self.generate_pattern(&arm.pattern)?;
-            parts.push(Document::Str("<"));
-            parts.push(pattern_doc);
-            parts.push(Document::Str(">"));
+        Ok(docvec![
+            "let ", Document::String(match_var.clone()), " = ", value_doc,
+            " in ", inner_doc
+        ])
+    }
 
-            // Push scope and bind pattern variables so the guard and body
-            // can reference them directly instead of looking up the bindings map.
-            self.push_scope();
-            Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
-                self.bind_var(name, core_var);
-            });
-
-            // Generate guard
-            if let Some(guard) = &arm.guard {
-                parts.push(Document::Str(" when "));
-                let guard_doc = self.generate_guard_expression(guard)?;
-                parts.push(guard_doc);
-            } else {
-                parts.push(Document::Str(" when 'true'"));
-            }
-
-            // Generate body
-            parts.push(Document::Str(" -> "));
-            let body_doc = self.expression_doc(&arm.body)?;
-            parts.push(body_doc);
-
-            self.pop_scope();
+    /// Compiles match arms as a chain of nested case expressions.
+    ///
+    /// Used when any arm contains a `Pattern::Array` (opaque tagged map — cannot be
+    /// matched natively in Core Erlang). Each arm becomes its own case expression with
+    /// a wildcard fallthrough to the next arm.
+    ///
+    /// For `Pattern::Array` arms the generated structure is:
+    /// ```text
+    /// case is_map(_Match) of
+    ///   <'true'> when 'true' ->
+    ///     case map_get('$beamtalk_class', _Match) of
+    ///       <'Array'> when 'true' ->
+    ///         case beamtalk_array:size(_Match) of
+    ///           <N> when 'true' ->
+    ///             let Elem1 = at(_Match, 1) in ... body
+    ///           <_NoMatch> when 'true' -> [rest]
+    ///         end
+    ///       <_NoMatch> when 'true' -> [rest]
+    ///     end
+    ///   <'false'> when 'true' -> [rest]
+    /// end
+    /// ```
+    ///
+    /// For all other arms:
+    /// `case _Match of <pattern> when guard -> body <_FT> when 'true' -> [rest] end`
+    fn generate_match_chain(
+        &mut self,
+        match_var: &str,
+        arms: &[MatchArm],
+    ) -> Result<Document<'static>> {
+        if arms.is_empty() {
+            return Ok(docvec![
+                "call 'erlang':'error'({'case_clause', ",
+                Document::String(match_var.to_string()),
+                "})"
+            ]);
         }
 
-        parts.push(Document::Str(" end"));
-        Ok(Document::Vec(parts))
+        let arm = &arms[0];
+        let rest = &arms[1..];
+
+        if let Pattern::Array { elements, .. } = &arm.pattern {
+            let rest_doc = self.generate_match_chain(match_var, rest)?;
+            return self.generate_array_match_arm(match_var, arm, elements, rest_doc);
+        }
+
+        // Native arm: case _Match of <pattern> when guard -> body <_FT> when 'true' -> rest end
+        let rest_doc = self.generate_match_chain(match_var, rest)?;
+        let fallthrough_var = self.fresh_temp_var("NoMatch");
+        let pattern_doc = self.generate_pattern(&arm.pattern)?;
+
+        self.push_scope();
+        Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+            self.bind_var(name, core_var);
+        });
+        let guard_part = if let Some(guard) = &arm.guard {
+            let gd = self.generate_guard_expression(guard)?;
+            docvec![" when ", gd]
+        } else {
+            Document::Str(" when 'true'")
+        };
+        let body_doc = self.expression_doc(&arm.body)?;
+        self.pop_scope();
+
+        Ok(docvec![
+            "case ", Document::String(match_var.to_string()), " of ",
+            "<", pattern_doc, ">", guard_part, " -> ", body_doc,
+            " <", Document::String(fallthrough_var), "> when 'true' -> ", rest_doc,
+            " end"
+        ])
+    }
+
+    /// Compiles a single `Pattern::Array` match arm.
+    ///
+    /// Emits a three-level conditional check (is_map → class → size), then element
+    /// extractions via `at:` dispatch. `rest_doc` is cloned for all failure branches.
+    fn generate_array_match_arm(
+        &mut self,
+        match_var: &str,
+        arm: &MatchArm,
+        elements: &[Pattern],
+        rest_doc: Document<'static>,
+    ) -> Result<Document<'static>> {
+        let n = elements.len();
+
+        // Bind all pattern variables (including from nested arrays) into scope
+        // before generating guard/body so they can reference the bound names.
+        self.push_scope();
+        Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+            self.bind_var(name, core_var);
+        });
+        let guard_doc_opt = if let Some(guard) = &arm.guard {
+            Some(self.generate_guard_expression(guard)?)
+        } else {
+            None
+        };
+        let body_doc = self.expression_doc(&arm.body)?;
+        self.pop_scope();
+
+        // Build body section: element extractions + optional guard check
+        let success_doc = if let Some(guard_doc) = guard_doc_opt {
+            let no_guard_var = self.fresh_temp_var("GuardFail");
+            docvec![
+                "case ", guard_doc, " of ",
+                "<'true'> when 'true' -> ", body_doc,
+                " <", Document::String(no_guard_var), "> when 'true' -> ", rest_doc.clone(),
+                " end"
+            ]
+        } else {
+            body_doc
+        };
+
+        // Recursively build element extraction + nested array checks
+        let inner_body = self.build_array_arm_body(match_var, elements, 0, success_doc, &rest_doc)?;
+
+        let no_match_size = self.fresh_temp_var("NoMatch");
+        let no_match_class = self.fresh_temp_var("NoMatch");
+
+        Ok(docvec![
+            "case call 'erlang':'is_map'(", Document::String(match_var.to_string()), ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'map_get'('$beamtalk_class', ", Document::String(match_var.to_string()), ") of ",
+            "<'Array'> when 'true' -> ",
+            "case call 'beamtalk_array':'size'(", Document::String(match_var.to_string()), ") of ",
+            "<", Document::String(n.to_string()), "> when 'true' -> ", inner_body,
+            " <", Document::String(no_match_size), "> when 'true' -> ", rest_doc.clone(),
+            " end ",
+            "<", Document::String(no_match_class), "> when 'true' -> ", rest_doc.clone(),
+            " end ",
+            "<'false'> when 'true' -> ", rest_doc,
+            " end"
+        ])
+    }
+
+    /// Recursively builds element-extraction `let`-bindings for an array pattern arm.
+    ///
+    /// Handles nested `Pattern::Array` elements by wrapping the continuation in a
+    /// sub-array check. Variables are pre-registered in scope by
+    /// [`Self::generate_array_match_arm`] via [`Self::collect_pattern_variables`].
+    ///
+    /// `continuation` is what to execute after all elements are extracted.
+    /// `failure_doc` is what to execute if any nested array check fails.
+    fn build_array_arm_body(
+        &mut self,
+        array_var: &str,
+        elements: &[Pattern],
+        start: usize,
+        continuation: Document<'static>,
+        failure_doc: &Document<'static>,
+    ) -> Result<Document<'static>> {
+        if start >= elements.len() {
+            return Ok(continuation);
+        }
+
+        let one_based = start + 1;
+        match &elements[start] {
+            Pattern::Variable(id) => {
+                let core_var = Self::to_core_erlang_var(&id.name);
+                let next = self.build_array_arm_body(
+                    array_var, elements, start + 1, continuation, failure_doc,
+                )?;
+                Ok(docvec![
+                    "let ", Document::String(core_var),
+                    " = call 'beamtalk_message_dispatch':'send'(",
+                    Document::String(array_var.to_string()),
+                    ", 'at:', [", Document::String(one_based.to_string()), "]) in ",
+                    next
+                ])
+            }
+            Pattern::Wildcard(_) => {
+                self.build_array_arm_body(array_var, elements, start + 1, continuation, failure_doc)
+            }
+            Pattern::Array { elements: inner_elems, .. } => {
+                let nested_var = self.fresh_temp_var("ArrElem");
+                let n_inner = inner_elems.len();
+
+                // Build continuation for elements after this nested array
+                let after_nested = self.build_array_arm_body(
+                    array_var, elements, start + 1, continuation, failure_doc,
+                )?;
+
+                // Build inner element extractions from the nested array variable
+                let inner_elems_vec: Vec<Pattern> = inner_elems.to_vec();
+                let inner_body = self.build_array_arm_body(
+                    &nested_var, &inner_elems_vec, 0, after_nested, failure_doc,
+                )?;
+
+                let no_match_size_n = self.fresh_temp_var("NoMatch");
+                let no_match_class_n = self.fresh_temp_var("NoMatch");
+
+                Ok(docvec![
+                    "let ", Document::String(nested_var.clone()),
+                    " = call 'beamtalk_message_dispatch':'send'(",
+                    Document::String(array_var.to_string()),
+                    ", 'at:', [", Document::String(one_based.to_string()), "]) in ",
+                    "case call 'erlang':'is_map'(", Document::String(nested_var.clone()), ") of ",
+                    "<'true'> when 'true' -> ",
+                    "case call 'erlang':'map_get'('$beamtalk_class', ", Document::String(nested_var.clone()), ") of ",
+                    "<'Array'> when 'true' -> ",
+                    "case call 'beamtalk_array':'size'(", Document::String(nested_var.clone()), ") of ",
+                    "<", Document::String(n_inner.to_string()), "> when 'true' -> ", inner_body,
+                    " <", Document::String(no_match_size_n), "> when 'true' -> ", failure_doc.clone(),
+                    " end ",
+                    "<", Document::String(no_match_class_n), "> when 'true' -> ", failure_doc.clone(),
+                    " end ",
+                    "<'false'> when 'true' -> ", failure_doc.clone(),
+                    " end"
+                ])
+            }
+            elem => Err(CodeGenError::UnsupportedFeature {
+                feature: "Unsupported pattern in Array match arm element".to_string(),
+                location: format!("{:?}", elem.span()),
+            }),
+        }
     }
 
     /// Generates a Core Erlang pattern from a Pattern AST node.
@@ -1809,13 +2028,25 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str("}#"));
                 Ok(Document::Vec(parts))
             }
-            Pattern::Map { .. } => {
-                // Map patterns are only valid in destructuring assignments,
-                // not in match arms. Use `#{#k => v} := expr` instead.
-                Err(CodeGenError::UnsupportedFeature {
-                    feature: "Map pattern in match arm — use destructuring assignment `#{#k => v} := expr` instead".to_string(),
-                    location: format!("{:?}", pattern.span()),
-                })
+            Pattern::Map { pairs, .. } => {
+                // Beamtalk Dictionaries are plain Erlang maps — emit a Core Erlang map pattern.
+                // `#{#k => v}` compiles to `~{ 'k' := V }~` (`:=` is the match-binding form).
+                if pairs.is_empty() {
+                    return Ok(Document::Str("~{}~"));
+                }
+                let mut parts: Vec<Document<'static>> = vec![Document::Str("~{ ")];
+                for (i, pair) in pairs.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::Str(", "));
+                    }
+                    let key_atom = escape_atom_chars(pair.key.as_str());
+                    parts.push(Document::Str("'"));
+                    parts.push(Document::String(key_atom));
+                    parts.push(Document::Str("' := "));
+                    parts.push(self.generate_pattern(&pair.value)?);
+                }
+                parts.push(Document::Str(" }~"));
+                Ok(Document::Vec(parts))
             }
         }
     }
