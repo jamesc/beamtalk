@@ -1790,37 +1790,66 @@ impl CoreErlangGenerator {
 
     /// Checks if a control flow expression actually threads state through mutations.
     ///
-    /// This goes beyond `is_state_threading_control_flow` by analyzing whether
-    /// the block argument contains field mutations that require state threading.
+    /// This goes beyond mere selector-based classification by analysing whether
+    /// the block argument(s) contain mutations that require state threading.
     ///
     /// Returns `true` only if:
-    /// 1. The expression is a state-threading control flow construct (do:, whileTrue:, etc.)
-    /// 2. The block argument contains field writes that need threading
+    /// 1. The expression is a `ControlFlow` dispatch (from pre-computed `dispatch_kinds`).
+    /// 2. The relevant block argument(s) need state threading in the current context
+    ///    (checked via `needs_mutation_threading` on pre-computed `block_profiles`).
     ///
-    /// This prevents binding non-state return values (like `ok` or `nil`) to `StateN`.
+    /// Using pre-computed `dispatch_kinds` and `block_profiles` avoids the repeated
+    /// `is_state_threading_control_flow` re-classification and `analyze_block` calls
+    /// that the original implementation performed (BT-1309).
     pub(in crate::codegen::core_erlang) fn control_flow_has_mutations(
         &self,
         expr: &Expression,
     ) -> bool {
-        // First check if it's a potential state-threading construct
-        if !Self::is_state_threading_control_flow(expr) {
-            return false;
-        }
-
-        if let Expression::MessageSend {
+        let Expression::MessageSend {
             receiver,
             arguments,
             selector: crate::ast::MessageSelector::Keyword(parts),
+            span,
             ..
         } = expr
+        else {
+            return false;
+        };
+
+        // Use pre-computed dispatch classification instead of re-deriving it.
+        if self.semantic_facts.dispatch_kind(span)
+            != crate::semantic_analysis::DispatchKind::ControlFlow
         {
-            // BT-410: For on:do: and ensure:, the receiver (try body) is also
-            // a block that may contain field mutations
-            let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-            if crate::codegen::core_erlang::state_threading_selectors::is_exception_selector(
-                sel.as_str(),
-            ) {
-                if let Expression::Block(block) = receiver.as_ref() {
+            return false;
+        }
+
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+        // BT-410: For on:do: and ensure:, the receiver (try body) is also
+        // a block that may contain field mutations.
+        if crate::codegen::core_erlang::state_threading_selectors::is_exception_selector(
+            sel.as_str(),
+        ) {
+            if let Expression::Block(block) = receiver.as_ref() {
+                // Use pre-computed block profile when available.
+                let analysis = self
+                    .semantic_facts
+                    .block_profile(&block.span)
+                    .cloned()
+                    .unwrap_or_else(|| block_analysis::analyze_block(block));
+                if self.needs_mutation_threading(&analysis) {
+                    return true;
+                }
+            }
+        }
+
+        // BT-915: For Boolean conditionals, any block argument may contain mutations.
+        // BT-1226: ifNotNil: also needs per-block mutation detection.
+        if crate::codegen::core_erlang::state_threading_selectors::is_conditional_selector(
+            sel.as_str(),
+        ) {
+            for arg in arguments {
+                if let Expression::Block(block) = arg {
                     let analysis = self
                         .semantic_facts
                         .block_profile(&block.span)
@@ -1831,42 +1860,19 @@ impl CoreErlangGenerator {
                     }
                 }
             }
-
-            // BT-915: For Boolean conditionals, any block argument may contain mutations.
-            // Check all block arguments (not just the last) since ifTrue:ifFalse: has
-            // mutations in the first block but not necessarily in the second.
-            // BT-1226: ifNotNil: also needs per-block mutation detection.
-            if crate::codegen::core_erlang::state_threading_selectors::is_conditional_selector(
-                sel.as_str(),
-            ) {
-                for arg in arguments {
-                    if let Expression::Block(block) = arg {
-                        let analysis = self
-                            .semantic_facts
-                            .block_profile(&block.span)
-                            .cloned()
-                            .unwrap_or_else(|| block_analysis::analyze_block(block));
-                        if self.needs_mutation_threading(&analysis) {
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }
-
-            // Standard check: analyze the last argument block
-            if let Some(Expression::Block(block)) = arguments.last() {
-                let analysis = self
-                    .semantic_facts
-                    .block_profile(&block.span)
-                    .cloned()
-                    .unwrap_or_else(|| block_analysis::analyze_block(block));
-                return self.needs_mutation_threading(&analysis);
-            }
+            return false;
         }
 
-        // If we can't analyze (e.g., block isn't a literal), conservatively return false
-        // to avoid binding non-state values to StateN
+        // Standard check: analyse the last argument block.
+        if let Some(Expression::Block(block)) = arguments.last() {
+            let analysis = self
+                .semantic_facts
+                .block_profile(&block.span)
+                .cloned()
+                .unwrap_or_else(|| block_analysis::analyze_block(block));
+            return self.needs_mutation_threading(&analysis);
+        }
+
         false
     }
 

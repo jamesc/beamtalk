@@ -140,7 +140,7 @@ fn collect_expression_facts(expr: &Expression, facts: &mut SemanticFacts) {
             span,
             ..
         } => {
-            // Classify this message send
+            // Classify this message send.
             let kind = classify_dispatch(receiver, selector, *is_cast);
             facts.dispatch_kinds.insert(*span, kind);
             // Recurse
