@@ -812,7 +812,15 @@ fn find_hover_in_expr(
         Expression::Match { value, arms, .. } => {
             find_hover_in_expr(value, offset, context, hierarchy, type_map).or_else(|| {
                 arms.iter().find_map(|arm| {
-                    find_hover_in_expr(&arm.body, offset, context, hierarchy, type_map)
+                    find_hover_in_pattern(&arm.pattern, offset, type_map)
+                        .or_else(|| {
+                            arm.guard.as_ref().and_then(|g| {
+                                find_hover_in_expr(g, offset, context, hierarchy, type_map)
+                            })
+                        })
+                        .or_else(|| {
+                            find_hover_in_expr(&arm.body, offset, context, hierarchy, type_map)
+                        })
                 })
             })
         }
@@ -1894,6 +1902,68 @@ mod tests {
         assert!(
             hover_b.unwrap().contents.contains("`b`"),
             "Hover for `b` should mention the exact variable name"
+        );
+    }
+
+    #[test]
+    fn hover_on_match_arm_pattern_variable() {
+        // `x match: [v -> 1]` — hover over `v` (column 10)
+        // x=0, ' '=1, m=2, a=3, t=4, c=5, h=6, :=7, ' '=8, [=9, v=10
+        let source = "x match: [v -> 1]";
+        let hover = hover_at(source, Position::new(0, 10));
+        assert!(
+            hover.is_some(),
+            "Should get hover info for match arm pattern variable `v`"
+        );
+        assert!(
+            hover.unwrap().contents.contains("`v`"),
+            "Hover should mention the pattern variable name"
+        );
+    }
+
+    #[test]
+    fn hover_on_match_arm_pattern_tuple_variable() {
+        // `x match: [{a, b} -> a]` — hover over `a` in the arm pattern (offset 11)
+        // "x match: [{a, b} -> a]"
+        //  012345678901234567890123
+        // x=0, ' '=1, match=2-6, :=7, ' '=8, [=9, {=10, a=11
+        let source = "x match: [{a, b} -> a]";
+        let hover_a = hover_at(source, Position::new(0, 11));
+        assert!(
+            hover_a.is_some(),
+            "Should get hover info for match arm tuple pattern variable `a`"
+        );
+        assert!(
+            hover_a.unwrap().contents.contains("`a`"),
+            "Hover should mention the pattern variable name `a`"
+        );
+
+        let hover_b = hover_at(source, Position::new(0, 14));
+        assert!(
+            hover_b.is_some(),
+            "Should get hover info for match arm tuple pattern variable `b`"
+        );
+        assert!(
+            hover_b.unwrap().contents.contains("`b`"),
+            "Hover should mention the pattern variable name `b`"
+        );
+    }
+
+    #[test]
+    fn hover_on_match_arm_guard_expression() {
+        // `x match: [v when: [v > 0] -> v]` — hover over the `v` inside the guard (column 19)
+        // Indices:  0         1         2         3
+        //           012345678901234567890123456789012
+        //                             ^ column 19 (`v` in the guard)
+        let source = "x match: [v when: [v > 0] -> v]";
+        let hover = hover_at(source, Position::new(0, 19));
+        assert!(
+            hover.is_some(),
+            "Should get hover info for identifier in match arm guard"
+        );
+        assert!(
+            hover.unwrap().contents.contains("`v`"),
+            "Hover for guard expression should mention the identifier `v`"
         );
     }
 

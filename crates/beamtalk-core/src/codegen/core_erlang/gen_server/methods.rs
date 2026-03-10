@@ -92,10 +92,9 @@ impl CoreErlangGenerator {
         // BT-761: Detect whether any block argument in this method body contains ^.
         // If so, set up a non-local return token so ^ inside blocks can throw to escape
         // the closure and return from the enclosing actor method.
-        let needs_nlr = method
-            .body
-            .iter()
-            .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
+        let needs_nlr = self
+            .semantic_facts
+            .has_block_nlr_or_walk(&method.span, &method.body);
 
         let nlr_token_var = if needs_nlr {
             let token_var = self.fresh_temp_var("NlrToken");
@@ -1449,10 +1448,9 @@ impl CoreErlangGenerator {
                 .collect();
 
             // BT-1202: Detect if method body has ^ inside blocks (needs NLR).
-            let needs_nlr = method
-                .body
-                .iter()
-                .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
+            let needs_nlr = self
+                .semantic_facts
+                .has_block_nlr_or_walk(&method.span, &method.body);
 
             let nlr_token_var = if needs_nlr {
                 let token_var = self.fresh_temp_var("NlrToken");
@@ -1829,11 +1827,8 @@ impl CoreErlangGenerator {
         let is_control_flow = match dispatch_kind {
             crate::semantic_analysis::DispatchKind::ControlFlow => true,
             crate::semantic_analysis::DispatchKind::Unknown => {
-                crate::codegen::core_erlang::state_threading_selectors::is_exception_selector(
-                    sel_str.as_str(),
-                ) || crate::codegen::core_erlang::state_threading_selectors::is_conditional_selector(
-                    sel_str.as_str(),
-                )
+                crate::state_threading_selectors::is_exception_selector(sel_str.as_str())
+                    || crate::state_threading_selectors::is_conditional_selector(sel_str.as_str())
             }
             _ => false,
         };
@@ -1843,9 +1838,7 @@ impl CoreErlangGenerator {
 
         // BT-410: For on:do: and ensure:, the receiver (try body) is also
         // a block that may contain field mutations.
-        if crate::codegen::core_erlang::state_threading_selectors::is_exception_selector(
-            sel_str.as_str(),
-        ) {
+        if crate::state_threading_selectors::is_exception_selector(sel_str.as_str()) {
             if let Expression::Block(block) = receiver.as_ref() {
                 // Use pre-computed block profile when available.
                 let analysis = self
@@ -1861,9 +1854,7 @@ impl CoreErlangGenerator {
 
         // BT-915: For Boolean conditionals, any block argument may contain mutations.
         // BT-1226: ifNotNil: also needs per-block mutation detection.
-        if crate::codegen::core_erlang::state_threading_selectors::is_conditional_selector(
-            sel_str.as_str(),
-        ) {
+        if crate::state_threading_selectors::is_conditional_selector(sel_str.as_str()) {
             for arg in arguments {
                 if let Expression::Block(block) = arg {
                     let analysis = self

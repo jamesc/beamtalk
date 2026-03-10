@@ -24,6 +24,7 @@ pub mod project;
 pub mod queries;
 pub mod semantic_analysis;
 pub mod source_analysis;
+pub(crate) mod state_threading_selectors;
 pub mod test_helpers;
 pub mod unparse;
 
