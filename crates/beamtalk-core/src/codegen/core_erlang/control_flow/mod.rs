@@ -1750,9 +1750,7 @@ impl CoreErlangGenerator {
         } = expr
         {
             let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-            if crate::codegen::core_erlang::state_threading_selectors::is_conditional_selector(
-                sel.as_str(),
-            ) {
+            if crate::state_threading_selectors::is_conditional_selector(sel.as_str()) {
                 for arg in arguments {
                     if let Expression::Block(block) = arg {
                         let analysis = facts

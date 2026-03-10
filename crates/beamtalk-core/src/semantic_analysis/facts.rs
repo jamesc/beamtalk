@@ -305,37 +305,6 @@ fn collect_expression_facts(expr: &Expression, facts: &mut SemanticFacts) {
     }
 }
 
-/// Returns `true` if `sel` is a state-threading keyword selector.
-///
-/// Mirrors `codegen::core_erlang::state_threading_selectors` without creating
-/// a cross-layer dependency from `semantic_analysis` into codegen.
-fn is_state_threading_keyword_selector(sel: &str) -> bool {
-    matches!(
-        sel,
-        "whileTrue:"
-            | "whileFalse:"
-            | "timesRepeat:"
-            | "to:do:"
-            | "to:by:do:"
-            | "do:"
-            | "collect:"
-            | "select:"
-            | "reject:"
-            | "inject:into:"
-            | "on:do:"
-            | "ensure:"
-            | "ifTrue:"
-            | "ifFalse:"
-            | "ifTrue:ifFalse:"
-            | "ifNotNil:"
-    )
-}
-
-/// Returns `true` if `sel` is a state-threading unary selector.
-fn is_state_threading_unary_selector(sel: &str) -> bool {
-    matches!(sel, "whileTrue" | "whileFalse" | "timesRepeat")
-}
-
 /// Classify a message send based on static AST information.
 fn classify_dispatch(
     receiver: &Expression,
@@ -357,9 +326,11 @@ fn classify_dispatch(
     let is_control_flow = match selector {
         MessageSelector::Keyword(parts) => {
             let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-            is_state_threading_keyword_selector(sel.as_str())
+            crate::state_threading_selectors::is_state_threading_keyword_selector(sel.as_str())
         }
-        MessageSelector::Unary(name) => is_state_threading_unary_selector(name.as_str()),
+        MessageSelector::Unary(name) => {
+            crate::state_threading_selectors::is_state_threading_unary_selector(name.as_str())
+        }
         MessageSelector::Binary(_) => false,
     };
 
