@@ -53,6 +53,9 @@ class_of({beamtalk_future, _} = Future) ->
 class_of(X) when is_tuple(X), tuple_size(X) >= 2, element(1, X) =:= beamtalk_object ->
     % Extract class field from #beamtalk_object{}
     element(2, X);
+class_of(X) when is_tuple(X), tuple_size(X) =:= 4, element(1, X) =:= beamtalk_supervisor ->
+    % Extract class name from {beamtalk_supervisor, ClassName, Module, Pid}
+    element(2, X);
 class_of(X) when is_tuple(X) -> 'Tuple';
 class_of(X) when is_pid(X) -> 'Pid';
 class_of(X) when is_port(X) -> 'Port';

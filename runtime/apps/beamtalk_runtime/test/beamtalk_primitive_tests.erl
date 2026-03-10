@@ -78,6 +78,13 @@ class_of_tuple_test() ->
     %% Non-object tuples
     ?assertEqual('Tuple', beamtalk_primitive:class_of({other_record, data})).
 
+class_of_supervisor_tuple_test() ->
+    Pid = spawn(fun() -> ok end),
+    ?assertEqual('AppSupervisor',
+        beamtalk_primitive:class_of({beamtalk_supervisor, 'AppSupervisor', bt_app_sup, Pid})),
+    ?assertEqual('WorkerPool',
+        beamtalk_primitive:class_of({beamtalk_supervisor, 'WorkerPool', bt_worker_pool, Pid})).
+
 class_of_pid_test() ->
     ?assertEqual('Pid', beamtalk_primitive:class_of(self())),
     Pid = spawn(fun() -> ok end),
