@@ -743,7 +743,9 @@ fn find_self_message_send(expr: &Expression) -> Option<Span> {
     // Timer after:do: / every:do: run their block in a separate process —
     // skip block arguments so we don't flag safe self-sends (BT-1301).
     if let Expression::MessageSend {
-        selector, arguments, ..
+        selector,
+        arguments,
+        ..
     } = expr
     {
         if is_timer_spawn_selector(selector.name().as_str()) {
@@ -2314,8 +2316,7 @@ mod tests {
     /// `Timer after:do:` with `self` in the block — no hint (separate process).
     #[test]
     fn self_in_timer_after_do_block_no_hint() {
-        let src =
-            "Actor subclass: Worker\n  run => Timer after: 0 do: [self doWork]";
+        let src = "Actor subclass: Worker\n  run => Timer after: 0 do: [self doWork]";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -2332,8 +2333,7 @@ mod tests {
     /// `Timer every:do:` with `self` in the block — no hint (separate process).
     #[test]
     fn self_in_timer_every_do_block_no_hint() {
-        let src =
-            "Actor subclass: Worker\n  run => Timer every: 100 do: [self tick]";
+        let src = "Actor subclass: Worker\n  run => Timer every: 100 do: [self tick]";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -2368,8 +2368,7 @@ mod tests {
     /// Cast (`!`) variant: `Timer after:do:` with `self someMethod!` — no hint.
     #[test]
     fn self_cast_in_timer_block_no_hint() {
-        let src =
-            "Actor subclass: Worker\n  run => Timer after: 0 do: [self doWork!]";
+        let src = "Actor subclass: Worker\n  run => Timer after: 0 do: [self doWork!]";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
