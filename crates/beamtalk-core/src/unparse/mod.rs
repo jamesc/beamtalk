@@ -1136,6 +1136,18 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
             let joined = join_docs(pair_docs, ", ");
             docvec!["#{", joined, "}"]
         }
+        Pattern::Constructor {
+            class, keywords, ..
+        } => {
+            let mut parts: Vec<Document<'static>> = vec![Document::String(class.name.to_string())];
+            for (kw, binding) in keywords {
+                parts.push(Document::Str(" "));
+                parts.push(Document::String(kw.to_string()));
+                parts.push(Document::Str(" "));
+                parts.push(unparse_pattern(binding));
+            }
+            Document::Vec(parts)
+        }
     }
 }
 
