@@ -50,8 +50,18 @@ Actor subclass: Subprocess
   /// ```
   class open: command args: args env: env dir: dir -> Result =>
     (Erlang beamtalk_subprocess)
+      open: command
+      args: args
+      env: env
+      dir: dir
 
-  open: command args: args env: env dir: dir writeLine: data -> Nil =>
+  /// Write a line to the subprocess's stdin (appends newline).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// agent writeLine: "{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
+  /// ```
+  writeLine: data -> Nil =>
     (Erlang beamtalk_subprocess) writeLine: self data: data
 
   /// Read one line from stdout. Blocks until a line is available. Returns nil at EOF.

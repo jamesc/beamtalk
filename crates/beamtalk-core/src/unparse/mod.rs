@@ -2563,4 +2563,46 @@ mod tests {
             "short single-keyword block body should stay inline: {out}"
         );
     }
+
+    // --- BT-1294: class-side method with 3+ keyword body (non-idempotency regression) ---
+
+    #[test]
+    fn class_side_four_keyword_body_idempotent() {
+        // Actor subclass with a `class` method whose body is a 4-keyword send followed
+        // by an instance method.  The formatter must not merge the broken keyword lines
+        // with the next method's selector on the second pass.
+        let source = concat!(
+            "Actor subclass: Subprocess\n",
+            "\n",
+            "  class open: command args: args env: env dir: dir -> Result =>\n",
+            "    (Erlang beamtalk_subprocess)\n",
+            "      open: command\n",
+            "      args: args\n",
+            "      env: env\n",
+            "      dir: dir\n",
+            "\n",
+            "  writeLine: data -> Nil =>\n",
+            "    (Erlang beamtalk_subprocess) writeLine: self data: data\n",
+        );
+        assert_idempotent(source);
+    }
+
+    #[test]
+    fn class_side_four_keyword_body_identity() {
+        // Same source must be already in canonical form (no change on first pass).
+        let source = concat!(
+            "Actor subclass: Subprocess\n",
+            "\n",
+            "  class open: command args: args env: env dir: dir -> Result =>\n",
+            "    (Erlang beamtalk_subprocess)\n",
+            "      open: command\n",
+            "      args: args\n",
+            "      env: env\n",
+            "      dir: dir\n",
+            "\n",
+            "  writeLine: data -> Nil =>\n",
+            "    (Erlang beamtalk_subprocess) writeLine: self data: data\n",
+        );
+        assert_identity(source);
+    }
 }

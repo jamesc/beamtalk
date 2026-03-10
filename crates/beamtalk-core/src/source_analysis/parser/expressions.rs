@@ -420,13 +420,35 @@ impl Parser {
         // unambiguously a continuation of the previous expression (BT-1061).
         // The one exception is a keyword that begins a method definition
         // (`keyword: param =>`), which must not be consumed as a continuation.
+        //
+        // BT-1294: Inside a class method body `is_at_method_definition()` produces
+        // false positives: its lookahead scans all continuation keyword lines plus
+        // the next method's `-> Type =>`, making the whole sequence look like a
+        // single keyword method definition.  Method definitions cannot nest inside
+        // method bodies, so for the class-body case we use indentation instead:
+        // class body members are always indented 2 spaces, so any keyword at
+        // col ≤ 2 signals a sibling method definition, not a continuation.
         if !matches!(self.current_kind(), TokenKind::Keyword(_)) {
             return receiver;
         }
-        if self.current_token().has_leading_newline()
-            && (self.is_at_method_definition() || (self.in_class_body && !self.in_method_body))
-        {
-            return receiver;
+        if self.current_token().has_leading_newline() {
+            if self.in_class_body && self.in_method_body {
+                // Inside a class method body: stop at the class member boundary.
+                let col = self
+                    .current_token()
+                    .indentation_after_newline()
+                    .unwrap_or(0);
+                if col <= 2 {
+                    return receiver;
+                }
+            } else if !self.in_method_body && (self.is_at_method_definition() || self.in_class_body)
+            {
+                // Outside a method body: original lookahead-based check.
+                return receiver;
+            } else if self.in_method_body && !self.in_class_body && self.is_at_method_definition() {
+                // Inside a standalone method body (not a class): original check.
+                return receiver;
+            }
         }
 
         // Special handling for `match:` — produces Expression::Match
@@ -439,16 +461,45 @@ impl Parser {
         // Parse keyword message
         let mut keywords = Vec::new();
         let mut arguments = Vec::new();
+        // BT-1294: When inside a class method body, track the indentation of the
+        // first keyword that appears on a new line.  Any subsequent keyword at a
+        // *lesser* indentation is at the class-member level (col ≤ 2) and signals
+        // the start of a sibling method definition rather than a continuation.
+        // Outside class method bodies the original `is_at_method_definition()`
+        // lookahead is used (methods cannot nest anyway).
+        let mut continuation_indent: Option<usize> = None;
 
         while let TokenKind::Keyword(keyword) = self.current_kind() {
-            // Stop if the keyword is on a new line AND looks like a method
-            // definition (keyword arg =>). Otherwise allow multi-line keyword
-            // messages like `ifTrue: [...]\n  ifFalse: [...]` (BT-890).
-            if self.current_token().has_leading_newline()
-                && !keywords.is_empty()
-                && self.is_at_method_definition()
-            {
-                break;
+            if self.current_token().has_leading_newline() {
+                if self.in_class_body && self.in_method_body {
+                    // Inside a class method body: use indentation comparison.
+                    let current_indent = self.current_token().indentation_after_newline();
+                    match continuation_indent {
+                        None => {
+                            // First keyword on a new line in this message.
+                            // Stop immediately if it is at the class-member level
+                            // (col ≤ 2), otherwise record it as the continuation level.
+                            let col = current_indent.unwrap_or(0);
+                            if col <= 2 {
+                                break;
+                            }
+                            continuation_indent = current_indent;
+                        }
+                        Some(ci) => {
+                            if let Some(ind) = current_indent {
+                                if ind < ci {
+                                    // Shallower than the established continuation level:
+                                    // this is a sibling method definition, not a continuation.
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } else if !keywords.is_empty() && self.is_at_method_definition() {
+                    // Outside a class method body: original lookahead-based check.
+                    // Guard with `!keywords.is_empty()` to match previous behaviour.
+                    break;
+                }
             }
             let span = self.current_token().span();
             keywords.push(KeywordPart::new(keyword.clone(), span));
