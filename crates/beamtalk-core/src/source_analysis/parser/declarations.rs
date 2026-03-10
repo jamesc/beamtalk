@@ -109,13 +109,18 @@ impl Parser {
         let backing_module = if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "native:")
         {
             self.advance(); // consume `native:`
-            if let TokenKind::Identifier(module_name) = self.current_kind() {
+            if self.current_token().has_leading_newline() {
+                // Module name must be on the same line as `native:`
+                self.error("Expected Erlang module name after 'native:'");
+                None
+            } else if let TokenKind::Identifier(module_name) = self.current_kind() {
                 let module_name = module_name.to_string();
                 native_span = Some(self.current_token().span());
                 self.advance(); // consume module name
                 Some(module_name)
             } else {
                 self.error("Expected Erlang module name after 'native:'");
+                self.advance(); // skip invalid token so class-body parsing can recover
                 None
             }
         } else {

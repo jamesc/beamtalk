@@ -1581,6 +1581,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_native_keyword_newline_before_module_does_not_consume_method() {
+        // `native:` followed by a newline should NOT consume the next-line identifier
+        // as the module name — it should be treated as a missing module name error
+        // and the method should still be parsed as a class member.
+        let tokens = lex_with_eof("Actor subclass: Foo native:\n  doIt => 42");
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("Expected Erlang module name")),
+            "Expected error for newline after native:, got: {diagnostics:?}"
+        );
+        // The method should still be parsed despite the native: error
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(module.classes[0].backing_module, None);
+        assert_eq!(
+            module.classes[0].methods.len(),
+            1,
+            "Method 'doIt' should not be consumed as native module name"
+        );
+    }
+
+    #[test]
     fn parse_native_keyword_non_identifier_emits_error() {
         let diagnostics = parse_err("Actor subclass: Foo native: 42");
         assert!(
