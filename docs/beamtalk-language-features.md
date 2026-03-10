@@ -915,7 +915,7 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 // Match on computed expression
 (3 + 4) match: [7 -> "correct"; _ -> "wrong"]
 
-// Constructor patterns for sealed types (e.g. Result)
+// Constructor patterns (Result ok:/error: only in this release)
 (Result ok: 42) match: [
   Result ok: v    -> v;
   Result error: _ -> 0
