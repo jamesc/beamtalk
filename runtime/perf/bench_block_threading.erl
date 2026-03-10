@@ -384,11 +384,15 @@ collect_tuple_acc_mutation(List) ->
     {RevResults, _} = lists:foldl(BlockFun, {[], Count0}, List),
     lists:reverse(RevResults).
 
-%% @doc Simulates `inject:into:` with a local mutation (count) using StateAcc map approach.
+%% @doc Simulates `inject:into:` with a local mutation (count) using StateAcc map approach,
+%% post-BT-1304 optimisation.
 %%
 %% Beamtalk source equivalent:
 %%   count := 0.
 %%   list inject: 0 into: [:acc :x | count := count + 1. acc + x]
+%%
+%% BT-1304: AccIn starts from a literal (0) so it is provably sync; maybe_await is elided
+%% on AccIn. X (the list element) still requires maybe_await.
 -spec fold_stateacc_mutation(list()) -> integer().
 fold_stateacc_mutation(List) ->
     Count0 = 0,
@@ -397,23 +401,24 @@ fold_stateacc_mutation(List) ->
         Count = maps:get('__local__count', StateAcc),
         NewCount = Count + 1,
         NewStateAcc = maps:put('__local__count', NewCount, StateAcc),
-        NewAcc =
-            beamtalk_future:maybe_await(AccIn) + beamtalk_future:maybe_await(X),
+        NewAcc = AccIn + beamtalk_future:maybe_await(X),
         {NewAcc, NewStateAcc}
     end,
     {Result, _} = lists:foldl(BlockFun, {0, InitState}, List),
     Result.
 
-%% @doc Simulates `inject:into:` with a local mutation using BT-1276 tuple-acc approach.
+%% @doc Simulates `inject:into:` with a local mutation using BT-1276 tuple-acc approach,
+%% post-BT-1304 optimisation.
 %%
 %% Accumulator is {Acc, Count} — no StateAcc map allocation per iteration.
+%% BT-1304: AccIn starts from a literal (0) so it is provably sync; maybe_await is elided
+%% on AccIn. X (the list element) still requires maybe_await.
 -spec fold_tuple_acc_mutation(list()) -> integer().
 fold_tuple_acc_mutation(List) ->
     Count0 = 0,
     BlockFun = fun(X, {AccIn, Count}) ->
         NewCount = Count + 1,
-        NewAcc =
-            beamtalk_future:maybe_await(AccIn) + beamtalk_future:maybe_await(X),
+        NewAcc = AccIn + beamtalk_future:maybe_await(X),
         {NewAcc, NewCount}
     end,
     {Result, _} = lists:foldl(BlockFun, {0, Count0}, List),
