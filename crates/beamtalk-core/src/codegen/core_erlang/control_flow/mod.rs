@@ -214,10 +214,17 @@ impl ThreadingPlan {
                     &threaded_locals,
                 )
             });
+            // DestructureAssignment as the last expr is not supported in tuple-acc mode:
+            // `emit_destructure_last_expr` always emits the map-shaped StateAcc path.
+            let body_last_is_destructure = body
+                .body
+                .last()
+                .is_some_and(|s| matches!(s.expression, Expression::DestructureAssignment { .. }));
             !body_analysis.has_state_effects()
                 && !body_has_tier2_threaded_assign_tuple
                 && !body_has_cf_mutations
                 && !body_has_conditional_threaded_writes
+                && !body_last_is_destructure
         };
 
         Self {
@@ -406,29 +413,34 @@ impl ThreadingPlan {
 
     // ─── BT-1276: Tuple accumulator helpers ───────────────────────────────────
 
-    /// Returns the current Core Erlang bindings of all threaded locals as a
-    /// comma-separated string.  Used to build tuple repacks at iteration end.
+    /// Returns the current Core Erlang bindings of all threaded locals as a `Document`.
     ///
-    /// Example: `threaded_locals = ["sum", "count"]` → `"Sum1, Count"`.
-    pub fn current_vars_str(&self, generator: &CoreErlangGenerator) -> String {
-        self.threaded_locals
-            .iter()
-            .map(|v| {
-                generator
-                    .lookup_var(v)
-                    .cloned()
-                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
+    /// Example: `threaded_locals = ["sum", "count"]` → `Sum1, Count`.
+    /// Returns `Document::Nil` when `threaded_locals` is empty.
+    pub fn current_vars_doc(&self, generator: &CoreErlangGenerator) -> Document<'static> {
+        join(
+            self.threaded_locals.iter().map(|v| {
+                Document::String(
+                    generator
+                        .lookup_var(v)
+                        .cloned()
+                        .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v)),
+                )
+            }),
+            &Document::Str(", "),
+        )
     }
 
-    /// Returns the initial-values tuple string constructed from outer-scope bindings.
+    /// Returns the initial-values tuple `Document` constructed from outer-scope bindings.
     ///
     /// Call this **before** `push_scope()` so the bindings reflect the state before
-    /// the loop.  Example: `threaded_locals = ["sum"]` → `"{Sum}"`.
-    pub fn initial_vars_tuple_str(&self, generator: &CoreErlangGenerator) -> String {
-        format!("{{{}}}", self.current_vars_str(generator))
+    /// the loop.  Example: `threaded_locals = ["sum"]` → `{Sum}`.
+    /// Returns `Document::Str("{}")` when `threaded_locals` is empty.
+    pub fn initial_vars_tuple_doc(&self, generator: &CoreErlangGenerator) -> Document<'static> {
+        if self.threaded_locals.is_empty() {
+            return Document::Str("{}");
+        }
+        docvec!["{", self.current_vars_doc(generator), "}"]
     }
 
     /// Generates `let V = call 'erlang':'element'(idx, src) in` docs for each
@@ -463,50 +475,52 @@ impl ThreadingPlan {
         docs
     }
 
-    /// Returns element-extraction code after foldl completes for tuple mode.
+    /// Returns element-extraction code after foldl completes for tuple mode as a `Document`.
     ///
     /// Generates `let V = call 'erlang':'element'(idx, acc) in ...` using the
     /// outer-scope binding names (from `lookup_var`) as targets.
     ///
     /// `index_offset` — same as in `generate_tuple_unpack_docs`.
-    pub fn generate_tuple_extract_suffix_str(
+    pub fn generate_tuple_extract_suffix_doc(
         &self,
         final_acc_var: &str,
         index_offset: usize,
         generator: &CoreErlangGenerator,
-    ) -> String {
-        let mut s = String::new();
+    ) -> Document<'static> {
+        let mut docs: Vec<Document<'static>> = Vec::new();
         for (i, var_name) in self.threaded_locals.iter().enumerate() {
             let core_var = generator
                 .lookup_var(var_name)
                 .cloned()
                 .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
             let idx = index_offset + i;
-            let _ = write!(
-                s,
-                "let {core_var} = call 'erlang':'element'({idx}, {final_acc_var}) in "
-            );
+            docs.push(docvec![
+                "let ",
+                Document::String(core_var),
+                " = call 'erlang':'element'(",
+                Document::String(idx.to_string()),
+                ", ",
+                Document::String(final_acc_var.to_string()),
+                ") in ",
+            ]);
         }
-        s
+        Document::Vec(docs)
     }
 
-    /// BT-1276: Re-packs updated locals back into the `StateAcc` map after a tuple-acc loop.
+    /// BT-1276: Re-packs updated locals back into the `StateAcc` map after a tuple-acc loop,
+    /// returning a `(Document, final_var_name)` pair instead of mutating a `String`.
     ///
-    /// The tuple accumulator eliminates per-iteration `maps:get`/`maps:put`, but the outer
-    /// method-body threading in `generate_method_body_with_reply` still uses `maps:get` to
-    /// extract updated locals from the `{result, StateAcc}` return of each list-op expression.
+    /// The returned `Document` contains the `let PkSt1 = maps:put(...) in ...` chain.
+    /// The returned `String` is the name of the final packed-state variable (`PkStN`).
     ///
-    /// This method appends `let PkSt1 = maps:put(key1, Var1, State) in ... in` to `s`
-    /// and returns the name of the final packed-state variable (`PkStN`).
-    ///
-    /// Must be called AFTER `generate_tuple_extract_suffix_str` so that the Core Erlang
+    /// Must be called AFTER `generate_tuple_extract_suffix_doc` so that the Core Erlang
     /// variable names (e.g. `Total`) refer to the extracted (updated) values.
-    pub fn append_repack_stateacc(
+    pub fn append_repack_stateacc_doc(
         &self,
-        s: &mut String,
         generator: &mut CoreErlangGenerator,
-    ) -> String {
+    ) -> (Document<'static>, String) {
         let mut current = self.initial_state_var.clone();
+        let mut docs: Vec<Document<'static>> = Vec::new();
         for var_name in &self.threaded_locals {
             let core_var = generator
                 .lookup_var(var_name)
@@ -514,13 +528,20 @@ impl ThreadingPlan {
                 .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
             let key = self.state_key(var_name);
             let pack_var = generator.fresh_temp_var("PkSt");
-            let _ = write!(
-                s,
-                "let {pack_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
-            );
+            docs.push(docvec![
+                "let ",
+                Document::String(pack_var.clone()),
+                " = call 'maps':'put'('",
+                Document::String(key),
+                "', ",
+                Document::String(core_var),
+                ", ",
+                Document::String(current),
+                ") in ",
+            ]);
             current = pack_var;
         }
-        current
+        (Document::Vec(docs), current)
     }
 }
 
@@ -667,17 +688,29 @@ impl CoreErlangGenerator {
                     // `let NewVar = value in` without a StateAcc map. The var binding
                     // is updated so the final tuple repack references the latest version.
                     has_mutations = true;
-                    let assign_doc = self.generate_direct_var_update_in_loop(expr)?;
+                    let (assign_doc, new_var) = self.generate_direct_var_update_in_loop(expr)?;
                     docs.push(assign_doc);
                     if is_last {
-                        self.emit_local_assign_last_expr(&mut docs, kind, pred_var.as_ref(), plan);
+                        self.emit_local_assign_last_expr(
+                            &mut docs,
+                            kind,
+                            pred_var.as_ref(),
+                            plan,
+                            new_var.as_deref(),
+                        );
                     }
                 } else {
                     has_mutations = true;
                     let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
                     docs.push(assign_doc);
                     if is_last {
-                        self.emit_local_assign_last_expr(&mut docs, kind, pred_var.as_ref(), plan);
+                        self.emit_local_assign_last_expr(
+                            &mut docs,
+                            kind,
+                            pred_var.as_ref(),
+                            plan,
+                            None,
+                        );
                     }
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
@@ -740,30 +773,42 @@ impl CoreErlangGenerator {
         // FoldlFilter: append the predicate case expression after all statements.
         if let BodyKind::FoldlFilter { item_var, negate } = kind {
             if let Some(pv) = &pred_var {
-                let condition = if *negate {
-                    format!("call 'erlang':'not'({pv})")
+                let condition_doc: Document<'static> = if *negate {
+                    docvec!["call 'erlang':'not'(", Document::String(pv.clone()), ")",]
                 } else {
-                    pv.clone()
+                    Document::String(pv.clone())
                 };
                 if plan.use_tuple_acc {
                     // BT-1276: Tuple mode — repack current var bindings into the result tuple.
-                    let vars = plan.current_vars_str(self);
-                    docs.push(Document::String(format!(
-                        "case {condition} of \
-                         <'true'> when 'true' -> {{[{item_var} | AccList], {vars}}} \
-                         <'false'> when 'true' -> {{AccList, {vars}}} end"
-                    )));
+                    let vars_doc = plan.current_vars_doc(self);
+                    docs.push(docvec![
+                        "case ",
+                        condition_doc,
+                        " of <'true'> when 'true' -> {[",
+                        Document::String(item_var.clone()),
+                        " | AccList], ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {AccList, ",
+                        vars_doc,
+                        "} end",
+                    ]);
                 } else {
                     let final_state = if has_mutations {
                         self.current_state_var()
                     } else {
                         "StateAcc".to_string()
                     };
-                    docs.push(Document::String(format!(
-                        "case {condition} of \
-                         <'true'> when 'true' -> {{[{item_var} | AccList], {final_state}}} \
-                         <'false'> when 'true' -> {{AccList, {final_state}}} end"
-                    )));
+                    docs.push(docvec![
+                        "case ",
+                        condition_doc,
+                        " of <'true'> when 'true' -> {[",
+                        Document::String(item_var.clone()),
+                        " | AccList], ",
+                        Document::String(final_state.clone()),
+                        "} <'false'> when 'true' -> {AccList, ",
+                        Document::String(final_state),
+                        "} end",
+                    ]);
                 }
             }
         }
@@ -790,17 +835,23 @@ impl CoreErlangGenerator {
                 docs.push(Document::String(self.current_state_var()));
             }
             BodyKind::FoldlCollect => {
-                let fs = self.current_state_var();
-                docs.push(Document::String(format!("{{[_Val | AccList], {fs}}}")));
+                docs.push(docvec![
+                    "{[_Val | AccList], ",
+                    Document::String(self.current_state_var()),
+                    "}",
+                ]);
             }
             BodyKind::FoldlFilter { .. } => {
                 if let Some(pv) = pred_var {
-                    docs.push(Document::String(format!("let {pv} = _Val in ")));
+                    docs.push(docvec!["let ", Document::String(pv.clone()), " = _Val in ",]);
                 }
             }
             BodyKind::FoldlInject => {
-                let fs = self.current_state_var();
-                docs.push(Document::String(format!("{{_Val, {fs}}}")));
+                docs.push(docvec![
+                    "{_Val, ",
+                    Document::String(self.current_state_var()),
+                    "}",
+                ]);
             }
         }
     }
@@ -822,22 +873,37 @@ impl CoreErlangGenerator {
                 let fs = self.current_state_var();
                 if let Some(dv) = self.last_dispatch_var.clone() {
                     let ir = self.fresh_temp_var("ItemResult");
-                    docs.push(Document::String(format!(
-                        "let {ir} = call 'erlang':'element'(1, {dv}) in \
-                         {{[{ir} | AccList], {fs}}}"
-                    )));
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(ir.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        Document::String(dv),
+                        ") in {[",
+                        Document::String(ir),
+                        " | AccList], ",
+                        Document::String(fs),
+                        "}",
+                    ]);
                 } else {
-                    docs.push(Document::String(format!("{{['nil' | AccList], {fs}}}")));
+                    docs.push(docvec!["{['nil' | AccList], ", Document::String(fs), "}",]);
                 }
             }
             BodyKind::FoldlFilter { .. } => {
                 if let Some(pv) = pred_var {
                     if let Some(dv) = self.last_dispatch_var.clone() {
-                        docs.push(Document::String(format!(
-                            "let {pv} = call 'erlang':'element'(1, {dv}) in "
-                        )));
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(pv.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            Document::String(dv),
+                            ") in ",
+                        ]);
                     } else {
-                        docs.push(Document::String(format!("let {pv} = 'nil' in ")));
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(pv.clone()),
+                            " = 'nil' in ",
+                        ]);
                     }
                 }
             }
@@ -845,11 +911,19 @@ impl CoreErlangGenerator {
                 let fs = self.current_state_var();
                 if let Some(dv) = self.last_dispatch_var.clone() {
                     let ar = self.fresh_temp_var("AccResult");
-                    docs.push(Document::String(format!(
-                        "let {ar} = call 'erlang':'element'(1, {dv}) in {{{ar}, {fs}}}"
-                    )));
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(ar.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        Document::String(dv),
+                        ") in {",
+                        Document::String(ar),
+                        ", ",
+                        Document::String(fs),
+                        "}",
+                    ]);
                 } else {
-                    docs.push(Document::String(format!("{{'nil', {fs}}}")));
+                    docs.push(docvec!["{'nil', ", Document::String(fs), "}",]);
                 }
             }
         }
@@ -861,25 +935,48 @@ impl CoreErlangGenerator {
         kind: &BodyKind,
         pred_var: Option<&String>,
         plan: &ThreadingPlan,
+        last_val: Option<&str>,
     ) {
         if plan.use_tuple_acc {
             // BT-1276: Tuple mode — repack current bindings as tuple accumulator.
-            let vars = plan.current_vars_str(self);
+            // `last_val` is the newly-bound variable name from `generate_direct_var_update_in_loop`
+            // (e.g. `"Sum1"`). Used for FoldlCollect/FoldlFilter/FoldlInject where the loop
+            // result value must be referenced explicitly; falls back to `"_Val"` when not set.
+            let val = last_val.unwrap_or("_Val");
+            let vars_doc = plan.current_vars_doc(self);
             match kind {
                 BodyKind::Letrec => {}
                 BodyKind::FoldlDo => {
-                    docs.push(Document::String(format!(" {{{vars}}}")));
+                    docs.push(docvec![" {", vars_doc, "}"]);
                 }
                 BodyKind::FoldlCollect => {
-                    docs.push(Document::String(format!(" {{[_Val | AccList], {vars}}}")));
+                    docs.push(docvec![
+                        " {[",
+                        Document::String(val.to_string()),
+                        " | AccList], ",
+                        vars_doc,
+                        "}",
+                    ]);
                 }
                 BodyKind::FoldlFilter { .. } => {
                     if let Some(pv) = pred_var {
-                        docs.push(Document::String(format!(" let {pv} = _Val in ")));
+                        docs.push(docvec![
+                            " let ",
+                            Document::String(pv.clone()),
+                            " = ",
+                            Document::String(val.to_string()),
+                            " in ",
+                        ]);
                     }
                 }
                 BodyKind::FoldlInject => {
-                    docs.push(Document::String(format!(" {{_Val, {vars}}}")));
+                    docs.push(docvec![
+                        " {",
+                        Document::String(val.to_string()),
+                        ", ",
+                        vars_doc,
+                        "}",
+                    ]);
                 }
             }
             return;
@@ -889,20 +986,30 @@ impl CoreErlangGenerator {
                 // Nothing; caller appends recursive call.
             }
             BodyKind::FoldlDo => {
-                docs.push(Document::String(format!(" {}", self.current_state_var())));
+                docs.push(docvec![" ", Document::String(self.current_state_var())]);
             }
             BodyKind::FoldlCollect => {
-                let fs = self.current_state_var();
-                docs.push(Document::String(format!(" {{[_Val | AccList], {fs}}}")));
+                docs.push(docvec![
+                    " {[_Val | AccList], ",
+                    Document::String(self.current_state_var()),
+                    "}",
+                ]);
             }
             BodyKind::FoldlFilter { .. } => {
                 if let Some(pv) = pred_var {
-                    docs.push(Document::String(format!(" let {pv} = _Val in ")));
+                    docs.push(docvec![
+                        " let ",
+                        Document::String(pv.clone()),
+                        " = _Val in ",
+                    ]);
                 }
             }
             BodyKind::FoldlInject => {
-                let fs = self.current_state_var();
-                docs.push(Document::String(format!(" {{_Val, {fs}}}")));
+                docs.push(docvec![
+                    " {_Val, ",
+                    Document::String(self.current_state_var()),
+                    "}",
+                ]);
             }
         }
     }
@@ -927,11 +1034,15 @@ impl CoreErlangGenerator {
                 } else {
                     "StateAcc".to_string()
                 };
-                docs.push(Document::String(format!("{{['nil' | AccList], {fs}}}")));
+                docs.push(docvec!["{['nil' | AccList], ", Document::String(fs), "}",]);
             }
             BodyKind::FoldlFilter { .. } => {
                 if let Some(pv) = pred_var {
-                    docs.push(Document::String(format!("let {pv} = 'false' in ")));
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(pv.clone()),
+                        " = 'false' in ",
+                    ]);
                 }
             }
             BodyKind::FoldlInject => {
@@ -940,7 +1051,7 @@ impl CoreErlangGenerator {
                 } else {
                     "StateAcc".to_string()
                 };
-                docs.push(Document::String(format!("{{'nil', {fs}}}")));
+                docs.push(docvec!["{'nil', ", Document::String(fs), "}"]);
             }
         }
     }
@@ -974,9 +1085,15 @@ impl CoreErlangGenerator {
                     let expr_code = self.expression_doc(expr)?;
                     self.set_state_version(next_version);
                     docs.push(docvec![
-                        format!("let {tuple_var} = "),
+                        "let ",
+                        Document::String(tuple_var.clone()),
+                        " = ",
                         expr_code,
-                        format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
+                        " in let ",
+                        Document::String(next_var),
+                        " = call 'erlang':'element'(2, ",
+                        Document::String(tuple_var),
+                        ") in",
                     ]);
                 } else {
                     let expr_code = self.expression_doc(expr)?;
@@ -992,13 +1109,9 @@ impl CoreErlangGenerator {
                 if is_last && (has_mutations || has_plain_lets) {
                     if plan.use_tuple_acc {
                         // BT-1276: Repack threaded locals as tuple.
-                        let vars = plan.current_vars_str(self);
-                        docs.push(Document::String(format!(" in {{{vars}}}")));
+                        docs.push(docvec![" in {", plan.current_vars_doc(self), "}"]);
                     } else {
-                        docs.push(Document::String(format!(
-                            " in {}",
-                            self.current_state_var()
-                        )));
+                        docs.push(docvec![" in ", Document::String(self.current_state_var())]);
                     }
                 } else if !is_last {
                     docs.push(Document::Str(" in "));
@@ -1013,11 +1126,17 @@ impl CoreErlangGenerator {
                     let expr_code = self.expression_doc(expr)?;
                     if plan.use_tuple_acc {
                         // BT-1276: Tuple mode — repack current vars.
-                        let vars = plan.current_vars_str(self);
+                        let vars_doc = plan.current_vars_doc(self);
                         docs.push(docvec![
-                            format!("let {result_var} = "),
+                            "let ",
+                            Document::String(result_var.clone()),
+                            " = ",
                             expr_code,
-                            format!(" in {{[{result_var} | AccList], {vars}}}"),
+                            " in {[",
+                            Document::String(result_var),
+                            " | AccList], ",
+                            vars_doc,
+                            "}",
                         ]);
                     } else {
                         let fs = if has_mutations {
@@ -1026,9 +1145,15 @@ impl CoreErlangGenerator {
                             "StateAcc".to_string()
                         };
                         docs.push(docvec![
-                            format!("let {result_var} = "),
+                            "let ",
+                            Document::String(result_var.clone()),
+                            " = ",
                             expr_code,
-                            format!(" in {{[{result_var} | AccList], {fs}}}"),
+                            " in {[",
+                            Document::String(result_var),
+                            " | AccList], ",
+                            Document::String(fs),
+                            "}",
                         ]);
                     }
                 } else {
@@ -1044,7 +1169,13 @@ impl CoreErlangGenerator {
                 if is_last {
                     if let Some(pv) = pred_var {
                         let expr_code = self.expression_doc(expr)?;
-                        docs.push(docvec![format!("let {pv} = "), expr_code, " in "]);
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(pv.clone()),
+                            " = ",
+                            expr_code,
+                            " in ",
+                        ]);
                     }
                 } else {
                     let doc = self.generate_expression(expr)?;
@@ -1061,11 +1192,17 @@ impl CoreErlangGenerator {
                     let expr_code = self.expression_doc(expr)?;
                     if plan.use_tuple_acc {
                         // BT-1276: Tuple mode — repack current vars.
-                        let vars = plan.current_vars_str(self);
+                        let vars_doc = plan.current_vars_doc(self);
                         docs.push(docvec![
-                            format!("let {acc_var} = "),
+                            "let ",
+                            Document::String(acc_var.clone()),
+                            " = ",
                             expr_code,
-                            format!(" in {{{acc_var}, {vars}}}"),
+                            " in {",
+                            Document::String(acc_var),
+                            ", ",
+                            vars_doc,
+                            "}",
                         ]);
                     } else {
                         let fs = if has_mutations {
@@ -1074,9 +1211,15 @@ impl CoreErlangGenerator {
                             "StateAcc".to_string()
                         };
                         docs.push(docvec![
-                            format!("let {acc_var} = "),
+                            "let ",
+                            Document::String(acc_var.clone()),
+                            " = ",
                             expr_code,
-                            format!(" in {{{acc_var}, {fs}}}"),
+                            " in {",
+                            Document::String(acc_var),
+                            ", ",
+                            Document::String(fs),
+                            "}",
                         ]);
                     }
                 } else {
@@ -1435,10 +1578,13 @@ impl CoreErlangGenerator {
     /// %% Direct params pattern (this function):
     /// let Sum1 = Sum + I in
     /// ```
+    ///
+    /// Returns `(doc, Some(new_var_name))` so callers (e.g. `emit_local_assign_last_expr`)
+    /// can reference the newly-bound variable by name (e.g. for FoldlCollect/FoldlInject).
     pub(super) fn generate_direct_var_update_in_loop(
         &mut self,
         expr: &Expression,
-    ) -> Result<Document<'static>> {
+    ) -> Result<(Document<'static>, Option<String>)> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let value_code = self.expression_doc(value)?;
@@ -1446,16 +1592,17 @@ impl CoreErlangGenerator {
                 let new_var =
                     self.fresh_temp_var(&CoreErlangGenerator::to_core_erlang_var(&id.name));
                 self.bind_var(&id.name, &new_var);
-                return Ok(docvec![
+                let doc = docvec![
                     "let ",
-                    Document::String(new_var),
+                    Document::String(new_var.clone()),
                     " = ",
                     value_code,
                     " in ",
-                ]);
+                ];
+                return Ok((doc, Some(new_var)));
             }
         }
-        Ok(Document::Nil)
+        Ok((Document::Nil, None))
     }
 
     /// BT-153: Generate a local variable assignment inside a loop body with state threading.
