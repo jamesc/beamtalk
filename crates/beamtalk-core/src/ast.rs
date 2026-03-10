@@ -871,6 +871,12 @@ impl ExpectCategory {
             Self::All => "all",
         }
     }
+
+    /// Returns the list of all valid category name strings, for use in error messages.
+    #[must_use]
+    pub const fn valid_names() -> &'static [&'static str] {
+        &["dnu", "type", "unused", "self_capture", "all"]
+    }
 }
 
 /// A Beamtalk expression.

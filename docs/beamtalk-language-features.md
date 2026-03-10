@@ -1542,6 +1542,8 @@ Actor subclass: Processor
 
 Prefer refactoring to avoid the pattern (bind the result before the block) when possible. `@expect self_capture` is for cases where the deadlock analysis is a false positive.
 
+**Unknown categories are parse errors:** Writing an unknown category (e.g. `@expect selfcapture`) is rejected at parse time with an error listing the valid names. This prevents typos from silently suppressing nothing.
+
 **Stale directives:** If `@expect` does not suppress any diagnostic (because no matching diagnostic exists on the following expression), the compiler emits an error to prevent directives from silently becoming out of date.
 
 `@expect` works inside method bodies, class definitions, and at module scope.
