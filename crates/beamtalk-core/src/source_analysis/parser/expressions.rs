@@ -496,12 +496,13 @@ impl Parser {
                             continuation_indent = current_indent;
                         }
                         Some(ci) => {
-                            if let Some(ind) = current_indent {
-                                if ind < ci {
-                                    // Shallower than the established continuation level:
-                                    // this is a sibling method definition, not a continuation.
-                                    break;
-                                }
+                            // Treat None as col 0: a token with no indentation info
+                            // (or a col-0 newline) is shallower than any continuation.
+                            let ind = current_indent.unwrap_or(0);
+                            if ind < ci {
+                                // Shallower than the established continuation level:
+                                // this is a sibling method definition, not a continuation.
+                                break;
                             }
                         }
                     }
