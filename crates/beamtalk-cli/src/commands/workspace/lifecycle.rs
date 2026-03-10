@@ -90,6 +90,10 @@ pub fn create_workspace(
 
 /// Get or start a workspace node for the current directory.
 /// Returns (`NodeInfo`, bool) where bool indicates if a new node was started.
+///
+/// `otp_app_name` is forwarded to [`start_detached_node`]: when `Some`, the named
+/// OTP application is started inside the workspace after class bootstrap completes,
+/// ensuring all project classes are registered before the supervisor's `init/1` runs.
 #[allow(clippy::too_many_arguments)] // workspace startup requires many independent parameters
 pub fn get_or_start_workspace(
     project_path: &Path,
@@ -102,6 +106,7 @@ pub fn get_or_start_workspace(
     bind_addr: Option<Ipv4Addr>,
     ssl_dist_optfile: Option<&Path>,
     web_port: Option<u16>,
+    otp_app_name: Option<&str>,
 ) -> Result<(NodeInfo, bool, String)> {
     let workspace_id = workspace_id_for(project_path, workspace_name)?;
 
@@ -161,6 +166,7 @@ pub fn get_or_start_workspace(
             bind_addr,
             ssl_dist_optfile,
             web_port,
+            otp_app_name,
         ) {
             Ok(node_info) => return Ok((node_info, true, workspace_id)),
             Err(e) => {
