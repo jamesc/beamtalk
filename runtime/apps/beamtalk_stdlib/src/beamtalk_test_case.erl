@@ -29,7 +29,9 @@
     %% BT-762: Exported for beamtalk_test_runner
     run_test_method/4,
     structure_results/3,
-    resolve_module/1
+    resolve_module/1,
+    %% BT-1293: Exported for testing
+    is_valid_setUp_result/2
 ]).
 
 %% FFI shims for (Erlang beamtalk_test_case) dispatch
@@ -540,10 +542,20 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods) ->
         {HasSetUp, HasTearDown} = check_lifecycle_methods(Module, FlatMethods),
         %% BT-900: Value objects are immutable maps — setUp returns a new instance
         %% with fields set. We must use that return value, not the original Instance.
+        %% BT-1293: But only when setUp returns a valid instance map of the same
+        %% class. If setUp ends with an untaken conditional (e.g. false ifTrue: [...]),
+        %% it returns false/nil rather than self — using that as the receiver would
+        %% corrupt all test method dispatches with a DNU error.
         SetUpInstance =
             case HasSetUp of
-                true -> Module:dispatch(setUp, [], Instance);
-                false -> Instance
+                true ->
+                    SetUpResult = Module:dispatch(setUp, [], Instance),
+                    case is_valid_setUp_result(Instance, SetUpResult) of
+                        true -> SetUpResult;
+                        false -> Instance
+                    end;
+                false ->
+                    Instance
             end,
         TestResult =
             try
@@ -616,6 +628,20 @@ check_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
 check_lifecycle_methods(Module, none) ->
     Exports = Module:module_info(exports),
     {lists:keymember(setUp, 1, Exports), lists:keymember(tearDown, 1, Exports)}.
+
+%% @doc Return true when setUp's result is a valid instance of the same class.
+%%
+%% BT-1293: Prevents setUp's accidental non-instance return (e.g. `false` from
+%% an untaken `ifTrue:` branch) from replacing `self` in test method dispatch.
+%% A valid result is a map carrying the same `'$beamtalk_class'` tag as the
+%% original instance — i.e. the normal BT-900 value-object case where setUp
+%% assignments return an updated copy of self.
+-spec is_valid_setUp_result(term(), term()) -> boolean().
+is_valid_setUp_result(Instance, Result) when is_map(Instance), is_map(Result) ->
+    maps:get('$beamtalk_class', Instance, undefined) =:=
+        maps:get('$beamtalk_class', Result, undefined);
+is_valid_setUp_result(_Instance, _Result) ->
+    false.
 
 %% @doc Format test results for REPL display.
 -spec format_results(

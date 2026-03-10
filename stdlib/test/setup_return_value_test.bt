@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1293: Tests that setUp's return value does not corrupt test method dispatch.
+//
+// When setUp ends with an untaken conditional, the last expression evaluates
+// to false/nil. The BUnit runner must NOT use that value as self — doing so
+// would cause every test to fail with "False does not understand 'assert:'".
+
+TestCase subclass: SetupReturnValueTest
+
+  // setUp ends with a conditional whose result is false/nil.
+  // Uses a runtime-computed condition so the compiler does not warn about dead code.
+  setUp =>
+    cond := (1 == 2)
+    cond ifTrue: ["skip reason"]
+
+  // If self were corrupted to false/nil, this assert: dispatch would raise DNU.
+  testDispatchWorksAfterNonInstanceSetupReturn => self assert: true

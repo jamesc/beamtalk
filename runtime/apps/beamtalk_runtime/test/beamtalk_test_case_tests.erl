@@ -212,3 +212,50 @@ run_all_with_real_module_test() ->
         % Expected — module doesn't exist (undef error)
         error:_ -> ok
     end.
+
+%%% ============================================================================
+%%% is_valid_setUp_result/2 Tests (BT-1293)
+%%% ============================================================================
+
+%% Valid: same class map — normal BT-900 value-object setUp path
+is_valid_setUp_result_same_class_test() ->
+    Instance = #{'$beamtalk_class' => 'MyTest', value => 0},
+    Result = #{'$beamtalk_class' => 'MyTest', value => 42},
+    ?assert(beamtalk_test_case:is_valid_setUp_result(Instance, Result)).
+
+%% Invalid: setUp returns false (untaken ifTrue: branch)
+is_valid_setUp_result_false_test() ->
+    Instance = #{'$beamtalk_class' => 'MyTest', value => 0},
+    ?assertNot(beamtalk_test_case:is_valid_setUp_result(Instance, false)).
+
+%% Invalid: setUp returns nil
+is_valid_setUp_result_nil_test() ->
+    Instance = #{'$beamtalk_class' => 'MyTest'},
+    ?assertNot(beamtalk_test_case:is_valid_setUp_result(Instance, nil)).
+
+%% Invalid: setUp returns an integer (e.g. result of some computation)
+is_valid_setUp_result_integer_test() ->
+    Instance = #{'$beamtalk_class' => 'MyTest'},
+    ?assertNot(beamtalk_test_case:is_valid_setUp_result(Instance, 42)).
+
+%% Invalid: setUp returns a map of a different class
+is_valid_setUp_result_different_class_test() ->
+    Instance = #{'$beamtalk_class' => 'MyTest'},
+    Result = #{'$beamtalk_class' => 'OtherClass'},
+    ?assertNot(beamtalk_test_case:is_valid_setUp_result(Instance, Result)).
+
+%% Invalid: setUp returns a map without '$beamtalk_class' key
+is_valid_setUp_result_plain_map_test() ->
+    Instance = #{'$beamtalk_class' => 'MyTest'},
+    ?assertNot(beamtalk_test_case:is_valid_setUp_result(Instance, #{foo => bar})).
+
+%% Invalid: instance itself has no '$beamtalk_class' (degenerate case)
+is_valid_setUp_result_no_class_key_test() ->
+    Instance = #{value => 0},
+    Result = #{value => 42},
+    ?assertNot(beamtalk_test_case:is_valid_setUp_result(Instance, Result)).
+
+%% Invalid: non-map instance (e.g. actor #beamtalk_object record)
+is_valid_setUp_result_actor_instance_test() ->
+    Instance = #beamtalk_object{class = 'MyTest', class_mod = my_test, pid = self()},
+    ?assertNot(beamtalk_test_case:is_valid_setUp_result(Instance, nil)).
