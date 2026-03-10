@@ -9,6 +9,18 @@
 //! variable state is preserved across blocks), normalises inline `// =>` assertions to
 //! next-line form, then hands the resulting btscript content to the same `EUnit` pipeline
 //! used by `test_stdlib`.
+//!
+//! ## Fixture support
+//!
+//! Markdown chapters can declare companion `.bt` fixture files with an HTML comment:
+//!
+//! ```markdown
+//! <!-- btfixture: fixtures/point.bt -->
+//! ```
+//!
+//! The runner resolves the path relative to the markdown file, injects a `// @load` directive
+//! into the generated btscript, and compiles the fixture before running assertions.
+//! Fixture files that contain `TestCase subclass:` are also run as `BUnit` test suites.
 
 use super::test_stdlib::{
     CompiledTestFile, compile_erl_files, compile_single_test_file, report_results,
@@ -16,6 +28,7 @@ use super::test_stdlib::{
 };
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
+use std::fmt::Write;
 use std::fs;
 use tracing::{info, instrument, warn};
 
@@ -149,6 +162,31 @@ pub(crate) fn normalize_inline_assertions(content: &str) -> String {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Fixture support
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Extract `<!-- btfixture: rel/path.bt -->` declarations from markdown content.
+///
+/// Returns paths as written (relative to the markdown file's directory).
+fn extract_fixture_paths(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix("<!-- btfixture:")
+                .and_then(|r| r.strip_suffix("-->"))
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+        })
+        .collect()
+}
+
+/// Returns `true` if Beamtalk source defines at least one `TestCase subclass:`.
+fn has_bunit_tests(content: &str) -> bool {
+    content.contains("TestCase subclass:")
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // File discovery
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -187,24 +225,89 @@ fn find_md_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 // Main entry point
 // ──────────────────────────────────────────────────────────────────────────
 
+/// A `BUnit` fixture file discovered via `<!-- btfixture: ... -->`.
+struct BunitFixture {
+    /// The markdown file that declared this fixture.
+    source_md: Utf8PathBuf,
+    /// Absolute path to the `.bt` fixture file.
+    fixture_path: Utf8PathBuf,
+}
+
+/// Results of extracting btscript files from markdown.
+struct ExtractionResult {
+    /// `(md_path, btscript_path)` for files that had runnable inline assertions.
+    pairs: Vec<(Utf8PathBuf, Utf8PathBuf)>,
+    /// Count of files that had beamtalk fences but all lacked `// =>` markers.
+    skipped_with_blocks: usize,
+    /// `BUnit` fixture modules that should be added to the `EUnit` test run
+    /// in addition to the inline-assertion modules.
+    bunit_fixtures: Vec<BunitFixture>,
+}
+
 /// Extract beamtalk code blocks from `.md` files and write synthetic `.btscript` files.
 ///
-/// Returns `(pairs, skipped_with_blocks)`:
-/// - `pairs` — `(md_path, btscript_path)` for files that had runnable assertions.
-/// - `skipped_with_blocks` — count of files that had beamtalk fences but all
-///   lacked `// =>` markers (so were silently excluded from the run).
+/// Fixture declarations (`<!-- btfixture: path.bt -->`) are resolved relative to each
+/// markdown file and injected as `// @load` directives in the generated btscript.
+/// Fixture files containing `TestCase subclass:` are tracked as `BUnit` test modules
+/// so the caller can include them in the `EUnit` run.
 fn extract_to_btscript_files(
     md_files: &[Utf8PathBuf],
     btscript_dir: &Utf8Path,
-) -> Result<(Vec<(Utf8PathBuf, Utf8PathBuf)>, usize)> {
+) -> Result<ExtractionResult> {
     let mut pairs: Vec<(Utf8PathBuf, Utf8PathBuf)> = Vec::new();
     let mut skipped_with_blocks = 0usize;
+    let mut bunit_fixtures: Vec<BunitFixture> = Vec::new();
+
     for md_file in md_files {
         let content = fs::read_to_string(md_file)
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to read '{md_file}'"))?;
+
+        // Resolve fixture declarations to absolute `// @load` directives.
+        let fixture_rel_paths = extract_fixture_paths(&content);
+        let md_dir = md_file.parent().unwrap_or(Utf8Path::new("."));
+
+        let mut load_preamble = String::new();
+        for rel_path in &fixture_rel_paths {
+            let fixture_path = md_dir.join(rel_path);
+            if !fixture_path.exists() {
+                miette::bail!(
+                    "btfixture '{rel_path}' declared in '{md_file}' not found \
+                     (resolved to '{fixture_path}')"
+                );
+            }
+            // Canonicalise so the path works regardless of CWD at compile time.
+            let abs_path = fixture_path
+                .canonicalize_utf8()
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!("Failed to canonicalise fixture path '{fixture_path}'")
+                })?;
+            let _ = writeln!(load_preamble, "// @load {abs_path}");
+
+            // If the fixture contains BUnit tests, record the module name so it
+            // gets added to the EUnit run (not just loaded).
+            let fixture_src = fs::read_to_string(&abs_path)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to read fixture '{abs_path}'"))?;
+            if has_bunit_tests(&fixture_src) {
+                bunit_fixtures.push(BunitFixture {
+                    source_md: md_file.clone(),
+                    fixture_path: abs_path.clone(),
+                });
+            }
+        }
+
         let extracted = extract_btscript_from_markdown(&content);
-        if extracted.trim().is_empty() {
+
+        // Combine load preamble with extracted inline assertions.
+        let combined = if load_preamble.is_empty() {
+            extracted
+        } else {
+            format!("{load_preamble}\n{extracted}")
+        };
+
+        if combined.trim().is_empty() {
             if has_beamtalk_blocks(&content) {
                 warn!(
                     "'{md_file}' has beamtalk code blocks but none contain `// =>` assertions — skipped"
@@ -213,7 +316,7 @@ fn extract_to_btscript_files(
             }
             continue;
         }
-        let normalised = normalize_inline_assertions(&extracted);
+        let normalised = normalize_inline_assertions(&combined);
         let stem = md_file
             .file_stem()
             .ok_or_else(|| miette::miette!("Markdown file has no stem: {md_file}"))?;
@@ -230,15 +333,65 @@ fn extract_to_btscript_files(
             .collect();
         // Prefix with a zero-padded index to prevent collisions when two distinct
         // filenames sanitise to the same safe_stem (e.g. "01-foo.md" and "01_foo.md"
-        // both become "01_foo").
-        let unique_stem = format!("{:03}_{safe_stem}", pairs.len());
+        // both become "01_foo"). The `doc` prefix ensures the stem (and thus the
+        // derived Erlang module name) always starts with a letter, which is required
+        // by the Erlang parser.
+        let unique_stem = format!("doc{:03}_{safe_stem}", pairs.len());
         let btscript_path = btscript_dir.join(format!("{unique_stem}.btscript"));
         fs::write(&btscript_path, &normalised)
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to write btscript for '{md_file}'"))?;
         pairs.push((md_file.clone(), btscript_path));
     }
-    Ok((pairs, skipped_with_blocks))
+
+    bunit_fixtures.sort_by(|a, b| a.fixture_path.cmp(&b.fixture_path));
+    bunit_fixtures.dedup_by(|a, b| a.fixture_path == b.fixture_path);
+
+    Ok(ExtractionResult {
+        pairs,
+        skipped_with_blocks,
+        bunit_fixtures,
+    })
+}
+
+/// Generate `EUnit` wrappers for `BUnit` fixture files so they can be run by `EUnit`.
+///
+/// `BUnit` `.bt` files compile to Beamtalk class modules (via `compile_fixture`),
+/// but `EUnit` needs a wrapper that creates instances and dispatches test methods.
+/// This function discovers `TestCase` subclasses in each fixture, generates the
+/// corresponding `.erl` wrappers, and registers them for compilation and execution.
+fn generate_bunit_wrappers(
+    bunit_fixtures: &[BunitFixture],
+    build_dir: &Utf8Path,
+    all_erl_files: &mut Vec<Utf8PathBuf>,
+    compiled_files: &mut Vec<CompiledTestFile>,
+) -> Result<()> {
+    for fixture in bunit_fixtures {
+        let (test_classes, _loads) = super::test::discover_test_classes(&fixture.fixture_path)
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to discover test classes in '{}'",
+                    fixture.fixture_path
+                )
+            })?;
+
+        for test_class in &test_classes {
+            let eunit_module = format!("{}_tests", test_class.module_name);
+            let erl_source =
+                super::test::generate_eunit_wrapper(test_class, fixture.fixture_path.as_str());
+            let erl_file = build_dir.join(format!("{eunit_module}.erl"));
+            fs::write(&erl_file, &erl_source)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to write EUnit wrapper for '{eunit_module}'"))?;
+            all_erl_files.push(erl_file);
+            compiled_files.push(CompiledTestFile {
+                source_file: fixture.source_md.clone(),
+                module_name: eunit_module,
+                assertion_count: test_class.test_methods.len(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Run doctests extracted from Markdown files.
@@ -278,10 +431,12 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
         .into_diagnostic()
         .wrap_err("Failed to create btscript staging directory")?;
 
-    let (btscript_files, skipped_with_blocks) =
-        extract_to_btscript_files(&md_files, &btscript_dir)?;
+    let extraction = extract_to_btscript_files(&md_files, &btscript_dir)?;
+    let btscript_files = extraction.pairs;
+    let skipped_with_blocks = extraction.skipped_with_blocks;
+    let bunit_fixtures = extraction.bunit_fixtures;
 
-    if btscript_files.is_empty() {
+    if btscript_files.is_empty() && bunit_fixtures.is_empty() {
         if skipped_with_blocks > 0 {
             miette::bail!(
                 "No runnable doctests found in '{test_path}': {skipped_with_blocks} file(s) had \
@@ -323,6 +478,14 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
     all_fixture_modules.sort();
     all_fixture_modules.dedup();
 
+    // Phase 1b: Generate EUnit wrappers for BUnit fixture files.
+    generate_bunit_wrappers(
+        &bunit_fixtures,
+        &build_dir,
+        &mut all_erl_files,
+        &mut compiled_files,
+    )?;
+
     // Phase 2: Batch compile all .core → .beam
     if !all_core_files.is_empty() {
         let compiler = crate::beam_compiler::BeamCompiler::new(build_dir.clone());
@@ -335,6 +498,8 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
     compile_erl_files(&all_erl_files, &build_dir)?;
 
     // Phase 4: Run all EUnit test modules in a single BEAM process
+    // Include both inline-assertion modules and BUnit fixture modules.
+    // BUnit fixtures are already in compiled_files, so just collect all module names.
     let test_module_names: Vec<&str> = compiled_files
         .iter()
         .map(|f| f.module_name.as_str())
@@ -350,10 +515,11 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
     )?;
 
     // Phase 5: Report results
+    let file_count = btscript_files.len() + bunit_fixtures.len();
     report_results(
         &compiled_files,
         &eunit_result,
-        btscript_files.len(),
+        file_count,
         total_tests,
         quiet,
     )

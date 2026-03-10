@@ -10,7 +10,7 @@ Send `ifTrue:` to a boolean with a block. The block runs if the boolean is true.
 
 ```beamtalk
 true ifTrue: ["yes"]   // => yes
-false ifTrue: ["yes"]  // => false       (ifTrue: returns the receiver when the condition is false)
+false ifTrue: ["yes"]  // => false
 ```
 
 `ifFalse:` — runs the block when false:
@@ -27,22 +27,11 @@ true ifTrue: ["yes"] ifFalse: ["no"]   // => yes
 false ifTrue: ["yes"] ifFalse: ["no"]  // => no
 ```
 
-`ifFalse:ifTrue:` — reversed (rare but valid):
-
-```beamtalk
-false ifFalse: ["no"] ifTrue: ["yes"]  // => no
-```
-
 The result of `ifTrue:ifFalse:` is the value of whichever block ran:
 
 ```beamtalk
-score := 85   // => _
-grade := score >= 90
-  ifTrue: ["A"]
-  ifFalse: [score >= 80
-    ifTrue: ["B"]
-    ifFalse: ["C"]]
-// => _
+score := 85  // => _
+grade := (score >= 90) ifTrue: ["A"] ifFalse: [(score >= 80) ifTrue: ["B"] ifFalse: ["C"]]  // => _
 grade  // => B
 ```
 
@@ -80,14 +69,8 @@ Building a result inside `whileTrue:`:
 ```beamtalk
 result := 0  // => _
 k := 1       // => _
-
-[k <= 10] whileTrue: [
-  result := result + k
-  k := k + 1
-]
-// => _
-
-result  // => 55       (sum 1..10)
+[k <= 10] whileTrue: [result := result + k. k := k + 1]  // => _
+result  // => 55
 ```
 
 ## timesRepeat:
@@ -115,7 +98,7 @@ sum                                    // => 15
 ```beamtalk
 evens := 0                                 // => _
 2 to: 10 by: 2 do: [:n | evens := evens + n]  // => _
-evens                                      // => 30       (2+4+6+8+10)
+evens                                      // => 30
 ```
 
 Counting down (negative step):
@@ -123,14 +106,14 @@ Counting down (negative step):
 ```beamtalk
 countdown := 0                                    // => _
 5 to: 1 by: -1 do: [:n | countdown := countdown + n]  // => _
-countdown                                         // => 15       (5+4+3+2+1)
+countdown                                         // => 15
 ```
 
 `to:collect:` — build an array from a range:
 
 ```beamtalk
 squares := (1 to: 5) collect: [:n | n * n]  // => _
-squares                                      // => #[1, 4, 9, 16, 25]
+squares                                      // => [1,4,9,16,25]
 ```
 
 ## and: / or: — short-circuit boolean logic
@@ -147,30 +130,20 @@ x > 0 or: [x < 0]    // => true
 Without short-circuit (the block is not evaluated when not needed):
 
 ```beamtalk
-false and: [1/0]   // => false   (the division block never runs)
-true or: [1/0]     // => true    (the division block never runs)
+false and: [1/0]   // => false
+true or: [1/0]     // => true
 ```
 
-## Case-like dispatch: caseOf:
+## Case-like dispatch: match:
 
-Use `caseOf:` for switch/case-style dispatch on a value:
+Use `match:` for switch/case-style dispatch on a value.
+Arms are separated by `;`, with `->` between pattern and result.
+A `_` wildcard arm acts as the default/otherwise case.
 
 ```beamtalk
 day := #monday  // => _
-
-day caseOf: {
-  [#monday]    -> ["Start of work week"],
-  [#friday]    -> ["End of work week"],
-  [#saturday]  -> ["Weekend!"],
-  [#sunday]    -> ["Weekend!"]
-} otherwise: ["Midweek"]
-// => Start of work week
-
-#wednesday caseOf: {
-  [#monday] -> ["Monday"],
-  [#friday] -> ["Friday"]
-} otherwise: ["Other day"]
-// => Other day
+(day match: [#monday -> "Start of work week"; #friday -> "End of work week"; #saturday -> "Weekend!"; #sunday -> "Weekend!"; _ -> "Midweek"])  // => Start of work week
+(#wednesday match: [#monday -> "Monday"; #friday -> "Friday"; _ -> "Other day"])  // => Other day
 ```
 
 ## Early exit with `^`
@@ -228,7 +201,7 @@ bool or: [...]    (short-circuit)
 Dispatch:
 
 ```
-val caseOf: {...} otherwise: [...]
+val match: [pattern -> result; pattern -> result; _ -> default]
 ```
 
 Next: Chapter 9 — Collections

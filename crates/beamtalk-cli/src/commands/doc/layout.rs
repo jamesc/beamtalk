@@ -25,7 +25,8 @@ pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
         String::new()
     } else {
         format!(
-            "<a href=\"{nav_prefix}docs/installation.html\">Getting Started</a>\n\
+            "<a href=\"{nav_prefix}docs/installation.html\">Installation</a>\n\
+             <a href=\"{nav_prefix}learning/\">Getting Started</a>\n\
              <a href=\"{nav_prefix}docs/\">Documentation</a>\n\
              <a href=\"{nav_prefix}apidocs/\">Standard Library</a>\n"
         )

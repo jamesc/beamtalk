@@ -333,6 +333,9 @@ fn analyse_full(
         &mut result.diagnostics,
     );
 
+    // BT-1299: Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
+    validators::check_match_exhaustiveness(module, &mut result.diagnostics);
+
     // BT-951/BT-979: Lint on effect-free statements (suppressed during normal compile).
     // Module-level expressions are checked by default; set skip_module_expression_lint
     // to opt out (bootstrap-test compilation uses this).

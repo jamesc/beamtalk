@@ -144,7 +144,6 @@ mod tests {
             version: version.to_string(),
             description: description.map(String::from),
             licenses: None,
-            start: None,
         }
     }
 

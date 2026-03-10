@@ -104,11 +104,37 @@ impl Parser {
         // Parse class name
         let name = self.parse_identifier("Expected class name");
 
+        // Parse optional `native: module_name` (ADR 0056)
+        let mut native_span = None;
+        let backing_module = if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "native:")
+        {
+            self.advance(); // consume `native:`
+            if self.current_token().has_leading_newline() {
+                // Module name must be on the same line as `native:`
+                self.error("Expected Erlang module name after 'native:'");
+                None
+            } else if let TokenKind::Identifier(module_name) = self.current_kind() {
+                let module_name = module_name.to_string();
+                native_span = Some(self.current_token().span());
+                self.advance(); // consume module name
+                Some(module_name)
+            } else {
+                self.error("Expected Erlang module name after 'native:'");
+                self.advance(); // skip invalid token so class-body parsing can recover
+                None
+            }
+        } else {
+            None
+        };
+
         // Parse class body (state declarations, instance methods, class methods, class variables)
         let (state, methods, class_methods, class_variables) = self.parse_class_body();
 
         // Determine end span: max of last instance method, class method, state, class var, or name
         let mut end = name.span;
+        if let Some(ns) = native_span {
+            end = end.merge(ns);
+        }
         if let Some(s) = state.last() {
             end = end.merge(s.span);
         }
@@ -137,6 +163,7 @@ impl Parser {
         class_def.class_variables = class_variables;
         class_def.doc_comment = doc_comment;
         class_def.comments = comments;
+        class_def.backing_module = backing_module;
         class_def
     }
 

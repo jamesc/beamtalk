@@ -23,24 +23,24 @@ TestCase subclass: Ch12Exceptions
     self assert: (result startsWith: "caught:")
 
   testCatchDivisionByZero =>
-    // ZeroDivide is a subclass of Error:
-    result := [10 / 0] on: ZeroDivide do: [:e | -1]
+    // Division by zero raises a runtime exception — catch with Exception:
+    result := [10 / 0] on: Exception do: [:e | -1]
     self assert: result equals: -1
 
   testDoesNotUnderstand =>
-    // Sending an unknown message raises doesNotUnderstand:
-    result := [42 bogusMessage] on: MessageNotUnderstood do: [:e | #caught]
+    // Sending an unknown message raises does_not_understand (a RuntimeError):
+    result := [42 bogusMessage] on: RuntimeError do: [:e | #caught]
     self assert: result equals: #caught
 
   testUncaughtExceptionPropagates =>
     // When the on:do: class doesn't match, the exception propagates:
     self should: [
-      [42 bogusMessage] on: ZeroDivide do: [:e | #wrong]
+      [42 bogusMessage] on: TypeError do: [:e | #wrong]
     ] raise: #does_not_understand
 
-  testOnDoWithMultipleExceptionTypes =>
-    // Catch either type:
-    r1 := [1 / 0] on: ZeroDivide, Error do: [:e | #caught]
+  testOnDoWithException =>
+    // Catch any exception:
+    r1 := [1 / 0] on: Exception do: [:e | #caught]
     self assert: r1 equals: #caught
 
   testEnsure =>
@@ -52,13 +52,13 @@ TestCase subclass: Ch12Exceptions
   testEnsureRunsOnException =>
     ran := false
     [
-      [1 / 0] on: ZeroDivide do: [:e | nil]
+      [1 / 0] on: Exception do: [:e | nil]
     ] ensure: [ran := true]
     self assert: ran
 
   testErrorMessageText =>
     // Exception objects have messageText:
-    text := [42 bogusMessage] on: MessageNotUnderstood do: [:e | e messageText]
+    text := [42 bogusMessage] on: RuntimeError do: [:e | e messageText]
     self assert: (text isKindOf: String)
 ```
 
@@ -161,7 +161,7 @@ TestCase subclass: Ch12DNU
     self assert: result equals: "false"
 
   testDNUCaught =>
-    result := [42 bogusMessage] on: MessageNotUnderstood do: [:e | #caught]
+    result := [42 bogusMessage] on: RuntimeError do: [:e | #caught]
     self assert: result equals: #caught
 ```
 
@@ -198,7 +198,8 @@ TestCase subclass: Ch12Validator
 **Exceptions:**
 
 ```
-[code] on: ExceptionClass do: [:e | handler]
+[code] on: Exception do: [:e | handler]
+[code] on: RuntimeError do: [:e | handler]
 [code] ensure: [always-runs]
 self error: "message"
 ```

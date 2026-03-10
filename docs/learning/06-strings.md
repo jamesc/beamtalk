@@ -48,7 +48,7 @@ items := #[1, 2, 3]           // => _
 Escape `{` with `\{` to suppress interpolation:
 
 ```beamtalk
-"Literal: \{name\}"  // => Literal: \{name\}
+"Literal: \{name\}"  // => Literal: {name}
 ```
 
 ## Size and indexing
@@ -57,8 +57,8 @@ Escape `{` with `\{` to suppress interpolation:
 
 ```beamtalk
 "hello" size  // => 5
-"café" size   // => 4        (not 5 bytes)
-"🌍" size     // => 1        (one emoji grapheme, even though it's multiple bytes)
+"café" size   // => 4
+"🌍" size     // => 1
 ```
 
 Access individual characters (1-based indexing):
@@ -75,16 +75,16 @@ Access individual characters (1-based indexing):
 "Hello" ++ ", " ++ "World!"  // => Hello, World!
 ```
 
-Join an array of strings with a separator:
+Join a list of strings with a separator:
 
 ```beamtalk
-#["a", "b", "c"] join: ", "        // => a, b, c
-#["Hello", " ", "World"] join: ""  // => Hello World
+#("a", "b", "c") join: ", "        // => a, b, c
+#("Hello", " ", "World") join: ""  // => Hello World
 ```
 
-Repeat a string:
+Repeat a string using `*`:
 
-```beamtalk
+```text
 "ab" * 3  // => ababab
 ```
 
@@ -95,7 +95,7 @@ Repeat a string:
 "hello world" includesSubstring: "xyz"    // => false
 "hello" startsWith: "hel"                 // => true
 "hello" endsWith: "llo"                   // => true
-"hello" indexOf: $l                       // => 3        (first occurrence, 1-based)
+"hello" indexOf: "l"                      // => 3
 "" isEmpty                                // => true
 "hello" isEmpty                           // => false
 "hello" isNotEmpty                        // => true
@@ -117,27 +117,26 @@ Unicode-aware (German sharp-s):
 ## Trimming
 
 ```beamtalk
-"  hello  " trimSeparators   // => hello
-"  hello  " withBlanksTrimmed  // => hello
+"  hello  " trim  // => hello
 ```
 
 ## Splitting
 
 ```beamtalk
-"a,b,c" substrings: ","          // => #[a, b, c]
-"hello world foo" substrings: " "  // => #[hello, world, foo]
+"a,b,c" split: ","           // => ["a","b","c"]
+"hello world foo" split: " "  // => ["hello","world","foo"]
 ```
 
 Split on any whitespace:
 
 ```beamtalk
-"hello   world" substrings  // => #[hello, world]
+"hello   world" words  // => ["hello","world"]
 ```
 
 ## Replacing
 
 ```beamtalk
-"hello world" copyReplaceAll: "world" with: "Beamtalk"  // => hello Beamtalk
+"hello world" replaceAll: "world" with: "Beamtalk"  // => hello Beamtalk
 ```
 
 ## Conversion
@@ -156,27 +155,18 @@ Number to string:
 3.14 printString  // => 3.14
 ```
 
-Symbol to/from string:
+Symbol to string:
 
 ```beamtalk
 #hello asString   // => hello
-"hello" asSymbol  // => hello
 ```
 
 ## Character access
 
-Iterate over characters with `each:` or `do:`:
+Collect characters into a new collection (returns a List):
 
 ```beamtalk
-count := 0                             // => _
-"hello" do: [:ch | count := count + 1]  // => _
-count                                  // => 5
-```
-
-Collect characters into a new collection:
-
-```beamtalk
-"hello" collect: [:ch | ch uppercase]  // => HELLO
+"hello" collect: [:ch | ch uppercase]  // => ["H","E","L","L","O"]
 ```
 
 ## Multiline strings
@@ -185,7 +175,7 @@ There is no multi-line string literal syntax. Use `++` to concatenate lines:
 
 ```beamtalk
 multiline := "line 1" ++ "\n" ++ "line 2" ++ "\n" ++ "line 3"  // => _
-multiline size  // => 20
+multiline size  // => 22
 ```
 
 ## Summary
@@ -195,8 +185,8 @@ multiline size  // => 20
 - Concatenation: `"a" ++ "b"`
 - Size: `str size` (grapheme clusters)
 - Search: `includesSubstring:`, `startsWith:`, `endsWith:`, `indexOf:`
-- Transform: `uppercase`, `lowercase`, `trimSeparators`, `copyReplaceAll:with:`
-- Split/Join: `substrings:`, `join:`
-- Convert: `asInteger`, `asFloat`, `asSymbol`, `printString`
+- Transform: `uppercase`, `lowercase`, `trim`, `replaceAll:with:`
+- Split/Join: `split:`, `words`, `join:`
+- Convert: `asInteger`, `asFloat`, `printString`
 
 Next: Chapter 7 — Blocks

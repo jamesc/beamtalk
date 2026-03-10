@@ -28,7 +28,7 @@ A unary message has no arguments. It's just a word sent to an object.
 42 isZero     // => false
 -5 abs        // => 5
 "hello" size  // => 5
-"hello" reversed  // => olleh
+"hello" reverse  // => olleh
 "hello" uppercase  // => HELLO
 true not      // => false
 ```
@@ -60,7 +60,7 @@ but within binary messages Beamtalk uses **standard math precedence**
 This is the biggest syntactic departure from Smalltalk:
 
 ```beamtalk
-2 + 3 * 4  // => 14     (multiplication before addition, as in most languages)
+2 + 3 * 4  // => 14
 ```
 
 In classic Smalltalk, this would be 20 (strict left-to-right).
@@ -115,7 +115,7 @@ More examples:
 
 ```beamtalk
 #[1, 2, 3, 4, 5] inject: 0 into: [:sum :each | sum + each]  // => 15
-"a,b,c" substrings: ","                                      // => #[a, b, c]
+"a,b,c" split: ","                                           // => ["a","b","c"]
 ```
 
 ## Message precedence: the full picture
@@ -132,7 +132,7 @@ than keyword.
 Unary before binary:
 
 ```beamtalk
-2 + 3 factorial  // => 8        (factorial first: 3 factorial = 6, then 2 + 6)
+2 + 3 factorial  // => 8
 ```
 
 Binary before keyword — the keyword message receives the result of the binary expression:
@@ -160,10 +160,11 @@ If you want binary to happen after keyword, use parentheses:
 A cascade sends multiple messages to the *same receiver* using semicolons.
 The result of a cascade is the result of the last message.
 
-With cascade (all go to `Transcript`):
+With cascade (all go to the same array):
 
 ```beamtalk
-Transcript show: "a"; show: "b"; show: "c"  // => _
+a := #[1, 2, 3]               // => _
+a includes: 1; includes: 2    // => true
 ```
 
 Cascade is especially useful for building up state (shown more in chapter 9 with collections).

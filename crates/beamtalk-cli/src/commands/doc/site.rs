@@ -729,6 +729,38 @@ fn render_learning_index(chapters: &[ChapterInfo], learning_output: &Utf8Path) -
     Ok(())
 }
 
+/// Build the prev / up / next navigation bar for a chapter page.
+fn chapter_nav(prev: Option<&ChapterInfo>, next: Option<&ChapterInfo>) -> String {
+    let mut html = String::from("<nav class=\"chapter-nav\">\n");
+
+    if let Some(p) = prev {
+        let _ = writeln!(
+            html,
+            "<a class=\"chapter-nav-prev\" href=\"{file}\">← {title}</a>",
+            file = p.output_file,
+            title = html_escape(&p.title),
+        );
+    } else {
+        html.push_str("<span class=\"chapter-nav-placeholder\"></span>\n");
+    }
+
+    html.push_str("<a class=\"chapter-nav-up\" href=\"index.html\">↑ Contents</a>\n");
+
+    if let Some(n) = next {
+        let _ = writeln!(
+            html,
+            "<a class=\"chapter-nav-next\" href=\"{file}\">{title} →</a>",
+            file = n.output_file,
+            title = html_escape(&n.title),
+        );
+    } else {
+        html.push_str("<span class=\"chapter-nav-placeholder\"></span>\n");
+    }
+
+    html.push_str("</nav>\n");
+    html
+}
+
 /// Render a single chapter page.
 fn render_chapter_page(
     chapter: &ChapterInfo,
@@ -736,6 +768,13 @@ fn render_chapter_page(
     content: &str,
     learning_output: &Utf8Path,
 ) -> Result<()> {
+    let idx = all_chapters
+        .iter()
+        .position(|c| c.output_file == chapter.output_file)
+        .unwrap_or(0);
+    let prev = idx.checked_sub(1).map(|i| &all_chapters[i]);
+    let next = all_chapters.get(idx + 1);
+
     let page_title = format!("{} — Beamtalk", chapter.title);
     let mut html = String::new();
     html.push_str(&page_header(&page_title, "../style.css", "../"));
@@ -748,7 +787,9 @@ fn render_chapter_page(
     html.push_str("<a href=\"index.html\">Learn Beamtalk</a> &rsaquo; ");
     html.push_str(&html_escape(&chapter.title));
     html.push_str("</div>\n");
+    html.push_str(&chapter_nav(prev, next));
     html.push_str(&render_doc(content));
+    html.push_str(&chapter_nav(prev, next));
     html.push_str("</main>\n");
     html.push_str(&page_footer_simple());
 

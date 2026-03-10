@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for docs/learning/10-value-classes.md
+
+Value subclass: Money
+  state: amount = 0
+  state: currency = #USD
+
+  amount => self.amount
+  currency => self.currency
+
+  add: other =>
+    other currency =:= self.currency
+      ifFalse: [^self error: "Currency mismatch"]
+    Money amount: (self.amount + other amount) currency: self.currency
+
+  printString => "{self.amount} {self.currency}"
