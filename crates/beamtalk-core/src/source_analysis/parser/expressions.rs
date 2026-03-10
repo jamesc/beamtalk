@@ -1314,6 +1314,11 @@ impl Parser {
         let mut end_span = start;
 
         while let TokenKind::Keyword(kw) = self.current_kind() {
+            // `when:` is the guard keyword for match arms — stop here so the
+            // enclosing match arm parser can handle the guard clause.
+            if kw.as_str() == "when:" {
+                break;
+            }
             let kw = kw.clone();
             self.advance(); // consume keyword
             let binding = self.parse_constructor_binding();

@@ -113,3 +113,16 @@ TestCase subclass: PatternMatchingTest
       Result ok: _ -> "other";
       Result error: _ -> "err"
     ]) equals: "other"
+
+  testConstructorPatternWithGuard =>
+    // when: guard must not be consumed as a constructor keyword (BT-1297 bug fix)
+    self assert: ((Result ok: 5) match: [
+      Result ok: v when: [v > 3] -> "big";
+      Result ok: _ -> "small";
+      Result error: _ -> "err"
+    ]) equals: "big"
+    self assert: ((Result ok: 1) match: [
+      Result ok: v when: [v > 3] -> "big";
+      Result ok: _ -> "small";
+      Result error: _ -> "err"
+    ]) equals: "small"
