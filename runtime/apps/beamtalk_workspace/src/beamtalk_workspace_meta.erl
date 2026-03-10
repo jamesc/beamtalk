@@ -50,14 +50,27 @@
     last_activity :: integer(),
     node_name :: atom(),
     repl_port :: inet:port_number() | undefined,
+    repl :: boolean(),
     supervised_actors :: [pid()],
     loaded_modules :: #{atom() => string() | undefined},
     class_sources :: #{binary() => string()},
-    metadata_path :: string(),
+    metadata_path :: string() | undefined,
     persist_timer :: reference() | undefined,
     monitor_refs :: #{pid() => reference()}
 }).
 
+%% init_metadata/0 is the input contract for start_link/1.
+%% It extends metadata() with init-only fields (repl) that are consumed during
+%% initialisation and not exposed through get_metadata/0.
+-type init_metadata() :: #{
+    workspace_id := binary(),
+    project_path => binary() | undefined,
+    created_at := integer(),
+    repl_port => inet:port_number() | undefined,
+    repl => boolean()
+}.
+
+%% metadata/0 is the output contract returned by get_metadata/0.
 -type metadata() :: #{
     workspace_id => binary(),
     project_path => binary() | undefined,
@@ -70,12 +83,12 @@
     loaded_modules => [atom()]
 }.
 
--export_type([metadata/0]).
+-export_type([init_metadata/0, metadata/0]).
 
 %%% Public API
 
 %% @doc Start the workspace metadata server.
--spec start_link(metadata()) -> {ok, pid()} | {error, term()}.
+-spec start_link(init_metadata()) -> {ok, pid()} | {error, term()}.
 start_link(InitialMetadata) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, InitialMetadata, []).
 
@@ -225,6 +238,7 @@ init(InitialMetadata) ->
     PackageName = detect_package_name(ProjectPath),
     CreatedAt = maps:get(created_at, InitialMetadata),
     ReplPort = maps:get(repl_port, InitialMetadata, undefined),
+    ReplMode = maps:get(repl, InitialMetadata, true),
     Now = erlang:system_time(second),
 
     %% Create ETS table for workspace registry (if not already exists)
@@ -238,25 +252,30 @@ init(InitialMetadata) ->
             ok
     end,
 
-    %% Compute metadata path
+    %% Compute metadata path — undefined in run mode (repl=false) so no disk registration.
     MetadataPath =
-        case beamtalk_platform:home_dir() of
+        case ReplMode of
             false ->
-                CacheDir = filename:basedir(user_cache, "beamtalk"),
-                filename:join([
-                    CacheDir,
-                    "workspaces",
-                    binary_to_list(WorkspaceId),
-                    "metadata.json"
-                ]);
-            Home ->
-                filename:join([
-                    Home,
-                    ".beamtalk",
-                    "workspaces",
-                    binary_to_list(WorkspaceId),
-                    "metadata.json"
-                ])
+                undefined;
+            true ->
+                case beamtalk_platform:home_dir() of
+                    false ->
+                        CacheDir = filename:basedir(user_cache, "beamtalk"),
+                        filename:join([
+                            CacheDir,
+                            "workspaces",
+                            binary_to_list(WorkspaceId),
+                            "metadata.json"
+                        ]);
+                    Home ->
+                        filename:join([
+                            Home,
+                            ".beamtalk",
+                            "workspaces",
+                            binary_to_list(WorkspaceId),
+                            "metadata.json"
+                        ])
+                end
         end,
 
     State = #state{
@@ -267,6 +286,7 @@ init(InitialMetadata) ->
         last_activity = Now,
         node_name = node(),
         repl_port = ReplPort,
+        repl = ReplMode,
         supervised_actors = [],
         loaded_modules = #{},
         class_sources = #{},
@@ -394,6 +414,9 @@ code_change(_OldVsn, State, _Extra) ->
 %% @private
 %% Schedule a debounced persist to disk.
 %% Cancels any pending timer and resets the debounce window.
+%% No-op in run mode (metadata_path = undefined).
+schedule_persist(#state{metadata_path = undefined} = State) ->
+    State;
 schedule_persist(#state{persist_timer = OldTimer} = State) ->
     case OldTimer of
         undefined -> ok;
@@ -412,7 +435,10 @@ store_state_in_ets(State) ->
     end.
 
 %% @private
-%% Load metadata from disk if available
+%% Load metadata from disk if available.
+%% Skipped in run mode (metadata_path = undefined).
+load_metadata_from_disk(#state{metadata_path = undefined} = State) ->
+    State;
 load_metadata_from_disk(State) ->
     Path = State#state.metadata_path,
     case file:read_file(Path) of
@@ -517,7 +543,10 @@ load_metadata_from_disk(State) ->
     end.
 
 %% @private
-%% Persist metadata to disk in JSON format
+%% Persist metadata to disk in JSON format.
+%% Skipped in run mode (metadata_path = undefined — no workspace registration).
+persist_metadata_to_disk(#state{metadata_path = undefined}) ->
+    ok;
 persist_metadata_to_disk(State) ->
     Path = State#state.metadata_path,
     %% Ensure directory exists
