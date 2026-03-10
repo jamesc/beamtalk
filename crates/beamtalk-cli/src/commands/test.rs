@@ -170,12 +170,23 @@ fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> Stri
 
         // setUp (if defined)
         // For value objects (immutable maps), setUp returns a new instance with modified fields.
-        // We must capture that return value and use it for the test method.
+        // BT-1293: We must validate the setUp return value before using it as self. When setUp
+        // ends with an untaken conditional (e.g. `false ifTrue: [...]`), the return value is
+        // `false`/`nil` rather than self — using that as the dispatch receiver corrupts all
+        // subsequent test method dispatches with a DNU error. Only accept the return value when
+        // it is a map of the same class; otherwise fall back to the original Instance.
         let instance_var = if has_setup {
             let _ = writeln!(
                 erl,
-                "        Instance1 = '{bt_module}':dispatch('setUp', [], Instance),"
+                "        SetUpResult = '{bt_module}':dispatch('setUp', [], Instance),"
             );
+            let _ = writeln!(
+                erl,
+                "        Instance1 = case beamtalk_test_case:is_valid_setUp_result(Instance, SetUpResult) of"
+            );
+            let _ = writeln!(erl, "            true -> SetUpResult;");
+            let _ = writeln!(erl, "            false -> Instance");
+            let _ = writeln!(erl, "        end,");
             "Instance1"
         } else {
             "Instance"
@@ -1793,7 +1804,14 @@ mod tests {
         };
 
         let wrapper = generate_eunit_wrapper(&test_class, "test/my_test.bt");
-        assert!(wrapper.contains("Instance1 = 'bt@my_test':dispatch('setUp', [], Instance)"));
+        // BT-1293: setUp return is validated before use — check the new pattern
+        assert!(wrapper.contains("SetUpResult = 'bt@my_test':dispatch('setUp', [], Instance)"));
+        assert!(
+            wrapper.contains("beamtalk_test_case:is_valid_setUp_result(Instance, SetUpResult)")
+        );
+        assert!(wrapper.contains("Instance1 = case beamtalk_test_case:is_valid_setUp_result"));
+        assert!(wrapper.contains("true -> SetUpResult"));
+        assert!(wrapper.contains("false -> Instance"));
         assert!(wrapper.contains("try"));
         assert!(wrapper.contains("after"));
         assert!(wrapper.contains("dispatch('tearDown', [], Instance1)"));
