@@ -1823,11 +1823,8 @@ impl CoreErlangGenerator {
         let is_control_flow = match dispatch_kind {
             crate::semantic_analysis::DispatchKind::ControlFlow => true,
             crate::semantic_analysis::DispatchKind::Unknown => {
-                crate::codegen::core_erlang::state_threading_selectors::is_exception_selector(
-                    sel_str.as_str(),
-                ) || crate::codegen::core_erlang::state_threading_selectors::is_conditional_selector(
-                    sel_str.as_str(),
-                )
+                crate::state_threading_selectors::is_exception_selector(sel_str.as_str())
+                    || crate::state_threading_selectors::is_conditional_selector(sel_str.as_str())
             }
             _ => false,
         };
@@ -1837,9 +1834,7 @@ impl CoreErlangGenerator {
 
         // BT-410: For on:do: and ensure:, the receiver (try body) is also
         // a block that may contain field mutations.
-        if crate::codegen::core_erlang::state_threading_selectors::is_exception_selector(
-            sel_str.as_str(),
-        ) {
+        if crate::state_threading_selectors::is_exception_selector(sel_str.as_str()) {
             if let Expression::Block(block) = receiver.as_ref() {
                 // Use pre-computed block profile when available.
                 let analysis = self
@@ -1855,9 +1850,7 @@ impl CoreErlangGenerator {
 
         // BT-915: For Boolean conditionals, any block argument may contain mutations.
         // BT-1226: ifNotNil: also needs per-block mutation detection.
-        if crate::codegen::core_erlang::state_threading_selectors::is_conditional_selector(
-            sel_str.as_str(),
-        ) {
+        if crate::state_threading_selectors::is_conditional_selector(sel_str.as_str()) {
             for arg in arguments {
                 if let Expression::Block(block) = arg {
                     let analysis = self
