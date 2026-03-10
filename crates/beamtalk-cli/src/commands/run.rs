@@ -467,6 +467,7 @@ fn ensure_otp_app_in_workspace(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::fs;
     use tempfile::TempDir;
 
@@ -492,6 +493,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_run_no_manifest() {
         let temp = TempDir::new().unwrap();
         let src_path = temp.path().join("src");
@@ -508,6 +510,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_run_dot_no_application() {
         let temp = TempDir::new().unwrap();
         create_test_project_with_manifest(
@@ -525,6 +528,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_run_class_missing_selector() {
         let temp = TempDir::new().unwrap();
         create_test_project_with_manifest(
@@ -542,6 +546,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_run_invalid_class_name_lowercase() {
         let temp = TempDir::new().unwrap();
         create_test_project_with_manifest(
@@ -565,6 +570,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_run_with_syntax_error() {
         let temp = TempDir::new().unwrap();
         let src_path = temp.path().join("src");
@@ -581,6 +587,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_run_old_package_start_field_ignored() {
         // Old [package] start = "module" manifests should parse without error
         // (TOML ignores unknown fields); `run "."` then fails with no-entry-point error.
