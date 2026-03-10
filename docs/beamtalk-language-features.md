@@ -1523,7 +1523,7 @@ someObject unknownMessage   // DNU hint suppressed
 x := computeSomething       // unused-variable warning suppressed
 
 @expect self_capture
-self.items collect: [:x | self process: x]  // self-capture warning suppressed
+self.items collect: [:x | self process: x]  // self-capture hint suppressed
 
 @expect all
 anything                    // any diagnostic suppressed (discouraged — use a specific category)
