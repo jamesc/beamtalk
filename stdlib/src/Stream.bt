@@ -105,9 +105,19 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) inject: 0 into: [:sum :n | sum + n]  // => 6
   /// ```
-  inject: initial into: block :: Block => (Erlang beamtalk_stream)
+  inject: initial into: block :: Block =>
+    (Erlang beamtalk_stream)
+      inject: self
+      init: initial
+      into: block
 
-  inject: self init: initial into: block detect: predicate :: Block =>
+  /// Return first element matching predicate, or nil (terminal).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream on: #(1, 2, 3, 4)) detect: [:n | n > 2]  // => 3
+  /// ```
+  detect: predicate :: Block =>
     (Erlang beamtalk_stream) detect: self with: predicate
 
   /// Materialize entire stream to a List (terminal).

@@ -736,10 +736,29 @@ impl Parser {
         // state declaration, class definition, or standalone method definition
         // BT-903: When inside a class body, a token at column 0 after a newline
         // is outside the class body (trailing expression). Break to avoid consuming it.
+        //
+        // BT-1294: Guard `is_at_method_definition()` with an indentation check.
+        // After the formatter breaks 3+ keyword messages onto their own indented
+        // lines, continuation keywords appear at col 4–6 inside the method body.
+        // `is_at_method_definition()` does a wide lookahead and can find `-> Type =>`
+        // from the *next* method's signature, causing a false positive that exits
+        // the body early and treats continuation keywords as a new method selector.
+        // When `in_class_body` is true, canonical class members start at col 2;
+        // any token deeper than col 2 is part of an expression, never a member.
         #[allow(clippy::nonminimal_bool)]
         while !self.is_at_end()
             && !self.is_at_class_definition()
-            && !self.is_at_method_definition()
+            && !(
+                // Only test is_at_method_definition when the token could plausibly
+                // be a class member (indentation <= 2). Deeper tokens are continuation
+                // expressions and must not trigger early exit from the method body.
+                (!self.in_class_body
+                    || self
+                        .current_token()
+                        .indentation_after_newline()
+                        .is_none_or(|col| col <= 2))
+                    && self.is_at_method_definition()
+            )
             && !self.is_at_standalone_method_definition()
             && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
