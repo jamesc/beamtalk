@@ -14,7 +14,9 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{
+    Error as WsError, Message, error::ProtocolError as WsProtocolError,
+};
 use tracing::instrument;
 
 /// Default timeout for REPL I/O operations.
@@ -450,11 +452,21 @@ impl ReplClient {
         self.send_once(&request).await
     }
 
-    /// Send a JSON request and receive a JSON response **without retrying**.
+    /// Send a JSON request and receive a JSON response for non-idempotent operations.
     ///
-    /// Suitable for non-idempotent operations where a retry after partial
-    /// success could cause duplicate side effects. For ordinary ops use
-    /// [`send`] which retries once after transient I/O failures.
+    /// Unlike [`send`], this method uses a narrower reconnect policy to reduce
+    /// double-execution risk:
+    ///
+    /// - **Send phase** — reconnects and retries only when the WebSocket is
+    ///   definitively closed *before* the send starts
+    ///   ([`tungstenite::Error::ConnectionClosed`] / [`tungstenite::Error::AlreadyClosed`]).
+    ///   These errors guarantee the request was never transmitted, so a retry is safe.
+    ///   Send timeouts and other I/O errors are propagated directly without a retry,
+    ///   because partial transmission cannot be ruled out.
+    ///
+    /// - **Receive phase** — receive failures are propagated without reconnect.
+    ///   Once a request is in-flight, the server may have processed it; retrying
+    ///   would cause double-execution.
     ///
     /// Used by: [`eval`], [`evaluate_with_options`], [`load_file`], [`load_project`],
     /// [`reload`], [`clear`], [`unload`], [`interrupt`], [`test_class`], [`test_file`], [`test_all`].
@@ -462,37 +474,99 @@ impl ReplClient {
         let request_str =
             serde_json::to_string(request).map_err(|e| format!("Failed to serialize: {e}"))?;
 
-        let mut inner = self.inner.lock().await;
+        for attempt in 0..2 {
+            let mut inner = self.inner.lock().await;
 
-        let io_future = async {
-            inner
-                .ws
-                .send(Message::Text(request_str.into()))
-                .await
-                .map_err(|e| format!("Failed to send: {e}"))?;
+            // Send phase: apply REPL_IO_TIMEOUT so a half-open TCP connection
+            // (send buffer full, OS hasn't yet detected the dead link) cannot block forever.
+            let send_result = tokio::time::timeout(
+                REPL_IO_TIMEOUT,
+                inner.ws.send(Message::Text(request_str.clone().into())),
+            )
+            .await;
 
-            loop {
-                let response_text = read_text_message(&mut inner.ws).await?;
-
-                let parsed: serde_json::Value = serde_json::from_str(&response_text)
-                    .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_text}"))?;
-
-                if parsed.get("status").is_some() {
-                    return serde_json::from_value(parsed).map_err(|e| {
-                        format!("Failed to deserialize response: {e}\nRaw: {response_text}")
-                    });
+            match send_result {
+                Ok(Ok(())) => {} // send succeeded — fall through to receive phase
+                Ok(Err(
+                    e @ (WsError::ConnectionClosed
+                    | WsError::AlreadyClosed
+                    | WsError::Protocol(WsProtocolError::SendAfterClosing)),
+                )) if attempt == 0 => {
+                    // Connection was definitively closed before the send started —
+                    // the server never saw the request, so reconnecting is safe.
+                    // Covers: ConnectionClosed (close handshake complete),
+                    //         AlreadyClosed (post-ConnectionClosed write),
+                    //         SendAfterClosing (write after local close frame).
+                    drop(inner); // release lock before reconnecting
+                    tracing::warn!("send_once: connection closed ({e}), attempting reconnect");
+                    if let Err(re) = self.reconnect().await {
+                        return Err(format!("Failed to send: {e}; reconnect failed: {re}"));
+                    }
+                    continue; // retry with fresh connection
+                }
+                Ok(Err(e)) => {
+                    // Other send error (I/O error, protocol error, or second-attempt
+                    // closed-connection): cannot guarantee the server received nothing,
+                    // so do not retry. Quarantine the socket through the existing guard
+                    // so the next call is forced onto a fresh connection.
+                    tracing::warn!("send_once: send failed ({e}); closing socket");
+                    let _ =
+                        tokio::time::timeout(Duration::from_secs(1), inner.ws.close(None)).await;
+                    return Err(format!("Failed to send: {e}"));
+                }
+                Err(_) => {
+                    // Send timed out: request may have been partially transmitted.
+                    // Quarantine the socket through the existing guard.
+                    tracing::warn!("send_once: send timed out; closing socket");
+                    let _ =
+                        tokio::time::timeout(Duration::from_secs(1), inner.ws.close(None)).await;
+                    return Err(format!(
+                        "REPL I/O timed out after {}s — the REPL may be unresponsive",
+                        REPL_IO_TIMEOUT.as_secs()
+                    ));
                 }
             }
-        };
 
-        tokio::time::timeout(REPL_IO_TIMEOUT, io_future)
-            .await
-            .map_err(|_| {
-                format!(
+            // Receive phase: the request is now in-flight.
+            // Do NOT reconnect — the server may have already processed the request.
+            //
+            // Use select! to apply the timeout while keeping `inner` available through
+            // the existing guard. This avoids a re-lock on the error path and ensures
+            // the quarantine close always goes through the same guard that owns the socket.
+            let receive_result = tokio::select! {
+                result = async {
+                    loop {
+                        let response_text = read_text_message(&mut inner.ws).await?;
+                        let parsed: serde_json::Value =
+                            serde_json::from_str(&response_text).map_err(|e| {
+                                format!("Failed to parse response: {e}\nRaw: {response_text}")
+                            })?;
+                        if parsed.get("status").is_some() {
+                            return serde_json::from_value(parsed).map_err(|e| {
+                                format!(
+                                    "Failed to deserialize response: {e}\nRaw: {response_text}"
+                                )
+                            });
+                        }
+                    }
+                } => result,
+                () = tokio::time::sleep(REPL_IO_TIMEOUT) => Err(format!(
                     "REPL I/O timed out after {}s — the REPL may be unresponsive",
                     REPL_IO_TIMEOUT.as_secs()
-                )
-            })?
+                )),
+            };
+
+            if receive_result.is_err() {
+                // Quarantine the socket through the existing guard — no re-lock needed.
+                // A late server response for this failed request cannot reach the next call.
+                tracing::warn!("send_once receive phase failed; closing socket");
+                let _ = tokio::time::timeout(Duration::from_secs(1), inner.ws.close(None)).await;
+            }
+
+            return receive_result;
+        }
+
+        unreachable!("send_once loop always returns on attempt 1")
     }
 
     /// Send a docs operation.
@@ -1230,6 +1304,60 @@ mod tests {
         assert!(
             bindings.get("reconnectTest").is_some(),
             "reconnectTest binding should persist after reconnect: {bindings:?}"
+        );
+        Ok(())
+    }
+
+    /// Verifies that `send_once` operations automatically reconnect when the WebSocket
+    /// is closed between requests (BT-1289).
+    ///
+    /// Before the fix, closing the socket and calling `evaluate_with_options` would
+    /// return "Trying to work with closed connection" permanently — requiring Claude
+    /// Code to be restarted. After the fix, `send_once` detects a stale-before-send
+    /// connection, reconnects once, and succeeds transparently.
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_send_once_reconnects_on_stale_connection()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+
+        // Establish a binding before the forced connection drop.
+        let resp = client
+            .evaluate_with_options("staleOnce := 77", false)
+            .await?;
+        assert!(!resp.is_error(), "initial evaluate should succeed");
+
+        // Force-close the underlying WebSocket to simulate a stale connection
+        // (e.g. idle timeout, cowboy restart, or session process crash).
+        {
+            let mut inner = client.inner.lock().await;
+            let _ = inner.ws.close(None).await;
+        }
+
+        // evaluate_with_options goes through send_once.  It must reconnect
+        // transparently and return the correct result (BT-1289).
+        let resp = client.evaluate_with_options("staleOnce + 1", false).await?;
+        assert!(
+            !resp.is_error(),
+            "evaluate_with_options should succeed after reconnect on stale connection: {:?}",
+            resp.error
+        );
+        assert_eq!(
+            resp.value_string(),
+            "78",
+            "result should be correct after send_once reconnect"
+        );
+
+        // Confirm the session was resumed and the earlier binding is still visible.
+        let resp = client.bindings().await?;
+        assert!(!resp.is_error(), "bindings should work after reconnect");
+        let bindings = resp
+            .bindings
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+        assert!(
+            bindings.get("staleOnce").is_some(),
+            "staleOnce binding should persist across send_once reconnect: {bindings:?}"
         );
         Ok(())
     }
