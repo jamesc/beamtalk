@@ -99,6 +99,19 @@ Object subclass: Actor
     spec := SupervisionSpec new withActorClass: self
     spec withRestart: policy
 
+  /// Delegate message dispatch to the backing Erlang module.
+  ///
+  /// This method is a sentinel — non-native Actors do not have a backing
+  /// Erlang module, so calling delegate raises an Error at runtime.
+  /// Native Actors (declared with `native:` in ClassBuilder) override this
+  /// intrinsic via the compiler's codegen phase.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// counter delegate   // => ERROR: delegate called on a non-native Actor
+  /// ```
+  sealed delegate => @primitive "actorDelegate"
+
   /// Gracefully stop this actor (gen_server:stop).
   ///
   /// Idempotent: stopping an already-stopped actor succeeds silently.
