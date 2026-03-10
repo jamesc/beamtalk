@@ -1794,13 +1794,15 @@ impl CoreErlangGenerator {
     /// the block argument(s) contain mutations that require state threading.
     ///
     /// Returns `true` only if:
-    /// 1. The expression is a `ControlFlow` dispatch (from pre-computed `dispatch_kinds`).
+    /// 1. The expression is a `ControlFlow` dispatch (from pre-computed `dispatch_kinds`),
+    ///    or — when semantic facts are unavailable — the selector matches a known
+    ///    exception/conditional selector as a fallback.
     /// 2. The relevant block argument(s) need state threading in the current context
     ///    (checked via `needs_mutation_threading` on pre-computed `block_profiles`).
     ///
     /// Using pre-computed `dispatch_kinds` and `block_profiles` avoids the repeated
-    /// `is_state_threading_control_flow` re-classification and `analyze_block` calls
-    /// that the original implementation performed (BT-1309).
+    /// selector-based re-classification and `analyze_block` calls that the original
+    /// implementation performed (BT-1309).
     pub(in crate::codegen::core_erlang) fn control_flow_has_mutations(
         &self,
         expr: &Expression,
@@ -1817,18 +1819,32 @@ impl CoreErlangGenerator {
         };
 
         // Use pre-computed dispatch classification instead of re-deriving it.
-        if self.semantic_facts.dispatch_kind(span)
-            != crate::semantic_analysis::DispatchKind::ControlFlow
-        {
+        // When semantic_facts is empty (e.g. in unit tests constructed via
+        // `CoreErlangGenerator::new`), `dispatch_kind` returns `Unknown`.
+        // In that case fall back to local selector-based classification so the
+        // function still returns the correct result for known control-flow
+        // selectors rather than silently returning `false` for all of them.
+        let dispatch_kind = self.semantic_facts.dispatch_kind(span);
+        let sel_str: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        let is_control_flow = match dispatch_kind {
+            crate::semantic_analysis::DispatchKind::ControlFlow => true,
+            crate::semantic_analysis::DispatchKind::Unknown => {
+                crate::codegen::core_erlang::state_threading_selectors::is_exception_selector(
+                    sel_str.as_str(),
+                ) || crate::codegen::core_erlang::state_threading_selectors::is_conditional_selector(
+                    sel_str.as_str(),
+                )
+            }
+            _ => false,
+        };
+        if !is_control_flow {
             return false;
         }
-
-        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
 
         // BT-410: For on:do: and ensure:, the receiver (try body) is also
         // a block that may contain field mutations.
         if crate::codegen::core_erlang::state_threading_selectors::is_exception_selector(
-            sel.as_str(),
+            sel_str.as_str(),
         ) {
             if let Expression::Block(block) = receiver.as_ref() {
                 // Use pre-computed block profile when available.
@@ -1846,7 +1862,7 @@ impl CoreErlangGenerator {
         // BT-915: For Boolean conditionals, any block argument may contain mutations.
         // BT-1226: ifNotNil: also needs per-block mutation detection.
         if crate::codegen::core_erlang::state_threading_selectors::is_conditional_selector(
-            sel.as_str(),
+            sel_str.as_str(),
         ) {
             for arg in arguments {
                 if let Expression::Block(block) = arg {

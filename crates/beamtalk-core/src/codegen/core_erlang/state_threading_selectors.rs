@@ -1,14 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Centralised classification of selectors that require state threading.
+//! Selector predicates for control-flow constructs that require per-block semantic
+//! analysis during state threading.
+//!
+//! This module covers two groups that need *special* analysis beyond a simple
+//! selector check: exception handlers (where the receiver block must also be
+//! analysed for mutations) and Boolean/optional conditionals (where each branch
+//! block must be analysed independently).  Loop selectors (`whileTrue:`, `do:`,
+//! etc.) and unary loop forms are classified directly in
+//! `semantic_analysis::facts` and do not require per-block analysis here.
 //!
 //! # Groups
 //!
-//! | Group       | Selectors                                                            |
-//! |-------------|----------------------------------------------------------------------|
-//! | Exception   | `on:do:`, `ensure:`                                                  |
-//! | Conditional | `ifTrue:`, `ifFalse:`, `ifTrue:ifFalse:`, `ifNotNil:`               |
+//! | Group       | Selectors                                            | Why per-block analysis?                        |
+//! |-------------|------------------------------------------------------|------------------------------------------------|
+//! | Exception   | `on:do:`, `ensure:`                                  | Receiver (try body) is a block that may mutate |
+//! | Conditional | `ifTrue:`, `ifFalse:`, `ifTrue:ifFalse:`, `ifNotNil:` | Each branch may mutate independently           |
 
 /// Returns `true` if `sel` is an exception-handling selector (`on:do:` or `ensure:`).
 ///
