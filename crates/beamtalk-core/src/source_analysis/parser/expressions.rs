@@ -1253,8 +1253,7 @@ impl Parser {
     ///
     /// Accepts a symbol (`#key`) or a string literal (`"key"`).
     /// Bare lowercase identifiers (e.g. `foo`) are rejected with a diagnostic
-    /// error suggesting `#foo`; the parser recovers by treating them as the
-    /// intended symbol.
+    /// error suggesting `#foo`.
     /// Returns `None` on an invalid token (error is pushed; caller should skip the pair).
     fn parse_map_pattern_key(&mut self) -> Option<MapPatternKey> {
         match self.current_kind() {
@@ -1278,8 +1277,7 @@ impl Parser {
                     format!("bare word '{name}' is not a valid map key; did you mean '#{name}'?"),
                     span,
                 ));
-                // Error recovery: treat as the intended symbol
-                Some(MapPatternKey::Symbol(name))
+                None
             }
             _ => {
                 let bad = self.advance();
@@ -1888,12 +1886,12 @@ impl Parser {
                     unreachable!()
                 };
                 let name = name.clone();
-                self.diagnostics.push(Diagnostic::error(
-                    format!("bare word '{name}' is not a valid map key; did you mean '#{name}'?"),
-                    span,
-                ));
-                // Error recovery: treat as the intended symbol
-                Expression::Literal(Literal::Symbol(name), span)
+                let message: EcoString =
+                    format!("bare word '{name}' is not a valid map key; did you mean '#{name}'?")
+                        .into();
+                self.diagnostics
+                    .push(Diagnostic::error(message.clone(), span));
+                Expression::Error { message, span }
             } else {
                 // Parse key expression (unary only - stops at `=>`, `,`, `}`)
                 self.parse_unary_message()
@@ -2285,23 +2283,6 @@ mod tests {
             "message should suggest #foo: {}",
             errors[0].message
         );
-    }
-
-    #[test]
-    fn bare_word_map_key_error_recovers_as_symbol() {
-        use crate::ast::{Expression, Literal};
-        let (module, _diags) = parse_source("#{foo => 1}");
-        let expr = &module.expressions[0].expression;
-        if let Expression::MapLiteral { pairs, .. } = expr {
-            assert_eq!(pairs.len(), 1);
-            assert!(
-                matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s.as_str() == "foo"),
-                "expected Symbol('foo') as key, got: {:?}",
-                pairs[0].key
-            );
-        } else {
-            panic!("expected MapLiteral, got: {expr:?}");
-        }
     }
 
     #[test]
