@@ -641,5 +641,66 @@ bench_block_threading() ->
     report("block/fold_stateacc_block", FoldStateAccStats, ?ITERATIONS),
     io:format(standard_error,
         "PERF: block/fold_overhead ~.2fx vs native~n",
-        [maps:get(median, FoldStateAccStats) / max(maps:get(median, FoldNativeStats), 1)]).
+        [maps:get(median, FoldStateAccStats) / max(maps:get(median, FoldNativeStats), 1)]),
+
+    %% --- BT-1276: list-op with local variable mutation (StateAcc map vs tuple acc) ---
+    DoStateAccMutTimings = run_benchmark(fun() ->
+        bench_block_threading:do_stateacc_mutation(List)
+    end, ?ITERATIONS, ?WARMUP),
+    DoTupleAccMutTimings = run_benchmark(fun() ->
+        bench_block_threading:do_tuple_acc_mutation(List)
+    end, ?ITERATIONS, ?WARMUP),
+
+    DoStateAccMutStats = stats(DoStateAccMutTimings),
+    DoTupleAccMutStats = stats(DoTupleAccMutTimings),
+
+    report("block/do_stateacc_mutation", DoStateAccMutStats, ?ITERATIONS),
+    report("block/do_tuple_acc_mutation", DoTupleAccMutStats, ?ITERATIONS),
+    DoMutImprovementRatio = maps:get(median, DoStateAccMutStats) /
+        max(maps:get(median, DoTupleAccMutStats), 1),
+    io:format(standard_error,
+        "PERF: block/do_mutation_improvement ~.2fx tuple vs stateacc~n",
+        [DoMutImprovementRatio]),
+    %% BT-1276: Tuple-acc should be at least 1.5x faster than StateAcc for do: with mutation.
+    ?assert(DoMutImprovementRatio >= 1.5),
+
+    CollectStateAccMutTimings = run_benchmark(fun() ->
+        bench_block_threading:collect_stateacc_mutation(List)
+    end, ?ITERATIONS, ?WARMUP),
+    CollectTupleAccMutTimings = run_benchmark(fun() ->
+        bench_block_threading:collect_tuple_acc_mutation(List)
+    end, ?ITERATIONS, ?WARMUP),
+
+    CollectStateAccMutStats = stats(CollectStateAccMutTimings),
+    CollectTupleAccMutStats = stats(CollectTupleAccMutTimings),
+
+    report("block/collect_stateacc_mutation", CollectStateAccMutStats, ?ITERATIONS),
+    report("block/collect_tuple_acc_mutation", CollectTupleAccMutStats, ?ITERATIONS),
+    CollectMutImprovementRatio = maps:get(median, CollectStateAccMutStats) /
+        max(maps:get(median, CollectTupleAccMutStats), 1),
+    io:format(standard_error,
+        "PERF: block/collect_mutation_improvement ~.2fx tuple vs stateacc~n",
+        [CollectMutImprovementRatio]),
+    %% BT-1276: Tuple-acc should be at least 1.5x faster than StateAcc for collect: with mutation.
+    ?assert(CollectMutImprovementRatio >= 1.5),
+
+    FoldStateAccMutTimings = run_benchmark(fun() ->
+        bench_block_threading:fold_stateacc_mutation(List)
+    end, ?ITERATIONS, ?WARMUP),
+    FoldTupleAccMutTimings = run_benchmark(fun() ->
+        bench_block_threading:fold_tuple_acc_mutation(List)
+    end, ?ITERATIONS, ?WARMUP),
+
+    FoldStateAccMutStats = stats(FoldStateAccMutTimings),
+    FoldTupleAccMutStats = stats(FoldTupleAccMutTimings),
+
+    report("block/fold_stateacc_mutation", FoldStateAccMutStats, ?ITERATIONS),
+    report("block/fold_tuple_acc_mutation", FoldTupleAccMutStats, ?ITERATIONS),
+    FoldMutImprovementRatio = maps:get(median, FoldStateAccMutStats) /
+        max(maps:get(median, FoldTupleAccMutStats), 1),
+    io:format(standard_error,
+        "PERF: block/fold_mutation_improvement ~.2fx tuple vs stateacc~n",
+        [FoldMutImprovementRatio]),
+    %% BT-1276: Tuple-acc should be at least 1.5x faster than StateAcc for inject: with mutation.
+    ?assert(FoldMutImprovementRatio >= 1.5).
 

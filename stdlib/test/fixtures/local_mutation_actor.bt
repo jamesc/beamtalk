@@ -83,3 +83,23 @@ Actor subclass: LocalMutationActor
         total := total + doubled
       ]
     total
+
+  // BT-1276: select: with local mutation (tuple-acc path)
+  selectPositiveWithCount: items =>
+    count := 0
+    result := items
+      select: [:item |
+        count := count + 1
+        item > 0
+      ]
+    #{#result => result, #count => count}
+
+  // BT-1276: reject: with local mutation (tuple-acc path)
+  rejectNegativeWithCount: items =>
+    count := 0
+    result := items
+      reject: [:item |
+        count := count + 1
+        item < 0
+      ]
+    #{#result => result, #count => count}

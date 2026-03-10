@@ -48,12 +48,14 @@ impl CoreErlangGenerator {
         self.generate_simple_list_op(receiver, body, "foreach")
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_list_do_with_mutations(
         &mut self,
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new(self, body, None);
+        // BT-1276: Use tuple accumulator when eligible (no field/self-send mutations).
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
 
         // BT-524: Add is_list guard for non-list collection types.
         let list_var = self.fresh_temp_var("temp");
@@ -63,7 +65,87 @@ impl CoreErlangGenerator {
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
 
-        // BT-598/BT-1053: Pack threaded locals into StateAcc before the foldl.
+        if plan.use_tuple_acc {
+            // BT-1276: Tuple-accumulator path — no StateAcc map allocation per iteration.
+            // Initial fold accumulator: {Var1, ..., VarN} built from outer-scope bindings.
+            let init_tuple_doc = plan.initial_vars_tuple_doc(self);
+
+            let mut docs: Vec<Document<'static>> = Vec::new();
+            docs.push(docvec![
+                "let ",
+                Document::String(list_var.clone()),
+                " = ",
+                recv_code,
+                " in let ",
+                Document::String(safe_list_var.clone()),
+                " = case call 'erlang':'is_list'(",
+                Document::String(list_var.clone()),
+                ") of <'true'> when 'true' -> ",
+                Document::String(list_var.clone()),
+                " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
+                Document::String(list_var),
+                ") end in let ",
+                Document::String(lambda_var.clone()),
+                " = fun (",
+                Document::String(item_var.clone()),
+                ", StateAcc) -> ",
+            ]);
+
+            self.push_scope();
+            if let Some(param) = body.parameters.first() {
+                self.bind_var(&param.name, &item_var);
+            }
+            // Unpack vars from the tuple accumulator: element(1..N, StateAcc).
+            docs.extend(plan.generate_tuple_unpack_docs(self, "StateAcc", 1));
+
+            let (body_doc, _) =
+                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+            docs.push(body_doc);
+            self.pop_scope();
+
+            // After foldl: extract vars from result tuple, repack into StateAcc.
+            let fold_result = self.fresh_temp_var("FoldResult");
+            let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
+            let result_doc = if matches!(plan.context, CodeGenContext::ValueType) {
+                docvec![
+                    " in let ",
+                    Document::String(fold_result.clone()),
+                    " = call 'lists':'foldl'(",
+                    Document::String(lambda_var),
+                    ", ",
+                    init_tuple_doc,
+                    ", ",
+                    Document::String(safe_list_var),
+                    ") in ",
+                    extract_doc,
+                    "'nil'",
+                ]
+            } else {
+                // BT-1276: Re-pack updated locals into StateAcc so the outer method-body
+                // threading (`maps:get` in `generate_method_body_with_reply`) can extract them.
+                let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
+                docvec![
+                    " in let ",
+                    Document::String(fold_result.clone()),
+                    " = call 'lists':'foldl'(",
+                    Document::String(lambda_var),
+                    ", ",
+                    init_tuple_doc,
+                    ", ",
+                    Document::String(safe_list_var),
+                    ") in ",
+                    extract_doc,
+                    repack_doc,
+                    "{'nil', ",
+                    Document::String(stateacc),
+                    "}",
+                ]
+            };
+            docs.push(result_doc);
+            return Ok(Document::Vec(docs));
+        }
+
+        // Map-accumulator path (field mutations or complex control flow present).
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
@@ -136,15 +218,16 @@ impl CoreErlangGenerator {
 
     /// BT-904: Generates stateful `collect:` using `lists:foldl` with state threading.
     ///
-    /// Accumulator is `{ResultList, StateAcc}`. Each iteration runs the body
-    /// with state threading (for self-sends, field writes), prepends the result
-    /// to the list, and threads the new state. After foldl, reverses the list.
+    /// In map mode: accumulator is `{ResultList, StateAcc}`.
+    /// In tuple mode (BT-1276): accumulator is `{ResultList, Var1, ..., VarN}`.
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_list_collect_with_mutations(
         &mut self,
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new(self, body, None);
+        // BT-1276: Use tuple accumulator when eligible.
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
 
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -152,11 +235,90 @@ impl CoreErlangGenerator {
         let lambda_var = self.fresh_temp_var("temp");
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
-
-        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
-
-        // Accumulator is {ResultList, StateAcc}
         let acc_state_var = self.fresh_temp_var("AccSt");
+
+        if plan.use_tuple_acc {
+            // BT-1276: Tuple-accumulator path.
+            // Initial fold acc: {[], Var1, ..., VarN} (flat tuple, no StateAcc map).
+            let vars_doc = plan.current_vars_doc(self); // Before push_scope.
+            let init_tuple_doc = docvec!["{ [], ", vars_doc, "}"];
+
+            let mut docs: Vec<Document<'static>> = Vec::new();
+            docs.push(docvec![
+                "let ",
+                Document::String(list_var.clone()),
+                " = ",
+                recv_code,
+                " in let ",
+                Document::String(safe_list_var.clone()),
+                " = case call 'erlang':'is_list'(",
+                Document::String(list_var.clone()),
+                ") of <'true'> when 'true' -> ",
+                Document::String(list_var.clone()),
+                " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
+                Document::String(list_var),
+                ") end in let ",
+                Document::String(lambda_var.clone()),
+                " = fun (",
+                Document::String(item_var.clone()),
+                ", ",
+                Document::String(acc_state_var.clone()),
+                ") -> let AccList = call 'erlang':'element'(1, ",
+                Document::String(acc_state_var.clone()),
+                ") in ",
+            ]);
+
+            self.push_scope();
+            if let Some(param) = body.parameters.first() {
+                self.bind_var(&param.name, &item_var);
+            }
+            // Unpack vars starting at index 2 (slot 1 is AccList).
+            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
+
+            let (body_doc, _) =
+                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlCollect)?;
+            docs.push(body_doc);
+            self.pop_scope();
+
+            let fold_result = self.fresh_temp_var("FoldResult");
+            let rev_list = self.fresh_temp_var("RevList");
+            let final_list = self.fresh_temp_var("FinalList");
+
+            // Extract each updated local var from tuple positions 2..N.
+            let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
+            // BT-1276: Re-pack into StateAcc for outer method-body `maps:get` extraction.
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
+            docs.push(docvec![
+                " in let ",
+                Document::String(fold_result.clone()),
+                " = call 'lists':'foldl'(",
+                Document::String(lambda_var),
+                ", ",
+                init_tuple_doc,
+                ", ",
+                Document::String(safe_list_var),
+                ") in let ",
+                Document::String(rev_list.clone()),
+                " = call 'erlang':'element'(1, ",
+                Document::String(fold_result),
+                ") in let ",
+                Document::String(final_list.clone()),
+                " = call 'lists':'reverse'(",
+                Document::String(rev_list),
+                ") in ",
+                extract_doc,
+                repack_doc,
+                "{",
+                Document::String(final_list),
+                ", ",
+                Document::String(stateacc),
+                "}",
+            ]);
+            return Ok(Document::Vec(docs));
+        }
+
+        // Map-accumulator path.
+        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
@@ -185,7 +347,6 @@ impl CoreErlangGenerator {
         docs.push(body_doc);
         self.pop_scope();
 
-        // After foldl: extract result list and reverse it, extract final state.
         let fold_result = self.fresh_temp_var("FoldResult");
         let rev_list = self.fresh_temp_var("RevList");
         let final_list = self.fresh_temp_var("FinalList");
@@ -278,16 +439,17 @@ impl CoreErlangGenerator {
 
     /// BT-904: Generates stateful `select:`/`reject:` using `lists:foldl` with state threading.
     ///
-    /// Uses foldl with `{ResultList, StateAcc}` accumulator. Each iteration runs the body
-    /// with state threading, then conditionally includes the item based on the block result.
-    /// For `reject:` (negate=true), the condition is inverted.
+    /// In map mode: accumulator is `{ResultList, StateAcc}`.
+    /// In tuple mode (BT-1276): accumulator is `{ResultList, Var1, ..., VarN}`.
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_list_filter_with_mutations(
         &mut self,
         receiver: &Expression,
         body: &Block,
         negate: bool,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new(self, body, None);
+        // BT-1276: Use tuple accumulator when eligible.
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
 
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -295,11 +457,94 @@ impl CoreErlangGenerator {
         let lambda_var = self.fresh_temp_var("temp");
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
-
-        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
-
-        // Accumulator is {ResultList, StateAcc}
         let acc_state_var = self.fresh_temp_var("AccSt");
+
+        if plan.use_tuple_acc {
+            // BT-1276: Tuple-accumulator path.
+            let vars_doc = plan.current_vars_doc(self); // Before push_scope.
+            let init_tuple_doc = docvec!["{ [], ", vars_doc, "}"];
+
+            let mut docs: Vec<Document<'static>> = Vec::new();
+            docs.push(docvec![
+                "let ",
+                Document::String(list_var.clone()),
+                " = ",
+                recv_code,
+                " in let ",
+                Document::String(safe_list_var.clone()),
+                " = case call 'erlang':'is_list'(",
+                Document::String(list_var.clone()),
+                ") of <'true'> when 'true' -> ",
+                Document::String(list_var.clone()),
+                " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
+                Document::String(list_var),
+                ") end in let ",
+                Document::String(lambda_var.clone()),
+                " = fun (",
+                Document::String(item_var.clone()),
+                ", ",
+                Document::String(acc_state_var.clone()),
+                ") -> let AccList = call 'erlang':'element'(1, ",
+                Document::String(acc_state_var.clone()),
+                ") in ",
+            ]);
+
+            self.push_scope();
+            if let Some(param) = body.parameters.first() {
+                self.bind_var(&param.name, &item_var);
+            }
+            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
+
+            let (body_doc, _) = self.generate_threaded_loop_body(
+                body,
+                &plan,
+                &BodyKind::FoldlFilter {
+                    item_var: item_var.clone(),
+                    negate,
+                },
+            )?;
+            docs.push(body_doc);
+            self.pop_scope();
+
+            let fold_result = self.fresh_temp_var("FoldResult");
+            let rev_list = self.fresh_temp_var("RevList");
+            let final_list = self.fresh_temp_var("FinalList");
+
+            // Extract each updated local var from tuple positions 2..N.
+            let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
+            // BT-1276: Re-pack into StateAcc for outer method-body `maps:get` extraction.
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
+            docs.push(docvec![
+                " in let ",
+                Document::String(fold_result.clone()),
+                " = call 'lists':'foldl'(",
+                Document::String(lambda_var),
+                ", ",
+                init_tuple_doc,
+                ", ",
+                Document::String(safe_list_var),
+                ") in let ",
+                Document::String(rev_list.clone()),
+                " = call 'erlang':'element'(1, ",
+                Document::String(fold_result),
+                ") in let ",
+                Document::String(final_list.clone()),
+                " = call 'lists':'reverse'(",
+                Document::String(rev_list),
+                ") in ",
+                extract_doc,
+                repack_doc,
+                "{",
+                Document::String(final_list),
+                ", ",
+                Document::String(stateacc),
+                "}",
+            ]);
+            return Ok(Document::Vec(docs));
+        }
+
+        // Map-accumulator path.
+        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
@@ -334,7 +579,6 @@ impl CoreErlangGenerator {
         docs.push(body_doc);
         self.pop_scope();
 
-        // After foldl: reverse result list, extract final state.
         let fold_result = self.fresh_temp_var("FoldResult");
         let rev_list = self.fresh_temp_var("RevList");
         let final_list = self.fresh_temp_var("FinalList");
@@ -526,13 +770,15 @@ impl CoreErlangGenerator {
         ])
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_list_inject_with_mutations(
         &mut self,
         receiver: &Expression,
         initial: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new(self, body, None);
+        // BT-1276: Use tuple accumulator when eligible.
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
 
         // BT-524: Add is_list guard for non-list collection types.
         let list_var = self.fresh_temp_var("temp");
@@ -541,11 +787,90 @@ impl CoreErlangGenerator {
         let init_var = self.fresh_temp_var("temp");
         let init_code = self.expression_doc(initial)?;
         let lambda_var = self.fresh_temp_var("temp");
-
-        // BT-598: Pack threaded locals into StateAcc before foldl.
-        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
-
         let acc_state_var = self.fresh_temp_var("AccSt");
+
+        if plan.use_tuple_acc {
+            // BT-1276: Tuple-accumulator path.
+            // Initial fold acc: {InitVar, Var1, ..., VarN} (flat tuple).
+            let vars_doc = plan.current_vars_doc(self); // Before push_scope.
+
+            let mut docs: Vec<Document<'static>> = Vec::new();
+            docs.push(docvec![
+                "let ",
+                Document::String(list_var.clone()),
+                " = ",
+                recv_code,
+                " in let ",
+                Document::String(safe_list_var.clone()),
+                " = case call 'erlang':'is_list'(",
+                Document::String(list_var.clone()),
+                ") of <'true'> when 'true' -> ",
+                Document::String(list_var.clone()),
+                " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
+                Document::String(list_var),
+                ") end in let ",
+                Document::String(init_var.clone()),
+                " = ",
+                init_code,
+                " in let ",
+                Document::String(lambda_var.clone()),
+                " = fun (Item, ",
+                Document::String(acc_state_var.clone()),
+                ") -> let Acc = call 'erlang':'element'(1, ",
+                Document::String(acc_state_var.clone()),
+                ") in ",
+            ]);
+
+            self.push_scope();
+            if !body.parameters.is_empty() {
+                self.bind_var(&body.parameters[0].name, "Acc");
+            }
+            if body.parameters.len() >= 2 {
+                self.bind_var(&body.parameters[1].name, "Item");
+            }
+            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
+
+            let (body_doc, _) =
+                self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlInject)?;
+            docs.push(body_doc);
+            self.pop_scope();
+
+            let result_var = self.fresh_temp_var("temp");
+            let acc_out = self.fresh_temp_var("AccOut");
+
+            // Extract each updated local var from tuple positions 2..N.
+            let extract_doc = plan.generate_tuple_extract_suffix_doc(&result_var, 2, self);
+            // BT-1276: Re-pack into StateAcc for outer method-body `maps:get` extraction.
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
+            docs.push(docvec![
+                " in let ",
+                Document::String(result_var.clone()),
+                " = call 'lists':'foldl'(",
+                Document::String(lambda_var),
+                ", {",
+                Document::String(init_var),
+                ", ",
+                vars_doc,
+                "}, ",
+                Document::String(safe_list_var),
+                ") in let ",
+                Document::String(acc_out.clone()),
+                " = call 'erlang':'element'(1, ",
+                Document::String(result_var),
+                ") in ",
+                extract_doc,
+                repack_doc,
+                "{",
+                Document::String(acc_out),
+                ", ",
+                Document::String(stateacc),
+                "}",
+            ]);
+            return Ok(Document::Vec(docs));
+        }
+
+        // Map-accumulator path.
+        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
@@ -773,6 +1098,91 @@ mod tests {
         assert!(
             !has_bare_expr_in,
             "First non-last pure expr in collect: body must emit 'let _ = ...' binding. Got:\n{code}"
+        );
+    }
+
+    // ── BT-1276: Tuple-accumulator tests ──────────────────────────────────
+
+    #[test]
+    fn test_do_with_local_mutation_uses_tuple_acc() {
+        // do: with only local mutation should use tuple accumulator:
+        // - element(N, ...) inside the lambda (not maps:get per iteration)
+        // - exactly 1 maps:get outside the loop (outer method body extraction)
+        // - exactly 1 maps:put outside the loop (repack for outer method body)
+        let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    total := 0\n    items do: [:item | total := total + item]\n    total\n";
+        let code = codegen(src);
+        // In tuple mode: 1 maps:get (outer extraction), 1 maps:put (repack).
+        // In StateAcc mode: ≥2 maps:get, ≥2 maps:put (inside lambda + extract_suffix/pack).
+        let get_count = code.matches("maps':'get'('__local__total'").count();
+        let put_count = code.matches("maps':'put'('__local__total'").count();
+        assert_eq!(
+            get_count, 1,
+            "do: tuple mode should have exactly 1 maps:get (outer extraction). Got:\n{code}"
+        );
+        assert_eq!(
+            put_count, 1,
+            "do: tuple mode should have exactly 1 maps:put (repack after loop). Got:\n{code}"
+        );
+        assert!(
+            code.contains("'erlang':'element'(1,"),
+            "do: tuple mode should use element(1, ...) to read threaded local. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_do_with_field_mutation_uses_stateacc() {
+        // do: with field mutation must still use maps:put (no tuple acc — state effects present).
+        let src = "Actor subclass: Ctr\n  state: sum = 0\n\n  run: items =>\n    items do: [:item | self.sum := self.sum + item]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'put'('sum'"),
+            "do: with field mutation must still use maps:put for field. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_collect_with_local_mutation_uses_tuple_acc() {
+        // collect: with only local mutation should use element/2 (tuple acc).
+        let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items collect: [:item | count := count + 1. item * 2]\n";
+        let code = codegen(src);
+        assert!(
+            !code.contains("maps':'get'('__local__count'"),
+            "collect: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'erlang':'element'(2,"),
+            "collect: tuple acc should use element(2, ...) for first threaded var. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_inject_with_local_mutation_uses_tuple_acc() {
+        // inject:into: with only local mutation should use element/2 (tuple acc).
+        let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items inject: 0 into: [:acc :item | count := count + 1. acc + item]\n";
+        let code = codegen(src);
+        assert!(
+            !code.contains("maps':'get'('__local__count'"),
+            "inject: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'erlang':'element'(2,"),
+            "inject: tuple acc should use element(2, ...) for first threaded var. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_filter_with_local_mutation_uses_tuple_acc() {
+        // BT-1276: select: with only local mutation should use tuple accumulator.
+        // element(2, ...) reads the first threaded var (slot 1 is AccList).
+        let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items select: [:item | count := count + 1. item > 0]\n";
+        let code = codegen(src);
+        assert!(
+            !code.contains("maps':'get'('__local__count'"),
+            "select: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'erlang':'element'(2,"),
+            "select: tuple acc should use element(2, ...) for first threaded var. Got:\n{code}"
         );
     }
 }

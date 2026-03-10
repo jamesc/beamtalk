@@ -42,3 +42,16 @@ TestCase subclass: ActorLocalMutationsTest
   testBlockLocalVarInDoBody =>
     a := LocalMutationActor spawn
     self assert: (a doubleAndSum: #(1, 2, 3)) equals: 12
+
+  // BT-1276: select:/reject: with local mutation should use tuple-acc and return correct results.
+  testSelectWithLocalMutation =>
+    a := LocalMutationActor spawn
+    r := a selectPositiveWithCount: #(-1, 2, -3, 4, 5)
+    self assert: (r at: #result) equals: #(2, 4, 5)
+    self assert: (r at: #count) equals: 5
+
+  testRejectWithLocalMutation =>
+    a := LocalMutationActor spawn
+    r := a rejectNegativeWithCount: #(-1, 2, -3, 4, 5)
+    self assert: (r at: #result) equals: #(2, 4, 5)
+    self assert: (r at: #count) equals: 5

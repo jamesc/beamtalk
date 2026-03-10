@@ -33,7 +33,14 @@
     double_stateacc_block/1,
     %% inject:into: equivalents
     fold_native/1,
-    fold_stateacc_block/1
+    fold_stateacc_block/1,
+    %% BT-1276: list-op with LOCAL VARIABLE mutation — tuple-acc vs StateAcc map
+    do_stateacc_mutation/1,
+    do_tuple_acc_mutation/1,
+    collect_stateacc_mutation/1,
+    collect_tuple_acc_mutation/1,
+    fold_stateacc_mutation/1,
+    fold_tuple_acc_mutation/1
 ]).
 
 %%====================================================================
@@ -294,4 +301,120 @@ fold_stateacc_block(List) ->
         {NewAcc, StateAcc}
     end,
     {Result, _} = lists:foldl(BlockFun, {0, InitState}, List),
+    Result.
+
+%%====================================================================
+%% BT-1276: list-op with LOCAL VARIABLE mutation
+%% These simulate the codegen output for blocks that capture and mutate
+%% outer-scope locals (e.g. `total := 0; list do: [:x | total := total + x]`).
+%%
+%% StateAcc approach: maps:get / maps:put per iteration (pre-BT-1276).
+%% Tuple-acc approach: element(N, T) / {V1, ..., VN} per iteration (BT-1276).
+%%====================================================================
+
+%% @doc Simulates `do:` with a local mutation using old StateAcc map approach.
+%%
+%% Beamtalk source equivalent:
+%%   total := 0. list do: [:item | total := total + item]. total
+-spec do_stateacc_mutation(list()) -> integer().
+do_stateacc_mutation(List) ->
+    Total0 = 0,
+    InitState = maps:put('__local__total', Total0, #{}),
+    BlockFun = fun(Item, StateAcc) ->
+        Total = maps:get('__local__total', StateAcc),
+        NewTotal =
+            beamtalk_future:maybe_await(Total) + beamtalk_future:maybe_await(Item),
+        maps:put('__local__total', NewTotal, StateAcc)
+    end,
+    FinalState = lists:foldl(BlockFun, InitState, List),
+    maps:get('__local__total', FinalState).
+
+%% @doc Simulates `do:` with a local mutation using BT-1276 tuple-acc approach.
+%%
+%% Generated pattern (accumulator is a flat tuple {Total}):
+%%   fun(Item, StateAcc) ->
+%%       Total = element(1, StateAcc),
+%%       NewTotal = maybe_await(Total) + maybe_await(Item),
+%%       {NewTotal}
+%% After foldl: element(1, FoldResult) extracts the final value.
+%% (The one-time maps:put repack for the outer method body is omitted here
+%% as it is not part of the per-element hot path being benchmarked.)
+-spec do_tuple_acc_mutation(list()) -> integer().
+do_tuple_acc_mutation(List) ->
+    Total0 = 0,
+    BlockFun = fun(Item, StateAcc) ->
+        Total = erlang:element(1, StateAcc),
+        NewTotal =
+            beamtalk_future:maybe_await(Total) + beamtalk_future:maybe_await(Item),
+        {NewTotal}
+    end,
+    FoldResult = lists:foldl(BlockFun, {Total0}, List),
+    erlang:element(1, FoldResult).
+
+%% @doc Simulates `collect:` with a local mutation (count) using StateAcc map approach.
+%%
+%% Beamtalk source equivalent:
+%%   count := 0.
+%%   list collect: [:x | count := count + 1. x * 2]
+-spec collect_stateacc_mutation(list()) -> list().
+collect_stateacc_mutation(List) ->
+    Count0 = 0,
+    InitState = maps:put('__local__count', Count0, #{}),
+    BlockFun = fun(X, {AccList, StateAcc}) ->
+        Count = maps:get('__local__count', StateAcc),
+        NewCount = Count + 1,
+        NewStateAcc = maps:put('__local__count', NewCount, StateAcc),
+        Result = beamtalk_future:maybe_await(X) * 2,
+        {[Result | AccList], NewStateAcc}
+    end,
+    {RevResults, _} = lists:foldl(BlockFun, {[], InitState}, List),
+    lists:reverse(RevResults).
+
+%% @doc Simulates `collect:` with a local mutation using BT-1276 tuple-acc approach.
+%%
+%% Accumulator is {AccList, Count} — no StateAcc map allocation per iteration.
+-spec collect_tuple_acc_mutation(list()) -> list().
+collect_tuple_acc_mutation(List) ->
+    Count0 = 0,
+    BlockFun = fun(X, {AccList, Count}) ->
+        NewCount = Count + 1,
+        Result = beamtalk_future:maybe_await(X) * 2,
+        {[Result | AccList], NewCount}
+    end,
+    {RevResults, _} = lists:foldl(BlockFun, {[], Count0}, List),
+    lists:reverse(RevResults).
+
+%% @doc Simulates `inject:into:` with a local mutation (count) using StateAcc map approach.
+%%
+%% Beamtalk source equivalent:
+%%   count := 0.
+%%   list inject: 0 into: [:acc :x | count := count + 1. acc + x]
+-spec fold_stateacc_mutation(list()) -> integer().
+fold_stateacc_mutation(List) ->
+    Count0 = 0,
+    InitState = maps:put('__local__count', Count0, #{}),
+    BlockFun = fun(X, {AccIn, StateAcc}) ->
+        Count = maps:get('__local__count', StateAcc),
+        NewCount = Count + 1,
+        NewStateAcc = maps:put('__local__count', NewCount, StateAcc),
+        NewAcc =
+            beamtalk_future:maybe_await(AccIn) + beamtalk_future:maybe_await(X),
+        {NewAcc, NewStateAcc}
+    end,
+    {Result, _} = lists:foldl(BlockFun, {0, InitState}, List),
+    Result.
+
+%% @doc Simulates `inject:into:` with a local mutation using BT-1276 tuple-acc approach.
+%%
+%% Accumulator is {Acc, Count} — no StateAcc map allocation per iteration.
+-spec fold_tuple_acc_mutation(list()) -> integer().
+fold_tuple_acc_mutation(List) ->
+    Count0 = 0,
+    BlockFun = fun(X, {AccIn, Count}) ->
+        NewCount = Count + 1,
+        NewAcc =
+            beamtalk_future:maybe_await(AccIn) + beamtalk_future:maybe_await(X),
+        {NewAcc, NewCount}
+    end,
+    {Result, _} = lists:foldl(BlockFun, {0, Count0}, List),
     Result.
