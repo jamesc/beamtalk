@@ -6083,6 +6083,86 @@ Actor subclass: T
     }
 
     #[test]
+    fn class_state_after_methods() {
+        // state: fields should be allowed after method definitions
+        let module = parse_ok(
+            "Actor subclass: Counter
+  increment => self.value := self.value + 1
+  state: value = 0
+  getValue => ^self.value",
+        );
+        assert_eq!(module.classes.len(), 1, "Should find 1 class");
+        let class = &module.classes[0];
+        assert_eq!(
+            class.state.len(),
+            1,
+            "Should have 1 state field, got {}",
+            class.state.len()
+        );
+        assert_eq!(
+            class.methods.len(),
+            2,
+            "Should have 2 methods, got {}",
+            class.methods.len()
+        );
+        assert_eq!(class.state[0].name.name.as_str(), "value");
+    }
+
+    #[test]
+    fn class_classstate_after_methods() {
+        // classState: fields should be allowed after method definitions
+        let module = parse_ok(
+            "Actor subclass: Counter
+  increment => self.count := self.count + 1
+  classState: instanceCount = 0
+  state: count = 0
+  getCount => ^self.count",
+        );
+        assert_eq!(module.classes.len(), 1, "Should find 1 class");
+        let class = &module.classes[0];
+        assert_eq!(
+            class.class_variables.len(),
+            1,
+            "Should have 1 classState field, got {}",
+            class.class_variables.len()
+        );
+        assert_eq!(class.class_variables[0].name.name.as_str(), "instanceCount");
+        assert_eq!(
+            class.state.len(),
+            1,
+            "Should have 1 state field, got {}",
+            class.state.len()
+        );
+        assert_eq!(
+            class.methods.len(),
+            2,
+            "Should have 2 methods, got {}",
+            class.methods.len()
+        );
+    }
+
+    #[test]
+    fn class_members_fully_interleaved() {
+        // All member types interleaved: method, classState, method, state, method
+        let module = parse_ok(
+            "Actor subclass: Mixed
+  first => 1
+  classState: cv = 0
+  second => 2
+  state: iv = 0
+  third => 3",
+        );
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 3, "Should have 3 methods");
+        assert_eq!(class.state.len(), 1, "Should have 1 state field");
+        assert_eq!(
+            class.class_variables.len(),
+            1,
+            "Should have 1 classState field"
+        );
+    }
+
+    #[test]
     fn binary_segment_conflicting_signedness_specifiers_error() {
         // `/signed-unsigned` — two signedness specifiers: error on the second
         let diagnostics = parse_err(
