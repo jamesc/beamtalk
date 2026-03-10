@@ -858,9 +858,11 @@ fn test_match_array_pattern_uses_maps_get_with_default_not_map_get() {
     let code =
         generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
 
+    // Verify the 3-arg form maps:get/3 is used — the key, the map, AND the default 'undefined'.
+    // This prevents regression to maps:get/2 or erlang:map_get/2 (both throw on missing key).
     assert!(
-        code.contains("call 'maps':'get'('$beamtalk_class',"),
-        "Should use maps:get/3 (safe, with default) not erlang:map_get/2 (crashes on missing key). Got:\n{code}"
+        code.contains("call 'maps':'get'('$beamtalk_class',") && code.contains(", 'undefined')"),
+        "Should use maps:get/3 with 'undefined' default. Got:\n{code}"
     );
     assert!(
         !code.contains("call 'erlang':'map_get'("),

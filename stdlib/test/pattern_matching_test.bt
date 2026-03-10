@@ -113,6 +113,16 @@ TestCase subclass: PatternMatchingTest
       #[x, y, z] -> "three";
       _ -> "other"
     ]) equals: "three"
+    // Array arm with guard — positive (exercises guard-success branch)
+    self assert: (#[1, 2] match: [
+      #[x, y] when: [x < y] -> "ascending";
+      _ -> "other"
+    ]) equals: "ascending"
+    // Array arm with guard — negative (exercises guard-fail fallthrough)
+    self assert: (#[2, 1] match: [
+      #[x, y] when: [x < y] -> "ascending";
+      _ -> "other"
+    ]) equals: "other"
 
   testMapPatternInMatchArm =>
     // BT-1296: Map/Dict pattern arms

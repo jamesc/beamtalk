@@ -1713,6 +1713,24 @@ impl CoreErlangGenerator {
         let match_var = self.fresh_temp_var("Match");
         let value_doc = self.expression_doc(value)?;
 
+        // Guard against list-syntax patterns (e.g. `#(a, b)` from destructuring) reaching
+        // array-match codegen. The match arm parser always produces list_syntax: false, so
+        // this should never trigger, but prevents silent miscompilation if that ever changes.
+        for arm in arms {
+            if let Pattern::Array {
+                list_syntax: true,
+                span,
+                ..
+            } = &arm.pattern
+            {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "List-syntax pattern `#(...)` in match: arm is not yet supported"
+                        .to_string(),
+                    location: format!("{span:?}"),
+                });
+            }
+        }
+
         let has_array_arm = arms
             .iter()
             .any(|arm| matches!(arm.pattern, Pattern::Array { .. }));
@@ -1807,12 +1825,13 @@ impl CoreErlangGenerator {
         let rest = &arms[1..];
 
         if let Pattern::Array { elements, .. } = &arm.pattern {
-            let rest_doc = self.generate_match_chain(match_var, rest)?;
-            return self.generate_array_match_arm(match_var, arm, elements, rest_doc);
+            // Generate current arm body FIRST so that state_version and temp-var counters
+            // are not advanced by later arms before we codegen the current one.
+            return self.generate_array_match_arm(match_var, arm, elements, rest);
         }
 
         // Native arm: case _Match of <pattern> when guard -> body <_FT> when 'true' -> rest end
-        let rest_doc = self.generate_match_chain(match_var, rest)?;
+        // Compute current arm first — body codegen must not see state advanced by later arms.
         let fallthrough_var = self.fresh_temp_var("NoMatch");
         let pattern_doc = self.generate_pattern(&arm.pattern)?;
 
@@ -1828,6 +1847,9 @@ impl CoreErlangGenerator {
         };
         let body_doc = self.expression_doc(&arm.body)?;
         self.pop_scope();
+
+        // Rest is generated AFTER the current arm to prevent state leakage.
+        let rest_doc = self.generate_match_chain(match_var, rest)?;
 
         Ok(docvec![
             "case ",
@@ -1851,17 +1873,21 @@ impl CoreErlangGenerator {
     ///
     /// Emits a three-level conditional check (`is_map` → class → size), then element
     /// extractions via `at:` dispatch. `rest_doc` is cloned for all failure branches.
+    ///
+    /// Takes `rest_arms` (not a pre-built `rest_doc`) so that the current arm's body
+    /// is fully generated before any later arm's codegen advances generator state.
     fn generate_array_match_arm(
         &mut self,
         match_var: &str,
         arm: &MatchArm,
         elements: &[Pattern],
-        rest_doc: Document<'static>,
+        rest_arms: &[MatchArm],
     ) -> Result<Document<'static>> {
         let n = elements.len();
 
         // Bind all pattern variables (including from nested arrays) into scope
         // before generating guard/body so they can reference the bound names.
+        // This MUST happen before rest_arms codegen so state is not leaked.
         self.push_scope();
         Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
             self.bind_var(name, core_var);
@@ -1874,18 +1900,21 @@ impl CoreErlangGenerator {
         let body_doc = self.expression_doc(&arm.body)?;
         self.pop_scope();
 
-        // Build body section: element extractions + optional guard check
+        // Generate rest AFTER the current arm body to prevent state leakage.
+        let rest_doc = self.generate_match_chain(match_var, rest_arms)?;
+
+        // Build body section: element extractions + optional guard check.
+        // Use `case 'true' of <'true'> when GUARD ->` (Core Erlang guard position) so that
+        // guard evaluation errors silently fail and fall through, matching Erlang guard semantics.
+        // A plain `case GUARD of <'true'>` would propagate evaluation errors as exceptions.
         let success_doc = if let Some(guard_doc) = guard_doc_opt {
-            let no_guard_var = self.fresh_temp_var("GuardFail");
             docvec![
-                "case ",
+                "case 'true' of ",
+                "<'true'> when ",
                 guard_doc,
-                " of ",
-                "<'true'> when 'true' -> ",
+                " -> ",
                 body_doc,
-                " <",
-                Document::String(no_guard_var),
-                "> when 'true' -> ",
+                " <'true'> when 'true' -> ",
                 rest_doc.clone(),
                 " end"
             ]
