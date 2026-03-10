@@ -215,3 +215,39 @@ TestCase subclass: PatternMatchingTest
       Result ok: _ -> "other";
       Result error: _ -> "err"
     ]) equals: "neg one"
+
+  testStringKeyDictPattern =>
+    // BT-1295: String keys in dict patterns — capture variable
+    d := #{"event" => "click", "x" => 5}
+    self assert: (d match: [
+      #{"event" => evName} -> evName;
+      _ -> "unknown"
+    ]) equals: "click"
+    // String-key dict arm fallthrough: key missing
+    self assert: (#{"kind" => "x"} match: [
+      #{"event" => evName} -> evName;
+      _ -> "unknown"
+    ]) equals: "unknown"
+    // String-key dict arm fallthrough: subject is not a map
+    self assert: (42 match: [
+      #{"event" => evName} -> evName;
+      _ -> "unknown"
+    ]) equals: "unknown"
+    // String-key value equality check
+    self assert: (d match: [
+      #{"event" => "click"} -> "got click";
+      #{"event" => _} -> "other event";
+      _ -> "no event"
+    ]) equals: "got click"
+    // Mixed symbol and string keys in one pattern
+    mixed := #{#id => 42, "name" => "alice"}
+    self assert: (mixed match: [
+      #{#id => id, "name" => name} -> name;
+      _ -> "no match"
+    ]) equals: "alice"
+    // Multiple string-key bindings
+    resp := #{"status" => "ok", "data" => 99}
+    self assert: (resp match: [
+      #{"status" => status, "data" => data} -> data;
+      _ -> 0
+    ]) equals: 99

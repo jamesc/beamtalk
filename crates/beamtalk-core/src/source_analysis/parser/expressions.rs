@@ -19,7 +19,8 @@
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart,
-    Literal, MapPair, MapPatternPair, MatchArm, MessageSelector, Pattern, StringSegment,
+    Literal, MapPair, MapPatternKey, MapPatternPair, MatchArm, MessageSelector, Pattern,
+    StringSegment,
 };
 use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -289,14 +290,15 @@ impl Parser {
 
     /// Converts map literal pairs to a destructuring pattern.
     ///
-    /// Returns `Ok(Pattern::Map)` if keys are symbol literals and values are
+    /// Returns `Ok(Pattern::Map)` if keys are symbol or string literals and values are
     /// identifiers or `_`, or `Err(span)` pointing at the first invalid element.
     fn map_pairs_to_pattern(pairs: &[MapPair], span: Span) -> Result<Pattern, Span> {
         let mut pattern_pairs = Vec::new();
         for pair in pairs {
-            // Key must be a symbol literal
+            // Key must be a symbol or string literal
             let key = match &pair.key {
-                Expression::Literal(Literal::Symbol(s), _) => s.clone(),
+                Expression::Literal(Literal::Symbol(s), _) => MapPatternKey::Symbol(s.clone()),
+                Expression::Literal(Literal::String(s), _) => MapPatternKey::StringLit(s.clone()),
                 _ => return Err(pair.key.span()),
             };
             // Value must be an identifier (variable or `_`)
@@ -1189,6 +1191,83 @@ impl Parser {
     ///
     /// Keys must be symbol literals (`#key`) or bare lowercase identifiers treated as symbols.
     /// Values must be variable identifiers or `_` wildcards.
+    /// Parses the key in a map pattern pair.
+    ///
+    /// Accepts a symbol (`#key`), a string literal (`"key"`), or a bare lowercase
+    /// identifier followed by `=>` (shorthand for a symbol key).
+    fn parse_map_pattern_key(&mut self) -> MapPatternKey {
+        match self.current_kind() {
+            TokenKind::Symbol(s) => {
+                let s = s.clone();
+                self.advance();
+                MapPatternKey::Symbol(s)
+            }
+            TokenKind::String(s) => {
+                let s = s.clone();
+                self.advance();
+                MapPatternKey::StringLit(s)
+            }
+            TokenKind::Identifier(name)
+                if name.chars().next().is_some_and(char::is_lowercase)
+                    && matches!(self.peek_kind(), Some(TokenKind::FatArrow)) =>
+            {
+                let name = name.clone();
+                self.advance();
+                MapPatternKey::Symbol(name)
+            }
+            _ => {
+                let bad = self.advance();
+                self.diagnostics.push(Diagnostic::error(
+                    "Map destructuring key must be a symbol or string (e.g. #key or \"key\")",
+                    bad.span(),
+                ));
+                MapPatternKey::Symbol(EcoString::from("_"))
+            }
+        }
+    }
+
+    /// Parses the value in a map pattern pair.
+    ///
+    /// Accepts a variable identifier, `_` wildcard, or a literal (for equality matching).
+    fn parse_map_pattern_value(&mut self) -> Pattern {
+        let value_span = self.current_token().span();
+        match self.current_kind() {
+            TokenKind::Identifier(name) if name.as_str() == "_" => {
+                let span = self.advance().span();
+                Pattern::Wildcard(span)
+            }
+            TokenKind::Identifier(_) => {
+                let token = self.advance();
+                let span = token.span();
+                let TokenKind::Identifier(name) = token.into_kind() else {
+                    unreachable!()
+                };
+                Pattern::Variable(Identifier::new(name, span))
+            }
+            TokenKind::String(_)
+            | TokenKind::Integer(_)
+            | TokenKind::Float(_)
+            | TokenKind::Character(_)
+            | TokenKind::Symbol(_) => {
+                let expr = self.parse_literal();
+                let span = expr.span();
+                if let Expression::Literal(lit, _) = expr {
+                    Pattern::Literal(lit, span)
+                } else {
+                    Pattern::Wildcard(span)
+                }
+            }
+            _ => {
+                let bad = self.advance();
+                self.diagnostics.push(Diagnostic::error(
+                    "Map pattern value must be a variable, '_', or a literal",
+                    bad.span(),
+                ));
+                Pattern::Wildcard(value_span)
+            }
+        }
+    }
+
     fn parse_map_pattern(&mut self) -> Pattern {
         let start = self
             .expect(&TokenKind::MapOpen, "Expected '#{'")
@@ -1201,35 +1280,9 @@ impl Parser {
                 if self.is_at_end() {
                     break;
                 }
-
                 let pair_start = self.current_token().span();
+                let key = self.parse_map_pattern_key();
 
-                // Parse key: must be a symbol (#key) or bare lowercase identifier
-                let key: EcoString = match self.current_kind() {
-                    TokenKind::Symbol(s) => {
-                        let s = s.clone();
-                        self.advance();
-                        s
-                    }
-                    TokenKind::Identifier(name)
-                        if name.chars().next().is_some_and(char::is_lowercase)
-                            && matches!(self.peek_kind(), Some(TokenKind::FatArrow)) =>
-                    {
-                        let name = name.clone();
-                        self.advance();
-                        name
-                    }
-                    _ => {
-                        let bad = self.advance();
-                        self.diagnostics.push(Diagnostic::error(
-                            "Map destructuring key must be a symbol (e.g. #key)",
-                            bad.span(),
-                        ));
-                        EcoString::from("_")
-                    }
-                };
-
-                // Expect '=>'
                 if !matches!(self.current_kind(), TokenKind::FatArrow) {
                     let bad = self.advance();
                     self.diagnostics.push(Diagnostic::error(
@@ -1240,32 +1293,7 @@ impl Parser {
                 }
                 self.advance(); // consume '=>'
 
-                // Parse value: must be a variable identifier or `_` wildcard.
-                // Reject literals, tuples, nested patterns — they are not supported
-                // in map destructuring and would fail codegen with a confusing error.
-                let value_span = self.current_token().span();
-                let value = match self.current_kind() {
-                    TokenKind::Identifier(name) if name.as_str() == "_" => {
-                        let span = self.advance().span();
-                        Pattern::Wildcard(span)
-                    }
-                    TokenKind::Identifier(_) => {
-                        let token = self.advance();
-                        let span = token.span();
-                        let TokenKind::Identifier(name) = token.into_kind() else {
-                            unreachable!()
-                        };
-                        Pattern::Variable(Identifier::new(name, span))
-                    }
-                    _ => {
-                        let bad = self.advance();
-                        self.diagnostics.push(Diagnostic::error(
-                            "Map destructuring value must be a variable or '_' (e.g. #{#key => var})",
-                            bad.span(),
-                        ));
-                        Pattern::Wildcard(value_span)
-                    }
-                };
+                let value = self.parse_map_pattern_value();
                 let pair_span = pair_start.merge(value.span());
                 pairs.push(MapPatternPair {
                     key,
