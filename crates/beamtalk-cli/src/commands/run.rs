@@ -241,12 +241,12 @@ fn run_package_as_otp_application(
         .join("dev")
         .join("ebin")
         .into_std_path_buf();
-    let extra_code_paths = vec![ebin_dir];
+    let extra_code_paths = vec![ebin_dir.clone()];
 
     // Start or reconnect to a persistent workspace for this project.
     // otp_app_name causes application:ensure_all_started(app_name) to be
     // injected into the workspace eval after class bootstrap completes (BT-1319).
-    let (node_info, is_new, _workspace_id) = workspace::get_or_start_workspace(
+    let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
         project_root.as_std_path(),
         None,
         0, // ephemeral port: OS assigns
@@ -261,11 +261,29 @@ fn run_package_as_otp_application(
     )?;
 
     if !is_new {
-        // Workspace already running — OTP app is already up.
-        println!(
-            "{} v{} is already running (REPL port {})\nConnect with: beamtalk repl",
-            pkg.name, pkg.version, node_info.port
-        );
+        // Workspace already exists — it may have been started by `beamtalk repl`
+        // without the OTP application. Ensure the app is running via RPC so we
+        // never falsely print "already running" when only the workspace is live.
+        let already_running = ensure_otp_app_in_workspace(
+            &node_info.node_name,
+            &workspace_id,
+            &pkg.name,
+            &ebin_dir,
+            &paths,
+            project_root.as_std_path(),
+        )?;
+
+        if already_running {
+            println!(
+                "{} v{} is already running (REPL port {})\nConnect with: beamtalk repl",
+                pkg.name, pkg.version, node_info.port
+            );
+        } else {
+            println!(
+                "\nStarted {} v{} in existing workspace\n  Supervisor : {}\n  REPL port  : {}   (connect with: beamtalk repl)",
+                pkg.name, pkg.version, app_config.supervisor, node_info.port
+            );
+        }
         return Ok(());
     }
 
@@ -276,6 +294,76 @@ fn run_package_as_otp_application(
 
     info!("OTP service started");
     Ok(())
+}
+
+/// Ensure the named OTP application is running inside an existing workspace node.
+///
+/// Uses a short-lived hidden BEAM node to RPC `application:ensure_all_started/1`
+/// into the workspace. Also adds the package ebin to the workspace code path so
+/// the app is loadable even if the workspace was started without it (e.g. via a
+/// plain `beamtalk repl` session).
+///
+/// Returns `true` if the app was already running, `false` if it was just started.
+fn ensure_otp_app_in_workspace(
+    workspace_node: &str,
+    workspace_id: &str,
+    app_name: &str,
+    ebin_dir: &std::path::Path,
+    beam_paths: &repl_startup::BeamPaths,
+    project_root: &std::path::Path,
+) -> Result<bool> {
+    let cookie = workspace::read_workspace_cookie(workspace_id)?;
+    let cookie = cookie.trim();
+
+    let pid = std::process::id();
+    // Must use -name (not -sname) to connect to the workspace which also uses -name.
+    let client_node = format!("beamtalk_run_rpc_{pid}@localhost");
+
+    #[cfg(windows)]
+    let ebin_str = ebin_dir.to_string_lossy().replace('\\', "/");
+    #[cfg(not(windows))]
+    let ebin_str = ebin_dir.to_string_lossy();
+
+    // RPC into the workspace: add package ebin then ensure_all_started.
+    // {ok, []} = app already running; {ok, [_|_]} = freshly started.
+    let eval_cmd = format!(
+        "rpc:call('{workspace_node}', code, add_path, [\"{ebin_str}\"]), \
+         Result = rpc:call('{workspace_node}', application, ensure_all_started, [{app_name}]), \
+         case Result of \
+             {{ok, []}} -> io:format(\"already~n\"), halt(0); \
+             {{ok, _}} -> io:format(\"started~n\"), halt(0); \
+             _ -> io:format(\"error: ~p~n\", [Result]), halt(1) \
+         end."
+    );
+
+    let mut args = repl_startup::beam_pa_args(beam_paths);
+    args.push(OsString::from("-name"));
+    args.push(OsString::from(&client_node));
+    args.push(OsString::from("-setcookie"));
+    args.push(OsString::from(cookie));
+    args.push(OsString::from("-eval"));
+    args.push(OsString::from(&eval_cmd));
+
+    let output = Command::new("erl")
+        .arg("-noshell")
+        .arg("-hidden")
+        .args(&args)
+        .current_dir(project_root)
+        .output()
+        .map_err(|e| miette!("Failed to start RPC probe: {e}\nIs Erlang/OTP installed?"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    if output.status.success() {
+        Ok(stdout.trim().starts_with("already"))
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        miette::bail!(
+            "Failed to start OTP application '{app_name}' in existing workspace.\n\
+             The workspace may be in an incompatible state.\n\
+             Error: {stderr}"
+        )
+    }
 }
 
 #[cfg(test)]
