@@ -385,6 +385,82 @@ class_removed_event_updates_tracker_test_() ->
         ]
     end}.
 
+%% BT-1242: pending removals are drained on interrupt (worker killed by user).
+class_removed_drained_on_interrupt_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-interrupt-drain-1">>),
+                DummyMod = bt1242_interrupt_drain_mod,
+                %% Inject module into tracker + a fake worker + a pending removal.
+                FakeWorkerPid = spawn(fun() ->
+                    receive
+                        _ -> ok
+                    end
+                end),
+                %% Use {async, Self} so reply_eval sends a message rather than
+                %% calling gen_server:reply (which requires a {Pid,Tag} tuple).
+                FakeFrom = {async, self()},
+                sys:replace_state(Pid, fun({SId, State, _W}) ->
+                    Tracker = beamtalk_repl_state:get_module_tracker(State),
+                    T2 = beamtalk_repl_modules:add_module(DummyMod, undefined, Tracker),
+                    State2 = beamtalk_repl_state:set_module_tracker(T2, State),
+                    State3 = beamtalk_repl_state:add_pending_module_removal(DummyMod, State2),
+                    {SId, State3, {FakeWorkerPid, make_ref(), FakeFrom}}
+                end),
+                %% Interrupt — should kill FakeWorkerPid and drain pending removals
+                ok = beamtalk_repl_shell:interrupt(Pid),
+                %% Module must be removed from tracker
+                {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
+                ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker)),
+                %% Pending list must be empty
+                {_SId, CleanState, undefined} = sys:get_state(Pid),
+                ?assertEqual([], beamtalk_repl_state:get_pending_module_removals(CleanState)),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% BT-1242: pending removals are drained when the worker crashes (DOWN message).
+class_removed_drained_on_worker_crash_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-crash-drain-1">>),
+                DummyMod = bt1242_crash_drain_mod,
+                %% Spawn a real worker process we can kill to trigger DOWN
+                Self = self(),
+                {FakeWorkerPid, MonRef} = spawn_monitor(fun() ->
+                    receive
+                        _ -> ok
+                    end
+                end),
+                erlang:demonitor(MonRef, [flush]),
+                %% Inject module + pending removal + the real worker pid.
+                %% Use {async, Self} so reply_eval sends a message rather than
+                %% calling gen_server:reply (which requires a {Pid,Tag} tuple).
+                sys:replace_state(Pid, fun({SId, State, _W}) ->
+                    Tracker = beamtalk_repl_state:get_module_tracker(State),
+                    T2 = beamtalk_repl_modules:add_module(DummyMod, undefined, Tracker),
+                    State2 = beamtalk_repl_state:set_module_tracker(T2, State),
+                    State3 = beamtalk_repl_state:add_pending_module_removal(DummyMod, State2),
+                    WorkerMonRef = erlang:monitor(process, FakeWorkerPid),
+                    {SId, State3, {FakeWorkerPid, WorkerMonRef, {async, Self}}}
+                end),
+                %% Kill the fake worker — shell receives DOWN
+                exit(FakeWorkerPid, kill),
+                timer:sleep(50),
+                %% Module must be removed from tracker
+                {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
+                ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker)),
+                %% Pending list must be empty
+                {_SId, CleanState, undefined} = sys:get_state(Pid),
+                ?assertEqual([], beamtalk_repl_state:get_pending_module_removals(CleanState)),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
 unload_module_in_use_returns_error_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [

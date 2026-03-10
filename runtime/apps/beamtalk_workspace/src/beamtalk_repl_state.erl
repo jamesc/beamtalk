@@ -30,7 +30,8 @@
     set_module_tracker/2,
     %% BT-1242: pending module removals (deferred during active eval)
     get_pending_module_removals/1,
-    add_pending_module_removal/2
+    add_pending_module_removal/2,
+    clear_pending_module_removals/1
 ]).
 
 -export_type([state/0]).
@@ -170,3 +171,11 @@ get_pending_module_removals(#state{pending_module_removals = Removals}) ->
 -spec add_pending_module_removal(atom(), state()) -> state().
 add_pending_module_removal(Module, #state{pending_module_removals = Removals} = State) ->
     State#state{pending_module_removals = ordsets:add_element(Module, Removals)}.
+
+%% @doc Clear the pending-removals list.
+%%
+%% BT-1242: Called after applying pending removals on interrupt or worker crash,
+%% so the shell returns to idle with a clean slate.
+-spec clear_pending_module_removals(state()) -> state().
+clear_pending_module_removals(State) ->
+    State#state{pending_module_removals = []}.

@@ -201,7 +201,11 @@ handle_call(interrupt, _From, {SessionId, State, {WorkerPid, MonRef, EvalFrom}})
     Err0 = beamtalk_error:new(interrupted, 'REPL'),
     Err1 = beamtalk_error:with_message(Err0, <<"Interrupted">>),
     reply_eval(EvalFrom, {eval_error, Err1, <<>>, []}),
-    {reply, ok, {SessionId, State, undefined}};
+    %% BT-1242: Apply any pending module removals that accumulated while the
+    %% worker was running.  No WorkerState is returned on interrupt, so we
+    %% drain directly from ShellState.
+    CleanState = drain_pending_removals(State),
+    {reply, ok, {SessionId, CleanState, undefined}};
 handle_call(interrupt, _From, {_SessionId, _State, undefined} = FullState) ->
     %% No eval in progress — nothing to interrupt
     {reply, ok, FullState};
@@ -344,7 +348,10 @@ handle_info(
         iolist_to_binary(io_lib:format("Evaluation crashed: ~p", [Reason]))
     ),
     reply_eval(From, {eval_error, Err1, <<>>, []}),
-    {noreply, {SessionId, State, undefined}};
+    %% BT-1242: Apply any pending module removals that arrived while the
+    %% worker was running.  No WorkerState is returned on crash.
+    CleanState = drain_pending_removals(State),
+    {noreply, {SessionId, CleanState, undefined}};
 %% BT-1242: Class removed via Beamtalk code path — clean up session tracker.
 %% Only updates tracker when no eval worker is active: if a worker is running it
 %% holds a snapshot of State that would overwrite our edit on eval_result arrival.
@@ -428,6 +435,27 @@ apply_pending_removals(ShellState, WorkerState) ->
                 Pending
             ),
             beamtalk_repl_state:set_module_tracker(NewTracker, WorkerState)
+    end.
+
+%% @private BT-1242: Apply pending module removals directly to State and clear the list.
+%%
+%% Used when the worker exits via interrupt or crash (no WorkerState is returned).
+%% In those paths the shell resumes using its own ShellState, so we fold the
+%% pending list over that state's tracker and reset the list to [].
+-spec drain_pending_removals(beamtalk_repl_state:state()) -> beamtalk_repl_state:state().
+drain_pending_removals(State) ->
+    case beamtalk_repl_state:get_pending_module_removals(State) of
+        [] ->
+            State;
+        Pending ->
+            Tracker = beamtalk_repl_state:get_module_tracker(State),
+            NewTracker = lists:foldl(
+                fun(M, T) -> beamtalk_repl_modules:remove_module(M, T) end,
+                Tracker,
+                Pending
+            ),
+            State1 = beamtalk_repl_state:set_module_tracker(NewTracker, State),
+            beamtalk_repl_state:clear_pending_module_removals(State1)
     end.
 
 %% @private BT-696: Dispatch eval result to sync caller or async subscriber.
