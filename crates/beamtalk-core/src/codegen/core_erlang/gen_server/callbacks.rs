@@ -236,15 +236,9 @@ impl CoreErlangGenerator {
 
     /// Generates the `handle_cast/2` callback for async message sends.
     ///
-    /// Handles two cast message formats:
-    ///
-    /// 1. **Fire-and-forget cast** (BT-920): `{cast, Selector, Args}` — sent by
-    ///    `beamtalk_actor:cast_send/3`. Dispatches the message and updates state;
-    ///    errors are logged via `logger:warning` and discarded (BT-943).
-    ///
-    /// 2. **Async future cast** (legacy): `{Selector, Args, FuturePid}` — sent by
-    ///    `beamtalk_actor:async_send/4`. Dispatches and notifies the future PID
-    ///    with `{resolve, Result}` or `{reject, Error}`.
+    /// Handles the fire-and-forget cast format: `{cast, Selector, Args}` — sent by
+    /// `beamtalk_actor:cast_send/3`. Dispatches the message and updates state;
+    /// errors are logged via `logger:warning` and discarded (BT-943).
     // BT-920: helper — generates the inner `case safe_dispatch ... end` for fire-and-forget casts.
     fn cast_dispatch_case(module_name: &str) -> Document<'static> {
         docvec![
@@ -299,58 +293,8 @@ impl CoreErlangGenerator {
                             line(),
                             "<{'cast', CastSelector, CastArgs}> when 'true' ->",
                             nest(INDENT, Self::cast_dispatch_case(&module_name)),
-                            // Legacy async future cast: {Selector, Args, FuturePid}
                             line(),
-                            "<{Selector, Args, FuturePid}> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    // Store FuturePid so @primitive dispatch/3 can access it
-                                    // (e.g. subscribe/unsubscribe need to identify the caller)
-                                    "let _ = call 'erlang':'put'('$bt_future_pid', FuturePid)",
-                                    line(),
-                                    // Use safe_dispatch for error isolation per BT-29
-                                    docvec![
-                                        "in case call '",
-                                        Document::String(module_name.clone()),
-                                        "':'safe_dispatch'(Selector, Args, State) of"
-                                    ],
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            // Success case: resolve the future
-                                            line(),
-                                            "<{'reply', Result, NewState}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    // Send {resolve, Result} to match beamtalk_future protocol
-                                                    "let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})",
-                                                    line(),
-                                                    "in {'noreply', NewState}",
-                                                ]
-                                            ),
-                                            // Error case: reject the future (error isolation)
-                                            line(),
-                                            "<{'error', Error, NewState}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    // Send {reject, Error} to match beamtalk_future protocol
-                                                    "let _Ignored = call 'erlang':'!'(FuturePid, {'reject', Error})",
-                                                    line(),
-                                                    "in {'noreply', NewState}",
-                                                ]
-                                            ),
-                                        ]
-                                    ),
-                                    line(),
-                                    "end",
-                                ]
-                            ),
+                            "<_> when 'true' -> {'noreply', State}",
                         ]
                     ),
                     line(),

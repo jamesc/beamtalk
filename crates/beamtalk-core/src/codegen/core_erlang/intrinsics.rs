@@ -725,9 +725,7 @@ impl CoreErlangGenerator {
     /// ```core-erlang
     /// % For actors (objects):
     /// let Pid = call 'erlang':'element'(4, Receiver) in
-    /// let Future = call 'beamtalk_future':'new'() in
-    /// let _ = call 'beamtalk_actor':'async_send'(Pid, Selector, Arguments, Future) in
-    /// Future
+    /// call 'beamtalk_actor':'sync_send'(Pid, Selector, Arguments)
     /// ```
     #[allow(clippy::too_many_lines)] // one arm per ProtoObject intrinsic message
     pub(in crate::codegen::core_erlang) fn try_generate_protoobject_message(
@@ -1186,17 +1184,34 @@ impl CoreErlangGenerator {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "fieldNames" if arguments.is_empty() => {
+                    // BT-1321: Fast-path for `self` receiver in actor context.
+                    // `Self` is a `#beamtalk_object{..., pid: self()}` tuple, so the
+                    // normal is_tuple branch would call sync_send(self()) which is
+                    // gen_server:call(self(), ...) → deadlock.
+                    // Use beamtalk_primitive:send(State, ...) directly instead.
+                    if let Expression::Identifier(id) = receiver {
+                        if id.name == "self"
+                            && self.context == super::CodeGenContext::Actor
+                            && self.lookup_var("self").is_none()
+                        {
+                            let doc = docvec![
+                                "call 'beamtalk_primitive':'send'(",
+                                Document::String(self.current_state_var()),
+                                ", 'fieldNames', [])",
+                            ];
+                            return Ok(Some(doc));
+                        }
+                    }
+
                     let receiver_var = self.fresh_var("Receiver");
                     let pid_var = self.fresh_var("Pid");
-                    let future_var = self.fresh_var("Future");
-                    let future_pid_var = self.fresh_var("FuturePid");
 
                     let recv_code = self.expression_doc(receiver)?;
 
                     // BT-924: If receiver is a map (value object or stdlib tagged map),
                     // delegate to beamtalk_primitive:send which routes through the
                     // correct dispatch/3 for the receiver's class kind.
-                    // Actor (tuple) receivers use the fast async send path.
+                    // Actor (tuple) receivers use sync_send (ADR-0043).
                     let doc = docvec![
                         "let ",
                         Document::String(receiver_var.clone()),
@@ -1210,19 +1225,9 @@ impl CoreErlangGenerator {
                         Document::String(pid_var.clone()),
                         " = call 'erlang':'element'(4, ",
                         Document::String(receiver_var),
-                        ") in let ",
-                        Document::String(future_var.clone()),
-                        " = call 'beamtalk_future':'new'() in let ",
-                        Document::String(future_pid_var.clone()),
-                        " = call 'beamtalk_future':'pid'(",
-                        Document::String(future_var.clone()),
-                        ") in let _ = call 'beamtalk_actor':'async_send'(",
+                        ") in call 'beamtalk_actor':'sync_send'(",
                         Document::String(pid_var),
-                        ", 'fieldNames', [], ",
-                        Document::String(future_pid_var),
-                        ") in ",
-                        Document::String(future_var),
-                        " end",
+                        ", 'fieldNames', []) end",
                     ];
                     Ok(Some(doc))
                 }
@@ -1257,11 +1262,33 @@ impl CoreErlangGenerator {
                         Ok(Some(doc))
                     }
                     "fieldAt:" if arguments.len() == 1 => {
+                        // BT-1321: Fast-path for `self` receiver in actor context.
+                        // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
+                        if let Expression::Identifier(id) = receiver {
+                            if id.name == "self"
+                                && self.context == super::CodeGenContext::Actor
+                                && self.lookup_var("self").is_none()
+                            {
+                                let name_var = self.fresh_var("Name");
+                                let name_code = self.expression_doc(&arguments[0])?;
+                                let doc = docvec![
+                                    "let ",
+                                    Document::String(name_var.clone()),
+                                    " = ",
+                                    name_code,
+                                    " in call 'beamtalk_primitive':'send'(",
+                                    Document::String(self.current_state_var()),
+                                    ", 'fieldAt:', [",
+                                    Document::String(name_var),
+                                    "])",
+                                ];
+                                return Ok(Some(doc));
+                            }
+                        }
+
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let pid_var = self.fresh_var("Pid");
-                        let future_var = self.fresh_var("Future");
-                        let future_pid_var = self.fresh_var("FuturePid");
                         let class_var = self.fresh_var("Class");
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
@@ -1298,20 +1325,11 @@ impl CoreErlangGenerator {
                             Document::String(pid_var.clone()),
                             " = call 'erlang':'element'(4, ",
                             Document::String(receiver_var.clone()),
-                            ") in let ",
-                            Document::String(future_var.clone()),
-                            " = call 'beamtalk_future':'new'() in let ",
-                            Document::String(future_pid_var.clone()),
-                            " = call 'beamtalk_future':'pid'(",
-                            Document::String(future_var.clone()),
-                            ") in let _ = call 'beamtalk_actor':'async_send'(",
+                            ") in call 'beamtalk_actor':'sync_send'(",
                             Document::String(pid_var),
                             ", 'fieldAt:', [",
                             Document::String(name_var.clone()),
-                            "], ",
-                            Document::String(future_pid_var),
-                            ") in ",
-                            Document::String(future_var),
+                            "])",
                             // Non-actor: delegate map receivers to beamtalk_primitive:send
                             // which routes through dispatch/3 (respects ClassKind)
                             " <_> when 'true' -> case call 'erlang':'is_map'(",
@@ -1345,12 +1363,50 @@ impl CoreErlangGenerator {
                         Ok(Some(doc))
                     }
                     "fieldAt:put:" if arguments.len() == 2 => {
+                        // BT-1321: Fast-path for `self` receiver in actor context.
+                        // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
+                        //
+                        // **Limitation (BT-1324):** This fast-path does NOT thread the state update
+                        // back into the current method's state variable. After `self fieldAt: name put: value`,
+                        // subsequent reads (e.g., `self name`) will NOT see the updated value because
+                        // beamtalk_primitive:send returns a value but doesn't persist to actor State.
+                        //
+                        // For persistent actor slot mutation, use `self.slotName := value` instead.
+                        // Reflective mutation via fieldAt:put: is primarily for value object semantics.
+                        if let Expression::Identifier(id) = receiver {
+                            if id.name == "self"
+                                && self.context == super::CodeGenContext::Actor
+                                && self.lookup_var("self").is_none()
+                            {
+                                let name_var = self.fresh_var("Name");
+                                let value_var = self.fresh_var("Value");
+                                let name_code = self.expression_doc(&arguments[0])?;
+                                let value_code = self.expression_doc(&arguments[1])?;
+                                let doc = docvec![
+                                    "let ",
+                                    Document::String(name_var.clone()),
+                                    " = ",
+                                    name_code,
+                                    " in let ",
+                                    Document::String(value_var.clone()),
+                                    " = ",
+                                    value_code,
+                                    " in call 'beamtalk_primitive':'send'(",
+                                    Document::String(self.current_state_var()),
+                                    ", 'fieldAt:put:', [",
+                                    Document::String(name_var),
+                                    ", ",
+                                    Document::String(value_var),
+                                    "])",
+                                ];
+                                return Ok(Some(doc));
+                            }
+                        }
+
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let value_var = self.fresh_var("Value");
                         let pid_var = self.fresh_var("Pid");
-                        let future_var = self.fresh_var("Future");
-                        let future_pid_var = self.fresh_var("FuturePid");
                         let class_var = self.fresh_var("Class");
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
@@ -1387,22 +1443,13 @@ impl CoreErlangGenerator {
                             Document::String(pid_var.clone()),
                             " = call 'erlang':'element'(4, ",
                             Document::String(receiver_var.clone()),
-                            ") in let ",
-                            Document::String(future_var.clone()),
-                            " = call 'beamtalk_future':'new'() in let ",
-                            Document::String(future_pid_var.clone()),
-                            " = call 'beamtalk_future':'pid'(",
-                            Document::String(future_var.clone()),
-                            ") in let _ = call 'beamtalk_actor':'async_send'(",
+                            ") in call 'beamtalk_actor':'sync_send'(",
                             Document::String(pid_var),
                             ", 'fieldAt:put:', [",
                             Document::String(name_var),
                             ", ",
                             Document::String(value_var),
-                            "], ",
-                            Document::String(future_pid_var),
-                            ") in ",
-                            Document::String(future_var),
+                            "])",
                             " <_> when 'true' -> let ",
                             Document::String(class_var.clone()),
                             " = call 'beamtalk_primitive':'class_of'(",

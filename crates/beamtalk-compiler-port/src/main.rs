@@ -1282,7 +1282,7 @@ mod tests {
             (
                 atom("source"),
                 binary(
-                    "Shape subclass: Triangle\n  state: base = 1.0\n  class withBase: b => self new: #{base => b}",
+                    "Shape subclass: Triangle\n  state: base = 1.0\n  class withBase: b => self new: #{#base => b}",
                 ),
             ),
             (atom("module"), binary("bt@triangle")),

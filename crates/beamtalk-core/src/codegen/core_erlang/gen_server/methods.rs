@@ -56,14 +56,6 @@ impl CoreErlangGenerator {
         // BT-295: Clear method params (will be populated below if present)
         self.current_method_params.clear();
 
-        // BT-1288: Load sync vars for this method from pre-computed semantic facts.
-        self.current_sync_vars = self
-            .semantic_facts
-            .sync_envs
-            .get(&method.span)
-            .map(|env| env.sync_vars.clone())
-            .unwrap_or_default();
-
         let selector_name = method.selector.name();
 
         // BT-295: Collect parameter variable names (mutates scope via fresh_var)
@@ -1423,14 +1415,6 @@ impl CoreErlangGenerator {
             self.reset_state_version();
             self.class_var_version = 0;
             self.class_var_mutated = false;
-
-            // BT-1288: Load sync vars for this method from pre-computed semantic facts.
-            self.current_sync_vars = self
-                .semantic_facts
-                .sync_envs
-                .get(&method.span)
-                .map(|env| env.sync_vars.clone())
-                .unwrap_or_default();
 
             // Bind ClassSelf as 'self' in scope
             self.bind_var("self", "ClassSelf");

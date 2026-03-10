@@ -96,16 +96,7 @@ module 'typed_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/
                     let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => CastError}~)
                     in {'noreply', State}
             end
-        <{Selector, Args, FuturePid}> when 'true' ->
-            let _ = call 'erlang':'put'('$bt_future_pid', FuturePid)
-            in case call 'typed_methods':'safe_dispatch'(Selector, Args, State) of
-                <{'reply', Result, NewState}> when 'true' ->
-                    let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})
-                    in {'noreply', NewState}
-                <{'error', Error, NewState}> when 'true' ->
-                    let _Ignored = call 'erlang':'!'(FuturePid, {'reject', Error})
-                    in {'noreply', NewState}
-            end
+        <_> when 'true' -> {'noreply', State}
     end
 
 
@@ -153,13 +144,13 @@ module 'typed_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/
         <'deposit:'> when 'true' ->
             case Args of
                 <[_amount1]> when 'true' ->
-                    let _Val2 = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(call 'maps':'get'('value', State)), _amount1) in let State1 = call 'maps':'put'('value', _Val2, State) in {'reply', _Val2, State1}
+                    let _Val2 = call 'erlang':'+'(call 'maps':'get'('value', State), _amount1) in let State1 = call 'maps':'put'('value', _Val2, State) in {'reply', _Val2, State1}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <'tryGet'> when 'true' ->
-            let _Result = call 'beamtalk_message_dispatch':'send'(call 'erlang':'>'(call 'beamtalk_future':'maybe_await'(call 'maps':'get'('value', State)), 0), 'ifTrue:ifFalse:', [fun () -> call 'maps':'get'('value', State), fun () -> 'nil']) in {'reply', _Result, State}
+            let _Result = call 'beamtalk_message_dispatch':'send'(call 'erlang':'>'(call 'maps':'get'('value', State), 0), 'ifTrue:ifFalse:', [fun () -> call 'maps':'get'('value', State), fun () -> 'nil']) in {'reply', _Result, State}
         <'increment'> when 'true' ->
-            let _Val3 = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(call 'maps':'get'('value', State)), 1) in let State1 = call 'maps':'put'('value', _Val3, State) in {'reply', _Val3, State1}
+            let _Val3 = call 'erlang':'+'(call 'maps':'get'('value', State), 1) in let State1 = call 'maps':'put'('value', _Val3, State) in {'reply', _Val3, State1}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
             let ExtLookup = try call 'beamtalk_extensions':'lookup'('TypedCounter', OtherSelector)

@@ -10,9 +10,11 @@
 %%% This module provides both the naive Erlang equivalent and the StateAcc
 %%% simulation so the overhead can be measured directly.
 %%%
-%%% Also measures `beamtalk_future:maybe_await/1` overhead: the codegen wraps
-%%% every arithmetic operand in a maybe_await call (in case the value is a
-%%% future), adding 2 extra calls per binary operation.
+%%% Also measures historical `beamtalk_future:maybe_await/1` overhead: prior to
+%%% BT-1321, codegen wrapped every arithmetic operand in a maybe_await call.
+%%% Since ADR-0043 all actor sends are synchronous, binary op codegen no longer
+%%% emits maybe_await. The _maybe_await variants below remain as historical
+%%% benchmarks showing the overhead that was eliminated.
 
 -module(bench_block_threading).
 

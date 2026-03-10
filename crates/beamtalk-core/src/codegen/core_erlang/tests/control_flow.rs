@@ -65,10 +65,10 @@ fn test_block_while_true_loop() {
         output.contains("<'false'> when 'true' -> 'nil'"),
         "whileTrue: should return nil when condition is false. Got: {output}"
     );
-    // Binary ops inside condition blocks are wrapped with maybe_await (BT-899)
+    // Binary ops no longer wrap operands with maybe_await (ADR-0043 / BT-1321)
     assert!(
-        output.contains("beamtalk_future"),
-        "whileTrue: binary ops should wrap operands with maybe_await. Got: {output}"
+        !output.contains("maybe_await"),
+        "whileTrue: binary ops should not wrap operands with maybe_await. Got: {output}"
     );
 }
 
@@ -888,16 +888,14 @@ fn test_match_array_pattern_duplicate_variable_emits_equality_check() {
         code.contains("call 'erlang':'=:='("),
         "Should emit erlang:=:= equality check for duplicate variable. Got:\n{code}"
     );
-    // The primary binding `let X = ... at: [1]` should appear exactly once.
-    let x_at_1 = code.matches("'at:', [1]").count();
+    // The primary binding `let X = ... at: [1]` should appear.
     assert!(
-        x_at_1 >= 1,
+        code.contains("'at:', [1]"),
         "Should extract first element for primary binding. Got:\n{code}"
     );
     // A second extraction for position 2 must also be present (into a temp var).
-    let x_at_2 = code.matches("'at:', [2]").count();
     assert!(
-        x_at_2 >= 1,
+        code.contains("'at:', [2]"),
         "Should extract second element into temp for equality check. Got:\n{code}"
     );
 }
