@@ -489,6 +489,7 @@ pub fn run(
             Some(bind_addr),
             ssl_dist_conf.as_deref(),
             web_port,
+            None,
         )?;
 
         let actual_port = node_info.port;

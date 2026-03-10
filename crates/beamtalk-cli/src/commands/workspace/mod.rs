@@ -1057,7 +1057,18 @@ mod tests {
             let tw = TestWorkspace::new(&format!("{prefix}{attempt_suffix}"));
             let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
-            match start_detached_node(&tw.id, 0, &paths, &[], false, Some(60), None, None, None) {
+            match start_detached_node(
+                &tw.id,
+                0,
+                &paths,
+                &[],
+                false,
+                Some(60),
+                None,
+                None,
+                None,
+                None,
+            ) {
                 Ok(node_info) => {
                     let guard = NodeGuard::new(&node_info);
                     return (tw, node_info, guard);
@@ -1199,6 +1210,7 @@ mod tests {
             None,
             None, // ssl_dist_optfile
             None, // web_port
+            None, // otp_app_name
         )
         .expect("first get_or_start should succeed");
         let _guard1 = NodeGuard::new(&info1);
@@ -1221,6 +1233,7 @@ mod tests {
             None,
             None, // ssl_dist_optfile
             None, // web_port
+            None, // otp_app_name
         )
         .expect("reconnect should succeed");
         assert!(!started2, "second call should reuse existing node");
@@ -1252,6 +1265,7 @@ mod tests {
             None,
             None, // ssl_dist_optfile
             None, // web_port
+            None, // otp_app_name
         )
         .expect("restart should succeed");
         let _guard3 = NodeGuard::new(&info3);
@@ -1311,6 +1325,7 @@ mod tests {
                         None,
                         None, // ssl_dist_optfile
                         None, // web_port
+                        None, // otp_app_name
                     )
                 })
             })
@@ -1385,9 +1400,19 @@ mod tests {
         let paths = beam_dirs_for_tests();
 
         // Step 1: Start a node to get a real port, then kill it without cleanup.
-        let first_info =
-            start_detached_node(&tw.id, 0, &paths, &[], false, Some(60), None, None, None)
-                .expect("first start should succeed");
+        let first_info = start_detached_node(
+            &tw.id,
+            0,
+            &paths,
+            &[],
+            false,
+            Some(60),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("first start should succeed");
         let stale_port = first_info.port;
         kill_node_raw(&first_info);
 
@@ -1419,6 +1444,7 @@ mod tests {
             &[],
             false,
             Some(60),
+            None,
             None,
             None,
             None,
@@ -1460,9 +1486,19 @@ mod tests {
         let paths = beam_dirs_for_tests();
 
         // Step 1: Start a node to produce real runtime files, then kill it.
-        let first_info =
-            start_detached_node(&tw.id, 0, &paths, &[], false, Some(60), None, None, None)
-                .expect("first start should succeed");
+        let first_info = start_detached_node(
+            &tw.id,
+            0,
+            &paths,
+            &[],
+            false,
+            Some(60),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("first start should succeed");
         kill_node_raw(&first_info);
 
         // Step 2: Write a `starting` tombstone to simulate a partial startup that
@@ -1487,6 +1523,7 @@ mod tests {
             &[],
             false,
             Some(60),
+            None,
             None,
             None,
             None,
