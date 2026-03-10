@@ -1488,6 +1488,23 @@ pub enum Pattern {
         /// Source location.
         span: Span,
     },
+
+    /// Constructor pattern for sealed types.
+    ///
+    /// Matches a sealed Value type by its constructor class method.
+    ///
+    /// Example: `Result ok: v`, `Result error: e`, `Result ok: _`
+    ///
+    /// Each entry in `keywords` is a `(selector_keyword, binding_pattern)` pair.
+    /// The binding pattern is typically `Variable` or `Wildcard`.
+    Constructor {
+        /// The class name (e.g. `"Result"`).
+        class: Identifier,
+        /// Keyword-binding pairs (e.g. `[("ok:", Variable("v"))]`).
+        keywords: Vec<(EcoString, Pattern)>,
+        /// Source location.
+        span: Span,
+    },
 }
 
 impl Pattern {
@@ -1502,7 +1519,8 @@ impl Pattern {
             | Self::Array { span, .. }
             | Self::List { span, .. }
             | Self::Binary { span, .. }
-            | Self::Map { span, .. } => *span,
+            | Self::Map { span, .. }
+            | Self::Constructor { span, .. } => *span,
         }
     }
 }

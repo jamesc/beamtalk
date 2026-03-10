@@ -1139,42 +1139,6 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// Checks if an expression is a control flow construct that *potentially*
-    /// threads state through a block (e.g. `do:`, `whileTrue:`, etc.).
-    ///
-    /// **IMPORTANT:** This helper is **selector-based only** - it does not analyze
-    /// whether the literal block argument actually mutates any captured state, nor which
-    /// variant of the underlying control-flow primitive (pure vs. with mutations) will
-    /// be used. As a result, it may return `true` for expressions whose final result
-    /// is a non-state value (such as `ok` or `nil`).
-    ///
-    /// **Callers that use this to decide whether to rebind a threaded `StateN` variable
-    /// MUST also perform mutation analysis** on the block argument (or use equivalent
-    /// information such as `control_flow_has_mutations()`) rather than assuming that
-    /// the return value is always the updated state.
-    ///
-    /// Note: `inject:into:` is included because it may appear inside actor methods
-    /// with field mutations, requiring inline compilation for proper state threading.
-    pub(super) fn is_state_threading_control_flow(expr: &Expression) -> bool {
-        use super::state_threading_selectors::{
-            is_state_threading_keyword_selector, is_state_threading_unary_selector,
-        };
-        match expr {
-            Expression::MessageSend {
-                selector: MessageSelector::Keyword(parts),
-                ..
-            } => {
-                let selector: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                is_state_threading_keyword_selector(selector.as_str())
-            }
-            Expression::MessageSend {
-                selector: MessageSelector::Unary(name),
-                ..
-            } => is_state_threading_unary_selector(name.as_str()),
-            _ => false,
-        }
-    }
-
     /// Generates the opening part of a field assignment with state threading.
     ///
     /// For `self.field := value`, generates:

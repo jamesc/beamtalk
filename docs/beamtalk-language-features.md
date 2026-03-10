@@ -935,6 +935,13 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
   _ -> 0
 ]
 // => 6
+
+// Constructor patterns (Result ok:/error: only in this release)
+(Result ok: 42) match: [
+  Result ok: v    -> v;
+  Result error: _ -> 0
+]
+// => 42
 ```
 
 **Supported pattern types:**
@@ -952,6 +959,7 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Tuple | `{a, b}` | Destructure tuple (patterns supported; tuple literals planned) |
 | Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
+| Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
 
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
 

@@ -212,6 +212,7 @@ impl ThreadingPlan {
                 CoreErlangGenerator::inline_conditional_writes_threaded(
                     &s.expression,
                     &threaded_locals,
+                    &generator.semantic_facts,
                 )
             });
             // DestructureAssignment as the last expr is not supported in tuple-acc mode:
@@ -729,7 +730,11 @@ impl CoreErlangGenerator {
                 }
             } else if matches!(kind, BodyKind::FoldlDo)
                 && (self.control_flow_has_mutations(expr)
-                    || Self::inline_conditional_writes_threaded(expr, &plan.threaded_locals))
+                    || Self::inline_conditional_writes_threaded(
+                        expr,
+                        &plan.threaded_locals,
+                        &self.semantic_facts,
+                    ))
             {
                 // BT-1053: Inline conditional with local mutations returns {Result, NewStateAcc}.
                 // Unpack element(2) so subsequent iterations see the updated StateAcc.
@@ -1735,6 +1740,7 @@ impl CoreErlangGenerator {
     pub(super) fn inline_conditional_writes_threaded(
         expr: &Expression,
         threaded: &[String],
+        facts: &crate::semantic_analysis::SemanticFacts,
     ) -> bool {
         use crate::ast::MessageSelector;
         if let Expression::MessageSend {
@@ -1749,7 +1755,10 @@ impl CoreErlangGenerator {
             ) {
                 for arg in arguments {
                     if let Expression::Block(block) = arg {
-                        let analysis = block_analysis::analyze_block(block);
+                        let analysis = facts
+                            .block_profile(&block.span)
+                            .cloned()
+                            .unwrap_or_else(|| block_analysis::analyze_block(block));
                         if analysis.local_writes.iter().any(|v| threaded.contains(v)) {
                             return true;
                         }

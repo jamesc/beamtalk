@@ -2159,7 +2159,85 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(" }~"));
                 Ok(Document::Vec(parts))
             }
+            Pattern::Constructor {
+                class,
+                keywords,
+                span,
+            } => self.generate_constructor_pattern(class, keywords, *span),
         }
+    }
+
+    /// Generates a Core Erlang map pattern for a sealed-type constructor pattern.
+    ///
+    /// Maps `Result ok: v` to:
+    /// ```text
+    /// ~{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := V}~
+    /// ```
+    ///
+    /// The field mapping is looked up from [`sealed_constructor_fields`].
+    fn generate_constructor_pattern(
+        &mut self,
+        class: &crate::ast::Identifier,
+        keywords: &[(ecow::EcoString, Pattern)],
+        span: crate::source_analysis::Span,
+    ) -> Result<Document<'static>> {
+        // Build the full selector from keyword parts (e.g. "ok:" or "attempt:identifier:")
+        let selector: String = keywords.iter().map(|(kw, _)| kw.as_str()).collect();
+
+        let fields = sealed_constructor_fields(&class.name, &selector).ok_or_else(|| {
+            CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "Constructor pattern `{} {}` — '{}' is not a known sealed type or \
+                     '{}' is not a recognised constructor. \
+                     Only stdlib sealed types (e.g. Result) support constructor patterns in this release.",
+                    class.name, selector, class.name, selector
+                ),
+                location: format!("{span:?}"),
+            }
+        })?;
+
+        // Validate arity
+        if keywords.len() != fields.binding_fields.len() {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "Constructor pattern `{} {}` has {} argument(s) but constructor expects {}",
+                    class.name,
+                    selector,
+                    keywords.len(),
+                    fields.binding_fields.len()
+                ),
+                location: format!("{span:?}"),
+            });
+        }
+
+        // ~{'$beamtalk_class' := 'ClassName', 'discriminator' := Value, ..., 'field' := Binding}~
+        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{")];
+
+        // Class tag
+        parts.push(Document::Str("'$beamtalk_class' := '"));
+        parts.push(Document::String(class.name.to_string()));
+        parts.push(Document::Str("'"));
+
+        // Discriminator fields (fixed values distinguishing variants)
+        for (field_name, field_value) in &fields.discriminators {
+            parts.push(Document::Str(", '"));
+            parts.push(Document::String(field_name.to_string()));
+            parts.push(Document::Str("' := "));
+            parts.push(Document::String(field_value.to_string()));
+        }
+
+        // Binding fields — one per keyword argument. Wildcards still emit the
+        // field key (requiring the key to exist in the map) but bind to `_`.
+        for ((_, binding_pattern), field_name) in keywords.iter().zip(fields.binding_fields.iter())
+        {
+            parts.push(Document::Str(", '"));
+            parts.push(Document::String(field_name.to_string()));
+            parts.push(Document::Str("' := "));
+            parts.push(self.generate_pattern(binding_pattern)?);
+        }
+
+        parts.push(Document::Str("}~"));
+        Ok(Document::Vec(parts))
     }
 
     /// Generates a Core Erlang binary segment: `#<Value>(Size,Unit,Type,Flags)`.
@@ -2330,8 +2408,44 @@ impl CoreErlangGenerator {
                     Self::collect_pattern_variables_inner(&pair.value, bind);
                 }
             }
+            Pattern::Constructor { keywords, .. } => {
+                for (_, binding) in keywords {
+                    Self::collect_pattern_variables_inner(binding, bind);
+                }
+            }
             Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
         }
+    }
+}
+
+/// Field layout for a sealed-type constructor pattern (Phase 1: stdlib types only).
+///
+/// `discriminators` — fixed field values that distinguish variants of the same sealed type
+///   (e.g. `isOk => true` for `Result ok:`).
+/// `binding_fields` — ordered list of map keys that receive the constructor arguments.
+struct ConstructorPatternFields {
+    discriminators: Vec<(&'static str, &'static str)>,
+    binding_fields: Vec<&'static str>,
+}
+
+/// Returns the Core Erlang field layout for a known sealed-type constructor.
+///
+/// Returns `None` for unknown classes or unknown selectors (caller emits a compile error).
+///
+/// # Phase 1 scope
+/// Only stdlib sealed types are supported. User-defined sealed types require the
+/// Phase 2 `[pattern: ...]` annotation (tracked separately).
+fn sealed_constructor_fields(class: &str, selector: &str) -> Option<ConstructorPatternFields> {
+    match (class, selector) {
+        ("Result", "ok:") => Some(ConstructorPatternFields {
+            discriminators: vec![("isOk", "'true'")],
+            binding_fields: vec!["okValue"],
+        }),
+        ("Result", "error:") => Some(ConstructorPatternFields {
+            discriminators: vec![("isOk", "'false'")],
+            binding_fields: vec!["errReason"],
+        }),
+        _ => None,
     }
 }
 
