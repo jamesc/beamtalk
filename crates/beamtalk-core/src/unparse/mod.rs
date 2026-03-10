@@ -240,12 +240,18 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         modifiers.push(Document::Str("typed "));
     }
 
-    let header = docvec![
+    let class_header = docvec![
         concat(modifiers),
         Document::String(superclass),
         " subclass: ",
         Document::String(class.name.name.to_string()),
     ];
+
+    let header = if let Some(module) = &class.backing_module {
+        docvec![class_header, " native: ", Document::String(module.clone())]
+    } else {
+        class_header
+    };
 
     let header = if let Some(trail) = &class.comments.trailing {
         docvec![header, "  ", unparse_comment(trail)]
@@ -2124,6 +2130,21 @@ mod tests {
             module.classes[0].methods.len(),
             module2.classes[0].methods.len()
         );
+    }
+
+    #[test]
+    fn round_trip_class_with_native_keyword() {
+        let source = "Actor subclass: Foo native: my_module\n  doIt => 42";
+        let module = parse_source(source);
+        let unparsed = unparse_module(&module);
+        let module2 = parse_source(&unparsed);
+        assert_eq!(module2.classes.len(), 1);
+        assert_eq!(
+            module2.classes[0].backing_module.as_deref(),
+            Some("my_module"),
+            "backing_module lost after round-trip.\n  unparsed: {unparsed:?}"
+        );
+        assert_eq!(module2.classes[0].methods.len(), 1);
     }
 
     /// Structural equivalence check ignoring spans.

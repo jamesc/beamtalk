@@ -58,11 +58,11 @@ TestCase subclass: Ch13Assertions
 
   testShould =>
     // should:raise: — verifies an exception is raised
-    self should: [1 / 0] raise: ZeroDivide
+    self should: [1 / 0] raise: #badarith
 
   testShouldnt =>
     // shouldnt:raise: — verifies no exception is raised
-    self shouldnt: [1 + 1] raise: ZeroDivide
+    self shouldnt: [1 + 1] raise: #badarith
 
   testAssertKindOf =>
     self assert: 42 isKindOf: Integer
@@ -177,7 +177,7 @@ These are extracted and run automatically by the doc test runner.
 
 The format is a ` ```beamtalk ` block with `// =>` assertions:
 
-```beamtalk
+```text
 Object subclass: Greeter
   /// Greet someone by name.
   ///

@@ -66,6 +66,29 @@ TestCase subclass: DestructuringTest
     self assert: first equals: "hello"
     self assert: second equals: "world"
 
+  testArrayDestructuringWithTaggedSymbolLiteral =>
+    // Literal pattern in first slot: #[#ok, value] matches only when first element is #ok.
+    #[#ok, value] := #[#ok, 42]
+    self assert: value equals: 42
+
+  testArrayDestructuringLiteralMismatchRaisesError =>
+    // When the literal slot does not match, a RuntimeError with badmatch details is raised.
+    result := [
+      #[#ok, _val] := #[#error, 42]
+      #did_not_raise
+    ] on: RuntimeError do: [:e | e message includesSubstring: "badmatch"]
+    self assert: result equals: true
+
+  testArrayDestructuringIntegerLiteral =>
+    // Integer literal in a pattern position.
+    #[1, value] := #[1, 99]
+    self assert: value equals: 99
+
+  testArrayDestructuringMultipleLiterals =>
+    // Multiple literal positions with a variable in between.
+    #[#begin, middle, #done] := #[#begin, "data", #done]
+    self assert: middle equals: "data"
+
   // === Last-expression destructuring (RHS must be evaluated) ===
   testTupleDestructuringOnlyStatement =>
     // Destructuring as the only (and therefore last) statement in a method.

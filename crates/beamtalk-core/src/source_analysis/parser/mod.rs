@@ -1535,6 +1535,85 @@ mod tests {
         assert_eq!(module.expressions.len(), 2);
     }
 
+    // ========================================================================
+    // native: keyword argument tests (BT-1206, ADR 0056)
+    // ========================================================================
+
+    #[test]
+    fn parse_native_keyword_stores_backing_module() {
+        let module = parse_ok("Actor subclass: MyNative native: my_erl_module");
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.name.name.as_str(), "MyNative");
+        assert_eq!(class.backing_module.as_deref(), Some("my_erl_module"));
+    }
+
+    #[test]
+    fn parse_native_keyword_with_body() {
+        let module = parse_ok(
+            "Actor subclass: Foo native: foo_impl
+  state: x = 0
+  doIt => x",
+        );
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.backing_module.as_deref(), Some("foo_impl"));
+        assert_eq!(class.state.len(), 1);
+        assert_eq!(class.methods.len(), 1);
+    }
+
+    #[test]
+    fn parse_no_native_keyword_leaves_backing_module_none() {
+        let module = parse_ok("Actor subclass: Foo");
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(module.classes[0].backing_module, None);
+    }
+
+    #[test]
+    fn parse_native_keyword_missing_module_name_emits_error() {
+        let diagnostics = parse_err("Actor subclass: Foo native:");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("Expected Erlang module name")),
+            "Expected error for missing module name, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn parse_native_keyword_newline_before_module_does_not_consume_method() {
+        // `native:` followed by a newline should NOT consume the next-line identifier
+        // as the module name — it should be treated as a missing module name error
+        // and the method should still be parsed as a class member.
+        let tokens = lex_with_eof("Actor subclass: Foo native:\n  doIt => 42");
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("Expected Erlang module name")),
+            "Expected error for newline after native:, got: {diagnostics:?}"
+        );
+        // The method should still be parsed despite the native: error
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(module.classes[0].backing_module, None);
+        assert_eq!(
+            module.classes[0].methods.len(),
+            1,
+            "Method 'doIt' should not be consumed as native module name"
+        );
+    }
+
+    #[test]
+    fn parse_native_keyword_non_identifier_emits_error() {
+        let diagnostics = parse_err("Actor subclass: Foo native: 42");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("Expected Erlang module name")),
+            "Expected error for non-identifier after native:, got: {diagnostics:?}"
+        );
+    }
+
     #[test]
     fn parse_multiline_keyword_does_not_consume_method_def() {
         // In a class body, a keyword method on the next line should NOT

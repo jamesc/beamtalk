@@ -327,6 +327,14 @@ async_send(ActorPid, kill, [], FuturePid) ->
             beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
+async_send(_ActorPid, delegate, [], FuturePid) ->
+    %% BT-1208: Non-native Actors do not have a backing Erlang module.
+    Error = beamtalk_error:new(signal, unknown, delegate),
+    Error1 = Error#beamtalk_error{
+        message = <<"delegate called on a non-native Actor">>
+    },
+    beamtalk_future:reject(FuturePid, Error1),
+    ok;
 async_send(ActorPid, monitor, [], FuturePid) ->
     %% monitor is handled locally - creates an Erlang monitor
     Ref = erlang:monitor(process, ActorPid),
@@ -411,6 +419,14 @@ sync_send(ActorPid, kill, []) ->
         ok -> ok;
         timeout -> raise_timeout(kill)
     end;
+sync_send(_ActorPid, delegate, []) ->
+    %% BT-1208: Non-native Actors do not have a backing Erlang module.
+    %% Native Actors will override this at the codegen level.
+    Error = beamtalk_error:new(signal, unknown, delegate),
+    Error1 = Error#beamtalk_error{
+        message = <<"delegate called on a non-native Actor">>
+    },
+    error(beamtalk_exception_handler:ensure_wrapped(Error1));
 sync_send(ActorPid, monitor, []) ->
     erlang:monitor(process, ActorPid);
 sync_send(ActorPid, Selector, Args) ->
@@ -675,6 +691,16 @@ dispatch(Selector, Args, Self, State) ->
         isAlive when Args =:= [] ->
             %% Actor is alive if it's processing this message
             {reply, true, State};
+        delegate when Args =:= [] ->
+            %% BT-1208: Non-native Actors do not have a backing Erlang module.
+            %% This path is reached via perform:/perform:withArguments: which
+            %% bypass the send site and re-dispatch through dispatch/4.
+            ClassName = beamtalk_tagged_map:class_of(State, unknown),
+            Error = beamtalk_error:new(signal, ClassName, delegate),
+            Error1 = Error#beamtalk_error{
+                message = <<"delegate called on a non-native Actor">>
+            },
+            {error, Error1, State};
         'respondsTo:' when length(Args) =:= 1 ->
             %% Check user-defined methods first, then actor built-ins, then hierarchy
             [CheckSelector] = Args,
@@ -690,6 +716,9 @@ dispatch(Selector, Args, Self, State) ->
                     {reply, true, State};
                 false when CheckSelector =:= monitor ->
                     %% monitor is handled by actor lifecycle machinery, not in __methods__
+                    {reply, true, State};
+                false when CheckSelector =:= delegate ->
+                    %% delegate is handled by actor dispatch, not in __methods__
                     {reply, true, State};
                 false ->
                     %% Check inherited methods via hierarchy walk
