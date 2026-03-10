@@ -273,6 +273,22 @@ entry = "Main start"
 
 The class name is the PascalCase of the source file name (`main.bt` → `Main`).
 
+## Future: Release Mode
+
+`beamtalk release` (planned, separate ADR) produces a self-contained OTP release for production deployment. This introduces a third operational mode alongside run mode and full workspace:
+
+| Mode | Bootstrap | REPL server | Workspace registry | Use case |
+|---|---|---|---|---|
+| Run mode (`repl=false`) | ✓ | ✗ | ✗ | Scripts via `beamtalk run` |
+| Full workspace | ✓ | ✓ | ✓ | Dev: `beamtalk run` (services) and `beamtalk repl` |
+| Release | ✗ (pre-loaded) | ✓ | ✗ | Production deployments |
+
+**Class loading in releases:** All project `bt@*.beam` files are bundled in the release image and pre-loaded at boot via the release boot script. `beamtalk_workspace_bootstrap` is not needed — classes are already registered before the root supervisor starts. This sidesteps the class-loading ordering problem that ADR 0061 fixes for dev mode.
+
+**REPL against a release:** Production nodes should be connectable via `beamtalk repl --host prod.example.com --port 4001`, using the same protocol as dev workspace connections. The release includes a minimal REPL server (`beamtalk_repl_server` + `beamtalk_session_sup`) without the rest of the workspace machinery. Security defaults are stricter than dev: TLS + authentication required (see ADR 0058).
+
+**Design constraint for the release ADR:** `beamtalk_workspace_sup` must support release mode cleanly — either via a third config variant or by extracting `beamtalk_repl_server` + `beamtalk_session_sup` into a standalone OTP application that releases can include without pulling in the full workspace.
+
 ## Design Notes
 
 **Multiple `beamtalk run .` on a running service:** Idempotent. Before starting, `beamtalk run .` scans `~/.beamtalk/workspaces/` for a live workspace matching the project path. If found, prints "Already running (REPL port N) — connect with: beamtalk repl" and exits 0. No rebuild, no duplicate process. Consistent with `systemctl start` / `docker start` conventions.
