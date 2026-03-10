@@ -690,6 +690,36 @@ run_mode_metadata_accessible_test() ->
 
     gen_server:stop(Pid).
 
+%%% BT-1242: class_removed cast triggered by classRemoveFromSystemByName
+
+class_removed_cast_unregisters_module_test() ->
+    %% Verify that casting {unregister_module, Module} to beamtalk_workspace_meta
+    %% (which is what publish_class_removed/2 does) removes the module entry.
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        OldPid ->
+            gen_server:stop(OldPid),
+            timer:sleep(10)
+    end,
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+
+    ModuleName = list_to_atom(
+        "bt1242_meta_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = beamtalk_workspace_meta:register_module(ModuleName),
+    timer:sleep(50),
+    {ok, Modules1} = beamtalk_workspace_meta:loaded_modules(),
+    ?assert(lists:keymember(ModuleName, 1, Modules1)),
+
+    %% Simulate the direct cast from publish_class_removed/2
+    gen_server:cast(beamtalk_workspace_meta, {unregister_module, ModuleName}),
+    timer:sleep(50),
+    {ok, Modules2} = beamtalk_workspace_meta:loaded_modules(),
+    ?assertNot(lists:keymember(ModuleName, 1, Modules2)),
+
+    gen_server:stop(Pid).
+
 %%% Test helpers
 
 %% Mirror beamtalk_workspace_meta's metadata_path computation so tests check

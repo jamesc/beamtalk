@@ -6,7 +6,4 @@ name = "sicp"
 version = "0.1.0"
 description = "SICP Scheme compiler written in Beamtalk"
 
-[run]
-entry = "Main run"
-
 [dependencies]
