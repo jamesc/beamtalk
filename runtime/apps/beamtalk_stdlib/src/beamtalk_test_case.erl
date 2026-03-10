@@ -638,8 +638,12 @@ check_lifecycle_methods(Module, none) ->
 %% assignments return an updated copy of self.
 -spec is_valid_setUp_result(term(), term()) -> boolean().
 is_valid_setUp_result(Instance, Result) when is_map(Instance), is_map(Result) ->
-    maps:get('$beamtalk_class', Instance, undefined) =:=
-        maps:get('$beamtalk_class', Result, undefined);
+    %% Use maps:find/2 so that two maps both lacking '$beamtalk_class' are NOT
+    %% considered equal — the key must actually be present in both.
+    case {maps:find('$beamtalk_class', Instance), maps:find('$beamtalk_class', Result)} of
+        {{ok, Class}, {ok, Class}} -> true;
+        _ -> false
+    end;
 is_valid_setUp_result(_Instance, _Result) ->
     false.
 
