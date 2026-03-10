@@ -760,7 +760,7 @@ impl Parser {
                     && self.is_at_method_definition()
             )
             && !self.is_at_standalone_method_definition()
-            && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
+            && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "classState:")
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
         {
             let pos_before = self.current;
@@ -797,7 +797,7 @@ impl Parser {
                     || self.is_at_class_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
+                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "classState:")
                 {
                     break;
                 }
@@ -813,7 +813,7 @@ impl Parser {
                     || self.is_at_class_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
+                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "classState:")
                 {
                     // Trailing period at end of method — not needed (BT-948)
                     self.diagnostics.push(
@@ -851,7 +851,7 @@ impl Parser {
                     || self.is_at_class_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
+                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "classState:")
                 {
                     break;
                 }
