@@ -819,6 +819,14 @@ pub(super) struct CoreErlangGenerator {
     /// instead of `StateAcc*`, even when `in_loop_body` is also true.
     /// Set by `generate_counted_stateful_loop_hybrid` and `generate_while_loop_hybrid`.
     in_hybrid_loop: bool,
+    /// BT-1326: Map of actor field name → Core Erlang variable name for read-only fields
+    /// that have been pre-extracted before a hybrid letrec loop.
+    ///
+    /// When non-empty, `generate_field_access` substitutes the variable name directly
+    /// instead of emitting `call 'maps':'get'('field', State)`, eliminating per-iteration
+    /// map reads for fields that never change during the loop body.
+    /// Cleared after the hybrid loop body is generated.
+    hybrid_readonly_field_params: std::collections::HashMap<String, String>,
     /// BT-153: Whether we're generating REPL code (vs module code).
     /// In REPL mode, local variable assignments should update bindings.
     is_repl_mode: bool,
@@ -931,6 +939,7 @@ impl CoreErlangGenerator {
             state_threading: StateThreading::new(),
             in_loop_body: false,
             in_hybrid_loop: false,
+            hybrid_readonly_field_params: std::collections::HashMap::new(),
             is_repl_mode: false,
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             source_text: None,
@@ -968,6 +977,7 @@ impl CoreErlangGenerator {
             state_threading: StateThreading::new(),
             in_loop_body: false,
             in_hybrid_loop: false,
+            hybrid_readonly_field_params: std::collections::HashMap::new(),
             is_repl_mode: false,
             context: CodeGenContext::Actor,
             source_text: None,

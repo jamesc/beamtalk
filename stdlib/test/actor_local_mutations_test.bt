@@ -51,6 +51,15 @@ TestCase subclass: ActorLocalMutationsTest
     self assert: (r2 at: #sum) equals: 4
     self assert: (r2 at: #log) equals: 4
 
+  testHybridReadonlyFieldOptimization =>
+    // BT-1326: Read-only field (self.step=1) is pre-extracted before the letrec.
+    // Verifies the optimization produces correct results at runtime.
+    a := LocalMutationActor spawn
+    r := a sumWithStep: 5
+    // sum = 1+1+1+1+1 = 5 (step=1 each iteration), log = 5 iterations
+    self assert: (r at: #sum) equals: 5
+    self assert: (r at: #log) equals: 5
+
   testBlockLocalVarInDoBody =>
     a := LocalMutationActor spawn
     self assert: (a doubleAndSum: #(1, 2, 3)) equals: 12

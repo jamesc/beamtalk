@@ -360,6 +360,15 @@ impl CoreErlangGenerator {
         // For now, assume receiver is 'self' and access from State/Self
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
+                // BT-1326: In hybrid mode, read-only fields are pre-extracted before the letrec.
+                // Use the direct parameter variable instead of generating maps:get every iteration.
+                if self.in_hybrid_loop {
+                    if let Some(param_var) =
+                        self.hybrid_readonly_field_params.get(field.name.as_str())
+                    {
+                        return Ok(Document::String(param_var.clone()));
+                    }
+                }
                 // BT-213/BT-833: Use appropriate variable based on context
                 let state_var = match self.context {
                     super::CodeGenContext::ValueType => self.current_self_var(),

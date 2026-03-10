@@ -365,4 +365,39 @@ mod tests {
             "to:by:do: hybrid: exit arm must pack sum into ExitSA. Got:\n{code}"
         );
     }
+
+    #[test]
+    fn test_to_do_readonly_field_pre_extracted_as_direct_param() {
+        // BT-1326: When the loop body reads a field that it never writes, that field is
+        // pre-extracted before the letrec and passed as a direct fun parameter.
+        // Body reads self.step (readonly) and writes self.n + local sum (hybrid mode).
+        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + self.step. self.n := self.n + 1]\n    sum\n";
+        let code = codegen(src);
+        // Hybrid mode triggered (field write for n, local sum).
+        assert!(
+            !code.contains("fun (I, StateAcc)"),
+            "readonly field: must not use StateAcc signature. Got:\n{code}"
+        );
+        // Readonly field pre-extracted before the letrec with maps:get.
+        assert!(
+            code.contains("maps':'get'('step'"),
+            "readonly field: 'step' should be pre-extracted via maps:get. Got:\n{code}"
+        );
+        // The pre-extracted value used as a fun parameter (StepField1 or similar).
+        assert!(
+            code.contains("StepField"),
+            "readonly field: fun should have a StepField param. Got:\n{code}"
+        );
+        // Inside the loop, self.step should NOT generate additional maps:get for 'step'.
+        // The single maps:get is the pre-extraction; body uses the param directly.
+        assert!(
+            code.match_indices("maps':'get'('step'").count() == 1,
+            "readonly field: exactly one maps:get for 'step' (pre-extraction only). Got:\n{code}"
+        );
+        // Mutable field 'n' still uses maps:put for writes.
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "readonly field: 'n' writes should still use maps:put. Got:\n{code}"
+        );
+    }
 }

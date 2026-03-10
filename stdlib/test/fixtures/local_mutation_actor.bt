@@ -6,6 +6,7 @@
 
 Actor subclass: LocalMutationActor
   state: log = 0
+  state: step = 1
 
   getLog => self.log
 
@@ -124,6 +125,19 @@ Actor subclass: LocalMutationActor
     n
       timesRepeat: [
         sum := sum + 1
+        self.log := self.log + 1
+      ]
+    #{#sum => sum, #log => self.log}
+
+  // BT-1326: Read-only field optimization — self.step is read but never written
+  // in the loop body, so it is pre-extracted before the letrec and passed as a
+  // direct fun parameter (no per-iteration maps:get for step).
+  sumWithStep: n =>
+    sum := 0
+    1
+      to: n
+      do: [:i |
+        sum := sum + self.step
         self.log := self.log + 1
       ]
     #{#sum => sum, #log => self.log}

@@ -85,6 +85,14 @@ pub(super) struct ThreadingPlan {
     /// threading actor state correctly through field mutations.
     /// Mutually exclusive with `use_direct_params`.
     pub use_hybrid_params: bool,
+    /// BT-1326: Actor fields that are read but never written in the loop body.
+    ///
+    /// In hybrid mode, read-only fields are pre-extracted before the letrec with a single
+    /// `maps:get` and passed as direct fun parameters — eliminating per-iteration
+    /// `maps:get` calls for fields that never change during the loop.
+    ///
+    /// Empty when `use_hybrid_params` is false (sorted for deterministic codegen).
+    pub readonly_fields: Vec<String>,
 }
 
 impl ThreadingPlan {
@@ -291,6 +299,21 @@ impl ThreadingPlan {
                 && !body_has_cf_mutations_hybrid
         };
 
+        // BT-1326: In hybrid mode, collect fields that are read but never written.
+        // These will be pre-extracted before the letrec (one maps:get total) and
+        // passed as direct fun parameters, eliminating per-iteration maps:get calls.
+        let readonly_fields = if use_hybrid_params {
+            let mut fields: Vec<String> = body_analysis
+                .field_reads
+                .difference(&body_analysis.field_writes)
+                .cloned()
+                .collect();
+            fields.sort(); // deterministic codegen
+            fields
+        } else {
+            vec![]
+        };
+
         Self {
             threaded_locals,
             initial_state_var,
@@ -299,6 +322,7 @@ impl ThreadingPlan {
             use_direct_params,
             use_tuple_acc,
             use_hybrid_params,
+            readonly_fields,
         }
     }
 
@@ -1556,20 +1580,53 @@ impl CoreErlangGenerator {
         let initial_local_args = plan.initial_direct_args(self);
         let initial_state = plan.initial_state_var.clone();
 
-        // Fun param names: locals (e.g. "Sum") + "State"
+        // BT-1326: Pre-extract read-only fields before the letrec.
+        // Each field is read once from the outer state and passed as a direct parameter,
+        // eliminating per-iteration maps:get calls for fields that never change.
+        // Leading space ensures correct separation from the preamble's trailing `in`.
+        let mut pre_extract_docs: Vec<Document<'static>> = Vec::new();
+        let readonly_params: Vec<(String, String)> = plan
+            .readonly_fields
+            .iter()
+            .map(|field| {
+                let var_name = self.fresh_temp_var(&format!(
+                    "{}Field",
+                    CoreErlangGenerator::to_core_erlang_var(field)
+                ));
+                pre_extract_docs.push(docvec![
+                    " let ",
+                    Document::String(var_name.clone()),
+                    " = call 'maps':'get'('",
+                    Document::String(field.clone()),
+                    "', ",
+                    Document::String(initial_state.clone()),
+                    ") in",
+                ]);
+                (field.clone(), var_name)
+            })
+            .collect();
+
+        // Fun param names: locals (e.g. "Sum") + readonly fields + "State"
         let local_param_names: Vec<String> = plan
             .threaded_locals
             .iter()
             .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
             .collect();
+        let readonly_param_names: Vec<String> =
+            readonly_params.iter().map(|(_, v)| v.clone()).collect();
         let state_param_name = "State".to_string();
-        let arity = 1 + local_param_names.len() + 1; // I + locals + State
+        let arity = 1 + local_param_names.len() + readonly_param_names.len() + 1;
 
-        // Build param list doc: (I, Var1, ..., VarN, State)
+        // Build param list doc: (I, Var1, ..., VarN, RField1, ..., State)
         let param_list_doc = join(
             std::iter::once(Document::Str("I"))
                 .chain(
                     local_param_names
+                        .iter()
+                        .map(|v| Document::String(v.clone())),
+                )
+                .chain(
+                    readonly_param_names
                         .iter()
                         .map(|v| Document::String(v.clone())),
                 )
@@ -1579,6 +1636,7 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(frame.preamble.clone());
+        docs.extend(pre_extract_docs);
         docs.push(docvec![
             " letrec '",
             Document::String(frame.fn_name.clone()),
@@ -1606,11 +1664,14 @@ impl CoreErlangGenerator {
         // Condition + true arm
         docs.push(frame.continue_header.clone());
 
-        // Run body with in_hybrid_loop = true so field mutations use State* naming.
+        // Run body with in_hybrid_loop = true so field mutations use State* naming
+        // and read-only fields resolve to direct parameters.
         let prev_hybrid = self.in_hybrid_loop;
         self.in_hybrid_loop = true;
+        self.hybrid_readonly_field_params = readonly_params.iter().cloned().collect();
         let (body_doc, final_state_version) =
             self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
+        self.hybrid_readonly_field_params.clear();
         self.in_hybrid_loop = prev_hybrid;
         docs.push(body_doc);
 
@@ -1639,18 +1700,28 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
 
-        // Recursive call args: next_counter, updated locals, updated state
+        // Recursive call args: next_counter, updated locals, readonly fields (unchanged), updated state
         let recursive_args_doc = join(
             std::iter::once(Document::String(frame.next_counter.clone()))
                 .chain(final_local_args.into_iter().map(Document::String))
+                .chain(
+                    readonly_param_names
+                        .iter()
+                        .map(|v| Document::String(v.clone())),
+                )
                 .chain(std::iter::once(Document::String(final_state_var))),
             &Document::Str(", "),
         );
 
-        // Initial apply args: initial_counter, initial locals, initial state
+        // Initial apply args: initial_counter, initial locals, initial readonly vals, initial state
         let initial_args_doc = join(
             std::iter::once(Document::String(frame.initial_counter.clone()))
                 .chain(initial_local_args.into_iter().map(Document::String))
+                .chain(
+                    readonly_param_names
+                        .iter()
+                        .map(|v| Document::String(v.clone())),
+                )
                 .chain(std::iter::once(Document::String(initial_state))),
             &Document::Str(", "),
         );

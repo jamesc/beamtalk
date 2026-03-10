@@ -395,8 +395,9 @@ impl CoreErlangGenerator {
 
     /// BT-1326: Hybrid direct-params + State threading variant of `generate_while_loop_with_mutations`.
     ///
-    /// Uses `fun (Var1, ..., VarN, State)` — locals as direct params, actor state as an
-    /// explicit `State` parameter. Field mutations use `State*` naming (not `StateAcc*`).
+    /// Uses `fun (Var1, ..., VarN, RField1, ..., State)` — locals and read-only fields as
+    /// direct params, actor state as an explicit `State` parameter.
+    /// Field mutations use `State*` naming (not `StateAcc*`).
     #[allow(clippy::too_many_lines)]
     fn generate_while_loop_hybrid(
         &mut self,
@@ -408,19 +409,50 @@ impl CoreErlangGenerator {
         let initial_local_args = plan.initial_direct_args(self);
         let initial_state = plan.initial_state_var.clone();
 
+        // BT-1326: Pre-extract read-only fields before the letrec.
+        let mut pre_extract_docs: Vec<Document<'static>> = Vec::new();
+        let readonly_params: Vec<(String, String)> = plan
+            .readonly_fields
+            .iter()
+            .map(|field| {
+                let var_name = self.fresh_temp_var(&format!(
+                    "{}Field",
+                    CoreErlangGenerator::to_core_erlang_var(field)
+                ));
+                pre_extract_docs.push(docvec![
+                    "let ",
+                    Document::String(var_name.clone()),
+                    " = call 'maps':'get'('",
+                    Document::String(field.clone()),
+                    "', ",
+                    Document::String(initial_state.clone()),
+                    ") in ",
+                ]);
+                (field.clone(), var_name)
+            })
+            .collect();
+
         let local_param_names: Vec<String> = plan
             .threaded_locals
             .iter()
             .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
             .collect();
+        let readonly_param_names: Vec<String> =
+            readonly_params.iter().map(|(_, v)| v.clone()).collect();
         let state_param_name = "State".to_string();
-        let arity = local_param_names.len() + 1; // locals + State
+        let arity = local_param_names.len() + readonly_param_names.len() + 1;
 
+        // Param list: (Var1, ..., VarN, RField1, ..., State)
         let param_list_doc = || {
             join(
                 local_param_names
                     .iter()
                     .map(|v| Document::String(v.clone()))
+                    .chain(
+                        readonly_param_names
+                            .iter()
+                            .map(|v| Document::String(v.clone())),
+                    )
                     .chain(std::iter::once(Document::String(state_param_name.clone()))),
                 &Document::Str(", "),
             )
@@ -429,6 +461,7 @@ impl CoreErlangGenerator {
         let cond_var = self.fresh_temp_var("CondFun");
 
         let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.extend(pre_extract_docs);
         docs.push(docvec![
             "letrec 'while'/",
             Document::String(arity.to_string()),
@@ -445,7 +478,7 @@ impl CoreErlangGenerator {
             "hybrid while: unpack should emit no code"
         );
 
-        // Condition closure captures local vars + State parameter.
+        // Condition closure captures local vars + readonly fields + State parameter.
         docs.push(docvec![
             "let ",
             Document::String(cond_var.clone()),
@@ -459,6 +492,7 @@ impl CoreErlangGenerator {
         let prev_state_version = self.state_version();
         self.in_loop_body = true;
         self.in_hybrid_loop = true;
+        self.hybrid_readonly_field_params = readonly_params.iter().cloned().collect();
         self.set_state_version(0);
 
         if let Expression::Block(cond_block) = condition {
@@ -486,8 +520,11 @@ impl CoreErlangGenerator {
         ]);
 
         self.in_hybrid_loop = true;
+        // Re-set readonly params (condition section restored them to prev_hybrid state).
+        self.hybrid_readonly_field_params = readonly_params.iter().cloned().collect();
         let (body_doc, final_state_version) =
             self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
+        self.hybrid_readonly_field_params.clear();
         self.in_hybrid_loop = prev_hybrid;
         docs.push(body_doc);
 
@@ -510,10 +547,16 @@ impl CoreErlangGenerator {
         let exit_stateacc =
             plan.generate_exit_stateacc_hybrid(&local_param_names, &state_param_name, self);
 
+        // Recursive call: updated locals, readonly fields (unchanged), updated state
         let final_args_doc = join(
             final_local_args
                 .into_iter()
                 .map(Document::String)
+                .chain(
+                    readonly_param_names
+                        .iter()
+                        .map(|v| Document::String(v.clone())),
+                )
                 .chain(std::iter::once(Document::String(final_state_var))),
             &Document::Str(", "),
         );
@@ -535,10 +578,16 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
 
+        // Initial call: initial locals, initial readonly vals, initial state
         let initial_args_doc = join(
             initial_local_args
                 .into_iter()
                 .map(Document::String)
+                .chain(
+                    readonly_param_names
+                        .iter()
+                        .map(|v| Document::String(v.clone())),
+                )
                 .chain(std::iter::once(Document::String(initial_state))),
             &Document::Str(", "),
         );
@@ -716,6 +765,33 @@ mod tests {
         assert!(
             code.match_indices("maps':'put'('__local__sum'").count() <= 1,
             "hybrid: whileTrue: at most one maps:put for local (exit rebuild). Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_while_true_readonly_field_pre_extracted_as_direct_param() {
+        // BT-1326: whileTrue: body reads self.step (never written) and writes self.n:
+        // self.step is pre-extracted before the letrec and passed as a direct param.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + self.step. self.n := self.n + 1]\n    sum\n";
+        let code = codegen(src);
+        assert!(
+            !code.contains("fun (StateAcc)"),
+            "readonly field: whileTrue: must not use StateAcc signature. Got:\n{code}"
+        );
+        // 'step' is read-only — pre-extracted before letrec.
+        assert!(
+            code.contains("StepField"),
+            "readonly field: whileTrue: fun should have a StepField param. Got:\n{code}"
+        );
+        // Only one maps:get for 'step' (the pre-extraction).
+        assert!(
+            code.match_indices("maps':'get'('step'").count() == 1,
+            "readonly field: whileTrue: exactly one maps:get for 'step'. Got:\n{code}"
+        );
+        // Mutable field 'n' still uses maps:put for writes.
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "readonly field: whileTrue: 'n' writes should still use maps:put. Got:\n{code}"
         );
     }
 }
