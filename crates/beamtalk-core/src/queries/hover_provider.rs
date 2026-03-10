@@ -573,9 +573,17 @@ fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> 
         Pattern::Map { pairs, .. } => pairs
             .iter()
             .find_map(|pair| find_hover_in_pattern(&pair.value, offset, type_map)),
-        Pattern::Constructor { keywords, .. } => keywords
-            .iter()
-            .find_map(|(_, p)| find_hover_in_pattern(p, offset, type_map)),
+        Pattern::Constructor { class, keywords, .. } => {
+            if offset >= class.span.start() && offset < class.span.end() {
+                return Some(HoverInfo::new(
+                    format!("Constructor type: `{}`", class.name),
+                    class.span,
+                ));
+            }
+            keywords
+                .iter()
+                .find_map(|(_, p)| find_hover_in_pattern(p, offset, type_map))
+        }
         Pattern::Wildcard(_) | Pattern::Literal(_, _) => None,
     }
 }

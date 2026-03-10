@@ -1884,12 +1884,10 @@ impl CoreErlangGenerator {
             parts.push(Document::String(field_value.to_string()));
         }
 
-        // Binding fields — one per keyword argument, skip wildcards
+        // Binding fields — one per keyword argument. Wildcards still emit the
+        // field key (requiring the key to exist in the map) but bind to `_`.
         for ((_, binding_pattern), field_name) in keywords.iter().zip(fields.binding_fields.iter())
         {
-            if matches!(binding_pattern, Pattern::Wildcard(_)) {
-                continue;
-            }
             parts.push(Document::Str(", '"));
             parts.push(Document::String(field_name.to_string()));
             parts.push(Document::Str("' := "));

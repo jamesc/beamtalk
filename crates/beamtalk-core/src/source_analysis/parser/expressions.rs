@@ -1345,7 +1345,8 @@ impl Parser {
 
     /// Parses the binding position of a constructor pattern argument.
     ///
-    /// Accepts: wildcard `_`, variable identifier, or a literal (integer, float, string, symbol).
+    /// Accepts: wildcard `_`, variable identifier, or a literal (integer, float, string, symbol,
+    /// or negative number like `-1`).
     fn parse_constructor_binding(&mut self) -> Pattern {
         match self.current_kind() {
             TokenKind::Identifier(name) if name.as_str() == "_" => {
@@ -1364,6 +1365,8 @@ impl Parser {
             | TokenKind::String(_)
             | TokenKind::Character(_)
             | TokenKind::Symbol(_) => self.parse_pattern(),
+            // Negative numeric literals: `-1`, `-3.14`
+            TokenKind::BinarySelector(op) if op.as_str() == "-" => self.parse_pattern(),
             _ => {
                 let span = self.current_token().span();
                 self.diagnostics.push(Diagnostic::error(

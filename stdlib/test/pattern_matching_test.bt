@@ -126,3 +126,11 @@ TestCase subclass: PatternMatchingTest
       Result ok: _ -> "small";
       Result error: _ -> "err"
     ]) equals: "small"
+
+  testConstructorPatternNegativeLiteral =>
+    // Negative numeric literal in binding position (BT-1297 bug fix)
+    self assert: ((Result ok: -1) match: [
+      Result ok: -1 -> "neg one";
+      Result ok: _ -> "other";
+      Result error: _ -> "err"
+    ]) equals: "neg one"
