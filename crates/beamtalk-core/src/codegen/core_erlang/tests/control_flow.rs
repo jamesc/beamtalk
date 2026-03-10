@@ -65,10 +65,10 @@ fn test_block_while_true_loop() {
         output.contains("<'false'> when 'true' -> 'nil'"),
         "whileTrue: should return nil when condition is false. Got: {output}"
     );
-    // Binary ops inside condition blocks are wrapped with maybe_await (BT-899)
+    // Binary ops no longer wrap operands with maybe_await (ADR-0043 / BT-1321)
     assert!(
-        output.contains("beamtalk_future"),
-        "whileTrue: binary ops should wrap operands with maybe_await. Got: {output}"
+        !output.contains("maybe_await"),
+        "whileTrue: binary ops should not wrap operands with maybe_await. Got: {output}"
     );
 }
 

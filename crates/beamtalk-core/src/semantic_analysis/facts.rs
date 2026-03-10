@@ -33,13 +33,6 @@ pub enum DispatchKind {
     Unknown,
 }
 
-/// Set of variables known to be non-future (synchronous) at a program point.
-#[derive(Debug, Clone, Default)]
-pub struct SyncEnv {
-    /// Variable names that are provably non-future at this point.
-    pub sync_vars: HashSet<String>,
-}
-
 /// Pre-computed facts for a single class definition.
 ///
 /// Populated by [`compute_semantic_facts`] and stored in [`SemanticFacts::class_facts`].
@@ -91,9 +84,6 @@ pub struct SemanticFacts {
     pub block_profiles: HashMap<Span, BlockProfile>,
     /// Dispatch classification for every [`Expression::MessageSend`] node, keyed by message span.
     pub dispatch_kinds: HashMap<Span, DispatchKind>,
-    /// Sync variable environment for every method body, keyed by method definition span.
-    /// Contains the set of method parameters that are provably non-future.
-    pub sync_envs: HashMap<Span, SyncEnv>,
     /// Per-class method index, keyed by class name.
     pub class_facts: HashMap<String, ClassFacts>,
     /// Set of method (or legacy block) spans whose body contains a `^` inside a block.
@@ -237,7 +227,6 @@ fn block_has_nlr(block: &Block) -> bool {
 /// Performs a single top-level pass over the AST:
 /// - Populates `block_profiles` by calling [`analyze_block`] for every [`Block`] node.
 /// - Populates `dispatch_kinds` for every [`Expression::MessageSend`] node.
-/// - Populates `sync_envs` for every method definition (method parameters are always sync).
 /// - Populates `methods_with_block_nlr` for methods whose body contains `^` inside a block.
 pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
     let mut facts = SemanticFacts::default();
@@ -293,16 +282,6 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
     // Process class methods
     for class in &module.classes {
         for method in class.methods.iter().chain(class.class_methods.iter()) {
-            // Populate sync_envs for this method's parameters
-            let sync_vars: HashSet<String> = method
-                .parameters
-                .iter()
-                .map(|p| p.name.name.to_string())
-                .collect();
-            if !sync_vars.is_empty() {
-                facts.sync_envs.insert(method.span, SyncEnv { sync_vars });
-            }
-
             // Detect block NLR: ^ inside a block requires the NLR throw/catch mechanism.
             if method
                 .body
@@ -321,14 +300,6 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
     // Process standalone method definitions
     for standalone in &module.method_definitions {
         let method = &standalone.method;
-        let sync_vars: HashSet<String> = method
-            .parameters
-            .iter()
-            .map(|p| p.name.name.to_string())
-            .collect();
-        if !sync_vars.is_empty() {
-            facts.sync_envs.insert(method.span, SyncEnv { sync_vars });
-        }
 
         // Detect block NLR for standalone methods.
         if method

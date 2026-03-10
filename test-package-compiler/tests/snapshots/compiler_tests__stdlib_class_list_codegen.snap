@@ -105,7 +105,7 @@ call 'beamtalk_list':'from_to'(Self, _start20, _end21)
 'indexOf:'/2 = fun (Self, _item22) ->
     let _NlrToken23 = call 'erlang':'make_ref'() in
     try
-    let _seq24 = call 'beamtalk_collection':'inject_into'(Self, 0, fun (_i25, _each26) -> let NewI = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_i25), 1) in let _Unit = call 'beamtalk_message_dispatch':'send'(call 'erlang':'=:='(call 'beamtalk_future':'maybe_await'(_each26), _item22), 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken23, NewI, Self})]) in NewI) in
+    let _seq24 = call 'beamtalk_collection':'inject_into'(Self, 0, fun (_i25, _each26) -> let NewI = call 'erlang':'+'(_i25, 1) in let _Unit = call 'beamtalk_message_dispatch':'send'(call 'erlang':'=:='(_each26, _item22), 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken23, NewI, Self})]) in NewI) in
     let _BodyResult27 = 'nil' in
     {_BodyResult27, Self}
 
@@ -118,7 +118,7 @@ call 'beamtalk_list':'from_to'(Self, _start20, _end21)
 
 
 'eachWithIndex:'/2 = fun (Self, _block36) ->
-    let _seq37 = call 'beamtalk_collection':'inject_into'(Self, 0, fun (_i38, _each39) -> let NewI = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_i38), 1) in let _Unit = let _ValRecv40 = _block36 in let _ValArg41 = _each39 in let _ValArg42 = NewI in case call 'erlang':'is_function'(_ValRecv40) of 'true' when 'true' -> apply _ValRecv40 (_ValArg41, _ValArg42) 'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv40, 'value:value:', [_ValArg41, _ValArg42]) end in NewI) in
+    let _seq37 = call 'beamtalk_collection':'inject_into'(Self, 0, fun (_i38, _each39) -> let NewI = call 'erlang':'+'(_i38, 1) in let _Unit = let _ValRecv40 = _block36 in let _ValArg41 = _each39 in let _ValArg42 = NewI in case call 'erlang':'is_function'(_ValRecv40) of 'true' when 'true' -> apply _ValRecv40 (_ValArg41, _ValArg42) 'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv40, 'value:value:', [_ValArg41, _ValArg42]) end in NewI) in
     'nil'
 
 'zip:'/2 = fun (Self, _other43) ->

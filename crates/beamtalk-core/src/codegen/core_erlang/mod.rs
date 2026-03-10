@@ -656,7 +656,7 @@ enum CodeGenContext {
     /// Generating code for an actor class (`gen_server` with async messaging).
     ///
     /// - Field access: `call 'maps':'get'('field', State)`
-    /// - Method calls: Async via `beamtalk_actor:async_send` with futures
+    /// - Method calls: Sync via `beamtalk_actor:sync_send` (ADR-0043)
     /// - State threading: Use State, State1, State2... for mutations
     Actor,
 
@@ -914,9 +914,6 @@ pub(super) struct CoreErlangGenerator {
     /// BT-1288: Pre-computed semantic facts from the pre-codegen analysis pass.
     /// Used for block profile lookups and dispatch classification.
     pub(super) semantic_facts: crate::semantic_analysis::SemanticFacts,
-    /// BT-1288: Variables in the current method that are known to be non-future.
-    /// Populated from `semantic_facts.sync_envs` when entering a method.
-    pub(super) current_sync_vars: std::collections::HashSet<String>,
 }
 
 impl CoreErlangGenerator {
@@ -953,7 +950,6 @@ impl CoreErlangGenerator {
             tier2_method_info: std::collections::HashMap::new(),
             codegen_warnings: Vec::new(),
             semantic_facts: crate::semantic_analysis::SemanticFacts::default(),
-            current_sync_vars: std::collections::HashSet::new(),
         }
     }
 
@@ -990,7 +986,6 @@ impl CoreErlangGenerator {
             tier2_method_info: std::collections::HashMap::new(),
             codegen_warnings: Vec::new(),
             semantic_facts: crate::semantic_analysis::SemanticFacts::default(),
-            current_sync_vars: std::collections::HashSet::new(),
         }
     }
 
