@@ -454,11 +454,18 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let fun_var = self.fresh_temp_var("Fun");
 
-        // Hoist any field-assignment arguments before the apply binding (BT-1270).
-        let mut parts: Vec<Document<'static>> = Vec::new();
+        // BT-1270: Evaluate receiver first, then hoist field-assignment arguments.
+        // This preserves evaluation order: `let _Fun = recv in [hoisted args] apply _Fun (args)`.
+        let recv_code = self.expression_doc(receiver)?;
+        let mut parts: Vec<Document<'static>> = vec![docvec![
+            "let ",
+            Document::String(fun_var.clone()),
+            " = ",
+            recv_code,
+            " in ",
+        ]];
         let arg_docs = self.generate_cascade_args(arguments, &mut parts)?;
 
-        let recv_code = self.expression_doc(receiver)?;
         let args_doc = {
             let mut a: Vec<Document<'static>> = Vec::new();
             for (i, d) in arg_docs.into_iter().enumerate() {
@@ -471,11 +478,7 @@ impl CoreErlangGenerator {
         };
 
         parts.push(docvec![
-            "let ",
-            Document::String(fun_var.clone()),
-            " = ",
-            recv_code,
-            " in apply ",
+            "apply ",
             Document::String(fun_var),
             " (",
             args_doc,

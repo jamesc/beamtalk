@@ -2069,17 +2069,22 @@ impl CoreErlangGenerator {
                 let nested_var = self.fresh_temp_var("ArrElem");
                 let n_inner = inner_elems.len();
 
-                // Build continuation for elements after this nested array
+                // Build continuation for elements after this nested array.
+                // Use a separate clone so sibling names don't contaminate inner processing
+                // (inner elements are extracted before siblings in execution order).
+                let mut after_bound = already_bound.clone();
                 let after_nested = self.build_array_arm_body(
                     array_var,
                     elements,
                     start + 1,
                     continuation,
                     failure_doc,
-                    already_bound,
+                    &mut after_bound,
                 )?;
 
-                // Build inner element extractions from the nested array variable
+                // Build inner element extractions from the nested array variable.
+                // Uses `already_bound` (without sibling names) so the first inner
+                // occurrence of a name is correctly treated as the primary binding.
                 let inner_elems_clone: Vec<Pattern> = inner_elems.clone();
                 let inner_body = self.build_array_arm_body(
                     &nested_var,
@@ -2089,6 +2094,9 @@ impl CoreErlangGenerator {
                     failure_doc,
                     already_bound,
                 )?;
+
+                // Propagate all names (inner + sibling) to the caller.
+                already_bound.extend(after_bound);
 
                 let no_match_size_n = self.fresh_temp_var("NoMatch");
                 let no_match_class_n = self.fresh_temp_var("NoMatch");

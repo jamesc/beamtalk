@@ -2319,15 +2319,21 @@ fn test_block_value_keyword_field_assignment_arg_hoisted() {
     let output = doc.to_pretty_string();
 
     // State binding must appear before the apply, not nested inside it.
-    // _Fun1 is allocated first (fresh_temp_var), then _Val2 + State1 from hoisting.
+    // _Fun1 = fun_var, _x2 = block param (from receiver codegen), _Val3 = hoisted val.
+    // Receiver is evaluated first, then args are hoisted.
     assert!(
-        output.contains("let _Val2 = 5 in let State1 = call 'maps':'put'('y', _Val2, State) in"),
+        output.contains("let _Val3 = 5 in let State1 = call 'maps':'put'('y', _Val3, State) in"),
         "State binding should be hoisted before apply. Got:\n{output}"
     );
     // The apply argument must be the val var, not the full assignment expression.
     assert!(
-        output.contains("apply _Fun1 (_Val2)"),
-        "Apply argument should be val var _Val2. Got:\n{output}"
+        output.contains("apply _Fun1 (_Val3)"),
+        "Apply argument should be val var _Val3. Got:\n{output}"
+    );
+    // Receiver must be evaluated before arguments: Fun binding precedes State binding.
+    assert!(
+        output.contains("let _Fun1 = ") && output.find("let _Fun1 = ") < output.find("State1"),
+        "Receiver (_Fun1) must be bound before State1 mutation. Got:\n{output}"
     );
 
     generator.pop_scope();
