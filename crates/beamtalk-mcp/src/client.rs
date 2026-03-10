@@ -556,10 +556,10 @@ impl ReplClient {
                 )),
             };
 
-            if let Err(ref err) = receive_result {
+            if receive_result.is_err() {
                 // Quarantine the socket through the existing guard — no re-lock needed.
                 // A late server response for this failed request cannot reach the next call.
-                tracing::warn!("send_once receive phase failed; closing socket: {err}");
+                tracing::warn!("send_once receive phase failed; closing socket");
                 let _ = tokio::time::timeout(Duration::from_secs(1), inner.ws.close(None)).await;
             }
 
