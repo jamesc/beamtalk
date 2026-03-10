@@ -208,6 +208,21 @@ sealed Value subclass: Result
       self
     ] ifFalse: [Result error: (block value: self.errReason)]
 
+  /// Evaluate a block with the error reason if this is an error; return self if ok.
+  ///
+  /// Use at the end of an `andThen:`/`map:` chain as a shared terminal error handler.
+  /// The error case is handled by the block; the ok case is passed through unchanged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) ifError: [:e | 0]             // => Result ok: 42
+  /// (Result error: #oops) ifError: [:e | e]        // => #oops
+  /// chain := (Result ok: 1) andThen: [:v | Result error: #fail].
+  /// chain ifError: [:_ | "handled"]                // => "handled"
+  /// ```
+  sealed ifError: block -> Object =>
+    self.isOk ifTrue: [self] ifFalse: [block value: self.errReason]
+
   // ===== Instance Methods — Pattern Matching =====
 
   /// Handle both ok and error cases with blocks.
