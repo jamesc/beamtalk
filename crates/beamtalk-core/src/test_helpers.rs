@@ -28,8 +28,8 @@ pub fn unique_temp_dir(prefix: &str) -> PathBuf {
 #[cfg(any(test, feature = "test"))]
 pub mod test_support {
     use crate::ast::{
-        ClassDefinition, ClassKind, CommentAttachment, Expression, ExpressionStatement, Identifier,
-        MessageSelector, MethodDefinition, Module,
+        ClassDefinition, Expression, ExpressionStatement, Identifier, MessageSelector,
+        MethodDefinition, Module,
     };
     use crate::source_analysis::{Severity, Span, lex_with_eof, parse};
 
@@ -83,22 +83,15 @@ pub mod test_support {
     #[must_use]
     pub fn make_class(name: &str) -> ClassDefinition {
         let span = test_span();
-        ClassDefinition {
-            name: Identifier::new(name, span),
-            superclass: None,
-            class_kind: ClassKind::Object,
-            is_abstract: false,
-            is_sealed: false,
-            is_typed: false,
-            supervisor_kind: None,
-            state: Vec::new(),
-            methods: Vec::new(),
-            class_methods: Vec::new(),
-            class_variables: Vec::new(),
-            comments: CommentAttachment::default(),
-            doc_comment: None,
+        ClassDefinition::with_modifiers(
+            Identifier::new(name, span),
+            None,
+            false,
+            false,
+            Vec::new(),
+            Vec::new(),
             span,
-        }
+        )
     }
 
     /// Builds a minimal [`MethodDefinition`] with a unary selector and empty body.

@@ -763,31 +763,23 @@ mod tests {
         class_name: &str,
         fields: Vec<(&str, Option<TypeAnnotation>)>,
     ) -> ClassDefinition {
-        use crate::ast::{ClassKind, CommentAttachment, StateDeclaration};
-        ClassDefinition {
-            name: Identifier::new(class_name, span()),
-            superclass: Some(Identifier::new("Value", span())),
-            class_kind: ClassKind::Value,
-            is_abstract: false,
-            is_sealed: false,
-            is_typed: false,
-            supervisor_kind: None,
-            state: fields
-                .into_iter()
-                .map(|(name, ann)| match ann {
-                    Some(a) => {
-                        StateDeclaration::with_type(Identifier::new(name, span()), a, span())
-                    }
-                    None => StateDeclaration::new(Identifier::new(name, span()), span()),
-                })
-                .collect(),
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            comments: CommentAttachment::default(),
-            doc_comment: None,
-            span: span(),
-        }
+        use crate::ast::StateDeclaration;
+        let state = fields
+            .into_iter()
+            .map(|(name, ann)| match ann {
+                Some(a) => StateDeclaration::with_type(Identifier::new(name, span()), a, span()),
+                None => StateDeclaration::new(Identifier::new(name, span()), span()),
+            })
+            .collect();
+        ClassDefinition::with_modifiers(
+            Identifier::new(class_name, span()),
+            Some(Identifier::new("Value", span())),
+            false,
+            false,
+            state,
+            vec![],
+            span(),
+        )
     }
 
     #[test]

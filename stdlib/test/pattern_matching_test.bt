@@ -212,6 +212,44 @@ TestCase subclass: PatternMatchingTest
       ])
       equals: 0
 
+  testDuplicateVariableInArrayMatchArm =>
+    // BT-1315: Duplicate variable names act as equality constraints
+    // Adjacent duplicate — equal values
+    self
+      assert: (#[3, 3] match: [
+        #[x, x] -> "equal";
+        _ -> "differ"
+      ])
+      equals: "equal"
+    // Adjacent duplicate — unequal values
+    self
+      assert: (#[1, 2] match: [
+        #[x, x] -> "equal";
+        _ -> "differ"
+      ])
+      equals: "differ"
+    // Non-adjacent duplicate — equal values
+    self
+      assert: (#[5, 9, 5] match: [
+        #[x, y, x] -> "match";
+        _ -> "no match"
+      ])
+      equals: "match"
+    // Non-adjacent duplicate — unequal values
+    self
+      assert: (#[5, 9, 7] match: [
+        #[x, y, x] -> "match";
+        _ -> "no match"
+      ])
+      equals: "no match"
+    // Duplicate mixed with non-duplicate; body uses bound variable
+    self
+      assert: (#[4, 4, 10] match: [
+        #[x, x, z] -> z;
+        _ -> 0
+      ])
+      equals: 10
+
   // BT-1297: Constructor patterns for sealed types (Result ok: / Result error:)
   testConstructorPatternOkArm =>
     // ok arm matched — variable captures the wrapped value
