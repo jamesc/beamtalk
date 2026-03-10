@@ -187,22 +187,19 @@ impl CoreErlangGenerator {
         // (e.g., Object.bt defines `new => @primitive basicNew`)
         // If so, skip auto-generating constructors to avoid duplicate definitions
         // Only check Primary methods — check both instance and class methods
-        let has_explicit_new = class.methods.iter().any(|m| {
-            m.kind == MethodKind::Primary
-                && matches!(&m.selector, MessageSelector::Unary(name) if name.as_str() == "new")
-        });
-        let has_explicit_class_new = class.class_methods.iter().any(|m| {
-            m.kind == MethodKind::Primary
-                && matches!(&m.selector, MessageSelector::Unary(name) if name.as_str() == "new")
-        });
-        let has_explicit_new_with = class
-            .methods
-            .iter()
-            .any(|m| m.kind == MethodKind::Primary && m.selector.name() == "new:")
-            || class
-                .class_methods
-                .iter()
-                .any(|m| m.kind == MethodKind::Primary && m.selector.name() == "new:");
+        let cf = self.semantic_facts.class_facts(&class.name.name);
+        let has_explicit_new = cf
+            .and_then(|cf| cf.instance_method_index("new"))
+            .is_some_and(|i| class.methods[i].kind == MethodKind::Primary);
+        let has_explicit_class_new = cf
+            .and_then(|cf| cf.class_method_index("new"))
+            .is_some_and(|i| class.class_methods[i].kind == MethodKind::Primary);
+        let has_explicit_new_with = cf
+            .and_then(|cf| cf.instance_method_index("new:"))
+            .is_some_and(|i| class.methods[i].kind == MethodKind::Primary)
+            || cf
+                .and_then(|cf| cf.class_method_index("new:"))
+                .is_some_and(|i| class.class_methods[i].kind == MethodKind::Primary);
 
         // BT-923: Compute auto-generated slot methods for `Value subclass:` classes.
         // This is `None` for `ClassKind::Object` and `ClassKind::Actor`.
@@ -462,12 +459,13 @@ impl CoreErlangGenerator {
         let class_name = self.class_name().clone();
 
         // Find the class method `new`
-        let new_method = class
-            .class_methods
-            .iter()
-            .find(|m| {
-                m.kind == MethodKind::Primary
-                    && matches!(&m.selector, MessageSelector::Unary(name) if name.as_str() == "new")
+        let new_method = self
+            .semantic_facts
+            .class_facts(&class_name)
+            .and_then(|cf| cf.class_method_index("new"))
+            .and_then(|i| {
+                let m = &class.class_methods[i];
+                (m.kind == MethodKind::Primary).then_some(m)
             })
             .ok_or_else(|| {
                 CodeGenError::Internal("Expected class method 'new' not found".to_string())
@@ -1403,10 +1401,10 @@ impl CoreErlangGenerator {
         }
 
         // asString — generate default for classes that don't define it
-        let has_as_string = class
-            .methods
-            .iter()
-            .any(|m| m.selector.name() == "asString");
+        let has_as_string = self
+            .semantic_facts
+            .class_facts(&class_name)
+            .is_some_and(|cf| cf.has_instance_method("asString"));
         let as_string_branch: Document<'static> = if has_as_string {
             Document::Vec(Vec::new())
         } else {
@@ -1873,10 +1871,10 @@ impl CoreErlangGenerator {
         ];
 
         // Include default asString if dispatch/3 generates one
-        let has_explicit_as_string = class
-            .methods
-            .iter()
-            .any(|m| m.selector.name() == "asString");
+        let has_explicit_as_string = self
+            .semantic_facts
+            .class_facts(&class_name)
+            .is_some_and(|cf| cf.has_instance_method("asString"));
         if !has_explicit_as_string
             && matches!(
                 class_name.as_str(),

@@ -13,7 +13,7 @@ use super::document::{Document, INDENT, line, nest};
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
-use crate::ast::{Expression, MethodKind, Module};
+use crate::ast::{MethodKind, Module};
 use crate::docvec;
 
 impl CoreErlangGenerator {
@@ -54,7 +54,7 @@ impl CoreErlangGenerator {
         // BT-411: Build class method exports
         let class_method_export_doc = Self::build_class_method_export_doc(module);
         // BT-1218: Synthesize class_supervisionSpec for Actor subclasses that don't define it
-        let needs_spec_synthesis = Self::needs_supervision_spec_synthesis(module);
+        let needs_spec_synthesis = self.needs_supervision_spec_synthesis(module);
         let supervision_spec_export: Document<'static> = if needs_spec_synthesis {
             Document::Str(", 'class_supervisionSpec'/2")
         } else {
@@ -66,7 +66,7 @@ impl CoreErlangGenerator {
         // Module header with expanded exports per BT-29
         // BT-217: Add 'new'/0 and 'new'/1 exports for error methods
         // BT-242: Add 'has_method'/1 export for reflection
-        let has_primitive_methods = Self::class_has_primitive_instance_methods(module);
+        let has_primitive_methods = self.class_has_primitive_instance_methods(module);
 
         let dispatch_3_export: Document<'static> = if has_primitive_methods {
             Document::Str(", 'dispatch'/3")
@@ -216,10 +216,10 @@ impl CoreErlangGenerator {
             // generate_supervision_spec_synthesis).
             let has_local_policy_override = module.classes.first().is_some_and(|c| {
                 let class_name = &c.name.name;
-                let has_inline = c
-                    .class_methods
-                    .iter()
-                    .any(|m| m.selector.name() == "supervisionPolicy");
+                let has_inline = self
+                    .semantic_facts
+                    .class_facts(class_name)
+                    .is_some_and(|cf| cf.has_class_method("supervisionPolicy"));
                 let has_standalone = module.method_definitions.iter().any(|md| {
                     md.is_class_method
                         && &md.class_name.name == class_name
@@ -250,18 +250,11 @@ impl CoreErlangGenerator {
     /// Used to decide whether to generate `dispatch/3` in the actor module.
     /// Selector-based primitives (quoted, e.g. `@primitive "show:"`) generate calls to
     /// `Module:dispatch/3` at runtime; structural intrinsics (unquoted) do not.
-    fn class_has_primitive_instance_methods(module: &Module) -> bool {
+    fn class_has_primitive_instance_methods(&self, module: &Module) -> bool {
         module.classes.first().is_some_and(|c| {
-            c.methods.iter().any(|m| {
-                m.body.len() == 1
-                    && matches!(
-                        &m.body[0].expression,
-                        Expression::Primitive {
-                            is_quoted: true,
-                            ..
-                        }
-                    )
-            })
+            self.semantic_facts
+                .class_facts(&c.name.name)
+                .is_some_and(|cf| cf.has_primitive_instance_methods)
         })
     }
 
@@ -298,10 +291,10 @@ impl CoreErlangGenerator {
         let mut parts: Vec<Document<'static>> = Vec::new();
         for sel in selectors {
             let arity = module.classes.first().map_or(0, |c| {
-                c.methods
-                    .iter()
-                    .find(|m| m.selector.name() == sel.as_str())
-                    .map_or(0, |m| m.selector.arity())
+                self.semantic_facts
+                    .class_facts(&c.name.name)
+                    .and_then(|cf| cf.instance_method_index(sel.as_str()))
+                    .map_or(0, |i| c.methods[i].selector.arity())
             });
             // Standalone function takes Args + Self + State params
             parts.push(docvec![
@@ -498,6 +491,7 @@ impl CoreErlangGenerator {
     /// explicitly (e.g. the `Actor` base class itself), either as an inline class
     /// method or as a standalone class-side method definition.
     pub(in crate::codegen::core_erlang) fn needs_supervision_spec_synthesis(
+        &self,
         module: &Module,
     ) -> bool {
         let Some(class) = module.classes.first() else {
@@ -505,10 +499,10 @@ impl CoreErlangGenerator {
         };
         let class_name = &class.name.name;
         // Skip if supervisionSpec is defined as an inline class method
-        let has_inline = class
-            .class_methods
-            .iter()
-            .any(|m| m.selector.name() == "supervisionSpec");
+        let has_inline = self
+            .semantic_facts
+            .class_facts(class_name)
+            .is_some_and(|cf| cf.has_class_method("supervisionSpec"));
         // Skip if supervisionSpec is defined as a standalone class-side method
         let has_standalone = module.method_definitions.iter().any(|md| {
             md.is_class_method
