@@ -1273,6 +1273,36 @@ impl CoreErlangGenerator {
                                         "]) in "
                                     ]);
                                 }
+                                Pattern::Literal(lit, _span) => {
+                                    // Guard-check: extract element and assert it equals the
+                                    // literal.  Raises `{badmatch, Array}` on mismatch.
+                                    let elem_var = self.fresh_temp_var("Elem");
+                                    let guard_ok_var = self.fresh_temp_var("GuardOk");
+                                    let mismatch_var = self.fresh_temp_var("Mismatch");
+                                    let lit_doc = self.generate_literal(lit)?;
+                                    docs.push(docvec![
+                                        "let ",
+                                        Document::String(elem_var.clone()),
+                                        " = call 'beamtalk_message_dispatch':'send'(",
+                                        Document::String(arr_var.clone()),
+                                        ", 'at:', [",
+                                        one_based,
+                                        "]) in "
+                                    ]);
+                                    docs.push(docvec![
+                                        "let ",
+                                        Document::String(guard_ok_var),
+                                        " = case ",
+                                        Document::String(elem_var),
+                                        " of <",
+                                        lit_doc,
+                                        "> when 'true' -> 'ok' <",
+                                        Document::String(mismatch_var),
+                                        "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                                        Document::String(arr_var.clone()),
+                                        "}) end in "
+                                    ]);
+                                }
                                 Pattern::Wildcard(_) => {} // no binding needed
                                 _ => {
                                     return Err(CodeGenError::UnsupportedFeature {
@@ -1529,6 +1559,39 @@ impl CoreErlangGenerator {
                                 terminator,
                             ]);
                             bound_pairs.push((id.name.to_string(), core_var));
+                        }
+                        Pattern::Literal(lit, _span) => {
+                            // Guard-check: extract the element and assert it equals the literal.
+                            // If it doesn't match, raise `{badmatch, Array}` mirroring tuple
+                            // literal destructuring.
+                            let elem_var = self.fresh_temp_var("Elem");
+                            let guard_ok_var = self.fresh_temp_var("GuardOk");
+                            let mismatch_var = self.fresh_temp_var("Mismatch");
+                            let lit_doc = self.generate_literal(lit)?;
+                            docs.push(docvec![
+                                indent,
+                                Document::String(elem_var.clone()),
+                                " = call 'beamtalk_message_dispatch':'send'(",
+                                Document::String(rhs_var.to_string()),
+                                ", 'at:', [",
+                                one_based,
+                                "])",
+                                terminator,
+                            ]);
+                            docs.push(docvec![
+                                indent,
+                                Document::String(guard_ok_var),
+                                " = case ",
+                                Document::String(elem_var),
+                                " of <",
+                                lit_doc,
+                                "> when 'true' -> 'ok' <",
+                                Document::String(mismatch_var),
+                                "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                                Document::String(rhs_var.to_string()),
+                                "}) end",
+                                terminator,
+                            ]);
                         }
                         Pattern::Wildcard(_) => {}
                         _ => {
