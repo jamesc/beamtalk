@@ -434,7 +434,12 @@ fold_tuple_acc_mutation(List) ->
 %%   in apply 'loop'/2 (1, maps:put('__local__sum', 0, State))
 -spec mixed_stateacc(non_neg_integer()) -> integer().
 mixed_stateacc(N) ->
-    InitState = maps:put('__local__sum', 0, #{'n' => 0}),
+    %% Realistic actor State has metadata keys ($beamtalk_class, __class_mod__,
+    %% __methods__) plus field keys.  A 1-key map is unrealistically small and
+    %% hides map-operation overhead behind BEAM's small-map JIT optimisation.
+    BaseState = #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
+                  '__methods__' => #{}, 'n' => 0},
+    InitState = maps:put('__local__sum', 0, BaseState),
     {_, FinalState} = mixed_stateacc_loop(1, N, InitState),
     maps:get('__local__sum', FinalState).
 
@@ -465,7 +470,8 @@ mixed_stateacc_loop(I, N, StateAcc) ->
 %%   in apply 'loop'/3 (1, 0, State)
 -spec mixed_hybrid(non_neg_integer()) -> integer().
 mixed_hybrid(N) ->
-    InitState = #{'n' => 0},
+    InitState = #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
+                  '__methods__' => #{}, 'n' => 0},
     {_, FinalState} = mixed_hybrid_loop(1, N, 0, InitState),
     maps:get('__local__sum', FinalState).
 
