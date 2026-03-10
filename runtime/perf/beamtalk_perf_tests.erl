@@ -520,28 +520,15 @@ bench_block_threading() ->
     StateAccTimings = run_benchmark(fun() ->
         bench_block_threading:sum_stateacc(N)
     end, ?ITERATIONS, ?WARMUP),
-    StateAccAwaitTimings = run_benchmark(fun() ->
-        bench_block_threading:sum_stateacc_maybe_await(N)
-    end, ?ITERATIONS, ?WARMUP),
-    ProcDictTimings = run_benchmark(fun() ->
-        bench_block_threading:sum_procdict(N)
-    end, ?ITERATIONS, ?WARMUP),
 
     DirectParamsTimings = run_benchmark(fun() ->
         bench_block_threading:sum_direct_params(N)
     end, ?ITERATIONS, ?WARMUP),
-    DirectParamsAwaitTimings = run_benchmark(fun() ->
-        bench_block_threading:sum_direct_params_maybe_await(N)
-    end, ?ITERATIONS, ?WARMUP),
 
     %% BT-1286: scale loop — best-case for literal-skipping optimisation.
     %% result := result * 2 repeated N times: 1 variable + 1 literal per op.
-    %% all_wrapped = pre-BT-1286 (4 maybe_await/iter), literal_opt = post (2/iter).
     ScaleNativeTimings = run_benchmark(fun() ->
         bench_block_threading:scale_native(N)
-    end, ?ITERATIONS, ?WARMUP),
-    ScaleAllWrappedTimings = run_benchmark(fun() ->
-        bench_block_threading:scale_direct_params_all_wrapped(N)
     end, ?ITERATIONS, ?WARMUP),
     ScaleLiteralOptTimings = run_benchmark(fun() ->
         bench_block_threading:scale_direct_params_literal_opt(N)
@@ -549,64 +536,33 @@ bench_block_threading() ->
 
     NativeStats = stats(NativeTimings),
     StateAccStats = stats(StateAccTimings),
-    StateAccAwaitStats = stats(StateAccAwaitTimings),
-    ProcDictStats = stats(ProcDictTimings),
     DirectParamsStats = stats(DirectParamsTimings),
-    DirectParamsAwaitStats = stats(DirectParamsAwaitTimings),
     ScaleNativeStats = stats(ScaleNativeTimings),
-    ScaleAllWrappedStats = stats(ScaleAllWrappedTimings),
     ScaleLiteralOptStats = stats(ScaleLiteralOptTimings),
 
     report("block/sum_native", NativeStats, ?ITERATIONS),
     report("block/sum_stateacc", StateAccStats, ?ITERATIONS),
-    report("block/sum_stateacc_maybe_await", StateAccAwaitStats, ?ITERATIONS),
-    report("block/sum_procdict", ProcDictStats, ?ITERATIONS),
     report("block/sum_direct_params", DirectParamsStats, ?ITERATIONS),
-    report("block/sum_direct_params_maybe_await", DirectParamsAwaitStats, ?ITERATIONS),
     report("block/scale_native", ScaleNativeStats, ?ITERATIONS),
-    report("block/scale_all_wrapped", ScaleAllWrappedStats, ?ITERATIONS),
     report("block/scale_literal_opt", ScaleLiteralOptStats, ?ITERATIONS),
 
     NativeMedian = maps:get(median, NativeStats),
     StateAccMedian = maps:get(median, StateAccStats),
-    StateAccAwaitMedian = maps:get(median, StateAccAwaitStats),
-    ProcDictMedian = maps:get(median, ProcDictStats),
     DirectParamsMedian = maps:get(median, DirectParamsStats),
-    DirectParamsAwaitMedian = maps:get(median, DirectParamsAwaitStats),
     ScaleNativeMedian = maps:get(median, ScaleNativeStats),
-    ScaleAllWrappedMedian = maps:get(median, ScaleAllWrappedStats),
     ScaleLiteralOptMedian = maps:get(median, ScaleLiteralOptStats),
     io:format(standard_error,
         "PERF: block/stateacc_overhead ~.2fx vs native~n",
         [StateAccMedian / max(NativeMedian, 1)]),
-    io:format(standard_error,
-        "PERF: block/maybe_await_overhead ~.2fx vs stateacc~n",
-        [StateAccAwaitMedian / max(StateAccMedian, 1)]),
-    io:format(standard_error,
-        "PERF: block/procdict_vs_native ~.2fx~n",
-        [ProcDictMedian / max(NativeMedian, 1)]),
-    io:format(standard_error,
-        "PERF: block/procdict_vs_stateacc ~.2fx~n",
-        [ProcDictMedian / max(StateAccMedian, 1)]),
     %% BT-1275: Direct-params overhead should be ≤ 3x native (vs ~26-30x for StateAcc).
     DirectParamsOverhead = DirectParamsMedian / max(NativeMedian, 1),
-    DirectParamsAwaitOverhead = DirectParamsAwaitMedian / max(NativeMedian, 1),
     io:format(standard_error,
         "PERF: block/direct_params_overhead ~.2fx vs native~n",
         [DirectParamsOverhead]),
-    io:format(standard_error,
-        "PERF: block/direct_params_await_overhead ~.2fx vs native~n",
-        [DirectParamsAwaitOverhead]),
-    %% BT-1286: Literal-skipping speedup on scale loop (50% fewer maybe_await calls).
-    io:format(standard_error,
-        "PERF: block/scale_all_wrapped_overhead ~.2fx vs native~n",
-        [ScaleAllWrappedMedian / max(ScaleNativeMedian, 1)]),
+    %% BT-1286: Literal-skipping overhead on scale loop vs native.
     io:format(standard_error,
         "PERF: block/scale_literal_opt_overhead ~.2fx vs native~n",
         [ScaleLiteralOptMedian / max(ScaleNativeMedian, 1)]),
-    io:format(standard_error,
-        "PERF: block/scale_literal_opt_speedup ~.2fx vs all_wrapped~n",
-        [ScaleAllWrappedMedian / max(ScaleLiteralOptMedian, 1)]),
     ?assert(DirectParamsOverhead =< 3.0),
 
     %% --- collect: / lists:map ---
@@ -623,7 +579,7 @@ bench_block_threading() ->
     report("block/collect_native", CollectNativeStats, ?ITERATIONS),
     report("block/collect_stateacc_block", CollectStateAccStats, ?ITERATIONS),
     io:format(standard_error,
-        "PERF: block/collect_overhead ~.2fx vs native~n",
+        "PERF: block/collect_pure_overhead ~.2fx vs native~n",
         [maps:get(median, CollectStateAccStats) / max(maps:get(median, CollectNativeStats), 1)]),
 
     %% --- inject:into: / foldl ---
@@ -640,10 +596,13 @@ bench_block_threading() ->
     report("block/fold_native", FoldNativeStats, ?ITERATIONS),
     report("block/fold_stateacc_block", FoldStateAccStats, ?ITERATIONS),
     io:format(standard_error,
-        "PERF: block/fold_overhead ~.2fx vs native~n",
+        "PERF: block/fold_pure_overhead ~.2fx vs native~n",
         [maps:get(median, FoldStateAccStats) / max(maps:get(median, FoldNativeStats), 1)]),
 
     %% --- BT-1276: list-op with local variable mutation (StateAcc map vs tuple acc) ---
+    DoNativeMutTimings = run_benchmark(fun() ->
+        bench_block_threading:do_native_mutation(List)
+    end, ?ITERATIONS, ?WARMUP),
     DoStateAccMutTimings = run_benchmark(fun() ->
         bench_block_threading:do_stateacc_mutation(List)
     end, ?ITERATIONS, ?WARMUP),
@@ -651,16 +610,22 @@ bench_block_threading() ->
         bench_block_threading:do_tuple_acc_mutation(List)
     end, ?ITERATIONS, ?WARMUP),
 
+    DoNativeMutStats = stats(DoNativeMutTimings),
     DoStateAccMutStats = stats(DoStateAccMutTimings),
     DoTupleAccMutStats = stats(DoTupleAccMutTimings),
 
+    report("block/do_native_mutation", DoNativeMutStats, ?ITERATIONS),
     report("block/do_stateacc_mutation", DoStateAccMutStats, ?ITERATIONS),
     report("block/do_tuple_acc_mutation", DoTupleAccMutStats, ?ITERATIONS),
+    DoNativeMutMedian = maps:get(median, DoNativeMutStats),
     DoMutImprovementRatio = maps:get(median, DoStateAccMutStats) /
         max(maps:get(median, DoTupleAccMutStats), 1),
     io:format(standard_error,
         "PERF: block/do_mutation_improvement ~.2fx tuple vs stateacc~n",
         [DoMutImprovementRatio]),
+    io:format(standard_error,
+        "PERF: block/do_tuple_acc_overhead ~.2fx vs native~n",
+        [maps:get(median, DoTupleAccMutStats) / max(DoNativeMutMedian, 1)]),
     %% BT-1276: Tuple-acc should be at least 1.5x faster than StateAcc for do: with mutation.
     ?assert(DoMutImprovementRatio >= 1.5),
 
@@ -702,5 +667,28 @@ bench_block_threading() ->
         "PERF: block/fold_mutation_improvement ~.2fx tuple vs stateacc~n",
         [FoldMutImprovementRatio]),
     %% BT-1276: Tuple-acc should be at least 1.5x faster than StateAcc for inject: with mutation.
-    ?assert(FoldMutImprovementRatio >= 1.5).
+    ?assert(FoldMutImprovementRatio >= 1.5),
+
+    %% --- BT-1329: nested list op inside counted loop (Tier-2 StateAcc fallback) ---
+    %%
+    %% Outer loop runs 100 times; inner inject:into: runs over a 10,000-element list
+    %% mutating an outer-scope variable on every element — the classic Tier-2 pattern.
+    OuterN = 100,
+    NestedStateAccTimings = run_benchmark(fun() ->
+        bench_block_threading:nested_stateacc_list_op(OuterN, List)
+    end, ?ITERATIONS, ?WARMUP),
+    NestedTupleTimings = run_benchmark(fun() ->
+        bench_block_threading:nested_tuple_list_op(OuterN, List)
+    end, ?ITERATIONS, ?WARMUP),
+
+    NestedStateAccStats = stats(NestedStateAccTimings),
+    NestedTupleStats = stats(NestedTupleTimings),
+
+    report("block/nested_stateacc_list_op", NestedStateAccStats, ?ITERATIONS),
+    report("block/nested_tuple_list_op", NestedTupleStats, ?ITERATIONS),
+    NestedImprovementRatio = maps:get(median, NestedStateAccStats) /
+        max(maps:get(median, NestedTupleStats), 1),
+    io:format(standard_error,
+        "PERF: block/nested_list_op_improvement ~.2fx tuple vs stateacc~n",
+        [NestedImprovementRatio]).
 
