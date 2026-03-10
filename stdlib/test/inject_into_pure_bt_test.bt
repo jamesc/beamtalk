@@ -45,14 +45,18 @@ TestCase subclass: InjectIntoPureBtTest
     ]) equals: #(3, 2, 1)
 
   testListFindMax =>
-    self assert: (#(3, 1, 4, 1, 5, 9) inject: 0 into: [:max :x |
-      x > max ifTrue: [x] ifFalse: [max]
-    ]) equals: 9
+    self
+      assert: (#(3, 1, 4, 1, 5, 9) inject: 0 into: [:max :x |
+        x > max ifTrue: [x] ifFalse: [max]
+      ])
+      equals: 9
 
   testListCountSatisfying =>
-    self assert: (#(1, 2, 3, 4, 5) inject: 0 into: [:count :x |
-      x > 2 ifTrue: [count + 1] ifFalse: [count]
-    ]) equals: 3
+    self
+      assert: (#(1, 2, 3, 4, 5) inject: 0 into: [:count :x |
+        x > 2 ifTrue: [count + 1] ifFalse: [count]
+      ])
+      equals: 3
 
   // =========================================================================
   // NumberList (user-defined Collection subclass) inject:into:
@@ -200,9 +204,11 @@ TestCase subclass: InjectIntoPureBtTest
   // =========================================================================
   testInjectWithComplexBlock =>
     // Block that checks a condition and branches before updating accumulator
-    self assert: (#(1, 2, 3, 4, 5) inject: 0 into: [:acc :x |
-      x > 2 ifTrue: [acc + x] ifFalse: [acc]
-    ]) equals: 12
+    self
+      assert: (#(1, 2, 3, 4, 5) inject: 0 into: [:acc :x |
+        x > 2 ifTrue: [acc + x] ifFalse: [acc]
+      ])
+      equals: 12
 
   testInjectBuildingString =>
     self assert: (#(1, 2, 3) inject: "" into: [:acc :x |

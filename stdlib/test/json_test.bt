@@ -60,9 +60,11 @@ TestCase subclass: JsonTest
     })) unwrap at: "name") equals: "Ada"
     // Round-trip nested structures
     @expect type
-    self assert: (((Json parse: (Json generate: #{
-      "user" => #{"age" => 36}
-    })) unwrap at: "user") at: "age") equals: 36
+    self
+      assert: (((Json parse: (Json generate: #{
+        "user" => #{"age" => 36}
+      })) unwrap at: "user") at: "age")
+      equals: 36
 
   testDictionaryGenerateAndParse =>
     // Generate JSON from a Dictionary, then verify structure

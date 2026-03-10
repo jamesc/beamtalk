@@ -238,7 +238,10 @@ sealed Number subclass: Integer
     cond
       ifTrue: [
         block value: self
-        (self + step) to: end by: step do: block
+        (self + step)
+          to: end
+          by: step
+          do: block
       ]
       ifFalse: [nil]
 

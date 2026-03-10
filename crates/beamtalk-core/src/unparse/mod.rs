@@ -745,9 +745,9 @@ fn unparse_identifier(id: &Identifier) -> Document<'static> {
 // --- Message send unparsing ---
 
 /// Returns `true` if this expression is a block that will always render
-/// across multiple lines — either because it contains multiple statements,
-/// or because a single statement carries a trailing line comment (which
-/// forces the closing `]` to its own line).
+/// across multiple lines — because it contains multiple statements, has a
+/// trailing line comment, or its single expression renders to multiple lines
+/// (e.g. a keyword send with multiline block arguments).
 ///
 /// Used by `unparse_message_send` to decide whether keyword messages should
 /// break each keyword to its own indented line.
@@ -758,12 +758,19 @@ fn block_renders_multiline(expr: &Expression) -> bool {
     match block.body.as_slice() {
         // Multi-statement blocks always break.
         [_, _, ..] => true,
-        // Single-statement block: only forced-multiline when it has a trailing
-        // LINE comment (which would otherwise land inside the `// …` text).
-        [single] => matches!(
-            single.comments.trailing.as_ref().map(|c| c.kind),
-            Some(CommentKind::Line)
-        ),
+        // Single-statement block: forced-multiline when it has a trailing LINE
+        // comment (which would otherwise land inside the `// …` text), or when
+        // the formatted body itself spans multiple lines.
+        [single] => {
+            let has_trailing_line_comment = matches!(
+                single.comments.trailing.as_ref().map(|c| c.kind),
+                Some(CommentKind::Line)
+            );
+            has_trailing_line_comment
+                || unparse_expression(&single.expression)
+                    .to_pretty_string()
+                    .contains('\n')
+        }
         // Empty block `[]` stays inline.
         [] => false,
     }
@@ -787,12 +794,18 @@ fn unparse_message_send(
             docvec![recv_doc, " ", Document::String(op.to_string()), " ", arg]
         }
         MessageSelector::Keyword(parts) => {
-            // When any argument is a block that always renders multi-line,
-            // break every keyword to its own line (2-space indent from receiver).
-            // Otherwise use the compact inline form.
-            let any_multiline = arguments.iter().any(block_renders_multiline);
+            // Break all keywords to their own indented lines when:
+            // - 3+ keyword parts (elm-format style: always break multi-keyword messages), or
+            // - any argument renders multi-line (block or otherwise — e.g. a
+            //   parenthesized 3-keyword send that itself breaks).
+            // Otherwise use the compact inline form (1-2 keywords, width-aware).
+            let any_multiline = arguments.iter().any(|arg| {
+                block_renders_multiline(arg)
+                    || unparse_expression(arg).to_pretty_string().contains('\n')
+            });
+            let always_break = parts.len() >= 3 || any_multiline;
 
-            if any_multiline {
+            if always_break {
                 let mut kw_docs: Vec<Document<'static>> = Vec::new();
                 for (i, part) in parts.iter().enumerate() {
                     kw_docs.push(line());
@@ -944,15 +957,24 @@ fn unparse_block(block: &Block) -> Document<'static> {
 
         // Single-statement block: width-aware via group().
         // Fits on one line → `[expr]`; too long → broken across lines.
+        // Exception: if the formatted body spans multiple lines (e.g. a keyword
+        // send with multiline block args), always use the break form so the
+        // `[:param |` header stays on one line, the body is indented, and `]`
+        // lands on its own line (preventing `]]` stacking with outer closers).
         [single] => {
             let body = unparse_expression_statement(single);
-            group(docvec![
-                "[",
-                params_doc,
-                nest(2, docvec![break_("", ""), body]),
-                break_("", ""),
-                "]",
-            ])
+            if body.to_pretty_string().contains('\n') {
+                // Body renders multiline — always break so `]` gets its own line.
+                docvec!["[", params_doc, nest(2, docvec![line(), body]), line(), "]"]
+            } else {
+                group(docvec![
+                    "[",
+                    params_doc,
+                    nest(2, docvec![break_("", ""), body]),
+                    break_("", ""),
+                    "]",
+                ])
+            }
         }
 
         // Unreachable: the slice patterns above are exhaustive.
@@ -2393,6 +2415,11 @@ mod tests {
     }
 
     #[test]
+    fn identity_fixture_long_keyword_messages() {
+        assert_identity(include_str!("fixtures/long_keyword_messages.bt"));
+    }
+
+    #[test]
     fn identity_empty_source() {
         assert_identity("");
     }
@@ -2443,6 +2470,97 @@ mod tests {
         assert!(
             out.contains("coll\n      do: ["),
             "receiver should be on its own line before do: {out}"
+        );
+    }
+
+    // --- BT-1294: 3+ keyword always-break, block body multiline, no ]] stacking ---
+
+    #[test]
+    fn three_keywords_always_break() {
+        // 3 keyword parts → always break, regardless of total length.
+        let source = "Object subclass: A\n  m => CandidateFilter filterEligible: c config: self.config running: self.running\n";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        assert!(
+            out.contains("CandidateFilter\n"),
+            "receiver must be on its own line for 3+ keywords: {out}"
+        );
+        assert!(
+            out.contains("      filterEligible:"),
+            "first keyword must be indented: {out}"
+        );
+        assert!(
+            out.contains("      config:"),
+            "second keyword must be indented: {out}"
+        );
+        assert!(
+            out.contains("      running:"),
+            "third keyword must be indented: {out}"
+        );
+    }
+
+    #[test]
+    fn three_keywords_always_break_idempotent() {
+        let source = "Object subclass: A\n  m =>\n    CandidateFilter\n      filterEligible: c\n      config: self.config\n      running: self.running\n";
+        assert_idempotent(source);
+    }
+
+    #[test]
+    fn four_keywords_always_break() {
+        // 4 keyword parts — real symphony pattern (orchestrator.bt:96).
+        let source = "Object subclass: A\n  m => CandidateFilter terminatedEntries: self.running stateMap: stateMap activeStates: self.config trackerActiveStates terminalStates: self.config trackerTerminalStates\n";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        // No line should exceed 120 chars (excluding string literals).
+        for line in out.lines() {
+            assert!(
+                line.len() <= 120,
+                "line exceeds 120 chars after formatting: {line:?}"
+            );
+        }
+        assert!(
+            out.contains("      terminatedEntries:"),
+            "first keyword must break: {out}"
+        );
+        assert!(
+            out.contains("      terminalStates:"),
+            "last keyword must break: {out}"
+        );
+    }
+
+    #[test]
+    fn two_keywords_short_stays_inline() {
+        // 2 keyword parts that are short → stays inline (no change to current behaviour).
+        let source = "Object subclass: A\n  m => dict at: #key ifAbsent: [nil]\n";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        assert!(
+            out.contains("dict at: #key ifAbsent: [nil]"),
+            "short 2-keyword message should stay inline: {out}"
+        );
+    }
+
+    #[test]
+    fn block_with_multiline_body_breaks_outer_close() {
+        // Block whose body renders multiline (keyword send with multiline block args)
+        // must use always-break form so `]` gets its own line (no `]]` stacking).
+        let source = "Object subclass: A\n  m =>\n    resp\n      andThen: [:r |\n        r ok\n          ifTrue: [\n            x := r body\n            Result ok: x\n          ]\n          ifFalse: [Result error: #http_error]\n      ]\n";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        // `]]` must not appear — every `]` must be on its own line.
+        assert!(!out.contains("]]"), "no `]]` stacking allowed: {out}");
+        assert_idempotent(source);
+    }
+
+    #[test]
+    fn block_with_single_short_keyword_stays_inline() {
+        // Single-statement block whose body is a short 1-keyword send must stay inline.
+        let source = "Object subclass: A\n  m => flag ifTrue: [self traceCr: \"yes\"]\n";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        assert!(
+            out.contains("ifTrue: [self traceCr: \"yes\"]"),
+            "short single-keyword block body should stay inline: {out}"
         );
     }
 }
