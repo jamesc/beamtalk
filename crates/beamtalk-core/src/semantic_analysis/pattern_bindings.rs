@@ -12,16 +12,15 @@ use crate::ast::{Identifier, Pattern};
 use crate::source_analysis::Span;
 use ecow::EcoString;
 
-/// Extract variable bindings from a pattern.
+/// Extract variable bindings from a pattern (strict mode).
 ///
 /// Recursively traverses the pattern and collects all variable identifiers
 /// that will be bound when the pattern matches. Returns diagnostics for
 /// duplicate pattern variables.
 ///
-/// Duplicate variable names are allowed inside `Pattern::Array` — the codegen
-/// emits `erlang:=:=` equality checks for subsequent occurrences. Duplicates in
-/// other pattern kinds (tuples, lists, etc.) remain errors because their codegen
-/// paths use native Core Erlang patterns which do not support repeated names.
+/// All duplicate variable names produce an error diagnostic regardless of
+/// pattern kind. Use [`extract_match_arm_bindings`] for match-arm patterns,
+/// where `Pattern::Array` additionally supports equality-constraint duplicates.
 ///
 /// # Examples
 ///
@@ -42,7 +41,24 @@ pub fn extract_pattern_bindings(
     let mut bindings = Vec::new();
     let mut diagnostics = Vec::new();
     let mut seen = std::collections::HashMap::new();
-    // Array patterns allow duplicate variables (codegen emits equality checks).
+    extract_pattern_bindings_impl(pattern, &mut bindings, &mut seen, &mut diagnostics, false);
+    (bindings, diagnostics)
+}
+
+/// Extract variable bindings from a **match-arm** pattern.
+///
+/// Like [`extract_pattern_bindings`], but `Pattern::Array` arms additionally
+/// allow duplicate variable names — the codegen for array match arms emits
+/// `erlang:=:=` equality guards for subsequent occurrences. This relaxation
+/// is intentionally limited to match arms: destructuring assignments and other
+/// pattern contexts use the strict variant.
+pub fn extract_match_arm_bindings(
+    pattern: &Pattern,
+) -> (Vec<Identifier>, Vec<crate::source_analysis::Diagnostic>) {
+    let mut bindings = Vec::new();
+    let mut diagnostics = Vec::new();
+    let mut seen = std::collections::HashMap::new();
+    // For match arms, top-level array patterns allow duplicate variables.
     let allow_duplicates = matches!(pattern, Pattern::Array { .. });
     extract_pattern_bindings_impl(
         pattern,
