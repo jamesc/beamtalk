@@ -118,9 +118,7 @@ fn run_script(
     // Full validation is required because the name is injected into an Erlang -eval string.
     if class_name.is_empty()
         || !class_name.chars().next().is_some_and(char::is_uppercase)
-        || class_name
-            .chars()
-            .any(|c| !c.is_alphanumeric() && c != '_')
+        || class_name.chars().any(|c| !c.is_alphanumeric() && c != '_')
     {
         miette::bail!(
             "Invalid class name '{class_name}': class names must start with an uppercase letter \
