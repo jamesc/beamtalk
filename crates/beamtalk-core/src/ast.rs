@@ -840,6 +840,8 @@ pub enum ExpectCategory {
     Type,
     /// Suppress unused-variable warnings.
     Unused,
+    /// Suppress self-capture-in-actor-block warnings.
+    SelfCapture,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -852,6 +854,7 @@ impl ExpectCategory {
             "dnu" => Some(Self::Dnu),
             "type" => Some(Self::Type),
             "unused" => Some(Self::Unused),
+            "self_capture" => Some(Self::SelfCapture),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -864,6 +867,7 @@ impl ExpectCategory {
             Self::Dnu => "dnu",
             Self::Type => "type",
             Self::Unused => "unused",
+            Self::SelfCapture => "self_capture",
             Self::All => "all",
         }
     }

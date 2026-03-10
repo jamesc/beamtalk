@@ -813,7 +813,8 @@ fn check_self_capture_at(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
                              `calling_self` dispatch and can deadlock. \
                              Inline the logic or bind the result to a local variable before \
                              entering the block.",
-                        ),
+                        )
+                        .with_category(DiagnosticCategory::SelfCapture),
                     );
                 }
             }
