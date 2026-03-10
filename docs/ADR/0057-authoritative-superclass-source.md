@@ -265,7 +265,7 @@ only overwrites `superclass` when `Meta` contains the key. If Meta is absent or 
 key is not present, the existing value is preserved unchanged — the init path is not
 affected.
 
-### Option C (Planned Phase 2): `__beamtalk_meta/0` as sole source for static metadata
+### Option C (Phase 5): `__beamtalk_meta/0` as sole source for static metadata
 
 Remove static structural fields from `#class_state{}` entirely. The gen_server
 becomes responsible only for mutable runtime state: live method table, class
@@ -286,7 +286,7 @@ module) use a separate lightweight in-memory store populated at `register_class`
   makes gen_server state correct. Option C makes gen_server state *minimal*. The
   right sequence: fix correctness now, migrate to cleanliness later."
 
-**Planned Phase 2**: `superclass` is the only field that is currently wrong, so
+**Phase 5**: `superclass` is the only field that is currently wrong, so
 Option A fixes all active bugs. Option C is the follow-up architectural migration
 once the gen_server's role as mutable-state-only process is fully defined. The two
 phases are independent — Option C can proceed whenever the codebase is ready, without
@@ -317,7 +317,7 @@ See Steelman Analysis above. Rejected because it perpetuates stale state and doe
 scale: every new hierarchy-traversal intrinsic must independently defend against the
 inconsistency.
 
-### Option C: Remove static metadata from gen_server (Phase 2)
+### Option C: Remove static metadata from gen_server (Phase 5)
 
 See Steelman Analysis above. Not rejected — planned as a follow-up architectural
 migration once Option A restores correctness. `superclass` is the only field
