@@ -20,7 +20,7 @@
 //!
 //! The runner resolves the path relative to the markdown file, injects a `// @load` directive
 //! into the generated btscript, and compiles the fixture before running assertions.
-//! Fixture files that contain `TestCase subclass:` are also run as BUnit test suites.
+//! Fixture files that contain `TestCase subclass:` are also run as `BUnit` test suites.
 
 use super::test_stdlib::{
     CompiledTestFile, compile_erl_files, compile_single_test_file, report_results,
@@ -225,7 +225,7 @@ fn find_md_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 // Main entry point
 // ──────────────────────────────────────────────────────────────────────────
 
-/// A BUnit fixture file discovered via `<!-- btfixture: ... -->`.
+/// A `BUnit` fixture file discovered via `<!-- btfixture: ... -->`.
 struct BunitFixture {
     /// The markdown file that declared this fixture.
     source_md: Utf8PathBuf,
@@ -239,7 +239,7 @@ struct ExtractionResult {
     pairs: Vec<(Utf8PathBuf, Utf8PathBuf)>,
     /// Count of files that had beamtalk fences but all lacked `// =>` markers.
     skipped_with_blocks: usize,
-    /// BUnit fixture modules that should be added to the EUnit test run
+    /// `BUnit` fixture modules that should be added to the `EUnit` test run
     /// in addition to the inline-assertion modules.
     bunit_fixtures: Vec<BunitFixture>,
 }
@@ -248,8 +248,8 @@ struct ExtractionResult {
 ///
 /// Fixture declarations (`<!-- btfixture: path.bt -->`) are resolved relative to each
 /// markdown file and injected as `// @load` directives in the generated btscript.
-/// Fixture files containing `TestCase subclass:` are tracked as BUnit test modules
-/// so the caller can include them in the EUnit run.
+/// Fixture files containing `TestCase subclass:` are tracked as `BUnit` test modules
+/// so the caller can include them in the `EUnit` run.
 fn extract_to_btscript_files(
     md_files: &[Utf8PathBuf],
     btscript_dir: &Utf8Path,
@@ -356,10 +356,10 @@ fn extract_to_btscript_files(
     })
 }
 
-/// Generate EUnit wrappers for BUnit fixture files so they can be run by EUnit.
+/// Generate `EUnit` wrappers for `BUnit` fixture files so they can be run by `EUnit`.
 ///
-/// BUnit `.bt` files compile to Beamtalk class modules (via `compile_fixture`),
-/// but EUnit needs a wrapper that creates instances and dispatches test methods.
+/// `BUnit` `.bt` files compile to Beamtalk class modules (via `compile_fixture`),
+/// but `EUnit` needs a wrapper that creates instances and dispatches test methods.
 /// This function discovers `TestCase` subclasses in each fixture, generates the
 /// corresponding `.erl` wrappers, and registers them for compilation and execution.
 fn generate_bunit_wrappers(
