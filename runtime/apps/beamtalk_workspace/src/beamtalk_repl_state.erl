@@ -27,7 +27,10 @@
     get_actor_registry/1,
     set_actor_registry/2,
     get_module_tracker/1,
-    set_module_tracker/2
+    set_module_tracker/2,
+    %% BT-1242: pending module removals (deferred during active eval)
+    get_pending_module_removals/1,
+    add_pending_module_removal/2
 ]).
 
 -export_type([state/0]).
@@ -42,7 +45,12 @@
     eval_counter :: non_neg_integer(),
     loaded_modules :: [atom()],
     actor_registry :: pid() | undefined,
-    module_tracker :: beamtalk_repl_modules:module_tracker()
+    module_tracker :: beamtalk_repl_modules:module_tracker(),
+    %% BT-1242: Modules removed via class_removed event while an eval worker
+    %% is active.  Deferred here so they can be applied to the worker's returned
+    %% state when eval_result arrives (prevents the worker snapshot from
+    %% reinstating modules that were removed during the eval).
+    pending_module_removals :: [atom()]
 }).
 
 -opaque state() :: #state{}.
@@ -63,7 +71,8 @@ new(ListenSocket, Port, _Options) ->
         eval_counter = 0,
         loaded_modules = [],
         actor_registry = undefined,
-        module_tracker = beamtalk_repl_modules:new()
+        module_tracker = beamtalk_repl_modules:new(),
+        pending_module_removals = []
     }.
 
 %% @doc Get current variable bindings.
@@ -145,3 +154,19 @@ get_module_tracker(#state{module_tracker = Tracker}) ->
 -spec set_module_tracker(beamtalk_repl_modules:module_tracker(), state()) -> state().
 set_module_tracker(Tracker, State) ->
     State#state{module_tracker = Tracker}.
+
+%% @doc Get pending module removals (deferred during active eval).
+%%
+%% BT-1242: Returns the list of module atoms queued for removal while an eval
+%% worker was running.  Applied to the worker result state in eval_result handler.
+-spec get_pending_module_removals(state()) -> [atom()].
+get_pending_module_removals(#state{pending_module_removals = Removals}) ->
+    Removals.
+
+%% @doc Add a module to the pending-removals list.
+%%
+%% BT-1242: Called by handle_info({class_removed, ...}) when an eval worker is
+%% active.  Deduplicates via ordsets so repeated removals are idempotent.
+-spec add_pending_module_removal(atom(), state()) -> state().
+add_pending_module_removal(Module, #state{pending_module_removals = Removals} = State) ->
+    State#state{pending_module_removals = ordsets:add_element(Module, Removals)}.

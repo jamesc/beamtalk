@@ -344,6 +344,39 @@ class_removed_event_updates_tracker_test_() ->
                 timer:sleep(50),
                 ?assert(is_process_alive(Pid)),
                 beamtalk_repl_shell:stop(Pid)
+            end),
+            %% BT-1242: class_removed while worker active — pending removal is
+            %% stored (not dropped) so eval_result can apply it.
+            ?_test(begin
+                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-class-removed-3">>),
+                DummyMod3 = bt1242_shell_pending_removal,
+                %% Inject module into tracker and a fake running worker.
+                %% FakeWorkerPid must be a real (but idle) process — terminate/2
+                %% calls exit(WorkerPid, kill), so using self() here would kill
+                %% the test process when the shell is stopped.
+                FakeWorkerPid = spawn(fun() -> receive _ -> ok end end),
+                FakeFrom = self(),
+                sys:replace_state(Pid, fun({SId, State, _W}) ->
+                    Tracker = beamtalk_repl_state:get_module_tracker(State),
+                    T2 = beamtalk_repl_modules:add_module(DummyMod3, undefined, Tracker),
+                    State2 = beamtalk_repl_state:set_module_tracker(T2, State),
+                    {SId, State2, {FakeWorkerPid, make_ref(), FakeFrom}}
+                end),
+                %% Send class_removed while worker is "active" — goes to pending path
+                Pid ! {class_removed, 'BT1242PendingClass', DummyMod3},
+                timer:sleep(50),
+                %% Shell must still be alive
+                ?assert(is_process_alive(Pid)),
+                %% Pending removal recorded in state — verify by extracting ShellState
+                {_SId, ShellState, _Worker} = sys:get_state(Pid),
+                ?assertEqual(
+                    [DummyMod3],
+                    beamtalk_repl_state:get_pending_module_removals(ShellState)
+                ),
+                %% Module is still in tracker (not yet applied)
+                {ok, T3} = beamtalk_repl_shell:get_module_tracker(Pid),
+                ?assert(beamtalk_repl_modules:module_exists(DummyMod3, T3)),
+                beamtalk_repl_shell:stop(Pid)
             end)
         ]
     end}.
