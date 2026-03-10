@@ -354,7 +354,11 @@ class_removed_event_updates_tracker_test_() ->
                 %% FakeWorkerPid must be a real (but idle) process — terminate/2
                 %% calls exit(WorkerPid, kill), so using self() here would kill
                 %% the test process when the shell is stopped.
-                FakeWorkerPid = spawn(fun() -> receive _ -> ok end end),
+                FakeWorkerPid = spawn(fun() ->
+                    receive
+                        _ -> ok
+                    end
+                end),
                 FakeFrom = self(),
                 sys:replace_state(Pid, fun({SId, State, _W}) ->
                     Tracker = beamtalk_repl_state:get_module_tracker(State),
