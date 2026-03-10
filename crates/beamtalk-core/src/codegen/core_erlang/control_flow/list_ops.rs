@@ -831,7 +831,18 @@ impl CoreErlangGenerator {
             // BT-1304: Elide maybe_await on the fold accumulator when the initial value is
             // provably sync. The accumulator is re-extracted at each iteration via
             // erlang:element/2; if the initial value is sync and the body only produces
-            // sync values via arithmetic, the accumulator remains non-future throughout.
+            // sync values (e.g., arithmetic), the accumulator remains non-future throughout.
+            //
+            // **Invariant assumption**: this optimization is sound when the fold body's
+            // return expression is always sync across all branches. For the common case —
+            // numerical reduction (e.g., `acc + x`) — this holds. If the body returns an
+            // async value (e.g., an actor method call) on any iteration, the next iteration's
+            // `Acc` would be a future and arithmetic on it would crash with badarg. Such
+            // bodies are user errors: `inject:into:` is designed for synchronous
+            // accumulation; bodies that produce futures should use explicit `await:`.
+            // The `expressions.rs` assignment handler additionally removes the acc param from
+            // `current_sync_vars` if it is reassigned (`:=`) to a non-sync value inside the
+            // body, covering explicit reassignment patterns.
             //
             // The block parameter *shadows* any outer variable with the same name. We must
             // not let an outer sync-var for, say, `acc` bleed into a nested fold that uses
@@ -931,8 +942,8 @@ impl CoreErlangGenerator {
         if body.parameters.len() >= 2 {
             self.bind_var(&body.parameters[1].name, "Item");
         }
-        // BT-1304: Elide maybe_await on the fold accumulator (same save/restore logic as
-        // tuple-acc path — see comment above for full rationale).
+        // BT-1304: Elide maybe_await on the fold accumulator (same invariant assumption and
+        // save/restore logic as the tuple-acc path — see comment above for full rationale).
         let map_acc_param_name = body.parameters.first().map(|p| p.name.to_string());
         let outer_map_acc_sync = map_acc_param_name
             .as_ref()
@@ -1276,6 +1287,37 @@ mod tests {
         assert!(
             code.contains("'maybe_await'(Acc)"),
             "BT-1304: maybe_await should be KEPT on the fold accumulator (map-acc path) when initial is a non-sync field read. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_inject_nested_scope_bleeding_regression() {
+        // BT-1304 regression: outer inject has sync initial (adds `acc` to sync_vars);
+        // inner inject has a non-sync initial (`self.initial`) with the *same* parameter
+        // name `acc`. Both blocks mutate `sharedCount`, which forces both injects through
+        // `generate_list_inject_with_mutations` where the BT-1304 sync-var logic runs.
+        //
+        // Before the save/restore fix, the outer fold's sync marking for `acc` would bleed
+        // into the inner fold body, causing `maybe_await(Acc)` to be silently elided for
+        // an accumulator that might be a future. After the fix, `maybe_await(Acc)` must
+        // be present in the generated code.
+        let src = concat!(
+            "Actor subclass: Ctr\n",
+            "  state: initial = 0\n\n",
+            "  run: outerList with: innerList =>\n",
+            "    sharedCount := 0\n",
+            "    outerList inject: 0 into: [:acc :x |\n",
+            "      sharedCount := sharedCount + 1.\n",
+            "      innerList inject: self.initial into: [:acc :y |\n",
+            "        sharedCount := sharedCount + y.\n",
+            "        acc + y]]\n",
+        );
+        let code = codegen(src);
+        // The inner fold has non-sync initial → must retain maybe_await on its Acc.
+        assert!(
+            code.contains("'maybe_await'(Acc)"),
+            "BT-1304 scope-bleeding: inner fold with non-sync initial must retain \
+             maybe_await(Acc) even when outer fold has same param name. Got:\n{code}"
         );
     }
 
