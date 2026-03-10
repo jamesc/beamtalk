@@ -1535,13 +1535,35 @@ impl Pattern {
     }
 }
 
+/// The key in a map destructuring pattern.
+///
+/// Distinguishes between symbol keys (`#key`) and string keys (`"key"`),
+/// since they compile to different Core Erlang representations (atom vs binary).
+#[derive(Debug, Clone, PartialEq)]
+pub enum MapPatternKey {
+    /// Symbol key: `#key` — compiled as an Erlang atom.
+    Symbol(EcoString),
+    /// String key: `"key"` — compiled as an Erlang binary.
+    StringLit(EcoString),
+}
+
+impl MapPatternKey {
+    /// Returns the inner string value regardless of key kind.
+    pub fn as_str(&self) -> &str {
+        match self {
+            MapPatternKey::Symbol(s) | MapPatternKey::StringLit(s) => s.as_str(),
+        }
+    }
+}
+
 /// A key-value binding pair in a map destructuring pattern.
 ///
-/// Example: in `#{#sid => sid}`, the pair has key `sid` and value `Pattern::Variable("sid")`.
+/// Example: in `#{#sid => sid}`, the pair has key `Symbol("sid")` and value `Pattern::Variable("sid")`.
+/// Example: in `#{"event" => ev}`, the pair has key `StringLit("event")` and value `Pattern::Variable("ev")`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapPatternPair {
-    /// The map key (always a symbol atom).
-    pub key: EcoString,
+    /// The map key — either a symbol atom or a string literal.
+    pub key: MapPatternKey,
     /// The pattern to bind the value to.
     pub value: Pattern,
     /// Source location.

@@ -22,7 +22,8 @@ use super::selector_mangler::escape_atom_chars;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, CascadeMessage,
-    Expression, Identifier, Literal, MapPair, MatchArm, MessageSelector, Pattern, StringSegment,
+    Expression, Identifier, Literal, MapPair, MapPatternKey, MatchArm, MessageSelector, Pattern,
+    StringSegment,
 };
 use crate::docvec;
 
@@ -1627,13 +1628,13 @@ impl CoreErlangGenerator {
                         Pattern::Variable(id) => {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
-                            let key_atom = Document::String(escape_atom_chars(pair.key.as_str()));
+                            let key_doc = Self::map_pattern_key_doc(&pair.key);
                             docs.push(docvec![
                                 indent,
                                 Document::String(core_var.clone()),
-                                " = call 'erlang':'map_get'('",
-                                key_atom,
-                                "', ",
+                                " = call 'erlang':'map_get'(",
+                                key_doc,
+                                ", ",
                                 Document::String(rhs_var.to_string()),
                                 ")",
                                 terminator,
@@ -2080,6 +2081,22 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// Generates a Core Erlang document for a map pattern key.
+    ///
+    /// Symbol keys emit an atom: `'key'`.
+    /// String keys emit a Core Erlang binary literal via the Document pipeline.
+    fn map_pattern_key_doc(key: &MapPatternKey) -> Document<'static> {
+        match key {
+            MapPatternKey::Symbol(s) => {
+                let key_atom = escape_atom_chars(s.as_str());
+                docvec!["'", Document::String(key_atom), "'"]
+            }
+            MapPatternKey::StringLit(s) => {
+                docvec![Self::binary_string_literal(s.as_str())]
+            }
+        }
+    }
+
     /// Generates a Core Erlang pattern from a Pattern AST node.
     pub(super) fn generate_pattern(&mut self, pattern: &Pattern) -> Result<Document<'static>> {
         match pattern {
@@ -2141,7 +2158,9 @@ impl CoreErlangGenerator {
             }
             Pattern::Map { pairs, .. } => {
                 // Beamtalk Dictionaries are plain Erlang maps — emit a Core Erlang map pattern.
-                // `#{#k => v}` compiles to `~{ 'k' := V }~` (`:=` is the match-binding form).
+                // `#{#k => v}` compiles to `~{ 'k' := V }~`   (symbol key → atom)
+                // `#{"k" => v}` compiles to `~{ <binary literal for "k"> := V }~` (string key → binary)
+                // `:=` is the Core Erlang match-binding form.
                 if pairs.is_empty() {
                     return Ok(Document::Str("~{}~"));
                 }
@@ -2150,10 +2169,9 @@ impl CoreErlangGenerator {
                     if i > 0 {
                         parts.push(Document::Str(", "));
                     }
-                    let key_atom = escape_atom_chars(pair.key.as_str());
-                    parts.push(Document::Str("'"));
-                    parts.push(Document::String(key_atom));
-                    parts.push(Document::Str("' := "));
+                    let key_doc = Self::map_pattern_key_doc(&pair.key);
+                    parts.push(key_doc);
+                    parts.push(Document::Str(" := "));
                     parts.push(self.generate_pattern(&pair.value)?);
                 }
                 parts.push(Document::Str(" }~"));

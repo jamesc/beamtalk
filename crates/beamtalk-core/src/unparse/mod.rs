@@ -31,8 +31,8 @@
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
-    Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair, MatchArm,
-    MessageSelector, MethodDefinition, Module, Pattern, StandaloneMethodDefinition,
+    Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair, MapPatternKey,
+    MatchArm, MessageSelector, MethodDefinition, Module, Pattern, StandaloneMethodDefinition,
     StateDeclaration, StringSegment, TypeAnnotation,
 };
 use crate::codegen::core_erlang::document::{Document, break_, concat, group, line, nest, nil};
@@ -1157,11 +1157,11 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
             let pair_docs: Vec<Document<'static>> = pairs
                 .iter()
                 .map(|p| {
-                    docvec![
-                        unparse_literal(&Literal::Symbol(p.key.clone())),
-                        " => ",
-                        unparse_pattern(&p.value)
-                    ]
+                    let key_doc = match &p.key {
+                        MapPatternKey::Symbol(s) => unparse_literal(&Literal::Symbol(s.clone())),
+                        MapPatternKey::StringLit(s) => unparse_literal(&Literal::String(s.clone())),
+                    };
+                    docvec![key_doc, " => ", unparse_pattern(&p.value)]
                 })
                 .collect();
             let joined = join_docs(pair_docs, ", ");
