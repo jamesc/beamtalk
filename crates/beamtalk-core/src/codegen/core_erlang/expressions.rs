@@ -1628,15 +1628,7 @@ impl CoreErlangGenerator {
                         Pattern::Variable(id) => {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
-                            let key_doc = match &pair.key {
-                                MapPatternKey::Symbol(s) => {
-                                    let key_atom = escape_atom_chars(s.as_str());
-                                    docvec!["'", Document::String(key_atom), "'"]
-                                }
-                                MapPatternKey::StringLit(s) => {
-                                    Document::String(Self::binary_string_literal(s.as_str()))
-                                }
-                            };
+                            let key_doc = Self::map_pattern_key_doc(&pair.key);
                             docs.push(docvec![
                                 indent,
                                 Document::String(core_var.clone()),
@@ -2089,6 +2081,22 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// Generates a Core Erlang document for a map pattern key.
+    ///
+    /// Symbol keys emit an atom: `'key'`.
+    /// String keys emit a Core Erlang binary literal via the Document pipeline.
+    fn map_pattern_key_doc(key: &MapPatternKey) -> Document<'static> {
+        match key {
+            MapPatternKey::Symbol(s) => {
+                let key_atom = escape_atom_chars(s.as_str());
+                docvec!["'", Document::String(key_atom), "'"]
+            }
+            MapPatternKey::StringLit(s) => {
+                docvec![Self::binary_string_literal(s.as_str())]
+            }
+        }
+    }
+
     /// Generates a Core Erlang pattern from a Pattern AST node.
     pub(super) fn generate_pattern(&mut self, pattern: &Pattern) -> Result<Document<'static>> {
         match pattern {
@@ -2161,15 +2169,7 @@ impl CoreErlangGenerator {
                     if i > 0 {
                         parts.push(Document::Str(", "));
                     }
-                    let key_doc = match &pair.key {
-                        MapPatternKey::Symbol(s) => {
-                            let key_atom = escape_atom_chars(s.as_str());
-                            docvec!["'", Document::String(key_atom), "'"]
-                        }
-                        MapPatternKey::StringLit(s) => {
-                            Document::String(Self::binary_string_literal(s.as_str()))
-                        }
-                    };
+                    let key_doc = Self::map_pattern_key_doc(&pair.key);
                     parts.push(key_doc);
                     parts.push(Document::Str(" := "));
                     parts.push(self.generate_pattern(&pair.value)?);

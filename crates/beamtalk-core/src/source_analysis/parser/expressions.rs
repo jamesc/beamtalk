@@ -216,7 +216,7 @@ impl Parser {
                     }
                     Err(bad_span) => {
                         self.diagnostics.push(Diagnostic::error(
-                            "Map destructuring: keys must be symbols and values must be identifiers or '_'",
+                            "Map destructuring: keys must be symbols or string literals, values must be identifiers or '_'",
                             bad_span,
                         ));
                         return Expression::Error {
@@ -1191,17 +1191,18 @@ impl Parser {
     ///
     /// Accepts a symbol (`#key`), a string literal (`"key"`), or a bare lowercase
     /// identifier followed by `=>` (shorthand for a symbol key).
-    fn parse_map_pattern_key(&mut self) -> MapPatternKey {
+    /// Returns `None` on an invalid token (error is pushed; caller should skip the pair).
+    fn parse_map_pattern_key(&mut self) -> Option<MapPatternKey> {
         match self.current_kind() {
             TokenKind::Symbol(s) => {
                 let s = s.clone();
                 self.advance();
-                MapPatternKey::Symbol(s)
+                Some(MapPatternKey::Symbol(s))
             }
             TokenKind::String(s) => {
                 let s = s.clone();
                 self.advance();
-                MapPatternKey::StringLit(s)
+                Some(MapPatternKey::StringLit(s))
             }
             TokenKind::Identifier(name)
                 if name.chars().next().is_some_and(char::is_lowercase)
@@ -1209,7 +1210,7 @@ impl Parser {
             {
                 let name = name.clone();
                 self.advance();
-                MapPatternKey::Symbol(name)
+                Some(MapPatternKey::Symbol(name))
             }
             _ => {
                 let bad = self.advance();
@@ -1217,7 +1218,7 @@ impl Parser {
                     "Map destructuring key must be a symbol or string (e.g. #key or \"key\")",
                     bad.span(),
                 ));
-                MapPatternKey::Symbol(EcoString::from("_"))
+                None
             }
         }
     }
@@ -1309,7 +1310,7 @@ impl Parser {
                     break;
                 }
                 let pair_start = self.current_token().span();
-                let key = self.parse_map_pattern_key();
+                let key_opt = self.parse_map_pattern_key();
 
                 if !matches!(self.current_kind(), TokenKind::FatArrow) {
                     let bad = self.advance();
@@ -1322,12 +1323,16 @@ impl Parser {
                 self.advance(); // consume '=>'
 
                 let value = self.parse_map_pattern_value();
-                let pair_span = pair_start.merge(value.span());
-                pairs.push(MapPatternPair {
-                    key,
-                    value,
-                    span: pair_span,
-                });
+                // Only push the pair if the key was valid; skip error-recovery pairs
+                // so downstream passes don't see a synthetic `#_` lookup key.
+                if let Some(key) = key_opt {
+                    let pair_span = pair_start.merge(value.span());
+                    pairs.push(MapPatternPair {
+                        key,
+                        value,
+                        span: pair_span,
+                    });
+                }
 
                 if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",")
                 {
