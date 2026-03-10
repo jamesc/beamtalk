@@ -761,6 +761,11 @@ fn block_renders_multiline(expr: &Expression) -> bool {
         // Single-statement block: forced-multiline when it has a trailing LINE
         // comment (which would otherwise land inside the `// …` text), or when
         // the formatted body itself spans multiple lines.
+        //
+        // Note: `unparse_expression` is called here purely for the multiline
+        // predicate; the caller will unparse the block again when building the
+        // actual output document.  This is a known O(n) duplication trade-off
+        // kept intentionally simple until profiling shows it matters.
         [single] => {
             let has_trailing_line_comment = matches!(
                 single.comments.trailing.as_ref().map(|c| c.kind),
@@ -799,11 +804,14 @@ fn unparse_message_send(
             // - any argument renders multi-line (block or otherwise — e.g. a
             //   parenthesized 3-keyword send that itself breaks).
             // Otherwise use the compact inline form (1-2 keywords, width-aware).
-            let any_multiline = arguments.iter().any(|arg| {
+            //
+            // `any_multiline` is only checked for 1–2 keyword messages; for 3+
+            // the result is always break regardless, so we skip the check to
+            // avoid re-unparsing every argument just for the predicate.
+            let always_break = parts.len() >= 3 || arguments.iter().any(|arg| {
                 block_renders_multiline(arg)
                     || unparse_expression(arg).to_pretty_string().contains('\n')
             });
-            let always_break = parts.len() >= 3 || any_multiline;
 
             if always_break {
                 let mut kw_docs: Vec<Document<'static>> = Vec::new();
@@ -2511,7 +2519,7 @@ mod tests {
         let source = "Object subclass: A\n  m => CandidateFilter terminatedEntries: self.running stateMap: stateMap activeStates: self.config trackerActiveStates terminalStates: self.config trackerTerminalStates\n";
         let module = parse_source(source);
         let out = unparse_module(&module);
-        // No line should exceed 120 chars (excluding string literals).
+        // No line should exceed 120 chars (measured by raw byte length).
         for line in out.lines() {
             assert!(
                 line.len() <= 120,

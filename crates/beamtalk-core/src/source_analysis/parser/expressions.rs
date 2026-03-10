@@ -434,6 +434,14 @@ impl Parser {
         if self.current_token().has_leading_newline() {
             if self.in_class_body && self.in_method_body {
                 // Inside a class method body: stop at the class member boundary.
+                //
+                // Beamtalk canonical formatting (enforced by `beamtalk fmt`) always
+                // places class body members at column 0–2 and continuation keywords
+                // deeper than that.  We rely on this invariant here rather than a
+                // wide-lookahead `is_at_method_definition()` call, which can span
+                // into the next sibling method's `-> Type =>` annotation and produce
+                // false positives (BT-1294).  Non-canonically-indented source (e.g.
+                // members at col 4) should be formatted with `beamtalk fmt` first.
                 let col = self
                     .current_token()
                     .indentation_after_newline()
@@ -473,6 +481,8 @@ impl Parser {
             if self.current_token().has_leading_newline() {
                 if self.in_class_body && self.in_method_body {
                     // Inside a class method body: use indentation comparison.
+                    // Relies on the canonical ≤ 2 column invariant for class members
+                    // (see the same assumption in the initial check above).
                     let current_indent = self.current_token().indentation_after_newline();
                     match continuation_indent {
                         None => {
