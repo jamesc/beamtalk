@@ -56,6 +56,14 @@ impl CoreErlangGenerator {
         // BT-295: Clear method params (will be populated below if present)
         self.current_method_params.clear();
 
+        // BT-1288: Load sync vars for this method from pre-computed semantic facts.
+        self.current_sync_vars = self
+            .semantic_facts
+            .sync_envs
+            .get(&method.span)
+            .map(|env| env.sync_vars.clone())
+            .unwrap_or_default();
+
         let selector_name = method.selector.name();
 
         // BT-295: Collect parameter variable names (mutates scope via fresh_var)
@@ -430,7 +438,7 @@ impl CoreErlangGenerator {
                             self.bind_var(var_name, &core_var);
 
                             // Extract threaded locals from updated state
-                            if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(value)
+                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
                             {
                                 for var in &threaded_vars {
                                     let tv_core = self.lookup_var(var).map_or_else(
@@ -520,7 +528,7 @@ impl CoreErlangGenerator {
                 let _ = self.next_state_var();
 
                 // BT-598: Extract threaded locals from the updated state
-                if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
+                if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
                     for var in &threaded_vars {
                         let core_var = self
                             .lookup_var(var)
@@ -778,7 +786,7 @@ impl CoreErlangGenerator {
                             self.bind_var(var_name, &core_var);
 
                             // Extract threaded locals from updated state
-                            if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(value)
+                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
                             {
                                 for var in &threaded_vars {
                                     let tv_core = self.lookup_var(var).map_or_else(
@@ -816,7 +824,7 @@ impl CoreErlangGenerator {
                 for d in binding_docs {
                     docs.push(d);
                 }
-            } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
+            } else if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
                 // Control flow with local variable threading - need to rebind threaded vars after loop
                 if self.control_flow_has_mutations(expr) {
                     // BT-598: Control flow with mutations returns {Result, State} tuple.
@@ -1417,6 +1425,14 @@ impl CoreErlangGenerator {
             self.class_var_version = 0;
             self.class_var_mutated = false;
 
+            // BT-1288: Load sync vars for this method from pre-computed semantic facts.
+            self.current_sync_vars = self
+                .semantic_facts
+                .sync_envs
+                .get(&method.span)
+                .map(|env| env.sync_vars.clone())
+                .unwrap_or_default();
+
             // Bind ClassSelf as 'self' in scope
             self.bind_var("self", "ClassSelf");
             self.in_class_method = true;
@@ -1805,7 +1821,11 @@ impl CoreErlangGenerator {
                 sel.as_str(),
             ) {
                 if let Expression::Block(block) = receiver.as_ref() {
-                    let analysis = block_analysis::analyze_block(block);
+                    let analysis = self
+                        .semantic_facts
+                        .block_profile(&block.span)
+                        .cloned()
+                        .unwrap_or_else(|| block_analysis::analyze_block(block));
                     if self.needs_mutation_threading(&analysis) {
                         return true;
                     }
@@ -1821,7 +1841,11 @@ impl CoreErlangGenerator {
             ) {
                 for arg in arguments {
                     if let Expression::Block(block) = arg {
-                        let analysis = block_analysis::analyze_block(block);
+                        let analysis = self
+                            .semantic_facts
+                            .block_profile(&block.span)
+                            .cloned()
+                            .unwrap_or_else(|| block_analysis::analyze_block(block));
                         if self.needs_mutation_threading(&analysis) {
                             return true;
                         }
@@ -1832,7 +1856,11 @@ impl CoreErlangGenerator {
 
             // Standard check: analyze the last argument block
             if let Some(Expression::Block(block)) = arguments.last() {
-                let analysis = block_analysis::analyze_block(block);
+                let analysis = self
+                    .semantic_facts
+                    .block_profile(&block.span)
+                    .cloned()
+                    .unwrap_or_else(|| block_analysis::analyze_block(block));
                 return self.needs_mutation_threading(&analysis);
             }
         }

@@ -751,6 +751,13 @@ impl CoreErlangGenerator {
         self.push_scope();
         // BT-295: Track method params for @primitive codegen
         self.current_method_params.clear();
+        // BT-1288: Load sync vars for this method from pre-computed semantic facts.
+        self.current_sync_vars = self
+            .semantic_facts
+            .sync_envs
+            .get(&method.span)
+            .map(|env| env.sync_vars.clone())
+            .unwrap_or_default();
         let mut params = vec!["Self".to_string()];
         for param in &method.parameters {
             let var_name = self.fresh_var(&param.name.name);

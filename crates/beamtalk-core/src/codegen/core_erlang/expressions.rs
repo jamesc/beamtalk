@@ -1360,7 +1360,7 @@ impl CoreErlangGenerator {
                         ]);
                     }
                 }
-            } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
+            } else if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
                 // whileTrue:/whileFalse:/timesRepeat: with mutations - need to rebind threaded vars after loop
                 // For single var, the loop returns its final value directly
                 // For multiple vars, we'd need a tuple (not yet supported)
