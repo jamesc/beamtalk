@@ -51,6 +51,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     Module {

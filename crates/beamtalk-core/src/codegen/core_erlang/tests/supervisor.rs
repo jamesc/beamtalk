@@ -21,6 +21,7 @@ fn make_static_supervisor_module() -> Module {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     Module {
@@ -49,6 +50,7 @@ fn make_dynamic_supervisor_module() -> Module {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     Module {
@@ -295,6 +297,7 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {

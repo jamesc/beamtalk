@@ -2459,6 +2459,7 @@ Module {
                 trailing: None,
             },
             doc_comment: None,
+            backing_module: None,
             span: Span {
                 start: 208,
                 end: 2111,

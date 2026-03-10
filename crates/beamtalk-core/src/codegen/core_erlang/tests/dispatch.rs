@@ -332,6 +332,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 50),
     };
 

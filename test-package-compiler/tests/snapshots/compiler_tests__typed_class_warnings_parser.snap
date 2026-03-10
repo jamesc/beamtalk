@@ -505,6 +505,7 @@ Module {
                 trailing: None,
             },
             doc_comment: None,
+            backing_module: None,
             span: Span {
                 start: 275,
                 end: 684,
