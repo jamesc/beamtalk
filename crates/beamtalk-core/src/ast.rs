@@ -840,7 +840,7 @@ pub enum ExpectCategory {
     Type,
     /// Suppress unused-variable warnings.
     Unused,
-    /// Suppress self-capture-in-actor-block warnings.
+    /// Suppress self-capture-in-actor-block hints.
     SelfCapture,
     /// Suppress any diagnostic on the following expression.
     All,

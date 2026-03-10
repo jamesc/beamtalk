@@ -888,4 +888,38 @@ mod tests {
             "Typo in @expect category should be a parse error, got: {diagnostics:?}"
         );
     }
+
+    #[test]
+    fn expect_self_capture_only_suppresses_self_capture_not_dnu() {
+        // Targeted suppression: @expect self_capture on an expression that has BOTH a
+        // self-capture hint AND a DNU hint should suppress only the self-capture hint;
+        // the DNU hint must still surface.
+        //
+        // The block `[:x | self printString. 42 unknownMsg]` contains:
+        //   - `self printString`  → triggers the self-capture hint on the collect: call
+        //   - `42 unknownMsg`     → triggers a DNU hint (Integer does not understand unknownMsg)
+        // Both spans are within the target span of the @expect directive.
+        let source = "Actor subclass: Foo\n  state: items = #()\n  run =>\n    @expect self_capture\n    self.items collect: [:x | self printString. 42 unknownMsg]";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        // Self-capture hint must be suppressed
+        let self_capture = diagnostics
+            .iter()
+            .any(|d| d.message.contains("may deadlock"));
+        assert!(
+            !self_capture,
+            "@expect self_capture should suppress self-capture hint, got: {diagnostics:?}"
+        );
+
+        // DNU hint on 42 unknownMsg inside the block must still be present
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            dnu,
+            "@expect self_capture must NOT suppress the DNU hint on the same expression, got: {diagnostics:?}"
+        );
+    }
 }

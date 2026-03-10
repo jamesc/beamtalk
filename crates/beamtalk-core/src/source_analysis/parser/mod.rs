@@ -364,7 +364,7 @@ pub enum DiagnosticCategory {
     EmptyBody,
     /// Style/redundancy lint (BT-959).
     Lint,
-    /// Self-capture-in-actor-block warning (BT-1302).
+    /// Self-capture-in-actor-block hint (BT-1302).
     SelfCapture,
 }
 
