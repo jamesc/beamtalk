@@ -832,21 +832,43 @@ impl CoreErlangGenerator {
             // provably sync. The accumulator is re-extracted at each iteration via
             // erlang:element/2; if the initial value is sync and the body only produces
             // sync values via arithmetic, the accumulator remains non-future throughout.
+            //
+            // The block parameter *shadows* any outer variable with the same name. We must
+            // not let an outer sync-var for, say, `acc` bleed into a nested fold that uses
+            // the same parameter name but a non-sync initial. Save/restore the outer state:
+            //   1. Remove any outer sync-var for this name (it is now shadowed).
+            //   2. Insert the new sync-var if *this* fold's initial is provably sync.
+            //   3. After the body, remove what we inserted and restore what we removed.
             let acc_param_name = body.parameters.first().map(|p| p.name.to_string());
-            if let Some(ref name) = acc_param_name {
-                if self.is_definitely_sync(initial) {
-                    self.current_sync_vars.insert(name.clone());
-                }
-            }
+            let outer_acc_sync = acc_param_name
+                .as_ref()
+                .map(|name| self.current_sync_vars.remove(name.as_str()))
+                .unwrap_or(false);
+            let acc_sync_inserted = acc_param_name
+                .as_ref()
+                .map(|name| {
+                    if self.is_definitely_sync(initial) {
+                        self.current_sync_vars.insert(name.clone());
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
             docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
 
             let (body_doc, _) =
                 self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlInject)?;
             docs.push(body_doc);
             self.pop_scope();
-            // BT-1304: Clean up the accumulator sync-var entry after leaving the fold scope.
+            // BT-1304: Restore the accumulator sync state.
             if let Some(ref name) = acc_param_name {
-                self.current_sync_vars.remove(name.as_str());
+                if acc_sync_inserted {
+                    self.current_sync_vars.remove(name.as_str());
+                }
+                if outer_acc_sync {
+                    self.current_sync_vars.insert(name.clone());
+                }
             }
 
             let result_var = self.fresh_temp_var("temp");
@@ -913,22 +935,38 @@ impl CoreErlangGenerator {
         if body.parameters.len() >= 2 {
             self.bind_var(&body.parameters[1].name, "Item");
         }
-        // BT-1304: Elide maybe_await on the fold accumulator (same logic as tuple-acc path).
+        // BT-1304: Elide maybe_await on the fold accumulator (same save/restore logic as
+        // tuple-acc path — see comment above for full rationale).
         let map_acc_param_name = body.parameters.first().map(|p| p.name.to_string());
-        if let Some(ref name) = map_acc_param_name {
-            if self.is_definitely_sync(initial) {
-                self.current_sync_vars.insert(name.clone());
-            }
-        }
+        let outer_map_acc_sync = map_acc_param_name
+            .as_ref()
+            .map(|name| self.current_sync_vars.remove(name.as_str()))
+            .unwrap_or(false);
+        let map_acc_sync_inserted = map_acc_param_name
+            .as_ref()
+            .map(|name| {
+                if self.is_definitely_sync(initial) {
+                    self.current_sync_vars.insert(name.clone());
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
         docs.extend(plan.generate_unpack_at_iteration_start(self));
 
         let (body_doc, _) =
             self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlInject)?;
         docs.push(body_doc);
         self.pop_scope();
-        // BT-1304: Clean up the accumulator sync-var entry after leaving the fold scope.
+        // BT-1304: Restore the accumulator sync state.
         if let Some(ref name) = map_acc_param_name {
-            self.current_sync_vars.remove(name.as_str());
+            if map_acc_sync_inserted {
+                self.current_sync_vars.remove(name.as_str());
+            }
+            if outer_map_acc_sync {
+                self.current_sync_vars.insert(name.clone());
+            }
         }
 
         // BT-483: Return {Result, State} tuple — inject:into: returns accumulator as result.
@@ -1206,6 +1244,46 @@ mod tests {
         assert!(
             !code.contains("'maybe_await'(Acc)"),
             "BT-1304: maybe_await should be elided on the fold accumulator when initial is a literal. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_inject_sync_var_initial_elides_acc_maybe_await() {
+        // BT-1304: When the initial accumulator is a sync var (method parameter), maybe_await
+        // is also elided on the fold accumulator.
+        let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items start: start =>\n    count := 0\n    items inject: start into: [:acc :item | count := count + 1. acc + item]\n";
+        let code = codegen(src);
+        // `start` is a method parameter → sync. acc is provably sync → maybe_await elided.
+        assert!(
+            !code.contains("'maybe_await'(Acc)"),
+            "BT-1304: maybe_await should be elided on the fold accumulator when initial is a sync param. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_inject_non_literal_initial_keeps_acc_maybe_await() {
+        // BT-1304: When the initial accumulator is NOT provably sync (e.g. a local var that
+        // was never declared sync), maybe_await is retained on the accumulator.
+        // Note: `self.someState` is a field read — not a literal → NOT in sync_vars.
+        let src = "Actor subclass: Ctr\n  state: x = 0\n  state: initial = 0\n\n  run: items =>\n    count := 0\n    items inject: self.initial into: [:acc :item | count := count + 1. acc + item]\n";
+        let code = codegen(src);
+        // `self.initial` is a state field read → not a literal, not a sync var.
+        // maybe_await should be retained on Acc.
+        assert!(
+            code.contains("'maybe_await'(Acc)"),
+            "BT-1304: maybe_await should be KEPT on the fold accumulator when initial is a non-sync field read. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_inject_non_literal_initial_keeps_acc_maybe_await_map_acc() {
+        // BT-1304: When the initial accumulator is NOT provably sync and the block forces
+        // the map-accumulator path (due to a field mutation), maybe_await is still retained.
+        let src = "Actor subclass: Ctr\n  state: count = 0\n  state: initial = 0\n\n  run: items =>\n    items inject: self.initial into: [:acc :item | self.count := self.count + 1. acc + item]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("'maybe_await'(Acc)"),
+            "BT-1304: maybe_await should be KEPT on the fold accumulator (map-acc path) when initial is a non-sync field read. Got:\n{code}"
         );
     }
 
