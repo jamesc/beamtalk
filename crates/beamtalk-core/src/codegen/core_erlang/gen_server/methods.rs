@@ -92,10 +92,9 @@ impl CoreErlangGenerator {
         // BT-761: Detect whether any block argument in this method body contains ^.
         // If so, set up a non-local return token so ^ inside blocks can throw to escape
         // the closure and return from the enclosing actor method.
-        let needs_nlr = method
-            .body
-            .iter()
-            .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
+        let needs_nlr = self
+            .semantic_facts
+            .has_block_nlr_or_walk(&method.span, &method.body);
 
         let nlr_token_var = if needs_nlr {
             let token_var = self.fresh_temp_var("NlrToken");
@@ -1449,10 +1448,9 @@ impl CoreErlangGenerator {
                 .collect();
 
             // BT-1202: Detect if method body has ^ inside blocks (needs NLR).
-            let needs_nlr = method
-                .body
-                .iter()
-                .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
+            let needs_nlr = self
+                .semantic_facts
+                .has_block_nlr_or_walk(&method.span, &method.body);
 
             let nlr_token_var = if needs_nlr {
                 let token_var = self.fresh_temp_var("NlrToken");
