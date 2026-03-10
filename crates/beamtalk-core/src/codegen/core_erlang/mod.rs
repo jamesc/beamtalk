@@ -813,6 +813,12 @@ pub(super) struct CoreErlangGenerator {
     state_threading: StateThreading,
     /// BT-153: Whether we're inside a loop body (use `StateAcc` instead of `State`)
     in_loop_body: bool,
+    /// BT-1326: Whether we're inside a hybrid-params loop body.
+    ///
+    /// When `true`, `current_state_var()` and `next_state_var()` use `State*` naming
+    /// instead of `StateAcc*`, even when `in_loop_body` is also true.
+    /// Set by `generate_counted_stateful_loop_hybrid` and `generate_while_loop_hybrid`.
+    in_hybrid_loop: bool,
     /// BT-153: Whether we're generating REPL code (vs module code).
     /// In REPL mode, local variable assignments should update bindings.
     is_repl_mode: bool,
@@ -924,6 +930,7 @@ impl CoreErlangGenerator {
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
             in_loop_body: false,
+            in_hybrid_loop: false,
             is_repl_mode: false,
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             source_text: None,
@@ -960,6 +967,7 @@ impl CoreErlangGenerator {
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
             in_loop_body: false,
+            in_hybrid_loop: false,
             is_repl_mode: false,
             context: CodeGenContext::Actor,
             source_text: None,
@@ -1011,11 +1019,18 @@ impl CoreErlangGenerator {
 
     /// Returns the current state variable name for state threading.
     ///
-    /// When inside a loop body (`in_loop_body = true`), returns `StateAcc` or `StateAccN`.
+    /// When inside a hybrid-params loop (`in_hybrid_loop = true`), returns `State` or `StateN`
+    /// (same as normal context) so that field mutations thread through the explicit `State`
+    /// parameter instead of a `StateAcc` map.
+    ///
+    /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc` or `StateAccN`.
     /// Otherwise returns `State` or `StateN`.
     pub(super) fn current_state_var(&self) -> String {
-        if self.in_loop_body {
-            // Inside loop body - use StateAcc nomenclature
+        if self.in_hybrid_loop {
+            // Hybrid-params loop: use State* naming (State is an explicit fun parameter)
+            self.state_threading.current_var()
+        } else if self.in_loop_body {
+            // Normal loop body: use StateAcc* nomenclature
             if self.state_threading.version() == 0 {
                 "StateAcc".to_string()
             } else {
@@ -1029,12 +1044,16 @@ impl CoreErlangGenerator {
 
     /// Increments the state version and returns the new state variable name.
     ///
-    /// When inside a loop body (`in_loop_body = true`), returns `StateAcc1`, `StateAcc2`, etc.
-    /// Otherwise returns `State1`, `State2`, etc.
+    /// When inside a hybrid-params loop (`in_hybrid_loop = true`) or normal context,
+    /// returns `State1`, `State2`, etc.
+    /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc1`, etc.
     pub(super) fn next_state_var(&mut self) -> String {
         let next_var = self.state_threading.next_var();
-        if self.in_loop_body {
-            // Replace "State" prefix with "StateAcc"
+        if self.in_hybrid_loop || !self.in_loop_body {
+            // Hybrid mode or normal context: use State* naming
+            next_var
+        } else {
+            // Normal loop body: replace "State" prefix with "StateAcc"
             if next_var == "State1" {
                 // First increment in loop body
                 "StateAcc1".to_string()
@@ -1043,8 +1062,6 @@ impl CoreErlangGenerator {
             } else {
                 next_var
             }
-        } else {
-            next_var
         }
     }
 

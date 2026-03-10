@@ -289,19 +289,80 @@ mod tests {
         );
     }
 
+    // ── BT-1326: hybrid direct-params + State threading ──────────────────────
+
     #[test]
-    fn test_to_do_field_plus_local_mutation_keeps_stateacc() {
-        // When both field AND local vars are mutated, must keep StateAcc (field mutations
-        // require it for actor state threading across iterations).
+    fn test_to_do_field_plus_local_mutation_uses_hybrid_params() {
+        // BT-1326: When both field AND local vars are mutated, hybrid mode uses
+        // fun(I, Sum, State) — locals as direct params, State as explicit parameter.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
-            code.contains("fun (I, StateAcc)"),
-            "mixed mutations: letrec fun must use StateAcc. Got:\n{code}"
+            code.contains("letrec"),
+            "mixed mutations: should generate a letrec. Got:\n{code}"
+        );
+        // Fun signature must be (I, Sum, State), not (I, StateAcc).
+        assert!(
+            code.contains("fun (I, Sum, State)"),
+            "hybrid: letrec fun should have Sum + State as params. Got:\n{code}"
         );
         assert!(
-            code.contains("maps':'get'('__local__sum'"),
-            "mixed mutations: must unpack local sum from StateAcc. Got:\n{code}"
+            !code.contains("fun (I, StateAcc)"),
+            "hybrid: letrec fun must not use StateAcc signature. Got:\n{code}"
+        );
+        // Field mutation must use State (not StateAcc) as the base map.
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "hybrid: body should update 'n' via maps:put. Got:\n{code}"
+        );
+        // No per-iteration maps:get for local sum inside the loop body.
+        // The post-loop extract (maps:get after the loop) is still expected.
+        assert!(
+            code.match_indices("maps':'get'('__local__sum'").count() <= 1,
+            "hybrid: at most one maps:get for local sum (post-loop extract only). Got:\n{code}"
+        );
+        // Exit arm must pack locals back into StateAcc.
+        assert!(
+            code.contains("maps':'put'('__local__sum'"),
+            "hybrid: exit arm must pack sum into ExitSA. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_times_repeat_field_plus_local_mutation_uses_hybrid_params() {
+        // BT-1326: timesRepeat: with both field + local mutations uses hybrid mode.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    3 timesRepeat: [sum := sum + 1. self.n := self.n + 1]\n    self.n := sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("fun (I, Sum, State)"),
+            "timesRepeat: hybrid: letrec fun should have Sum + State as params. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (I, StateAcc)"),
+            "timesRepeat: hybrid: must not use StateAcc signature. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('__local__sum'"),
+            "timesRepeat: hybrid: exit arm must pack sum into ExitSA. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_to_by_do_field_plus_local_mutation_uses_hybrid_params() {
+        // BT-1326: to:by:do: with both field + local mutations uses hybrid mode.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("fun (I, Sum, State)"),
+            "to:by:do: hybrid: letrec fun should have Sum + State as params. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (I, StateAcc)"),
+            "to:by:do: hybrid: must not use StateAcc signature. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('__local__sum'"),
+            "to:by:do: hybrid: exit arm must pack sum into ExitSA. Got:\n{code}"
         );
     }
 }

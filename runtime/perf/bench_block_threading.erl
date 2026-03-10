@@ -39,7 +39,11 @@
     collect_stateacc_mutation/1,
     collect_tuple_acc_mutation/1,
     fold_stateacc_mutation/1,
-    fold_tuple_acc_mutation/1
+    fold_tuple_acc_mutation/1,
+    %% BT-1326: counted loop with BOTH local + field mutations — hybrid vs StateAcc
+    mixed_stateacc/1,
+    mixed_hybrid/1,
+    mixed_native/1
 ]).
 
 %%====================================================================
@@ -398,3 +402,87 @@ fold_tuple_acc_mutation(List) ->
     end,
     {Result, _} = lists:foldl(BlockFun, {0, Count0}, List),
     Result.
+
+%%====================================================================
+%% BT-1326: Counted loop with BOTH local variable + actor field mutations
+%%
+%% Simulates:
+%%   sum := 0
+%%   1000 timesRepeat: [sum := sum + 1. self.n := self.n + 1]
+%%   -- then extract sum --
+%%
+%% Three variants:
+%%   mixed_stateacc  — old StateAcc path: all state packed into one map
+%%   mixed_hybrid    — BT-1326 hybrid: locals as direct params, State threaded separately
+%%   mixed_native    — idiomatic Erlang baseline (no overhead)
+%%====================================================================
+
+%% @doc Simulates old StateAcc path for a loop with both local + field mutations.
+%%
+%% Generated Core Erlang (pre-BT-1326):
+%%   letrec 'loop'/2 = fun(I, StateAcc) ->
+%%     case I =< N of
+%%       true ->
+%%         Sum = maps:get('__local__sum', StateAcc),
+%%         Sum1 = Sum + 1,
+%%         N0 = maps:get('n', StateAcc),
+%%         StateAcc1 = maps:put('n', N0 + 1, StateAcc),
+%%         StateAcc2 = maps:put('__local__sum', Sum1, StateAcc1),
+%%         apply 'loop'/2 (I + 1, StateAcc2)
+%%       false -> {nil, StateAcc}
+%%     end
+%%   in apply 'loop'/2 (1, maps:put('__local__sum', 0, State))
+-spec mixed_stateacc(non_neg_integer()) -> integer().
+mixed_stateacc(N) ->
+    InitState = maps:put('__local__sum', 0, #{'n' => 0}),
+    {_, FinalState} = mixed_stateacc_loop(1, N, InitState),
+    maps:get('__local__sum', FinalState).
+
+mixed_stateacc_loop(I, N, StateAcc) when I > N ->
+    {nil, StateAcc};
+mixed_stateacc_loop(I, N, StateAcc) ->
+    Sum = maps:get('__local__sum', StateAcc),
+    Sum1 = Sum + 1,
+    N0 = maps:get('n', StateAcc),
+    StateAcc1 = maps:put('n', N0 + 1, StateAcc),
+    StateAcc2 = maps:put('__local__sum', Sum1, StateAcc1),
+    mixed_stateacc_loop(I + 1, N, StateAcc2).
+
+%% @doc Simulates BT-1326 hybrid params path for a loop with both local + field mutations.
+%%
+%% Generated Core Erlang (post-BT-1326):
+%%   letrec 'loop'/3 = fun(I, Sum, State) ->
+%%     case I =< N of
+%%       true ->
+%%         Sum1 = Sum + 1,
+%%         N0 = maps:get('n', State),
+%%         State1 = maps:put('n', N0 + 1, State),
+%%         apply 'loop'/3 (I + 1, Sum1, State1)
+%%       false ->
+%%         ExitSA = maps:put('__local__sum', Sum, State),
+%%         {nil, ExitSA}
+%%     end
+%%   in apply 'loop'/3 (1, 0, State)
+-spec mixed_hybrid(non_neg_integer()) -> integer().
+mixed_hybrid(N) ->
+    InitState = #{'n' => 0},
+    {_, FinalState} = mixed_hybrid_loop(1, N, 0, InitState),
+    maps:get('__local__sum', FinalState).
+
+mixed_hybrid_loop(I, N, Sum, State) when I > N ->
+    ExitSA = maps:put('__local__sum', Sum, State),
+    {nil, ExitSA};
+mixed_hybrid_loop(I, N, Sum, State) ->
+    Sum1 = Sum + 1,
+    N0 = maps:get('n', State),
+    State1 = maps:put('n', N0 + 1, State),
+    mixed_hybrid_loop(I + 1, N, Sum1, State1).
+
+%% @doc Idiomatic Erlang baseline for the mixed local + field mutation pattern.
+-spec mixed_native(non_neg_integer()) -> integer().
+mixed_native(N) ->
+    mixed_native_loop(1, N, 0, 0).
+
+mixed_native_loop(I, N, Sum, _FieldN) when I > N -> Sum;
+mixed_native_loop(I, N, Sum, FieldN) ->
+    mixed_native_loop(I + 1, N, Sum + 1, FieldN + 1).

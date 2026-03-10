@@ -175,6 +175,9 @@ impl CoreErlangGenerator {
         if plan.use_direct_params {
             return self.generate_while_loop_direct(condition, body, &plan, negate);
         }
+        if plan.use_hybrid_params {
+            return self.generate_while_loop_hybrid(condition, body, &plan, negate);
+        }
 
         let cond_var = self.fresh_temp_var("CondFun");
 
@@ -377,6 +380,166 @@ impl CoreErlangGenerator {
 
         let initial_args_doc = join(
             initial_direct_args.into_iter().map(Document::String),
+            &Document::Str(", "),
+        );
+        docs.push(docvec![
+            "in apply 'while'/",
+            Document::String(arity.to_string()),
+            " (",
+            initial_args_doc,
+            ")",
+        ]);
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-1326: Hybrid direct-params + State threading variant of `generate_while_loop_with_mutations`.
+    ///
+    /// Uses `fun (Var1, ..., VarN, State)` — locals as direct params, actor state as an
+    /// explicit `State` parameter. Field mutations use `State*` naming (not `StateAcc*`).
+    #[allow(clippy::too_many_lines)]
+    fn generate_while_loop_hybrid(
+        &mut self,
+        condition: &Expression,
+        body: &Block,
+        plan: &ThreadingPlan,
+        negate: bool,
+    ) -> Result<Document<'static>> {
+        let initial_local_args = plan.initial_direct_args(self);
+        let initial_state = plan.initial_state_var.clone();
+
+        let local_param_names: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
+            .collect();
+        let state_param_name = "State".to_string();
+        let arity = local_param_names.len() + 1; // locals + State
+
+        let param_list_doc = || {
+            join(
+                local_param_names
+                    .iter()
+                    .map(|v| Document::String(v.clone()))
+                    .chain(std::iter::once(Document::String(state_param_name.clone()))),
+                &Document::Str(", "),
+            )
+        };
+
+        let cond_var = self.fresh_temp_var("CondFun");
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(docvec![
+            "letrec 'while'/",
+            Document::String(arity.to_string()),
+            " = fun (",
+            param_list_doc(),
+            ") -> ",
+        ]);
+
+        self.push_scope();
+        // Register local var bindings — no unpack docs in hybrid mode.
+        let unpack_docs = plan.generate_unpack_at_iteration_start(self);
+        debug_assert!(
+            unpack_docs.is_empty(),
+            "hybrid while: unpack should emit no code"
+        );
+
+        // Condition closure captures local vars + State parameter.
+        docs.push(docvec![
+            "let ",
+            Document::String(cond_var.clone()),
+            " = fun (",
+            param_list_doc(),
+            ") -> ",
+        ]);
+
+        let prev_in_loop_body = self.in_loop_body;
+        let prev_state_version = self.state_version();
+        self.in_loop_body = true;
+        self.in_hybrid_loop = true;
+        self.set_state_version(0);
+
+        if let Expression::Block(cond_block) = condition {
+            docs.push(self.generate_block_body(cond_block)?);
+        } else {
+            docs.push(self.generate_expression(condition)?);
+        }
+
+        self.in_loop_body = prev_in_loop_body;
+        self.in_hybrid_loop = false;
+        self.set_state_version(prev_state_version);
+
+        let case_arm = if negate {
+            "<'false'> when 'true' -> "
+        } else {
+            "<'true'> when 'true' -> "
+        };
+        docs.push(docvec![
+            " in case apply ",
+            Document::String(cond_var),
+            " (",
+            param_list_doc(),
+            ") of ",
+            case_arm,
+        ]);
+
+        let prev_hybrid = self.in_hybrid_loop;
+        self.in_hybrid_loop = true;
+        let (body_doc, final_state_version) =
+            self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
+        self.in_hybrid_loop = prev_hybrid;
+        docs.push(body_doc);
+
+        let final_state_var = if final_state_version == 0 {
+            state_param_name.clone()
+        } else {
+            format!("{state_param_name}{final_state_version}")
+        };
+
+        let final_local_args: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| {
+                self.lookup_var(v)
+                    .cloned()
+                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
+            })
+            .collect();
+
+        let exit_stateacc =
+            plan.generate_exit_stateacc_hybrid(&local_param_names, &state_param_name, self);
+
+        let final_args_doc = join(
+            final_local_args
+                .into_iter()
+                .map(Document::String)
+                .chain(std::iter::once(Document::String(final_state_var))),
+            &Document::Str(", "),
+        );
+        let exit_arm = if negate {
+            "<'true'> when 'true' -> "
+        } else {
+            "<'false'> when 'true' -> "
+        };
+        docs.push(docvec![
+            " apply 'while'/",
+            Document::String(arity.to_string()),
+            " (",
+            final_args_doc,
+            ") ",
+            exit_arm,
+            exit_stateacc,
+            " end ",
+        ]);
+
+        self.pop_scope();
+
+        let initial_args_doc = join(
+            initial_local_args
+                .into_iter()
+                .map(Document::String)
+                .chain(std::iter::once(Document::String(initial_state))),
             &Document::Str(", "),
         );
         docs.push(docvec![

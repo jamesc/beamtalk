@@ -75,6 +75,16 @@ pub(super) struct ThreadingPlan {
     /// The accumulator becomes `{Var1, Var2, ..., VarN}` (for `do:`) or
     /// `{FoldAcc, Var1, ..., VarN}` (for `collect:` / `inject:`).
     pub use_tuple_acc: bool,
+    /// BT-1326: When `true`, use hybrid direct-params + State threading for letrec loops.
+    ///
+    /// Set when the loop body has BOTH local variable mutations AND actor field mutations
+    /// (but no self-sends). The loop fun signature becomes `fun(I, Local1, ..., State)`
+    /// with locals as direct parameters and actor state as an explicit `State` parameter.
+    ///
+    /// Eliminates per-iteration `maps:get`/`maps:put` for local variables while still
+    /// threading actor state correctly through field mutations.
+    /// Mutually exclusive with `use_direct_params`.
+    pub use_hybrid_params: bool,
 }
 
 impl ThreadingPlan {
@@ -120,6 +130,7 @@ impl ThreadingPlan {
         Self::new_impl(generator, body, None, false, true)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn new_impl(
         generator: &mut CoreErlangGenerator,
         body: &crate::ast::Block,
@@ -228,6 +239,49 @@ impl ThreadingPlan {
                 && !body_last_is_destructure
         };
 
+        // BT-1326: Hybrid direct-params + State threading for letrec loops.
+        //
+        // Eligible when:
+        // - caller opts in via `allow_direct_params` (letrec loops only)
+        // - there are local vars to thread
+        // - body has field mutations (but NOT self-sends — those need async dispatch)
+        // - condition has no state effects
+        // - no tier-2 threaded-local assignments
+        // - actor context only (ValueType has no actor State to thread)
+        // - NOT already using use_direct_params (mutually exclusive)
+        let use_hybrid_params = if !allow_direct_params
+            || threaded_locals.is_empty()
+            || use_direct_params
+            || !matches!(context, CodeGenContext::Actor)
+        {
+            false
+        } else {
+            let cond_has_state_effects_for_hybrid = condition.is_some_and(|c| {
+                if let Expression::Block(cb) = c {
+                    block_analysis::analyze_block(cb).has_state_effects()
+                } else {
+                    false
+                }
+            });
+            let body_has_tier2_threaded_assign_hybrid = body.body.iter().any(|s| {
+                if let Expression::Assignment { target, value, .. } = &s.expression {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        if threaded_locals.contains(&id.name.to_string()) {
+                            return generator.is_tier2_value_call(value);
+                        }
+                    }
+                }
+                false
+            });
+            // Eligible when body has field mutations but no self-sends:
+            // - self-sends require async gen_server dispatch; hybrid mode only handles
+            //   direct field-map mutations which produce simple maps:put code.
+            !body_analysis.field_writes.is_empty()
+                && !body_analysis.has_self_sends
+                && !cond_has_state_effects_for_hybrid
+                && !body_has_tier2_threaded_assign_hybrid
+        };
+
         Self {
             threaded_locals,
             initial_state_var,
@@ -235,6 +289,7 @@ impl ThreadingPlan {
             context,
             use_direct_params,
             use_tuple_acc,
+            use_hybrid_params,
         }
     }
 
@@ -260,7 +315,7 @@ impl ThreadingPlan {
         &self,
         generator: &mut CoreErlangGenerator,
     ) -> (Document<'static>, String) {
-        if self.threaded_locals.is_empty() || self.use_direct_params {
+        if self.threaded_locals.is_empty() || self.use_direct_params || self.use_hybrid_params {
             return (Document::Nil, self.initial_state_var.clone());
         }
         let mut pack_str = String::new();
@@ -303,7 +358,7 @@ impl ThreadingPlan {
         for var_name in &self.threaded_locals {
             let core_var = CoreErlangGenerator::to_core_erlang_var(var_name);
             generator.bind_var(var_name, &core_var);
-            if !self.use_direct_params {
+            if !self.use_direct_params && !self.use_hybrid_params {
                 let key = self.state_key(var_name);
                 docs.push(docvec![
                     "let ",
@@ -385,6 +440,54 @@ impl ThreadingPlan {
             current = next_var;
         }
         docs.push(docvec!["{'nil', ", Document::String(current), "}",]);
+        Document::Vec(docs)
+    }
+
+    /// BT-1326: Generates the exit `{'nil', ExitSA}` expression for the false arm of a
+    /// hybrid-params loop.
+    ///
+    /// In hybrid mode, locals are direct params and actor state is an explicit `State`
+    /// parameter. At loop exit (false arm), we rebuild a `StateAcc` map by packing the
+    /// local var params into the current `State` parameter, then returning `{'nil', ExitSA}`.
+    ///
+    /// Unlike `generate_exit_stateacc` (which uses `initial_state_var` as the base),
+    /// this uses `state_param_name` — the State parameter of the current loop iteration —
+    /// so that any field mutations from prior iterations are preserved.
+    ///
+    /// `local_param_names` are the Core Erlang names of each threaded local (the fun
+    /// parameter names at the point of the false arm — the current iteration's values).
+    pub fn generate_exit_stateacc_hybrid(
+        &self,
+        local_param_names: &[String],
+        state_param_name: &str,
+        generator: &mut CoreErlangGenerator,
+    ) -> Document<'static> {
+        if self.threaded_locals.is_empty() {
+            return docvec![
+                "{'nil', ",
+                Document::String(state_param_name.to_string()),
+                "}"
+            ];
+        }
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut current = state_param_name.to_string();
+        for (var_name, param) in self.threaded_locals.iter().zip(local_param_names.iter()) {
+            let key = self.state_key(var_name);
+            let next_var = generator.fresh_temp_var("ExitSA");
+            docs.push(docvec![
+                "let ",
+                Document::String(next_var.clone()),
+                " = call 'maps':'put'('",
+                Document::String(key),
+                "', ",
+                Document::String(param.clone()),
+                ", ",
+                Document::String(current),
+                ") in ",
+            ]);
+            current = next_var;
+        }
+        docs.push(docvec!["{'nil', ", Document::String(current), "}"]);
         Document::Vec(docs)
     }
 
@@ -684,10 +787,10 @@ impl CoreErlangGenerator {
                 {
                     has_plain_lets = true;
                     docs.push(doc);
-                } else if plan.use_direct_params || plan.use_tuple_acc {
-                    // BT-1275/BT-1276: Direct-params or tuple-acc mode — emit
-                    // `let NewVar = value in` without a StateAcc map. The var binding
-                    // is updated so the final tuple repack references the latest version.
+                } else if plan.use_direct_params || plan.use_tuple_acc || plan.use_hybrid_params {
+                    // BT-1275/BT-1276/BT-1326: Direct-params, tuple-acc, or hybrid mode —
+                    // emit `let NewVar = value in` without a StateAcc map. The var binding
+                    // is updated so the final repack references the latest version.
                     has_mutations = true;
                     let (assign_doc, new_var) = self.generate_direct_var_update_in_loop(expr)?;
                     docs.push(assign_doc);
@@ -1258,6 +1361,9 @@ impl CoreErlangGenerator {
         if plan.use_direct_params {
             return self.generate_counted_stateful_loop_direct(frame, body, plan);
         }
+        if plan.use_hybrid_params {
+            return self.generate_counted_stateful_loop_hybrid(frame, body, plan);
+        }
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
@@ -1402,6 +1508,144 @@ impl CoreErlangGenerator {
         );
 
         // Recursive call + false arm (with rebuilt StateAcc) + initial apply.
+        docs.push(docvec![
+            " apply '",
+            Document::String(frame.fn_name.clone()),
+            "'/",
+            Document::String(arity.to_string()),
+            " (",
+            recursive_args_doc,
+            ") ",
+            "<'false'> when 'true' -> ",
+            exit_stateacc,
+            " end ",
+            "in apply '",
+            Document::String(frame.fn_name.clone()),
+            "'/",
+            Document::String(arity.to_string()),
+            " (",
+            initial_args_doc,
+            ")",
+        ]);
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-1326: Hybrid direct-params + State threading variant of `generate_counted_stateful_loop`.
+    ///
+    /// Uses `fun (I, Var1, ..., VarN, State)` — locals as direct fun params, actor state as
+    /// an explicit `State` parameter. Field mutations use `State*` naming (not `StateAcc*`).
+    /// At loop exit (false arm), packs local params back into the State map before returning
+    /// `{'nil', ExitSA}`.
+    fn generate_counted_stateful_loop_hybrid(
+        &mut self,
+        frame: &CountedLoopFrame,
+        body: &crate::ast::Block,
+        plan: &ThreadingPlan,
+    ) -> Result<Document<'static>> {
+        // Collect initial arg values from the outer scope (before push_scope overwrites them).
+        let initial_local_args = plan.initial_direct_args(self);
+        let initial_state = plan.initial_state_var.clone();
+
+        // Fun param names: locals (e.g. "Sum") + "State"
+        let local_param_names: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
+            .collect();
+        let state_param_name = "State".to_string();
+        let arity = 1 + local_param_names.len() + 1; // I + locals + State
+
+        // Build param list doc: (I, Var1, ..., VarN, State)
+        let param_list_doc = join(
+            std::iter::once(Document::Str("I"))
+                .chain(
+                    local_param_names
+                        .iter()
+                        .map(|v| Document::String(v.clone())),
+                )
+                .chain(std::iter::once(Document::String(state_param_name.clone()))),
+            &Document::Str(", "),
+        );
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(frame.preamble.clone());
+        docs.push(docvec![
+            " letrec '",
+            Document::String(frame.fn_name.clone()),
+            "'/",
+            Document::String(arity.to_string()),
+            " = fun (",
+            param_list_doc,
+            ") -> ",
+        ]);
+
+        self.push_scope();
+
+        // Bind block counter param if any (e.g. to:do: [:i | ...] → bind "i" → "I")
+        if let Some(ref bt_name) = frame.body_param {
+            self.bind_var(bt_name, "I");
+        }
+
+        // Register local var bindings (no unpack docs emitted in hybrid mode).
+        let unpack_docs = plan.generate_unpack_at_iteration_start(self);
+        debug_assert!(
+            unpack_docs.is_empty(),
+            "hybrid params: unpack should emit no code"
+        );
+
+        // Condition + true arm
+        docs.push(frame.continue_header.clone());
+
+        // Run body with in_hybrid_loop = true so field mutations use State* naming.
+        let prev_hybrid = self.in_hybrid_loop;
+        self.in_hybrid_loop = true;
+        let (body_doc, final_state_version) =
+            self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
+        self.in_hybrid_loop = prev_hybrid;
+        docs.push(body_doc);
+
+        // Final state variable name: "State" if no mutations, "State1" etc. after mutations.
+        let final_state_var = if final_state_version == 0 {
+            state_param_name.clone()
+        } else {
+            format!("{state_param_name}{final_state_version}")
+        };
+
+        // Final local var args after body (updated bindings from scope).
+        let final_local_args: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| {
+                self.lookup_var(v)
+                    .cloned()
+                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
+            })
+            .collect();
+
+        // Exit StateAcc: pack local params + current State param into a map.
+        // Uses the current iteration's parameter names (not updated values).
+        let exit_stateacc =
+            plan.generate_exit_stateacc_hybrid(&local_param_names, &state_param_name, self);
+
+        self.pop_scope();
+
+        // Recursive call args: next_counter, updated locals, updated state
+        let recursive_args_doc = join(
+            std::iter::once(Document::String(frame.next_counter.clone()))
+                .chain(final_local_args.into_iter().map(Document::String))
+                .chain(std::iter::once(Document::String(final_state_var))),
+            &Document::Str(", "),
+        );
+
+        // Initial apply args: initial_counter, initial locals, initial state
+        let initial_args_doc = join(
+            std::iter::once(Document::String(frame.initial_counter.clone()))
+                .chain(initial_local_args.into_iter().map(Document::String))
+                .chain(std::iter::once(Document::String(initial_state))),
+            &Document::Str(", "),
+        );
+
         docs.push(docvec![
             " apply '",
             Document::String(frame.fn_name.clone()),
