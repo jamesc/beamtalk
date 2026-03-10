@@ -629,3 +629,77 @@ debounce_coalesces_rapid_changes_test() ->
     gen_server:stop(Pid),
     _ = file:delete(MetaFile),
     _ = file:del_dir(MetaDir).
+
+%%% Run mode tests (repl=false, BT-1317)
+
+run_mode_no_disk_write_test() ->
+    %% In run mode (repl=false), no entry should be written to ~/.beamtalk/workspaces/
+    WsId = <<"run_mode_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    %% Mirror beamtalk_workspace_meta's metadata path computation exactly.
+    MetaFile = metadata_path_for(WsId),
+
+    %% Ensure no leftover file
+    _ = file:delete(MetaFile),
+
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        OldPid ->
+            gen_server:stop(OldPid),
+            timer:sleep(10)
+    end,
+
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"/tmp/run_mode_test">>,
+        created_at => erlang:system_time(second),
+        repl => false
+    }),
+
+    %% Register a module and wait longer than the debounce window
+    ok = beamtalk_workspace_meta:register_module(lists),
+    timer:sleep(2500),
+
+    %% No file should have been written
+    ?assertNot(filelib:is_file(MetaFile)),
+
+    gen_server:stop(Pid).
+
+run_mode_metadata_accessible_test() ->
+    %% Even in run mode, get_metadata/0 must work normally
+    WsId = <<"run_meta_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        OldPid ->
+            gen_server:stop(OldPid),
+            timer:sleep(10)
+    end,
+
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"/tmp/run_meta_test">>,
+        created_at => erlang:system_time(second),
+        repl => false
+    }),
+
+    {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+    ?assertEqual(WsId, maps:get(workspace_id, Meta)),
+    ?assertEqual(<<"/tmp/run_meta_test">>, maps:get(project_path, Meta)),
+
+    gen_server:stop(Pid).
+
+%%% Test helpers
+
+%% Mirror beamtalk_workspace_meta's metadata_path computation so tests check
+%% the same file the module would write to.
+metadata_path_for(WsId) ->
+    Base =
+        case beamtalk_platform:home_dir() of
+            false ->
+                filename:join(filename:basedir(user_cache, "beamtalk"), "workspaces");
+            Home ->
+                filename:join([Home, ".beamtalk", "workspaces"])
+        end,
+    filename:join([Base, binary_to_list(WsId), "metadata.json"]).
