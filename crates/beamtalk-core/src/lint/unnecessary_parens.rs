@@ -78,9 +78,9 @@ fn is_always_unnecessary(expr: &Expression) -> bool {
 /// Like `check_expr`, but skips the unnecessary-parens diagnostic for a
 /// top-level `Parenthesized` node and only recurses into its contents.
 ///
-/// Used for map literal keys: `#{(x) => v}` uses parens to prevent the
-/// bare-identifier-to-symbol conversion (BT-591), so `(x)` there is
-/// semantically meaningful.  Deeper nesting (e.g., `#{((x)) => v}`) still
+/// Used for map literal keys: `#{(x) => v}` uses parens to signal a dynamic
+/// variable key (bare words are a compile error per BT-1240), so `(x)` there
+/// is semantically meaningful.  Deeper nesting (e.g., `#{((x)) => v}`) still
 /// recurses and may flag the inner `(x)`.
 fn check_map_key(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     if let Expression::Parenthesized { expression, .. } = expr {
@@ -172,9 +172,9 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 
         Expression::MapLiteral { pairs, .. } => {
             for pair in pairs {
-                // BT-591: bare lowercase identifiers before `=>` become symbols,
-                // so `#{(x) => v}` is the only way to use a variable as a dynamic
-                // key. A top-level `Parenthesized` around the key is therefore
+                // `#{(x) => v}` is the correct way to use a variable as a dynamic
+                // map key (bare words are rejected; parens signal "dynamic key").
+                // A top-level `Parenthesized` around the key is therefore
                 // semantically significant — skip that node's lint but still
                 // recurse into the inner expression for further checks.
                 check_map_key(&pair.key, diagnostics);
@@ -322,8 +322,9 @@ mod tests {
         assert!(diags.is_empty(), "got: {diags:?}");
     }
 
-    /// BT-591: `#{(key) => val}` uses parens to prevent bare-identifier-to-symbol
-    /// conversion — these parens are semantically required and must NOT be flagged.
+    /// `#{(key) => val}` uses parens to signal a dynamic variable key (bare words
+    /// are a compile error per BT-1240) — these parens are semantically required
+    /// and must NOT be flagged.
     #[test]
     fn parens_around_map_key_variable_not_flagged() {
         let diags = lint("Object subclass: Foo\n  value: k => #{(k) => 1}\n");

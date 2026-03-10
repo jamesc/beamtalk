@@ -2153,7 +2153,8 @@ mod tests {
     /// `self` inside a map literal within a collect: block in an Actor class still triggers.
     #[test]
     fn self_capture_nested_in_map_literal_hints() {
-        let src = "Actor subclass: Foo\n  run: items => items collect: [:x | #{key => self value}]";
+        let src =
+            "Actor subclass: Foo\n  run: items => items collect: [:x | #{#key => self value}]";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");

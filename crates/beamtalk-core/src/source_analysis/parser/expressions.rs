@@ -1271,7 +1271,12 @@ impl Parser {
                     && matches!(self.peek_kind(), Some(TokenKind::FatArrow)) =>
             {
                 let name = name.clone();
-                self.advance();
+                let span = self.advance().span();
+                self.diagnostics.push(Diagnostic::error(
+                    format!("bare word '{name}' is not a valid map key; did you mean '#{name}'?"),
+                    span,
+                ));
+                // Error recovery: treat as the intended symbol
                 Some(MapPatternKey::Symbol(name))
             }
             _ => {
@@ -1867,9 +1872,8 @@ impl Parser {
 
             let pair_start = self.current_token().span();
 
-            // BT-591: Bare identifier keys in map literals are implicit symbols.
-            // If the current token is a lowercase identifier followed by `=>`,
-            // treat it as a symbol literal (e.g., `#{x => 3}` means `#{#x => 3}`).
+            // BT-1240: Bare identifier keys in map literals are a compile error.
+            // `#{foo => v}` is invalid; write `#{#foo => v}` instead.
             let key = if matches!(self.current_kind(), TokenKind::Identifier(name) if name.chars().next().is_some_and(char::is_lowercase))
                 && matches!(self.peek_kind(), Some(TokenKind::FatArrow))
             {
@@ -1878,7 +1882,13 @@ impl Parser {
                 let TokenKind::Identifier(name) = token.kind() else {
                     unreachable!()
                 };
-                Expression::Literal(Literal::Symbol(name.clone()), span)
+                let name = name.clone();
+                self.diagnostics.push(Diagnostic::error(
+                    format!("bare word '{name}' is not a valid map key; did you mean '#{name}'?"),
+                    span,
+                ));
+                // Error recovery: treat as the intended symbol
+                Expression::Literal(Literal::Symbol(name), span)
             } else {
                 // Parse key expression (unary only - stops at `=>`, `,`, `}`)
                 self.parse_unary_message()
@@ -2240,5 +2250,83 @@ mod tests {
 
         // Test i64::MAX in hex
         assert_eq!(parse_integer("16r7FFFFFFFFFFFFFFF").unwrap(), i64::MAX);
+    }
+
+    // ========================================================================
+    // BT-1240: Bare-word map key error tests
+    // ========================================================================
+
+    fn parse_source(src: &str) -> (crate::ast::Module, Vec<crate::source_analysis::Diagnostic>) {
+        use crate::source_analysis::{lex_with_eof, parse};
+        parse(lex_with_eof(src))
+    }
+
+    #[test]
+    fn bare_word_map_key_produces_error() {
+        use crate::source_analysis::Severity;
+        let (_module, diags) = parse_source("#{foo => 1}");
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+        assert!(
+            errors[0].message.contains("bare word 'foo'"),
+            "message: {}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains("'#foo'"),
+            "message should suggest #foo: {}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn bare_word_map_key_error_recovers_as_symbol() {
+        use crate::ast::{Expression, Literal};
+        let (module, _diags) = parse_source("#{foo => 1}");
+        let expr = &module.expressions[0].expression;
+        if let Expression::MapLiteral { pairs, .. } = expr {
+            assert_eq!(pairs.len(), 1);
+            assert!(
+                matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s.as_str() == "foo"),
+                "expected Symbol('foo') as key, got: {:?}",
+                pairs[0].key
+            );
+        } else {
+            panic!("expected MapLiteral, got: {expr:?}");
+        }
+    }
+
+    #[test]
+    fn explicit_symbol_map_key_no_error() {
+        use crate::source_analysis::Severity;
+        let (_module, diags) = parse_source("#{#foo => 1}");
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "explicit #foo key should produce no errors, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn bare_word_map_pattern_key_produces_error() {
+        use crate::source_analysis::Severity;
+        let (_module, diags) =
+            parse_source("Object subclass: Foo\n  m: x => x match: [#{foo => v} -> v]");
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+        assert!(
+            errors[0].message.contains("bare word 'foo'"),
+            "message: {}",
+            errors[0].message
+        );
     }
 }
