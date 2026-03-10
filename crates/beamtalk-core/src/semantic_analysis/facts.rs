@@ -10,7 +10,8 @@
 //! inline at every call site (BT-1288).
 
 use crate::ast::{
-    Block, CascadeMessage, Expression, MessageSelector, MethodKind, Module, StringSegment,
+    Block, CascadeMessage, Expression, ExpressionStatement, MessageSelector, MethodKind, Module,
+    StringSegment,
 };
 use crate::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};
 use crate::source_analysis::Span;
@@ -100,6 +101,12 @@ pub struct SemanticFacts {
     /// Populated by [`compute_semantic_facts`]. Codegen uses this for O(1) NLR detection
     /// instead of re-walking the AST at every call site.
     pub methods_with_block_nlr: HashSet<Span>,
+    /// `true` once [`compute_semantic_facts`] has finished populating this struct.
+    ///
+    /// When `false` (e.g. `SemanticFacts::default()` in unit tests that construct
+    /// [`CoreErlangGenerator`] directly), lookup methods fall back to local AST analysis
+    /// rather than silently returning incorrect defaults.
+    is_populated: bool,
 }
 
 impl SemanticFacts {
@@ -124,6 +131,24 @@ impl SemanticFacts {
     /// Returns `true` if the method or block identified by `span` contains a `^` inside a block.
     pub fn has_block_nlr(&self, span: &Span) -> bool {
         self.methods_with_block_nlr.contains(span)
+    }
+
+    /// Returns `true` if the method contains `^` inside a block, with a fallback for when
+    /// semantic facts have not been populated.
+    ///
+    /// When [`is_populated`] is `false` (e.g. in unit tests that construct
+    /// [`CoreErlangGenerator`] directly via `new`), the pre-computed set is empty and
+    /// `has_block_nlr` would silently return `false` for all methods, causing the NLR wrapper
+    /// to be skipped. This method mirrors the `control_flow_has_mutations` pattern: if facts
+    /// are not yet computed, fall back to an inline AST walk over `body_stmts`.
+    pub fn has_block_nlr_or_walk(&self, span: &Span, body_stmts: &[ExpressionStatement]) -> bool {
+        if self.is_populated {
+            self.methods_with_block_nlr.contains(span)
+        } else {
+            body_stmts
+                .iter()
+                .any(|stmt| expr_has_block_nlr(&stmt.expression, false))
+        }
     }
 }
 
@@ -319,6 +344,7 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
         }
     }
 
+    facts.is_populated = true;
     facts
 }
 

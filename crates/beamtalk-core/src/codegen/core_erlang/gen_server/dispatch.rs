@@ -253,7 +253,9 @@ impl CoreErlangGenerator {
                         .collect();
 
                     // BT-761: Detect whether any block in this method body contains ^.
-                    let needs_nlr = self.semantic_facts.has_block_nlr(&block.span);
+                    let needs_nlr = self
+                        .semantic_facts
+                        .has_block_nlr_or_walk(&block.span, &block.body);
 
                     let nlr_token_var = if needs_nlr {
                         let token_var = self.fresh_temp_var("NlrToken");

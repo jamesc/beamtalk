@@ -765,7 +765,9 @@ impl CoreErlangGenerator {
         // BT-754: Detect whether any block argument in this method body contains ^.
         // If so, set up a non-local return token so ^ inside blocks can throw to escape
         // the closure and return from the enclosing method.
-        let needs_nlr = self.semantic_facts.has_block_nlr(&method.span);
+        let needs_nlr = self
+            .semantic_facts
+            .has_block_nlr_or_walk(&method.span, &method.body);
 
         let nlr_token_var = if needs_nlr {
             let token_var = self.fresh_temp_var("NlrToken");
@@ -1376,7 +1378,9 @@ impl CoreErlangGenerator {
             )));
 
             // BT-854: Methods with NLR return {Result, State} tuple — unwrap via case.
-            let has_nlr = self.semantic_facts.has_block_nlr(&method.span);
+            let has_nlr = self
+                .semantic_facts
+                .has_block_nlr_or_walk(&method.span, &method.body);
 
             // Build the method call arguments: (Self) or (Self, DispArg0, DispArg1, ...)
             if !method.parameters.is_empty() {
