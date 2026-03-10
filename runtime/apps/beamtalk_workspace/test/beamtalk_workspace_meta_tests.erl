@@ -635,13 +635,8 @@ debounce_coalesces_rapid_changes_test() ->
 run_mode_no_disk_write_test() ->
     %% In run mode (repl=false), no entry should be written to ~/.beamtalk/workspaces/
     WsId = <<"run_mode_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
-    Home =
-        case beamtalk_platform:home_dir() of
-            false -> filename:basedir(user_cache, "beamtalk");
-            HomeDir -> HomeDir
-        end,
-    MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
-    MetaFile = filename:join(MetaDir, "metadata.json"),
+    %% Mirror beamtalk_workspace_meta's metadata path computation exactly.
+    MetaFile = metadata_path_for(WsId),
 
     %% Ensure no leftover file
     _ = file:delete(MetaFile),
@@ -694,3 +689,17 @@ run_mode_metadata_accessible_test() ->
     ?assertEqual(<<"/tmp/run_meta_test">>, maps:get(project_path, Meta)),
 
     gen_server:stop(Pid).
+
+%%% Test helpers
+
+%% Mirror beamtalk_workspace_meta's metadata_path computation so tests check
+%% the same file the module would write to.
+metadata_path_for(WsId) ->
+    Base =
+        case beamtalk_platform:home_dir() of
+            false ->
+                filename:join(filename:basedir(user_cache, "beamtalk"), "workspaces");
+            Home ->
+                filename:join([Home, ".beamtalk", "workspaces"])
+        end,
+    filename:join([Base, binary_to_list(WsId), "metadata.json"]).

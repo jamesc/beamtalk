@@ -39,7 +39,7 @@
     workspace_id => binary(),
     project_path => binary() | undefined,
     repl => boolean(),
-    tcp_port => inet:port_number(),
+    tcp_port => inet:port_number() | undefined,
     bind_addr => inet:ip4_address(),
     auto_cleanup => boolean(),
     max_idle_seconds => integer()
@@ -70,8 +70,18 @@ init(Config) ->
     AutoCleanup = maps:get(auto_cleanup, Config, true),
     MaxIdleSeconds = maps:get(max_idle_seconds, Config, 3600 * 4),
 
-    %% Set up file logging before children start (they may log during init)
-    setup_file_logger(WorkspaceId),
+    %% Fail fast: REPL mode requires a TCP port — run mode (repl=false) does not.
+    case {Repl, TcpPort} of
+        {true, undefined} -> erlang:error({bad_config, missing_tcp_port_for_repl});
+        _ -> ok
+    end,
+
+    %% Set up file logging before children start (they may log during init).
+    %% Skipped in run mode — no workspace artifacts should be created on disk.
+    case Repl of
+        true -> setup_file_logger(WorkspaceId);
+        false -> ok
+    end,
 
     %% Start the compiler application (ADR 0022)
     %% This is started dynamically rather than as a static app dependency

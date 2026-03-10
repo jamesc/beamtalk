@@ -523,3 +523,16 @@ full_mode_meta_gets_repl_true_test() ->
     [MetaSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_meta],
     {beamtalk_workspace_meta, start_link, [MetaConfig]} = maps:get(start, MetaSpec),
     ?assertEqual(true, maps:get(repl, MetaConfig)).
+
+repl_mode_missing_tcp_port_fails_fast_test() ->
+    %% repl=true (default) without tcp_port must fail fast, not silently pass
+    %% undefined into the REPL server child spec.
+    Config = #{
+        workspace_id => <<"fail-fast-test">>,
+        project_path => <<"/tmp/test">>
+        %% tcp_port intentionally omitted, repl defaults to true
+    },
+    ?assertError(
+        {bad_config, missing_tcp_port_for_repl},
+        beamtalk_workspace_sup:init(Config)
+    ).

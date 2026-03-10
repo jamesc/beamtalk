@@ -59,6 +59,18 @@
     monitor_refs :: #{pid() => reference()}
 }).
 
+%% init_metadata/0 is the input contract for start_link/1.
+%% It extends metadata() with init-only fields (repl) that are consumed during
+%% initialisation and not exposed through get_metadata/0.
+-type init_metadata() :: #{
+    workspace_id := binary(),
+    project_path => binary() | undefined,
+    created_at := integer(),
+    repl_port => inet:port_number() | undefined,
+    repl => boolean()
+}.
+
+%% metadata/0 is the output contract returned by get_metadata/0.
 -type metadata() :: #{
     workspace_id => binary(),
     project_path => binary() | undefined,
@@ -71,12 +83,12 @@
     loaded_modules => [atom()]
 }.
 
--export_type([metadata/0]).
+-export_type([init_metadata/0, metadata/0]).
 
 %%% Public API
 
 %% @doc Start the workspace metadata server.
--spec start_link(metadata()) -> {ok, pid()} | {error, term()}.
+-spec start_link(init_metadata()) -> {ok, pid()} | {error, term()}.
 start_link(InitialMetadata) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, InitialMetadata, []).
 
