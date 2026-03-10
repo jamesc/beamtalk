@@ -215,9 +215,7 @@ fn run_package_as_otp_application(
     // Early probe: if the workspace+app is already running, skip building entirely.
     // This ensures `beamtalk run .` reports "already running" even when the current
     // checkout has compile errors (e.g. work in progress that hasn't been committed).
-    if let Some(port) =
-        probe_running_workspace_app(project_root.as_std_path(), &pkg.name)
-    {
+    if let Some(port) = probe_running_workspace_app(project_root.as_std_path(), &pkg.name) {
         println!(
             "{} v{} is already running (REPL port {})\nConnect with: beamtalk repl",
             pkg.name, pkg.version, port
@@ -312,10 +310,7 @@ fn run_package_as_otp_application(
 ///
 /// Returns `Some(port)` if the application is running, `None` otherwise.
 /// Failures are swallowed — callers fall through to the normal startup path.
-fn probe_running_workspace_app(
-    project_root: &std::path::Path,
-    app_name: &str,
-) -> Option<u16> {
+fn probe_running_workspace_app(project_root: &std::path::Path, app_name: &str) -> Option<u16> {
     let workspace_id = workspace::workspace_id_for_project(project_root, None).ok()?;
     let node_info = workspace::get_node_info(&workspace_id).ok()??;
     if !workspace::is_node_running(&node_info, Some(&workspace_id)) {
@@ -394,12 +389,10 @@ fn ensure_otp_app_in_workspace(
     let client_node = format!("beamtalk_run_rpc_{pid}@localhost");
 
     #[cfg(windows)]
-    let ebin_escaped = crate::beam_compiler::escape_erlang_string(
-        &ebin_dir.to_string_lossy().replace('\\', "/"),
-    );
-    #[cfg(not(windows))]
     let ebin_escaped =
-        crate::beam_compiler::escape_erlang_string(&ebin_dir.to_string_lossy());
+        crate::beam_compiler::escape_erlang_string(&ebin_dir.to_string_lossy().replace('\\', "/"));
+    #[cfg(not(windows))]
+    let ebin_escaped = crate::beam_compiler::escape_erlang_string(&ebin_dir.to_string_lossy());
 
     // RPC into the workspace: add package ebin then ensure_all_started.
     // {ok, []} = app already running; {ok, [_|_]} = freshly started.
