@@ -1522,8 +1522,11 @@ someObject unknownMessage   // DNU hint suppressed
 @expect unused
 x := computeSomething       // unused-variable warning suppressed
 
+@expect self_capture
+self.items collect: [:x | self process: x]  // self-capture hint suppressed
+
 @expect all
-anything                    // any diagnostic suppressed
+anything                    // any diagnostic suppressed (discouraged — use a specific category)
 ```
 
 **Suppression categories:**
@@ -1533,7 +1536,8 @@ anything                    // any diagnostic suppressed
 | `dnu` | Does-not-understand hints |
 | `type` | Type mismatch warnings *and* method-not-found (DNU) hints |
 | `unused` | Unused variable warnings |
-| `all` | Any diagnostic on the following expression |
+| `self_capture` | Self-capture-in-actor-block deadlock hints |
+| `all` | Any diagnostic on the following expression *(discouraged — use a specific category)* |
 
 **`@expect type` for method-not-found diagnostics:**
 
@@ -1546,6 +1550,22 @@ self assert: someResult unwrap size equals: 10
 ```
 
 This is preferred over `@expect dnu` at type-erasure boundaries because it communicates *why* the diagnostic appears: a type-system limitation, not intentional dynamic dispatch.
+
+**`@expect self_capture` for Actor block deadlock hints:**
+
+When an Actor method passes a block containing a `self` message send to a collection HOF (e.g. `collect:`, `do:`, `inject:into:`), the compiler emits a hint that this may deadlock by re-entering the `calling_self` dispatch. Use `@expect self_capture` to suppress this hint when the pattern is intentional and safe:
+
+```beamtalk
+Actor subclass: Processor
+  state: items = #()
+  process =>
+    @expect self_capture
+    self.items collect: [:x | self transform: x]
+```
+
+Prefer refactoring to avoid the pattern (bind the result before the block) when possible. `@expect self_capture` is for cases where the deadlock analysis is a false positive.
+
+**Unknown categories are parse errors:** Writing an unknown category (e.g. `@expect selfcapture`) is rejected at parse time with an error listing the valid names. This prevents typos from silently suppressing nothing.
 
 **Stale directives:** If `@expect` does not suppress any diagnostic (because no matching diagnostic exists on the following expression), the compiler emits an error to prevent directives from silently becoming out of date.
 

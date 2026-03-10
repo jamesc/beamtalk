@@ -840,6 +840,8 @@ pub enum ExpectCategory {
     Type,
     /// Suppress unused-variable warnings.
     Unused,
+    /// Suppress self-capture-in-actor-block hints.
+    SelfCapture,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -852,6 +854,7 @@ impl ExpectCategory {
             "dnu" => Some(Self::Dnu),
             "type" => Some(Self::Type),
             "unused" => Some(Self::Unused),
+            "self_capture" => Some(Self::SelfCapture),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -864,8 +867,15 @@ impl ExpectCategory {
             Self::Dnu => "dnu",
             Self::Type => "type",
             Self::Unused => "unused",
+            Self::SelfCapture => "self_capture",
             Self::All => "all",
         }
+    }
+
+    /// Returns the list of all valid category name strings, for use in error messages.
+    #[must_use]
+    pub const fn valid_names() -> &'static [&'static str] {
+        &["dnu", "type", "unused", "self_capture", "all"]
     }
 }
 
