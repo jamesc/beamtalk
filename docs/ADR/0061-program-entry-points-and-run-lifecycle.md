@@ -69,7 +69,7 @@ The rule: **if `beamtalk run` returns your shell, the workspace persists. If it 
 | `beamtalk repl . --ephemeral` | Persistent workspace → REPL → **tears down on disconnect** | Persistent workspace → OTP app → REPL → **tears down on disconnect** |
 
 What an operator sees when running a service:
-```
+```text
 $ beamtalk run .
 Building...
 Started otp_tree v0.1.0
@@ -79,7 +79,7 @@ $
 ```
 
 Running a script against a live service:
-```
+```text
 $ beamtalk run .          # service already running
 otp_tree v0.1.0 is already running (REPL port 4001)
 $ beamtalk run Database migrate
@@ -93,7 +93,7 @@ $
 Both modes start the workspace before executing any user code. This guarantees all project classes are registered before any method dispatch occurs, fixing the OTP supervisor class-loading crash.
 
 **Script startup:**
-```
+```text
 beamtalk run Main run
   → build project
   → start beamtalk_runtime
@@ -105,7 +105,7 @@ beamtalk run Main run
 ```
 
 **Script against running service:**
-```
+```text
 beamtalk run Database migrate
   → detect existing workspace for project path in ~/.beamtalk/workspaces/
   → connect to REPL server on existing workspace port
@@ -114,7 +114,7 @@ beamtalk run Database migrate
 ```
 
 **Service startup:**
-```
+```text
 beamtalk run .
   → build project
   → start beamtalk_runtime
@@ -172,7 +172,7 @@ Run-mode workspaces are **not registered** in `~/.beamtalk/workspaces/` — ther
 ## User Impact
 
 ### Newcomer
-Scripts are invoked explicitly: `beamtalk run Main run`. No config needed for one-off runs. Services are declared in toml and started with `beamtalk run .`. Error messages guide migration from `[run]` and `[package] start`.
+Scripts are invoked explicitly: `beamtalk run Main run`. No separate entry-point config is needed for one-off runs; the command still runs within a Beamtalk project context (a `beamtalk.toml` manifest is still required). Services are declared in toml and started with `beamtalk run .`. Error messages guide migration from `[run]` and `[package] start`.
 
 ### Smalltalk developer
 Familiar with image-based persistence and interactive environments. The persistent workspace model maps naturally — the workspace is an image-like environment that survives the REPL session. `TranscriptStream` works as expected in both modes.
@@ -262,7 +262,8 @@ The right long-term answer. Deferred: the CLI form covers the immediate need and
 - Remove `run_package_as_otp_application` as a separate path
 - Add `beamtalk run ClassName selector` CLI form (positional args, build-time class resolution)
 - Script path: detect running workspace → connect and eval, or start run-mode workspace
-- Service path: persistent workspace → OTP app → detach after port sentinel line
+- Service path: reuse the existing detached-workspace launcher that `beamtalk repl` and workspace management already use. `beamtalk run` starts the package via a workspace in persistent mode (`repl = true`) and relies on the same cross-platform mechanism (Erlang `-detached` with `-noshell` plus `setsid`/umask on Unix, and process-group flags on Windows) to detach the BEAM node. The CLI reads startup output (REPL port sentinel line) from the bootstrap process on stdout and then exits. If the bootstrap process exits before writing the sentinel line, `beamtalk run` reports the failure and exits non-zero.
+- Add `--foreground` flag to run without detaching (blocks until the top-level supervisor exits and preserves its exit status)
 - Remove `[run]` and `[package] start` from manifest parsing; remove REPL auto-eval of `[run]`
 - Update error messages to guide migration
 
@@ -277,10 +278,15 @@ beamtalk run Main start
 
 **`[run] entry = "Main run"`:**
 ```bash
-# Before: beamtalk run . (read from [run])
-# After:
+# Before: beamtalk run . (read [run] entry; supported arbitrary expressions
+#   including keyword selectors, e.g. entry = "App start: 'production'")
+# After: pass the class and selector explicitly on the CLI
 beamtalk run Main run
+# Keyword-selector example:
+beamtalk run App "start: 'production'"
 ```
+
+Note: `[run] entry` was treated as an arbitrary Beamtalk expression (matching `beamtalk repl` eval semantics) and therefore supported keyword selectors and arguments. This capability is preserved at the CLI level — the decision removes the *config* mechanism, not expressive power. Any entry expression that was valid in `[run] entry` can be passed as CLI args to `beamtalk run`. **This is a breaking change** for projects using `[run] entry`; update `beamtalk.toml` and any CI scripts accordingly.
 
 **`beamtalk repl` auto-eval of `[run] entry`:** Remove `[run]` from toml. If the auto-eval was used to warm up the REPL, start the service with `beamtalk run .` first and connect with `beamtalk repl`.
 
