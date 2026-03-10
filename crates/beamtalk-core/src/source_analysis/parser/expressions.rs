@@ -1759,7 +1759,7 @@ impl Parser {
             if let Some(category) = ExpectCategory::from_name(&name) {
                 Expression::ExpectDirective { category, span }
             } else {
-                let valid = "dnu, type, unused, all";
+                let valid = ExpectCategory::valid_names().join(", ");
                 let message: EcoString =
                     format!("unknown @expect category '{name}', valid categories are: {valid}")
                         .into();
@@ -1768,9 +1768,10 @@ impl Parser {
                 Expression::Error { message, span }
             }
         } else {
+            let valid = ExpectCategory::valid_names().join(", ");
             let span = start;
             let message: EcoString =
-                "@expect must be followed by a category name (dnu, type, unused, all)".into();
+                format!("@expect must be followed by a category name ({valid})").into();
             self.diagnostics
                 .push(Diagnostic::error(message.clone(), span));
             Expression::Error { message, span }

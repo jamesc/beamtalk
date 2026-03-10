@@ -102,7 +102,6 @@ mod repl_codegen;
 pub mod selector_mangler;
 mod spec_codegen;
 mod state_codegen;
-mod state_threading_selectors;
 mod supervisor_codegen;
 mod util;
 mod value_type_codegen;
