@@ -32,6 +32,7 @@
     registry_name/1,
     ensure_pg_started/0,
     ensure_hierarchy_table/0,
+    ensure_module_table/0,
     ensure_class_warnings_table/0,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
@@ -164,6 +165,14 @@ ensure_pg_started() ->
 -spec ensure_hierarchy_table() -> ok.
 ensure_hierarchy_table() ->
     beamtalk_class_hierarchy_table:new().
+
+%% @doc Ensure the class module ETS table exists (BT-1285).
+%%
+%% Delegates to `beamtalk_class_module_table:new/0`.
+%% Called from `beamtalk_object_class:init/1` alongside `ensure_hierarchy_table/0`.
+-spec ensure_module_table() -> ok.
+ensure_module_table() ->
+    beamtalk_class_module_table:new().
 
 %% @doc Ensure the class collision warnings ETS table exists.
 %% BT-737: Stores collision warnings keyed by class name (atom).

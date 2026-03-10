@@ -19,6 +19,11 @@
 %% OTP supervisor callback and worker start function — required for supervisor:start_link/3.
 -export([init/1, start_worker/1]).
 
+%% BT-1285: Fake class methods used by the hierarchy-walk test.
+%% These are called directly by call_class_method_direct / call_inherited_class_method_direct
+%% when the test populates the module ETS table with this module as the "parent" class module.
+-export([class_children/2, class_strategy/2, class_maxRestarts/2, class_restartWindow/2]).
+
 %%====================================================================
 %% OTP supervisor callback
 %%====================================================================
@@ -271,3 +276,65 @@ root_registry_overwrite_test() ->
     beamtalk_supervisor:register_root({beamtalk_supervisor, 'Old', old_mod, Pid1}),
     beamtalk_supervisor:register_root({beamtalk_supervisor, 'New', new_mod, Pid2}),
     ?assertMatch({beamtalk_supervisor, 'New', new_mod, _}, beamtalk_supervisor:get_root()).
+
+%%====================================================================
+%% Tests: BT-1285 — hierarchy walk uses ETS, not gen_server:call
+%%====================================================================
+
+%% @doc Verify that static_init/2 can walk a two-level Supervisor subclass
+%% hierarchy when the ancestor's class methods are in a module looked up
+%% via ETS — without any gen_server being registered for those classes.
+%%
+%% In the old code, call_inherited_class_method_direct called
+%% beamtalk_object_class:module_name/1 (gen_server:call).  If the ancestor
+%% class gen_server is blocked inside startLink/1, that call deadlocks.
+%% The new code reads from beamtalk_class_module_table (ETS) instead.
+%%
+%% We simulate the deadlock scenario by populating ETS for a fake two-level
+%% hierarchy where NO gen_server processes are registered for either class.
+%% The old code would crash (gen_server:call to undefined); the new code
+%% resolves the module from ETS and succeeds.
+static_init_walks_hierarchy_via_ets_not_genserver_test() ->
+    %% Ensure ETS tables exist.
+    beamtalk_class_hierarchy_table:new(),
+    beamtalk_class_module_table:new(),
+
+    %% Set up a two-level hierarchy in ETS:
+    %%   'BT1285Child' extends 'BT1285Parent' extends none
+    %% Neither has a registered class gen_server process — this simulates
+    %% the scenario where 'BT1285Parent' gen_server is blocked in startLink/1.
+    beamtalk_class_hierarchy_table:insert('BT1285Child', 'BT1285Parent'),
+    beamtalk_class_hierarchy_table:insert('BT1285Parent', none),
+
+    %% Register module for 'BT1285Parent' only — 'BT1285Child' uses a module
+    %% (erlang) that does NOT export class_children/2, forcing the walk upward.
+    beamtalk_class_module_table:insert('BT1285Parent', ?MODULE),
+
+    %% static_init/2 takes (Module, ClassName) where Module is the child's
+    %% BEAM module.  We use 'erlang' as the child module so none of the
+    %% class_* functions are exported there — the walk must climb to 'BT1285Parent'.
+    %% 'BT1285Child' is not registered with whereis so ClassPid = undefined;
+    %% that is fine since ClassSelf is only used as a value passed to class methods.
+    Result = beamtalk_supervisor:static_init(erlang, 'BT1285Child'),
+
+    %% Clean up ETS entries to avoid polluting state for other tests.
+    beamtalk_class_hierarchy_table:delete('BT1285Child'),
+    beamtalk_class_hierarchy_table:delete('BT1285Parent'),
+    beamtalk_class_module_table:delete('BT1285Parent'),
+
+    %% The walk found class_children/2, class_strategy/2, class_maxRestarts/2,
+    %% and class_restartWindow/2 in ?MODULE (this test module) via the ETS lookup.
+    %% It should succeed with zero children and one_for_one strategy.
+    ?assertMatch(
+        {ok, {#{strategy := one_for_one, intensity := 3, period := 5}, []}},
+        Result
+    ).
+
+%%====================================================================
+%% Fake class methods for BT-1285 hierarchy-walk test
+%%====================================================================
+
+class_children(_ClassSelf, _ClassVars) -> [].
+class_strategy(_ClassSelf, _ClassVars) -> oneForOne.
+class_maxRestarts(_ClassSelf, _ClassVars) -> 3.
+class_restartWindow(_ClassSelf, _ClassVars) -> 5.

@@ -429,29 +429,26 @@ call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, Dep
         not_found ->
             error({supervisor_init_method_not_found, FunName});
         {ok, SuperclassName} ->
-            SuperPid = beamtalk_class_registry:whereis_class(SuperclassName),
-            case SuperPid of
-                undefined ->
-                    error({supervisor_init_class_not_found, SuperclassName});
-                _ ->
-                    %% module_name/1 uses process dict for self-calls; gen_server:call
-                    %% for ancestors (which are not blocked, so this is safe).
-                    SuperModule = beamtalk_object_class:module_name(SuperPid),
-                    case SuperModule of
-                        undefined ->
-                            %% Module not yet set (class still initialising) — skip upward.
+            %% BT-1285: Look up the ancestor module via ETS instead of gen_server:call.
+            %% If the ancestor is itself a Supervisor subclass currently being initialised,
+            %% its class gen_server is blocked inside startLink/1 waiting for OTP
+            %% supervisor:start_link to return.  A gen_server:call to it would deadlock.
+            %% beamtalk_class_module_table stores module names written during class init
+            %% and is safe to read from any process without coordination.
+            case beamtalk_class_module_table:lookup(SuperclassName) of
+                not_found ->
+                    %% Class not yet registered or module not yet recorded — skip upward.
+                    call_inherited_class_method_direct(
+                        SuperclassName, FunName, ClassSelf, ClassVars, Depth + 1
+                    );
+                {ok, SuperModule} ->
+                    case erlang:function_exported(SuperModule, FunName, 2) of
+                        true ->
+                            erlang:apply(SuperModule, FunName, [ClassSelf, ClassVars]);
+                        false ->
                             call_inherited_class_method_direct(
                                 SuperclassName, FunName, ClassSelf, ClassVars, Depth + 1
-                            );
-                        _ ->
-                            case erlang:function_exported(SuperModule, FunName, 2) of
-                                true ->
-                                    erlang:apply(SuperModule, FunName, [ClassSelf, ClassVars]);
-                                false ->
-                                    call_inherited_class_method_direct(
-                                        SuperclassName, FunName, ClassSelf, ClassVars, Depth + 1
-                                    )
-                            end
+                            )
                     end
             end
     end.
