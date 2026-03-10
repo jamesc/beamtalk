@@ -206,7 +206,7 @@ impl Analyser {
                     // name as an outer-scope variable would be incorrectly treated
                     // as a captured variable (BT-655).
                     let (bindings, _) =
-                        crate::semantic_analysis::extract_pattern_bindings(&arm.pattern);
+                        crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
                     let pattern_names: std::collections::HashSet<&str> =
                         bindings.iter().map(|b| b.name.as_str()).collect();
 

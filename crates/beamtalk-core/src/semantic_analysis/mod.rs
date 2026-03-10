@@ -49,7 +49,7 @@ pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use name_resolver::NameResolver;
-pub use pattern_bindings::extract_pattern_bindings;
+pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};
 pub use return_type_writeback::apply_return_type_writeback;
 pub use scope::BindingKind;
 pub use supervisor_kind_writeback::apply_supervisor_kind_writeback;
@@ -681,7 +681,7 @@ impl Analyser {
         // Pattern variable binding is now handled by NameResolver
         // Extract bindings here just to define them in the scope for captures/mutations tracking
         let (bindings, _pattern_diagnostics) =
-            crate::semantic_analysis::extract_pattern_bindings(&arm.pattern);
+            crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
         // Note: diagnostics are already collected by NameResolver, no need to duplicate
 
         for binding in bindings {

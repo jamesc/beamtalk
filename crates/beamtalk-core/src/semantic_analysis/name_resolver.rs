@@ -351,9 +351,11 @@ impl NameResolver {
         // Create a new scope for this match arm
         self.scope.push();
 
-        // Extract and define all pattern variables, collect duplicate diagnostics
+        // Extract and define all pattern variables, collect duplicate diagnostics.
+        // Use extract_match_arm_bindings so that duplicate variable names in
+        // Pattern::Array are allowed (they become equality constraints in codegen).
         let (bindings, pattern_diagnostics) =
-            crate::semantic_analysis::extract_pattern_bindings(&arm.pattern);
+            crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
         self.diagnostics.extend(pattern_diagnostics);
 
         for binding in bindings {
