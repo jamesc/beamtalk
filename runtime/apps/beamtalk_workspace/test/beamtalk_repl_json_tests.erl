@@ -57,7 +57,14 @@ format_response_boolean_test() ->
 format_response_float_test() ->
     Result = beamtalk_repl_json:format_response(3.14),
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
-    ?assertEqual(3.14, maps:get(<<"value">>, Decoded)).
+    %% BT-1336: Floats are serialized as strings to preserve ".0" in whole numbers.
+    ?assertEqual(<<"3.14">>, maps:get(<<"value">>, Decoded)).
+
+format_response_whole_float_test() ->
+    %% BT-1336: Whole-number floats must preserve ".0", not become integers.
+    Result = beamtalk_repl_json:format_response(6.0),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assertEqual(<<"6.0">>, maps:get(<<"value">>, Decoded)).
 
 format_response_list_test() ->
     Result = beamtalk_repl_json:format_response([1, 2, 3]),
@@ -254,7 +261,15 @@ term_to_json_integer_test() ->
     ?assertEqual(42, beamtalk_repl_json:term_to_json(42)).
 
 term_to_json_float_test() ->
-    ?assertEqual(3.14, beamtalk_repl_json:term_to_json(3.14)).
+    %% BT-1336: Floats are converted to binary strings to preserve decimal point.
+    ?assertEqual(<<"3.14">>, beamtalk_repl_json:term_to_json(3.14)).
+
+term_to_json_whole_float_test() ->
+    %% BT-1336: Whole-number floats preserve ".0".
+    ?assertEqual(<<"6.0">>, beamtalk_repl_json:term_to_json(6.0)).
+
+term_to_json_negative_float_test() ->
+    ?assertEqual(<<"-2.5">>, beamtalk_repl_json:term_to_json(-2.5)).
 
 term_to_json_boolean_test() ->
     ?assertEqual(true, beamtalk_repl_json:term_to_json(true)),

@@ -233,8 +233,12 @@ maybe_add_warnings_reloaded(Map, Warnings) -> Map#{<<"warnings">> => Warnings}.
 
 %% @doc Convert an Erlang term to a JSON-encodable value for jsx.
 -spec term_to_json(term()) -> term().
-term_to_json(Value) when is_integer(Value); is_float(Value); is_boolean(Value) ->
+term_to_json(Value) when is_integer(Value); is_boolean(Value) ->
     Value;
+term_to_json(Value) when is_float(Value) ->
+    %% BT-1336: Convert floats to explicit decimal strings so JSX cannot
+    %% strip the ".0" from whole-number floats (e.g. 6.0 → "6").
+    format_float(Value);
 term_to_json(Value) when is_atom(Value) ->
     atom_to_binary(Value, utf8);
 term_to_json(Value) when is_binary(Value) ->
@@ -478,6 +482,16 @@ format_error_message(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
 
 %%% Internal Helpers
+
+%% @doc Format a float as a binary string, ensuring a decimal point is always present.
+%% BT-1336: Uses ~p for clean representation, then appends ".0" if ~p omits the decimal.
+-spec format_float(float()) -> binary().
+format_float(Value) ->
+    Bin = iolist_to_binary(io_lib:format("~p", [Value])),
+    case binary:match(Bin, <<".">>) of
+        nomatch -> <<Bin/binary, ".0">>;
+        _ -> Bin
+    end.
 
 %% @doc Format a rejection reason for display in #Future<rejected: ...>.
 -spec format_rejection_reason(term()) -> binary().
