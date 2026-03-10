@@ -28,25 +28,51 @@ just test-learn
 
 ## Chapters
 
+### Part 1 — The Basics
+
+The first five chapters cover the fundamentals you need before writing any real code:
+types, variables, and the message-passing model that underlies everything in Beamtalk.
+
 | # | Chapter | What you'll learn |
 |---|---------|-------------------|
-| [01](01-getting-started.md) | Getting Started | REPL, hello world, first expressions |
-| [02](02-basic-types.md) | Basic Types | Integer, Float, String, Boolean, Nil, Symbol, Character |
-| [03](03-variables.md) | Variables | `:=` assignment, temporary variables, scope |
-| [04](04-messages.md) | Messages | **The core concept.** Unary, binary, keyword, cascade, precedence |
-| [05](05-arithmetic-and-comparison.md) | Arithmetic & Comparison | Operators, math precedence, equality |
-| [06](06-strings.md) | Strings | UTF-8, interpolation, graphemes, common methods |
-| [07](07-blocks.md) | Blocks | Closures, arguments, variable capture, `value:` |
-| [08](08-control-flow.md) | Control Flow | `ifTrue:`, `whileTrue:`, `timesRepeat:`, `to:do:` |
-| [09](09-collections.md) | Collections | Array, Dictionary, `collect:`, `select:`, `inject:into:` |
-| [10](10-value-classes.md) | Value Classes | `Value subclass:`, slots, constructors, immutability |
-| [11](11-actors.md) | Actors | `Actor subclass:`, `spawn`, state mutation, concurrency |
-| [12](12-error-handling.md) | Error Handling | Exceptions, `on:do:`, Result type, `doesNotUnderstand` |
-| [13](13-testing.md) | Testing with BUnit | `TestCase`, `assert:equals:`, `setUp`/`tearDown` |
-| [14](14-pattern-matching.md) | Pattern Matching | Array destructuring, binary patterns |
-| [15](15-type-annotations.md) | Type Annotations | `::` syntax, gradual typing |
-| [16](16-beam-interop.md) | BEAM Interop | Erlang FFI, atoms, calling `:module function` |
-| [17](17-otp-supervisors.md) | OTP Supervisors | `Supervisor subclass:`, restart strategies, dynamic supervisors |
+| [01](01-getting-started.md) | Getting Started | Fire up the REPL, send your first message, understand how expressions work |
+| [02](02-basic-types.md) | Basic Types | Every value is an object: Integer, Float, String, Boolean, Nil, Symbol, Character |
+| [03](03-variables.md) | Variables | `:=` assignment, temporary variables, lexical scope |
+| [04](04-messages.md) | Messages | **The core concept.** Unary, binary, and keyword messages; cascade; precedence rules |
+| [05](05-arithmetic-and-comparison.md) | Arithmetic & Comparison | Numeric operators, division, equality (`==`, `=:=`, `/=`), ordering |
+
+### Part 2 — Working with Data
+
+With the basics in hand, these chapters cover the types and structures you'll use most in everyday code.
+
+| # | Chapter | What you'll learn |
+|---|---------|-------------------|
+| [06](06-strings.md) | Strings | UTF-8 text, `++` concatenation, `{interpolation}`, grapheme clusters, common methods |
+| [07](07-blocks.md) | Blocks | Closures as first-class values; `value:`, `valueWithArguments:`; variable capture |
+| [08](08-control-flow.md) | Control Flow | `ifTrue:ifFalse:`, `whileTrue:`, `timesRepeat:`, `to:do:`, `match:` |
+| [09](09-collections.md) | Collections | Array, Dictionary, Bag, Set; `collect:`, `select:`, `inject:into:` |
+
+### Part 3 — Object-Oriented Beamtalk
+
+Classes, concurrency, and error handling — the three pillars of production Beamtalk code.
+
+| # | Chapter | What you'll learn |
+|---|---------|-------------------|
+| [10](10-value-classes.md) | Value Classes | Immutable data objects with `Value subclass:`; slots, constructors, equality |
+| [11](11-actors.md) | Actors | Concurrent objects with `Actor subclass:`; `spawn`, `send:`, mutable state |
+| [12](12-error-handling.md) | Error Handling | `on:do:` exceptions, the `Result` type, `doesNotUnderstand` |
+| [13](13-testing.md) | Testing with BUnit | `TestCase subclass:`, `assert:equals:`, `should:raise:`, `setUp`/`tearDown` |
+
+### Part 4 — Advanced Features
+
+Pattern matching, the type system, and BEAM interoperability for when you need the full power of the platform.
+
+| # | Chapter | What you'll learn |
+|---|---------|-------------------|
+| [14](14-pattern-matching.md) | Pattern Matching | Destructuring arrays, maps, and tuples; binary patterns with `match:` |
+| [15](15-type-annotations.md) | Type Annotations | The `::` syntax, gradual typing, method signatures |
+| [16](16-beam-interop.md) | BEAM Interop | Calling Erlang from Beamtalk, atoms, tuples, `Erlang module function:` |
+| [17](17-otp-supervisors.md) | OTP Supervisors | `Supervisor subclass:`, restart strategies, fault-tolerant trees |
 
 ---
 
@@ -79,7 +105,7 @@ TestCase subclass: Ch10Examples
 
 Wildcard `_` matches any value (used for setup expressions):
 
-```beamtalk
+```
 counter := Counter spawn  // => _
 ```
 

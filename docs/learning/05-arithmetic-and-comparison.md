@@ -26,24 +26,19 @@ Truncating integer division:
 -7 div: 2   // => -3
 ```
 
-Modulo (remainder, same sign as dividend):
+Modulo with `%` (remainder, same sign as dividend):
 
 ```beamtalk
-10 rem: 3   // => 1
--10 rem: 3  // => -1
-```
-
-`%` operator is an alias for `rem:`:
-
-```beamtalk
-10 % 3  // => 1
+10 % 3   // => 1
+-10 % 3  // => -1
 ```
 
 Exponentiation (right-associative):
 
 ```beamtalk
 2 ** 10        // => 1024
-2 ** 3 ** 2    // => 512     (2 ** (3 ** 2) = 2 ** 9)
+// Right-associative: 2 ** 3 ** 2 is the same as 2 ** (3 ** 2)
+2 ** 3 ** 2    // => 512
 ```
 
 ## Float arithmetic
@@ -54,11 +49,11 @@ Exponentiation (right-associative):
 7.5 / 2.5    // => 3.0
 ```
 
-Mixed integer/float — integer is promoted:
+Mixed integer/float:
 
 ```beamtalk
 3 + 1.5   // => 4.5
-2 * 3.0   // => 6.0
+2 * 3.0   // => 6
 ```
 
 Float-specific operations:
@@ -84,9 +79,9 @@ Highest to lowest within binary messages:
 ```
 
 ```beamtalk
-2 + 3 * 4    // => 14       (* binds tighter than +)
-10 - 2 * 3   // => 4        (10 - 6, not 8 * 3)
-2 ** 3 + 1   // => 9        (8 + 1)
+2 + 3 * 4    // => 14
+10 - 2 * 3   // => 4
+2 ** 3 + 1   // => 9
 ```
 
 Parentheses override:
@@ -106,22 +101,20 @@ Parentheses override:
 
 ## Equality
 
-Beamtalk has several equality operators inherited from Erlang:
+Beamtalk has several equality operators:
 
-- `=:=` strict equality (same type AND same value)
-- `==` loose equality (`5 == 5.0` is true)
-- `=/=` strict inequality
-- `/=` loose inequality
+- `=:=` value equality (works across Integer/Float)
+- `==` value equality (same as `=:=`)
+- `=/=` value inequality
+- `/=` value inequality (same as `=/=`)
 - `=` alias for `=:=` (legacy; lint warns on `x = true` / `x = false`)
-
-For most code, use `=:=` for value equality and `==` when comparing across Integer/Float.
 
 ```beamtalk
 5 =:= 5      // => true
-5 =:= 5.0    // => false     (different types)
-5 == 5.0     // => true      (loose: numeric equality across types)
+5 =:= 5.0    // => true
+5 == 5.0     // => true
 5 =/= 6      // => true
-5 /= 5.0     // => false     (5 == 5.0, so /= is false)
+5 /= 5.0     // => false
 ```
 
 Strings and symbols use `=:=`:
@@ -173,7 +166,7 @@ Square root (returns Float):
 
 ```beamtalk
 42 asFloat      // => 42.0
-3.9 asInteger   // => 3         (truncates toward zero)
+3.9 asInteger   // => 3
 3.9 floor       // => 3
 3.9 ceiling     // => 4
 3.9 rounded     // => 4
@@ -182,7 +175,7 @@ Square root (returns Float):
 
 ## Summary
 
-- Arithmetic: `+  -  *  /  div:  rem:  %  **`
+- Arithmetic: `+  -  *  /  div:  %  **`
 - Comparison: `<  >  <=  >=`
 - Equality: `=:=  ==  =/=  /=`
 - Utilities: `abs`, `negated`, `max:`, `min:`, `between:and:`, `gcd:`, `lcm:`, `sqrt`

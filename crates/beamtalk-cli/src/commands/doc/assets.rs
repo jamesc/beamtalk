@@ -399,6 +399,26 @@ tbody tr:hover { background: var(--sidebar-bg); }
 .breadcrumb a { color: var(--fg-muted); }
 .breadcrumb a:hover { color: var(--accent); text-decoration: none; }
 
+/* --- Chapter navigation --- */
+.chapter-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 0;
+  margin: 1.5rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.875rem;
+  gap: 1rem;
+}
+.chapter-nav a { color: var(--accent); text-decoration: none; }
+.chapter-nav a:hover { text-decoration: underline; }
+.chapter-nav-prev { text-align: left; flex: 1; }
+.chapter-nav-up { text-align: center; flex: 0; white-space: nowrap; color: var(--fg-muted); }
+.chapter-nav-up:hover { color: var(--accent) !important; }
+.chapter-nav-next { text-align: right; flex: 1; }
+.chapter-nav-placeholder { flex: 1; }
+
 /* --- Class page --- */
 .class-doc { margin-bottom: 2.5rem; }
 

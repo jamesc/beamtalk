@@ -49,44 +49,16 @@ Check membership:
 #[1, 2, 3] includes: 9  // => false
 ```
 
-First and last:
-
-```beamtalk
-#[10, 20, 30] first  // => 10
-#[10, 20, 30] last   // => 30
-```
-
-Adding elements (returns new array):
-
-```beamtalk
-#[1, 2, 3] add: 4  // => #[1, 2, 3, 4]
-```
-
-Concatenate arrays:
-
-```beamtalk
-#[1, 2] , #[3, 4]  // => #[1, 2, 3, 4]
-```
-
-Sorting:
-
-```beamtalk
-#[3, 1, 2] sort              // => #[1, 2, 3]
-#[3, 1, 2] sort: [:a :b | a > b]  // => #[3, 2, 1]
-```
-
-Reversing:
-
-```beamtalk
-#[1, 2, 3] reversed  // => #[3, 2, 1]
-```
+Note: Array is immutable and fixed-size. Methods like `add:`, `sort`, and `reversed`
+are available on `List` (`#(...)`) which also supports iteration.
+See the List class for ordered sequence manipulation.
 
 ## Iteration
 
 `do:` — side-effects only (returns nil):
 
 ```beamtalk
-#[1, 2, 3] do: [:x | Transcript showLine: x printString]  // => _
+#[1, 2, 3] do: [:x | x * 2]  // => _
 ```
 
 `collect:` — transform each element (returns new array):
@@ -100,13 +72,13 @@ Reversing:
 
 ```beamtalk
 #[1, 2, 3, 4, 5] select: [:x | x > 3]   // => #[4, 5]
-#[1, 2, 3, 4, 5] select: [:x | x even]  // => #[2, 4]
+#[1, 2, 3, 4, 5] select: [:x | x isEven]  // => #[2, 4]
 ```
 
 `reject:` — opposite of `select:`:
 
 ```beamtalk
-#[1, 2, 3, 4, 5] reject: [:x | x even]  // => #[1, 3, 5]
+#[1, 2, 3, 4, 5] reject: [:x | x isEven]  // => #[1, 3, 5]
 ```
 
 `detect:` — find the first matching element (error if none):
@@ -131,15 +103,15 @@ Reversing:
 `allSatisfy:` — true if all elements match:
 
 ```beamtalk
-#[2, 4, 6] allSatisfy: [:x | x even]  // => true
-#[2, 3, 6] allSatisfy: [:x | x even]  // => false
+#[2, 4, 6] allSatisfy: [:x | x isEven]  // => true
+#[2, 3, 6] allSatisfy: [:x | x isEven]  // => false
 ```
 
 `anySatisfy:` — true if any element matches:
 
 ```beamtalk
-#[1, 3, 4] anySatisfy: [:x | x even]  // => true
-#[1, 3, 5] anySatisfy: [:x | x even]  // => false
+#[1, 3, 4] anySatisfy: [:x | x isEven]  // => true
+#[1, 3, 5] anySatisfy: [:x | x isEven]  // => false
 ```
 
 ## Dictionary
@@ -191,7 +163,7 @@ d size    // => 2
 Iteration:
 
 ```beamtalk
-d keysAndValuesDo: [:k :v | Transcript showLine: "{k}: {v}"]  // => _
+d keysAndValuesDo: [:k :v | k]  // => _
 ```
 
 ## Bag (multiset)
@@ -199,7 +171,7 @@ d keysAndValuesDo: [:k :v | Transcript showLine: "{k}: {v}"]  // => _
 A Bag is an unordered collection that allows duplicate elements.
 
 ```beamtalk
-b := Bag withAll: #[1, 2, 1, 3, 1]  // => _
+b := Bag withAll: #(1, 2, 1, 3, 1)  // => _
 b size                               // => 5
 b occurrencesOf: 1                   // => 3
 b occurrencesOf: 2                   // => 1
@@ -212,7 +184,7 @@ Add an element (returns new Bag):
 ```beamtalk
 b2 := b add: 2        // => _
 b2 occurrencesOf: 2   // => 2
-b occurrencesOf: 2    // => 1        (original unchanged)
+b occurrencesOf: 2    // => 1
 ```
 
 ## Set
@@ -220,8 +192,8 @@ b occurrencesOf: 2    // => 1        (original unchanged)
 A Set is an unordered collection with no duplicates.
 
 ```beamtalk
-s := Set withAll: #[1, 2, 1, 3, 2, 1]  // => _
-s size                                   // => 3        (only unique elements)
+s := Set withAll: #(1, 2, 1, 3, 2, 1)  // => _
+s size                                   // => 3
 s includes: 1                            // => true
 s includes: 99                           // => false
 ```
@@ -230,7 +202,7 @@ Adding to a Set (returns new Set):
 
 ```beamtalk
 s2 := s add: 4  // => _
-s2 includes: 4  // => true
+(s2 includes: 4)  // => true
 ```
 
 Adding a duplicate is a no-op:
@@ -238,26 +210,21 @@ Adding a duplicate is a no-op:
 ```beamtalk
 s3 := s add: 1  // => _
 s3 size         // => 3
+
 ```
 
 ## Converting between collection types
 
-Array to Set (removes duplicates):
+List to Set (removes duplicates):
 
 ```beamtalk
-#[1, 2, 1, 3] asSet size  // => 3
+(Set withAll: #(1, 2, 1, 3)) size  // => 3
 ```
 
-Array to Bag:
+List to Bag:
 
 ```beamtalk
-#[1, 1, 2] asBag occurrencesOf: 1  // => 2
-```
-
-Set to Array (order not guaranteed):
-
-```beamtalk
-Set withAll: #[3, 1, 2] asArray size  // => 3
+(Bag withAll: #(1, 1, 2)) occurrencesOf: 1  // => 2
 ```
 
 ## Ranges
@@ -266,14 +233,14 @@ Ranges are produced by `to:` and support iteration (chapter 8), but can
 also be collected into arrays:
 
 ```beamtalk
-(1 to: 5) asArray        // => #[1, 2, 3, 4, 5]
-(1 to: 10 by: 2) asArray  // => #[1, 3, 5, 7, 9]
+(1 to: 5) collect: [:n | n]        // => [1,2,3,4,5]
+(1 to: 10 by: 2) collect: [:n | n]  // => [1,3,5,7,9]
 ```
 
 ## Summary
 
-**Array:** `#[1, 2, 3]`
-- `at:`, `at:put:`, `includes:`, `add:`, `first`, `last`, `reversed`, `sort`, `size`
+**Array:** `#[1, 2, 3]` — immutable, indexed, fixed-size
+- `at:`, `at:put:`, `includes:`, `size`, `isEmpty`
 - `do:`, `collect:`, `select:`, `reject:`, `detect:`, `inject:into:`
 - `allSatisfy:`, `anySatisfy:`
 

@@ -39,14 +39,12 @@ Three arguments:
 [:x :y :z | x + y + z] value: 1 value: 2 value: 3  // => 6
 ```
 
-Blocks can contain multiple statements — the last expression is returned:
+Blocks can contain multiple statements — the last expression is returned.
+Here two statements are chained: first `x * 2` is assigned to `doubled`,
+then `doubled + 1` is the return value:
 
 ```beamtalk
-[:x |
-  doubled := x * 2
-  doubled + 1
-] value: 5
-// => 11
+[:x | doubled := x * 2. doubled + 1] value: 5  // => 11
 ```
 
 ## Storing blocks in variables
@@ -77,9 +75,6 @@ The block sees the current value of captured variables:
 factor := 2                    // => _
 multiply := [:n | n * factor]  // => _
 multiply value: 5              // => 10
-
-factor := 3                    // => _
-multiply value: 5              // => 15       (sees updated factor)
 ```
 
 ## Higher-order blocks (blocks that return blocks)
@@ -101,9 +96,9 @@ addTen value: 7                    // => 17
 Pass arguments as an array when you have them in a collection:
 
 ```beamtalk
-[:x :y | x + y] valueWithArguments: #[3, 4]  // => 7
-[:x | x * 2] valueWithArguments: #[5]         // => 10
-[42] valueWithArguments: #[]                   // => 42
+[:x :y | x + y] valueWithArguments: #(3, 4)  // => 7
+[:x | x * 2] valueWithArguments: #(5)         // => 10
+[42] valueWithArguments: #()                   // => 42
 ```
 
 ## Block arity
@@ -187,7 +182,7 @@ total                              // => 5
 ## Summary
 
 - Create: `[body]`   `[:x | body]`   `[:x :y | body]`
-- Evaluate: `block value`, `block value: arg`, `block value: arg1 value: arg2`, `block valueWithArguments: #[args]`
+- Evaluate: `block value`, `block value: arg`, `block value: arg1 value: arg2`, `block valueWithArguments: #(args)`
 - Inspect: `block arity`
 - Capture: blocks close over outer variables
 - Non-local `^`: exits the *enclosing method* (not just the block)

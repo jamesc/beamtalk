@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for docs/learning/10-value-classes.md
+
+Value subclass: Point
+  state: x = 0
+  state: y = 0
+
+  x => self.x
+  y => self.y
+
+  distanceSquared => (self.x * self.x) + (self.y * self.y)
+
+  translateBy: dx and: dy =>
+    Point x: (self.x + dx) y: (self.y + dy)
+
+  printString => "Point({self.x}, {self.y})"

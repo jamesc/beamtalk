@@ -36,11 +36,11 @@ Useful messages:
 Integer predicates:
 
 ```beamtalk
-3 isInteger  // => true
-3 isFloat    // => false
-3 even       // => false
-4 even       // => true
-3 odd        // => true
+(3 isKindOf: Integer)  // => true
+(3 isKindOf: Float)    // => false
+3 isEven               // => false
+4 isEven               // => true
+3 isOdd                // => true
 ```
 
 ## Floats
@@ -66,8 +66,8 @@ Float-specific messages:
 3.2 ceiling    // => 4
 3.7 truncated  // => 3
 3.7 rounded    // => 4
-3.14 class     // => Float
-3.14 isFloat   // => true
+3.14 class              // => Float
+(3.14 isKindOf: Float)  // => true
 ```
 
 ## Strings
@@ -108,7 +108,7 @@ Case conversion:
 Trimming whitespace:
 
 ```beamtalk
-"  hello  " trimSeparators  // => hello
+"  hello  " trim  // => hello
 ```
 
 Checking contents:
@@ -122,15 +122,15 @@ Checking contents:
 Splitting and joining:
 
 ```beamtalk
-"a,b,c" substrings: ","  // => #[a, b, c]
+"a,b,c" split: ","  // => ["a","b","c"]
 ```
 
 Converting to/from other types:
 
 ```beamtalk
-42 printString   // => 42
-"42" asInteger   // => 42
-"3.14" asFloat   // => 3.14
+42 printString    // => 42
+"42" asInteger    // => 42
+"3.14" asFloat    // => 3.14
 ```
 
 ## Booleans
@@ -172,17 +172,17 @@ true xor: true   // => false
 Checking type:
 
 ```beamtalk
-true isBoolean   // => true
-42 isBoolean     // => false
+true isBoolean              // => true
+(42 isKindOf: Boolean)      // => false
 ```
 
 ## Nil
 
-`nil` represents the absence of a value. It is the only instance of `NilObject`.
+`nil` represents the absence of a value. It is the only instance of `UndefinedObject`.
 
 ```beamtalk
 nil           // => nil
-nil class     // => NilObject
+nil class     // => UndefinedObject
 nil isNil     // => true
 nil notNil    // => false
 42 isNil      // => false
@@ -207,11 +207,11 @@ They are commonly used as dictionary keys, method selectors, and enum-like value
 #hello class    // => Symbol
 ```
 
-Symbol equality:
+Symbol equality (symbols with the same name are identical, so use `=:=`):
 
 ```beamtalk
-#hello = #hello  // => true
-#hello = #world  // => false
+#hello =:= #hello  // => true
+#hello =:= #world  // => false
 ```
 
 Symbols are often used as dictionary keys:
@@ -221,11 +221,10 @@ d := #{#name => "Alice", #age => 30}  // => _
 d at: #name                            // => Alice
 ```
 
-Converting to/from strings:
+Converting to strings:
 
 ```beamtalk
 #hello asString   // => hello
-"hello" asSymbol  // => hello
 ```
 
 ## Characters
@@ -234,20 +233,17 @@ A character literal is written with a `$` prefix. Characters represent a
 single Unicode codepoint and are stored as integers.
 
 ```beamtalk
-$A            // => $A
-$a class      // => Character
-$A asInteger  // => 65
-$a asInteger  // => 97
-97 asCharacter  // => $a
+$A        // => 65
+$a class  // => Integer
 ```
 
-Character predicates:
+Character predicates work on the integer codepoint:
 
 ```beamtalk
-$A isUppercase  // => true
-$a isLowercase  // => true
-$5 isDigit      // => true
-$A isLetter     // => true
+65 isUppercase  // => true
+97 isLowercase  // => true
+53 isDigit      // => true
+65 isLetter     // => true
 ```
 
 ## Type checking and conversion summary

@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/10-value-classes.md (Money)
+
+TestCase subclass: Ch10MoneyExample
+
+  testMoneyAddition =>
+    a := Money amount: 10 currency: #USD
+    b := Money amount: 5 currency: #USD
+    c := a add: b
+    self assert: c amount equals: 15
+    self assert: c currency equals: #USD
+
+  testMoneyImmutable =>
+    a := Money amount: 10 currency: #USD
+    b := Money amount: 5 currency: #USD
+    a add: b
+    self assert: a amount equals: 10
+
+  testMoneyPrintString =>
+    m := Money amount: 42 currency: #EUR
+    self assert: m printString equals: "42 EUR"
