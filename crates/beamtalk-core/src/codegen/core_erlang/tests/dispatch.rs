@@ -2282,9 +2282,21 @@ fn codegen_source(src: &str) -> String {
     .expect("codegen should succeed")
 }
 
+/// Returns `true` if the generated code contains a `beamtalk_actor:sync_send` call
+/// with the given selector atom (e.g. `"'fieldNames'"`) as the second argument.
+/// Used to assert selector-specific dispatch rather than module-wide presence.
+fn has_sync_send_for_selector(code: &str, selector: &str) -> bool {
+    code.match_indices("'beamtalk_actor':'sync_send'(")
+        .any(|(idx, _)| {
+            let end = (idx + 200).min(code.len());
+            code[idx..end].contains(selector)
+        })
+}
+
 #[test]
 fn test_field_names_actor_uses_sync_send() {
     // BT-1321: fieldNames on an actor receiver must use sync_send, not async_send + future.
+    // Assertion is selector-specific: checks sync_send includes the 'fieldNames' atom.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2293,8 +2305,8 @@ fn test_field_names_actor_uses_sync_send() {
     );
     let code = codegen_source(src);
     assert!(
-        code.contains("'beamtalk_actor':'sync_send'"),
-        "fieldNames on actor must use sync_send. Got:\n{code}"
+        has_sync_send_for_selector(&code, "'fieldNames'"),
+        "fieldNames on actor must call sync_send with 'fieldNames' selector. Got:\n{code}"
     );
     assert!(
         !code.contains("'async_send'"),
@@ -2309,6 +2321,7 @@ fn test_field_names_actor_uses_sync_send() {
 #[test]
 fn test_field_at_actor_uses_sync_send() {
     // BT-1321: fieldAt: on an actor receiver must use sync_send.
+    // Assertion is selector-specific: checks sync_send includes the 'fieldAt:' atom.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2317,8 +2330,8 @@ fn test_field_at_actor_uses_sync_send() {
     );
     let code = codegen_source(src);
     assert!(
-        code.contains("'beamtalk_actor':'sync_send'"),
-        "fieldAt: on actor must use sync_send. Got:\n{code}"
+        has_sync_send_for_selector(&code, "'fieldAt:'"),
+        "fieldAt: on actor must call sync_send with 'fieldAt:' selector. Got:\n{code}"
     );
     assert!(
         !code.contains("'async_send'"),
@@ -2333,6 +2346,7 @@ fn test_field_at_actor_uses_sync_send() {
 #[test]
 fn test_field_at_put_actor_uses_sync_send() {
     // BT-1321: fieldAt:put: on an actor receiver must use sync_send.
+    // Assertion is selector-specific: checks sync_send includes the 'fieldAt:put:' atom.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2341,8 +2355,8 @@ fn test_field_at_put_actor_uses_sync_send() {
     );
     let code = codegen_source(src);
     assert!(
-        code.contains("'beamtalk_actor':'sync_send'"),
-        "fieldAt:put: on actor must use sync_send. Got:\n{code}"
+        has_sync_send_for_selector(&code, "'fieldAt:put:'"),
+        "fieldAt:put: on actor must call sync_send with 'fieldAt:put:' selector. Got:\n{code}"
     );
     assert!(
         !code.contains("'async_send'"),
@@ -2351,5 +2365,67 @@ fn test_field_at_put_actor_uses_sync_send() {
     assert!(
         !code.contains("'beamtalk_future':'new'"),
         "fieldAt:put: must not allocate a future. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_field_names_self_no_sync_send() {
+    // BT-1321: `self fieldNames` inside an actor must NOT route through sync_send.
+    // Self is a #beamtalk_object{..., pid: self()} tuple; sync_send(self()) would be
+    // gen_server:call(self(), ...) → deadlock. Must use beamtalk_primitive:send(State).
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  getFieldNames =>\n",
+        "    self fieldNames\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldNames'"),
+        "self fieldNames must not route through sync_send (deadlock risk). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_primitive':'send'"),
+        "self fieldNames must route through beamtalk_primitive:send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_field_at_self_no_sync_send() {
+    // BT-1321: `self fieldAt: name` inside an actor must NOT route through sync_send.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  getField: name =>\n",
+        "    self fieldAt: name\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldAt:'"),
+        "self fieldAt: must not route through sync_send (deadlock risk). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_primitive':'send'"),
+        "self fieldAt: must route through beamtalk_primitive:send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_field_at_put_self_no_sync_send() {
+    // BT-1321: `self fieldAt: name put: val` inside an actor must NOT route through sync_send.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  setField: name to: val =>\n",
+        "    self fieldAt: name put: val\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldAt:put:'"),
+        "self fieldAt:put: must not route through sync_send (deadlock risk). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_primitive':'send'"),
+        "self fieldAt:put: must route through beamtalk_primitive:send. Got:\n{code}"
     );
 }

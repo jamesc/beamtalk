@@ -1205,6 +1205,10 @@ mod tests {
             !code.contains("'maybe_await'(Acc)"),
             "BT-1321: binary op should not wrap acc with maybe_await. Got:\n{code}"
         );
+        assert!(
+            !code.contains("'maybe_await'(Item)"),
+            "BT-1321: binary op should not wrap item with maybe_await. Got:\n{code}"
+        );
     }
 
     #[test]
@@ -1216,6 +1220,10 @@ mod tests {
         assert!(
             !code.contains("'maybe_await'(Acc)"),
             "BT-1321: binary op should not wrap acc with maybe_await (map-acc path). Got:\n{code}"
+        );
+        assert!(
+            !code.contains("'maybe_await'(Item)"),
+            "BT-1321: binary op should not wrap item with maybe_await (map-acc path). Got:\n{code}"
         );
     }
 
