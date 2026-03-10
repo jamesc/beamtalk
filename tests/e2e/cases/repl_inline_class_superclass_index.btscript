@@ -24,7 +24,7 @@
 // did not receive Shape's superclass info from the ETS table.
 Shape subclass: Triangle
   state: base = 1.0
-  class withBase: b => self new: #{base => b}
+  class withBase: b => self new: #{#base => b}
 // => _
 
 Triangle >> base => self.base
@@ -61,7 +61,7 @@ Triangle subclass: RightTriangle
   state: hypotenuse = 0.0
 // => _
 
-rt := RightTriangle new: #{base => 3.0, hypotenuse => 5.0}
+rt := RightTriangle new: #{#base => 3.0, #hypotenuse => 5.0}
 // => _
 
 rt class name
