@@ -656,7 +656,7 @@ enum CodeGenContext {
     /// Generating code for an actor class (`gen_server` with async messaging).
     ///
     /// - Field access: `call 'maps':'get'('field', State)`
-    /// - Method calls: Async via `beamtalk_actor:async_send` with futures
+    /// - Method calls: Sync via `beamtalk_actor:sync_send` (ADR-0043)
     /// - State threading: Use State, State1, State2... for mutations
     Actor,
 

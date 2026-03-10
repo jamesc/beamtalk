@@ -139,13 +139,13 @@ module 'nested_blocks' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'outerBlock'> when 'true' ->
-            let _Result = fun (_x1) -> call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_x1), 1) in {'reply', _Result, State}
+            let _Result = fun (_x1) -> call 'erlang':'+'(_x1, 1) in {'reply', _Result, State}
         <'deeplyNested'> when 'true' ->
             let _Result = fun () -> fun () -> 42 in {'reply', _Result, State}
         <'blockWithNested'> when 'true' ->
             case Args of
                 <[_x2]> when 'true' ->
-                    let Inner = fun (_y3) -> call 'erlang':'*'(call 'beamtalk_future':'maybe_await'(_y3), 2) in let _Result = let _ValRecv4 = Inner in let _ValArg5 = _x2 in case call 'erlang':'is_function'(_ValRecv4) of 'true' when 'true' -> apply _ValRecv4 (_ValArg5) 'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv4, 'value:', [_ValArg5]) end in {'reply', _Result, State}
+                    let Inner = fun (_y3) -> call 'erlang':'*'(_y3, 2) in let _Result = let _ValRecv4 = Inner in let _ValArg5 = _x2 in case call 'erlang':'is_function'(_ValRecv4) of 'true' when 'true' -> apply _ValRecv4 (_ValArg5) 'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv4, 'value:', [_ValArg5]) end in {'reply', _Result, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <OtherSelector> when 'true' ->

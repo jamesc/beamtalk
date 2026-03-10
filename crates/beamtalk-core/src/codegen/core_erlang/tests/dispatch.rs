@@ -527,10 +527,10 @@ fn test_block_value_message_one_arg() {
         output.contains("(5)"),
         "Should pass argument 5 to the block. Got: {output}"
     );
-    // Binary ops inside block bodies are wrapped with maybe_await (BT-899)
+    // Binary ops no longer wrap operands with maybe_await (ADR-0043: all sends are sync)
     assert!(
-        output.contains("beamtalk_future"),
-        "value: binary ops should wrap operands with maybe_await. Got: {output}"
+        !output.contains("maybe_await"),
+        "value: binary ops should not wrap operands with maybe_await. Got: {output}"
     );
 }
 
@@ -2267,5 +2267,89 @@ fn test_repl_expression_spawn_with_args_uses_class_module_index() {
     assert!(
         !code.contains("'bt@counter':'spawn'"),
         "Heuristic module name must NOT appear when class_module_index is provided. Got:\n{code}"
+    );
+}
+
+// --- BT-1321: intrinsic async_send → sync_send migration ---
+
+fn codegen_source(src: &str) -> String {
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("codegen should succeed")
+}
+
+#[test]
+fn test_field_names_actor_uses_sync_send() {
+    // BT-1321: fieldNames on an actor receiver must use sync_send, not async_send + future.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  run: other =>\n",
+        "    other fieldNames\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'beamtalk_actor':'sync_send'"),
+        "fieldNames on actor must use sync_send. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'async_send'"),
+        "fieldNames must not use async_send. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'beamtalk_future':'new'"),
+        "fieldNames must not allocate a future. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_field_at_actor_uses_sync_send() {
+    // BT-1321: fieldAt: on an actor receiver must use sync_send.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  run: other with: name =>\n",
+        "    other fieldAt: name\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'beamtalk_actor':'sync_send'"),
+        "fieldAt: on actor must use sync_send. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'async_send'"),
+        "fieldAt: must not use async_send. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'beamtalk_future':'new'"),
+        "fieldAt: must not allocate a future. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_field_at_put_actor_uses_sync_send() {
+    // BT-1321: fieldAt:put: on an actor receiver must use sync_send.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  run: other with: name with: val =>\n",
+        "    other fieldAt: name put: val\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'beamtalk_actor':'sync_send'"),
+        "fieldAt:put: on actor must use sync_send. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'async_send'"),
+        "fieldAt:put: must not use async_send. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'beamtalk_future':'new'"),
+        "fieldAt:put: must not allocate a future. Got:\n{code}"
     );
 }

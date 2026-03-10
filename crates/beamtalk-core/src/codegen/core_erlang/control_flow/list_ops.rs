@@ -1264,43 +1264,34 @@ mod tests {
     }
 
     #[test]
-    fn test_inject_non_literal_initial_keeps_acc_maybe_await() {
-        // BT-1304: When the initial accumulator is NOT provably sync (e.g. a local var that
-        // was never declared sync), maybe_await is retained on the accumulator.
-        // Note: `self.someState` is a field read — not a literal → NOT in sync_vars.
+    fn test_inject_non_literal_initial_no_maybe_await() {
+        // BT-1321: Binary op codegen no longer emits maybe_await on any operand (ADR-0043).
+        // Even when the initial accumulator is a non-literal field read, the generated
+        // binary op for `acc + item` must not wrap either operand with maybe_await.
         let src = "Actor subclass: Ctr\n  state: x = 0\n  state: initial = 0\n\n  run: items =>\n    count := 0\n    items inject: self.initial into: [:acc :item | count := count + 1. acc + item]\n";
         let code = codegen(src);
-        // `self.initial` is a state field read → not a literal, not a sync var.
-        // maybe_await should be retained on Acc.
         assert!(
-            code.contains("'maybe_await'(Acc)"),
-            "BT-1304: maybe_await should be KEPT on the fold accumulator when initial is a non-sync field read. Got:\n{code}"
+            !code.contains("'maybe_await'(Acc)"),
+            "BT-1321: binary op should not wrap acc with maybe_await. Got:\n{code}"
         );
     }
 
     #[test]
-    fn test_inject_non_literal_initial_keeps_acc_maybe_await_map_acc() {
-        // BT-1304: When the initial accumulator is NOT provably sync and the block forces
-        // the map-accumulator path (due to a field mutation), maybe_await is still retained.
+    fn test_inject_non_literal_initial_no_maybe_await_map_acc() {
+        // BT-1321: Binary op codegen no longer emits maybe_await (ADR-0043), even on the
+        // map-accumulator path when the initial is a non-literal field read.
         let src = "Actor subclass: Ctr\n  state: count = 0\n  state: initial = 0\n\n  run: items =>\n    items inject: self.initial into: [:acc :item | self.count := self.count + 1. acc + item]\n";
         let code = codegen(src);
         assert!(
-            code.contains("'maybe_await'(Acc)"),
-            "BT-1304: maybe_await should be KEPT on the fold accumulator (map-acc path) when initial is a non-sync field read. Got:\n{code}"
+            !code.contains("'maybe_await'(Acc)"),
+            "BT-1321: binary op should not wrap acc with maybe_await (map-acc path). Got:\n{code}"
         );
     }
 
     #[test]
-    fn test_inject_nested_scope_bleeding_regression() {
-        // BT-1304 regression: outer inject has sync initial (adds `acc` to sync_vars);
-        // inner inject has a non-sync initial (`self.initial`) with the *same* parameter
-        // name `acc`. Both blocks mutate `sharedCount`, which forces both injects through
-        // `generate_list_inject_with_mutations` where the BT-1304 sync-var logic runs.
-        //
-        // Before the save/restore fix, the outer fold's sync marking for `acc` would bleed
-        // into the inner fold body, causing `maybe_await(Acc)` to be silently elided for
-        // an accumulator that might be a future. After the fix, `maybe_await(Acc)` must
-        // be present in the generated code.
+    fn test_inject_nested_scope_no_maybe_await() {
+        // BT-1321: Binary op codegen no longer emits maybe_await on any operand (ADR-0043).
+        // Verifies that neither the outer nor the inner fold's accumulator is wrapped.
         let src = concat!(
             "Actor subclass: Ctr\n",
             "  state: initial = 0\n\n",
@@ -1313,11 +1304,9 @@ mod tests {
             "        acc + y]]\n",
         );
         let code = codegen(src);
-        // The inner fold has non-sync initial → must retain maybe_await on its Acc.
         assert!(
-            code.contains("'maybe_await'(Acc)"),
-            "BT-1304 scope-bleeding: inner fold with non-sync initial must retain \
-             maybe_await(Acc) even when outer fold has same param name. Got:\n{code}"
+            !code.contains("'maybe_await'(Acc)"),
+            "BT-1321: no fold accumulator should be wrapped with maybe_await. Got:\n{code}"
         );
     }
 
