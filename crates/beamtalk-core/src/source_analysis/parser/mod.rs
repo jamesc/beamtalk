@@ -6014,8 +6014,18 @@ Actor subclass: T
         );
         assert_eq!(module.classes.len(), 1, "Should find 1 class");
         let class = &module.classes[0];
-        assert_eq!(class.state.len(), 1, "Should have 1 state field, got {}", class.state.len());
-        assert_eq!(class.methods.len(), 2, "Should have 2 methods, got {}", class.methods.len());
+        assert_eq!(
+            class.state.len(),
+            1,
+            "Should have 1 state field, got {}",
+            class.state.len()
+        );
+        assert_eq!(
+            class.methods.len(),
+            2,
+            "Should have 2 methods, got {}",
+            class.methods.len()
+        );
         assert_eq!(class.state[0].name.name.as_str(), "value");
     }
 
@@ -6031,13 +6041,25 @@ Actor subclass: T
         );
         assert_eq!(module.classes.len(), 1, "Should find 1 class");
         let class = &module.classes[0];
-        assert_eq!(class.class_variables.len(), 1,
-            "Should have 1 classState field, got {}", class.class_variables.len());
+        assert_eq!(
+            class.class_variables.len(),
+            1,
+            "Should have 1 classState field, got {}",
+            class.class_variables.len()
+        );
         assert_eq!(class.class_variables[0].name.name.as_str(), "instanceCount");
-        assert_eq!(class.state.len(), 1,
-            "Should have 1 state field, got {}", class.state.len());
-        assert_eq!(class.methods.len(), 2,
-            "Should have 2 methods, got {}", class.methods.len());
+        assert_eq!(
+            class.state.len(),
+            1,
+            "Should have 1 state field, got {}",
+            class.state.len()
+        );
+        assert_eq!(
+            class.methods.len(),
+            2,
+            "Should have 2 methods, got {}",
+            class.methods.len()
+        );
     }
 
     #[test]
@@ -6054,7 +6076,11 @@ Actor subclass: T
         let class = &module.classes[0];
         assert_eq!(class.methods.len(), 3, "Should have 3 methods");
         assert_eq!(class.state.len(), 1, "Should have 1 state field");
-        assert_eq!(class.class_variables.len(), 1, "Should have 1 classState field");
+        assert_eq!(
+            class.class_variables.len(),
+            1,
+            "Should have 1 classState field"
+        );
     }
 
     #[test]
