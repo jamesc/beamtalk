@@ -30,9 +30,13 @@ pub(crate) fn format_value(value: &serde_json::Value) -> String {
             // Values are pre-formatted by the backend:
             // - Actors: "#Actor<0.123.0>" or "#ClassName<0.123.0>"
             // - Blocks: "a Block/N"
-            // Just return as-is with cyan coloring for actor/block references
+            // - Floats: "6.0", "3.14" (BT-1336: sent as strings to preserve ".0")
             if (s.starts_with('#') && s.contains('<')) || s.starts_with("a Block") {
                 color::paint(color::CYAN, s)
+            } else if s.contains('.') && s.parse::<f64>().is_ok() {
+                // BT-1336: Float values are serialized as strings to preserve
+                // the decimal point (e.g. "6.0" instead of JSON number 6).
+                color::paint(color::YELLOW, s)
             } else {
                 color::paint(color::GREEN, s)
             }
@@ -275,5 +279,24 @@ mod tests {
         let val = serde_json::json!([[1, 2], [3, 4]]);
         let rendered = strip_ansi(&format_value(&val));
         assert_eq!(rendered, "#(#(1, 2), #(3, 4))");
+    }
+
+    #[test]
+    fn float_string_displays_as_number() {
+        // BT-1336: Floats come as strings from the backend to preserve ".0"
+        let val = serde_json::json!("6.0");
+        let rendered = strip_ansi(&format_value(&val));
+        assert_eq!(rendered, "6.0");
+
+        let val = serde_json::json!("3.14");
+        let rendered = strip_ansi(&format_value(&val));
+        assert_eq!(rendered, "3.14");
+    }
+
+    #[test]
+    fn regular_string_not_mistaken_for_float() {
+        let val = serde_json::json!("hello");
+        let rendered = strip_ansi(&format_value(&val));
+        assert_eq!(rendered, "hello");
     }
 }

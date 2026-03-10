@@ -53,7 +53,7 @@ Mixed integer/float:
 
 ```beamtalk
 3 + 1.5   // => 4.5
-2 * 3.0   // => 6
+2 * 3.0   // => 6.0
 ```
 
 Float-specific operations:
