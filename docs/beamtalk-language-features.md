@@ -914,6 +914,13 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 
 // Match on computed expression
 (3 + 4) match: [7 -> "correct"; _ -> "wrong"]
+
+// Constructor patterns for sealed types (e.g. Result)
+(Result ok: 42) match: [
+  Result ok: v    -> v;
+  Result error: _ -> 0
+]
+// => 42
 ```
 
 **Supported pattern types:**
@@ -929,6 +936,7 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Negative number | `-1` | Negative integer/float match |
 | Variable | `x` | Binds matched value to name |
 | Tuple | `{a, b}` | Destructure tuple (patterns supported; tuple literals planned) |
+| Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
 
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
 
