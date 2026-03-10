@@ -957,8 +957,8 @@ Module {
                         KeywordPart {
                             keyword: "keysAndValuesDo:",
                             span: Span {
-                                start: 754,
-                                end: 770,
+                                start: 756,
+                                end: 772,
                             },
                         },
                     ],
@@ -970,15 +970,15 @@ Module {
                                 BlockParameter {
                                     name: "k",
                                     span: Span {
-                                        start: 773,
-                                        end: 774,
+                                        start: 775,
+                                        end: 776,
                                     },
                                 },
                                 BlockParameter {
                                     name: "v",
                                     span: Span {
-                                        start: 776,
-                                        end: 777,
+                                        start: 778,
+                                        end: 779,
                                     },
                                 },
                             ],
@@ -993,13 +993,13 @@ Module {
                                             name: Identifier {
                                                 name: "Transcript",
                                                 span: Span {
-                                                    start: 782,
-                                                    end: 792,
+                                                    start: 786,
+                                                    end: 796,
                                                 },
                                             },
                                             span: Span {
-                                                start: 782,
-                                                end: 792,
+                                                start: 786,
+                                                end: 796,
                                             },
                                         },
                                         selector: Keyword(
@@ -1007,8 +1007,8 @@ Module {
                                                 KeywordPart {
                                                     keyword: "show:",
                                                     span: Span {
-                                                        start: 793,
-                                                        end: 798,
+                                                        start: 797,
+                                                        end: 802,
                                                     },
                                                 },
                                             ],
@@ -1018,16 +1018,16 @@ Module {
                                                 Identifier {
                                                     name: "k",
                                                     span: Span {
-                                                        start: 799,
-                                                        end: 800,
+                                                        start: 803,
+                                                        end: 804,
                                                     },
                                                 },
                                             ),
                                         ],
                                         is_cast: false,
                                         span: Span {
-                                            start: 782,
-                                            end: 800,
+                                            start: 786,
+                                            end: 804,
                                         },
                                     },
                                     preceding_blank_line: false,
@@ -1042,13 +1042,13 @@ Module {
                                             name: Identifier {
                                                 name: "Transcript",
                                                 span: Span {
-                                                    start: 803,
-                                                    end: 813,
+                                                    start: 809,
+                                                    end: 819,
                                                 },
                                             },
                                             span: Span {
-                                                start: 803,
-                                                end: 813,
+                                                start: 809,
+                                                end: 819,
                                             },
                                         },
                                         selector: Keyword(
@@ -1056,8 +1056,8 @@ Module {
                                                 KeywordPart {
                                                     keyword: "show:",
                                                     span: Span {
-                                                        start: 814,
-                                                        end: 819,
+                                                        start: 820,
+                                                        end: 825,
                                                     },
                                                 },
                                             ],
@@ -1067,24 +1067,24 @@ Module {
                                                 Identifier {
                                                     name: "v",
                                                     span: Span {
-                                                        start: 820,
-                                                        end: 821,
+                                                        start: 826,
+                                                        end: 827,
                                                     },
                                                 },
                                             ),
                                         ],
                                         is_cast: false,
                                         span: Span {
-                                            start: 803,
-                                            end: 821,
+                                            start: 809,
+                                            end: 827,
                                         },
                                     },
                                     preceding_blank_line: false,
                                 },
                             ],
                             span: Span {
-                                start: 771,
-                                end: 823,
+                                start: 773,
+                                end: 831,
                             },
                         },
                     ),
@@ -1092,7 +1092,7 @@ Module {
                 is_cast: false,
                 span: Span {
                     start: 747,
-                    end: 823,
+                    end: 831,
                 },
             },
             preceding_blank_line: true,
@@ -1103,8 +1103,8 @@ Module {
                     Comment {
                         content: "Transformation of values",
                         span: Span {
-                            start: 853,
-                            end: 860,
+                            start: 861,
+                            end: 868,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1117,8 +1117,8 @@ Module {
                     Identifier {
                         name: "doubled",
                         span: Span {
-                            start: 853,
-                            end: 860,
+                            start: 861,
+                            end: 868,
                         },
                     },
                 ),
@@ -1131,8 +1131,8 @@ Module {
                                         "x",
                                     ),
                                     Span {
-                                        start: 866,
-                                        end: 868,
+                                        start: 874,
+                                        end: 876,
                                     },
                                 ),
                                 value: Literal(
@@ -1140,13 +1140,13 @@ Module {
                                         10,
                                     ),
                                     Span {
-                                        start: 872,
-                                        end: 874,
+                                        start: 880,
+                                        end: 882,
                                     },
                                 ),
                                 span: Span {
-                                    start: 866,
-                                    end: 874,
+                                    start: 874,
+                                    end: 882,
                                 },
                             },
                             MapPair {
@@ -1155,8 +1155,8 @@ Module {
                                         "y",
                                     ),
                                     Span {
-                                        start: 876,
-                                        end: 878,
+                                        start: 884,
+                                        end: 886,
                                     },
                                 ),
                                 value: Literal(
@@ -1164,19 +1164,19 @@ Module {
                                         20,
                                     ),
                                     Span {
-                                        start: 882,
-                                        end: 884,
+                                        start: 890,
+                                        end: 892,
                                     },
                                 ),
                                 span: Span {
-                                    start: 876,
-                                    end: 884,
+                                    start: 884,
+                                    end: 892,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 864,
-                            end: 885,
+                            start: 872,
+                            end: 893,
                         },
                     },
                     selector: Keyword(
@@ -1184,8 +1184,8 @@ Module {
                             KeywordPart {
                                 keyword: "collect:",
                                 span: Span {
-                                    start: 886,
-                                    end: 894,
+                                    start: 894,
+                                    end: 902,
                                 },
                             },
                         ],
@@ -1197,8 +1197,8 @@ Module {
                                     BlockParameter {
                                         name: "v",
                                         span: Span {
-                                            start: 897,
-                                            end: 898,
+                                            start: 905,
+                                            end: 906,
                                         },
                                     },
                                 ],
@@ -1213,8 +1213,8 @@ Module {
                                                 Identifier {
                                                     name: "v",
                                                     span: Span {
-                                                        start: 901,
-                                                        end: 902,
+                                                        start: 909,
+                                                        end: 910,
                                                     },
                                                 },
                                             ),
@@ -1227,36 +1227,36 @@ Module {
                                                         2,
                                                     ),
                                                     Span {
-                                                        start: 905,
-                                                        end: 906,
+                                                        start: 913,
+                                                        end: 914,
                                                     },
                                                 ),
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 901,
-                                                end: 906,
+                                                start: 909,
+                                                end: 914,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 895,
-                                    end: 907,
+                                    start: 903,
+                                    end: 915,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 864,
-                        end: 907,
+                        start: 872,
+                        end: 915,
                     },
                 },
                 span: Span {
-                    start: 853,
-                    end: 907,
+                    start: 861,
+                    end: 915,
                 },
             },
             preceding_blank_line: true,
@@ -1267,8 +1267,8 @@ Module {
                     Comment {
                         content: "Merge two dictionaries",
                         span: Span {
-                            start: 935,
-                            end: 939,
+                            start: 943,
+                            end: 947,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1281,8 +1281,8 @@ Module {
                     Identifier {
                         name: "base",
                         span: Span {
-                            start: 935,
-                            end: 939,
+                            start: 943,
+                            end: 947,
                         },
                     },
                 ),
@@ -1294,8 +1294,8 @@ Module {
                                     "a",
                                 ),
                                 Span {
-                                    start: 945,
-                                    end: 947,
+                                    start: 953,
+                                    end: 955,
                                 },
                             ),
                             value: Literal(
@@ -1303,13 +1303,13 @@ Module {
                                     1,
                                 ),
                                 Span {
-                                    start: 951,
-                                    end: 952,
+                                    start: 959,
+                                    end: 960,
                                 },
                             ),
                             span: Span {
-                                start: 945,
-                                end: 952,
+                                start: 953,
+                                end: 960,
                             },
                         },
                         MapPair {
@@ -1318,8 +1318,8 @@ Module {
                                     "b",
                                 ),
                                 Span {
-                                    start: 954,
-                                    end: 956,
+                                    start: 962,
+                                    end: 964,
                                 },
                             ),
                             value: Literal(
@@ -1327,24 +1327,24 @@ Module {
                                     2,
                                 ),
                                 Span {
-                                    start: 960,
-                                    end: 961,
+                                    start: 968,
+                                    end: 969,
                                 },
                             ),
                             span: Span {
-                                start: 954,
-                                end: 961,
+                                start: 962,
+                                end: 969,
                             },
                         },
                     ],
                     span: Span {
-                        start: 943,
-                        end: 962,
+                        start: 951,
+                        end: 970,
                     },
                 },
                 span: Span {
-                    start: 935,
-                    end: 962,
+                    start: 943,
+                    end: 970,
                 },
             },
             preceding_blank_line: true,
@@ -1359,8 +1359,8 @@ Module {
                     Identifier {
                         name: "extra",
                         span: Span {
-                            start: 963,
-                            end: 968,
+                            start: 971,
+                            end: 976,
                         },
                     },
                 ),
@@ -1372,8 +1372,8 @@ Module {
                                     "b",
                                 ),
                                 Span {
-                                    start: 974,
-                                    end: 976,
+                                    start: 982,
+                                    end: 984,
                                 },
                             ),
                             value: Literal(
@@ -1381,13 +1381,13 @@ Module {
                                     3,
                                 ),
                                 Span {
-                                    start: 980,
-                                    end: 981,
+                                    start: 988,
+                                    end: 989,
                                 },
                             ),
                             span: Span {
-                                start: 974,
-                                end: 981,
+                                start: 982,
+                                end: 989,
                             },
                         },
                         MapPair {
@@ -1396,8 +1396,8 @@ Module {
                                     "c",
                                 ),
                                 Span {
-                                    start: 983,
-                                    end: 985,
+                                    start: 991,
+                                    end: 993,
                                 },
                             ),
                             value: Literal(
@@ -1405,24 +1405,24 @@ Module {
                                     4,
                                 ),
                                 Span {
-                                    start: 989,
-                                    end: 990,
+                                    start: 997,
+                                    end: 998,
                                 },
                             ),
                             span: Span {
-                                start: 983,
-                                end: 990,
+                                start: 991,
+                                end: 998,
                             },
                         },
                     ],
                     span: Span {
-                        start: 972,
-                        end: 991,
+                        start: 980,
+                        end: 999,
                     },
                 },
                 span: Span {
-                    start: 963,
-                    end: 991,
+                    start: 971,
+                    end: 999,
                 },
             },
             preceding_blank_line: false,
@@ -1437,8 +1437,8 @@ Module {
                     Identifier {
                         name: "merged",
                         span: Span {
-                            start: 992,
-                            end: 998,
+                            start: 1000,
+                            end: 1006,
                         },
                     },
                 ),
@@ -1447,8 +1447,8 @@ Module {
                         Identifier {
                             name: "base",
                             span: Span {
-                                start: 1002,
-                                end: 1006,
+                                start: 1010,
+                                end: 1014,
                             },
                         },
                     ),
@@ -1457,8 +1457,8 @@ Module {
                             KeywordPart {
                                 keyword: "merge:",
                                 span: Span {
-                                    start: 1007,
-                                    end: 1013,
+                                    start: 1015,
+                                    end: 1021,
                                 },
                             },
                         ],
@@ -1468,21 +1468,21 @@ Module {
                             Identifier {
                                 name: "extra",
                                 span: Span {
-                                    start: 1014,
-                                    end: 1019,
+                                    start: 1022,
+                                    end: 1027,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 1002,
-                        end: 1019,
+                        start: 1010,
+                        end: 1027,
                     },
                 },
                 span: Span {
-                    start: 992,
-                    end: 1019,
+                    start: 1000,
+                    end: 1027,
                 },
             },
             preceding_blank_line: false,
@@ -1490,7 +1490,7 @@ Module {
     ],
     span: Span {
         start: 140,
-        end: 1019,
+        end: 1027,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

@@ -106,7 +106,10 @@ sealed Object subclass: Stream
   /// (Stream on: #(1, 2, 3)) inject: 0 into: [:sum :n | sum + n]  // => 6
   /// ```
   inject: initial into: block :: Block =>
-    (Erlang beamtalk_stream) inject: self init: initial into: block
+    (Erlang beamtalk_stream)
+      inject: self
+      init: initial
+      into: block
 
   /// Return first element matching predicate, or nil (terminal).
   ///

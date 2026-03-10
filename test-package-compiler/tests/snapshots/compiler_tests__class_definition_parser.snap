@@ -175,26 +175,26 @@ Module {
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 207,
-                                                end: 211,
+                                                start: 208,
+                                                end: 212,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "value",
                                         span: Span {
-                                            start: 212,
-                                            end: 217,
+                                            start: 213,
+                                            end: 218,
                                         },
                                     },
                                     span: Span {
-                                        start: 207,
-                                        end: 217,
+                                        start: 208,
+                                        end: 218,
                                     },
                                 },
                                 span: Span {
-                                    start: 206,
-                                    end: 217,
+                                    start: 207,
+                                    end: 218,
                                 },
                             },
                             preceding_blank_line: false,
@@ -209,8 +209,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 194,
-                        end: 217,
+                        start: 195,
+                        end: 218,
                     },
                 },
             ],
@@ -249,9 +249,10 @@ Module {
                 trailing: None,
             },
             doc_comment: None,
+            backing_module: None,
             span: Span {
                 start: 104,
-                end: 217,
+                end: 218,
             },
         },
     ],
@@ -259,7 +260,7 @@ Module {
     expressions: [],
     span: Span {
         start: 104,
-        end: 217,
+        end: 218,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

@@ -18,6 +18,11 @@ use ecow::EcoString;
 /// that will be bound when the pattern matches. Returns diagnostics for
 /// duplicate pattern variables.
 ///
+/// Duplicate variable names are allowed inside `Pattern::Array` — the codegen
+/// emits `erlang:=:=` equality checks for subsequent occurrences. Duplicates in
+/// other pattern kinds (tuples, lists, etc.) remain errors because their codegen
+/// paths use native Core Erlang patterns which do not support repeated names.
+///
 /// # Examples
 ///
 /// ```
@@ -37,25 +42,29 @@ pub fn extract_pattern_bindings(
     let mut bindings = Vec::new();
     let mut diagnostics = Vec::new();
     let mut seen = std::collections::HashMap::new();
-    extract_pattern_bindings_impl(pattern, &mut bindings, &mut seen, &mut diagnostics);
+    // Array patterns allow duplicate variables (codegen emits equality checks).
+    let allow_duplicates = matches!(pattern, Pattern::Array { .. });
+    extract_pattern_bindings_impl(
+        pattern,
+        &mut bindings,
+        &mut seen,
+        &mut diagnostics,
+        allow_duplicates,
+    );
     (bindings, diagnostics)
 }
 
 /// Internal implementation of pattern binding extraction.
 ///
-/// Detects duplicate pattern variables and emits diagnostics. Beamtalk follows
-/// Rust-style semantics: duplicate variables in patterns are an error.
-///
-/// # Note
-///
-/// Erlang allows duplicates as equality constraints ({X, X} means both must be equal),
-/// but for MVP we disallow this for simplicity. Can be relaxed in future with codegen
-/// for equality checks.
+/// `allow_duplicates` suppresses the duplicate-variable diagnostic.  It is set
+/// to `true` for `Pattern::Array` arms, where codegen emits `erlang:=:=`
+/// equality guards for repeated names.
 fn extract_pattern_bindings_impl(
     pattern: &Pattern,
     bindings: &mut Vec<Identifier>,
     seen: &mut std::collections::HashMap<EcoString, Span>,
     diagnostics: &mut Vec<crate::source_analysis::Diagnostic>,
+    allow_duplicates: bool,
 ) {
     match pattern {
         // Variable patterns bind the identifier
@@ -65,16 +74,18 @@ fn extract_pattern_bindings_impl(
 
             match seen.entry(id.name.clone()) {
                 Entry::Occupied(entry) => {
-                    // Duplicate variable - emit diagnostic
-                    let first_span = *entry.get();
-                    diagnostics.push(crate::source_analysis::Diagnostic::error(
-                        format!(
-                            "Variable '{}' is bound multiple times in pattern (first bound at byte offset {})",
-                            id.name,
-                            first_span.start()
-                        ),
-                        id.span,
-                    ));
+                    if !allow_duplicates {
+                        // Duplicate variable - emit diagnostic
+                        let first_span = *entry.get();
+                        diagnostics.push(crate::source_analysis::Diagnostic::error(
+                            format!(
+                                "Variable '{}' is bound multiple times in pattern (first bound at byte offset {})",
+                                id.name,
+                                first_span.start()
+                            ),
+                            id.span,
+                        ));
+                    }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(id.span);
@@ -83,20 +94,45 @@ fn extract_pattern_bindings_impl(
             bindings.push(id.clone());
         }
 
-        // Tuple and array patterns: recursively extract from all elements
-        Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
+        // Tuple patterns: recursively extract; duplicates are not allowed (native Core Erlang patterns)
+        Pattern::Tuple { elements, .. } => {
             for element in elements {
-                extract_pattern_bindings_impl(element, bindings, seen, diagnostics);
+                extract_pattern_bindings_impl(
+                    element,
+                    bindings,
+                    seen,
+                    diagnostics,
+                    allow_duplicates,
+                );
+            }
+        }
+
+        // Array patterns: duplicates are allowed — codegen emits equality checks
+        Pattern::Array { elements, .. } => {
+            for element in elements {
+                extract_pattern_bindings_impl(element, bindings, seen, diagnostics, true);
             }
         }
 
         // List patterns: recursively extract from elements and tail
         Pattern::List { elements, tail, .. } => {
             for element in elements {
-                extract_pattern_bindings_impl(element, bindings, seen, diagnostics);
+                extract_pattern_bindings_impl(
+                    element,
+                    bindings,
+                    seen,
+                    diagnostics,
+                    allow_duplicates,
+                );
             }
             if let Some(tail_pattern) = tail {
-                extract_pattern_bindings_impl(tail_pattern, bindings, seen, diagnostics);
+                extract_pattern_bindings_impl(
+                    tail_pattern,
+                    bindings,
+                    seen,
+                    diagnostics,
+                    allow_duplicates,
+                );
             }
         }
 
@@ -104,21 +140,39 @@ fn extract_pattern_bindings_impl(
         Pattern::Binary { segments, .. } => {
             for segment in segments {
                 // Binary segments may have value patterns that bind variables
-                extract_pattern_bindings_impl(&segment.value, bindings, seen, diagnostics);
+                extract_pattern_bindings_impl(
+                    &segment.value,
+                    bindings,
+                    seen,
+                    diagnostics,
+                    allow_duplicates,
+                );
             }
         }
 
         // Map patterns: extract variable bindings from value patterns
         Pattern::Map { pairs, .. } => {
             for pair in pairs {
-                extract_pattern_bindings_impl(&pair.value, bindings, seen, diagnostics);
+                extract_pattern_bindings_impl(
+                    &pair.value,
+                    bindings,
+                    seen,
+                    diagnostics,
+                    allow_duplicates,
+                );
             }
         }
 
         // Constructor patterns: extract bindings from each keyword argument
         Pattern::Constructor { keywords, .. } => {
             for (_, binding) in keywords {
-                extract_pattern_bindings_impl(binding, bindings, seen, diagnostics);
+                extract_pattern_bindings_impl(
+                    binding,
+                    bindings,
+                    seen,
+                    diagnostics,
+                    allow_duplicates,
+                );
             }
         }
 
@@ -340,6 +394,28 @@ mod tests {
         assert_eq!(bindings.len(), 3);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("'x'"));
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_duplicate_in_array_is_allowed() {
+        // BT-1315: Pattern #[x, x] should NOT error — codegen emits equality check
+        let pattern = Pattern::Array {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Variable(Identifier::new("x", test_span())),
+            ],
+            list_syntax: false,
+            span: test_span(),
+        };
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "x");
+        assert_eq!(bindings[1].name, "x");
+        assert!(
+            diagnostics.is_empty(),
+            "Duplicate in array pattern should be allowed. Got: {diagnostics:?}"
+        );
     }
 
     #[test]

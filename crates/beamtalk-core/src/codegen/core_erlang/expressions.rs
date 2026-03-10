@@ -17,12 +17,15 @@
 //!
 //! Note: Message sending is handled by [`super::dispatch_codegen`].
 
+use std::collections::HashSet;
+
 use super::document::Document;
 use super::selector_mangler::escape_atom_chars;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, CascadeMessage,
-    Expression, Identifier, Literal, MapPair, MatchArm, MessageSelector, Pattern, StringSegment,
+    Expression, Identifier, Literal, MapPair, MapPatternKey, MatchArm, MessageSelector, Pattern,
+    StringSegment,
 };
 use crate::docvec;
 
@@ -1623,13 +1626,13 @@ impl CoreErlangGenerator {
                         Pattern::Variable(id) => {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
-                            let key_atom = Document::String(escape_atom_chars(pair.key.as_str()));
+                            let key_doc = Self::map_pattern_key_doc(&pair.key);
                             docs.push(docvec![
                                 indent,
                                 Document::String(core_var.clone()),
-                                " = call 'erlang':'map_get'('",
-                                key_atom,
-                                "', ",
+                                " = call 'erlang':'map_get'(",
+                                key_doc,
+                                ", ",
                                 Document::String(rhs_var.to_string()),
                                 ")",
                                 terminator,
@@ -1661,7 +1664,7 @@ impl CoreErlangGenerator {
     ///
     /// BT-884: This is a helper to avoid duplicating the hoisting logic across the
     /// `MessageSend` and fallback branches of `generate_cascade`.
-    fn generate_cascade_args(
+    pub(super) fn generate_cascade_args(
         &mut self,
         arguments: &[Expression],
         docs: &mut Vec<Document<'static>>,
@@ -1919,8 +1922,15 @@ impl CoreErlangGenerator {
         };
 
         // Recursively build element extraction + nested array checks
-        let inner_body =
-            self.build_array_arm_body(match_var, elements, 0, success_doc, &rest_doc)?;
+        let mut bound_vars: HashSet<String> = HashSet::new();
+        let inner_body = self.build_array_arm_body(
+            match_var,
+            elements,
+            0,
+            success_doc,
+            &rest_doc,
+            &mut bound_vars,
+        )?;
 
         let no_match_size = self.fresh_temp_var("NoMatch");
         let no_match_class = self.fresh_temp_var("NoMatch");
@@ -1965,6 +1975,9 @@ impl CoreErlangGenerator {
     ///
     /// `continuation` is what to execute after all elements are extracted.
     /// `failure_doc` is what to execute if any nested array check fails.
+    /// `already_bound` tracks variable names already extracted in this arm; a second
+    /// occurrence emits an `erlang:=:=` equality check rather than a new binding.
+    #[allow(clippy::too_many_lines)]
     fn build_array_arm_body(
         &mut self,
         array_var: &str,
@@ -1972,6 +1985,7 @@ impl CoreErlangGenerator {
         start: usize,
         continuation: Document<'static>,
         failure_doc: &Document<'static>,
+        already_bound: &mut HashSet<String>,
     ) -> Result<Document<'static>> {
         if start >= elements.len() {
             return Ok(continuation);
@@ -1981,27 +1995,69 @@ impl CoreErlangGenerator {
         match &elements[start] {
             Pattern::Variable(id) => {
                 let core_var = Self::to_core_erlang_var(&id.name);
-                let next = self.build_array_arm_body(
-                    array_var,
-                    elements,
-                    start + 1,
-                    continuation,
-                    failure_doc,
-                )?;
-                Ok(docvec![
-                    "let ",
-                    Document::String(core_var),
-                    " = call 'beamtalk_message_dispatch':'send'(",
-                    Document::String(array_var.to_string()),
-                    ", 'at:', [",
-                    Document::String(one_based.to_string()),
-                    "]) in ",
-                    next
-                ])
+                if already_bound.contains(id.name.as_str()) {
+                    // Duplicate: extract to a temp and emit equality guard
+                    let dup_var = self.fresh_temp_var(&format!("{core_var}Dup"));
+                    let mismatch_var = self.fresh_temp_var("Mismatch");
+                    let next = self.build_array_arm_body(
+                        array_var,
+                        elements,
+                        start + 1,
+                        continuation,
+                        failure_doc,
+                        already_bound,
+                    )?;
+                    Ok(docvec![
+                        "let ",
+                        Document::String(dup_var.clone()),
+                        " = call 'beamtalk_message_dispatch':'send'(",
+                        Document::String(array_var.to_string()),
+                        ", 'at:', [",
+                        Document::String(one_based.to_string()),
+                        "]) in ",
+                        "case call 'erlang':'=:='(",
+                        Document::String(core_var),
+                        ", ",
+                        Document::String(dup_var),
+                        ") of ",
+                        "<'true'> when 'true' -> ",
+                        next,
+                        " <",
+                        Document::String(mismatch_var),
+                        "> when 'true' -> ",
+                        failure_doc.clone(),
+                        " end"
+                    ])
+                } else {
+                    already_bound.insert(id.name.to_string());
+                    let next = self.build_array_arm_body(
+                        array_var,
+                        elements,
+                        start + 1,
+                        continuation,
+                        failure_doc,
+                        already_bound,
+                    )?;
+                    Ok(docvec![
+                        "let ",
+                        Document::String(core_var),
+                        " = call 'beamtalk_message_dispatch':'send'(",
+                        Document::String(array_var.to_string()),
+                        ", 'at:', [",
+                        Document::String(one_based.to_string()),
+                        "]) in ",
+                        next
+                    ])
+                }
             }
-            Pattern::Wildcard(_) => {
-                self.build_array_arm_body(array_var, elements, start + 1, continuation, failure_doc)
-            }
+            Pattern::Wildcard(_) => self.build_array_arm_body(
+                array_var,
+                elements,
+                start + 1,
+                continuation,
+                failure_doc,
+                already_bound,
+            ),
             Pattern::Array {
                 elements: inner_elems,
                 ..
@@ -2009,16 +2065,22 @@ impl CoreErlangGenerator {
                 let nested_var = self.fresh_temp_var("ArrElem");
                 let n_inner = inner_elems.len();
 
-                // Build continuation for elements after this nested array
+                // Build continuation for elements after this nested array.
+                // Use a separate clone so sibling names don't contaminate inner processing
+                // (inner elements are extracted before siblings in execution order).
+                let mut after_bound = already_bound.clone();
                 let after_nested = self.build_array_arm_body(
                     array_var,
                     elements,
                     start + 1,
                     continuation,
                     failure_doc,
+                    &mut after_bound,
                 )?;
 
-                // Build inner element extractions from the nested array variable
+                // Build inner element extractions from the nested array variable.
+                // Uses `already_bound` (without sibling names) so the first inner
+                // occurrence of a name is correctly treated as the primary binding.
                 let inner_elems_clone: Vec<Pattern> = inner_elems.clone();
                 let inner_body = self.build_array_arm_body(
                     &nested_var,
@@ -2026,7 +2088,11 @@ impl CoreErlangGenerator {
                     0,
                     after_nested,
                     failure_doc,
+                    already_bound,
                 )?;
+
+                // Propagate all names (inner + sibling) to the caller.
+                already_bound.extend(after_bound);
 
                 let no_match_size_n = self.fresh_temp_var("NoMatch");
                 let no_match_class_n = self.fresh_temp_var("NoMatch");
@@ -2073,6 +2139,22 @@ impl CoreErlangGenerator {
                 feature: "Unsupported pattern in Array match arm element".to_string(),
                 location: format!("{:?}", elem.span()),
             }),
+        }
+    }
+
+    /// Generates a Core Erlang document for a map pattern key.
+    ///
+    /// Symbol keys emit an atom: `'key'`.
+    /// String keys emit a Core Erlang binary literal via the Document pipeline.
+    fn map_pattern_key_doc(key: &MapPatternKey) -> Document<'static> {
+        match key {
+            MapPatternKey::Symbol(s) => {
+                let key_atom = escape_atom_chars(s.as_str());
+                docvec!["'", Document::String(key_atom), "'"]
+            }
+            MapPatternKey::StringLit(s) => {
+                docvec![Self::binary_string_literal(s.as_str())]
+            }
         }
     }
 
@@ -2137,7 +2219,9 @@ impl CoreErlangGenerator {
             }
             Pattern::Map { pairs, .. } => {
                 // Beamtalk Dictionaries are plain Erlang maps — emit a Core Erlang map pattern.
-                // `#{#k => v}` compiles to `~{ 'k' := V }~` (`:=` is the match-binding form).
+                // `#{#k => v}` compiles to `~{ 'k' := V }~`   (symbol key → atom)
+                // `#{"k" => v}` compiles to `~{ <binary literal for "k"> := V }~` (string key → binary)
+                // `:=` is the Core Erlang match-binding form.
                 if pairs.is_empty() {
                     return Ok(Document::Str("~{}~"));
                 }
@@ -2146,10 +2230,9 @@ impl CoreErlangGenerator {
                     if i > 0 {
                         parts.push(Document::Str(", "));
                     }
-                    let key_atom = escape_atom_chars(pair.key.as_str());
-                    parts.push(Document::Str("'"));
-                    parts.push(Document::String(key_atom));
-                    parts.push(Document::Str("' := "));
+                    let key_doc = Self::map_pattern_key_doc(&pair.key);
+                    parts.push(key_doc);
+                    parts.push(Document::Str(" := "));
                     parts.push(self.generate_pattern(&pair.value)?);
                 }
                 parts.push(Document::Str(" }~"));

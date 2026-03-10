@@ -9,6 +9,7 @@ sealed Object subclass: Set
 
   // Size
   size => @primitive "size"
+
   isEmpty => @primitive "isEmpty"
 
   // Membership
@@ -16,11 +17,14 @@ sealed Object subclass: Set
 
   // Modification (returns new Set)
   add: element => @primitive "add:"
+
   remove: element => @primitive "remove:"
 
   // Set operations (returns new Set)
   union: other => @primitive "union:"
+
   intersection: other => @primitive "intersection:"
+
   difference: other => @primitive "difference:"
 
   // Predicates
@@ -28,8 +32,8 @@ sealed Object subclass: Set
 
   // Conversion
   asList => @primitive "asList"
+
   fromList: list => @primitive "fromList:"
 
   // Iteration
   do: block => @primitive "do:"
-

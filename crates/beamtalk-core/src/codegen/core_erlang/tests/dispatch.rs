@@ -332,6 +332,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 50),
     };
 
@@ -2428,4 +2429,130 @@ fn test_field_at_put_self_no_sync_send() {
         code.contains("'beamtalk_primitive':'send'"),
         "self fieldAt:put: must route through beamtalk_primitive:send. Got:\n{code}"
     );
+}
+
+// --- BT-1270: State-mutation hoisting in block value: apply paths ---
+
+#[test]
+fn test_block_value_keyword_field_assignment_arg_hoisted() {
+    // [:x | x] value: (self.y := 5)
+    //
+    // The field-assignment StateN binding must be hoisted before the
+    // `let _Fun = ... in apply` wrapper, not nested inside it.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.push_scope();
+
+    let field_assignment = Expression::Assignment {
+        target: Box::new(Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "self",
+                Span::new(0, 4),
+            ))),
+            field: Identifier::new("y", Span::new(5, 6)),
+            span: Span::new(0, 6),
+        }),
+        value: Box::new(Expression::Literal(Literal::Integer(5), Span::new(10, 11))),
+        span: Span::new(0, 11),
+    };
+
+    let block_param = BlockParameter {
+        name: "x".into(),
+        span: Span::new(0, 1),
+    };
+    let block = Expression::Block(Block::new(
+        vec![block_param],
+        vec![bare(Expression::Identifier(Identifier::new(
+            "x",
+            Span::new(3, 4),
+        )))],
+        Span::new(0, 5),
+    ));
+
+    let send = Expression::MessageSend {
+        receiver: Box::new(block),
+        selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(0, 6))]),
+        arguments: vec![field_assignment],
+        is_cast: false,
+        span: Span::new(0, 20),
+    };
+
+    let doc = generator.generate_expression(&send).unwrap();
+    let output = doc.to_pretty_string();
+
+    // State binding must appear before the apply, not nested inside it.
+    // _Fun1 = fun_var, _x2 = block param (from receiver codegen), _Val3 = hoisted val.
+    // Receiver is evaluated first, then args are hoisted.
+    assert!(
+        output.contains("let _Val3 = 5 in let State1 = call 'maps':'put'('y', _Val3, State) in"),
+        "State binding should be hoisted before apply. Got:\n{output}"
+    );
+    // The apply argument must be the val var, not the full assignment expression.
+    assert!(
+        output.contains("apply _Fun1 (_Val3)"),
+        "Apply argument should be val var _Val3. Got:\n{output}"
+    );
+    // Receiver must be evaluated before arguments: Fun binding precedes State binding.
+    assert!(
+        output.contains("let _Fun1 = ") && output.find("let _Fun1 = ") < output.find("State1"),
+        "Receiver (_Fun1) must be bound before State1 mutation. Got:\n{output}"
+    );
+
+    generator.pop_scope();
+}
+
+#[test]
+fn test_value_keyword_guard_field_assignment_arg_hoisted() {
+    // someVar value: (self.y := 5)   (unknown receiver — triggers is_function guard)
+    //
+    // The StateN binding must be outside the `let _ValArgN = ...` binding so it
+    // remains in scope after the case expression.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.push_scope();
+
+    let field_assignment = Expression::Assignment {
+        target: Box::new(Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "self",
+                Span::new(0, 4),
+            ))),
+            field: Identifier::new("y", Span::new(5, 6)),
+            span: Span::new(0, 6),
+        }),
+        value: Box::new(Expression::Literal(Literal::Integer(5), Span::new(10, 11))),
+        span: Span::new(0, 11),
+    };
+
+    // Non-block, non-FFI receiver → triggers generate_value_keyword_guard
+    let recv = Expression::Identifier(Identifier::new("someVar", Span::new(0, 7)));
+
+    let send = Expression::MessageSend {
+        receiver: Box::new(recv),
+        selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(0, 6))]),
+        arguments: vec![field_assignment],
+        is_cast: false,
+        span: Span::new(0, 20),
+    };
+
+    let doc = generator.generate_expression(&send).unwrap();
+    let output = doc.to_pretty_string();
+
+    // State binding must be hoisted before the _ValArgN binding.
+    // _ValRecv1 is first, _ValArg2 allocated next (before field_assignment_open),
+    // then _Val3 + State1 from hoisting, then _ValArg2 = _Val3.
+    assert!(
+        output.contains("let _Val3 = 5 in let State1 = call 'maps':'put'('y', _Val3, State) in"),
+        "State binding should be hoisted before _ValArgN binding. Got:\n{output}"
+    );
+    // The _ValArgN should be bound to the val var, not the full assignment expression.
+    assert!(
+        output.contains("let _ValArg2 = _Val3 in"),
+        "_ValArg2 should be bound to _Val3. Got:\n{output}"
+    );
+    // The is_function guard must reference _ValRecv1.
+    assert!(
+        output.contains("call 'erlang':'is_function'(_ValRecv1)"),
+        "Guard should check _ValRecv1. Got:\n{output}"
+    );
+
+    generator.pop_scope();
 }

@@ -3,4 +3,4 @@
 
 // Test async unary message send within a method
 // Returns future from counter increment
-run := [ ^counter increment ]
+run := [^counter increment]

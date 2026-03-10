@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Fixture: keyword message line-breaking rules (BT-1294).
+///
+/// Rules:
+/// - 1 keyword: always inline.
+/// - 2 keywords: width-aware, inline when short.
+/// - 3+ keywords: always break each keyword:arg to its own indented line.
+/// - Block body that renders multiline forces block to break form (no `]]`).
+Object subclass: KeywordBreakExamples
+
+  /// 1 keyword — stays inline.
+  shortIf: flag => flag ifTrue: [^42]
+
+  /// 2 keywords, short — stays inline.
+  twoKeywordShort: dict => dict at: #key ifAbsent: [nil]
+
+  /// 3 keywords — always breaks.
+  threeKeywords: candidates =>
+    CandidateFilter
+      filterEligible: candidates
+      config: self.config
+      running: self.running
+
+  /// 4 keywords — always breaks (real symphony pattern).
+  fourKeywords: stateMap =>
+    CandidateFilter
+      terminatedEntries: self.running
+      stateMap: stateMap
+      activeStates: self.config trackerActiveStates
+      terminalStates: self.config trackerTerminalStates
+
+  /// Block whose body is a multiline keyword send — block uses break form,
+  /// `]` on its own line, no `]]` stacking with outer block closers.
+  andThenExample: resp =>
+    resp
+      andThen: [:r |
+        r ok
+          ifTrue: [
+            data := r bodyAsJson
+            Result ok: data
+          ]
+          ifFalse: [Result error: #http_error]
+      ]

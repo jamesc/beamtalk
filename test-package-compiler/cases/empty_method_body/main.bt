@@ -8,8 +8,8 @@
 Actor subclass: EmptyActor
   state: value = 0
 
+  class classEmpty =>
+
   doNothing =>
 
   getValue => self.value
-
-  class classEmpty =>

@@ -17,7 +17,7 @@ lastName := "Smith"
 fullName := "Name: {firstName} {lastName}"
 
 // Escape sequences in interpolated strings
-escaped := "Literal braces: \{ and \}, variable: {name}"
+escaped := "Literal braces: \{ and }, variable: {name}"
 
 // Unicode in interpolated strings
 emojiVar := "🎉"

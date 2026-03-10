@@ -9,209 +9,372 @@ TestCase subclass: PatternMatchingTest
   testPatternMatchingWithGuards =>
     self assert: (42 match: [_ -> "matched"]) equals: "matched"
     // Match integer literal — first arm
-    self assert: (1 match: [
-      1 -> "one";
-      2 -> "two";
-      _ -> "other"
-    ]) equals: "one"
+    self
+      assert: (1 match: [
+        1 -> "one";
+        2 -> "two";
+        _ -> "other"
+      ])
+      equals: "one"
     // Match integer literal — second arm
-    self assert: (2 match: [
-      1 -> "one";
-      2 -> "two";
-      _ -> "other"
-    ]) equals: "two"
+    self
+      assert: (2 match: [
+        1 -> "one";
+        2 -> "two";
+        _ -> "other"
+      ])
+      equals: "two"
     // Match integer literal — fallthrough to wildcard
-    self assert: (3 match: [
-      1 -> "one";
-      2 -> "two";
-      _ -> "other"
-    ]) equals: "other"
+    self
+      assert: (3 match: [
+        1 -> "one";
+        2 -> "two";
+        _ -> "other"
+      ])
+      equals: "other"
     // Match symbol literal
-    self assert: (#ok match: [
-      #ok -> "success";
-      #error -> "failure";
-      _ -> "unknown"
-    ]) equals: "success"
+    self
+      assert: (#ok match: [
+        #ok -> "success";
+        #error -> "failure";
+        _ -> "unknown"
+      ])
+      equals: "success"
     // ═══════════════════════════════════════════════════════════════════════════
-    self assert: (#error match: [
-      #ok -> "success";
-      #error -> "failure";
-      _ -> "unknown"
-    ]) equals: "failure"
+    self
+      assert: (#error match: [
+        #ok -> "success";
+        #error -> "failure";
+        _ -> "unknown"
+      ])
+      equals: "failure"
     // Match string literal
-    self assert: ("hello" match: [
-      "hello" -> "greeting";
-      _ -> "other"
-    ]) equals: "greeting"
+    self
+      assert: ("hello" match: [
+        "hello" -> "greeting";
+        _ -> "other"
+      ])
+      equals: "greeting"
     // Variable captures the matched value
     self assert: (42 match: [x -> x + 1]) equals: 43
     // Match with guard — positive
-    self assert: (10 match: [
-      x when: [x > 0] -> "positive";
-      _ -> "non-positive"
-    ]) equals: "positive"
+    self
+      assert: (10 match: [
+        x when: [x > 0] -> "positive";
+        _ -> "non-positive"
+      ])
+      equals: "positive"
     // Match with guard — non-positive
-    self assert: (-5 match: [
-      x when: [x > 0] -> "positive";
-      _ -> "non-positive"
-    ]) equals: "non-positive"
+    self
+      assert: (-5 match: [
+        x when: [x > 0] -> "positive";
+        _ -> "non-positive"
+      ])
+      equals: "non-positive"
     // Guard with arithmetic comparison
-    self assert: (42 match: [
-      x when: [x > 100] -> "big";
-      x when: [x > 10] -> "medium";
-      _ -> "small"
-    ]) equals: "medium"
+    self
+      assert: (42 match: [
+        x when: [x > 100] -> "big";
+        x when: [x > 10] -> "medium";
+        _ -> "small"
+      ])
+      equals: "medium"
     // Match on expression result
-    self assert: ((3 + 4) match: [
-      7 -> "correct";
-      _ -> "wrong"
-    ]) equals: "correct"
+    self
+      assert: ((3 + 4) match: [
+        7 -> "correct";
+        _ -> "wrong"
+      ])
+      equals: "correct"
     // Match negative integer
-    self assert: (-1 match: [
-      -1 -> "minus one";
-      0 -> "zero";
-      _ -> "other"
-    ]) equals: "minus one"
+    self
+      assert: (-1 match: [
+        -1 -> "minus one";
+        0 -> "zero";
+        _ -> "other"
+      ])
+      equals: "minus one"
     // ═══════════════════════════════════════════════════════════════════════════
-    self assert: (0 match: [
-      -1 -> "minus one";
-      0 -> "zero";
-      _ -> "other"
-    ]) equals: "zero"
+    self
+      assert: (0 match: [
+        -1 -> "minus one";
+        0 -> "zero";
+        _ -> "other"
+      ])
+      equals: "zero"
 
   testArrayPatternInMatchArm =>
     // BT-1296: Array pattern arms — basic 2-element match
     arr := #[10, 20]
-    self assert: (arr match: [
-      #[h, t] -> h + t;
-      _ -> 0
-    ]) equals: 30
+    self
+      assert: (arr match: [
+        #[h, t] -> h + t;
+        _ -> 0
+      ])
+      equals: 30
     // Array arm fallthrough: subject is not an array
-    self assert: (42 match: [
-      #[a, b] -> a + b;
-      _ -> 0
-    ]) equals: 0
+    self
+      assert: (42 match: [
+        #[a, b] -> a + b;
+        _ -> 0
+      ])
+      equals: 0
     // Array arm fallthrough: subject is a dict (plain map — must not crash on missing key)
-    self assert: (#{#x => 1} match: [
-      #[a, b] -> a + b;
-      _ -> 0
-    ]) equals: 0
+    self
+      assert: (#{#x => 1} match: [
+        #[a, b] -> a + b;
+        _ -> 0
+      ])
+      equals: 0
     // Array arm fallthrough: wrong size
-    self assert: (#[1, 2, 3] match: [
-      #[a, b] -> a + b;
-      _ -> 0
-    ]) equals: 0
+    self
+      assert: (#[1, 2, 3] match: [
+        #[a, b] -> a + b;
+        _ -> 0
+      ])
+      equals: 0
     // Wildcard elements in array pattern
-    self assert: (#[1, 2, 3] match: [
-      #[_, v, _] -> v;
-      _ -> 0
-    ]) equals: 2
+    self
+      assert: (#[1, 2, 3] match: [
+        #[_, v, _] -> v;
+        _ -> 0
+      ])
+      equals: 2
     // Multiple array arms with different sizes
-    self assert: (#[1, 2, 3] match: [
-      #[x] -> "one";
-      #[x, y] -> "two";
-      #[x, y, z] -> "three";
-      _ -> "other"
-    ]) equals: "three"
+    self
+      assert: (#[1, 2, 3] match: [
+        #[x] -> "one";
+        #[x, y] -> "two";
+        #[x, y, z] -> "three";
+        _ -> "other"
+      ])
+      equals: "three"
     // Array arm with guard — positive (exercises guard-success branch)
-    self assert: (#[1, 2] match: [
-      #[x, y] when: [x < y] -> "ascending";
-      _ -> "other"
-    ]) equals: "ascending"
+    self
+      assert: (#[1, 2] match: [
+        #[x, y] when: [x < y] -> "ascending";
+        _ -> "other"
+      ])
+      equals: "ascending"
     // Array arm with guard — negative (exercises guard-fail fallthrough)
-    self assert: (#[2, 1] match: [
-      #[x, y] when: [x < y] -> "ascending";
-      _ -> "other"
-    ]) equals: "other"
+    self
+      assert: (#[2, 1] match: [
+        #[x, y] when: [x < y] -> "ascending";
+        _ -> "other"
+      ])
+      equals: "other"
 
   testMapPatternInMatchArm =>
     // BT-1296: Map/Dict pattern arms
     d := #{#event => "click", #x => 5}
-    self assert: (d match: [
-      #{#event => evName} -> evName;
-      _ -> "unknown"
-    ]) equals: "click"
+    self
+      assert: (d match: [
+        #{#event => evName} -> evName;
+        _ -> "unknown"
+      ])
+      equals: "click"
     // Dict arm fallthrough: key missing
-    self assert: (#{#kind => "x"} match: [
-      #{#event => evName} -> evName;
-      _ -> "unknown"
-    ]) equals: "unknown"
+    self
+      assert: (#{#kind => "x"} match: [
+        #{#event => evName} -> evName;
+        _ -> "unknown"
+      ])
+      equals: "unknown"
     // Dict arm fallthrough: subject is not a map
-    self assert: (42 match: [
-      #{#event => evName} -> evName;
-      _ -> "unknown"
-    ]) equals: "unknown"
+    self
+      assert: (42 match: [
+        #{#event => evName} -> evName;
+        _ -> "unknown"
+      ])
+      equals: "unknown"
     // Multiple key bindings
-    self assert: (#{#a => 1, #b => 2} match: [
-      #{#a => x, #b => y} -> x + y;
-      _ -> 0
-    ]) equals: 3
+    self
+      assert: (#{#a => 1, #b => 2} match: [
+        #{#a => x, #b => y} -> x + y;
+        _ -> 0
+      ])
+      equals: 3
 
   testNestedArrayPatternInMatchArm =>
     // BT-1296: Nested array pattern: #[#[a, b], c] -> ...
     nested := #[#[1, 2], 3]
-    self assert: (nested match: [
-      #[#[a, b], c] -> a + b + c;
-      _ -> 0
-    ]) equals: 6
+    self
+      assert: (nested match: [
+        #[#[a, b], c] -> a + b + c;
+        _ -> 0
+      ])
+      equals: 6
     // Nested array fallthrough: inner wrong size
-    self assert: (#[#[1, 2, 3], 4] match: [
-      #[#[a, b], c] -> a + b + c;
-      _ -> 0
-    ]) equals: 0
+    self
+      assert: (#[#[1, 2, 3], 4] match: [
+        #[#[a, b], c] -> a + b + c;
+        _ -> 0
+      ])
+      equals: 0
+
+  testDuplicateVariableInArrayMatchArm =>
+    // BT-1315: Duplicate variable names act as equality constraints
+    // Adjacent duplicate — equal values
+    self
+      assert: (#[3, 3] match: [
+        #[x, x] -> "equal";
+        _ -> "differ"
+      ])
+      equals: "equal"
+    // Adjacent duplicate — unequal values
+    self
+      assert: (#[1, 2] match: [
+        #[x, x] -> "equal";
+        _ -> "differ"
+      ])
+      equals: "differ"
+    // Non-adjacent duplicate — equal values
+    self
+      assert: (#[5, 9, 5] match: [
+        #[x, y, x] -> "match";
+        _ -> "no match"
+      ])
+      equals: "match"
+    // Non-adjacent duplicate — unequal values
+    self
+      assert: (#[5, 9, 7] match: [
+        #[x, y, x] -> "match";
+        _ -> "no match"
+      ])
+      equals: "no match"
+    // Duplicate mixed with non-duplicate; body uses bound variable
+    self
+      assert: (#[4, 4, 10] match: [
+        #[x, x, z] -> z;
+        _ -> 0
+      ])
+      equals: 10
 
   // BT-1297: Constructor patterns for sealed types (Result ok: / Result error:)
   testConstructorPatternOkArm =>
     // ok arm matched — variable captures the wrapped value
-    self assert: ((Result ok: 42) match: [
-      Result ok: v -> v;
-      Result error: _ -> 0
-    ]) equals: 42
+    self
+      assert: ((Result ok: 42) match: [
+        Result ok: v -> v;
+        Result error: _ -> 0
+      ])
+      equals: 42
 
   testConstructorPatternErrorArm =>
     // error arm matched — variable captures the error reason
-    self assert: ((Result error: #oops) match: [
-      Result ok: _ -> #none;
-      Result error: e -> e
-    ]) equals: #oops
+    self
+      assert: ((Result error: #oops) match: [
+        Result ok: _ -> #none;
+        Result error: e -> e
+      ])
+      equals: #oops
 
   testConstructorPatternWildcardBinding =>
     // Wildcard in value position: arm matches but nothing is bound
-    self assert: ((Result ok: 99) match: [
-      Result ok: _ -> "any ok";
-      Result error: _ -> "any error"
-    ]) equals: "any ok"
+    self
+      assert: ((Result ok: 99) match: [
+        Result ok: _ -> "any ok";
+        Result error: _ -> "any error"
+      ])
+      equals: "any ok"
 
   testConstructorPatternLiteralBinding =>
     // Literal in binding position: arm only matches when value equals literal
-    self assert: ((Result ok: 0) match: [
-      Result ok: 0 -> "zero";
-      Result ok: _ -> "other";
-      Result error: _ -> "err"
-    ]) equals: "zero"
-    self assert: ((Result ok: 1) match: [
-      Result ok: 0 -> "zero";
-      Result ok: _ -> "other";
-      Result error: _ -> "err"
-    ]) equals: "other"
+    self
+      assert: ((Result ok: 0) match: [
+        Result ok: 0 -> "zero";
+        Result ok: _ -> "other";
+        Result error: _ -> "err"
+      ])
+      equals: "zero"
+    self
+      assert: ((Result ok: 1) match: [
+        Result ok: 0 -> "zero";
+        Result ok: _ -> "other";
+        Result error: _ -> "err"
+      ])
+      equals: "other"
 
   testConstructorPatternWithGuard =>
     // when: guard must not be consumed as a constructor keyword (BT-1297 bug fix)
-    self assert: ((Result ok: 5) match: [
-      Result ok: v when: [v > 3] -> "big";
-      Result ok: _ -> "small";
-      Result error: _ -> "err"
-    ]) equals: "big"
-    self assert: ((Result ok: 1) match: [
-      Result ok: v when: [v > 3] -> "big";
-      Result ok: _ -> "small";
-      Result error: _ -> "err"
-    ]) equals: "small"
+    self
+      assert: ((Result ok: 5) match: [
+        Result ok: v when: [v > 3] -> "big";
+        Result ok: _ -> "small";
+        Result error: _ -> "err"
+      ])
+      equals: "big"
+    self
+      assert: ((Result ok: 1) match: [
+        Result ok: v when: [v > 3] -> "big";
+        Result ok: _ -> "small";
+        Result error: _ -> "err"
+      ])
+      equals: "small"
 
   testConstructorPatternNegativeLiteral =>
     // Negative numeric literal in binding position (BT-1297 bug fix)
-    self assert: ((Result ok: -1) match: [
-      Result ok: -1 -> "neg one";
-      Result ok: _ -> "other";
-      Result error: _ -> "err"
-    ]) equals: "neg one"
+    self
+      assert: ((Result ok: -1) match: [
+        Result ok: -1 -> "neg one";
+        Result ok: _ -> "other";
+        Result error: _ -> "err"
+      ])
+      equals: "neg one"
+
+  testStringKeyDictPattern =>
+    // BT-1295: String keys in dict patterns — capture variable
+    d := #{"event" => "click", "x" => 5}
+    self
+      assert: (d match: [
+        #{"event" => evName} -> evName;
+        _ -> "unknown"
+      ])
+      equals: "click"
+    // String-key dict arm fallthrough: key missing
+    self
+      assert: (#{"kind" => "x"} match: [
+        #{"event" => evName} -> evName;
+        _ -> "unknown"
+      ])
+      equals: "unknown"
+    // String-key dict arm fallthrough: subject is not a map
+    self
+      assert: (42 match: [
+        #{"event" => evName} -> evName;
+        _ -> "unknown"
+      ])
+      equals: "unknown"
+    // String-key value equality check
+    self
+      assert: (d match: [
+        #{"event" => "click"} -> "got click";
+        #{"event" => _} -> "other event";
+        _ -> "no event"
+      ])
+      equals: "got click"
+    // Mixed symbol and string keys in one pattern
+    mixed := #{#id => 42, "name" => "alice"}
+    self
+      assert: (mixed match: [
+        #{#id => id, "name" => name} -> name;
+        _ -> "no match"
+      ])
+      equals: "alice"
+    // Multiple string-key bindings
+    resp := #{"status" => "ok", "data" => 99}
+    self
+      assert: (resp match: [
+        #{"status" => status, "data" => data} -> data;
+        _ -> 0
+      ])
+      equals: 99
+    // Negative integer literal value equality check
+    neg := #{"score" => -1}
+    self
+      assert: (neg match: [
+        #{"score" => -1} -> "neg one";
+        #{"score" => _} -> "other";
+        _ -> "no score"
+      ])
+      equals: "neg one"

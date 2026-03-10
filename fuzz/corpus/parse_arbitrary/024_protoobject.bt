@@ -26,7 +26,6 @@
 // Boolean responds to class
 true class
 // => True
-
 false class
 // => False
 
@@ -44,28 +43,24 @@ nil class
 // Integer identity
 42 == 42
 // => true
-
 42 == 43
 // => false
 
 // String identity
 "hello" == "hello"
 // => true
-
 "hello" == "world"
 // => false
 
 // Boolean identity
 true == true
 // => true
-
 true == false
 // => false
 
 // Nil identity
 nil == nil
 // => true
-
 nil == false
 // => false
 
@@ -79,30 +74,25 @@ nil == false
 // Integer inequality
 42 /= 43
 // => true
-
 42 /= 42
 // => false
 
 // String inequality
 "hello" /= "world"
 // => true
-
 "hello" /= "hello"
 // => false
 
 // Boolean inequality
 true /= false
 // => true
-
 true /= true
 // => false
 
 // Nil inequality
 nil /= false
 // => true
-
-nil /= nil
-// => false
+nil /= nil// => false
 
 // ===========================================================================
 // ACTOR IDENTITY TESTS

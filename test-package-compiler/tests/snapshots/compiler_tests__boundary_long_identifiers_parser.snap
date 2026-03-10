@@ -165,22 +165,22 @@ Module {
                             KeywordPart {
                                 keyword: "thisIsAVeryLongKeywordPart:",
                                 span: Span {
-                                    start: 707,
-                                    end: 734,
+                                    start: 702,
+                                    end: 729,
                                 },
                             },
                             KeywordPart {
                                 keyword: "andAnotherVeryLongKeywordPart:",
                                 span: Span {
-                                    start: 747,
-                                    end: 777,
+                                    start: 737,
+                                    end: 767,
                                 },
                             },
                             KeywordPart {
                                 keyword: "andYetAnotherExtremelyLongKeywordPart:",
                                 span: Span {
-                                    start: 789,
-                                    end: 827,
+                                    start: 775,
+                                    end: 813,
                                 },
                             },
                         ],
@@ -190,8 +190,8 @@ Module {
                             Identifier {
                                 name: "value1",
                                 span: Span {
-                                    start: 735,
-                                    end: 741,
+                                    start: 730,
+                                    end: 736,
                                 },
                             },
                         ),
@@ -199,8 +199,8 @@ Module {
                             Identifier {
                                 name: "value2",
                                 span: Span {
-                                    start: 778,
-                                    end: 784,
+                                    start: 768,
+                                    end: 774,
                                 },
                             },
                         ),
@@ -208,8 +208,8 @@ Module {
                             Identifier {
                                 name: "value3",
                                 span: Span {
-                                    start: 828,
-                                    end: 834,
+                                    start: 814,
+                                    end: 820,
                                 },
                             },
                         ),
@@ -217,12 +217,12 @@ Module {
                     is_cast: false,
                     span: Span {
                         start: 672,
-                        end: 834,
+                        end: 820,
                     },
                 },
                 span: Span {
                     start: 662,
-                    end: 834,
+                    end: 820,
                 },
             },
             preceding_blank_line: true,
@@ -233,8 +233,8 @@ Module {
                     Comment {
                         content: "Long identifier in nested context",
                         span: Span {
-                            start: 873,
-                            end: 916,
+                            start: 859,
+                            end: 902,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -247,8 +247,8 @@ Module {
                     Identifier {
                         name: "anotherVeryLongIdentifierForTestingPurposes",
                         span: Span {
-                            start: 873,
-                            end: 916,
+                            start: 859,
+                            end: 902,
                         },
                     },
                 ),
@@ -258,8 +258,8 @@ Module {
                             Identifier {
                                 name: "yetAnotherLongIdentifierName",
                                 span: Span {
-                                    start: 926,
-                                    end: 954,
+                                    start: 907,
+                                    end: 935,
                                 },
                             },
                         ),
@@ -268,8 +268,8 @@ Module {
                                 KeywordPart {
                                     keyword: "at:",
                                     span: Span {
-                                        start: 955,
-                                        end: 958,
+                                        start: 936,
+                                        end: 939,
                                     },
                                 },
                             ],
@@ -279,26 +279,26 @@ Module {
                                 Identifier {
                                     name: "evenMoreLongIdentifierNames",
                                     span: Span {
-                                        start: 968,
-                                        end: 995,
+                                        start: 940,
+                                        end: 967,
                                     },
                                 },
                             ),
                         ],
                         is_cast: false,
                         span: Span {
-                            start: 926,
-                            end: 995,
+                            start: 907,
+                            end: 967,
                         },
                     },
                     span: Span {
-                        start: 920,
-                        end: 997,
+                        start: 906,
+                        end: 968,
                     },
                 },
                 span: Span {
-                    start: 873,
-                    end: 997,
+                    start: 859,
+                    end: 968,
                 },
             },
             preceding_blank_line: true,
@@ -306,7 +306,7 @@ Module {
     ],
     span: Span {
         start: 218,
-        end: 997,
+        end: 968,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

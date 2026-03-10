@@ -35,10 +35,11 @@ keys := person keys
 values := person values
 
 // Iteration over keys and values
-person keysAndValuesDo: [:k :v |
-  Transcript show: k
-  Transcript show: v
-]
+person
+  keysAndValuesDo: [:k :v |
+    Transcript show: k
+    Transcript show: v
+  ]
 
 // Transformation of values
 doubled := #{#x => 10, #y => 20} collect: [:v | v * 2]

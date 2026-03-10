@@ -7,4 +7,5 @@ Actor subclass: Counter
   state: value = 0
 
   increment => self.value := self.value + 1
+
   getValue => ^self.value

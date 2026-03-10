@@ -45,8 +45,8 @@ Module {
                                     Identifier {
                                         name: "self",
                                         span: Span {
-                                            start: 186,
-                                            end: 190,
+                                            start: 187,
+                                            end: 191,
                                         },
                                     },
                                 ),
@@ -56,8 +56,8 @@ Module {
                                 arguments: [],
                                 is_cast: false,
                                 span: Span {
-                                    start: 186,
-                                    end: 213,
+                                    start: 187,
+                                    end: 214,
                                 },
                             },
                             preceding_blank_line: false,
@@ -72,8 +72,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 178,
-                        end: 213,
+                        start: 179,
+                        end: 214,
                     },
                 },
             ],
@@ -112,9 +112,10 @@ Module {
                 trailing: None,
             },
             doc_comment: None,
+            backing_module: None,
             span: Span {
                 start: 145,
-                end: 213,
+                end: 214,
             },
         },
     ],

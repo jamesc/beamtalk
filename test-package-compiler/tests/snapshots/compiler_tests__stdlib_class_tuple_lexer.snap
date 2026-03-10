@@ -10,35 +10,35 @@ Token { kind: Identifier("size"), span: Span { start: 294, end: 298 }, leading_t
 Token { kind: FatArrow, span: Span { start: 299, end: 301 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: AtPrimitive, span: Span { start: 302, end: 312 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: String("size"), span: Span { start: 313, end: 319 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Keyword("at:"), span: Span { start: 322, end: 325 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("index"), span: Span { start: 326, end: 331 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 332, end: 334 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: AtPrimitive, span: Span { start: 335, end: 345 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("at:"), span: Span { start: 346, end: 351 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("isOk"), span: Span { start: 401, end: 405 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Pattern matching for Erlang result types"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 406, end: 408 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: AtPrimitive, span: Span { start: 409, end: 419 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("isOk"), span: Span { start: 420, end: 426 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("isError"), span: Span { start: 429, end: 436 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 437, end: 439 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: AtPrimitive, span: Span { start: 440, end: 450 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("isError"), span: Span { start: 451, end: 460 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("unwrap"), span: Span { start: 480, end: 486 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Unwrapping"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 487, end: 489 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: AtPrimitive, span: Span { start: 490, end: 500 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("unwrap"), span: Span { start: 501, end: 509 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Keyword("unwrapOr:"), span: Span { start: 512, end: 521 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("default"), span: Span { start: 522, end: 529 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 530, end: 532 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: AtPrimitive, span: Span { start: 533, end: 543 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("unwrapOr:"), span: Span { start: 544, end: 555 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Keyword("unwrapOrElse:"), span: Span { start: 558, end: 571 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("block"), span: Span { start: 572, end: 577 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 578, end: 580 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: AtPrimitive, span: Span { start: 581, end: 591 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("unwrapOrElse:"), span: Span { start: 592, end: 607 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("asString"), span: Span { start: 627, end: 635 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Conversion"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 636, end: 638 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: AtPrimitive, span: Span { start: 639, end: 649 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("asString"), span: Span { start: 650, end: 660 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 661, end: 661 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Keyword("at:"), span: Span { start: 323, end: 326 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("index"), span: Span { start: 327, end: 332 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 333, end: 335 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: AtPrimitive, span: Span { start: 336, end: 346 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("at:"), span: Span { start: 347, end: 352 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("isOk"), span: Span { start: 402, end: 406 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Pattern matching for Erlang result types"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 407, end: 409 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: AtPrimitive, span: Span { start: 410, end: 420 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("isOk"), span: Span { start: 421, end: 427 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("isError"), span: Span { start: 431, end: 438 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 439, end: 441 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: AtPrimitive, span: Span { start: 442, end: 452 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("isError"), span: Span { start: 453, end: 462 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("unwrap"), span: Span { start: 482, end: 488 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Unwrapping"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 489, end: 491 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: AtPrimitive, span: Span { start: 492, end: 502 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("unwrap"), span: Span { start: 503, end: 511 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("unwrapOr:"), span: Span { start: 515, end: 524 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("default"), span: Span { start: 525, end: 532 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 533, end: 535 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: AtPrimitive, span: Span { start: 536, end: 546 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("unwrapOr:"), span: Span { start: 547, end: 558 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("unwrapOrElse:"), span: Span { start: 562, end: 575 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("block"), span: Span { start: 576, end: 581 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 582, end: 584 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: AtPrimitive, span: Span { start: 585, end: 595 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("unwrapOrElse:"), span: Span { start: 596, end: 611 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("asString"), span: Span { start: 631, end: 639 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Conversion"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 640, end: 642 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: AtPrimitive, span: Span { start: 643, end: 653 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("asString"), span: Span { start: 654, end: 664 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 665, end: 665 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

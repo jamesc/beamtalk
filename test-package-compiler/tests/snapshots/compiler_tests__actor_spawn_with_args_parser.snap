@@ -13,8 +13,8 @@ Module {
                     Comment {
                         content: "Copyright 2026 James Casey",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -22,8 +22,8 @@ Module {
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -31,8 +31,8 @@ Module {
                     Comment {
                         content: "Test actor spawn with initialization arguments",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -40,8 +40,8 @@ Module {
                     Comment {
                         content: "Counter spawnWith: passes initialization arguments to init/1",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -49,8 +49,8 @@ Module {
                     Comment {
                         content: "which merges them with default field values.",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -58,8 +58,8 @@ Module {
                     Comment {
                         content: "",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -67,8 +67,8 @@ Module {
                     Comment {
                         content: "Once map literals are supported, use:",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -76,8 +76,8 @@ Module {
                     Comment {
                         content: "  counter := Counter spawnWith: #{value => 10}",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -85,8 +85,8 @@ Module {
                     Comment {
                         content: "",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -94,8 +94,8 @@ Module {
                     Comment {
                         content: "For now, test with a simple value:",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -108,8 +108,8 @@ Module {
                     Identifier {
                         name: "value",
                         span: Span {
-                            start: 368,
-                            end: 373,
+                            start: 367,
+                            end: 372,
                         },
                     },
                 ),
@@ -118,13 +118,13 @@ Module {
                         0,
                     ),
                     Span {
-                        start: 377,
-                        end: 378,
+                        start: 376,
+                        end: 377,
                     },
                 ),
                 span: Span {
-                    start: 368,
-                    end: 378,
+                    start: 367,
+                    end: 377,
                 },
             },
             preceding_blank_line: false,
@@ -139,8 +139,8 @@ Module {
                     Identifier {
                         name: "increment",
                         span: Span {
-                            start: 380,
-                            end: 389,
+                            start: 378,
+                            end: 387,
                         },
                     },
                 ),
@@ -159,21 +159,21 @@ Module {
                                             Identifier {
                                                 name: "self",
                                                 span: Span {
-                                                    start: 395,
-                                                    end: 399,
+                                                    start: 392,
+                                                    end: 396,
                                                 },
                                             },
                                         ),
                                         field: Identifier {
                                             name: "value",
                                             span: Span {
-                                                start: 400,
-                                                end: 405,
+                                                start: 397,
+                                                end: 402,
                                             },
                                         },
                                         span: Span {
-                                            start: 395,
-                                            end: 405,
+                                            start: 392,
+                                            end: 402,
                                         },
                                     },
                                     value: MessageSend {
@@ -182,21 +182,21 @@ Module {
                                                 Identifier {
                                                     name: "self",
                                                     span: Span {
-                                                        start: 409,
-                                                        end: 413,
+                                                        start: 406,
+                                                        end: 410,
                                                     },
                                                 },
                                             ),
                                             field: Identifier {
                                                 name: "value",
                                                 span: Span {
-                                                    start: 414,
-                                                    end: 419,
+                                                    start: 411,
+                                                    end: 416,
                                                 },
                                             },
                                             span: Span {
-                                                start: 409,
-                                                end: 419,
+                                                start: 406,
+                                                end: 416,
                                             },
                                         },
                                         selector: Binary(
@@ -208,34 +208,34 @@ Module {
                                                     1,
                                                 ),
                                                 Span {
-                                                    start: 422,
-                                                    end: 423,
+                                                    start: 419,
+                                                    end: 420,
                                                 },
                                             ),
                                         ],
                                         is_cast: false,
                                         span: Span {
-                                            start: 409,
-                                            end: 423,
+                                            start: 406,
+                                            end: 420,
                                         },
                                     },
                                     span: Span {
-                                        start: 395,
-                                        end: 423,
+                                        start: 392,
+                                        end: 420,
                                     },
                                 },
                                 preceding_blank_line: false,
                             },
                         ],
                         span: Span {
-                            start: 393,
-                            end: 425,
+                            start: 391,
+                            end: 421,
                         },
                     },
                 ),
                 span: Span {
-                    start: 380,
-                    end: 425,
+                    start: 378,
+                    end: 421,
                 },
             },
             preceding_blank_line: false,
@@ -246,8 +246,8 @@ Module {
                     Comment {
                         content: "Spawn with default values (value = 0)",
                         span: Span {
-                            start: 469,
-                            end: 477,
+                            start: 464,
+                            end: 472,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -260,8 +260,8 @@ Module {
                     Identifier {
                         name: "counter1",
                         span: Span {
-                            start: 469,
-                            end: 477,
+                            start: 464,
+                            end: 472,
                         },
                     },
                 ),
@@ -270,13 +270,13 @@ Module {
                         name: Identifier {
                             name: "Counter",
                             span: Span {
-                                start: 481,
-                                end: 488,
+                                start: 476,
+                                end: 483,
                             },
                         },
                         span: Span {
-                            start: 481,
-                            end: 488,
+                            start: 476,
+                            end: 483,
                         },
                     },
                     selector: Unary(
@@ -285,38 +285,38 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 481,
-                        end: 494,
+                        start: 476,
+                        end: 489,
                     },
                 },
                 span: Span {
-                    start: 469,
-                    end: 494,
+                    start: 464,
+                    end: 489,
                 },
             },
             preceding_blank_line: true,
         },
     ],
     span: Span {
-        start: 368,
-        end: 494,
+        start: 367,
+        end: 489,
     },
     file_leading_comments: [],
     file_trailing_comments: [
         Comment {
             content: "TODO: When map literal syntax #{key => value} is implemented:",
             span: Span {
-                start: 610,
-                end: 610,
+                start: 604,
+                end: 604,
             },
             kind: Line,
-            preceding_blank_line: true,
+            preceding_blank_line: false,
         },
         Comment {
             content: "counter2 := Counter spawnWith: #{value => 10}",
             span: Span {
-                start: 610,
-                end: 610,
+                start: 604,
+                end: 604,
             },
             kind: Line,
             preceding_blank_line: false,

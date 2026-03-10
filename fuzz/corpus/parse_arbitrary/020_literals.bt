@@ -38,7 +38,7 @@
 
 // Empty string
 ""
-// => 
+// =>
 
 // String with punctuation
 "Hello, World!"
@@ -98,6 +98,4 @@ true
 // => true
 
 // False literal
-false
-// => false
-
+false// => false

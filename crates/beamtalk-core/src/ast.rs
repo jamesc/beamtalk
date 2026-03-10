@@ -361,6 +361,11 @@ pub struct ClassDefinition {
     pub comments: CommentAttachment,
     /// Doc comment attached to this class (`///` lines).
     pub doc_comment: Option<String>,
+    /// The Erlang module that backs this class (ADR 0056, `native: module`).
+    ///
+    /// Set by the parser when `native: <module>` appears on the `subclass:` declaration.
+    /// `None` for all ordinary Beamtalk classes.
+    pub backing_module: Option<String>,
     /// Source location of the entire class definition.
     pub span: Span,
 }
@@ -390,6 +395,7 @@ impl ClassDefinition {
             class_variables: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span,
         }
     }
@@ -422,6 +428,7 @@ impl ClassDefinition {
             class_variables: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span,
         }
     }
@@ -1535,13 +1542,35 @@ impl Pattern {
     }
 }
 
+/// The key in a map destructuring pattern.
+///
+/// Distinguishes between symbol keys (`#key`) and string keys (`"key"`),
+/// since they compile to different Core Erlang representations (atom vs binary).
+#[derive(Debug, Clone, PartialEq)]
+pub enum MapPatternKey {
+    /// Symbol key: `#key` — compiled as an Erlang atom.
+    Symbol(EcoString),
+    /// String key: `"key"` — compiled as an Erlang binary.
+    StringLit(EcoString),
+}
+
+impl MapPatternKey {
+    /// Returns the inner string value regardless of key kind.
+    pub fn as_str(&self) -> &str {
+        match self {
+            MapPatternKey::Symbol(s) | MapPatternKey::StringLit(s) => s.as_str(),
+        }
+    }
+}
+
 /// A key-value binding pair in a map destructuring pattern.
 ///
-/// Example: in `#{#sid => sid}`, the pair has key `sid` and value `Pattern::Variable("sid")`.
+/// Example: in `#{#sid => sid}`, the pair has key `Symbol("sid")` and value `Pattern::Variable("sid")`.
+/// Example: in `#{"event" => ev}`, the pair has key `StringLit("event")` and value `Pattern::Variable("ev")`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapPatternPair {
-    /// The map key (always a symbol atom).
-    pub key: EcoString,
+    /// The map key — either a symbol atom or a string literal.
+    pub key: MapPatternKey,
     /// The pattern to bind the value to.
     pub value: Pattern,
     /// Source location.
@@ -2311,5 +2340,44 @@ mod tests {
             Span::new(0, 20),
         );
         assert_eq!(object_class.class_kind, ClassKind::Object);
+    }
+
+    #[test]
+    fn class_definition_backing_module_defaults_to_none() {
+        let class = ClassDefinition::new(
+            Identifier::new("Counter", Span::new(0, 7)),
+            Identifier::new("Actor", Span::new(0, 5)),
+            vec![],
+            vec![],
+            Span::new(0, 20),
+        );
+        assert_eq!(class.backing_module, None);
+    }
+
+    #[test]
+    fn class_definition_with_modifiers_backing_module_defaults_to_none() {
+        let class = ClassDefinition::with_modifiers(
+            Identifier::new("Counter", Span::new(0, 7)),
+            Some(Identifier::new("Actor", Span::new(0, 5))),
+            false,
+            false,
+            vec![],
+            vec![],
+            Span::new(0, 20),
+        );
+        assert_eq!(class.backing_module, None);
+    }
+
+    #[test]
+    fn class_definition_backing_module_can_be_set() {
+        let mut class = ClassDefinition::new(
+            Identifier::new("MyActor", Span::new(0, 7)),
+            Identifier::new("Actor", Span::new(0, 5)),
+            vec![],
+            vec![],
+            Span::new(0, 20),
+        );
+        class.backing_module = Some("my_erlang_module".to_string());
+        assert_eq!(class.backing_module, Some("my_erlang_module".to_string()));
     }
 }

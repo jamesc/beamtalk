@@ -869,3 +869,35 @@ fn test_match_array_pattern_uses_maps_get_with_default_not_map_get() {
         "Must NOT use erlang:map_get/2 — throws badkey when '$beamtalk_class' absent. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_match_array_pattern_duplicate_variable_emits_equality_check() {
+    // BT-1315: `arr match: [#[x, x] -> "equal"; _ -> "differ"]`
+    // The second occurrence of `x` must emit an `erlang:=:=` equality check
+    // rather than a bare re-binding.
+    let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[x, x] -> \"equal\";\n      _ -> \"differ\"\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for duplicate-variable array pattern:\n{code}");
+
+    // Must emit a strict-equality call for the duplicate variable.
+    assert!(
+        code.contains("call 'erlang':'=:='("),
+        "Should emit erlang:=:= equality check for duplicate variable. Got:\n{code}"
+    );
+    // The primary binding `let X = ... at: [1]` should appear exactly once.
+    let x_at_1 = code.matches("'at:', [1]").count();
+    assert!(
+        x_at_1 >= 1,
+        "Should extract first element for primary binding. Got:\n{code}"
+    );
+    // A second extraction for position 2 must also be present (into a temp var).
+    let x_at_2 = code.matches("'at:', [2]").count();
+    assert!(
+        x_at_2 >= 1,
+        "Should extract second element into temp for equality check. Got:\n{code}"
+    );
+}

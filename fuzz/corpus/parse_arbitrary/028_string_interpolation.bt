@@ -6,8 +6,8 @@
 // ===========================================================================
 // IMPLEMENTATION STATUS
 // ===========================================================================
-// 
-// Double-quoted string interpolation with {expression} syntax is NOT YET 
+//
+// Double-quoted string interpolation with {expression} syntax is NOT YET
 // IMPLEMENTED in Beamtalk. This file serves as placeholder documentation.
 //
 // Planned syntax:
@@ -33,5 +33,4 @@ count := 42
 // => 42
 
 // Verify variable persistence
-name
-// => World
+name// => World

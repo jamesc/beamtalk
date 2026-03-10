@@ -21,11 +21,12 @@ TestCase subclass: HTTPClientTest
 
   testSpawnWithAllOptions =>
     // All three state fields are accepted by spawnWith:
-    client := HTTPClient spawnWith: #{
-      #baseUrl => "https://httpbin.org",
-      #headers => #(#("X-Custom", "value")),
-      #timeout => 10000
-    }
+    client := HTTPClient
+      spawnWith: #{
+        #baseUrl => "https://httpbin.org",
+        #headers => #(#("X-Custom", "value")),
+        #timeout => 10000
+      }
     self assert: client isAlive
     self assert: client stop equals: #ok
 

@@ -46,13 +46,13 @@ Module {
                                         name: Identifier {
                                             name: "Transcript",
                                             span: Span {
-                                                start: 162,
-                                                end: 172,
+                                                start: 163,
+                                                end: 173,
                                             },
                                         },
                                         span: Span {
-                                            start: 162,
-                                            end: 172,
+                                            start: 163,
+                                            end: 173,
                                         },
                                     },
                                     selector: Keyword(
@@ -60,8 +60,8 @@ Module {
                                             KeywordPart {
                                                 keyword: "show:",
                                                 span: Span {
-                                                    start: 173,
-                                                    end: 178,
+                                                    start: 174,
+                                                    end: 179,
                                                 },
                                             },
                                         ],
@@ -72,15 +72,15 @@ Module {
                                                 "Hello",
                                             ),
                                             Span {
-                                                start: 179,
-                                                end: 186,
+                                                start: 180,
+                                                end: 187,
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 162,
-                                        end: 186,
+                                        start: 163,
+                                        end: 187,
                                     },
                                 },
                                 messages: [
@@ -90,8 +90,8 @@ Module {
                                         ),
                                         arguments: [],
                                         span: Span {
-                                            start: 188,
-                                            end: 190,
+                                            start: 189,
+                                            end: 191,
                                         },
                                     },
                                     CascadeMessage {
@@ -100,8 +100,8 @@ Module {
                                                 KeywordPart {
                                                     keyword: "show:",
                                                     span: Span {
-                                                        start: 192,
-                                                        end: 197,
+                                                        start: 193,
+                                                        end: 198,
                                                     },
                                                 },
                                             ],
@@ -112,20 +112,20 @@ Module {
                                                     "World",
                                                 ),
                                                 Span {
-                                                    start: 198,
-                                                    end: 205,
+                                                    start: 199,
+                                                    end: 206,
                                                 },
                                             ),
                                         ],
                                         span: Span {
-                                            start: 192,
-                                            end: 205,
+                                            start: 193,
+                                            end: 206,
                                         },
                                     },
                                 ],
                                 span: Span {
-                                    start: 162,
-                                    end: 205,
+                                    start: 163,
+                                    end: 206,
                                 },
                             },
                             preceding_blank_line: false,
@@ -140,8 +140,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 155,
-                        end: 205,
+                        start: 156,
+                        end: 206,
                     },
                 },
             ],
@@ -171,9 +171,10 @@ Module {
                 trailing: None,
             },
             doc_comment: None,
+            backing_module: None,
             span: Span {
                 start: 130,
-                end: 205,
+                end: 206,
             },
         },
     ],
@@ -181,7 +182,7 @@ Module {
     expressions: [],
     span: Span {
         start: 130,
-        end: 205,
+        end: 206,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

@@ -3,4 +3,4 @@
 
 // Test await on a future
 // Await blocks until future resolves
-waitFor := [ ^future await ]
+waitFor := [^future await]

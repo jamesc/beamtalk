@@ -8,8 +8,8 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 // Test isNil / notNil
-result1 := nil isNil       // => true
-result2 := nil notNil      // => false
+result1 := nil isNil  // => true
+result2 := nil notNil  // => false
 
 // ═══════════════════════════════════════════════════════════════════════
 // Control Flow Methods
@@ -37,7 +37,7 @@ result8 := nil deepCopy
 result9 := nil shallowCopy
 
 // Test printString
-result10 := nil printString   // => "nil"
+result10 := nil printString  // => "nil"
 
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Cases: Chaining and Composition
@@ -63,8 +63,8 @@ result14 := nil ifNil: [nil]  // => nil
 result15 := nil =:= nil  // => true
 
 // nil inequality with other values
-result16 := nil =:= 0    // => false
-result17 := nil =:= ""   // => false
+result16 := nil =:= 0  // => false
+result17 := nil =:= ""  // => false
 result18 := nil =:= false  // => false (nil is not false!)
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -72,10 +72,10 @@ result18 := nil =:= false  // => false (nil is not false!)
 // ═══════════════════════════════════════════════════════════════════════
 
 // Combining isNil with boolean logic
-result19 := nil isNil and: [true]   // => true
-result20 := nil isNil or: [false]   // => true (short-circuits)
+result19 := nil isNil and: [true]  // => true
+result20 := nil isNil or: [false]  // => true (short-circuits)
 result21 := nil notNil and: [true]  // => false (short-circuits)
-result22 := nil notNil or: [true]   // => true
+result22 := nil notNil or: [true]  // => true
 
 // Using isNil result in ifTrue:ifFalse:
 result23 := nil isNil ifTrue: ["is nil"] ifFalse: ["not nil"]  // => "is nil"
@@ -88,15 +88,17 @@ result23 := nil isNil ifTrue: ["is nil"] ifFalse: ["not nil"]  // => "is nil"
 result24 := nil ifNil: [1 + 2 * 3]  // => 7
 
 // ifNotNil: block should NOT be evaluated
-result25 := nil ifNotNil: [:val | val + 100 * 2]  // => nil (block not evaluated)
+result25 := nil ifNotNil: [:val |
+  val + 100 * 2
+]  // => nil (block not evaluated)
 
 // ═══════════════════════════════════════════════════════════════════════
-// Edge Cases: Multiple Consecutive Checks  
+// Edge Cases: Multiple Consecutive Checks
 // ═══════════════════════════════════════════════════════════════════════
 
 // Multiple isNil checks in sequence (should all be consistent)
 check1 := nil isNil
-check2 := nil isNil  
+check2 := nil isNil
 check3 := nil isNil
 result26 := check1 and: [check2 and: [check3]]  // => true
 

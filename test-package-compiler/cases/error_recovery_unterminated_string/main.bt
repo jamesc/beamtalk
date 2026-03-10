@@ -11,7 +11,7 @@ str1 := "unterminated string
 x := 42
 
 // Another unterminated string
-str2 := "another unclosed
+str2 := " another unclosed
 
 // More code
 y := x + 1
