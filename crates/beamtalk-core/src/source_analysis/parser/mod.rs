@@ -2538,48 +2538,44 @@ mod tests {
     }
 
     #[test]
-    fn parse_map_with_bare_identifier_keys() {
-        // BT-591: Bare identifiers before `=>` in map literals become implicit symbols
-        let module = parse_ok("#{name => \"Alice\", age => 30}");
-        assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0].expression {
-            Expression::MapLiteral { pairs, .. } => {
-                assert_eq!(pairs.len(), 2);
-                // Bare `name` becomes Symbol("name")
-                assert!(
-                    matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "name")
-                );
-                assert!(
-                    matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "Alice")
-                );
-                // Bare `age` becomes Symbol("age")
-                assert!(
-                    matches!(&pairs[1].key, Expression::Literal(Literal::Symbol(s), _) if s == "age")
-                );
-                assert!(matches!(
-                    &pairs[1].value,
-                    Expression::Literal(Literal::Integer(30), _)
-                ));
-            }
-            _ => panic!("Expected MapLiteral"),
-        }
+    fn parse_map_with_bare_identifier_keys_is_error() {
+        // BT-1240: Bare identifiers before `=>` in map literals are now a compile error
+        let (module, diags) = parse(lex_with_eof("#{name => \"Alice\", age => 30}"));
+        // Two errors: one for `name`, one for `age`
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 2, "expected 2 errors, got: {errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|d| d.message.contains("bare word 'name'") && d.message.contains("'#name'")),
+            "expected suggestion for 'name': {errors:?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|d| d.message.contains("bare word 'age'") && d.message.contains("'#age'")),
+            "expected suggestion for 'age': {errors:?}"
+        );
+        // No valid module expression — keys produced Error nodes
+        let _ = module;
     }
 
     #[test]
     fn parse_map_with_mixed_keys() {
-        // BT-591: Mixed bare identifier and explicit symbol keys
-        let module = parse_ok("#{x => 1, #y => 2}");
+        // Explicit symbol and string keys are both valid
+        let module = parse_ok("#{#x => 1, \"y\" => 2}");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
-                // Bare `x` becomes Symbol("x")
                 assert!(
                     matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "x")
                 );
-                // Explicit `#y` is also Symbol("y")
                 assert!(
-                    matches!(&pairs[1].key, Expression::Literal(Literal::Symbol(s), _) if s == "y")
+                    matches!(&pairs[1].key, Expression::Literal(Literal::String(s), _) if s == "y")
                 );
             }
             _ => panic!("Expected MapLiteral"),
@@ -5096,7 +5092,7 @@ Actor subclass: Counter
 
     #[test]
     fn standalone_method_definition_class_side() {
-        let module = parse_ok("Counter class >> withInitial: n => self spawnWith: #{value => n}");
+        let module = parse_ok("Counter class >> withInitial: n => self spawnWith: #{#value => n}");
         assert_eq!(module.method_definitions.len(), 1);
         let method_def = &module.method_definitions[0];
         assert_eq!(method_def.class_name.name.as_str(), "Counter");
