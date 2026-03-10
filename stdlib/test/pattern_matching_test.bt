@@ -9,96 +9,128 @@ TestCase subclass: PatternMatchingTest
   testPatternMatchingWithGuards =>
     self assert: (42 match: [_ -> "matched"]) equals: "matched"
     // Match integer literal — first arm
-    self
-      assert: (1 match: [
-        1 -> "one";
-        2 -> "two";
-        _ -> "other"
-      ])
-      equals: "one"
+    self assert: (1 match: [
+      1 -> "one";
+      2 -> "two";
+      _ -> "other"
+    ]) equals: "one"
     // Match integer literal — second arm
-    self
-      assert: (2 match: [
-        1 -> "one";
-        2 -> "two";
-        _ -> "other"
-      ])
-      equals: "two"
+    self assert: (2 match: [
+      1 -> "one";
+      2 -> "two";
+      _ -> "other"
+    ]) equals: "two"
     // Match integer literal — fallthrough to wildcard
-    self
-      assert: (3 match: [
-        1 -> "one";
-        2 -> "two";
-        _ -> "other"
-      ])
-      equals: "other"
+    self assert: (3 match: [
+      1 -> "one";
+      2 -> "two";
+      _ -> "other"
+    ]) equals: "other"
     // Match symbol literal
-    self
-      assert: (#ok match: [
-        #ok -> "success";
-        #error -> "failure";
-        _ -> "unknown"
-      ])
-      equals: "success"
+    self assert: (#ok match: [
+      #ok -> "success";
+      #error -> "failure";
+      _ -> "unknown"
+    ]) equals: "success"
     // ═══════════════════════════════════════════════════════════════════════════
-    self
-      assert: (#error match: [
-        #ok -> "success";
-        #error -> "failure";
-        _ -> "unknown"
-      ])
-      equals: "failure"
+    self assert: (#error match: [
+      #ok -> "success";
+      #error -> "failure";
+      _ -> "unknown"
+    ]) equals: "failure"
     // Match string literal
-    self
-      assert: ("hello" match: [
-        "hello" -> "greeting";
-        _ -> "other"
-      ])
-      equals: "greeting"
+    self assert: ("hello" match: [
+      "hello" -> "greeting";
+      _ -> "other"
+    ]) equals: "greeting"
     // Variable captures the matched value
     self assert: (42 match: [x -> x + 1]) equals: 43
     // Match with guard — positive
-    self
-      assert: (10 match: [
-        x when: [x > 0] -> "positive";
-        _ -> "non-positive"
-      ])
-      equals: "positive"
+    self assert: (10 match: [
+      x when: [x > 0] -> "positive";
+      _ -> "non-positive"
+    ]) equals: "positive"
     // Match with guard — non-positive
-    self
-      assert: (-5 match: [
-        x when: [x > 0] -> "positive";
-        _ -> "non-positive"
-      ])
-      equals: "non-positive"
+    self assert: (-5 match: [
+      x when: [x > 0] -> "positive";
+      _ -> "non-positive"
+    ]) equals: "non-positive"
     // Guard with arithmetic comparison
-    self
-      assert: (42 match: [
-        x when: [x > 100] -> "big";
-        x when: [x > 10] -> "medium";
-        _ -> "small"
-      ])
-      equals: "medium"
+    self assert: (42 match: [
+      x when: [x > 100] -> "big";
+      x when: [x > 10] -> "medium";
+      _ -> "small"
+    ]) equals: "medium"
     // Match on expression result
-    self
-      assert: ((3 + 4) match: [
-        7 -> "correct";
-        _ -> "wrong"
-      ])
-      equals: "correct"
+    self assert: ((3 + 4) match: [
+      7 -> "correct";
+      _ -> "wrong"
+    ]) equals: "correct"
     // Match negative integer
-    self
-      assert: (-1 match: [
-        -1 -> "minus one";
-        0 -> "zero";
-        _ -> "other"
-      ])
-      equals: "minus one"
+    self assert: (-1 match: [
+      -1 -> "minus one";
+      0 -> "zero";
+      _ -> "other"
+    ]) equals: "minus one"
     // ═══════════════════════════════════════════════════════════════════════════
-    self
-      assert: (0 match: [
-        -1 -> "minus one";
-        0 -> "zero";
-        _ -> "other"
-      ])
-      equals: "zero"
+    self assert: (0 match: [
+      -1 -> "minus one";
+      0 -> "zero";
+      _ -> "other"
+    ]) equals: "zero"
+
+  // BT-1297: Constructor patterns for sealed types (Result ok: / Result error:)
+  testConstructorPatternOkArm =>
+    // ok arm matched — variable captures the wrapped value
+    self assert: ((Result ok: 42) match: [
+      Result ok: v -> v;
+      Result error: _ -> 0
+    ]) equals: 42
+
+  testConstructorPatternErrorArm =>
+    // error arm matched — variable captures the error reason
+    self assert: ((Result error: #oops) match: [
+      Result ok: _ -> #none;
+      Result error: e -> e
+    ]) equals: #oops
+
+  testConstructorPatternWildcardBinding =>
+    // Wildcard in value position: arm matches but nothing is bound
+    self assert: ((Result ok: 99) match: [
+      Result ok: _ -> "any ok";
+      Result error: _ -> "any error"
+    ]) equals: "any ok"
+
+  testConstructorPatternLiteralBinding =>
+    // Literal in binding position: arm only matches when value equals literal
+    self assert: ((Result ok: 0) match: [
+      Result ok: 0 -> "zero";
+      Result ok: _ -> "other";
+      Result error: _ -> "err"
+    ]) equals: "zero"
+    self assert: ((Result ok: 1) match: [
+      Result ok: 0 -> "zero";
+      Result ok: _ -> "other";
+      Result error: _ -> "err"
+    ]) equals: "other"
+
+  testConstructorPatternWithGuard =>
+    // when: guard must not be consumed as a constructor keyword (BT-1297 bug fix)
+    self assert: ((Result ok: 5) match: [
+      Result ok: v when: [v > 3] -> "big";
+      Result ok: _ -> "small";
+      Result error: _ -> "err"
+    ]) equals: "big"
+    self assert: ((Result ok: 1) match: [
+      Result ok: v when: [v > 3] -> "big";
+      Result ok: _ -> "small";
+      Result error: _ -> "err"
+    ]) equals: "small"
+
+  testConstructorPatternNegativeLiteral =>
+    // Negative numeric literal in binding position (BT-1297 bug fix)
+    self assert: ((Result ok: -1) match: [
+      Result ok: -1 -> "neg one";
+      Result ok: _ -> "other";
+      Result error: _ -> "err"
+    ]) equals: "neg one"

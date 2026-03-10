@@ -8,20 +8,20 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 // Test isNil / notNil on integers
-result1 := 42 isNil       // => false
-result2 := 42 notNil      // => true
-result3 := 0 isNil        // => false (zero is not nil!)
+result1 := 42 isNil  // => false
+result2 := 42 notNil  // => true
+result3 := 0 isNil  // => false (zero is not nil!)
 
 // Test isNil / notNil on strings
-result4 := "hello" isNil   // => false
+result4 := "hello" isNil  // => false
 result5 := "hello" notNil  // => true
-result6 := "" isNil        // => false (empty string is not nil!)
+result6 := "" isNil  // => false (empty string is not nil!)
 
 // Test isNil / notNil on booleans
-result7 := true isNil      // => false
-result8 := true notNil     // => true
-result9 := false isNil     // => false (false is not nil!)
-result10 := false notNil   // => true
+result7 := true isNil  // => false
+result8 := true notNil  // => true
+result9 := false isNil  // => false (false is not nil!)
+result10 := false notNil  // => true
 
 // ═══════════════════════════════════════════════════════════════════════
 // Control Flow Methods (Non-Nil Objects)
@@ -34,7 +34,9 @@ result11 := 42 ifNil: ["default"]  // => 42
 result12 := 42 ifNotNil: [:val | val + 1]  // => 43
 
 // Test ifNil:ifNotNil: evaluates notNilBlock with receiver
-result13 := "hello" ifNil: ["was nil"] ifNotNil: [:val | val uppercase]  // => "HELLO"
+result13 := "hello" ifNil: [
+  "was nil"
+] ifNotNil: [:val | val uppercase]  // => "HELLO"
 
 // Test ifNotNil:ifNil: (reversed order) evaluates notNilBlock with receiver
 result14 := 10 ifNotNil: [:val | val * 2] ifNil: [0]  // => 20
@@ -58,7 +60,9 @@ result17 := 5 ifNotNil: [:n | (n * 2) + 3]  // => 13
 result18 := (42 ifNotNil: [:v | v * 2]) + 10  // => 94
 
 // Nested ifNotNil: - both evaluate
-result19 := 10 ifNotNil: [:outer | outer ifNotNil: [:inner | inner + 5]]  // => 15
+result19 := 10 ifNotNil: [:outer |
+  outer ifNotNil: [:inner | inner + 5]
+]  // => 15
 
 // ifNil: on non-nil returns self, can chain
 result20 := (100 ifNil: [0]) + 50  // => 150
@@ -68,19 +72,21 @@ result20 := (100 ifNil: [0]) + 50  // => 150
 // ═══════════════════════════════════════════════════════════════════════
 
 // Combining notNil with boolean logic
-result21 := 42 notNil and: [true]   // => true
+result21 := 42 notNil and: [true]  // => true
 result22 := "test" isNil or: [false]  // => false
 
 // Using notNil result in ifTrue:ifFalse:
-result23 := 100 notNil ifTrue: ["is not nil"] ifFalse: ["is nil"]  // => "is not nil"
+result23 := 100 notNil ifTrue: [
+  "is not nil"
+] ifFalse: ["is nil"]  // => "is not nil"
 
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Cases: Different Object Types
 // ═══════════════════════════════════════════════════════════════════════
 
 // Blocks are not nil
-result24 := [42] isNil       // => false
-result25 := [:x | x] isNil   // => false
+result24 := [42] isNil  // => false
+result25 := [:x | x] isNil  // => false
 
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Cases: ifNil: Should NOT Evaluate Block
@@ -105,8 +111,12 @@ value2 := 10
 result29 := value2 ifNotNil: [:v | v * 3]  // => 30
 
 // Compare with nil's behavior (for contrast)
-result30 := nil ifNil: ["nil case"] ifNotNil: [:v | "not nil case"]  // => "nil case"
-result31 := 42 ifNil: ["nil case"] ifNotNil: [:v | "not nil case"]   // => "not nil case"
+result30 := nil ifNil: [
+  "nil case"
+] ifNotNil: [:v | "not nil case"]  // => "nil case"
+result31 := 42 ifNil: [
+  "nil case"
+] ifNotNil: [:v | "not nil case"]  // => "not nil case"
 
 // ═══════════════════════════════════════════════════════════════════════
 // Edge Cases: Return Value Verification
@@ -124,7 +134,9 @@ result33 := (100 ifNil: [0]) =:= 100  // => true
 
 // Safe access pattern with ifNotNil:
 userName := "Alice"
-greeting := userName ifNotNil: [:name | "Hello, " + name + "!"]  // => "Hello, Alice!"
+greeting := userName ifNotNil: [:name |
+  "Hello, " + name + "!"
+]  // => "Hello, Alice!"
 
 // Default value pattern with ifNil:
 userInput := 42

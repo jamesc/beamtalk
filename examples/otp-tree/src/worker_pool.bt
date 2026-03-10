@@ -7,4 +7,5 @@
 // affect the others or the rest of the tree.
 
 DynamicSupervisor subclass: WorkerPool
+
   class childClass => TaskWorker

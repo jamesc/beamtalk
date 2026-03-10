@@ -67,11 +67,9 @@ TestCase subclass: YamlTest
     })) unwrap at: "items") equals: #(1, 2, 3)
     // Sequence containing a map (via round-trip)
     @expect type
-    self
-      assert: (((Yaml parse: (Yaml generate: #(#{
-        "x" => 1
-      }, #{"x" => 2}))) unwrap at: 1) at: "x")
-      equals: 1
+    self assert: (((Yaml parse: (Yaml generate: #(#{
+      "x" => 1
+    }, #{"x" => 2}))) unwrap at: 1) at: "x") equals: 1
 
   testParseAllSingleDocument =>
     // parseAll: with a single document returns a Result ok: list of size 1
@@ -119,11 +117,9 @@ TestCase subclass: YamlTest
     })) unwrap at: "name") equals: "Ada"
     // Round-trip nested structures
     @expect type
-    self
-      assert: (((Yaml parse: (Yaml generate: #{
-        "user" => #{"age" => 36}
-      })) unwrap at: "user") at: "age")
-      equals: 36
+    self assert: (((Yaml parse: (Yaml generate: #{
+      "user" => #{"age" => 36}
+    })) unwrap at: "user") at: "age") equals: 36
     // Round-trip empty dict
     @expect type
     self assert: (Yaml parse: (Yaml generate: #{})) unwrap size equals: 0

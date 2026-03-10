@@ -12,5 +12,7 @@
 // so `beamtalk run` starts it automatically as an OTP application.
 
 Supervisor subclass: AppSupervisor
+
   class strategy -> Symbol => #oneForOne
+
   class children => #(EventLogger, WorkerPool)

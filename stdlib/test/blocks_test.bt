@@ -21,12 +21,7 @@ TestCase subclass: BlocksTest
     // Block with subtraction
     self assert: ([:a :b | a - b] value: 10 value: 3) equals: 7
     // Block with three arguments
-    self
-      assert: ([:x :y :z | x + y + z]
-        value: 1
-        value: 2
-        value: 3)
-      equals: 6
+    self assert: ([:x :y :z | x + y + z] value: 1 value: 2 value: 3) equals: 6
     // Nested blocks - outer returns inner block that captures x
     self assert: ([[:x | [:y | x + y]] value: 10] value value: 5) equals: 15
     // Higher-order block (makeAdder pattern)

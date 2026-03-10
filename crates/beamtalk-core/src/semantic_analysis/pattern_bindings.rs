@@ -115,6 +115,13 @@ fn extract_pattern_bindings_impl(
             }
         }
 
+        // Constructor patterns: extract bindings from each keyword argument
+        Pattern::Constructor { keywords, .. } => {
+            for (_, binding) in keywords {
+                extract_pattern_bindings_impl(binding, bindings, seen, diagnostics);
+            }
+        }
+
         // Wildcards and literals don't bind variables
         Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
     }

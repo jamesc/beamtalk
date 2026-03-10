@@ -29,4 +29,3 @@ TestCase subclass: SupervisorConfigTest
 
   testTaskWorkerSupervisionPolicy =>
     self assert: TaskWorker supervisionPolicy equals: #transient
-

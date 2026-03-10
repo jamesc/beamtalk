@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1297: Actor fixture for testing constructor pattern matching in Actor methods.
+// Verifies that match: with Result ok:/error: patterns compiles and runs correctly
+// inside Actor methods (with state mutations after the match: expression).
+
+Actor subclass: ResultMatchActor
+  state: lastValue = 0
+  state: errorCount = 0
+
+  // Use match: to extract value, then mutate state based on the result tag
+  process: result =>
+    extracted := result match: [
+      Result ok: v -> v;
+      Result error: _ -> -1
+    ]
+    result isError ifTrue: [
+      self.errorCount := self.errorCount + 1
+    ] ifFalse: [self.lastValue := extracted]
+    self.lastValue
+
+  getLastValue => self.lastValue
+
+  getErrorCount => self.errorCount

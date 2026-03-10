@@ -20,4 +20,3 @@ TestCase subclass: TaskWorkerTest
   testProcessZeroCrashes =>
     worker := TaskWorker spawn
     self should: [worker process: 0] raise: #user_error
-

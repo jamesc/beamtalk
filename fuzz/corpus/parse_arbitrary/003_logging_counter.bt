@@ -12,10 +12,10 @@
 //   > :load examples/logging_counter.bt
 
 Counter subclass: LoggingCounter
-  
+
   // Override increment to add logging before delegating to superclass
   // The "super" keyword calls Counter's increment method
-  increment => 
+  increment =>
     // TODO: Add actual logging when we have IO/logging support
     // For now, just delegate to super
     super increment

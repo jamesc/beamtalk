@@ -15,15 +15,11 @@ Actor subclass: Account
 
   withdraw: amount =>
     amount < 0 ifTrue: [self error: "Amount must be non-negative"]
-    self.balance < amount
-      ifTrue: [
-        self
-          error: "Insufficient funds (balance: "
-            ++ self.balance printString
-            ++ ", requested: "
-            ++ amount printString
-            ++ ")"
-      ]
+    self.balance < amount ifTrue: [self error: "Insufficient funds (balance: "
+        ++ self.balance printString
+        ++ ", requested: "
+        ++ amount printString
+        ++ ")"]
     self.balance := self.balance - amount
     ^self.balance
 

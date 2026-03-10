@@ -46,7 +46,6 @@
 // Basic test to verify spawn and class work
 c := Counter spawn
 // => _
-
 c class
 // => Counter
 
@@ -54,9 +53,7 @@ c class
 // Auto-await: REPL automatically awaits actor message futures
 c increment
 // => 1
-
-c getValue
-// => 1
+c getValue// => 1
 
 // ===========================================================================
 // IMPLEMENTATION NOTES
@@ -76,4 +73,3 @@ c getValue
 //
 // The super_dispatch protocol and class registry work correctly.
 // The remaining issue is inherited state fields (BT-211).
-

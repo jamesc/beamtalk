@@ -20,24 +20,15 @@ TestCase subclass: CountedLoopsTcoTest
 
   testToByDoLargeRange =>
     // to:by:do: over 100 000 values — verifies TCO
-    1
-      to: 100000
-      by: 1
-      do: [:_ | ]
+    1 to: 100000 by: 1 do: [:_ | ]
     self assert: true equals: true
 
   testToByDoNegativeStep =>
     // to:by:do: with negative step — verifies TCO
-    100000
-      to: 1
-      by: -1
-      do: [:_ | ]
+    100000 to: 1 by: -1 do: [:_ | ]
     self assert: true equals: true
 
   testToByDoZeroStepIsNoop =>
     // to:by:do: with zero step — condition never true, must return immediately
-    1
-      to: 100000
-      by: 0
-      do: [:_ | ]
+    1 to: 100000 by: 0 do: [:_ | ]
     self assert: true equals: true

@@ -9,7 +9,7 @@
 //! Codegen consumes it via hash-map lookup instead of re-deriving facts
 //! inline at every call site (BT-1288).
 
-use crate::ast::{Expression, MessageSelector, Module};
+use crate::ast::{Expression, MessageSelector, MethodKind, Module};
 use crate::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};
 use crate::source_analysis::Span;
 use std::collections::{HashMap, HashSet};
@@ -37,6 +37,47 @@ pub struct SyncEnv {
     pub sync_vars: HashSet<String>,
 }
 
+/// Pre-computed facts for a single class definition.
+///
+/// Populated by [`compute_semantic_facts`] and stored in [`SemanticFacts::class_facts`].
+/// Turns O(n) method scans in codegen into O(1) hash-map lookups.
+#[derive(Debug, Clone, Default)]
+pub struct ClassFacts {
+    /// Whether the class has any primary instance method.
+    pub has_primary_method: bool,
+    /// Whether the class has any selector-based `@primitive` instance method.
+    ///
+    /// A method is "primitive" when its body is a single quoted `@primitive` expression
+    /// (e.g. `@primitive "show:"`).  Unquoted structural intrinsics are excluded.
+    pub has_primitive_instance_methods: bool,
+    /// Instance methods indexed by selector name → index into `class.methods`.
+    pub instance_methods_by_selector: HashMap<String, usize>,
+    /// Class methods indexed by selector name → index into `class.class_methods`.
+    pub class_methods_by_selector: HashMap<String, usize>,
+}
+
+impl ClassFacts {
+    /// Returns `true` if the class has an instance method with the given selector.
+    pub fn has_instance_method(&self, selector: &str) -> bool {
+        self.instance_methods_by_selector.contains_key(selector)
+    }
+
+    /// Returns `true` if the class has a class method with the given selector.
+    pub fn has_class_method(&self, selector: &str) -> bool {
+        self.class_methods_by_selector.contains_key(selector)
+    }
+
+    /// Returns the index of the instance method with the given selector into `class.methods`.
+    pub fn instance_method_index(&self, selector: &str) -> Option<usize> {
+        self.instance_methods_by_selector.get(selector).copied()
+    }
+
+    /// Returns the index of the class method with the given selector into `class.class_methods`.
+    pub fn class_method_index(&self, selector: &str) -> Option<usize> {
+        self.class_methods_by_selector.get(selector).copied()
+    }
+}
+
 /// Pre-computed semantic facts for a module, produced before code generation.
 ///
 /// Built by [`compute_semantic_facts`] and consumed by [`CoreErlangGenerator`] via
@@ -50,12 +91,19 @@ pub struct SemanticFacts {
     /// Sync variable environment for every method body, keyed by method definition span.
     /// Contains the set of method parameters that are provably non-future.
     pub sync_envs: HashMap<Span, SyncEnv>,
+    /// Per-class method index, keyed by class name.
+    pub class_facts: HashMap<String, ClassFacts>,
 }
 
 impl SemanticFacts {
     /// Returns the block profile for the given span, or `None` if not found.
     pub fn block_profile(&self, span: &Span) -> Option<&BlockProfile> {
         self.block_profiles.get(span)
+    }
+
+    /// Returns the pre-computed facts for the class with the given name, or `None`.
+    pub fn class_facts(&self, class_name: &str) -> Option<&ClassFacts> {
+        self.class_facts.get(class_name)
     }
 
     /// Returns the dispatch kind for the given span, or `DispatchKind::Unknown`.
@@ -79,6 +127,34 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
     // Process module-level expressions
     for stmt in &module.expressions {
         collect_expression_facts(&stmt.expression, &mut facts);
+    }
+
+    // Compute per-class method index facts
+    for class in &module.classes {
+        let mut cf = ClassFacts::default();
+        for (i, method) in class.methods.iter().enumerate() {
+            cf.instance_methods_by_selector
+                .insert(method.selector.name().to_string(), i);
+            if method.kind == MethodKind::Primary {
+                cf.has_primary_method = true;
+            }
+            if method.body.len() == 1
+                && matches!(
+                    &method.body[0].expression,
+                    Expression::Primitive {
+                        is_quoted: true,
+                        ..
+                    }
+                )
+            {
+                cf.has_primitive_instance_methods = true;
+            }
+        }
+        for (i, method) in class.class_methods.iter().enumerate() {
+            cf.class_methods_by_selector
+                .insert(method.selector.name().to_string(), i);
+        }
+        facts.class_facts.insert(class.name.name.to_string(), cf);
     }
 
     // Process class methods
@@ -140,7 +216,7 @@ fn collect_expression_facts(expr: &Expression, facts: &mut SemanticFacts) {
             span,
             ..
         } => {
-            // Classify this message send
+            // Classify this message send.
             let kind = classify_dispatch(receiver, selector, *is_cast);
             facts.dispatch_kinds.insert(*span, kind);
             // Recurse

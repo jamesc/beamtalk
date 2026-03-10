@@ -46,9 +46,4 @@ TestCase subclass: BlockEvaluationTest
     twoArg := [:a :b | a + b]
     self assert: (twoArg value: 4 value: 5) equals: 9
     threeArg := [:a :b :c | a * b + c]
-    self
-      assert: (threeArg
-        value: 2
-        value: 3
-        value: 1)
-      equals: 7
+    self assert: (threeArg value: 2 value: 3 value: 1) equals: 7

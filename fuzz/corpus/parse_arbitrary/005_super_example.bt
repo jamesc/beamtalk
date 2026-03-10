@@ -5,11 +5,10 @@
 
 Actor subclass: Counter
   state: value = 0
-  
-  increment => self.value := self.value + 1
-  
-  getValue => self.value
 
+  increment => self.value := self.value + 1
+
+  getValue => self.value
 Counter subclass: LoggingCounter
-  
+
   increment => super increment

@@ -7,11 +7,9 @@ TestCase subclass: FileStreamTest
 
   testFileLinesBasicReading =>
     self assert: (File lines: "test/fixtures/stream_test.txt") isOk
-    self
-      assert: (File open: "test/fixtures/stream_test.txt" do: [:h |
-        h lines asList size
-      ]) unwrap
-      equals: 3
+    self assert: (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h lines asList size
+    ]) unwrap equals: 3
     self assert: (File lines: "test/fixtures/stream_single.txt") isOk
     self assert: (File lines: "test/fixtures/stream_no_trailing.txt") isOk
 
@@ -28,51 +26,37 @@ TestCase subclass: FileStreamTest
 
   testFileOpenDoBlockScopedHandle =>
     // Read lines through handle
-    self
-      assert: (File open: "test/fixtures/stream_test.txt" do: [:handle |
-        handle lines asList
-      ]) unwrap
-      equals: #("line one", "line two", "line three")
+    self assert: (File open: "test/fixtures/stream_test.txt" do: [:handle |
+      handle lines asList
+    ]) unwrap equals: #("line one", "line two", "line three")
     // Take lines through handle
-    self
-      assert: (File open: "test/fixtures/stream_test.txt" do: [:handle |
-        handle lines take: 1
-      ]) unwrap
-      equals: #("line one")
+    self assert: (File open: "test/fixtures/stream_test.txt" do: [:handle |
+      handle lines take: 1
+    ]) unwrap equals: #("line one")
     // Pipeline through handle
-    self
-      assert: (File open: "test/fixtures/stream_test.txt" do: [:handle |
-        (handle lines select: [:l | l includesSubstring: "two"]) asList
-      ]) unwrap
-      equals: #("line two")
+    self assert: (File open: "test/fixtures/stream_test.txt" do: [:handle |
+      (handle lines select: [:l | l includesSubstring: "two"]) asList
+    ]) unwrap equals: #("line two")
     // Block returns result
-    self
-      assert: (File open: "test/fixtures/stream_test.txt" do: [:handle |
-        handle lines inject: 0 into: [:count :line | count + 1]
-      ]) unwrap
-      equals: 3
+    self assert: (File open: "test/fixtures/stream_test.txt" do: [:handle |
+      handle lines inject: 0 into: [:count :line | count + 1]
+    ]) unwrap equals: 3
     // Empty file through handle
-    self
-      assert: (File open: "test/fixtures/stream_empty.txt" do: [:handle |
-        handle lines asList
-      ]) unwrap
-      equals: #()
+    self assert: (File open: "test/fixtures/stream_empty.txt" do: [:handle |
+      handle lines asList
+    ]) unwrap equals: #()
 
   testLazyEvaluationConstantMemory =>
     // Lazy take: reads only N lines from a large file; count with inject:into:
-    self
-      assert: (File open: "test/fixtures/stream_large.txt" do: [:h |
-        (h lines take: 3) inject: 0 into: [:count :_ | count + 1]
-      ]) unwrap
-      equals: 3
+    self assert: (File open: "test/fixtures/stream_large.txt" do: [:h |
+      (h lines take: 3) inject: 0 into: [:count :_ | count + 1]
+    ]) unwrap equals: 3
 
   testDoSideEffects =>
     // do: iterates all lines; verify count via inject:into:
-    self
-      assert: (File open: "test/fixtures/stream_test.txt" do: [:h |
-        h lines inject: 0 into: [:count :line | count + 1]
-      ]) unwrap
-      equals: 3
+    self assert: (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h lines inject: 0 into: [:count :line | count + 1]
+    ]) unwrap equals: 3
 
   testPrintstringStreamDescription =>
     // Stream printString returns a non-empty description

@@ -113,11 +113,11 @@ sealed Value subclass: Result
   /// (Result error: #x) value  // => Exception: Cannot access 'value'...
   /// ```
   sealed value -> Object =>
-    self.isOk
-      ifTrue: [self.okValue]
-      ifFalse: [
-        Exception new signal: "Cannot access 'value' on Result error — use valueOr:, ifOk:ifError:, or unwrap"
-      ]
+    self.isOk ifTrue: [
+      self.okValue
+    ] ifFalse: [
+      Exception new signal: "Cannot access 'value' on Result error — use valueOr:, ifOk:ifError:, or unwrap"
+    ]
 
   /// The error reason. Raises if this is an ok Result.
   ///
@@ -129,11 +129,9 @@ sealed Value subclass: Result
   /// (Result ok: 42) error     // => Exception: Cannot access 'error'...
   /// ```
   sealed error -> Object =>
-    self.isOk
-      ifTrue: [
-        Exception new signal: "Cannot access 'error' on Result ok — use ifOk:ifError: or mapError:"
-      ]
-      ifFalse: [self.errReason]
+    self.isOk ifTrue: [
+      Exception new signal: "Cannot access 'error' on Result ok — use ifOk:ifError: or mapError:"
+    ] ifFalse: [self.errReason]
 
   // ===== Instance Methods — Safe Extractors =====
 
@@ -209,6 +207,21 @@ sealed Value subclass: Result
     self.isOk ifTrue: [
       self
     ] ifFalse: [Result error: (block value: self.errReason)]
+
+  /// Evaluate a block with the error reason if this is an error; return self if ok.
+  ///
+  /// Use at the end of an `andThen:`/`map:` chain as a shared terminal error handler.
+  /// The error case is handled by the block; the ok case is passed through unchanged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) ifError: [:e | 0]             // => Result ok: 42
+  /// (Result error: #oops) ifError: [:e | e]        // => #oops
+  /// chain := (Result ok: 1) andThen: [:v | Result error: #fail].
+  /// chain ifError: [:_ | "handled"]                // => "handled"
+  /// ```
+  sealed ifError: block -> Object =>
+    self.isOk ifTrue: [self] ifFalse: [block value: self.errReason]
 
   // ===== Instance Methods — Pattern Matching =====
 

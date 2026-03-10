@@ -156,18 +156,14 @@ TestCase subclass: HttpTest
 
   // ===== HTTPClient class-side — request:url:options: =====
   testClassRequestGetReturns200 =>
-    resp := (HTTPClient
-      request: #get
-      url: self.baseUrl ++ "/get"
-      options: #{}) unwrap
+    resp := (HTTPClient request: #get url: self.baseUrl ++ "/get" options: #{}) unwrap
     @expect type
     self assert: resp status equals: 200
 
   testClassRequestPostWithBodyOption =>
-    resp := (HTTPClient
-      request: #post
-      url: self.baseUrl ++ "/post"
-      options: #{#body => "payload"}) unwrap
+    resp := (HTTPClient request: #post url: self.baseUrl ++ "/post" options: #{
+      #body => "payload"
+    }) unwrap
     @expect type
     self assert: resp status equals: 200
     @expect type
@@ -223,10 +219,9 @@ TestCase subclass: HttpTest
 
   // ===== Custom headers =====
   testCustomHeaderSentInRequest =>
-    resp := (HTTPClient
-      request: #get
-      url: self.baseUrl ++ "/echo-headers"
-      options: #{#headers => #(#("x-test-key", "test-value"))}) unwrap
+    resp := (HTTPClient request: #get url: self.baseUrl ++ "/echo-headers" options: #{
+      #headers => #(#("x-test-key", "test-value"))
+    }) unwrap
     @expect type
     self assert: resp status equals: 200
     @expect type
@@ -276,10 +271,9 @@ TestCase subclass: HttpTest
   // ===== Error cases =====
   testConnectionRefusedReturnsHttpError =>
     // Use a short timeout so gun fails fast
-    result := HTTPClient
-      request: #get
-      url: "http://localhost:1/get"
-      options: #{#timeout => 2000}
+    result := HTTPClient request: #get url: "http://localhost:1/get" options: #{
+      #timeout => 2000
+    }
     self deny: result isOk
 
   testInvalidUrlSchemeReturnsHttpError =>

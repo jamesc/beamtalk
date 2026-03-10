@@ -805,13 +805,14 @@ fn unparse_message_send(
             //   parenthesized 3-keyword send that itself breaks).
             // Otherwise use the compact inline form (1-2 keywords, width-aware).
             //
-            // `any_multiline` is only checked for 1–2 keyword messages; for 3+
-            // the result is always break regardless, so we skip the check to
-            // avoid re-unparsing every argument just for the predicate.
-            let always_break = parts.len() >= 3 || arguments.iter().any(|arg| {
-                block_renders_multiline(arg)
-                    || unparse_expression(arg).to_pretty_string().contains('\n')
-            });
+            // For 3+ keywords, short-circuit to avoid re-unparsing every argument
+            // just for the `any_multiline` predicate (it doesn't matter since
+            // `parts.len() >= 3` guarantees a break regardless).
+            let always_break = parts.len() >= 3
+                || arguments.iter().any(|arg| {
+                    block_renders_multiline(arg)
+                        || unparse_expression(arg).to_pretty_string().contains('\n')
+                });
 
             if always_break {
                 let mut kw_docs: Vec<Document<'static>> = Vec::new();
@@ -1165,6 +1166,18 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
                 .collect();
             let joined = join_docs(pair_docs, ", ");
             docvec!["#{", joined, "}"]
+        }
+        Pattern::Constructor {
+            class, keywords, ..
+        } => {
+            let mut parts: Vec<Document<'static>> = vec![Document::String(class.name.to_string())];
+            for (kw, binding) in keywords {
+                parts.push(Document::Str(" "));
+                parts.push(Document::String(kw.to_string()));
+                parts.push(Document::Str(" "));
+                parts.push(unparse_pattern(binding));
+            }
+            Document::Vec(parts)
         }
     }
 }

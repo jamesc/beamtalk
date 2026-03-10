@@ -17,10 +17,7 @@ TestCase subclass: ReactiveSubprocessTest
   testStdoutLinesPushedToNotify =>
     self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
-    proc := (ReactiveSubprocess
-      open: "/bin/sh"
-      args: #("-c", "printf 'alpha\nbeta\ngamma\n'")
-      notify: delegate) unwrap
+    proc := (ReactiveSubprocess open: "/bin/sh" args: #("-c", "printf 'alpha\nbeta\ngamma\n'") notify: delegate) unwrap
     // Wait for exit
     self waitForExit: delegate from: proc
     self assert: delegate stdoutLines equals: #("alpha", "beta", "gamma")
@@ -31,10 +28,7 @@ TestCase subclass: ReactiveSubprocessTest
   testStderrLinesPushedToNotify =>
     self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
-    proc := (ReactiveSubprocess
-      open: "/bin/sh"
-      args: #("-c", "printf 'x\ny\nz\n' >&2")
-      notify: delegate) unwrap
+    proc := (ReactiveSubprocess open: "/bin/sh" args: #("-c", "printf 'x\ny\nz\n' >&2") notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: delegate stderrLines equals: #("x", "y", "z")
     self assert: delegate stdoutLines equals: #()
@@ -45,10 +39,7 @@ TestCase subclass: ReactiveSubprocessTest
   testExitCodePushedToNotify =>
     self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
-    proc := (ReactiveSubprocess
-      open: "/bin/true"
-      args: #()
-      notify: delegate) unwrap
+    proc := (ReactiveSubprocess open: "/bin/true" args: #() notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: delegate exitCode equals: 0
     self assert: delegate stop equals: #ok
@@ -58,10 +49,7 @@ TestCase subclass: ReactiveSubprocessTest
   testPartialLineFlushedOnExit =>
     self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
-    proc := (ReactiveSubprocess
-      open: "/bin/sh"
-      args: #("-c", "printf hello")
-      notify: delegate) unwrap
+    proc := (ReactiveSubprocess open: "/bin/sh" args: #("-c", "printf hello") notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: delegate stdoutLines equals: #("hello")
     self assert: delegate stop equals: #ok
@@ -71,10 +59,7 @@ TestCase subclass: ReactiveSubprocessTest
   testStdoutAndStderrIndependent =>
     self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
-    proc := (ReactiveSubprocess
-      open: "/bin/sh"
-      args: #("-c", "echo out; echo err >&2")
-      notify: delegate) unwrap
+    proc := (ReactiveSubprocess open: "/bin/sh" args: #("-c", "echo out; echo err >&2") notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: delegate stdoutLines equals: #("out")
     self assert: delegate stderrLines equals: #("err")
@@ -85,10 +70,7 @@ TestCase subclass: ReactiveSubprocessTest
   testWriteLineDeliversThroughCat =>
     self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
-    proc := (ReactiveSubprocess
-      open: "/bin/cat"
-      args: #()
-      notify: delegate) unwrap
+    proc := (ReactiveSubprocess open: "/bin/cat" args: #() notify: delegate) unwrap
     @expect type
     proc writeLine: "hello"
     // Poll up to 500 ms (50 × 10 ms) for cat to echo back
@@ -105,10 +87,7 @@ TestCase subclass: ReactiveSubprocessTest
   testExitCodeNilWhileRunning =>
     self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
-    proc := (ReactiveSubprocess
-      open: "/bin/sleep"
-      args: #("10")
-      notify: delegate) unwrap
+    proc := (ReactiveSubprocess open: "/bin/sleep" args: #("10") notify: delegate) unwrap
     @expect type
     self assert: proc exitCode equals: nil
     @expect type
@@ -120,10 +99,7 @@ TestCase subclass: ReactiveSubprocessTest
   testCloseIsIdempotent =>
     self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
-    proc := (ReactiveSubprocess
-      open: "/bin/cat"
-      args: #()
-      notify: delegate) unwrap
+    proc := (ReactiveSubprocess open: "/bin/cat" args: #() notify: delegate) unwrap
     @expect type
     self assert: proc close equals: nil
     @expect type
@@ -136,12 +112,9 @@ TestCase subclass: ReactiveSubprocessTest
     self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
     // Print the env var and the working directory to verify both are passed through
-    proc := (ReactiveSubprocess
-      open: "/bin/sh"
-      args: #("-c", "echo $BT_TEST_SEED; pwd")
-      env: #{"BT_TEST_SEED" => "hello1187"}
-      dir: "/tmp"
-      notify: delegate) unwrap
+    proc := (ReactiveSubprocess open: "/bin/sh" args: #("-c", "echo $BT_TEST_SEED; pwd") env: #{
+      "BT_TEST_SEED" => "hello1187"
+    } dir: "/tmp" notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: (delegate stdoutLines includes: "hello1187")
     self assert: (delegate stdoutLines includes: "/tmp")

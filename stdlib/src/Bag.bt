@@ -87,15 +87,15 @@ Collection subclass: Bag
   /// ```
   remove: element :: Object -> Bag =>
     current := self occurrencesOf: element
-    current =:= 0
-      ifTrue: [self]
-      ifFalse: [
-        current =:= 1 ifTrue: [
-          Bag new: #{#counts => (self.counts removeKey: element)}
-        ] ifFalse: [
-          Bag new: #{#counts => (self.counts at: element put: current - 1)}
-        ]
+    current =:= 0 ifTrue: [
+      self
+    ] ifFalse: [
+      current =:= 1 ifTrue: [
+        Bag new: #{#counts => (self.counts removeKey: element)}
+      ] ifFalse: [
+        Bag new: #{#counts => (self.counts at: element put: current - 1)}
       ]
+    ]
 
   /// Iterate over each element once per occurrence.
   ///

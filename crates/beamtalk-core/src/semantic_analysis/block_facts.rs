@@ -351,6 +351,12 @@ fn collect_pattern_bindings(
             }
         }
 
+        Pattern::Constructor { keywords, .. } => {
+            for (_, binding) in keywords {
+                collect_pattern_bindings(binding, analysis, ctx);
+            }
+        }
+
         // Leaf patterns have no ordering constraints or size expressions.
         // Delegate to the canonical semantic analysis extractor.
         Pattern::Variable(_) | Pattern::Wildcard(..) | Pattern::Literal(..) => {

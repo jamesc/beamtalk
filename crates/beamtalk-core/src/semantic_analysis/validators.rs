@@ -708,6 +708,18 @@ fn is_self_receiver(expr: &Expression) -> bool {
     }
 }
 
+/// Returns `true` if this selector spawns a block in a separate BEAM process,
+/// meaning self-sends inside the block are safe for Actor classes (BT-1301).
+///
+/// `Timer after:do:` and `Timer every:do:` execute their block argument in a
+/// separate process via `erlang:send_after` / `timer:apply_interval`.  A
+/// `self someMethod` call from inside such a block is a regular `gen_server`
+/// call *to* the actor — it cannot re-enter the actor's own call-stack, so
+/// the `calling_self` deadlock mechanism does not apply.
+fn is_timer_spawn_selector(selector: &str) -> bool {
+    matches!(selector, "after:do:" | "every:do:")
+}
+
 /// Searches an expression tree for a `MessageSend` or `Cascade` whose
 /// immediate receiver is `self`.
 ///
@@ -715,6 +727,9 @@ fn is_self_receiver(expr: &Expression) -> bool {
 /// can deadlock when called from inside a collection HOF block.
 /// `FieldAccess { receiver: self }` (`self.field`) compiles to `maps:get` /
 /// `maps:put` — a direct in-process map operation — and is safe.
+///
+/// Block arguments of Timer spawn calls (`after:do:`, `every:do:`) are skipped:
+/// they run in a separate BEAM process and self-sends there are always safe.
 fn find_self_message_send(expr: &Expression) -> Option<Span> {
     match expr {
         Expression::MessageSend { receiver, span, .. }
@@ -724,6 +739,27 @@ fn find_self_message_send(expr: &Expression) -> Option<Span> {
             }
         }
         _ => {}
+    }
+    // Timer after:do: / every:do: run their block in a separate process —
+    // skip the block argument so we don't flag safe self-sends (BT-1301).
+    // The receiver is NOT skipped: `(self getTimer) after:do:` still warns
+    // because `self getTimer` is a real calling_self dispatch in the HOF.
+    if let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        ..
+    } = expr
+    {
+        if is_timer_spawn_selector(selector.name().as_str()) {
+            return std::iter::once(receiver.as_ref())
+                .chain(
+                    arguments
+                        .iter()
+                        .filter(|a| !matches!(a, Expression::Block(_))),
+                )
+                .find_map(find_self_message_send);
+        }
     }
     child_expressions(expr)
         .into_iter()
@@ -2277,6 +2313,118 @@ mod tests {
             diagnostics.len(),
             1,
             "Expected 1 hint for actual self message send in collect:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Hint);
+    }
+
+    // ── BT-1301: Timer block self-capture false-positive tests ───────────────
+
+    /// `Timer after:do:` with `self` in the block — no hint (separate process).
+    #[test]
+    fn self_in_timer_after_do_block_no_hint() {
+        let src = "Actor subclass: Worker\n  run => Timer after: 0 do: [self doWork]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hint for self in Timer after:do: block (separate process), got: {diagnostics:?}"
+        );
+    }
+
+    /// `Timer every:do:` with `self` in the block — no hint (separate process).
+    #[test]
+    fn self_in_timer_every_do_block_no_hint() {
+        let src = "Actor subclass: Worker\n  run => Timer every: 100 do: [self tick]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hint for self in Timer every:do: block (separate process), got: {diagnostics:?}"
+        );
+    }
+
+    /// `Timer after:do:` block nested inside a collection HOF — no hint (Timer
+    /// runs in a separate process even when scheduled from a HOF iteration).
+    #[test]
+    fn self_in_timer_block_nested_in_hof_no_hint() {
+        let src = "Actor subclass: Worker\n  process: items => items do: [:x | Timer after: 0 do: [self handle: x]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hint for self in Timer block inside do: (Timer runs separately), got: {diagnostics:?}"
+        );
+    }
+
+    /// Cast (`!`) variant: `Timer after:do:` with `self someMethod!` — no hint.
+    #[test]
+    fn self_cast_in_timer_block_no_hint() {
+        let src = "Actor subclass: Worker\n  run => Timer after: 0 do: [self doWork!]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hint for self cast in Timer after:do: block, got: {diagnostics:?}"
+        );
+    }
+
+    /// A direct `self` call inside a collection HOF still fires even when a Timer
+    /// is also present — only the Timer block is safe, not sibling direct self-sends.
+    #[test]
+    fn direct_self_in_hof_with_timer_still_hints() {
+        let src = "Actor subclass: Worker\n  process: items => items do: [:x | self log: x. Timer after: 0 do: [self handle: x]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 hint for direct self send in do: block alongside Timer, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Hint);
+    }
+
+    /// `self` in the *receiver* of a timer call inside a HOF still warns —
+    /// e.g. `(self getTimer) after: 0 do: [block]` — the receiver goes through
+    /// `calling_self` dispatch in the HOF and is NOT safe.
+    #[test]
+    fn self_in_timer_receiver_inside_hof_still_hints() {
+        let src = "Actor subclass: Worker\n  process: items => items do: [:x | (self getTimer) after: 0 do: [x doSomething]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 hint for self in Timer receiver inside do: block, got: {diagnostics:?}"
         );
         assert_eq!(diagnostics[0].severity, Severity::Hint);
     }

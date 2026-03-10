@@ -5,5 +5,7 @@
 // Both keywords map to Expression::Primitive in the AST.
 
 Object subclass: Foo
+
   blockValue => @intrinsic blockValue
+
   size => @intrinsic "size"
