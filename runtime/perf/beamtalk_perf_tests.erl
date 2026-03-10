@@ -671,21 +671,26 @@ bench_block_threading() ->
 
     %% --- BT-1329: nested list op inside counted loop (Tier-2 StateAcc fallback) ---
     %%
-    %% Outer loop runs 100 times; inner inject:into: runs over a 10,000-element list
+    %% Outer loop runs 10 times; inner inject:into: runs over a 10,000-element list
     %% mutating an outer-scope variable on every element — the classic Tier-2 pattern.
-    OuterN = 100,
+    %% Reduced sample count (100 iters / 10 warmup) keeps this in the same wall-clock
+    %% budget as the rest of the suite (~120s); OuterN=100 with ?ITERATIONS would be ~1e9
+    %% inner callbacks total.
+    OuterN = 10,
+    NestedIterations = 100,
+    NestedWarmup = 10,
     NestedStateAccTimings = run_benchmark(fun() ->
         bench_block_threading:nested_stateacc_list_op(OuterN, List)
-    end, ?ITERATIONS, ?WARMUP),
+    end, NestedIterations, NestedWarmup),
     NestedTupleTimings = run_benchmark(fun() ->
         bench_block_threading:nested_tuple_list_op(OuterN, List)
-    end, ?ITERATIONS, ?WARMUP),
+    end, NestedIterations, NestedWarmup),
 
     NestedStateAccStats = stats(NestedStateAccTimings),
     NestedTupleStats = stats(NestedTupleTimings),
 
-    report("block/nested_stateacc_list_op", NestedStateAccStats, ?ITERATIONS),
-    report("block/nested_tuple_list_op", NestedTupleStats, ?ITERATIONS),
+    report("block/nested_stateacc_list_op", NestedStateAccStats, NestedIterations),
+    report("block/nested_tuple_list_op", NestedTupleStats, NestedIterations),
     NestedImprovementRatio = maps:get(median, NestedStateAccStats) /
         max(maps:get(median, NestedTupleStats), 1),
     io:format(standard_error,
