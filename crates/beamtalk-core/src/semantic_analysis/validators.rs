@@ -1475,6 +1475,21 @@ fn check_children_literal_for_policy(
 ///
 /// Only applies to stdlib sealed types with a known complete variant set
 /// (Phase 1: `Result`). Wildcard `_` suppresses the check.
+///
+/// # Design: pattern-based, not type-based
+///
+/// Beamtalk is dynamically typed — there is no resolved scrutinee type available
+/// at compile time. The check is therefore keyed on the *constructor patterns in
+/// the arms*, not on the static type of the matched expression:
+///
+/// - If any arm contains a `Result ok:` or `Result error:` constructor pattern,
+///   the programmer has asserted that the value can be a `Result`, and the check
+///   requires full coverage (or a wildcard `_` escape hatch).
+/// - If the scrutinee happens to be a non-`Result` value, using `Result`
+///   constructor patterns on it is already a programmer error (the patterns will
+///   never match at runtime). The exhaustiveness error is an additional signal
+///   that coverage is incomplete; the wildcard `_` arm is the correct way to opt
+///   out of the check.
 pub(crate) fn check_match_exhaustiveness(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     walk_module(module, &mut |expr| {
         visit_match_exhaustiveness(expr, diagnostics);
@@ -3148,6 +3163,38 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no error for non-constructor match, got: {diagnostics:?}"
+        );
+    }
+
+    /// Non-Result scrutinee with a Result constructor arm still triggers the check.
+    ///
+    /// Using `Result ok:` on a non-Result value is itself a programmer error
+    /// (the pattern will never match at runtime). The exhaustiveness error fires
+    /// as an additional signal; the programmer should add a wildcard `_` arm
+    /// or cover all Result variants.
+    ///
+    /// This test pins the pattern-based (not type-based) boundary: the check is
+    /// keyed on which constructor patterns appear in the arms, not on the static
+    /// type of the scrutinee expression.
+    #[test]
+    fn match_exhaustiveness_non_result_scrutinee_with_result_arm_is_error() {
+        let src = "42 match: [Result ok: v -> v]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error when Result constructor arm appears with non-Result scrutinee, \
+             got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(
+            diagnostics[0].message.contains("error:"),
+            "Expected 'error:' in message, got: {}",
+            diagnostics[0].message
         );
     }
 

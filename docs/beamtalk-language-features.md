@@ -965,13 +965,13 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 
 ```beamtalk
 // Compile error: missing error: arm
-r match: [Result ok: v -> [v + 1]]
+r match: [Result ok: v -> v + 1]
 
 // Fine: all variants covered
-r match: [Result ok: v -> [v + 1]; Result error: _ -> [0]]
+r match: [Result ok: v -> v + 1; Result error: _ -> 0]
 
 // Fine: wildcard suppresses the check
-r match: [Result ok: v -> [v + 1]; _ -> [0]]
+r match: [Result ok: v -> v + 1; _ -> 0]
 ```
 
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
