@@ -230,8 +230,10 @@ fn extract_to_btscript_files(
             .collect();
         // Prefix with a zero-padded index to prevent collisions when two distinct
         // filenames sanitise to the same safe_stem (e.g. "01-foo.md" and "01_foo.md"
-        // both become "01_foo").
-        let unique_stem = format!("{:03}_{safe_stem}", pairs.len());
+        // both become "01_foo"). The `doc` prefix ensures the stem (and thus the
+        // derived Erlang module name) always starts with a letter, which is required
+        // by the Erlang parser.
+        let unique_stem = format!("doc{:03}_{safe_stem}", pairs.len());
         let btscript_path = btscript_dir.join(format!("{unique_stem}.btscript"));
         fs::write(&btscript_path, &normalised)
             .into_diagnostic()

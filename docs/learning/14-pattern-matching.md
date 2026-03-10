@@ -2,7 +2,7 @@
 
 Beamtalk supports destructuring assignment for arrays, maps, and Erlang tuples.
 Unlike full Smalltalk, these are assignment patterns — not match expressions
-with multiple branches (for branch dispatch use `caseOf:`, chapter 8).
+with multiple branches (for branch dispatch use `match:`, chapter 8).
 
 Forms:
 

@@ -47,9 +47,9 @@ Division always returns a float:
 In the REPL you'll mostly see return values directly, but in scripts
 you'll use Transcript:
 
-```beamtalk
-Transcript showLine: "Hello, World!"         // => _
-Transcript showLine: "Hello, " ++ "Beamtalk!"  // => _
+```text
+Transcript showLine: "Hello, World!"
+Transcript showLine: "Hello, " ++ "Beamtalk!"
 ```
 
 ## Everything is an object
