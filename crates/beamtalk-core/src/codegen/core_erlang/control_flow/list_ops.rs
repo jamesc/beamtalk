@@ -828,12 +828,26 @@ impl CoreErlangGenerator {
             if body.parameters.len() >= 2 {
                 self.bind_var(&body.parameters[1].name, "Item");
             }
+            // BT-1304: Elide maybe_await on the fold accumulator when the initial value is
+            // provably sync. The accumulator is re-extracted at each iteration via
+            // erlang:element/2; if the initial value is sync and the body only produces
+            // sync values via arithmetic, the accumulator remains non-future throughout.
+            let acc_param_name = body.parameters.first().map(|p| p.name.to_string());
+            if let Some(ref name) = acc_param_name {
+                if self.is_definitely_sync(initial) {
+                    self.current_sync_vars.insert(name.clone());
+                }
+            }
             docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
 
             let (body_doc, _) =
                 self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlInject)?;
             docs.push(body_doc);
             self.pop_scope();
+            // BT-1304: Clean up the accumulator sync-var entry after leaving the fold scope.
+            if let Some(ref name) = acc_param_name {
+                self.current_sync_vars.remove(name.as_str());
+            }
 
             let result_var = self.fresh_temp_var("temp");
             let acc_out = self.fresh_temp_var("AccOut");
@@ -899,12 +913,23 @@ impl CoreErlangGenerator {
         if body.parameters.len() >= 2 {
             self.bind_var(&body.parameters[1].name, "Item");
         }
+        // BT-1304: Elide maybe_await on the fold accumulator (same logic as tuple-acc path).
+        let map_acc_param_name = body.parameters.first().map(|p| p.name.to_string());
+        if let Some(ref name) = map_acc_param_name {
+            if self.is_definitely_sync(initial) {
+                self.current_sync_vars.insert(name.clone());
+            }
+        }
         docs.extend(plan.generate_unpack_at_iteration_start(self));
 
         let (body_doc, _) =
             self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlInject)?;
         docs.push(body_doc);
         self.pop_scope();
+        // BT-1304: Clean up the accumulator sync-var entry after leaving the fold scope.
+        if let Some(ref name) = map_acc_param_name {
+            self.current_sync_vars.remove(name.as_str());
+        }
 
         // BT-483: Return {Result, State} tuple — inject:into: returns accumulator as result.
         let result_var = self.fresh_temp_var("temp");
@@ -1167,6 +1192,20 @@ mod tests {
         assert!(
             code.contains("'erlang':'element'(2,"),
             "inject: tuple acc should use element(2, ...) for first threaded var. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_inject_literal_initial_elides_acc_maybe_await() {
+        // BT-1304: When the initial accumulator is a literal (provably sync), maybe_await
+        // should be elided on the accumulator parameter inside the fold body.
+        let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items inject: 0 into: [:acc :item | count := count + 1. acc + item]\n";
+        let code = codegen(src);
+        // The accumulator `acc` binds to Erlang var `Acc` inside the foldl lambda.
+        // With BT-1304, Acc is provably sync (initial = literal 0), so maybe_await is elided.
+        assert!(
+            !code.contains("'maybe_await'(Acc)"),
+            "BT-1304: maybe_await should be elided on the fold accumulator when initial is a literal. Got:\n{code}"
         );
     }
 
