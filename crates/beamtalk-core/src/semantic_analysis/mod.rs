@@ -47,7 +47,7 @@ pub use block_facts::BlockMutationAnalysis;
 pub use block_facts::analyze_block;
 pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
-pub use facts::{DispatchKind, SemanticFacts, SyncEnv, compute_semantic_facts};
+pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::extract_pattern_bindings;
 pub use return_type_writeback::apply_return_type_writeback;

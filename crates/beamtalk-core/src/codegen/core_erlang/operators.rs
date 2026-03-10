@@ -11,24 +11,6 @@ use crate::ast::Expression;
 use crate::docvec;
 
 impl CoreErlangGenerator {
-    /// Returns `true` if `expr` is provably non-future.
-    ///
-    /// Conservative: only handles cases where the type is known statically from
-    /// the AST shape alone, without any scope tracking.
-    ///
-    /// Used by `list_ops.rs` (BT-1304) to track inject:into: accumulator sync status.
-    pub(in crate::codegen::core_erlang) fn is_definitely_sync(&self, expr: &Expression) -> bool {
-        match expr {
-            // All AST literals and list literals are immediate (non-future) values.
-            Expression::Literal(_, _) | Expression::ListLiteral { .. } => true,
-            // `self` refers to the current actor PID / value object — never a future.
-            Expression::Identifier(id) if id.name == "self" => true,
-            // BT-1288: Method parameters are always non-future (passed by value, not as futures).
-            Expression::Identifier(id) if self.current_sync_vars.contains(id.name.as_str()) => true,
-            _ => false,
-        }
-    }
-
     /// Generates code for binary operators.
     ///
     /// Maps Beamtalk binary operators to Erlang's built-in operators:
