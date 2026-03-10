@@ -507,12 +507,19 @@ impl ReplClient {
                 Ok(Err(e)) => {
                     // Other send error (I/O error, protocol error, or second-attempt
                     // closed-connection): cannot guarantee the server received nothing,
-                    // so do not retry.
+                    // so do not retry. Quarantine the socket through the existing guard
+                    // so the next call is forced onto a fresh connection.
+                    tracing::warn!("send_once: send failed ({e}); closing socket");
+                    let _ =
+                        tokio::time::timeout(Duration::from_secs(1), inner.ws.close(None)).await;
                     return Err(format!("Failed to send: {e}"));
                 }
                 Err(_) => {
-                    // Send timed out: the request may have been partially transmitted —
-                    // do not retry.
+                    // Send timed out: request may have been partially transmitted.
+                    // Quarantine the socket through the existing guard.
+                    tracing::warn!("send_once: send timed out; closing socket");
+                    let _ =
+                        tokio::time::timeout(Duration::from_secs(1), inner.ws.close(None)).await;
                     return Err(format!(
                         "REPL I/O timed out after {}s — the REPL may be unresponsive",
                         REPL_IO_TIMEOUT.as_secs()
@@ -521,43 +528,38 @@ impl ReplClient {
             }
 
             // Receive phase: the request is now in-flight.
-            // Do NOT reconnect on failure here — the server may have already processed
-            // the request; a retry would cause double-execution.
+            // Do NOT reconnect — the server may have already processed the request.
             //
-            // On any receive failure (timeout or I/O error), quarantine the socket by
-            // closing it before returning the error. Without this, a late server response
-            // for this timed-out request could be consumed by the *next* request, returning
-            // the wrong result for a different operation.
-            let receive_future = async {
-                loop {
-                    let response_text = read_text_message(&mut inner.ws).await?;
-
-                    let parsed: serde_json::Value =
-                        serde_json::from_str(&response_text).map_err(|e| {
-                            format!("Failed to parse response: {e}\nRaw: {response_text}")
-                        })?;
-
-                    if parsed.get("status").is_some() {
-                        return serde_json::from_value(parsed).map_err(|e| {
-                            format!("Failed to deserialize response: {e}\nRaw: {response_text}")
-                        });
+            // Use select! to apply the timeout while keeping `inner` available through
+            // the existing guard. This avoids a re-lock on the error path and ensures
+            // the quarantine close always goes through the same guard that owns the socket.
+            let receive_result = tokio::select! {
+                result = async {
+                    loop {
+                        let response_text = read_text_message(&mut inner.ws).await?;
+                        let parsed: serde_json::Value =
+                            serde_json::from_str(&response_text).map_err(|e| {
+                                format!("Failed to parse response: {e}\nRaw: {response_text}")
+                            })?;
+                        if parsed.get("status").is_some() {
+                            return serde_json::from_value(parsed).map_err(|e| {
+                                format!(
+                                    "Failed to deserialize response: {e}\nRaw: {response_text}"
+                                )
+                            });
+                        }
                     }
-                }
-            };
-
-            let receive_result = match tokio::time::timeout(REPL_IO_TIMEOUT, receive_future).await {
-                Ok(result) => result,
-                Err(_) => Err(format!(
+                } => result,
+                () = tokio::time::sleep(REPL_IO_TIMEOUT) => Err(format!(
                     "REPL I/O timed out after {}s — the REPL may be unresponsive",
                     REPL_IO_TIMEOUT.as_secs()
                 )),
             };
 
             if let Err(ref err) = receive_result {
-                // Quarantine the socket so the next call reconnects cleanly rather than
-                // risking consumption of this request's late-arriving server response.
+                // Quarantine the socket through the existing guard — no re-lock needed.
+                // A late server response for this failed request cannot reach the next call.
                 tracing::warn!("send_once receive phase failed; closing socket: {err}");
-                let mut inner = self.inner.lock().await;
                 let _ = tokio::time::timeout(Duration::from_secs(1), inner.ws.close(None)).await;
             }
 
