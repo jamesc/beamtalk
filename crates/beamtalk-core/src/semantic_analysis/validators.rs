@@ -713,7 +713,7 @@ fn is_self_receiver(expr: &Expression) -> bool {
 ///
 /// `Timer after:do:` and `Timer every:do:` execute their block argument in a
 /// separate process via `erlang:send_after` / `timer:apply_interval`.  A
-/// `self someMethod` call from inside such a block is a regular gen_server
+/// `self someMethod` call from inside such a block is a regular `gen_server`
 /// call *to* the actor — it cannot re-enter the actor's own call-stack, so
 /// the `calling_self` deadlock mechanism does not apply.
 fn is_timer_spawn_selector(selector: &str) -> bool {
