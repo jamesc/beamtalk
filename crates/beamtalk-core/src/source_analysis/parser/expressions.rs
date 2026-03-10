@@ -1251,8 +1251,10 @@ impl Parser {
 
     /// Parses the key in a map pattern pair.
     ///
-    /// Accepts a symbol (`#key`), a string literal (`"key"`), or a bare lowercase
-    /// identifier followed by `=>` (shorthand for a symbol key).
+    /// Accepts a symbol (`#key`) or a string literal (`"key"`).
+    /// Bare lowercase identifiers (e.g. `foo`) are rejected with a diagnostic
+    /// error suggesting `#foo`; the parser recovers by treating them as the
+    /// intended symbol.
     /// Returns `None` on an invalid token (error is pushed; caller should skip the pair).
     fn parse_map_pattern_key(&mut self) -> Option<MapPatternKey> {
         match self.current_kind() {
@@ -1361,9 +1363,10 @@ impl Parser {
 
     /// Parses a map destructuring pattern: `#{key => value, ...}`
     ///
-    /// Keys may be symbol literals (`#key`), string literals (`"key"`), or bare
-    /// lowercase identifiers (treated as symbol keys). Values may be variable
-    /// identifiers, `_` wildcards, or literals (for equality matching in `match:` arms).
+    /// Keys must be symbol literals (`#key`) or string literals (`"key"`).
+    /// Bare lowercase identifiers are a compile error (BT-1240); use `#key` instead.
+    /// Values may be variable identifiers, `_` wildcards, or literals (for equality
+    /// matching in `match:` arms).
     fn parse_map_pattern(&mut self) -> Pattern {
         let start = self
             .expect(&TokenKind::MapOpen, "Expected '#{'")
@@ -1847,9 +1850,11 @@ impl Parser {
 
     /// Parses a map literal: `#{key => value, ...}`
     ///
-    /// Map keys and values are parsed as unary expressions (primaries + unary messages),
-    /// which stops at binary operators like `=>` and `,`. This allows nested maps and
-    /// simple expressions as keys/values while avoiding ambiguity with the map syntax.
+    /// Keys must be symbol literals (`#key`), string literals, integers, or parenthesized
+    /// expressions (e.g. `#{(varKey) => v}` for dynamic keys). Bare lowercase identifiers
+    /// are rejected with a diagnostic error suggesting `#key` (BT-1240).
+    /// Keys and values are parsed as unary expressions (primaries + unary messages),
+    /// which stops at binary operators like `=>` and `,`.
     fn parse_map_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
@@ -2310,6 +2315,21 @@ mod tests {
         assert!(
             errors.is_empty(),
             "explicit #foo key should produce no errors, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn parenthesized_dynamic_map_key_no_error() {
+        use crate::source_analysis::Severity;
+        // `#{(k) => 1}` is the escape hatch for variable keys — must not error
+        let (_module, diags) = parse_source("#{(k) => 1}");
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "parenthesized dynamic key should produce no errors, got: {errors:?}"
         );
     }
 

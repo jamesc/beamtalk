@@ -2547,8 +2547,18 @@ mod tests {
             .filter(|d| d.severity == Severity::Error)
             .collect();
         assert_eq!(errors.len(), 2, "expected 2 errors, got: {errors:?}");
-        assert!(errors[0].message.contains("bare word 'name'"));
-        assert!(errors[1].message.contains("bare word 'age'"));
+        assert!(
+            errors
+                .iter()
+                .any(|d| d.message.contains("bare word 'name'") && d.message.contains("'#name'")),
+            "expected suggestion for 'name': {errors:?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|d| d.message.contains("bare word 'age'") && d.message.contains("'#age'")),
+            "expected suggestion for 'age': {errors:?}"
+        );
         // Error recovery: AST still has the symbol literals
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0].expression {
