@@ -361,7 +361,9 @@ fn ensure_otp_app_in_workspace(
         miette::bail!(
             "Failed to start OTP application '{app_name}' in existing workspace.\n\
              The workspace may be in an incompatible state.\n\
-             Error: {stderr}"
+             stdout: {}\n\
+             stderr: {stderr}",
+            stdout.trim()
         )
     }
 }
