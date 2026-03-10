@@ -1351,6 +1351,10 @@ impl CoreErlangGenerator {
                         let val_doc = self.expression_doc(value)?;
                         // Now update the mapping so subsequent expressions see this binding.
                         self.bind_var(var_name, &core_var);
+                        // BT-1288: After reassignment, we can no longer guarantee sync.
+                        // Remove from current_sync_vars so is_definitely_sync is not misled
+                        // if the new value is a future (e.g. reassigning a method param).
+                        self.current_sync_vars.remove(var_name.as_str());
                         docs.push(docvec![
                             "let ",
                             Document::String(core_var.clone()),
@@ -1360,7 +1364,7 @@ impl CoreErlangGenerator {
                         ]);
                     }
                 }
-            } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
+            } else if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
                 // whileTrue:/whileFalse:/timesRepeat: with mutations - need to rebind threaded vars after loop
                 // For single var, the loop returns its final value directly
                 // For multiple vars, we'd need a tuple (not yet supported)

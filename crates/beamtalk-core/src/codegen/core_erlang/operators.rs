@@ -25,12 +25,14 @@ impl CoreErlangGenerator {
     ///
     /// Conservative: only handles cases where the type is known statically from
     /// the AST shape alone, without any scope tracking.
-    fn is_definitely_sync(expr: &Expression) -> bool {
+    fn is_definitely_sync(&self, expr: &Expression) -> bool {
         match expr {
             // All AST literals and list literals are immediate (non-future) values.
             Expression::Literal(_, _) | Expression::ListLiteral { .. } => true,
             // `self` refers to the current actor PID / value object — never a future.
             Expression::Identifier(id) if id.name == "self" => true,
+            // BT-1288: Method parameters are always non-future (passed by value, not as futures).
+            Expression::Identifier(id) if self.current_sync_vars.contains(id.name.as_str()) => true,
             _ => false,
         }
     }
@@ -40,8 +42,8 @@ impl CoreErlangGenerator {
     ///
     /// If `is_definitely_sync` returns `true` for `expr`, the document is returned
     /// unchanged; otherwise the standard `maybe_await` wrapper is applied.
-    fn wrap_if_needed(expr: &Expression, doc: Document<'static>) -> Document<'static> {
-        if Self::is_definitely_sync(expr) {
+    fn wrap_if_needed(&self, expr: &Expression, doc: Document<'static>) -> Document<'static> {
+        if self.is_definitely_sync(expr) {
             doc
         } else {
             Self::wrap_maybe_await(doc)
@@ -110,8 +112,8 @@ impl CoreErlangGenerator {
 
         let left_doc = self.expression_doc(left)?;
         let right_doc = self.expression_doc(&arguments[0])?;
-        let left_code = Self::wrap_if_needed(left, left_doc);
-        let right_code = Self::wrap_if_needed(&arguments[0], right_doc);
+        let left_code = self.wrap_if_needed(left, left_doc);
+        let right_code = self.wrap_if_needed(&arguments[0], right_doc);
 
         Ok(docvec![
             format!("call 'erlang':'{erlang_op}'("),
@@ -137,8 +139,8 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let left_doc = self.expression_doc(left)?;
         let right_doc = self.expression_doc(right)?;
-        let left_code = Self::wrap_if_needed(left, left_doc);
-        let right_code = Self::wrap_if_needed(right, right_doc);
+        let left_code = self.wrap_if_needed(left, left_doc);
+        let right_code = self.wrap_if_needed(right, right_doc);
         Ok(docvec![
             "call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(",
             left_code,
@@ -171,8 +173,8 @@ impl CoreErlangGenerator {
             // List concatenation: erlang:'++'
             let left_doc = self.expression_doc(left)?;
             let right_doc = self.expression_doc(right)?;
-            let left_code = Self::wrap_if_needed(left, left_doc);
-            let right_code = Self::wrap_if_needed(right, right_doc);
+            let left_code = self.wrap_if_needed(left, left_doc);
+            let right_code = self.wrap_if_needed(right, right_doc);
             Ok(docvec![
                 "call 'erlang':'++'(",
                 left_code,
@@ -184,8 +186,8 @@ impl CoreErlangGenerator {
             // String concatenation: iolist_to_binary
             let left_doc = self.expression_doc(left)?;
             let right_doc = self.expression_doc(right)?;
-            let left_code = Self::wrap_if_needed(left, left_doc);
-            let right_code = Self::wrap_if_needed(right, right_doc);
+            let left_code = self.wrap_if_needed(left, left_doc);
+            let right_code = self.wrap_if_needed(right, right_doc);
             Ok(docvec![
                 "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
                 left_code,
@@ -199,8 +201,8 @@ impl CoreErlangGenerator {
             let right_var = self.fresh_temp_var("ConcatRight");
             let left_doc = self.expression_doc(left)?;
             let right_doc = self.expression_doc(right)?;
-            let left_code = Self::wrap_if_needed(left, left_doc);
-            let right_code = Self::wrap_if_needed(right, right_doc);
+            let left_code = self.wrap_if_needed(left, left_doc);
+            let right_code = self.wrap_if_needed(right, right_doc);
             Ok(docvec![
                 format!("let {left_var} = "),
                 left_code,

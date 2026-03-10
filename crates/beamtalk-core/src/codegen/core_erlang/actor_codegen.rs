@@ -407,6 +407,14 @@ impl CoreErlangGenerator {
             self.push_scope();
             self.current_method_params.clear();
 
+            // BT-1288: Load sync vars for this method from pre-computed semantic facts.
+            self.current_sync_vars = self
+                .semantic_facts
+                .sync_envs
+                .get(&method.span)
+                .map(|env| env.sync_vars.clone())
+                .unwrap_or_default();
+
             // Generate parameter list and populate current_method_params
             // (needed for @primitive codegen which reads current_method_params)
             let mut params = Vec::new();

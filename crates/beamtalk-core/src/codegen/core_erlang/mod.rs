@@ -470,6 +470,10 @@ pub fn generate_module_with_warnings(
     generator.class_module_index = options.class_module_index;
     generator.source_path = options.source_path;
 
+    // BT-1288: Compute semantic facts before codegen begins.
+    let semantic_facts = crate::semantic_analysis::compute_semantic_facts(module);
+    generator.semantic_facts = semantic_facts;
+
     // Build hierarchy once for the entire generation (ADR 0006)
     let (hierarchy_result, _) =
         crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module);
@@ -908,6 +912,12 @@ pub(super) struct CoreErlangGenerator {
     /// [`generate_module_with_warnings`]. Examples include stateful blocks
     /// passed to Erlang call sites where mutations will be silently dropped.
     pub(super) codegen_warnings: Vec<Diagnostic>,
+    /// BT-1288: Pre-computed semantic facts from the pre-codegen analysis pass.
+    /// Used for block profile lookups and dispatch classification.
+    pub(super) semantic_facts: crate::semantic_analysis::SemanticFacts,
+    /// BT-1288: Variables in the current method that are known to be non-future.
+    /// Populated from `semantic_facts.sync_envs` when entering a method.
+    pub(super) current_sync_vars: std::collections::HashSet<String>,
 }
 
 impl CoreErlangGenerator {
@@ -943,6 +953,8 @@ impl CoreErlangGenerator {
             tier2_block_params: std::collections::HashSet::new(),
             tier2_method_info: std::collections::HashMap::new(),
             codegen_warnings: Vec::new(),
+            semantic_facts: crate::semantic_analysis::SemanticFacts::default(),
+            current_sync_vars: std::collections::HashSet::new(),
         }
     }
 
@@ -978,6 +990,8 @@ impl CoreErlangGenerator {
             tier2_block_params: std::collections::HashSet::new(),
             tier2_method_info: std::collections::HashMap::new(),
             codegen_warnings: Vec::new(),
+            semantic_facts: crate::semantic_analysis::SemanticFacts::default(),
+            current_sync_vars: std::collections::HashSet::new(),
         }
     }
 
@@ -1832,7 +1846,7 @@ impl CoreErlangGenerator {
     /// Check if an expression is a control flow construct (whileTrue:, whileFalse:, timesRepeat:, etc.)
     /// with literal blocks that has threaded mutations. Returns the threaded variable names if so.
     #[allow(clippy::too_many_lines)] // one branch per control flow construct (whileTrue:, timesRepeat:, etc.)
-    fn get_control_flow_threaded_vars(expr: &Expression) -> Option<Vec<String>> {
+    fn get_control_flow_threaded_vars(&self, expr: &Expression) -> Option<Vec<String>> {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
 
         let Expression::MessageSend {
@@ -1862,8 +1876,16 @@ impl CoreErlangGenerator {
                 return None;
             };
 
-            let cond_analysis = analyze_block(cond_block);
-            let body_analysis = analyze_block(body_block);
+            let cond_analysis = self
+                .semantic_facts
+                .block_profile(&cond_block.span)
+                .cloned()
+                .unwrap_or_else(|| analyze_block(cond_block));
+            let body_analysis = self
+                .semantic_facts
+                .block_profile(&body_block.span)
+                .cloned()
+                .unwrap_or_else(|| analyze_block(body_block));
 
             // BT-1224: Use captured_reads (not local_reads) to exclude block-local variables.
             // Block-local vars (defined inside the block before being read) must not be
@@ -1900,7 +1922,11 @@ impl CoreErlangGenerator {
                 return None;
             };
 
-            let body_analysis = analyze_block(body_block);
+            let body_analysis = self
+                .semantic_facts
+                .block_profile(&body_block.span)
+                .cloned()
+                .unwrap_or_else(|| analyze_block(body_block));
 
             // BT-1224: Use captured_reads to exclude block-local vars from threading.
             let threaded: Vec<String> = body_analysis
@@ -1931,7 +1957,11 @@ impl CoreErlangGenerator {
                 return None;
             };
 
-            let body_analysis = analyze_block(body_block);
+            let body_analysis = self
+                .semantic_facts
+                .block_profile(&body_block.span)
+                .cloned()
+                .unwrap_or_else(|| analyze_block(body_block));
 
             // The block parameter (e.g., `n` in `[:n | ...]`) is NOT a threaded variable
             let block_params: std::collections::HashSet<String> = body_block
@@ -1964,7 +1994,11 @@ impl CoreErlangGenerator {
                 return None;
             };
 
-            let body_analysis = analyze_block(body_block);
+            let body_analysis = self
+                .semantic_facts
+                .block_profile(&body_block.span)
+                .cloned()
+                .unwrap_or_else(|| analyze_block(body_block));
 
             // The block parameter (e.g., `item` in `[:item | ...]`) is NOT a threaded variable
             let block_params: std::collections::HashSet<String> = body_block
@@ -1996,7 +2030,11 @@ impl CoreErlangGenerator {
                 return None;
             };
 
-            let body_analysis = analyze_block(body_block);
+            let body_analysis = self
+                .semantic_facts
+                .block_profile(&body_block.span)
+                .cloned()
+                .unwrap_or_else(|| analyze_block(body_block));
 
             // The block parameters (acc, item) are NOT threaded variables
             let block_params: std::collections::HashSet<String> = body_block
@@ -2032,7 +2070,11 @@ impl CoreErlangGenerator {
                 return None;
             };
 
-            let body_analysis = analyze_block(body_block);
+            let body_analysis = self
+                .semantic_facts
+                .block_profile(&body_block.span)
+                .cloned()
+                .unwrap_or_else(|| analyze_block(body_block));
 
             let block_params: std::collections::HashSet<String> = body_block
                 .parameters

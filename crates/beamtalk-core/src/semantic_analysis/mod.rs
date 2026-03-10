@@ -21,8 +21,10 @@ use std::collections::HashMap;
 
 mod block_analyzer;
 pub(crate) mod block_context;
+pub mod block_facts;
 pub mod class_hierarchy;
 pub mod error;
+pub mod facts;
 pub(crate) mod method_validators;
 pub mod module_validator;
 pub mod name_resolver;
@@ -41,8 +43,11 @@ mod property_tests;
 #[cfg(test)]
 pub mod test_helpers;
 
+pub use block_facts::BlockMutationAnalysis;
+pub use block_facts::analyze_block;
 pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
+pub use facts::{DispatchKind, SemanticFacts, SyncEnv, compute_semantic_facts};
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::extract_pattern_bindings;
 pub use return_type_writeback::apply_return_type_writeback;
