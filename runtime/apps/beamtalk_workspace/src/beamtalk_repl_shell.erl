@@ -156,6 +156,10 @@ init(SessionId) ->
         end,
     State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0c),
 
+    %% BT-1242: Join class-removed notification group so this session is notified
+    %% when a class is removed via Beamtalk code (ClassName removeFromSystem).
+    catch pg:join(beamtalk_repl_shells, self()),
+
     {ok, {SessionId, State1, undefined}}.
 
 %% @private
@@ -334,6 +338,18 @@ handle_info(
     ),
     reply_eval(From, {eval_error, Err1, <<>>, []}),
     {noreply, {SessionId, State, undefined}};
+%% BT-1242: Class removed via Beamtalk code path — clean up session tracker.
+%% Only updates tracker when no eval worker is active: if a worker is running it
+%% holds a snapshot of State that would overwrite our edit on eval_result arrival.
+%% The code:is_loaded filter in the modules op covers the stale-entry window.
+handle_info({class_removed, _ClassName, Module}, {SessionId, State, undefined}) ->
+    Tracker = beamtalk_repl_state:get_module_tracker(State),
+    NewTracker = beamtalk_repl_modules:remove_module(Module, Tracker),
+    NewState = beamtalk_repl_state:set_module_tracker(NewTracker, State),
+    {noreply, {SessionId, NewState, undefined}};
+handle_info({class_removed, _ClassName, _Module}, State) ->
+    %% Eval worker is active — skip tracker update to avoid state overwrite.
+    {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 

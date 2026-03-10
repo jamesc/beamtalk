@@ -313,6 +313,41 @@ unload_module_not_in_tracker_test_() ->
         ]
     end}.
 
+%% BT-1242: {class_removed, ClassName, Module} info message removes module from tracker.
+class_removed_event_updates_tracker_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-class-removed-1">>),
+                DummyMod = bt1242_shell_test_module,
+                %% Inject module into the session tracker using the same pattern as
+                %% existing unload tests (sys:replace_state is accepted test practice).
+                sys:replace_state(Pid, fun({SId, State, Worker}) ->
+                    Tracker = beamtalk_repl_state:get_module_tracker(State),
+                    NewTracker = beamtalk_repl_modules:add_module(DummyMod, undefined, Tracker),
+                    {SId, beamtalk_repl_state:set_module_tracker(NewTracker, State), Worker}
+                end),
+                {ok, Tracker1} = beamtalk_repl_shell:get_module_tracker(Pid),
+                ?assert(beamtalk_repl_modules:module_exists(DummyMod, Tracker1)),
+                %% Send class_removed info message directly (simulates the event from runtime)
+                Pid ! {class_removed, 'BT1242TestClass', DummyMod},
+                %% Wait for handle_info to process
+                timer:sleep(50),
+                {ok, Tracker2} = beamtalk_repl_shell:get_module_tracker(Pid),
+                ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker2)),
+                beamtalk_repl_shell:stop(Pid)
+            end),
+            %% class_removed for unknown module must not crash the shell.
+            ?_test(begin
+                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-class-removed-2">>),
+                Pid ! {class_removed, 'BT1242NoSuchClass', bt1242_no_such_mod},
+                timer:sleep(50),
+                ?assert(is_process_alive(Pid)),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
 unload_module_in_use_returns_error_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
