@@ -273,6 +273,14 @@ impl ThreadingPlan {
                 }
                 false
             });
+            // Guard: if any body expression is nested control flow with mutations (e.g.
+            // `flag ifTrue: [self.n := ...]`), fall back to StateAcc mode.
+            // `emit_non_assign_expr` for BodyKind::Letrec hardcodes `StateAccN` naming;
+            // hybrid mode uses `StateN`. Mixed naming causes unbound variable errors.
+            let body_has_cf_mutations_hybrid = body
+                .body
+                .iter()
+                .any(|s| generator.control_flow_has_mutations(&s.expression));
             // Eligible when body has field mutations but no self-sends:
             // - self-sends require async gen_server dispatch; hybrid mode only handles
             //   direct field-map mutations which produce simple maps:put code.
@@ -280,6 +288,7 @@ impl ThreadingPlan {
                 && !body_analysis.has_self_sends
                 && !cond_has_state_effects_for_hybrid
                 && !body_has_tier2_threaded_assign_hybrid
+                && !body_has_cf_mutations_hybrid
         };
 
         Self {

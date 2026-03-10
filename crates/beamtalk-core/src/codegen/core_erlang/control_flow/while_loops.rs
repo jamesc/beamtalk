@@ -455,6 +455,7 @@ impl CoreErlangGenerator {
         ]);
 
         let prev_in_loop_body = self.in_loop_body;
+        let prev_hybrid = self.in_hybrid_loop;
         let prev_state_version = self.state_version();
         self.in_loop_body = true;
         self.in_hybrid_loop = true;
@@ -467,7 +468,7 @@ impl CoreErlangGenerator {
         }
 
         self.in_loop_body = prev_in_loop_body;
-        self.in_hybrid_loop = false;
+        self.in_hybrid_loop = prev_hybrid;
         self.set_state_version(prev_state_version);
 
         let case_arm = if negate {
@@ -484,7 +485,6 @@ impl CoreErlangGenerator {
             case_arm,
         ]);
 
-        let prev_hybrid = self.in_hybrid_loop;
         self.in_hybrid_loop = true;
         let (body_doc, final_state_version) =
             self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
@@ -678,6 +678,44 @@ mod tests {
         assert!(
             code.contains("ExitSA"),
             "direct-params: whileFalse: exit StateAcc rebuild expected. Got:\n{code}"
+        );
+    }
+
+    // ── BT-1326: hybrid direct-params + State threading ──────────────────────
+
+    #[test]
+    fn test_while_true_field_plus_local_mutation_uses_hybrid_params() {
+        // whileTrue: with BOTH local var mutation AND field mutation uses hybrid mode:
+        // fun(LocalVar, State) — locals as direct params, actor State as explicit param.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + 1. self.n := self.n + 1]\n    sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("letrec"),
+            "hybrid: whileTrue: should generate a letrec. Got:\n{code}"
+        );
+        // Hybrid signature: fun (Sum, State) — local as direct param, State explicit
+        assert!(
+            code.contains("fun (Sum, State)"),
+            "hybrid: whileTrue: fun should take (Sum, State) as params. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (StateAcc)"),
+            "hybrid: whileTrue: fun must not use StateAcc signature. Got:\n{code}"
+        );
+        // Field mutation uses maps:put on State (not StateAcc)
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "hybrid: whileTrue: field mutation should use maps:put. Got:\n{code}"
+        );
+        // Exit rebuilds StateAcc from State + local params
+        assert!(
+            code.contains("ExitSA"),
+            "hybrid: whileTrue: exit StateAcc rebuild expected. Got:\n{code}"
+        );
+        // Exit packs local into ExitSA via maps:put
+        assert!(
+            code.match_indices("maps':'put'('__local__sum'").count() <= 1,
+            "hybrid: whileTrue: at most one maps:put for local (exit rebuild). Got:\n{code}"
         );
     }
 }

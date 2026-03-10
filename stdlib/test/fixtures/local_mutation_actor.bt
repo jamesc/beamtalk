@@ -106,3 +106,24 @@ Actor subclass: LocalMutationActor
         item < 0
       ]
     #{#result => result, #count => count}
+
+  // BT-1326: hybrid direct-params + State threading
+  // Counted loop with BOTH local var mutation AND field mutation.
+  sumAndCountToN: n =>
+    sum := 0
+    1
+      to: n
+      do: [:i |
+        sum := sum + i
+        self.log := self.log + 1
+      ]
+    #{#sum => sum, #log => self.log}
+
+  sumAndCountTimesRepeat: n =>
+    sum := 0
+    n
+      timesRepeat: [
+        sum := sum + 1
+        self.log := self.log + 1
+      ]
+    #{#sum => sum, #log => self.log}
