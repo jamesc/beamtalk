@@ -67,8 +67,8 @@ pub fn run(path: &str) -> Result<()> {
 fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> Result<()> {
     // Check for OTP application mode (BT-1191)
     let app_config = manifest::find_application_config(project_root)?;
-    if app_config.is_some() {
-        return run_package_as_otp_application(project_root, pkg);
+    if let Some(app_config) = app_config {
+        return run_package_as_otp_application(project_root, pkg, &app_config);
     }
 
     let start_module = pkg.start.as_deref().ok_or_else(|| {
@@ -208,13 +208,9 @@ fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> R
 fn run_package_as_otp_application(
     project_root: &Utf8PathBuf,
     pkg: &manifest::PackageManifest,
+    app_config: &manifest::ApplicationConfig,
 ) -> Result<()> {
     info!(name = %pkg.name, "Running as OTP service (workspace-first)");
-
-    // Fetch supervisor name for display (already validated by run_package caller)
-    let app_config = manifest::find_application_config(project_root)?.ok_or_else(|| {
-        miette!("No [application] section in beamtalk.toml — cannot start as OTP service")
-    })?;
 
     println!("Building...");
     super::build::build(
