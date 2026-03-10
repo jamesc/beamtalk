@@ -27,6 +27,7 @@ Actor subclass: ClassBuilder
   state: fieldSpecs = #{}
   state: methodSpecs = #{}
   state: modifiers = #()
+  state: backingModule = nil
 
   /// Set the class name (a Symbol).
   ///
@@ -76,6 +77,17 @@ Actor subclass: ClassBuilder
   /// builder modifier: #sealed
   /// ```
   modifier: aSymbol => self.modifiers := self.modifiers add: aSymbol
+
+  /// Set the backing Erlang module for a native Actor class.
+  ///
+  /// When set, the `register` call will link this Beamtalk class to the
+  /// named Erlang module, enabling `self delegate` dispatch.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder native: #beamtalk_subprocess
+  /// ```
+  native: anErlangModule => self.backingModule := anErlangModule
 
   /// Register the class with the runtime and return the new class object.
   /// Stops the builder process after registration — the builder is
