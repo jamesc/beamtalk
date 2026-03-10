@@ -113,11 +113,11 @@ sealed Value subclass: Result
   /// (Result error: #x) value  // => Exception: Cannot access 'value'...
   /// ```
   sealed value -> Object =>
-    self.isOk ifTrue: [
-      self.okValue
-    ] ifFalse: [
-      Exception new signal: "Cannot access 'value' on Result error — use valueOr:, ifOk:ifError:, or unwrap"
-    ]
+    self.isOk
+      ifTrue: [self.okValue]
+      ifFalse: [
+        Exception new signal: "Cannot access 'value' on Result error — use valueOr:, ifOk:ifError:, or unwrap"
+      ]
 
   /// The error reason. Raises if this is an ok Result.
   ///
@@ -129,9 +129,11 @@ sealed Value subclass: Result
   /// (Result ok: 42) error     // => Exception: Cannot access 'error'...
   /// ```
   sealed error -> Object =>
-    self.isOk ifTrue: [
-      Exception new signal: "Cannot access 'error' on Result ok — use ifOk:ifError: or mapError:"
-    ] ifFalse: [self.errReason]
+    self.isOk
+      ifTrue: [
+        Exception new signal: "Cannot access 'error' on Result ok — use ifOk:ifError: or mapError:"
+      ]
+      ifFalse: [self.errReason]
 
   // ===== Instance Methods — Safe Extractors =====
 

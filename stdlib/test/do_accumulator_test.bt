@@ -161,48 +161,69 @@ TestCase subclass: DoAccumulatorTest
   // =========================================================================
   testInjectWithDoSum =>
     helper := DoAccumulatorValue new
-    self assert: (helper injectWithDo: #(1, 2, 3) initial: 0 into: [:acc :x |
-      acc + x
-    ]) equals: 6
+    self
+      assert: (helper
+        injectWithDo: #(1, 2, 3)
+        initial: 0
+        into: [:acc :x | acc + x])
+      equals: 6
 
   testInjectWithDoProduct =>
     helper := DoAccumulatorValue new
-    self assert: (helper injectWithDo: #(1, 2, 3, 4) initial: 1 into: [:acc :x |
-      acc * x
-    ]) equals: 24
+    self
+      assert: (helper
+        injectWithDo: #(1, 2, 3, 4)
+        initial: 1
+        into: [:acc :x | acc * x])
+      equals: 24
 
   testInjectWithDoStringConcat =>
     helper := DoAccumulatorValue new
-    self assert: (helper injectWithDo: #("a", "b", "c") initial: "" into: [:acc :x |
-      acc ++ x
-    ]) equals: "abc"
+    self
+      assert: (helper
+        injectWithDo: #("a", "b", "c")
+        initial: ""
+        into: [:acc :x | acc ++ x])
+      equals: "abc"
 
   testInjectWithDoEmptyList =>
     helper := DoAccumulatorValue new
-    self assert: (helper injectWithDo: #() initial: 42 into: [:acc :x |
-      acc + x
-    ]) equals: 42
+    self
+      assert: (helper
+        injectWithDo: #()
+        initial: 42
+        into: [:acc :x | acc + x])
+      equals: 42
 
   testInjectWithDoSingleElement =>
     helper := DoAccumulatorValue new
-    self assert: (helper injectWithDo: #(10) initial: 5 into: [:acc :x |
-      acc + x
-    ]) equals: 15
+    self
+      assert: (helper
+        injectWithDo: #(10)
+        initial: 5
+        into: [:acc :x | acc + x])
+      equals: 15
 
   // Non-commutative: verifies correct argument order is (accumulator, element)
   testInjectWithDoOrderMatters =>
     helper := DoAccumulatorValue new
     // Builds list in reverse via addFirst:
-    self assert: (helper injectWithDo: #(1, 2, 3) initial: #() into: [:acc :x |
-      acc addFirst: x
-    ]) equals: #(3, 2, 1)
+    self
+      assert: (helper
+        injectWithDo: #(1, 2, 3)
+        initial: #()
+        into: [:acc :x | acc addFirst: x])
+      equals: #(3, 2, 1)
 
   testInjectWithDoSubtraction =>
     helper := DoAccumulatorValue new
     // ((10 - 1) - 2) - 3 = 4  (left-fold, not right-fold)
-    self assert: (helper injectWithDo: #(1, 2, 3) initial: 10 into: [:acc :x |
-      acc - x
-    ]) equals: 4
+    self
+      assert: (helper
+        injectWithDo: #(1, 2, 3)
+        initial: 10
+        into: [:acc :x | acc - x])
+      equals: 4
 
   // =========================================================================
   // Multiple invocations — verifies that the value type is stateless between calls

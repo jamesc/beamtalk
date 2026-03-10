@@ -90,10 +90,10 @@ Actor subclass: HTTPClient
 
   request: method url: url options: opts get: path :: String -> Result =>
     url := self.baseUrl ++ path
-    (Erlang beamtalk_http) request: #get url: url options: #{
-      #headers => self.headers,
-      #timeout => self.timeout
-    }
+    (Erlang beamtalk_http)
+      request: #get
+      url: url
+      options: #{#headers => self.headers, #timeout => self.timeout}
 
   /// Perform a POST request using the stored base URL and default options.
   ///
@@ -114,10 +114,10 @@ Actor subclass: HTTPClient
 
   url: url options: opts delete: path :: String -> Result =>
     url := self.baseUrl ++ path
-    (Erlang beamtalk_http) request: #delete url: url options: #{
-      #headers => self.headers,
-      #timeout => self.timeout
-    }
+    (Erlang beamtalk_http)
+      request: #delete
+      url: url
+      options: #{#headers => self.headers, #timeout => self.timeout}
 
   /// Perform a generic request using the stored base URL.
   ///
@@ -135,4 +135,7 @@ Actor subclass: HTTPClient
   request: method path: path :: String options: opts :: Dictionary -> Result =>
     url := self.baseUrl ++ path
     defaults := #{#headers => self.headers, #timeout => self.timeout}
-    (Erlang beamtalk_http) request: method url: url options: (defaults merge: opts)
+    (Erlang beamtalk_http)
+      request: method
+      url: url
+      options: (defaults merge: opts)

@@ -58,7 +58,10 @@ Actor subclass: LocalMutationActor
   // Local mutation in to:by:do:
   sumEvens: n =>
     total := 0
-    2 to: n by: 2 do: [:i | total := total + i]
+    2
+      to: n
+      by: 2
+      do: [:i | total := total + i]
     total
 
   // Mixed local + field mutation

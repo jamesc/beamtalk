@@ -24,9 +24,11 @@ TestCase subclass: StreamCollectionsTest
     // Stream returns Stream, not List
     self assert: (#(1, 2, 3) stream) class equals: Stream
     // Chained lazy pipeline
-    self assert: (((#(1, 2, 3, 4, 5, 6) stream) select: [:n |
-      n > 2
-    ]) collect: [:n | n * 10]) asList equals: #(30, 40, 50, 60)
+    self
+      assert: (((#(1, 2, 3, 4, 5, 6) stream) select: [:n |
+        n > 2
+      ]) collect: [:n | n * 10]) asList
+      equals: #(30, 40, 50, 60)
     // Take on list stream
     self assert: ((#(1, 2, 3, 4, 5) stream) take: 3) equals: #(1, 2, 3)
     // Inject into on list stream
@@ -105,9 +107,11 @@ TestCase subclass: StreamCollectionsTest
     // do: on set stream (returns nil)
     self assert: (((Set new add: 1) stream) do: [:n | n]) equals: nil
     // inject:into: on set stream
-    self assert: (((((Set new add: 1) add: 2) add: 3) stream) inject: 0 into: [:sum :n |
-      sum + n
-    ]) equals: 6
+    self
+      assert: (((((Set new add: 1) add: 2) add: 3) stream) inject: 0 into: [:sum :n |
+        sum + n
+      ])
+      equals: 6
     // detect on set stream
     self assert: (((((Set new add: 1) add: 2) add: 3) stream) detect: [:n |
       n > 1

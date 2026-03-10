@@ -17,7 +17,11 @@ TestCase subclass: SupervisionSpecValueTest
     self assert: spec args equals: nil
 
   testKeywordConstructor =>
-    spec := SupervisionSpec id: #db actorClass: Counter restart: #permanent args: nil
+    spec := SupervisionSpec
+      id: #db
+      actorClass: Counter
+      restart: #permanent
+      args: nil
     self assert: spec id equals: #db
     self assert: spec actorClass equals: Counter
     self assert: spec restart equals: #permanent
@@ -50,7 +54,10 @@ TestCase subclass: SupervisionSpecValueTest
 
   testWithIdWithRestartWithArgs =>
     args := #{#role => #replica}
-    spec := SupervisionSpec new withId: #replica withRestart: #transient withArgs: args
+    spec := SupervisionSpec new
+      withId: #replica
+      withRestart: #transient
+      withArgs: args
     self assert: spec id equals: #replica
     self assert: spec restart equals: #transient
     self assert: spec args equals: args
