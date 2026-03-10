@@ -741,17 +741,19 @@ fn find_self_message_send(expr: &Expression) -> Option<Span> {
         _ => {}
     }
     // Timer after:do: / every:do: run their block in a separate process —
-    // skip block arguments so we don't flag safe self-sends (BT-1301).
+    // skip the block argument so we don't flag safe self-sends (BT-1301).
+    // The receiver is NOT skipped: `(self getTimer) after:do:` still warns
+    // because `self getTimer` is a real calling_self dispatch in the HOF.
     if let Expression::MessageSend {
+        receiver,
         selector,
         arguments,
         ..
     } = expr
     {
         if is_timer_spawn_selector(selector.name().as_str()) {
-            return arguments
-                .iter()
-                .filter(|a| !matches!(a, Expression::Block(_)))
+            return std::iter::once(receiver.as_ref())
+                .chain(arguments.iter().filter(|a| !matches!(a, Expression::Block(_))))
                 .find_map(find_self_message_send);
         }
     }
@@ -2398,6 +2400,27 @@ mod tests {
             diagnostics.len(),
             1,
             "Expected 1 hint for direct self send in do: block alongside Timer, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Hint);
+    }
+
+    /// `self` in the *receiver* of a timer call inside a HOF still warns —
+    /// e.g. `(self getTimer) after: 0 do: [block]` — the receiver goes through
+    /// `calling_self` dispatch in the HOF and is NOT safe.
+    #[test]
+    fn self_in_timer_receiver_inside_hof_still_hints() {
+        let src = "Actor subclass: Worker\n  process: items => items do: [:x | (self getTimer) after: 0 do: [x doSomething]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 hint for self in Timer receiver inside do: block, got: {diagnostics:?}"
         );
         assert_eq!(diagnostics[0].severity, Severity::Hint);
     }
