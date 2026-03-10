@@ -753,7 +753,11 @@ fn find_self_message_send(expr: &Expression) -> Option<Span> {
     {
         if is_timer_spawn_selector(selector.name().as_str()) {
             return std::iter::once(receiver.as_ref())
-                .chain(arguments.iter().filter(|a| !matches!(a, Expression::Block(_))))
+                .chain(
+                    arguments
+                        .iter()
+                        .filter(|a| !matches!(a, Expression::Block(_))),
+                )
                 .find_map(find_self_message_send);
         }
     }
