@@ -175,7 +175,7 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
                 [] ->
                     ok;
                 _ ->
-                    ClassName = maps:get('$beamtalk_class', OldState, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(OldState, unknown),
                     ?LOG_WARNING(
                         "Hot reload dropped fields",
                         #{class => ClassName, fields => Dropped}

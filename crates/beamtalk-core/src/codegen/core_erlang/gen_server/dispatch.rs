@@ -156,6 +156,31 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
+    /// Generates the `class_name/0` function for runtime class identity.
+    ///
+    /// Returns the Beamtalk class name atom directly from the compiled module,
+    /// so `beamtalk_tagged_map:class_of/1` never needs to read `$beamtalk_class`
+    /// from instance state — hot-reload correctness is automatic.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'class_name'/0 = fun () -> 'Counter'
+    /// ```
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
+    pub(in crate::codegen::core_erlang) fn generate_class_name_function(
+        &self,
+        _module: &Module,
+    ) -> Result<Document<'static>> {
+        let doc = docvec![
+            "'class_name'/0 = fun () -> '",
+            Document::String(self.class_name()),
+            "'",
+            "\n\n",
+        ];
+        Ok(doc)
+    }
+
     /// Generates the `safe_dispatch/3` function with error isolation.
     ///
     /// Per BT-29 design doc, errors in method dispatch are caught and returned

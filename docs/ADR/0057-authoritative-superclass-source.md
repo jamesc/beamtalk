@@ -417,23 +417,28 @@ variables, runtime-added docs. All structural queries read from
 `__beamtalk_meta/0` directly. Dynamic classes (no compiled module) populate a
 thin ETS cache at `register_class` time from `ClassInfo`.
 
-**Implemented in BT-1272 — compiled actor/value-object instance state (`__methods__`):** Remove
-`__methods__` from every compiled actor/value-object state map. `$beamtalk_class`
-and `__class_mod__` are retained.
+**Implemented in BT-1272 — compiled actor/value-object instance state:** Remove
+`$beamtalk_class` and `__methods__` from every compiled actor/value-object state
+map. `__class_mod__` is retained as the sole identity key.
 
-- `$beamtalk_class` is kept: it is a single atom with negligible overhead, and
-  is read by the entire runtime stack for display, inspect, printString, and
-  reflection via `beamtalk_tagged_map:class_of/1` (103+ call sites). Removing
-  it would require a cross-cutting runtime change beyond this migration's scope.
+- `$beamtalk_class` is removed: each compiled module now exports a
+  `class_name/0` function that returns the class name atom. The runtime's
+  `beamtalk_tagged_map:class_of/1` checks `$beamtalk_class` first (for backward
+  compatibility with dynamic actors and runtime-created tagged maps like
+  `StackFrame`, `CompiledMethod`, error objects), then falls back to
+  `Mod:class_name()` via `__class_mod__`. This eliminates the staleness hazard:
+  after hot-reload, the module function always returns the current class name.
+  `erlang:function_exported/3` guards against stale BEAM files that predate
+  `class_name/0`.
 - `__methods__` is removed: generated `dispatch/4` replaces
   `maps:get('__methods__', State)` with a direct call to the class module's
   `method_table/0` function (e.g. `'counter':'method_table'()` for `Counter`).
   The call uses the generated module name directly — not via `__class_mod__`.
   Hot-reload correctness is automatic — the new module's `method_table/0` is
   live immediately, no cache invalidation needed.
-- Dynamic actors (no compiled module): retain `__methods__`-as-functions in
-  state unchanged. `beamtalk_actor:dispatch` continues to read from state for
-  this path.
+- Dynamic actors (no compiled module): retain both `$beamtalk_class` and
+  `__methods__`-as-functions in state unchanged. `beamtalk_actor:dispatch`
+  continues to read from state for this path.
 
 ETS was considered for the method table but rejected for the compiled-actor path:
 `method_table/0` is a constant module function (no allocation, no locking,
@@ -444,7 +449,7 @@ Phase 5 does not block Phases 1-4.
 
 ## References
 
-- Related issues: BT-1169 (immediate trigger — `Counter class allMethods` bug), BT-1272 (Phase 5 partial: `__methods__` removal from compiled actor/value-object instance state)
+- Related issues: BT-1169 (immediate trigger — `Counter class allMethods` bug), BT-1272 (Phase 5: `$beamtalk_class` + `__methods__` removal from compiled actor/value-object instance state)
 - Related ADRs:
   - ADR 0007: Compilable Standard Library with Primitive Injection
   - ADR 0032: Early Class Protocol (introduced `apply_class_info`)

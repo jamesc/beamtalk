@@ -23,7 +23,7 @@ impl CoreErlangGenerator {
     /// 4. Returns `{ok, FinalState}` or propagates parent init errors
     ///
     /// For base classes (extending Actor), it generates a simple init:
-    /// 1. Creates a default state map with `$beamtalk_class`, `__methods__`, and field values
+    /// 1. Creates a default state map with `__class_mod__` and field values
     /// 2. Merges `InitArgs` into the default state (`InitArgs` values override defaults)
     /// 3. Returns `{ok, FinalState}`
     ///
@@ -34,7 +34,6 @@ impl CoreErlangGenerator {
     ///     case call 'counter':'init'(InitArgs) of
     ///         <{'ok', ParentState}> when 'true' ->
     ///             let ChildFields = ~{
-    ///                 '$beamtalk_class' => 'LoggingCounter',
     ///                 '__class_mod__' => 'logging_counter',
     ///                 'logCount' => 0
     ///             }~
@@ -52,7 +51,6 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'init'/1 = fun (InitArgs) ->
     ///     let DefaultState = ~{
-    ///         '$beamtalk_class' => 'Counter',
     ///         '__class_mod__' => 'counter',
     ///         'value' => 0
     ///     }~
@@ -83,7 +81,6 @@ impl CoreErlangGenerator {
             false
         };
 
-        let class_name = self.class_name();
         let module_name = self.module_name.clone();
 
         if has_parent_init {
@@ -129,12 +126,6 @@ impl CoreErlangGenerator {
                                         nest(
                                             INDENT,
                                             docvec![
-                                                line(),
-                                                docvec![
-                                                    "'$beamtalk_class' => '",
-                                                    Document::String(class_name.clone()),
-                                                    "',"
-                                                ],
                                                 line(),
                                                 docvec![
                                                     "'__class_mod__' => '",
@@ -191,12 +182,6 @@ impl CoreErlangGenerator {
                         nest(
                             INDENT,
                             docvec![
-                                line(),
-                                docvec![
-                                    "'$beamtalk_class' => '",
-                                    Document::String(class_name.clone()),
-                                    "',"
-                                ],
                                 line(),
                                 docvec![
                                     "'__class_mod__' => '",

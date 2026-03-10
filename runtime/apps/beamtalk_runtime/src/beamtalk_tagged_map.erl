@@ -50,15 +50,21 @@ class_key() -> '$beamtalk_class'.
 %%% Classification
 %%% ============================================================================
 
-%% @doc Returns the class name for a tagged map, or `undefined` for plain maps.
+%% @doc Returns the class name for a tagged map, or `undefined` for non-tagged maps.
 %%
-%% Only returns a class if the map has a `$beamtalk_class` key with an atom value.
+%% Prefers `$beamtalk_class` when present (dynamic actors, runtime-created maps,
+%% and compiled actors with pre-migration state all carry it). Falls back to
+%% calling `Mod:class_name()` via `__class_mod__` for compiled actors that have
+%% been migrated (no longer carry `$beamtalk_class` in instance state) — the
+%% module function is always correct after hot-reload.
 %% Non-map values always return `undefined`.
 -spec class_of(term()) -> atom() | undefined.
 class_of(Map) when is_map(Map) ->
     case maps:find('$beamtalk_class', Map) of
-        {ok, Class} when is_atom(Class) -> Class;
-        _ -> undefined
+        {ok, Class} when is_atom(Class) ->
+            Class;
+        _ ->
+            class_name_from_mod(Map, undefined)
     end;
 class_of(_) ->
     undefined.
@@ -67,8 +73,10 @@ class_of(_) ->
 -spec class_of(term(), atom()) -> atom().
 class_of(Map, Default) when is_map(Map) ->
     case maps:find('$beamtalk_class', Map) of
-        {ok, Class} when is_atom(Class) -> Class;
-        _ -> Default
+        {ok, Class} when is_atom(Class) ->
+            Class;
+        _ ->
+            class_name_from_mod(Map, Default)
     end;
 class_of(_, Default) ->
     Default.
@@ -78,10 +86,28 @@ class_of(_, Default) ->
 is_tagged(Map) when is_map(Map) ->
     case maps:find('$beamtalk_class', Map) of
         {ok, Class} when is_atom(Class) -> true;
-        _ -> false
+        _ -> maps:is_key('__class_mod__', Map)
     end;
 is_tagged(_) ->
     false.
+
+%%% ============================================================================
+%%% Internal helpers
+%%% ============================================================================
+
+%% @doc Try `Mod:class_name()` via `__class_mod__`, with guard for stale BEAM files.
+%% @private
+-spec class_name_from_mod(map(), atom()) -> atom().
+class_name_from_mod(Map, Default) ->
+    case maps:find('__class_mod__', Map) of
+        {ok, Mod} when is_atom(Mod) ->
+            case erlang:function_exported(Mod, class_name, 0) of
+                true -> Mod:class_name();
+                false -> Default
+            end;
+        _ ->
+            Default
+    end.
 
 %%% ============================================================================
 %%% Internal Field Management
