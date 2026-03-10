@@ -961,6 +961,19 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
 
+**Exhaustiveness checking (BT-1299):** `match:` on a sealed type with constructor patterns must cover all known variants or include a wildcard `_` arm, or the compiler emits an error:
+
+```beamtalk
+// Compile error: missing error: arm
+r match: [Result ok: v -> [v + 1]]
+
+// Fine: all variants covered
+r match: [Result ok: v -> [v + 1]; Result error: _ -> [0]]
+
+// Fine: wildcard suppresses the check
+r match: [Result ok: v -> [v + 1]; _ -> [0]]
+```
+
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
 
 ### Destructuring in Match Arms

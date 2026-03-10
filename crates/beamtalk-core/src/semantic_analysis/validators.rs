@@ -14,7 +14,9 @@
 //! - Empty method bodies (BT-631)
 //! - Value type `-> Nil` return annotations (BT-1052)
 
-use crate::ast::{Block, Expression, Identifier, MessageSelector, MethodDefinition, Module};
+use crate::ast::{
+    Block, Expression, Identifier, MessageSelector, MethodDefinition, Module, Pattern,
+};
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
 use crate::semantic_analysis::{BlockContext, ClassHierarchy};
@@ -1460,6 +1462,92 @@ fn check_children_literal_for_policy(
                 .with_hint(
                     "Add `class supervisionPolicy -> Symbol => #permanent` (or `#transient`) \
                      to declare the restart behaviour explicitly",
+                ),
+            );
+        }
+    }
+}
+
+// ── BT-1299: Match exhaustiveness for sealed types ────────────────────────────
+
+/// BT-1299: Error when a `match:` on a sealed type omits a known constructor
+/// variant and has no wildcard arm.
+///
+/// Only applies to stdlib sealed types with a known complete variant set
+/// (Phase 1: `Result`). Wildcard `_` suppresses the check.
+pub(crate) fn check_match_exhaustiveness(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    walk_module(module, &mut |expr| {
+        visit_match_exhaustiveness(expr, diagnostics);
+    });
+}
+
+/// Returns all constructor selectors for a sealed stdlib type, or `None` if the
+/// type is not a known sealed type (exhaustiveness check does not apply).
+fn sealed_type_all_constructors(class: &str) -> Option<&'static [&'static str]> {
+    match class {
+        "Result" => Some(&["ok:", "error:"]),
+        _ => None,
+    }
+}
+
+/// Visitor for match exhaustiveness (BT-1299).
+fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    let Expression::Match { arms, span, .. } = expr else {
+        return;
+    };
+
+    // A wildcard arm suppresses exhaustiveness checking.
+    if arms
+        .iter()
+        .any(|arm| matches!(arm.pattern, Pattern::Wildcard(_)))
+    {
+        return;
+    }
+
+    // Collect covered constructor selectors by class name.
+    let mut covered: std::collections::HashMap<&str, Vec<String>> =
+        std::collections::HashMap::new();
+    for arm in arms {
+        if let Pattern::Constructor {
+            class, keywords, ..
+        } = &arm.pattern
+        {
+            let selector: String = keywords.iter().map(|(kw, _)| kw.as_str()).collect();
+            covered
+                .entry(class.name.as_str())
+                .or_default()
+                .push(selector);
+        }
+    }
+
+    // For each sealed class with constructor arms, check that all variants are covered.
+    for (class_name, used_selectors) in &covered {
+        let Some(all_selectors) = sealed_type_all_constructors(class_name) else {
+            // Not a known sealed type — codegen already emits an error for unknown classes.
+            continue;
+        };
+
+        let missing: Vec<&str> = all_selectors
+            .iter()
+            .copied()
+            .filter(|sel| !used_selectors.iter().any(|u| u == *sel))
+            .collect();
+
+        if !missing.is_empty() {
+            let missing_str = missing.join(", ");
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Non-exhaustive match: on sealed type `{class_name}` — \
+                         missing arm{}: {missing_str}.",
+                        if missing.len() == 1 { "" } else { "s" }
+                    ),
+                    *span,
+                )
+                .with_hint(
+                    "Add the missing arm(s), or add a wildcard `_ ->` arm to handle \
+                     remaining cases."
+                        .to_string(),
                 ),
             );
         }
@@ -2965,5 +3053,118 @@ mod tests {
             diagnostics.is_empty(),
             "Expected no warning for Worker with #permanent policy, got: {diagnostics:?}"
         );
+    }
+
+    // ── BT-1299: Match exhaustiveness for sealed types ────────────────────────
+
+    /// Missing `error:` arm without wildcard → compile error.
+    #[test]
+    fn match_exhaustiveness_result_missing_error_arm_is_error() {
+        let src = "(Result ok: 42) match: [Result ok: v -> [v + 1]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for missing error: arm, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(
+            diagnostics[0].message.contains("error:"),
+            "Expected 'error:' in message, got: {}",
+            diagnostics[0].message
+        );
+        assert!(
+            diagnostics[0].message.contains("Result"),
+            "Expected 'Result' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// Missing `ok:` arm without wildcard → compile error.
+    #[test]
+    fn match_exhaustiveness_result_missing_ok_arm_is_error() {
+        let src = "(Result error: #x) match: [Result error: e -> [e]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for missing ok: arm, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(
+            diagnostics[0].message.contains("ok:"),
+            "Expected 'ok:' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// Both arms present → no error.
+    #[test]
+    fn match_exhaustiveness_result_both_arms_no_error() {
+        let src = "r match: [Result ok: v -> [v]; Result error: e -> [0]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error when both Result arms present, got: {diagnostics:?}"
+        );
+    }
+
+    /// Wildcard arm suppresses exhaustiveness check.
+    #[test]
+    fn match_exhaustiveness_wildcard_suppresses_check() {
+        let src = "r match: [Result ok: v -> [v]; _ -> [0]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error when wildcard present, got: {diagnostics:?}"
+        );
+    }
+
+    /// Non-sealed type match (no constructor patterns) → no error.
+    #[test]
+    fn match_exhaustiveness_non_constructor_match_no_error() {
+        let src = "x match: [1 -> [#one]; 2 -> [#two]; _ -> [#other]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error for non-constructor match, got: {diagnostics:?}"
+        );
+    }
+
+    /// Exhaustiveness check fires inside a method body.
+    #[test]
+    fn match_exhaustiveness_fires_inside_method() {
+        let src = "Object subclass: Foo\n  run: r => r match: [Result ok: v -> [v]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error inside method, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
     }
 }
