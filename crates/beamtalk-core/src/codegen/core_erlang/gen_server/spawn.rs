@@ -65,10 +65,11 @@ impl CoreErlangGenerator {
         module: &Module,
     ) -> Result<Document<'static>> {
         // BT-411: Check if class defines an initialize method
-        let has_initialize = module
-            .classes
-            .first()
-            .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"));
+        let has_initialize = module.classes.first().is_some_and(|c| {
+            self.semantic_facts
+                .class_facts(&c.name.name)
+                .is_some_and(|cf| cf.has_instance_method("initialize"))
+        });
 
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
@@ -208,10 +209,11 @@ impl CoreErlangGenerator {
         module: &Module,
     ) -> Result<Document<'static>> {
         // BT-411: Check if class defines an initialize method
-        let has_initialize = module
-            .classes
-            .first()
-            .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"));
+        let has_initialize = module.classes.first().is_some_and(|c| {
+            self.semantic_facts
+                .class_facts(&c.name.name)
+                .is_some_and(|cf| cf.has_instance_method("initialize"))
+        });
 
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
