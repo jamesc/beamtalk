@@ -74,8 +74,8 @@ Module {
                                             Identifier {
                                                 name: "object",
                                                 span: Span {
-                                                    start: 199,
-                                                    end: 205,
+                                                    start: 198,
+                                                    end: 204,
                                                 },
                                             },
                                         ),
@@ -84,15 +84,15 @@ Module {
                                                 KeywordPart {
                                                     keyword: "foo:",
                                                     span: Span {
-                                                        start: 206,
-                                                        end: 210,
+                                                        start: 205,
+                                                        end: 209,
                                                     },
                                                 },
                                                 KeywordPart {
                                                     keyword: "bar:",
                                                     span: Span {
-                                                        start: 213,
-                                                        end: 217,
+                                                        start: 212,
+                                                        end: 216,
                                                     },
                                                 },
                                             ],
@@ -103,8 +103,8 @@ Module {
                                                     1,
                                                 ),
                                                 Span {
-                                                    start: 211,
-                                                    end: 212,
+                                                    start: 210,
+                                                    end: 211,
                                                 },
                                             ),
                                             Literal(
@@ -112,20 +112,20 @@ Module {
                                                     "hello",
                                                 ),
                                                 Span {
-                                                    start: 218,
-                                                    end: 225,
+                                                    start: 217,
+                                                    end: 224,
                                                 },
                                             ),
                                         ],
                                         is_cast: false,
                                         span: Span {
-                                            start: 199,
-                                            end: 225,
+                                            start: 198,
+                                            end: 224,
                                         },
                                     },
                                     span: Span {
-                                        start: 198,
-                                        end: 225,
+                                        start: 197,
+                                        end: 224,
                                     },
                                 },
                                 preceding_blank_line: false,
@@ -133,13 +133,13 @@ Module {
                         ],
                         span: Span {
                             start: 196,
-                            end: 227,
+                            end: 225,
                         },
                     },
                 ),
                 span: Span {
                     start: 186,
-                    end: 227,
+                    end: 225,
                 },
             },
             preceding_blank_line: false,
@@ -147,7 +147,7 @@ Module {
     ],
     span: Span {
         start: 186,
-        end: 227,
+        end: 225,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

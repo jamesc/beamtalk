@@ -83,8 +83,8 @@ Module {
                                             Identifier {
                                                 name: "counter",
                                                 span: Span {
-                                                    start: 224,
-                                                    end: 231,
+                                                    start: 223,
+                                                    end: 230,
                                                 },
                                             },
                                         ),
@@ -94,8 +94,8 @@ Module {
                                         arguments: [],
                                         is_cast: false,
                                         span: Span {
-                                            start: 224,
-                                            end: 241,
+                                            start: 223,
+                                            end: 240,
                                         },
                                     },
                                     messages: [
@@ -105,8 +105,8 @@ Module {
                                             ),
                                             arguments: [],
                                             span: Span {
-                                                start: 243,
-                                                end: 252,
+                                                start: 242,
+                                                end: 251,
                                             },
                                         },
                                         CascadeMessage {
@@ -115,14 +115,14 @@ Module {
                                             ),
                                             arguments: [],
                                             span: Span {
-                                                start: 254,
-                                                end: 262,
+                                                start: 253,
+                                                end: 261,
                                             },
                                         },
                                     ],
                                     span: Span {
-                                        start: 224,
-                                        end: 262,
+                                        start: 223,
+                                        end: 261,
                                     },
                                 },
                                 preceding_blank_line: false,
@@ -130,13 +130,13 @@ Module {
                         ],
                         span: Span {
                             start: 222,
-                            end: 264,
+                            end: 262,
                         },
                     },
                 ),
                 span: Span {
                     start: 208,
-                    end: 264,
+                    end: 262,
                 },
             },
             preceding_blank_line: false,
@@ -144,7 +144,7 @@ Module {
     ],
     span: Span {
         start: 208,
-        end: 264,
+        end: 262,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

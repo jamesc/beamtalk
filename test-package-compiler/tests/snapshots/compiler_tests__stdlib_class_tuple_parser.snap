@@ -81,8 +81,8 @@ Module {
                             KeywordPart {
                                 keyword: "at:",
                                 span: Span {
-                                    start: 322,
-                                    end: 325,
+                                    start: 323,
+                                    end: 326,
                                 },
                             },
                         ],
@@ -92,8 +92,8 @@ Module {
                             name: Identifier {
                                 name: "index",
                                 span: Span {
-                                    start: 326,
-                                    end: 331,
+                                    start: 327,
+                                    end: 332,
                                 },
                             },
                             type_annotation: None,
@@ -110,8 +110,8 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 span: Span {
-                                    start: 335,
-                                    end: 351,
+                                    start: 336,
+                                    end: 352,
                                 },
                             },
                             preceding_blank_line: false,
@@ -126,8 +126,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 322,
-                        end: 351,
+                        start: 323,
+                        end: 352,
                     },
                 },
                 MethodDefinition {
@@ -146,8 +146,8 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 span: Span {
-                                    start: 409,
-                                    end: 426,
+                                    start: 410,
+                                    end: 427,
                                 },
                             },
                             preceding_blank_line: false,
@@ -161,8 +161,8 @@ Module {
                             Comment {
                                 content: "Pattern matching for Erlang result types",
                                 span: Span {
-                                    start: 401,
-                                    end: 405,
+                                    start: 402,
+                                    end: 406,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -172,8 +172,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 401,
-                        end: 426,
+                        start: 402,
+                        end: 427,
                     },
                 },
                 MethodDefinition {
@@ -192,8 +192,8 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 span: Span {
-                                    start: 440,
-                                    end: 460,
+                                    start: 442,
+                                    end: 462,
                                 },
                             },
                             preceding_blank_line: false,
@@ -208,8 +208,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 429,
-                        end: 460,
+                        start: 431,
+                        end: 462,
                     },
                 },
                 MethodDefinition {
@@ -228,8 +228,8 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 span: Span {
-                                    start: 490,
-                                    end: 509,
+                                    start: 492,
+                                    end: 511,
                                 },
                             },
                             preceding_blank_line: false,
@@ -243,8 +243,8 @@ Module {
                             Comment {
                                 content: "Unwrapping",
                                 span: Span {
-                                    start: 480,
-                                    end: 486,
+                                    start: 482,
+                                    end: 488,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -254,8 +254,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 480,
-                        end: 509,
+                        start: 482,
+                        end: 511,
                     },
                 },
                 MethodDefinition {
@@ -264,8 +264,8 @@ Module {
                             KeywordPart {
                                 keyword: "unwrapOr:",
                                 span: Span {
-                                    start: 512,
-                                    end: 521,
+                                    start: 515,
+                                    end: 524,
                                 },
                             },
                         ],
@@ -275,8 +275,8 @@ Module {
                             name: Identifier {
                                 name: "default",
                                 span: Span {
-                                    start: 522,
-                                    end: 529,
+                                    start: 525,
+                                    end: 532,
                                 },
                             },
                             type_annotation: None,
@@ -293,8 +293,8 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 span: Span {
-                                    start: 533,
-                                    end: 555,
+                                    start: 536,
+                                    end: 558,
                                 },
                             },
                             preceding_blank_line: false,
@@ -309,8 +309,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 512,
-                        end: 555,
+                        start: 515,
+                        end: 558,
                     },
                 },
                 MethodDefinition {
@@ -319,8 +319,8 @@ Module {
                             KeywordPart {
                                 keyword: "unwrapOrElse:",
                                 span: Span {
-                                    start: 558,
-                                    end: 571,
+                                    start: 562,
+                                    end: 575,
                                 },
                             },
                         ],
@@ -330,8 +330,8 @@ Module {
                             name: Identifier {
                                 name: "block",
                                 span: Span {
-                                    start: 572,
-                                    end: 577,
+                                    start: 576,
+                                    end: 581,
                                 },
                             },
                             type_annotation: None,
@@ -348,8 +348,8 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 span: Span {
-                                    start: 581,
-                                    end: 607,
+                                    start: 585,
+                                    end: 611,
                                 },
                             },
                             preceding_blank_line: false,
@@ -364,8 +364,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 558,
-                        end: 607,
+                        start: 562,
+                        end: 611,
                     },
                 },
                 MethodDefinition {
@@ -384,8 +384,8 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 span: Span {
-                                    start: 639,
-                                    end: 660,
+                                    start: 643,
+                                    end: 664,
                                 },
                             },
                             preceding_blank_line: false,
@@ -399,8 +399,8 @@ Module {
                             Comment {
                                 content: "Conversion",
                                 span: Span {
-                                    start: 627,
-                                    end: 635,
+                                    start: 631,
+                                    end: 639,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -410,8 +410,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 627,
-                        end: 660,
+                        start: 631,
+                        end: 664,
                     },
                 },
             ],
@@ -470,7 +470,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 240,
-                end: 660,
+                end: 664,
             },
         },
     ],
@@ -478,7 +478,7 @@ Module {
     expressions: [],
     span: Span {
         start: 240,
-        end: 660,
+        end: 664,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

@@ -6,13 +6,10 @@
 // Test 1: class message returns atoms (not futures)
 42 class
 // => Integer
-
 "hello" class
 // => String
 
 // Test 2: Identity comparisons work immediately (not futures)
 42 == 42
 // => true
-
-42 /= 43
-// => true
+42 /= 43// => true

@@ -116,13 +116,13 @@ Module {
                         body: [],
                         span: Span {
                             start: 239,
-                            end: 242,
+                            end: 241,
                         },
                     },
                 ),
                 span: Span {
                     start: 221,
-                    end: 242,
+                    end: 241,
                 },
             },
             preceding_blank_line: true,
@@ -133,8 +133,8 @@ Module {
                     Comment {
                         content: "Empty block with newlines",
                         span: Span {
-                            start: 273,
-                            end: 290,
+                            start: 272,
+                            end: 289,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -147,8 +147,8 @@ Module {
                     Identifier {
                         name: "emptyWithNewlines",
                         span: Span {
-                            start: 273,
-                            end: 290,
+                            start: 272,
+                            end: 289,
                         },
                     },
                 ),
@@ -157,14 +157,14 @@ Module {
                         parameters: [],
                         body: [],
                         span: Span {
-                            start: 294,
-                            end: 298,
+                            start: 293,
+                            end: 295,
                         },
                     },
                 ),
                 span: Span {
-                    start: 273,
-                    end: 298,
+                    start: 272,
+                    end: 295,
                 },
             },
             preceding_blank_line: true,
@@ -175,8 +175,8 @@ Module {
                     Comment {
                         content: "Empty block used as argument",
                         span: Span {
-                            start: 332,
-                            end: 342,
+                            start: 329,
+                            end: 339,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -189,8 +189,8 @@ Module {
                     Identifier {
                         name: "collection",
                         span: Span {
-                            start: 332,
-                            end: 342,
+                            start: 329,
+                            end: 339,
                         },
                     },
                 ),
@@ -199,8 +199,8 @@ Module {
                         KeywordPart {
                             keyword: "do:",
                             span: Span {
-                                start: 343,
-                                end: 346,
+                                start: 340,
+                                end: 343,
                             },
                         },
                     ],
@@ -211,16 +211,16 @@ Module {
                             parameters: [],
                             body: [],
                             span: Span {
-                                start: 347,
-                                end: 349,
+                                start: 344,
+                                end: 346,
                             },
                         },
                     ),
                 ],
                 is_cast: false,
                 span: Span {
-                    start: 332,
-                    end: 349,
+                    start: 329,
+                    end: 346,
                 },
             },
             preceding_blank_line: true,
@@ -228,7 +228,7 @@ Module {
     ],
     span: Span {
         start: 175,
-        end: 349,
+        end: 346,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

@@ -92,7 +92,10 @@ Object subclass: Ets
   /// cache at: "counter" put: 1
   /// ```
   at: key put: value -> Nil =>
-    (Erlang beamtalk_ets) insert: self key: key value: value
+    (Erlang beamtalk_ets)
+      insert: self
+      key: key
+      value: value
 
   /// Look up a key; if absent, evaluate the block and return its result.
   ///
@@ -105,7 +108,10 @@ Object subclass: Ets
   /// cache at: "key"     ifAbsent: [0]    // => stored value
   /// ```
   at: key ifAbsent: block :: Block =>
-    (Erlang beamtalk_ets) lookupIfAbsent: self key: key block: block
+    (Erlang beamtalk_ets)
+      lookupIfAbsent: self
+      key: key
+      block: block
 
   /// Return `true` if the table contains an entry for `key`.
   ///

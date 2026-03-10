@@ -11,10 +11,8 @@ Actor subclass: EventLogger
 
   class supervisionPolicy -> Symbol => #permanent
 
-  log: message =>
-    self.events := self.events add: message
+  log: message => self.events := self.events add: message
 
   events => self.events
 
-  clear =>
-    self.events := #()
+  clear => self.events := #()

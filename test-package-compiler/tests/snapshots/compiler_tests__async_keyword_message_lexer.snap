@@ -4,12 +4,12 @@ expression: output
 ---
 Token { kind: Identifier("update"), span: Span { start: 186, end: 192 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test async keyword message send within a method"), Whitespace("\n"), LineComment("// Uses a non-Dictionary selector to test async message protocol"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 193, end: 195 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 196, end: 197 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Caret, span: Span { start: 198, end: 199 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("object"), span: Span { start: 199, end: 205 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("foo:"), span: Span { start: 206, end: 210 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Integer("1"), span: Span { start: 211, end: 212 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("bar:"), span: Span { start: 213, end: 217 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: String("hello"), span: Span { start: 218, end: 225 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: RightBracket, span: Span { start: 226, end: 227 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 228, end: 228 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: LeftBracket, span: Span { start: 196, end: 197 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Caret, span: Span { start: 197, end: 198 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("object"), span: Span { start: 198, end: 204 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("foo:"), span: Span { start: 205, end: 209 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 210, end: 211 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("bar:"), span: Span { start: 212, end: 216 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("hello"), span: Span { start: 217, end: 224 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 224, end: 225 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 226, end: 226 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

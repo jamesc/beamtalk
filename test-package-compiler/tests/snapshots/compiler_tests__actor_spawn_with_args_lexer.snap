@@ -2,26 +2,24 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
-Token { kind: Identifier("value"), span: Span { start: 368, end: 373 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test actor spawn with initialization arguments"), Whitespace("\n"), LineComment("// Counter spawnWith: passes initialization arguments to init/1"), Whitespace("\n"), LineComment("// which merges them with default field values."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// Once map literals are supported, use:"), Whitespace("\n"), LineComment("//   counter := Counter spawnWith: #{value => 10}"), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// For now, test with a simple value:"), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 374, end: 376 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Integer("0"), span: Span { start: 377, end: 378 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Period, span: Span { start: 378, end: 379 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("increment"), span: Span { start: 380, end: 389 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 390, end: 392 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 393, end: 394 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("self"), span: Span { start: 395, end: 399 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Period, span: Span { start: 399, end: 400 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("value"), span: Span { start: 400, end: 405 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 406, end: 408 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("self"), span: Span { start: 409, end: 413 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Period, span: Span { start: 413, end: 414 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("value"), span: Span { start: 414, end: 419 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: BinarySelector("+"), span: Span { start: 420, end: 421 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Integer("1"), span: Span { start: 422, end: 423 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: RightBracket, span: Span { start: 424, end: 425 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Period, span: Span { start: 425, end: 426 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("counter1"), span: Span { start: 469, end: 477 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Spawn with default values (value = 0)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 478, end: 480 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("Counter"), span: Span { start: 481, end: 488 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("spawn"), span: Span { start: 489, end: 494 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 610, end: 610 }, leading_trivia: [Whitespace("\n\n"), LineComment("// TODO: When map literal syntax #{key => value} is implemented:"), Whitespace("\n"), LineComment("// counter2 := Counter spawnWith: #{value => 10}"), Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 367, end: 372 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test actor spawn with initialization arguments"), Whitespace("\n"), LineComment("// Counter spawnWith: passes initialization arguments to init/1"), Whitespace("\n"), LineComment("// which merges them with default field values."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// Once map literals are supported, use:"), Whitespace("\n"), LineComment("//   counter := Counter spawnWith: #{value => 10}"), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// For now, test with a simple value:"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 373, end: 375 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 376, end: 377 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("increment"), span: Span { start: 378, end: 387 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 388, end: 390 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 391, end: 392 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 392, end: 396 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 396, end: 397 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 397, end: 402 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 403, end: 405 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 406, end: 410 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 410, end: 411 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 411, end: 416 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 417, end: 418 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 419, end: 420 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 420, end: 421 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("counter1"), span: Span { start: 464, end: 472 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Spawn with default values (value = 0)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 473, end: 475 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Counter"), span: Span { start: 476, end: 483 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("spawn"), span: Span { start: 484, end: 489 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 604, end: 604 }, leading_trivia: [Whitespace("\n"), LineComment("// TODO: When map literal syntax #{key => value} is implemented:"), Whitespace("\n"), LineComment("// counter2 := Counter spawnWith: #{value => 10}"), Whitespace("\n")], trailing_trivia: [] }

@@ -45,8 +45,8 @@ Module {
                                     Identifier {
                                         name: "self",
                                         span: Span {
-                                            start: 216,
-                                            end: 220,
+                                            start: 217,
+                                            end: 221,
                                         },
                                     },
                                 ),
@@ -59,15 +59,15 @@ Module {
                                             2,
                                         ),
                                         Span {
-                                            start: 223,
-                                            end: 224,
+                                            start: 224,
+                                            end: 225,
                                         },
                                     ),
                                 ],
                                 is_cast: false,
                                 span: Span {
-                                    start: 216,
-                                    end: 224,
+                                    start: 217,
+                                    end: 225,
                                 },
                             },
                             preceding_blank_line: false,
@@ -82,8 +82,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 205,
-                        end: 224,
+                        start: 206,
+                        end: 225,
                     },
                 },
             ],
@@ -133,7 +133,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 179,
-                end: 224,
+                end: 225,
             },
         },
     ],
@@ -141,7 +141,7 @@ Module {
     expressions: [],
     span: Span {
         start: 179,
-        end: 224,
+        end: 225,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

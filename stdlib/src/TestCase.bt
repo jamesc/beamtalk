@@ -152,7 +152,8 @@ Object subclass: TestCase
     result isError ifFalse: [
       self fail: "Expected Result error: but got {result printString}"
     ]
-    (result error == expected) ifFalse: [
-      self fail: "Expected Result error: {expected printString}, got Result error: {result error printString}"
-    ]
+    (result error == expected)
+      ifFalse: [
+        self fail: "Expected Result error: {expected printString}, got Result error: {result error printString}"
+      ]
     nil

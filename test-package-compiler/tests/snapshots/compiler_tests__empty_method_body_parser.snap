@@ -75,8 +75,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 293,
-                        end: 302,
+                        start: 316,
+                        end: 325,
                     },
                 },
                 MethodDefinition {
@@ -95,21 +95,21 @@ Module {
                                     Identifier {
                                         name: "self",
                                         span: Span {
-                                            start: 321,
-                                            end: 325,
+                                            start: 344,
+                                            end: 348,
                                         },
                                     },
                                 ),
                                 field: Identifier {
                                     name: "value",
                                     span: Span {
-                                        start: 326,
-                                        end: 331,
+                                        start: 349,
+                                        end: 354,
                                     },
                                 },
                                 span: Span {
-                                    start: 321,
-                                    end: 331,
+                                    start: 344,
+                                    end: 354,
                                 },
                             },
                             preceding_blank_line: false,
@@ -124,8 +124,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 309,
-                        end: 331,
+                        start: 332,
+                        end: 354,
                     },
                 },
             ],
@@ -145,8 +145,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 335,
-                        end: 340,
+                        start: 293,
+                        end: 298,
                     },
                 },
             ],
@@ -204,7 +204,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 244,
-                end: 340,
+                end: 354,
             },
         },
     ],

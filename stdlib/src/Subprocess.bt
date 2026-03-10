@@ -49,7 +49,11 @@ Actor subclass: Subprocess
   /// agent := (Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: #"/tmp") unwrap
   /// ```
   class open: command args: args env: env dir: dir -> Result =>
-    (Erlang beamtalk_subprocess) open: command args: args env: env dir: dir
+    (Erlang beamtalk_subprocess)
+      open: command
+      args: args
+      env: env
+      dir: dir
 
   /// Write a line to the subprocess's stdin (appends newline).
   ///
