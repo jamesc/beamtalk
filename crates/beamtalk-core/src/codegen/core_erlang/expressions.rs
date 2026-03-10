@@ -1713,14 +1713,20 @@ impl CoreErlangGenerator {
         let match_var = self.fresh_temp_var("Match");
         let value_doc = self.expression_doc(value)?;
 
-        let has_array_arm = arms.iter().any(|arm| matches!(arm.pattern, Pattern::Array { .. }));
+        let has_array_arm = arms
+            .iter()
+            .any(|arm| matches!(arm.pattern, Pattern::Array { .. }));
 
         let inner_doc = if has_array_arm {
             self.generate_match_chain(&match_var, arms)?
         } else {
             // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
             let mut parts: Vec<Document<'static>> = Vec::new();
-            parts.push(docvec!["case ", Document::String(match_var.clone()), " of "]);
+            parts.push(docvec![
+                "case ",
+                Document::String(match_var.clone()),
+                " of "
+            ]);
             for (i, arm) in arms.iter().enumerate() {
                 if i > 0 {
                     parts.push(Document::Str(" "));
@@ -1750,8 +1756,12 @@ impl CoreErlangGenerator {
         };
 
         Ok(docvec![
-            "let ", Document::String(match_var.clone()), " = ", value_doc,
-            " in ", inner_doc
+            "let ",
+            Document::String(match_var.clone()),
+            " = ",
+            value_doc,
+            " in ",
+            inner_doc
         ])
     }
 
@@ -1820,16 +1830,26 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         Ok(docvec![
-            "case ", Document::String(match_var.to_string()), " of ",
-            "<", pattern_doc, ">", guard_part, " -> ", body_doc,
-            " <", Document::String(fallthrough_var), "> when 'true' -> ", rest_doc,
+            "case ",
+            Document::String(match_var.to_string()),
+            " of ",
+            "<",
+            pattern_doc,
+            ">",
+            guard_part,
+            " -> ",
+            body_doc,
+            " <",
+            Document::String(fallthrough_var),
+            "> when 'true' -> ",
+            rest_doc,
             " end"
         ])
     }
 
     /// Compiles a single `Pattern::Array` match arm.
     ///
-    /// Emits a three-level conditional check (is_map → class → size), then element
+    /// Emits a three-level conditional check (`is_map` → class → size), then element
     /// extractions via `at:` dispatch. `rest_doc` is cloned for all failure branches.
     fn generate_array_match_arm(
         &mut self,
@@ -1858,9 +1878,15 @@ impl CoreErlangGenerator {
         let success_doc = if let Some(guard_doc) = guard_doc_opt {
             let no_guard_var = self.fresh_temp_var("GuardFail");
             docvec![
-                "case ", guard_doc, " of ",
-                "<'true'> when 'true' -> ", body_doc,
-                " <", Document::String(no_guard_var), "> when 'true' -> ", rest_doc.clone(),
+                "case ",
+                guard_doc,
+                " of ",
+                "<'true'> when 'true' -> ",
+                body_doc,
+                " <",
+                Document::String(no_guard_var),
+                "> when 'true' -> ",
+                rest_doc.clone(),
                 " end"
             ]
         } else {
@@ -1868,23 +1894,40 @@ impl CoreErlangGenerator {
         };
 
         // Recursively build element extraction + nested array checks
-        let inner_body = self.build_array_arm_body(match_var, elements, 0, success_doc, &rest_doc)?;
+        let inner_body =
+            self.build_array_arm_body(match_var, elements, 0, success_doc, &rest_doc)?;
 
         let no_match_size = self.fresh_temp_var("NoMatch");
         let no_match_class = self.fresh_temp_var("NoMatch");
 
         Ok(docvec![
-            "case call 'erlang':'is_map'(", Document::String(match_var.to_string()), ") of ",
+            "case call 'erlang':'is_map'(",
+            Document::String(match_var.to_string()),
+            ") of ",
             "<'true'> when 'true' -> ",
-            "case call 'erlang':'map_get'('$beamtalk_class', ", Document::String(match_var.to_string()), ") of ",
+            "case call 'erlang':'map_get'('$beamtalk_class', ",
+            Document::String(match_var.to_string()),
+            ") of ",
             "<'Array'> when 'true' -> ",
-            "case call 'beamtalk_array':'size'(", Document::String(match_var.to_string()), ") of ",
-            "<", Document::String(n.to_string()), "> when 'true' -> ", inner_body,
-            " <", Document::String(no_match_size), "> when 'true' -> ", rest_doc.clone(),
+            "case call 'beamtalk_array':'size'(",
+            Document::String(match_var.to_string()),
+            ") of ",
+            "<",
+            Document::String(n.to_string()),
+            "> when 'true' -> ",
+            inner_body,
+            " <",
+            Document::String(no_match_size),
+            "> when 'true' -> ",
+            rest_doc.clone(),
             " end ",
-            "<", Document::String(no_match_class), "> when 'true' -> ", rest_doc.clone(),
+            "<",
+            Document::String(no_match_class),
+            "> when 'true' -> ",
+            rest_doc.clone(),
             " end ",
-            "<'false'> when 'true' -> ", rest_doc,
+            "<'false'> when 'true' -> ",
+            rest_doc,
             " end"
         ])
     }
@@ -1914,53 +1957,90 @@ impl CoreErlangGenerator {
             Pattern::Variable(id) => {
                 let core_var = Self::to_core_erlang_var(&id.name);
                 let next = self.build_array_arm_body(
-                    array_var, elements, start + 1, continuation, failure_doc,
+                    array_var,
+                    elements,
+                    start + 1,
+                    continuation,
+                    failure_doc,
                 )?;
                 Ok(docvec![
-                    "let ", Document::String(core_var),
+                    "let ",
+                    Document::String(core_var),
                     " = call 'beamtalk_message_dispatch':'send'(",
                     Document::String(array_var.to_string()),
-                    ", 'at:', [", Document::String(one_based.to_string()), "]) in ",
+                    ", 'at:', [",
+                    Document::String(one_based.to_string()),
+                    "]) in ",
                     next
                 ])
             }
             Pattern::Wildcard(_) => {
                 self.build_array_arm_body(array_var, elements, start + 1, continuation, failure_doc)
             }
-            Pattern::Array { elements: inner_elems, .. } => {
+            Pattern::Array {
+                elements: inner_elems,
+                ..
+            } => {
                 let nested_var = self.fresh_temp_var("ArrElem");
                 let n_inner = inner_elems.len();
 
                 // Build continuation for elements after this nested array
                 let after_nested = self.build_array_arm_body(
-                    array_var, elements, start + 1, continuation, failure_doc,
+                    array_var,
+                    elements,
+                    start + 1,
+                    continuation,
+                    failure_doc,
                 )?;
 
                 // Build inner element extractions from the nested array variable
-                let inner_elems_vec: Vec<Pattern> = inner_elems.to_vec();
+                let inner_elems_clone: Vec<Pattern> = inner_elems.clone();
                 let inner_body = self.build_array_arm_body(
-                    &nested_var, &inner_elems_vec, 0, after_nested, failure_doc,
+                    &nested_var,
+                    &inner_elems_clone,
+                    0,
+                    after_nested,
+                    failure_doc,
                 )?;
 
                 let no_match_size_n = self.fresh_temp_var("NoMatch");
                 let no_match_class_n = self.fresh_temp_var("NoMatch");
 
                 Ok(docvec![
-                    "let ", Document::String(nested_var.clone()),
+                    "let ",
+                    Document::String(nested_var.clone()),
                     " = call 'beamtalk_message_dispatch':'send'(",
                     Document::String(array_var.to_string()),
-                    ", 'at:', [", Document::String(one_based.to_string()), "]) in ",
-                    "case call 'erlang':'is_map'(", Document::String(nested_var.clone()), ") of ",
+                    ", 'at:', [",
+                    Document::String(one_based.to_string()),
+                    "]) in ",
+                    "case call 'erlang':'is_map'(",
+                    Document::String(nested_var.clone()),
+                    ") of ",
                     "<'true'> when 'true' -> ",
-                    "case call 'erlang':'map_get'('$beamtalk_class', ", Document::String(nested_var.clone()), ") of ",
+                    "case call 'erlang':'map_get'('$beamtalk_class', ",
+                    Document::String(nested_var.clone()),
+                    ") of ",
                     "<'Array'> when 'true' -> ",
-                    "case call 'beamtalk_array':'size'(", Document::String(nested_var.clone()), ") of ",
-                    "<", Document::String(n_inner.to_string()), "> when 'true' -> ", inner_body,
-                    " <", Document::String(no_match_size_n), "> when 'true' -> ", failure_doc.clone(),
+                    "case call 'beamtalk_array':'size'(",
+                    Document::String(nested_var.clone()),
+                    ") of ",
+                    "<",
+                    Document::String(n_inner.to_string()),
+                    "> when 'true' -> ",
+                    inner_body,
+                    " <",
+                    Document::String(no_match_size_n),
+                    "> when 'true' -> ",
+                    failure_doc.clone(),
                     " end ",
-                    "<", Document::String(no_match_class_n), "> when 'true' -> ", failure_doc.clone(),
+                    "<",
+                    Document::String(no_match_class_n),
+                    "> when 'true' -> ",
+                    failure_doc.clone(),
                     " end ",
-                    "<'false'> when 'true' -> ", failure_doc.clone(),
+                    "<'false'> when 'true' -> ",
+                    failure_doc.clone(),
                     " end"
                 ])
             }

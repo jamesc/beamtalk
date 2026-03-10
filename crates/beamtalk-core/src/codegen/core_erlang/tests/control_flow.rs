@@ -749,7 +749,8 @@ fn test_match_array_pattern_arm_generates_is_map_guard_chain() {
     let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[h, t] -> h + t;\n      _ -> 0\n    ]\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
 
     eprintln!("Generated code for array pattern match:\n{code}");
 
@@ -778,7 +779,8 @@ fn test_match_map_pattern_arm_generates_core_erlang_map_pattern() {
     let src = "Object subclass: Foo\n  test: d =>\n    d match: [\n      #{#event => evName} -> evName;\n      _ -> \"none\"\n    ]\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
 
     eprintln!("Generated code for map pattern match:\n{code}");
 
@@ -804,7 +806,8 @@ fn test_match_array_pattern_fallthrough_to_wildcard() {
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #[a, b] -> a + b;\n      _ -> 42\n    ]\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
 
     // The fallback (42) should appear in the generated code
     assert!(
@@ -825,7 +828,8 @@ fn test_match_nested_array_pattern_arm() {
     let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[#[a, b], c] -> a + b + c;\n      _ -> 0\n    ]\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
 
     eprintln!("Generated code for nested array pattern match:\n{code}");
 
