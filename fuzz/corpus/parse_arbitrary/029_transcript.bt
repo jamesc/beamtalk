@@ -42,4 +42,5 @@ Transcript show: nil
 // Use separate statements instead:
 Transcript show: "Hello"
 // => nil
-Transcript cr// => nil
+Transcript cr
+// => nil
