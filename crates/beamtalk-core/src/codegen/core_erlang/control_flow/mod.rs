@@ -1937,10 +1937,7 @@ impl CoreErlangGenerator {
                     .union(&list_op_cross_scope_writes)
                     .cloned()
                     .collect();
-                writes = writes
-                    .union(&list_op_cross_scope_writes)
-                    .cloned()
-                    .collect();
+                writes = writes.union(&list_op_cross_scope_writes).cloned().collect();
                 // BT-1329: Include outer-scope write-only variables (same as Actor above).
                 for v in &writes {
                     if !block_params.contains(v.as_str())

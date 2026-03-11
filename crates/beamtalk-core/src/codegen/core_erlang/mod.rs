@@ -1257,10 +1257,7 @@ impl CoreErlangGenerator {
     /// mutate variables from the outer scope. These cross-scope mutations are
     /// invisible to `analyze_block` (which doesn't propagate `local_writes` from
     /// nested non-conditional blocks), so they require a separate scan.
-    pub(super) fn body_has_list_op_cross_scope_mutations(
-        &self,
-        body: &crate::ast::Block,
-    ) -> bool {
+    pub(super) fn body_has_list_op_cross_scope_mutations(&self, body: &crate::ast::Block) -> bool {
         let mut cross_scope_writes = std::collections::HashSet::new();
         for stmt in &body.body {
             Self::collect_list_op_cross_scope_mutations_recursive(
@@ -2022,8 +2019,7 @@ impl CoreErlangGenerator {
                     captured.insert(v.clone());
                 }
             }
-            let threaded: Vec<String> =
-                captured.intersection(&writes).cloned().collect();
+            let threaded: Vec<String> = captured.intersection(&writes).cloned().collect();
 
             if !threaded.is_empty() {
                 return Some(threaded);
