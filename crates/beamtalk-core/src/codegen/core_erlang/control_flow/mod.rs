@@ -2291,7 +2291,7 @@ impl CoreErlangGenerator {
     ///
     /// When this returns `true`, the list op would fall back to map-accumulator mode which
     /// references `StateAcc` — incompatible with direct-params loops. The outer loop must
-    /// fall back to StateAcc mode.
+    /// fall back to `StateAcc` mode.
     fn list_op_needs_stateacc_fallback(
         expr: &Expression,
         facts: &crate::semantic_analysis::SemanticFacts,
