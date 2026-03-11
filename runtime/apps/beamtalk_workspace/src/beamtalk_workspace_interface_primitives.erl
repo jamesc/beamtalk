@@ -54,6 +54,8 @@
 -export([create_bindings_table/0]).
 %% Direct exports for Erlang FFI calls from sealed Object WorkspaceInterface
 -export([actors/0, actorAt/1, classes/0, load/1, globals/0, bind/2, unbind/1, rootSupervisor/0]).
+%% Supervisor lifecycle management (BT-1341)
+-export([startSupervisor/1, stopSupervisor/1, supervisors/0]).
 
 %% ETS table name for user workspace bindings
 -define(WI_BINDINGS_TABLE, beamtalk_wi_user_bindings).
@@ -83,6 +85,12 @@ dispatch('unbind:', [Name], _Self) ->
     unbind(Name);
 dispatch(rootSupervisor, [], _Self) ->
     rootSupervisor();
+dispatch('startSupervisor:', [ClassArg], _Self) ->
+    startSupervisor(ClassArg);
+dispatch('stopSupervisor:', [ClassArg], _Self) ->
+    stopSupervisor(ClassArg);
+dispatch(supervisors, [], _Self) ->
+    supervisors();
 dispatch(Selector, _Args, _Self) ->
     Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
@@ -190,6 +198,195 @@ unbind(Name) ->
 -spec rootSupervisor() -> tuple() | nil.
 rootSupervisor() ->
     beamtalk_supervisor:get_root().
+
+%%% ============================================================================
+%%% Supervisor lifecycle management (BT-1341)
+%%% ============================================================================
+
+%% @doc Start and attach a user supervisor to the workspace supervision tree.
+%%
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) startSupervisor: MySup`.
+%% The class must be a Supervisor or DynamicSupervisor subclass. The supervisor
+%% is started as a dynamic child of `beamtalk_workspace_sup` with `temporary`
+%% restart (user supervisors are not auto-restarted — the user re-attaches
+%% explicitly during iterative development).
+%%
+%% If the supervisor is already running under the workspace tree, returns the
+%% existing instance (idempotent).
+-spec startSupervisor(tuple()) -> tuple().
+startSupervisor(ClassArg) ->
+    case beamtalk_class_registry:is_class_object(ClassArg) of
+        false ->
+            raise_start_supervisor_type_error(<<"Expected a Supervisor class">>);
+        true ->
+            ok
+    end,
+    ClassPid = element(4, ClassArg),
+    ClassName = beamtalk_object_class:class_name(ClassPid),
+    Module = beamtalk_object_class:module_name(ClassPid),
+    case beamtalk_supervisor:is_supervisor(ClassName) of
+        false ->
+            NameBin = atom_to_binary(ClassName, utf8),
+            raise_start_supervisor_type_error(
+                iolist_to_binary([NameBin, <<" is not a Supervisor or DynamicSupervisor subclass">>])
+            );
+        true ->
+            ok
+    end,
+    do_start_supervisor(ClassName, Module).
+
+%% @private
+do_start_supervisor(ClassName, Module) ->
+    ChildId = {user_supervisor, ClassName},
+    ChildSpec = #{
+        id => ChildId,
+        start => {Module, start_link, []},
+        restart => temporary,
+        shutdown => infinity,
+        type => supervisor,
+        modules => [Module]
+    },
+    case supervisor:start_child(beamtalk_workspace_sup, ChildSpec) of
+        {ok, Pid} ->
+            {beamtalk_supervisor, ClassName, Module, Pid};
+        {error, {already_started, _Pid}} ->
+            %% Process is already running. If the child spec is registered
+            %% under our workspace supervisor (same ChildId), this is an
+            %% idempotent call — return the actual handle from which_children
+            %% (not the caller's Module, which may be stale after a reload).
+            %% Otherwise, the supervisor was started standalone.
+            case workspace_child_handle(ChildId) of
+                {ok, Handle} ->
+                    Handle;
+                not_found ->
+                    NameBin = atom_to_binary(ClassName, utf8),
+                    raise_start_supervisor_error(
+                        iolist_to_binary([
+                            NameBin,
+                            <<" is already running — stop it first, then attach to the workspace">>
+                        ])
+                    )
+            end;
+        {error, already_present} ->
+            %% Child spec exists but process is not running (was previously stopped).
+            %% Delete the stale spec and re-add to support iterative development.
+            _ = supervisor:delete_child(beamtalk_workspace_sup, ChildId),
+            case supervisor:start_child(beamtalk_workspace_sup, ChildSpec) of
+                {ok, Pid} ->
+                    {beamtalk_supervisor, ClassName, Module, Pid};
+                {error, Reason} ->
+                    raise_start_supervisor_error(Reason)
+            end;
+        {error, Reason} ->
+            raise_start_supervisor_error(Reason)
+    end.
+
+%% @private Return the actual attached handle for a workspace child.
+%% Reads from which_children to get the real module and pid (which may differ
+%% from the caller's ClassArg after a class reload).
+-spec workspace_child_handle(term()) -> {ok, tuple()} | not_found.
+workspace_child_handle(ChildId = {user_supervisor, ClassName}) ->
+    case lists:keyfind(ChildId, 1, supervisor:which_children(beamtalk_workspace_sup)) of
+        {ChildId, Pid, supervisor, [RunningModule]} when is_pid(Pid) ->
+            {ok, {beamtalk_supervisor, ClassName, RunningModule, Pid}};
+        _ ->
+            not_found
+    end.
+
+%% @private
+-dialyzer({no_return, raise_start_supervisor_type_error/1}).
+raise_start_supervisor_type_error(Message) ->
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'startSupervisor:'),
+    beamtalk_error:raise(beamtalk_error:with_message(Err1, Message)).
+
+%% @private
+-dialyzer({no_return, raise_start_supervisor_error/1}).
+raise_start_supervisor_error(Message) when is_binary(Message) ->
+    Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'startSupervisor:'),
+    beamtalk_error:raise(beamtalk_error:with_message(Err1, Message));
+raise_start_supervisor_error(Reason) ->
+    Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'startSupervisor:'),
+    beamtalk_error:raise(
+        beamtalk_error:with_message(
+            Err1,
+            iolist_to_binary(io_lib:format("Failed to start supervisor: ~p", [Reason]))
+        )
+    ).
+
+%% @doc Stop and remove a user supervisor from the workspace supervision tree.
+%%
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) stopSupervisor: MySup`.
+%% Cleanly shuts down the supervisor and all its children before removing the
+%% child spec from the workspace supervisor.
+-spec stopSupervisor(tuple()) -> nil.
+stopSupervisor(ClassArg) ->
+    case beamtalk_class_registry:is_class_object(ClassArg) of
+        false ->
+            raise_stop_supervisor_type_error(<<"Expected a Supervisor class">>);
+        true ->
+            ok
+    end,
+    ClassPid = element(4, ClassArg),
+    ClassName = beamtalk_object_class:class_name(ClassPid),
+    case beamtalk_supervisor:is_supervisor(ClassName) of
+        false ->
+            raise_stop_supervisor_type_error(
+                iolist_to_binary([
+                    atom_to_binary(ClassName, utf8),
+                    <<" is not a Supervisor or DynamicSupervisor subclass">>
+                ])
+            );
+        true ->
+            ok
+    end,
+    do_stop_supervisor(ClassName).
+
+%% @private
+do_stop_supervisor(ClassName) ->
+    ChildId = {user_supervisor, ClassName},
+    case supervisor:terminate_child(beamtalk_workspace_sup, ChildId) of
+        ok ->
+            _ = supervisor:delete_child(beamtalk_workspace_sup, ChildId),
+            nil;
+        {error, not_found} ->
+            NameBin = atom_to_binary(ClassName, utf8),
+            Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, 'stopSupervisor:'),
+            beamtalk_error:raise(
+                beamtalk_error:with_message(
+                    Err1,
+                    iolist_to_binary([NameBin, <<" is not attached to the workspace">>])
+                )
+            )
+    end.
+
+%% @private
+-dialyzer({no_return, raise_stop_supervisor_type_error/1}).
+raise_stop_supervisor_type_error(Message) ->
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'stopSupervisor:'),
+    beamtalk_error:raise(beamtalk_error:with_message(Err1, Message)).
+
+%% @doc List all user-attached supervisors in the workspace supervision tree.
+%%
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) supervisors`.
+%% Returns a list of `{beamtalk_supervisor, ClassName, Module, Pid}` tuples
+%% for all supervisors started via `startSupervisor:`.
+-spec supervisors() -> [tuple()].
+supervisors() ->
+    Children = supervisor:which_children(beamtalk_workspace_sup),
+    lists:filtermap(
+        fun
+            ({{user_supervisor, ClassName}, Pid, supervisor, [Module]}) when is_pid(Pid) ->
+                {true, {beamtalk_supervisor, ClassName, Module, Pid}};
+            (_) ->
+                false
+        end,
+        Children
+    ).
 
 %%% ============================================================================
 %%% Stable external API
