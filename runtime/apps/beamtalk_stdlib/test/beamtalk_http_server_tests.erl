@@ -5,7 +5,7 @@
 %%%
 %%% **DDD Context:** Object System Context
 %%%
-%%% Verifies lifecycle operations on the cowboy-backed HTTP server wrapper.
+%%% Verifies the cowboy lifecycle functions called by the HTTPServer actor.
 %%% Tests start real listeners and make real HTTP requests to confirm
 %%% the server is functioning correctly.
 
@@ -14,67 +14,60 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================
-%%% Lifecycle tests
+%%% Lifecycle tests (direct Erlang API)
 %%% ============================================================================
 
-start_returns_server_with_port_test() ->
+start_listener_returns_ref_and_port_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    Result = beamtalk_http_server:start(0, Handler),
-    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, Result),
-    Server = maps:get('okValue', Result),
-    ?assert(is_map(Server)),
-    Port = maps:get(actualPort, Server),
+    [Ref, Port] = beamtalk_http_server:startListener(0, Handler),
+    ?assert(is_reference(Ref)),
     ?assert(is_integer(Port)),
     ?assert(Port > 0),
     ?assert(Port =< 65535),
-    Ref = maps:get(listenerRef, Server),
-    beamtalk_http_server:stop(Ref).
+    beamtalk_http_server:stopListener(Ref).
 
-stop_is_idempotent_test() ->
+stop_listener_is_idempotent_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    Server = unwrap_result(beamtalk_http_server:start(0, Handler)),
-    Ref = maps:get(listenerRef, Server),
-    ?assertEqual(ok, beamtalk_http_server:stop(Ref)),
-    ?assertEqual(ok, beamtalk_http_server:stop(Ref)).
+    [Ref, _Port] = beamtalk_http_server:startListener(0, Handler),
+    ?assertEqual(ok, beamtalk_http_server:stopListener(Ref)),
+    ?assertEqual(ok, beamtalk_http_server:stopListener(Ref)).
 
-start_multiple_servers_test() ->
+start_multiple_listeners_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    Server1 = unwrap_result(beamtalk_http_server:start(0, Handler)),
-    Server2 = unwrap_result(beamtalk_http_server:start(0, Handler)),
-    Port1 = maps:get(actualPort, Server1),
-    Port2 = maps:get(actualPort, Server2),
+    [Ref1, Port1] = beamtalk_http_server:startListener(0, Handler),
+    [Ref2, Port2] = beamtalk_http_server:startListener(0, Handler),
     ?assertNotEqual(Port1, Port2),
-    beamtalk_http_server:stop(maps:get(listenerRef, Server1)),
-    beamtalk_http_server:stop(maps:get(listenerRef, Server2)).
+    beamtalk_http_server:stopListener(Ref1),
+    beamtalk_http_server:stopListener(Ref2).
 
 invalid_port_raises_type_error_test() ->
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
     ?assertError(
         #{'$beamtalk_class' := 'TypeError'},
-        beamtalk_http_server:start(-1, Handler)
+        beamtalk_http_server:startListener(-1, Handler)
     ).
 
 invalid_handler_raises_type_error_test() ->
     ?assertError(
         #{'$beamtalk_class' := 'TypeError'},
-        beamtalk_http_server:start(0, not_a_handler)
+        beamtalk_http_server:startListener(0, not_a_handler)
     ).
 
 invalid_opts_raises_type_error_test() ->
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
     ?assertError(
         #{'$beamtalk_class' := 'TypeError'},
-        beamtalk_http_server:start(0, Handler, not_a_map)
+        beamtalk_http_server:startListener(0, Handler, not_a_map)
     ).
 
 invalid_bind_raises_type_error_test() ->
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
     ?assertError(
         #{'$beamtalk_class' := 'TypeError'},
-        beamtalk_http_server:start(0, Handler, #{bind => 123})
+        beamtalk_http_server:startListener(0, Handler, #{bind => 123})
     ).
 
 %%% ============================================================================
@@ -85,23 +78,17 @@ handler_receives_request_and_returns_response_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     {ok, _} = application:ensure_all_started(gun),
     Handler = fun(_Req) -> make_simple_response(200, <<"hello from handler">>) end,
-    Server = unwrap_result(beamtalk_http_server:start(0, Handler)),
-    Port = maps:get(actualPort, Server),
+    [Ref, Port] = beamtalk_http_server:startListener(0, Handler),
     Url = iolist_to_binary(["http://127.0.0.1:", integer_to_list(Port), "/test"]),
     #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Resp} =
         beamtalk_http:'get:'(Url),
     ?assertEqual(200, maps:get(status, Resp)),
     ?assertEqual(<<"hello from handler">>, maps:get(body, Resp)),
-    beamtalk_http_server:stop(maps:get(listenerRef, Server)).
+    beamtalk_http_server:stopListener(Ref).
 
 %%% ============================================================================
 %%% Helpers
 %%% ============================================================================
-
-%% @private Extract the ok value from a Result map.
--spec unwrap_result(map()) -> term().
-unwrap_result(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Value}) ->
-    Value.
 
 %% @private Build a minimal HTTPResponse map for testing.
 %%
