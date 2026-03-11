@@ -652,6 +652,56 @@ mod tests {
     }
 
     #[test]
+    fn test_ensure_in_class_method_simple() {
+        // BT-1346: ensure: in a class method (no mutations) should compile
+        let src = "Object subclass: Foo\n\n  class bar =>\n    [42] ensure: [nil]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("try"),
+            "class method ensure: should generate try. Got:\n{code}"
+        );
+        // Must NOT reference State (class methods have no actor state)
+        assert!(
+            !code.contains("let StateAcc = State"),
+            "class method ensure: must not reference actor State. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_ensure_in_class_method_with_captured_local_mutation() {
+        // BT-1346: ensure: in a class method where locals declared outside
+        // the block are reassigned inside — must use closure path, not mutation threading
+        let src = "\
+Actor subclass: Foo
+  state: x = 0
+
+  class build: block =>
+    routeList := nil
+    nfHandler := nil
+    [
+      routeList := 42
+      nfHandler := 99
+    ] ensure: [nil]
+    routeList
+";
+        let code = codegen(src);
+        assert!(
+            code.contains("try"),
+            "class method ensure: with captured mutation should generate try. Got:\n{code}"
+        );
+        // Must NOT reference State (class methods have no actor state)
+        assert!(
+            !code.contains("let StateAcc = State"),
+            "class method ensure: must not reference actor State. Got:\n{code}"
+        );
+        // Should use closure-based approach (BlockFun/CleanupFun), not mutation threading
+        assert!(
+            code.contains("apply") && code.contains("do apply"),
+            "class method ensure: should use closure-based try/catch. Got:\n{code}"
+        );
+    }
+
+    #[test]
     fn test_ensure_generates_try_of_catch_with_cleanup() {
         // ensure: generates a try/of/catch (not Core Erlang try/after) with cleanup
         // applied in both success and error paths
@@ -667,4 +717,5 @@ mod tests {
             "ensure: catch should re-raise after cleanup. Got:\n{code}"
         );
     }
+
 }
