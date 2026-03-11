@@ -34,6 +34,7 @@ use super::document::{Document, join};
 use super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::Expression;
 use crate::docvec;
+use crate::source_analysis::Span;
 
 // ─── ThreadingPlan ────────────────────────────────────────────────────────────
 
@@ -44,6 +45,61 @@ pub(super) enum KeyStyle {
     LocalPrefixed,
     /// Plain variable name (REPL mode).
     ReplPlain,
+}
+
+/// BT-1343: Reason why a loop fell back to `StateAcc` threading instead of an optimized mode.
+#[derive(Clone, Debug)]
+pub(super) enum StateAccFallbackReason {
+    /// No fallback — an optimized convention was selected.
+    None,
+    /// Body contains self-sends (async dispatch requires `gen_server` state).
+    SelfSendInBody,
+    /// Nested list op with cross-scope mutations incompatible with direct-params.
+    NestedListOpCrossScope,
+    /// Tier-2 value call on a threaded local (returns `{Result, StateAcc}` tuple).
+    Tier2ValueCallOnThreaded,
+    /// Inline conditional writes to a threaded local.
+    InlineConditionalThreadedWrite,
+    /// Condition block has state effects.
+    ConditionStateEffects,
+    /// Control-flow sub-expression with mutations (e.g. `ifTrue:` with field writes).
+    ControlFlowMutations,
+    /// No threaded locals (nothing to optimize).
+    NoThreadedLocals,
+    /// `ValueType` context (no actor State to thread).
+    ValueTypeContext,
+    /// Not a letrec loop (foldl loops don't support direct-params).
+    NotLetrec,
+    /// Destructure assignment as last expression (incompatible with tuple-acc).
+    DestructureAsLastExpr,
+}
+
+impl std::fmt::Display for StateAccFallbackReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "none"),
+            Self::SelfSendInBody => write!(f, "self-send in loop body"),
+            Self::NestedListOpCrossScope => {
+                write!(f, "nested list op with cross-scope mutation")
+            }
+            Self::Tier2ValueCallOnThreaded => {
+                write!(f, "tier-2 value call on threaded local")
+            }
+            Self::InlineConditionalThreadedWrite => {
+                write!(f, "inline conditional writing to threaded local")
+            }
+            Self::ConditionStateEffects => write!(f, "condition has state effects"),
+            Self::ControlFlowMutations => {
+                write!(f, "control-flow sub-expression with mutations")
+            }
+            Self::NoThreadedLocals => write!(f, "no threaded locals"),
+            Self::ValueTypeContext => write!(f, "ValueType context"),
+            Self::NotLetrec => write!(f, "not a letrec loop"),
+            Self::DestructureAsLastExpr => {
+                write!(f, "destructure assignment as last expression")
+            }
+        }
+    }
 }
 
 /// Pre-computed contract for threading mutable state through a loop body.
@@ -93,6 +149,8 @@ pub(super) struct ThreadingPlan {
     ///
     /// Empty when `use_hybrid_params` is false (sorted for deterministic codegen).
     pub readonly_fields: Vec<String>,
+    /// BT-1343: Why `StateAcc` fallback was chosen (if no optimized mode was selected).
+    pub fallback_reason: StateAccFallbackReason,
 }
 
 impl ThreadingPlan {
@@ -344,6 +402,99 @@ impl ThreadingPlan {
             vec![]
         };
 
+        // BT-1343: Determine fallback reason when no optimized convention was selected.
+        let fallback_reason =
+            if use_direct_params || use_tuple_acc || use_hybrid_params {
+                StateAccFallbackReason::None
+            } else if threaded_locals.is_empty() {
+                StateAccFallbackReason::NoThreadedLocals
+            } else if !allow_direct_params && !allow_tuple_acc {
+                StateAccFallbackReason::NotLetrec
+            } else if body_analysis.has_self_sends {
+                StateAccFallbackReason::SelfSendInBody
+            } else if !body_analysis.field_writes.is_empty() {
+                // Field writes present (self-sends already excluded above) but not eligible
+                // for hybrid — check specific guards
+                if body.body.iter().any(|s| {
+                    CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
+                        &s.expression,
+                        &generator.semantic_facts,
+                    )
+                }) {
+                    StateAccFallbackReason::NestedListOpCrossScope
+                } else if body.body.iter().any(|s| {
+                    if let Expression::Assignment { target, value, .. } = &s.expression {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            if threaded_locals.contains(&id.name.to_string()) {
+                                return generator.is_tier2_value_call(value);
+                            }
+                        }
+                    }
+                    false
+                }) {
+                    StateAccFallbackReason::Tier2ValueCallOnThreaded
+                } else {
+                    StateAccFallbackReason::ControlFlowMutations
+                }
+            } else if matches!(generator.context, CodeGenContext::ValueType) {
+                StateAccFallbackReason::ValueTypeContext
+            } else {
+                // Check the specific guards that prevented optimization
+                if body.body.iter().any(|s| {
+                    CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
+                        &s.expression,
+                        &generator.semantic_facts,
+                    )
+                }) {
+                    StateAccFallbackReason::NestedListOpCrossScope
+                } else if body.body.iter().any(|s| {
+                    if let Expression::Assignment { target, value, .. } = &s.expression {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            if threaded_locals.contains(&id.name.to_string()) {
+                                return generator.is_tier2_value_call(value);
+                            }
+                        }
+                    }
+                    false
+                }) {
+                    StateAccFallbackReason::Tier2ValueCallOnThreaded
+                } else if condition.is_some_and(|c| {
+                    if let Expression::Block(cb) = c {
+                        block_analysis::analyze_block(cb).has_state_effects()
+                    } else {
+                        false
+                    }
+                }) {
+                    StateAccFallbackReason::ConditionStateEffects
+                } else if body
+                    .body
+                    .iter()
+                    .any(|s| generator.control_flow_has_mutations(&s.expression))
+                {
+                    StateAccFallbackReason::ControlFlowMutations
+                } else if body.body.iter().any(|s| {
+                    CoreErlangGenerator::inline_conditional_writes_threaded(
+                        &s.expression,
+                        &threaded_locals,
+                        &generator.semantic_facts,
+                    )
+                }) {
+                    StateAccFallbackReason::InlineConditionalThreadedWrite
+                } else if body.body.last().is_some_and(|s| {
+                    matches!(s.expression, Expression::DestructureAssignment { .. })
+                }) {
+                    StateAccFallbackReason::DestructureAsLastExpr
+                } else {
+                    // Generic fallback — body has state effects but doesn't match
+                    // any specific guard above. Re-check for self-sends first.
+                    if body_analysis.has_self_sends {
+                        StateAccFallbackReason::SelfSendInBody
+                    } else {
+                        StateAccFallbackReason::ControlFlowMutations
+                    }
+                }
+            };
+
         Self {
             threaded_locals,
             initial_state_var,
@@ -353,7 +504,26 @@ impl ThreadingPlan {
             use_tuple_acc,
             use_hybrid_params,
             readonly_fields,
+            fallback_reason,
         }
+    }
+
+    /// BT-1343: Returns a human-readable label for the selected calling convention.
+    pub fn convention_label(&self) -> &'static str {
+        if self.use_direct_params {
+            "direct-params"
+        } else if self.use_tuple_acc {
+            "tuple-acc"
+        } else if self.use_hybrid_params {
+            "hybrid"
+        } else {
+            "StateAcc"
+        }
+    }
+
+    /// BT-1343: Returns the total number of extracted parameters (locals + readonly fields).
+    pub fn total_extracted_params(&self) -> usize {
+        self.threaded_locals.len() + self.readonly_fields.len()
     }
 
     /// Returns the state-map key for a threaded local variable.
@@ -767,6 +937,87 @@ pub(super) struct CountedLoopFrame {
 // ─── CoreErlangGenerator impls ────────────────────────────────────────────────
 
 impl CoreErlangGenerator {
+    /// BT-1343: Emits a codegen diagnostic for the calling convention chosen for a loop.
+    ///
+    /// Reports which optimization mode was selected (direct-params, tuple-acc, hybrid,
+    /// or `StateAcc` fallback with reason). Also emits a large-arity warning when >8 params
+    /// are extracted. Gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`.
+    pub(super) fn emit_loop_convention_diagnostic(&mut self, plan: &ThreadingPlan, span: Span) {
+        if !self.codegen_diagnostics_enabled {
+            return;
+        }
+        let line_info = self
+            .span_to_line(span)
+            .map_or(String::new(), |l| format!(" at line {l}"));
+        let n_locals = plan.threaded_locals.len();
+        let n_readonly = plan.readonly_fields.len();
+        let convention = plan.convention_label();
+
+        if matches!(plan.fallback_reason, StateAccFallbackReason::None) {
+            // Optimized convention chosen
+            let detail = match convention {
+                "direct-params" => {
+                    format!("{n_locals} locals, 0 field mutations")
+                }
+                "tuple-acc" => {
+                    format!("{n_locals} locals in tuple accumulator")
+                }
+                "hybrid" => {
+                    format!("{n_locals} locals + {n_readonly} read-only fields as direct params")
+                }
+                _ => String::new(),
+            };
+            self.emit_codegen_diagnostic(
+                format!("Loop{line_info}: using {convention} ({detail})"),
+                span,
+            );
+        } else {
+            // StateAcc fallback
+            let reason = &plan.fallback_reason;
+            self.emit_stateacc_fallback_diagnostic(
+                format!("Loop{line_info}: StateAcc fallback — {reason}"),
+                span,
+            );
+        }
+
+        // BT-1343: Large extracted arity diagnostic (>8 params)
+        let total = plan.total_extracted_params();
+        if total > 8
+            && !matches!(
+                plan.fallback_reason,
+                StateAccFallbackReason::NoThreadedLocals
+            )
+        {
+            self.emit_codegen_diagnostic(
+                format!("Loop{line_info}: {total} extracted params"),
+                span,
+            );
+        }
+    }
+
+    /// BT-1343: Emits a diagnostic for synchronous self-send detected in a loop body.
+    pub(super) fn emit_self_send_in_loop_diagnostic(&mut self, expr: &Expression, span: Span) {
+        if !self.codegen_diagnostics_enabled {
+            return;
+        }
+        // Extract selector name from the message send
+        if let Expression::MessageSend { selector, .. } = expr {
+            let sel_name = selector.to_erlang_atom();
+            let line_info = self
+                .span_to_line(span)
+                .map_or(String::new(), |l| format!(" at line {l}"));
+            self.emit_codegen_diagnostic(
+                format!(
+                    "Self-send 'self {sel_name}' inside loop{line_info}: \
+                     synchronous call to own mailbox, potential deadlock"
+                ),
+                span,
+            );
+        }
+    }
+}
+
+impl CoreErlangGenerator {
     /// Generates the per-statement body for a stateful loop with state threading.
     ///
     /// This is the **single, unified body generator** replacing 7+
@@ -839,6 +1090,8 @@ impl CoreErlangGenerator {
                 }
             } else if self.is_actor_self_send(expr) {
                 has_mutations = true;
+                // BT-1343: Emit diagnostic for synchronous self-send in loop body.
+                self.emit_self_send_in_loop_diagnostic(expr, expr.span());
                 let doc = self.generate_self_dispatch_open(expr)?;
                 docs.push(doc);
                 if is_last {
@@ -1817,6 +2070,7 @@ impl CoreErlangGenerator {
         item_var: &str,
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new(self, body, None);
+        self.emit_loop_convention_diagnostic(&plan, body.span);
         self.push_scope();
         if let Some(param) = body.parameters.first() {
             self.bind_var(&param.name, item_var);

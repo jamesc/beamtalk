@@ -294,6 +294,20 @@ impl CoreErlangGenerator {
             )));
         }
 
+        // BT-1343: Emit dynamic dispatch fallback diagnostic.
+        {
+            let span = receiver.span();
+            let line_info = self
+                .span_to_line(span)
+                .map_or(String::new(), |l| format!(" at line {l}"));
+            self.emit_codegen_diagnostic(
+                format!(
+                    "Send '{selector_atom}'{line_info}: dynamic dispatch (receiver type unknown)"
+                ),
+                span,
+            );
+        }
+
         let receiver_doc = self.expression_doc(receiver)?;
         let args_doc = self.capture_argument_list_doc(arguments)?;
 

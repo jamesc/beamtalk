@@ -44,6 +44,7 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_letrec(self, body, None);
+        self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let n_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;
@@ -71,6 +72,7 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_letrec(self, body, None);
+        self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let start_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;
@@ -110,6 +112,7 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_letrec(self, body, None);
+        self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let start_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;

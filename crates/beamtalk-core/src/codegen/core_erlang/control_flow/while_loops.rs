@@ -177,6 +177,7 @@ impl CoreErlangGenerator {
         negate: bool,
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_letrec(self, body, Some(condition));
+        self.emit_loop_convention_diagnostic(&plan, body.span);
 
         if plan.use_direct_params {
             return self.generate_while_loop_direct(condition, body, &plan, negate);
@@ -813,6 +814,77 @@ mod tests {
         assert!(
             code.contains("maps':'put'('n'"),
             "readonly field: whileTrue: 'n' writes should still use maps:put. Got:\n{code}"
+        );
+    }
+
+    // ── BT-1343: codegen diagnostics ─────────────────────────────────────────
+
+    fn codegen_with_warnings(src: &str) -> (String, Vec<crate::source_analysis::Diagnostic>) {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let result = crate::codegen::core_erlang::generate_module_with_warnings(
+            &module,
+            crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        )
+        .expect("codegen should succeed");
+        (result.code, result.warnings)
+    }
+
+    #[test]
+    fn test_bt1343_diagnostics_off_by_default() {
+        // When BEAMTALK_CODEGEN_DIAGNOSTICS is not set, no codegen hints should be emitted.
+        // (There may be other warnings like stateful-block-at-erlang-boundary, so we filter
+        // specifically for our BT-1343 diagnostic patterns.)
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    x := 0\n    [x < 10] whileTrue: [x := x + 1]\n";
+        let (_, warnings) = codegen_with_warnings(src);
+        let codegen_diags: Vec<&str> = warnings
+            .iter()
+            .filter(|w| {
+                let m = w.message.as_str();
+                m.contains("direct-params")
+                    || m.contains("tuple-acc")
+                    || m.contains("StateAcc fallback")
+                    || m.contains("dynamic dispatch")
+            })
+            .map(|w| w.message.as_str())
+            .collect();
+        // Unless env var happens to be set in the test runner, no codegen diagnostics.
+        if !std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS").is_ok_and(|v| v == "1") {
+            assert!(
+                codegen_diags.is_empty(),
+                "Expected no codegen diagnostics without env var. Got: {codegen_diags:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_bt1343_direct_params_diagnostic() {
+        // This test exercises the diagnostic infra when explicitly enabled.
+        if !std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS").is_ok_and(|v| v == "1") {
+            return; // skip unless env var is set
+        }
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    x := 0\n    [x < 10] whileTrue: [x := x + 1]\n";
+        let (_, warnings) = codegen_with_warnings(src);
+        let diag_msgs: Vec<&str> = warnings.iter().map(|w| w.message.as_str()).collect();
+        assert!(
+            diag_msgs.iter().any(|m| m.contains("direct-params")),
+            "Expected direct-params diagnostic. Got: {diag_msgs:?}"
+        );
+    }
+
+    #[test]
+    fn test_bt1343_stateacc_fallback_diagnostic() {
+        if !std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS").is_ok_and(|v| v == "1") {
+            return; // skip unless env var is set
+        }
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    [self.n < 10] whileTrue: [self.n := self.n + 1]\n";
+        let (_, warnings) = codegen_with_warnings(src);
+        let diag_msgs: Vec<&str> = warnings.iter().map(|w| w.message.as_str()).collect();
+        assert!(
+            diag_msgs
+                .iter()
+                .any(|m| m.contains("StateAcc fallback") || m.contains("hybrid")),
+            "Expected StateAcc or hybrid diagnostic for field-only mutations. Got: {diag_msgs:?}"
         );
     }
 }
