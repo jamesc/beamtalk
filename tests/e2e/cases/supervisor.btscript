@@ -164,3 +164,77 @@ argsChild := argsSup which: Counter
 
 argsChild getValue
 // => 42
+
+// ===========================================================================
+// WORKSPACE SUPERVISOR LIFECYCLE — startSupervisor: / stopSupervisor: (BT-1341)
+// ===========================================================================
+
+// Stop the standalone supervisor before testing workspace attachment
+argsSup stop
+// => nil
+
+app stop
+// => nil
+
+pool stop
+// => nil
+
+outer stop
+// => nil
+
+// startSupervisor: attaches a supervisor to the workspace supervision tree
+wsSup := Workspace startSupervisor: E2EAppSupervisor
+// => #Supervisor<E2EAppSupervisor,_>
+
+// The attached supervisor has its Counter child running
+wsSup count
+// => 1
+
+wsSup children
+// => ["Counter"]
+
+// supervisors lists all user-attached supervisors
+Workspace supervisors size
+// => 1
+
+// startSupervisor: is idempotent — returns existing if already attached
+wsSup2 := Workspace startSupervisor: E2EAppSupervisor
+// => #Supervisor<E2EAppSupervisor,_>
+
+// stopSupervisor: cleanly shuts down and removes from workspace tree
+Workspace stopSupervisor: E2EAppSupervisor
+// => nil
+
+// supervisors is now empty
+Workspace supervisors size
+// => 0
+
+// Re-attaching after stopping works (iterative development)
+wsSup3 := Workspace startSupervisor: E2EAppSupervisor
+// => #Supervisor<E2EAppSupervisor,_>
+
+wsSup3 count
+// => 1
+
+// Also works with DynamicSupervisor
+wsPool := Workspace startSupervisor: E2EWorkerPool
+// => #DynamicSupervisor<E2EWorkerPool,_>
+
+wsPool count
+// => 0
+
+wsW1 := wsPool startChild
+// => #Actor<Counter,_>
+
+wsPool count
+// => 1
+
+// Clean up
+Workspace stopSupervisor: E2EWorkerPool
+// => nil
+
+Workspace stopSupervisor: E2EAppSupervisor
+// => nil
+
+Workspace supervisors size
+// => 0

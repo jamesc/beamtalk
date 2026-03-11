@@ -403,6 +403,38 @@ get_session_bindings_includes_user_bindings_test() ->
         catch unregister(beamtalk_workspace_meta)
     end.
 
+%%====================================================================
+%% startSupervisor: / stopSupervisor: / supervisors Validation Tests
+%%====================================================================
+
+start_supervisor_type_error_for_non_class_object_test() ->
+    %% Passing a non-class-object (integer) should raise type_error.
+    try
+        beamtalk_workspace_interface_primitives:startSupervisor(42),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class),
+            ?assertEqual('startSupervisor:', Err#beamtalk_error.selector)
+    end.
+
+stop_supervisor_type_error_for_non_class_object_test() ->
+    %% Passing a non-class-object (atom) should raise type_error.
+    try
+        beamtalk_workspace_interface_primitives:stopSupervisor(notAClass),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class),
+            ?assertEqual('stopSupervisor:', Err#beamtalk_error.selector)
+    end.
+
+%%====================================================================
+%% rootSupervisor Tests
+%%====================================================================
+
 root_supervisor_returns_nil_when_not_registered_test() ->
     %% rootSupervisor/0 returns nil when no root supervisor has been registered.
     catch ets:delete(beamtalk_root_supervisor),

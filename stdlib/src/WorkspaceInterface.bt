@@ -142,3 +142,41 @@ sealed Object subclass: WorkspaceInterface
   /// Workspace supervisor children         // => #(#DatabasePool #HTTPRouter)
   /// ```
   supervisor => (Erlang beamtalk_workspace_interface_primitives) rootSupervisor
+
+  /// Start and attach a supervisor to the workspace supervision tree.
+  ///
+  /// The class must be a Supervisor or DynamicSupervisor subclass.
+  /// Idempotent: returns the existing instance if already attached.
+  /// Supports iterative development — stop and re-attach after reloading.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace startSupervisor: MySup      // => #Supervisor<MySup, <0.200.0>>
+  /// Workspace startSupervisor: MySup      // => #Supervisor<MySup, <0.200.0>>  (idempotent)
+  /// ```
+  startSupervisor: aClass :: Object -> Supervisor =>
+    (Erlang beamtalk_workspace_interface_primitives) startSupervisor: aClass
+
+  /// Stop and remove a supervisor from the workspace supervision tree.
+  ///
+  /// Cleanly shuts down the supervisor and all its children before removing.
+  /// Raises an error if the supervisor is not currently attached.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace stopSupervisor: MySup       // => nil
+  /// ```
+  stopSupervisor: aClass :: Object -> Nil =>
+    (Erlang beamtalk_workspace_interface_primitives) stopSupervisor: aClass
+
+  /// List all user-attached supervisors in the workspace supervision tree.
+  ///
+  /// Returns supervisors started via `startSupervisor:`, not the root
+  /// application supervisor (use `supervisor` for that).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace supervisors                 // => #(#Supervisor<MySup, <0.200.0>>)
+  /// ```
+  supervisors -> List =>
+    (Erlang beamtalk_workspace_interface_primitives) supervisors
