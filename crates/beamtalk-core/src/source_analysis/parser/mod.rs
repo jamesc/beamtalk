@@ -1549,6 +1549,8 @@ mod tests {
             class.backing_module.as_ref().map(|id| id.name.as_str()),
             Some("my_erl_module")
         );
+        let bm = class.backing_module.as_ref().unwrap();
+        assert_eq!(bm.span, Span::new(33, 46));
     }
 
     #[test]
@@ -1564,6 +1566,8 @@ mod tests {
             class.backing_module.as_ref().map(|id| id.name.as_str()),
             Some("foo_impl")
         );
+        let bm = class.backing_module.as_ref().unwrap();
+        assert_eq!(bm.span, Span::new(28, 36));
         assert_eq!(class.state.len(), 1);
         assert_eq!(class.methods.len(), 1);
     }
