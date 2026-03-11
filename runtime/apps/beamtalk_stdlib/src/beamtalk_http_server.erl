@@ -45,9 +45,6 @@
     terminate/2
 ]).
 
-%% Legacy direct API — kept for EUnit tests and backward compatibility
--export([startListener/2, startListener/3, stopListener/1, listenerPort/1]).
-
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
@@ -72,8 +69,8 @@ init(Config) when is_map(Config) ->
     Port = maps:get(port, Config, 0),
     Handler = maps:get(handler, Config, undefined),
     Opts = maps:without([port, handler, '$beamtalk_class'], Config),
-    try startListener(Port, Handler, Opts) of
-        [Ref, ActualPort] ->
+    try start_listener(Port, Handler, Opts) of
+        {Ref, ActualPort} ->
             {ok, #{listener_ref => Ref, actual_port => ActualPort}}
     catch
         error:Err ->
@@ -111,34 +108,22 @@ handle_info(_Msg, State) ->
 %% @doc Stop the cowboy listener on shutdown.
 -spec terminate(term(), map()) -> ok.
 terminate(_Reason, #{listener_ref := Ref}) ->
-    stopListener(Ref),
+    stop_listener(Ref),
     ok;
 terminate(_Reason, _State) ->
     ok.
 
 %%% ============================================================================
-%%% Legacy direct API (used by EUnit tests)
+%%% Internal — cowboy lifecycle
 %%% ============================================================================
 
-%% @doc Start a cowboy listener on the given port with a handler.
+%% @private Start a cowboy listener on the given port with a handler.
 %%
-%% `Port` is an integer. Use 0 for an ephemeral port.
-%% `Handler` is a fun/1 (block) or actor pid responding to `handle:`.
-%% Binds to 127.0.0.1 by default.
-%%
-%% Returns `[Ref, ActualPort]`.
--dialyzer({nowarn_function, startListener/2}).
--spec startListener(non_neg_integer(), fun() | pid()) -> list().
-startListener(Port, Handler) ->
-    startListener(Port, Handler, #{}).
-
-%% @doc Start a cowboy listener with options.
-%%
-%% Options:
-%%   - `bind` — IP address to bind to (default `"127.0.0.1"`)
--dialyzer({nowarn_function, startListener/3}).
--spec startListener(non_neg_integer(), fun() | pid(), map()) -> list().
-startListener(Port, Handler, Opts) when is_integer(Port), Port >= 0, is_map(Opts) ->
+%% Called from init/1. Raises on validation or startup errors (caught by init).
+-dialyzer({nowarn_function, start_listener/3}).
+-spec start_listener(non_neg_integer(), fun() | pid(), map()) ->
+    {reference(), non_neg_integer()}.
+start_listener(Port, Handler, Opts) when is_integer(Port), Port >= 0, is_map(Opts) ->
     validate_handler(Handler),
     ensure_started(cowboy),
     %% Start gun too — HTTPClient needs it and BUnit tests don't start it automatically
@@ -156,42 +141,30 @@ startListener(Port, Handler, Opts) when is_integer(Port), Port >= 0, is_map(Opts
     case cowboy:start_clear(Ref, TransOpts, ProtoOpts) of
         {ok, _Pid} ->
             ActualPort = ranch:get_port(Ref),
-            [Ref, ActualPort];
+            {Ref, ActualPort};
         {error, Reason} ->
             server_error(
-                'startListener:handler:',
+                'start:handler:',
                 #{port => Port, reason => Reason},
                 <<"Failed to start HTTP server">>
             )
     end;
-startListener(Port, _Handler, _Opts) when is_integer(Port), Port >= 0 ->
-    type_error('startListener:handler:options:', <<"Options must be a Dictionary">>);
-startListener(Port, _Handler, _Opts) when not is_integer(Port) ->
-    type_error('startListener:handler:', <<"Port must be an Integer">>);
-startListener(Port, _Handler, _Opts) when Port < 0 ->
-    type_error('startListener:handler:', <<"Port must be a non-negative Integer">>).
+start_listener(Port, _Handler, _Opts) when is_integer(Port), Port >= 0 ->
+    type_error('start:handler:options:', <<"Options must be a Dictionary">>);
+start_listener(Port, _Handler, _Opts) when not is_integer(Port) ->
+    type_error('start:handler:', <<"Port must be an Integer">>);
+start_listener(Port, _Handler, _Opts) when Port < 0 ->
+    type_error('start:handler:', <<"Port must be a non-negative Integer">>).
 
-%% @doc Stop a cowboy listener identified by its reference.
+%% @private Stop a cowboy listener identified by its reference.
 %%
 %% Idempotent: stopping an already-stopped server succeeds silently.
--spec stopListener(reference()) -> atom().
-stopListener(Ref) when is_reference(Ref) ->
+-spec stop_listener(reference()) -> ok.
+stop_listener(Ref) when is_reference(Ref) ->
     _ = catch cowboy:stop_listener(Ref),
     ok;
-stopListener(_) ->
+stop_listener(_) ->
     ok.
-
-%% @doc Return the port of a running cowboy listener.
--spec listenerPort(reference()) -> non_neg_integer().
-listenerPort(Ref) when is_reference(Ref) ->
-    try
-        ranch:get_port(Ref)
-    catch
-        exit:{noproc, _} ->
-            server_error('listenerPort:', #{}, <<"Server is not running">>)
-    end;
-listenerPort(_) ->
-    type_error('listenerPort:', <<"Expected a listener reference">>).
 
 %%% ============================================================================
 %%% Internal
@@ -205,7 +178,7 @@ ensure_started(App) ->
             ok;
         {error, Reason} ->
             server_error(
-                'startListener:handler:',
+                'start:handler:',
                 #{application => App, reason => Reason},
                 iolist_to_binary([
                     <<"Failed to start dependency: ">>,
@@ -221,7 +194,7 @@ validate_handler(Handler) when is_pid(Handler) -> ok;
 validate_handler(#{compiledRoutes := Routes, notFoundHandler := _}) when is_list(Routes) -> ok;
 validate_handler(_) ->
     type_error(
-        'startListener:handler:',
+        'start:handler:',
         <<"Handler must be a block, an actor, or an HTTPRouter">>
     ).
 
@@ -233,12 +206,12 @@ parse_ip(Bin) when is_binary(Bin) ->
             Ip;
         {error, _} ->
             type_error(
-                'startListener:handler:options:',
+                'start:handler:options:',
                 <<"Invalid bind address: must be a valid IP address">>
             )
     end;
 parse_ip(_) ->
-    type_error('startListener:handler:options:', <<"Bind must be a String">>).
+    type_error('start:handler:options:', <<"Bind must be a String">>).
 
 %% @private Raise a type error.
 -spec type_error(atom(), binary()) -> no_return().

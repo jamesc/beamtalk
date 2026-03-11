@@ -1,74 +1,86 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_http_server (BT-1338).
+%%% @doc EUnit tests for beamtalk_http_server gen_server (BT-1338, ADR 0056).
 %%%
 %%% **DDD Context:** Object System Context
 %%%
-%%% Verifies the cowboy lifecycle functions called by the HTTPServer actor.
-%%% Tests start real listeners and make real HTTP requests to confirm
-%%% the server is functioning correctly.
+%%% Verifies the native gen_server backing the HTTPServer actor class.
+%%% Tests start real cowboy listeners via start_link/1 and exercise the
+%%% {port, []}/{printString, []} selectors and lifecycle.
 
 -module(beamtalk_http_server_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================
-%%% Lifecycle tests (direct Erlang API)
+%%% Lifecycle tests (gen_server API)
 %%% ============================================================================
 
-start_listener_returns_ref_and_port_test() ->
+start_link_returns_pid_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    [Ref, Port] = beamtalk_http_server:startListener(0, Handler),
-    ?assert(is_reference(Ref)),
+    {ok, Pid} = beamtalk_http_server:start_link(#{port => 0, handler => Handler}),
+    ?assert(is_pid(Pid)),
+    gen_server:stop(Pid).
+
+port_selector_returns_positive_integer_test() ->
+    {ok, _} = application:ensure_all_started(cowboy),
+    Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
+    {ok, Pid} = beamtalk_http_server:start_link(#{port => 0, handler => Handler}),
+    Port = gen_server:call(Pid, {port, []}),
     ?assert(is_integer(Port)),
     ?assert(Port > 0),
     ?assert(Port =< 65535),
-    beamtalk_http_server:stopListener(Ref).
+    gen_server:stop(Pid).
 
-stop_listener_is_idempotent_test() ->
+print_string_selector_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    [Ref, _Port] = beamtalk_http_server:startListener(0, Handler),
-    ?assertEqual(ok, beamtalk_http_server:stopListener(Ref)),
-    ?assertEqual(ok, beamtalk_http_server:stopListener(Ref)).
+    {ok, Pid} = beamtalk_http_server:start_link(#{port => 0, handler => Handler}),
+    Str = gen_server:call(Pid, {printString, []}),
+    ?assertMatch(<<"an HTTPServer(port: ", _/binary>>, Str),
+    gen_server:stop(Pid).
 
-start_multiple_listeners_test() ->
+stop_cleans_up_listener_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    [Ref1, Port1] = beamtalk_http_server:startListener(0, Handler),
-    [Ref2, Port2] = beamtalk_http_server:startListener(0, Handler),
+    {ok, Pid} = beamtalk_http_server:start_link(#{port => 0, handler => Handler}),
+    gen_server:stop(Pid),
+    %% Stopping twice should not crash (idempotent terminate)
+    ok.
+
+start_multiple_servers_test() ->
+    {ok, _} = application:ensure_all_started(cowboy),
+    Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
+    {ok, Pid1} = beamtalk_http_server:start_link(#{port => 0, handler => Handler}),
+    {ok, Pid2} = beamtalk_http_server:start_link(#{port => 0, handler => Handler}),
+    Port1 = gen_server:call(Pid1, {port, []}),
+    Port2 = gen_server:call(Pid2, {port, []}),
     ?assertNotEqual(Port1, Port2),
-    beamtalk_http_server:stopListener(Ref1),
-    beamtalk_http_server:stopListener(Ref2).
+    gen_server:stop(Pid1),
+    gen_server:stop(Pid2).
 
-invalid_port_raises_type_error_test() ->
+invalid_handler_fails_start_test() ->
+    {ok, _} = application:ensure_all_started(cowboy),
+    process_flag(trap_exit, true),
+    Result = beamtalk_http_server:start_link(#{port => 0, handler => not_a_handler}),
+    ?assertMatch({error, _}, Result),
+    process_flag(trap_exit, false).
+
+invalid_port_fails_start_test() ->
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    ?assertError(
-        #{'$beamtalk_class' := 'TypeError'},
-        beamtalk_http_server:startListener(-1, Handler)
-    ).
+    process_flag(trap_exit, true),
+    Result = beamtalk_http_server:start_link(#{port => -1, handler => Handler}),
+    ?assertMatch({error, _}, Result),
+    process_flag(trap_exit, false).
 
-invalid_handler_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := 'TypeError'},
-        beamtalk_http_server:startListener(0, not_a_handler)
-    ).
-
-invalid_opts_raises_type_error_test() ->
+invalid_bind_fails_start_test() ->
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    ?assertError(
-        #{'$beamtalk_class' := 'TypeError'},
-        beamtalk_http_server:startListener(0, Handler, not_a_map)
-    ).
-
-invalid_bind_raises_type_error_test() ->
-    Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    ?assertError(
-        #{'$beamtalk_class' := 'TypeError'},
-        beamtalk_http_server:startListener(0, Handler, #{bind => 123})
-    ).
+    process_flag(trap_exit, true),
+    Result = beamtalk_http_server:start_link(#{port => 0, handler => Handler, bind => 123}),
+    ?assertMatch({error, _}, Result),
+    process_flag(trap_exit, false).
 
 %%% ============================================================================
 %%% Integration smoke test (requires gun)
@@ -78,13 +90,14 @@ handler_receives_request_and_returns_response_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     {ok, _} = application:ensure_all_started(gun),
     Handler = fun(_Req) -> make_simple_response(200, <<"hello from handler">>) end,
-    [Ref, Port] = beamtalk_http_server:startListener(0, Handler),
+    {ok, Pid} = beamtalk_http_server:start_link(#{port => 0, handler => Handler}),
+    Port = gen_server:call(Pid, {port, []}),
     Url = iolist_to_binary(["http://127.0.0.1:", integer_to_list(Port), "/test"]),
     #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Resp} =
         beamtalk_http:'get:'(Url),
     ?assertEqual(200, maps:get(status, Resp)),
     ?assertEqual(<<"hello from handler">>, maps:get(body, Resp)),
-    beamtalk_http_server:stopListener(Ref).
+    gen_server:stop(Pid).
 
 %%% ============================================================================
 %%% Helpers
