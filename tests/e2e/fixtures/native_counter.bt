@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// NativeCounter — test fixture for native: facade dispatch (BT-1210).
+///
+/// Backed by beamtalk_test_native_counter.erl gen_server.
+/// Mix of self delegate methods and a Beamtalk method.
+Actor subclass: NativeCounter native: beamtalk_test_native_counter
+
+  /// Class method with Beamtalk body (compiles normally, not delegated)
+  class description => "A native counter backed by Erlang"
+
+  /// Increment counter (self delegate → gen_server)
+  increment => self delegate
+
+  /// Get current value (self delegate → gen_server)
+  getValue => self delegate
+
+  /// Add amount to counter (keyword self delegate → gen_server)
+  add: amount => self delegate
+
+  /// Trigger error from backing gen_server
+  failWith: reason => self delegate
