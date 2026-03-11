@@ -115,11 +115,19 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
 /// 2. Starts the `beamtalk_workspace` OTP application (and its dependencies)
 /// 3. Starts the workspace supervisor (which starts the REPL TCP server,
 ///    actor registry, session supervisor, and all singletons)
-/// 4. Prints a ready message
-/// 5. Blocks forever (the BEAM VM stays alive while the REPL runs)
-pub fn build_eval_cmd(port: u16, bind_addr: Option<Ipv4Addr>, web_port: Option<u16>) -> String {
+/// 4. Optionally starts the project's OTP application (BT-1340)
+/// 5. Prints a ready message
+/// 6. Blocks forever (the BEAM VM stays alive while the REPL runs)
+pub fn build_eval_cmd(
+    port: u16,
+    bind_addr: Option<Ipv4Addr>,
+    web_port: Option<u16>,
+    otp_app_name: Option<&str>,
+) -> String {
+    let otp_app_start = otp_app_start_fragment(otp_app_name);
     format!(
         "{}, \
+         {otp_app_start}\
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
          receive stop -> ok end.",
@@ -139,11 +147,14 @@ pub fn build_eval_cmd_with_node(
     node_name: &str,
     bind_addr: Option<Ipv4Addr>,
     web_port: Option<u16>,
+    otp_app_name: Option<&str>,
 ) -> String {
     let safe_name = escape_erlang_atom(node_name);
+    let otp_app_start = otp_app_start_fragment(otp_app_name);
     format!(
         "application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
          {}, \
+         {otp_app_start}\
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
          receive stop -> ok end.",
@@ -166,6 +177,19 @@ pub fn format_bind_addr_erl(bind_addr: Option<Ipv4Addr>) -> String {
             )
         }
         None => "{127,0,0,1}".to_string(),
+    }
+}
+
+/// Build the Erlang fragment that starts a project's OTP application (BT-1340).
+///
+/// When `otp_app_name` is `Some(name)`, returns
+/// `{ok, _} = application:ensure_all_started(name), ` so that the supervision
+/// tree is running before the REPL prompt appears.  Returns an empty string
+/// when `None`.
+fn otp_app_start_fragment(otp_app_name: Option<&str>) -> String {
+    match otp_app_name {
+        Some(name) => format!("{{ok, _}} = application:ensure_all_started({name}), "),
+        None => String::new(),
     }
 }
 
@@ -348,7 +372,7 @@ mod tests {
 
     #[test]
     fn eval_cmd_contains_required_steps() {
-        let cmd = build_eval_cmd(9000, None, None);
+        let cmd = build_eval_cmd(9000, None, None, None);
         // Must set application env before starting apps
         assert!(cmd.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         // Must start the workspace OTP application
@@ -369,14 +393,14 @@ mod tests {
 
     #[test]
     fn eval_cmd_with_node_includes_node_name() {
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None, None);
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None, None, None);
         assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
         assert!(cmd.contains("beamtalk_workspace_sup:start_link"));
     }
 
     #[test]
     fn eval_cmd_with_node_escapes_special_chars() {
-        let cmd = build_eval_cmd_with_node(9000, "node'inject", None, None);
+        let cmd = build_eval_cmd_with_node(9000, "node'inject", None, None, None);
         assert!(cmd.contains("node\\'inject"));
         assert!(!cmd.contains("node'inject"));
     }
@@ -424,8 +448,37 @@ mod tests {
 
     #[test]
     fn eval_cmd_with_web_port() {
-        let cmd = build_eval_cmd(9000, None, Some(9090));
+        let cmd = build_eval_cmd(9000, None, Some(9090), None);
         assert!(cmd.contains("web_port => 9090"));
+    }
+
+    #[test]
+    fn eval_cmd_with_otp_app_starts_application() {
+        let cmd = build_eval_cmd(9000, None, None, Some("my_app"));
+        // Must start the OTP application after workspace bootstrap
+        assert!(cmd.contains("application:ensure_all_started(my_app)"));
+        // OTP app start must come after workspace_sup:start_link
+        let ws_pos = cmd.find("beamtalk_workspace_sup:start_link").unwrap();
+        let app_pos = cmd.find("application:ensure_all_started(my_app)").unwrap();
+        assert!(app_pos > ws_pos, "OTP app must start after workspace supervisor");
+        // OTP app start must come before get_port
+        let port_pos = cmd.find("beamtalk_repl_server:get_port()").unwrap();
+        assert!(app_pos < port_pos, "OTP app must start before port query");
+    }
+
+    #[test]
+    fn eval_cmd_without_otp_app_has_no_ensure_all_started_extra() {
+        let cmd = build_eval_cmd(9000, None, None, None);
+        // Should only have ensure_all_started for beamtalk_workspace, not any other
+        let count = cmd.matches("ensure_all_started").count();
+        assert_eq!(count, 1, "Only beamtalk_workspace should be started");
+    }
+
+    #[test]
+    fn eval_cmd_with_node_and_otp_app() {
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None, None, Some("my_app"));
+        assert!(cmd.contains("application:ensure_all_started(my_app)"));
+        assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
     }
 
     #[test]

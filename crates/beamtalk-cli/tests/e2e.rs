@@ -320,7 +320,7 @@ fn beam_eval_cmd(
         )
     } else {
         // Port 0 = OS-assigned ephemeral port; build_eval_cmd already prints BEAMTALK_PORT.
-        repl_startup::build_eval_cmd(0, None, None)
+        repl_startup::build_eval_cmd(0, None, None, None)
     }
 }
 
@@ -1527,6 +1527,137 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
 /// (as happens with MCP/REPL multi-line submission), the trailing expressions must be
 /// evaluated and their result returned — not the class name.
 ///
+/// Verify that starting a BEAM node with `otp_app_name` causes
+/// `application:ensure_all_started(app_name)` to run, starting the
+/// project's OTP supervision tree before the REPL prompt (BT-1340).
+///
+/// This test:
+/// 1. Creates a temp project with `beamtalk.toml` containing `[application] supervisor`
+/// 2. Builds it using the beamtalk compiler
+/// 3. Starts a BEAM node with the project ebin on the code path and `otp_app_name` set
+/// 4. Connects and verifies the OTP application is running
+#[test]
+#[ignore = "slow test - run with `just test-e2e`"]
+#[serial(e2e)]
+fn e2e_repl_starts_otp_application_from_manifest() {
+    let runtime = runtime_dir();
+    let paths = repl_startup::beam_paths(&runtime);
+
+    // Ensure runtime is built
+    if !paths.runtime_ebin.exists() {
+        eprintln!("E2E: Building runtime for OTP app test...");
+        let status = Command::new("rebar3")
+            .arg("compile")
+            .current_dir(&runtime)
+            .status()
+            .expect("Failed to run rebar3 compile");
+        assert!(status.success(), "Failed to build runtime");
+    }
+
+    // Create temp project directory
+    let tmp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let project_dir = tmp_dir.path();
+
+    // Write beamtalk.toml with [application] supervisor
+    let manifest = "\
+[package]\n\
+name = \"e2e_otp_test\"\n\
+version = \"0.1.0\"\n\
+\n\
+[application]\n\
+supervisor = \"E2EOtpRootSup\"\n";
+    fs::write(project_dir.join("beamtalk.toml"), manifest).expect("Failed to write manifest");
+
+    // Create src/ directory and supervisor class
+    let src_dir = project_dir.join("src");
+    fs::create_dir_all(&src_dir).expect("Failed to create src dir");
+
+    // Write a minimal Supervisor subclass.
+    // No children — the test just verifies the OTP application starts.
+    let supervisor_src = "\
+// Copyright 2026 James Casey\n\
+// SPDX-License-Identifier: Apache-2.0\n\
+\n\
+Supervisor subclass: E2EOtpRootSup\n\
+  class children -> List => #()\n";
+    fs::write(src_dir.join("e2e_otp_root_sup.bt"), supervisor_src)
+        .expect("Failed to write supervisor source");
+
+    // Build the project using the beamtalk binary
+    let build_status = Command::new(env!("CARGO_BIN_EXE_beamtalk"))
+        .args(["build", "."])
+        .current_dir(project_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .status()
+        .expect("Failed to run beamtalk build");
+    assert!(
+        build_status.success(),
+        "beamtalk build failed for test project"
+    );
+
+    // Verify build artefacts exist
+    let ebin_dir = project_dir.join("_build/dev/ebin");
+    assert!(ebin_dir.exists(), "ebin dir not created by build");
+
+    // Start a BEAM node with OTP app startup — uses the same code path
+    // as `beamtalk repl` when a beamtalk.toml has [application] supervisor.
+    let eval_cmd =
+        repl_startup::build_eval_cmd(0, None, None, Some("e2e_otp_test"));
+
+    let mut pa_args = repl_startup::beam_pa_args(&paths);
+    // Add the project's ebin to the code path
+    pa_args.push("-pa".into());
+    pa_args.push(ebin_dir.as_os_str().to_os_string());
+    pa_args.push("-eval".into());
+    pa_args.push(eval_cmd.into());
+
+    let mut beam_child = Command::new("erl")
+        .arg("-noshell")
+        .arg("-sname")
+        .arg(format!(
+            "bt_e2e_otp_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                % 100_000
+        ))
+        .arg("-setcookie")
+        .arg(E2E_COOKIE)
+        .args(&pa_args)
+        .current_dir(project_dir)
+        .env("BEAMTALK_WORKSPACE", "e2e-otp-test")
+        .env("BEAMTALK_NO_FILE_LOG", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to start BEAM node for OTP app test");
+
+    // Read the port
+    let port = read_port_from_beam(&mut beam_child);
+    eprintln!("E2E OTP: REPL ready on port {port}");
+
+    // Connect and verify the OTP application is running
+    let mut client = ReplClient::connect(port).expect("Failed to connect to REPL");
+
+    // Use Erlang interop to check which applications are running.
+    // If OTP app startup worked, e2e_otp_test should be in the list.
+    let result = client
+        .eval("Erlang application which_applications")
+        .expect("Failed to query running applications");
+
+    assert!(
+        result.contains("e2e_otp_test"),
+        "OTP application 'e2e_otp_test' should be running after REPL startup, \
+         but which_applications() returned: {result}"
+    );
+
+    // Clean up: kill the BEAM node
+    let _ = beam_child.kill();
+    let _ = beam_child.wait();
+}
+
 /// Run explicitly with: `cargo test --test e2e -- --ignored` or `just test-e2e`
 #[test]
 #[ignore = "slow test - run with `just test-e2e`"]
