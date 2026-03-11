@@ -7,17 +7,14 @@
 Actor subclass: ClassMethodEnsureHelper
   state: cleaned = false
 
-  class simpleEnsure =>
-    [42] ensure: [nil]
+  class simpleEnsure => [42] ensure: [nil]
 
   class ensureReturnsBodyValue =>
     result := [100] ensure: [nil]
     result
 
-  class ensureWithCleanup: actor =>
-    [42] ensure: [actor markCleaned]
+  class ensureWithCleanup: actor => [42] ensure: [actor markCleaned]
 
   cleaned => self.cleaned
 
-  markCleaned =>
-    self.cleaned := true
+  markCleaned => self.cleaned := true
