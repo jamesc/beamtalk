@@ -1,0 +1,70 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/24-reflection.md
+
+TestCase subclass: Ch24Reflection
+
+  // — fieldNames —
+
+  testValueFieldNames =>
+    p := Point x: 3 y: 4
+    names := p fieldNames
+    self assert: (names includes: #x)
+    self assert: (names includes: #y)
+
+  // — fieldAt: —
+
+  testReadField =>
+    p := Point x: 10 y: 20
+    self assert: (p fieldAt: #x) equals: 10
+    self assert: (p fieldAt: #y) equals: 20
+
+  testPrimitiveFieldAccess =>
+    self should: [42 fieldAt: #x] raise: #immutable_value
+    self should: ["hello" fieldAt: #x] raise: #immutable_value
+    self should: [42 fieldAt: #x put: 10] raise: #immutable_value
+
+  // — Class introspection —
+
+  testMethods =>
+    methods := Point methods
+    self assert: (methods includes: #x)
+    self assert: (methods includes: #y)
+
+  testAllMethods =>
+    all := Point allMethods
+    self assert: (all includes: #x)
+    self assert: (all includes: #class)
+
+  testSuperclass =>
+    self assert: Point superclass equals: Value
+
+  testClassRespondsTo =>
+    self assert: (Point respondsTo: #new)
+    self assert: (Point respondsTo: #methods)
+
+  // — Metaclass —
+
+  testMetaclass =>
+    meta := Point class
+    self assert: meta isMeta
+    self deny: meta isClass
+
+  testMetaclassName =>
+    name := Point class name
+    self assert: (name includesSubstring: "class")
+
+  testSelfGrounding =>
+    m1 := Point class class
+    m2 := Point class class class
+    self assert: m1 equals: m2
+
+  // — Generic inspector —
+
+  testInspectValue =>
+    p := Point x: 5 y: 10
+
+    self assert: p class equals: Point
+    self assert: (p fieldNames includes: #x)
+    self assert: (p fieldAt: #x) equals: 5
