@@ -1527,15 +1527,20 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
 /// (as happens with MCP/REPL multi-line submission), the trailing expressions must be
 /// evaluated and their result returned — not the class name.
 ///
-/// Verify that starting a BEAM node with `otp_app_name` causes
-/// `application:ensure_all_started(app_name)` to run, starting the
-/// project's OTP supervision tree before the REPL prompt (BT-1340).
+/// Verify that a project's OTP supervision tree can be started during
+/// BEAM node boot via `application:ensure_all_started` (BT-1340).
 ///
-/// This test:
+/// This test validates the OTP application infrastructure end-to-end:
 /// 1. Creates a temp project with `beamtalk.toml` containing `[application] supervisor`
-/// 2. Builds it using the beamtalk compiler
-/// 3. Starts a BEAM node with the project ebin on the code path and `otp_app_name` set
-/// 4. Verifies the OTP application is running via stdout (no REPL eval needed)
+/// 2. Builds it using the beamtalk compiler (generates `.app` + `.beam` files)
+/// 3. Starts a BEAM node with the project ebin on the code path and
+///    `application:ensure_all_started(e2e_otp_test)` in the eval command
+/// 4. Verifies the OTP application appears in `which_applications()` via stdout
+///
+/// Note: the eval command is constructed manually (not via `build_eval_cmd`
+/// with `otp_app_name`) because the compiler port binary is unavailable in
+/// the isolated test environment. The automatic `otp_app_name` → eval command
+/// generation is covered by unit tests in `repl_startup.rs`.
 #[test]
 #[ignore = "slow test - run with `just test-e2e`"]
 #[serial(e2e)]
