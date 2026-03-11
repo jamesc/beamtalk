@@ -11,101 +11,47 @@ the response or `isOk` / `isError` to check the outcome.
 The simplest way to make a request — no setup needed:
 
 ```beamtalk
-TestCase subclass: Ch25QuickRequests
-  state: baseUrl = ""
-  setUp =>
-    port := (Erlang beamtalk_http_test_server) start
-    self.baseUrl := "http://localhost:" ++ port asString
-    self
-
-  tearDown =>
-    (Erlang beamtalk_http_test_server) stop
-    self
-
-  testGet =>
-    @expect type
-    resp := (HTTPClient get: self.baseUrl ++ "/get") unwrap
-    self assert: resp ok
-    self assert: resp status equals: 200
-
-  testPost =>
-    @expect type
-    resp := (HTTPClient post: self.baseUrl ++ "/post" body: "hello") unwrap
-    self assert: resp ok
+// GET request
+resp := (HTTPClient get: "https://api.example.com/users") unwrap
+resp status     // HTTP status code (e.g. 200)
+resp ok         // true if status is 200–299
+resp body       // response body as String
+resp headers    // response headers as a list
 ```
 
-Available class methods:
+POST, PUT, and DELETE work the same way:
 
 ```beamtalk
-TestCase subclass: Ch25ClassMethods
-  state: baseUrl = ""
-  setUp =>
-    port := (Erlang beamtalk_http_test_server) start
-    self.baseUrl := "http://localhost:" ++ port asString
-    self
+// POST with a body
+resp := (HTTPClient post: "https://api.example.com/users" body: "data") unwrap
 
-  tearDown =>
-    (Erlang beamtalk_http_test_server) stop
-    self
+// PUT with a body
+resp := (HTTPClient put: "https://api.example.com/users/1" body: "update") unwrap
 
-  testPut =>
-    @expect type
-    resp := (HTTPClient put: self.baseUrl ++ "/put" body: "data") unwrap
-    self assert: resp ok
-
-  testDelete =>
-    @expect type
-    resp := (HTTPClient delete: self.baseUrl ++ "/delete") unwrap
-    self assert: resp ok
+// DELETE
+resp := (HTTPClient delete: "https://api.example.com/users/1") unwrap
 ```
 
 ## The HTTPResponse object
 
-Every successful request returns an `HTTPResponse` with these accessors:
+Every successful request returns an `HTTPResponse`:
 
 ```beamtalk
-TestCase subclass: Ch25Response
-  state: baseUrl = ""
-  setUp =>
-    port := (Erlang beamtalk_http_test_server) start
-    self.baseUrl := "http://localhost:" ++ port asString
-    self
-
-  tearDown =>
-    (Erlang beamtalk_http_test_server) stop
-    self
-
-  testResponseAccessors =>
-    @expect type
-    resp := (HTTPClient get: self.baseUrl ++ "/get") unwrap
-    self assert: resp status equals: 200
-    self assert: resp ok
-    self assert: (resp body isKindOf: String)
-    self assert: (resp headers isKindOf: Array)
+resp := (HTTPClient get: url) unwrap
+resp status      // → 200 (Integer)
+resp ok          // → true (Boolean, true if 200–299)
+resp body        // → "..." (String)
+resp headers     // → list of header tuples
+resp bodyAsJson  // → Dictionary (parsed JSON)
 ```
 
-### Parsing JSON responses
-
-`bodyAsJson` parses the response body as JSON, returning a `Dictionary`:
+`bodyAsJson` parses the body as JSON, returning a `Dictionary`:
 
 ```beamtalk
-TestCase subclass: Ch25JsonResponse
-  state: baseUrl = ""
-  setUp =>
-    port := (Erlang beamtalk_http_test_server) start
-    self.baseUrl := "http://localhost:" ++ port asString
-    self
-
-  tearDown =>
-    (Erlang beamtalk_http_test_server) stop
-    self
-
-  testBodyAsJson =>
-    @expect type
-    resp := (HTTPClient get: self.baseUrl ++ "/json") unwrap
-    @expect type
-    data := resp bodyAsJson
-    self assert: (data isKindOf: Dictionary)
+resp := (HTTPClient get: "https://api.example.com/users/1") unwrap
+data := resp bodyAsJson
+data at: #name    // → "Alice"
+data at: #email   // → "alice@example.com"
 ```
 
 ## Configurable client actor
@@ -114,106 +60,75 @@ For repeated requests to the same server, spawn an `HTTPClient` actor with
 a base URL. Paths are appended automatically:
 
 ```beamtalk
-TestCase subclass: Ch25ActorClient
-  state: baseUrl = ""
-  state: client = nil
-  setUp =>
-    port := (Erlang beamtalk_http_test_server) start
-    self.baseUrl := "http://localhost:" ++ port asString
-    self.client := HTTPClient spawnWith: #{
-      #baseUrl => self.baseUrl,
-      #headers => #(),
-      #timeout => 5000
-    }
-    self
+client := HTTPClient spawnWith: #{
+  #baseUrl => "https://api.example.com",
+  #headers => #(),
+  #timeout => 5000
+}
 
-  tearDown =>
-    self.client stop
-    (Erlang beamtalk_http_test_server) stop
-    self
+// Requests use relative paths
+resp := (client get: "/users") unwrap
+resp := (client post: "/users" body: payload) unwrap
 
-  testActorGet =>
-    @expect type
-    resp := (self.client get: "/get") unwrap
-    self assert: resp ok
-    self assert: resp status equals: 200
-
-  testActorPost =>
-    @expect type
-    resp := (self.client post: "/post" body: "payload") unwrap
-    self assert: resp ok
+// Clean up when done
+client stop
 ```
+
+The actor maintains the base URL and default headers, reducing repetition
+when making many requests to the same API.
 
 ## Custom request options
 
 `request:url:options:` gives full control over headers, body, and timeout:
 
 ```beamtalk
-TestCase subclass: Ch25CustomRequest
-  state: baseUrl = ""
-  setUp =>
-    port := (Erlang beamtalk_http_test_server) start
-    self.baseUrl := "http://localhost:" ++ port asString
-    self
+// Set custom headers
+resp := (HTTPClient request: #get url: url options: #{
+  #headers => #(#("Accept", "application/json"),
+                #("Authorization", "Bearer token123"))
+}) unwrap
 
-  tearDown =>
-    (Erlang beamtalk_http_test_server) stop
-    self
-
-  testWithHeaders =>
-    @expect type
-    resp := (HTTPClient request: #get url: self.baseUrl ++ "/get" options: #{
-      #headers => #(#("Accept", "application/json"))
-    }) unwrap
-    self assert: resp ok
-
-  testWithTimeout =>
-    @expect type
-    resp := (HTTPClient request: #get url: self.baseUrl ++ "/get" options: #{
-      #timeout => 10000
-    }) unwrap
-    self assert: resp ok
+// Set a custom timeout (in milliseconds)
+resp := (HTTPClient request: #post url: url options: #{
+  #body => payload,
+  #timeout => 30000
+}) unwrap
 ```
 
 ## Error handling
 
-Invalid inputs raise type errors. Connection failures return error Results:
+All methods return `Result`. Use `isOk` / `isError` for safe checking:
 
 ```beamtalk
-TestCase subclass: Ch25Errors
-  testTypeErrors =>
-    self should: [HTTPClient get: 42] raise: #type_error
-    self should: [HTTPClient post: 42 body: "x"] raise: #type_error
+result := HTTPClient get: "https://unreachable.example.com"
+result isOk     // → false (connection failed)
+result isError  // → true
+```
 
-  testInstantiationError =>
-    // Must use spawn, not new
-    self should: [HTTPClient new] raise: #instantiation_error
+Invalid arguments raise type errors:
+
+```beamtalk
+// URL must be a String
+HTTPClient get: 42           // raises #type_error
+
+// Must use spawn, not new
+HTTPClient new               // raises #instantiation_error
 ```
 
 ## Working with JSON APIs
 
-A common pattern is to POST JSON and parse the response:
+A common pattern: serialize a Dictionary to JSON, POST it, and parse the response:
 
 ```beamtalk
-TestCase subclass: Ch25JsonApi
-  state: baseUrl = ""
-  setUp =>
-    port := (Erlang beamtalk_http_test_server) start
-    self.baseUrl := "http://localhost:" ++ port asString
-    self
+payload := Json generate: #{#name => "Alice", #age => 30}
 
-  tearDown =>
-    (Erlang beamtalk_http_test_server) stop
-    self
+resp := (HTTPClient request: #post url: "https://api.example.com/users" options: #{
+  #body => payload,
+  #headers => #(#("Content-Type", "application/json"))
+}) unwrap
 
-  testPostJson =>
-    payload := Json generate: #{#name => "Alice", #age => 30}
-    @expect type
-    resp := (HTTPClient request: #post url: self.baseUrl ++ "/json" options: #{
-      #body => payload,
-      #headers => #(#("Content-Type", "application/json"))
-    }) unwrap
-    self assert: resp ok
+user := resp bodyAsJson
+user at: #id    // → server-assigned ID
 ```
 
 ## Summary

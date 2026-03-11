@@ -131,7 +131,7 @@ compiled classes.
 Transcript show: value      → self (appends to buffer)
 Transcript cr               → self (appends newline)
 Transcript recent           → List (buffer contents)
-Transcript clear            → self (empties buffer)
+Transcript clear            → nil (empties buffer)
 Transcript subscribe        → self (subscribe to output)
 Transcript unsubscribe      → self (unsubscribe)
 ```

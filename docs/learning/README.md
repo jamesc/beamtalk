@@ -123,7 +123,7 @@ just test-learn           # run all learning guide doctests
 "hello" size    // => 5
 ```
 
-**Class chapters** (chapters 10–14, 16, 18, 24–25) — BUnit assertions:
+**Class chapters** (chapters 10–14, 16, 18, 24) — BUnit assertions:
 
 ```beamtalk
 TestCase subclass: Ch10Examples
