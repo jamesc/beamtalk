@@ -201,7 +201,15 @@ slice_from(#{'$beamtalk_class' := 'Array', 'data' := Arr}, From) when is_integer
             List = array:to_list(Arr),
             Rest = lists:nthtail(From - 1, List),
             from_list(Rest)
-    end.
+    end;
+slice_from(#{'$beamtalk_class' := 'Array'}, From) when is_integer(From) ->
+    Error0 = beamtalk_error:new(index_out_of_bounds, 'Array'),
+    Error1 = beamtalk_error:with_selector(Error0, 'sliceFrom:'),
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be >= 1">>));
+slice_from(#{'$beamtalk_class' := 'Array'}, _From) ->
+    Error0 = beamtalk_error:new(type_error, 'Array'),
+    Error1 = beamtalk_error:with_selector(Error0, 'sliceFrom:'),
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be an Integer">>)).
 
 %%% ============================================================================
 %%% String Representation

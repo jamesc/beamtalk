@@ -298,3 +298,29 @@ slice_from_well_past_end_test() ->
     A = make_array([1, 2]),
     Result = beamtalk_array:slice_from(A, 100),
     ?assertEqual(0, beamtalk_array:size(Result)).
+
+slice_from_empty_array_test() ->
+    A = make_array([]),
+    Result = beamtalk_array:slice_from(A, 1),
+    ?assertEqual(0, beamtalk_array:size(Result)).
+
+slice_from_zero_index_test() ->
+    A = make_array([1, 2, 3]),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
+        beamtalk_array:slice_from(A, 0)
+    ).
+
+slice_from_negative_index_test() ->
+    A = make_array([1, 2, 3]),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
+        beamtalk_array:slice_from(A, -1)
+    ).
+
+slice_from_non_integer_index_test() ->
+    A = make_array([1, 2, 3]),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_array:slice_from(A, <<"1">>)
+    ).
