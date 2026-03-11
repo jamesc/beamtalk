@@ -111,14 +111,25 @@ fn render_docs_index(
     html.push_str("Documentation");
     html.push_str("</div>\n");
     html.push_str("<h1>Documentation</h1>\n");
-    html.push_str("<ul>\n");
+    html.push_str("<ul class=\"docs-index-list\">\n");
     for &(_, file, title) in prose_pages {
-        let _ = writeln!(
-            html,
-            "<li><a href=\"{file}\">{title}</a></li>",
-            file = file,
-            title = html_escape(title)
-        );
+        let (_, desc) = landing_card_meta(file);
+        if desc.is_empty() {
+            let _ = writeln!(
+                html,
+                "<li><a href=\"{file}\">{title}</a></li>",
+                file = file,
+                title = html_escape(title)
+            );
+        } else {
+            let _ = writeln!(
+                html,
+                "<li><a href=\"{file}\">{title}</a> — {desc}</li>",
+                file = file,
+                title = html_escape(title),
+                desc = html_escape(desc)
+            );
+        }
     }
     html.push_str("</ul>\n");
     html.push_str("</main>\n");
@@ -144,12 +155,12 @@ fn prose_nav(
     html.push_str("<div class=\"sidebar-section-label\">Navigate</div>\n");
     html.push_str("<ul class=\"sidebar-nav\">\n");
     html.push_str("<li><a href=\"../\">Home</a></li>\n");
-    html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
-    html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
-    html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
     if learning_available {
         html.push_str("<li><a href=\"../learning/\">Learn Beamtalk</a></li>\n");
     }
+    html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
+    html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
+    html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
     html.push_str("</ul>\n");
 
     html.push_str("<div class=\"sidebar-section-label\">Documentation</div>\n");
@@ -535,12 +546,12 @@ fn adr_nav(active_file: &str, adrs: &[AdrInfo], learning_available: bool) -> Str
     html.push_str("<div class=\"sidebar-section-label\">Navigate</div>\n");
     html.push_str("<ul class=\"sidebar-nav\">\n");
     html.push_str("<li><a href=\"../\">Home</a></li>\n");
-    html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
-    html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
-    html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
     if learning_available {
         html.push_str("<li><a href=\"../learning/\">Learn Beamtalk</a></li>\n");
     }
+    html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
+    html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
+    html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
     html.push_str("</ul>\n");
 
     html.push_str("<div class=\"sidebar-section-label\">Architecture Decisions</div>\n");
@@ -840,10 +851,10 @@ fn learning_nav(active_file: &str, chapters: &[ChapterInfo]) -> String {
     html.push_str("<div class=\"sidebar-section-label\">Navigate</div>\n");
     html.push_str("<ul class=\"sidebar-nav\">\n");
     html.push_str("<li><a href=\"../\">Home</a></li>\n");
-    html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
-    html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
-    html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
     html.push_str("<li><a href=\"../learning/\">Learn Beamtalk</a></li>\n");
+    html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
+    html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
+    html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
     html.push_str("</ul>\n");
 
     html.push_str("<div class=\"sidebar-section-label\">Learn Beamtalk</div>\n");
@@ -940,7 +951,7 @@ fn landing_card_meta(output_file: &str) -> (&'static str, &'static str) {
 /// Return the learning guide landing card description.
 fn learning_card_desc() -> (&'static str, &'static str) {
     (
-        "📚",
+        "",
         "A progressive, chapter-by-chapter guide to learning Beamtalk from first principles.",
     )
 }
@@ -1018,11 +1029,11 @@ pub(super) fn write_site_landing_page(
 
     // Learning guide card (shown first when available)
     if learning_available {
-        let (emoji, desc) = learning_card_desc();
+        let (_, desc) = learning_card_desc();
         let _ = writeln!(
             html,
             "<a href=\"learning/\" class=\"landing-card\">\n\
-             <h2>{emoji} Learn Beamtalk</h2>\n\
+             <h2>Learn Beamtalk</h2>\n\
              <p>{desc}</p>\n\
              </a>"
         );
