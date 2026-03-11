@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1346: Tests that ensure: works correctly in class methods.
+// Previously, ensure: in class methods generated invalid Core Erlang
+// referencing a non-existent State variable.
+
+TestCase subclass: ClassMethodEnsureTest
+
+  testSimpleEnsureInClassMethod =>
+    result := ClassMethodEnsureHelper simpleEnsure
+    self assert: result equals: 42
+
+  testEnsureReturnsBodyValueInClassMethod =>
+    result := ClassMethodEnsureHelper ensureReturnsBodyValue
+    self assert: result equals: 100
+
+  testEnsureRunsCleanupBlockInClassMethod =>
+    helper := ClassMethodEnsureHelper spawn
+    result := ClassMethodEnsureHelper ensureWithCleanup: helper
+    self assert: result equals: 42
+    self assert: helper cleaned equals: true

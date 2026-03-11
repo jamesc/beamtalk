@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1346: Fixture for testing ensure: in class methods.
+// Verifies that ensure: compiles and runs correctly in class method context.
+
+Actor subclass: ClassMethodEnsureHelper
+  state: cleaned = false
+
+  class simpleEnsure => [42] ensure: [nil]
+
+  class ensureReturnsBodyValue =>
+    result := [100] ensure: [nil]
+    result
+
+  class ensureWithCleanup: actor => [42] ensure: [actor markCleaned]
+
+  cleaned => self.cleaned
+
+  markCleaned => self.cleaned := true
