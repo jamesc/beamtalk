@@ -530,6 +530,61 @@ fn selector_span_contains(
     }
 }
 
+/// Info about a native delegate method's backing module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeDelegateInfo {
+    /// The backing Erlang module name (e.g., `beamtalk_subprocess`).
+    pub backing_module: EcoString,
+}
+
+/// Check if a location from `goto_definition` points to a self-delegate method
+/// in a native class. If so, returns the backing module name.
+///
+/// This is used by the LSP to redirect navigation from the `.bt` method stub
+/// to the backing `.erl` implementation file (ADR 0056).
+#[must_use]
+pub fn check_native_delegate<'a>(
+    location: &Location,
+    files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
+) -> Option<NativeDelegateInfo> {
+    for (file_path, module) in files {
+        if *file_path != location.file {
+            continue;
+        }
+        // Check inline class methods
+        for class in &module.classes {
+            let backing_module = match &class.backing_module {
+                Some(ident) => &ident.name,
+                None => continue,
+            };
+            for method in &class.methods {
+                if method.span == location.span && method.is_self_delegate() {
+                    return Some(NativeDelegateInfo {
+                        backing_module: backing_module.clone(),
+                    });
+                }
+            }
+        }
+        // Check Tonel-style standalone method definitions (e.g., `MyNative >> sel => self delegate`)
+        for smd in &module.method_definitions {
+            if smd.method.span == location.span && smd.method.is_self_delegate() {
+                // Find the backing module from the class definition in this or any file
+                let class_name = smd.class_name.name.as_str();
+                for class in &module.classes {
+                    if class.name.name == class_name {
+                        if let Some(ident) = &class.backing_module {
+                            return Some(NativeDelegateInfo {
+                                backing_module: ident.name.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Recursively search for a variable definition (first assignment) in an expression.
 fn find_definition_in_expr(expr: &Expression, name: &str) -> Option<Span> {
     match expr {
@@ -758,5 +813,43 @@ mod tests {
         assert!(result.is_some());
         let (name, _span) = result.unwrap();
         assert_eq!(name, "+");
+    }
+
+    #[test]
+    fn check_native_delegate_returns_backing_module() {
+        let file = Utf8PathBuf::from("native.bt");
+        let module =
+            parse_source("Actor subclass: Foo native: bar_mod\n  doStuff => self delegate");
+        let method_span = module.classes[0].methods[0].span;
+
+        let location = Location::new(file.clone(), method_span);
+        let result = check_native_delegate(&location, [(&file, &module)]);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().backing_module, "bar_mod");
+    }
+
+    #[test]
+    fn check_native_delegate_returns_none_for_non_native_class() {
+        let file = Utf8PathBuf::from("normal.bt");
+        let module = parse_source("Object subclass: Foo\n  bar => 42");
+        let method_span = module.classes[0].methods[0].span;
+
+        let location = Location::new(file.clone(), method_span);
+        let result = check_native_delegate(&location, [(&file, &module)]);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn check_native_delegate_returns_none_for_non_delegate_method() {
+        let file = Utf8PathBuf::from("native.bt");
+        let module = parse_source(
+            "Actor subclass: Foo native: bar_mod\n  doStuff => self delegate\n  helper => 42",
+        );
+        // helper method is at index 1 — not a self delegate
+        let method_span = module.classes[0].methods[1].span;
+
+        let location = Location::new(file.clone(), method_span);
+        let result = check_native_delegate(&location, [(&file, &module)]);
+        assert!(result.is_none());
     }
 }

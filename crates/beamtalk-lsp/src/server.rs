@@ -85,6 +85,8 @@ pub struct Backend {
     preload_config: Mutex<Option<PreloadConfig>>,
     /// Paths of stdlib files loaded during preload; used to emit `beamtalk-stdlib://` URIs.
     stdlib_paths: Mutex<HashSet<Utf8PathBuf>>,
+    /// Workspace roots discovered at initialization; used for native delegate `.erl` lookup.
+    workspace_roots: Mutex<Vec<PathBuf>>,
 }
 
 impl Backend {
@@ -97,6 +99,7 @@ impl Backend {
             diagnostic_generation: Mutex::new(HashMap::new()),
             preload_config: Mutex::new(None),
             stdlib_paths: Mutex::new(HashSet::new()),
+            workspace_roots: Mutex::new(Vec::new()),
         }
     }
 
@@ -151,6 +154,41 @@ impl Backend {
             return None;
         }
         Some(first)
+    }
+
+    /// Searches workspace roots for an Erlang source file matching a module name.
+    ///
+    /// Looks in `runtime/apps/*/src/<module>.erl` and `src/<module>.erl` relative
+    /// to each workspace root. Returns the first match found.
+    fn find_erlang_source_file(&self, module_name: &str) -> Option<PathBuf> {
+        // Reject module names containing path separators to prevent directory traversal.
+        if module_name.contains('/') || module_name.contains('\\') || module_name.contains("..") {
+            return None;
+        }
+        let filename = format!("{module_name}.erl");
+        let roots = self
+            .workspace_roots
+            .lock()
+            .expect("workspace_roots lock poisoned")
+            .clone();
+        for root in &roots {
+            // Check runtime/apps/*/src/<module>.erl (OTP app layout)
+            let runtime_apps = root.join("runtime").join("apps");
+            if let Ok(entries) = std::fs::read_dir(&runtime_apps) {
+                for entry in entries.flatten() {
+                    let candidate = entry.path().join("src").join(&filename);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+            // Check src/<module>.erl (flat layout)
+            let flat = root.join("src").join(&filename);
+            if flat.is_file() {
+                return Some(flat);
+            }
+        }
+        None
     }
 
     async fn preload_workspace_source_files(&self, config: PreloadConfig) {
@@ -330,6 +368,13 @@ impl LanguageServer for Backend {
         let roots = workspace_roots(&params);
         let configured_stdlib = configured_stdlib_source_dir(&params);
         let stdlib_dirs = configured_stdlib_source_dirs(configured_stdlib.as_deref(), &roots);
+        {
+            let mut stored_roots = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            (*stored_roots).clone_from(&roots);
+        }
         {
             let mut preload_config = self
                 .preload_config
@@ -642,19 +687,41 @@ impl LanguageServer for Backend {
         };
 
         // Hold svc lock only for the definition lookup; release before checking stdlib_paths.
-        let resolved = {
+        let (resolved, native_delegate) = {
             let svc = self.service.lock().expect("service lock poisoned");
             let Some(source) = svc.file_source(&path) else {
                 return Ok(None);
             };
             let pos = to_bt_position(params.text_document_position_params.position, &source);
             let location = svc.goto_definition(&path, pos);
-            location.and_then(|loc| {
-                let target_source = svc.file_source(&loc.file)?;
-                let range = span_to_range(loc.span, &target_source);
-                Some((loc.file.clone(), range))
-            })
+            match location {
+                Some(loc) => {
+                    let delegate_info = svc.check_native_delegate(&loc);
+                    let target_source = svc.file_source(&loc.file);
+                    let resolved = target_source.map(|src| {
+                        let range = span_to_range(loc.span, &src);
+                        (loc.file.clone(), range)
+                    });
+                    (resolved, delegate_info)
+                }
+                None => (None, None),
+            }
         };
+
+        // If this is a native delegate method, try to navigate to the backing .erl file.
+        if let Some(delegate_info) = native_delegate {
+            if let Some(erl_path) = self.find_erlang_source_file(&delegate_info.backing_module) {
+                if let Ok(target_uri) = Url::from_file_path(&erl_path) {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(
+                        tower_lsp::lsp_types::Location {
+                            uri: target_uri,
+                            range: tower_lsp::lsp_types::Range::default(),
+                        },
+                    )));
+                }
+            }
+            // Fall through to .bt location if .erl file not found.
+        }
 
         Ok(resolved.and_then(|(file, range)| {
             let is_stdlib = {

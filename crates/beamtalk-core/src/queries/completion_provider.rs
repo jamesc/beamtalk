@@ -634,12 +634,22 @@ fn find_receiver_in_expr(
 fn add_receiver_type_completions(
     hierarchy: &ClassHierarchy,
     receiver_type: Option<&ReceiverSide>,
+    context: &ClassContext<'_>,
     completions: &mut Vec<Completion>,
 ) -> bool {
     let mut seen = HashSet::new();
     match receiver_type {
         Some(ReceiverSide::Instance(class_name)) if hierarchy.has_class(class_name) => {
             for method in hierarchy.all_methods(class_name) {
+                if should_exclude_delegate(
+                    &method.selector,
+                    &method.defined_in,
+                    context,
+                    Some(class_name),
+                    hierarchy,
+                ) {
+                    continue;
+                }
                 if seen.insert(method.selector.clone()) {
                     let doc = method_completion_doc(&method, false);
                     completions.push(
@@ -653,6 +663,15 @@ fn add_receiver_type_completions(
         }
         Some(ReceiverSide::Class(class_name)) if hierarchy.has_class(class_name) => {
             for method in hierarchy.all_class_methods(class_name) {
+                if should_exclude_delegate(
+                    &method.selector,
+                    &method.defined_in,
+                    context,
+                    Some(class_name),
+                    hierarchy,
+                ) {
+                    continue;
+                }
                 if seen.insert(method.selector.clone()) {
                     let doc = method_completion_doc(&method, true);
                     completions.push(
@@ -712,6 +731,40 @@ fn method_completion_doc(
     }
 }
 
+/// Returns `true` if the `delegate` method from `Actor` should be excluded from completions.
+///
+/// The sealed `delegate` method on `Actor` is only meaningful for native classes
+/// (those with a `native:` declaration). Showing it on non-native actors would be
+/// misleading since calling it raises an error at runtime (ADR 0056).
+///
+/// Only filters `delegate` when it is defined on `Actor` — user-defined methods
+/// named `delegate` on other classes are not affected.
+///
+/// When a concrete receiver class is known (typed completions), the receiver's
+/// native status is used instead of the editing context.
+fn should_exclude_delegate(
+    selector: &str,
+    defined_in: &str,
+    context: &ClassContext<'_>,
+    receiver_class: Option<&str>,
+    hierarchy: &ClassHierarchy,
+) -> bool {
+    if selector != "delegate" || defined_in != "Actor" {
+        return false;
+    }
+    // When the receiver class is known, check its native status directly.
+    if let Some(class_name) = receiver_class {
+        return !hierarchy.is_native(class_name);
+    }
+    // Fallback to editing context for untyped completions.
+    match context {
+        ClassContext::InstanceMethod(class) | ClassContext::ClassMethod(class) => {
+            class.backing_module.is_none()
+        }
+        ClassContext::TopLevel => true,
+    }
+}
+
 /// Adds method completions from the class hierarchy.
 ///
 /// Uses the cursor's class context to provide relevant completions:
@@ -730,7 +783,7 @@ fn add_hierarchy_completions(
     completions: &mut Vec<Completion>,
 ) {
     // If we have a known receiver type, show only methods for that type
-    if add_receiver_type_completions(hierarchy, receiver_type, completions) {
+    if add_receiver_type_completions(hierarchy, receiver_type, context, completions) {
         return;
     }
 
@@ -739,17 +792,16 @@ fn add_hierarchy_completions(
     // Fall back to context-based completions (Dynamic or no receiver)
     match context {
         ClassContext::InstanceMethod(class) => {
-            // Add instance methods for the enclosing class (including inherited)
             let class_name = class.name.name.as_str();
-            for method in hierarchy.all_methods(class_name) {
-                if seen.insert(method.selector.clone()) {
-                    let doc = method_completion_doc(&method, false);
-                    completions.push(
-                        Completion::new(method.selector.as_str(), CompletionKind::Function)
-                            .with_documentation(doc),
-                    );
-                }
-            }
+            collect_method_completions(
+                hierarchy.all_methods(class_name),
+                false,
+                context,
+                None,
+                hierarchy,
+                &mut seen,
+                completions,
+            );
             // Add state variable names as field completions
             for state_var in &class.state {
                 completions.push(
@@ -759,62 +811,89 @@ fn add_hierarchy_completions(
             }
         }
         ClassContext::ClassMethod(class) => {
-            // Add class-side methods for the enclosing class (including inherited)
             let class_name = class.name.name.as_str();
-            for method in hierarchy.all_class_methods(class_name) {
-                if seen.insert(method.selector.clone()) {
-                    let doc = method_completion_doc(&method, true);
-                    completions.push(
-                        Completion::new(method.selector.as_str(), CompletionKind::Function)
-                            .with_documentation(doc),
-                    );
-                }
-            }
+            collect_method_completions(
+                hierarchy.all_class_methods(class_name),
+                true,
+                context,
+                None,
+                hierarchy,
+                &mut seen,
+                completions,
+            );
             // Also include instance methods (class methods can access them via instances)
-            for method in hierarchy.all_methods(class_name) {
-                if seen.insert(method.selector.clone()) {
-                    let doc = method_completion_doc(&method, false);
-                    completions.push(
-                        Completion::new(method.selector.as_str(), CompletionKind::Function)
-                            .with_documentation(doc),
-                    );
-                }
-            }
+            collect_method_completions(
+                hierarchy.all_methods(class_name),
+                false,
+                context,
+                None,
+                hierarchy,
+                &mut seen,
+                completions,
+            );
         }
         ClassContext::TopLevel => {
-            // Add methods from all classes defined in the module
             for class in &module.classes {
-                for method in hierarchy.all_methods(class.name.name.as_str()) {
-                    if seen.insert(method.selector.clone()) {
-                        let doc = method_completion_doc(&method, false);
-                        completions.push(
-                            Completion::new(method.selector.as_str(), CompletionKind::Function)
-                                .with_documentation(doc),
-                        );
-                    }
-                }
-                // Also add class-side methods for top-level completions
-                for method in hierarchy.all_class_methods(class.name.name.as_str()) {
-                    if seen.insert(method.selector.clone()) {
-                        let doc = method_completion_doc(&method, true);
-                        completions.push(
-                            Completion::new(method.selector.as_str(), CompletionKind::Function)
-                                .with_documentation(doc),
-                        );
-                    }
-                }
+                let name = class.name.name.as_str();
+                collect_method_completions(
+                    hierarchy.all_methods(name),
+                    false,
+                    context,
+                    None,
+                    hierarchy,
+                    &mut seen,
+                    completions,
+                );
+                collect_method_completions(
+                    hierarchy.all_class_methods(name),
+                    true,
+                    context,
+                    None,
+                    hierarchy,
+                    &mut seen,
+                    completions,
+                );
             }
-
             // Always include common Object/ProtoObject methods for general completions
-            for method in hierarchy.all_methods("Object") {
-                if seen.insert(method.selector.clone()) {
-                    let doc = method_completion_doc(&method, false);
-                    completions.push(
-                        Completion::new(method.selector.as_str(), CompletionKind::Function)
-                            .with_documentation(doc),
-                    );
-                }
-            }
+            collect_method_completions(
+                hierarchy.all_methods("Object"),
+                false,
+                context,
+                None,
+                hierarchy,
+                &mut seen,
+                completions,
+            );
+        }
+    }
+}
+
+/// Collects methods into completions, filtering out `delegate` where inappropriate.
+fn collect_method_completions(
+    methods: impl IntoIterator<Item = crate::semantic_analysis::class_hierarchy::MethodInfo>,
+    is_class_side: bool,
+    context: &ClassContext<'_>,
+    receiver_class: Option<&str>,
+    hierarchy: &ClassHierarchy,
+    seen: &mut HashSet<EcoString>,
+    completions: &mut Vec<Completion>,
+) {
+    for method in methods {
+        if should_exclude_delegate(
+            &method.selector,
+            &method.defined_in,
+            context,
+            receiver_class,
+            hierarchy,
+        ) {
+            continue;
+        }
+        if seen.insert(method.selector.clone()) {
+            let doc = method_completion_doc(&method, is_class_side);
+            completions.push(
+                Completion::new(method.selector.as_str(), CompletionKind::Function)
+                    .with_documentation(doc),
+            );
         }
     }
 }
@@ -1627,5 +1706,39 @@ mod tests {
         let hierarchy = ClassHierarchy::with_builtins();
         let result = resolve_expression_type("myList collect: [:x | x]", &hierarchy);
         assert_eq!(result, None);
+    }
+
+    // ── delegate completion filtering (BT-1215) ─────────────────────────────
+
+    #[test]
+    fn delegate_excluded_from_completions_in_non_native_actor() {
+        // Inside an instance method of a non-native Actor subclass,
+        // `delegate` should not appear in completions.
+        // Define Actor with delegate method, then a non-native subclass.
+        let source = "Object subclass: Actor\n  delegate => 1\nActor subclass: Counter\n  increment => self ";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let completions = compute_completions(&module, source, Position::new(3, 19), &hierarchy);
+        assert!(
+            !completions.iter().any(|c| c.label == "delegate"),
+            "delegate should be excluded for non-native actors"
+        );
+    }
+
+    #[test]
+    fn delegate_included_in_completions_for_native_actor() {
+        // Inside an instance method of a native Actor subclass,
+        // `delegate` SHOULD appear in completions.
+        let source = "Object subclass: Actor\n  delegate => 1\nActor subclass: Proc native: beamtalk_proc\n  run => self del";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        // Position inside the method body (on "del" partial text)
+        let completions = compute_completions(&module, source, Position::new(3, 13), &hierarchy);
+        assert!(
+            completions.iter().any(|c| c.label == "delegate"),
+            "delegate should be included for native actors"
+        );
     }
 }

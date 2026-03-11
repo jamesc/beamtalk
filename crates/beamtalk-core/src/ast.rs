@@ -611,6 +611,28 @@ pub struct MethodDefinition {
 }
 
 impl MethodDefinition {
+    /// Returns `true` if the method body is exactly `self delegate`.
+    ///
+    /// This is the marker pattern for native facade classes (ADR 0056): the method
+    /// body delegates to the backing `gen_server` rather than containing Beamtalk logic.
+    #[must_use]
+    pub fn is_self_delegate(&self) -> bool {
+        if self.body.len() != 1 {
+            return false;
+        }
+        matches!(
+            &self.body[0].expression,
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Unary(sel),
+                arguments,
+                ..
+            } if arguments.is_empty()
+                && sel.as_str() == "delegate"
+                && matches!(receiver.as_ref(), Expression::Identifier(Identifier { name, .. }) if name.as_str() == "self")
+        )
+    }
+
     /// Creates a new method definition.
     #[must_use]
     pub fn new(

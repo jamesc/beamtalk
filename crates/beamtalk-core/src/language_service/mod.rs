@@ -181,6 +181,21 @@ impl SimpleLanguageService {
         self.files.get(file).map(|data| &data.module)
     }
 
+    /// Checks if a goto-definition result points to a `self delegate` method
+    /// in a native class, returning the backing Erlang module name if so.
+    ///
+    /// Used by the LSP to redirect navigation to the backing `.erl` file.
+    #[must_use]
+    pub fn check_native_delegate(
+        &self,
+        location: &Location,
+    ) -> Option<crate::queries::definition_provider::NativeDelegateInfo> {
+        crate::queries::definition_provider::check_native_delegate(
+            location,
+            self.files.iter().map(|(path, data)| (path, &data.module)),
+        )
+    }
+
     /// Returns the cached source text for a file, if available.
     #[must_use]
     pub fn file_source(&self, file: &Utf8PathBuf) -> Option<String> {
@@ -1208,6 +1223,48 @@ mod tests {
         let def = service.goto_definition(&file_hierarchy, Position::new(3, 16));
         assert!(def.is_some());
         assert_eq!(def.unwrap().file, file_hierarchy);
+    }
+
+    // ── native delegate tests (BT-1215) ────────────────────────────────────
+
+    #[test]
+    fn check_native_delegate_on_self_delegate_method() {
+        let mut service = SimpleLanguageService::new();
+        let file_def = Utf8PathBuf::from("native.bt");
+        service.update_file(
+            file_def.clone(),
+            "Actor subclass: Proc native: beamtalk_proc\n  run => self delegate".to_string(),
+        );
+        let file_call = Utf8PathBuf::from("caller.bt");
+        service.update_file(file_call.clone(), "p := Proc spawn\np run".to_string());
+
+        // Go-to-definition on the `run` call navigates to the method definition
+        let def = service.goto_definition(&file_call, Position::new(1, 2));
+        assert!(def.is_some(), "should find the method definition");
+        let loc = def.unwrap();
+        assert_eq!(loc.file, file_def);
+
+        let delegate_info = service.check_native_delegate(&loc);
+        assert!(delegate_info.is_some(), "should detect native delegate");
+        assert_eq!(delegate_info.unwrap().backing_module, "beamtalk_proc");
+    }
+
+    #[test]
+    fn check_native_delegate_returns_none_for_normal_method() {
+        let mut service = SimpleLanguageService::new();
+        let file_def = Utf8PathBuf::from("normal.bt");
+        service.update_file(
+            file_def.clone(),
+            "Object subclass: Foo\n  bar => 42".to_string(),
+        );
+        let file_call = Utf8PathBuf::from("caller.bt");
+        service.update_file(file_call.clone(), "f := Foo new\nf bar".to_string());
+
+        let def = service.goto_definition(&file_call, Position::new(1, 2));
+        assert!(def.is_some());
+        let loc = def.unwrap();
+        let delegate_info = service.check_native_delegate(&loc);
+        assert!(delegate_info.is_none());
     }
 
     // ── code_actions tests (BT-1067) ────────────────────────────────────────

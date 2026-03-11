@@ -13,10 +13,7 @@
 use super::super::document::{Document, INDENT, join, line, nest};
 use super::super::spec_codegen;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
-use crate::ast::{
-    Expression, ExpressionStatement, Identifier, MessageSelector, MethodDefinition, MethodKind,
-    Module,
-};
+use crate::ast::{MethodDefinition, MethodKind, Module};
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
 
@@ -68,7 +65,7 @@ impl CoreErlangGenerator {
             .map(|c| {
                 c.methods
                     .iter()
-                    .filter(|m| m.kind == MethodKind::Primary && is_self_delegate_body(&m.body))
+                    .filter(|m| m.kind == MethodKind::Primary && m.is_self_delegate())
                     .collect()
             })
             .unwrap_or_default();
@@ -803,25 +800,4 @@ impl CoreErlangGenerator {
             "\n",
         ]
     }
-}
-
-/// Returns `true` if a method body is exactly `self delegate` (unary message send).
-///
-/// This is the marker pattern for native facade classes (ADR 0056): the method
-/// body delegates to the backing `gen_server` rather than containing Beamtalk logic.
-fn is_self_delegate_body(body: &[ExpressionStatement]) -> bool {
-    if body.len() != 1 {
-        return false;
-    }
-    matches!(
-        &body[0].expression,
-        Expression::MessageSend {
-            receiver,
-            selector: MessageSelector::Unary(sel),
-            arguments,
-            ..
-        } if arguments.is_empty()
-            && sel.as_str() == "delegate"
-            && matches!(receiver.as_ref(), Expression::Identifier(Identifier { name, .. }) if name.as_str() == "self")
-    )
 }
