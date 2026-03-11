@@ -281,6 +281,10 @@ pub struct CodegenOptions {
     /// Injected into the `ClassHierarchy` before codegen so user-defined REPL
     /// classes are visible to `is_actor_class` and related checks.
     pre_class_hierarchy: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// BT-1343: Override for codegen diagnostics flag.
+    /// `None` = read from `BEAMTALK_CODEGEN_DIAGNOSTICS` env var at generator creation.
+    /// `Some(true/false)` = override the env var (used by tests).
+    codegen_diagnostics: Option<bool>,
 }
 
 impl CodegenOptions {
@@ -296,6 +300,7 @@ impl CodegenOptions {
             source_path: None,
             stdlib_mode: false,
             pre_class_hierarchy: Vec::new(),
+            codegen_diagnostics: None,
         }
     }
 
@@ -324,6 +329,13 @@ impl CodegenOptions {
     #[must_use]
     pub fn with_workspace_mode(mut self, enabled: bool) -> Self {
         self.workspace_mode = enabled;
+        self
+    }
+
+    /// BT-1343: Explicitly enable or disable codegen diagnostics, overriding the env var.
+    #[must_use]
+    pub fn with_codegen_diagnostics(mut self, enabled: bool) -> Self {
+        self.codegen_diagnostics = Some(enabled);
         self
     }
 
@@ -468,6 +480,10 @@ pub fn generate_module_with_warnings(
     generator.stdlib_mode = options.stdlib_mode;
     generator.class_module_index = options.class_module_index;
     generator.source_path = options.source_path;
+    // BT-1343: Override codegen diagnostics flag if explicitly set in options.
+    if let Some(enabled) = options.codegen_diagnostics {
+        generator.codegen_diagnostics_enabled = enabled;
+    }
 
     // BT-1288: Compute semantic facts before codegen begins.
     let semantic_facts = crate::semantic_analysis::compute_semantic_facts(module);
@@ -1792,7 +1808,7 @@ impl CoreErlangGenerator {
                                 .span_to_line(*span)
                                 .map_or(String::new(), |l| format!(" at line {l}"));
                             format!(
-                                "Non-local return in block{line_info}: generates throw/catch, \
+                                "Non-local return{line_info}: compiled via throw/catch, \
                                  may inhibit JIT optimization"
                             )
                         },

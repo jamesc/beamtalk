@@ -433,6 +433,28 @@ impl ThreadingPlan {
                     false
                 }) {
                     StateAccFallbackReason::Tier2ValueCallOnThreaded
+                } else if condition.is_some_and(|c| {
+                    if let Expression::Block(cb) = c {
+                        block_analysis::analyze_block(cb).has_state_effects()
+                    } else {
+                        false
+                    }
+                }) {
+                    StateAccFallbackReason::ConditionStateEffects
+                } else if body
+                    .body
+                    .iter()
+                    .any(|s| generator.control_flow_has_mutations(&s.expression))
+                {
+                    StateAccFallbackReason::ControlFlowMutations
+                } else if body.body.iter().any(|s| {
+                    CoreErlangGenerator::inline_conditional_writes_threaded(
+                        &s.expression,
+                        &threaded_locals,
+                        &generator.semantic_facts,
+                    )
+                }) {
+                    StateAccFallbackReason::InlineConditionalThreadedWrite
                 } else {
                     StateAccFallbackReason::ControlFlowMutations
                 }
@@ -980,14 +1002,9 @@ impl CoreErlangGenerator {
             );
         }
 
-        // BT-1343: Large extracted arity diagnostic (>8 params)
+        // BT-1343: Large extracted arity diagnostic (>8 direct fun params)
         let total = plan.total_extracted_params();
-        if total > 8
-            && !matches!(
-                plan.fallback_reason,
-                StateAccFallbackReason::NoThreadedLocals
-            )
-        {
+        if total > 8 && (plan.use_direct_params || plan.use_hybrid_params) {
             self.emit_codegen_diagnostic(
                 format!("Loop{line_info}: {total} extracted params"),
                 span,

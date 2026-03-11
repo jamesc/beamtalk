@@ -172,7 +172,7 @@ These are off by default (too noisy for normal use) and gated behind environment
 | Variable | Effect |
 |---|---|
 | `BEAMTALK_CODEGEN_DIAGNOSTICS=1` | Enable all codegen diagnostics (info-level hints) |
-| `BEAMTALK_WARN_STATEACC=1` | Promote StateAcc fallback diagnostics to warning level |
+| `BEAMTALK_WARN_STATEACC=1` | Promote StateAcc fallback diagnostics to warning level (requires `BEAMTALK_CODEGEN_DIAGNOSTICS=1`) |
 
 ```bash
 # See all codegen decisions
@@ -211,7 +211,7 @@ Example: `Loop at line 15: StateAcc fallback — self-send in loop body`
 Emitted when `^` inside a block generates throw/catch, which can prevent BEAM JIT
 from optimizing the enclosing function.
 
-Example: `Non-local return in block at line 15: generates throw/catch, may inhibit JIT optimization`
+Example: `Non-local return at line 15: compiled via throw/catch, may inhibit JIT optimization`
 
 **4. Synchronous self-send in loop**
 

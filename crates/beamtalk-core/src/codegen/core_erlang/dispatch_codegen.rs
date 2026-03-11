@@ -295,7 +295,7 @@ impl CoreErlangGenerator {
         }
 
         // BT-1343: Emit dynamic dispatch fallback diagnostic.
-        {
+        if self.codegen_diagnostics_enabled {
             let span = receiver.span();
             let line_info = self
                 .span_to_line(span)
