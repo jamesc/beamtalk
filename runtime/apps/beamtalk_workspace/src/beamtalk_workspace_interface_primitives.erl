@@ -249,15 +249,16 @@ do_start_supervisor(ClassName, Module) ->
     case supervisor:start_child(beamtalk_workspace_sup, ChildSpec) of
         {ok, Pid} ->
             {beamtalk_supervisor, ClassName, Module, Pid};
-        {error, {already_started, Pid}} ->
+        {error, {already_started, _Pid}} ->
             %% Process is already running. If the child spec is registered
             %% under our workspace supervisor (same ChildId), this is an
-            %% idempotent call — return the existing handle. Otherwise,
-            %% the supervisor was started standalone and can't be attached.
-            case is_workspace_child(ChildId) of
-                true ->
-                    {beamtalk_supervisor, ClassName, Module, Pid};
-                false ->
+            %% idempotent call — return the actual handle from which_children
+            %% (not the caller's Module, which may be stale after a reload).
+            %% Otherwise, the supervisor was started standalone.
+            case workspace_child_handle(ChildId) of
+                {ok, Handle} ->
+                    Handle;
+                not_found ->
                     NameBin = atom_to_binary(ClassName, utf8),
                     raise_start_supervisor_error(
                         iolist_to_binary([
@@ -280,11 +281,17 @@ do_start_supervisor(ClassName, Module) ->
             raise_start_supervisor_error(Reason)
     end.
 
-%% @private Check if a child id is registered under the workspace supervisor.
--spec is_workspace_child(term()) -> boolean().
-is_workspace_child(ChildId) ->
-    Children = supervisor:which_children(beamtalk_workspace_sup),
-    lists:any(fun({Id, _, _, _}) -> Id =:= ChildId end, Children).
+%% @private Return the actual attached handle for a workspace child.
+%% Reads from which_children to get the real module and pid (which may differ
+%% from the caller's ClassArg after a class reload).
+-spec workspace_child_handle(term()) -> {ok, tuple()} | not_found.
+workspace_child_handle(ChildId = {user_supervisor, ClassName}) ->
+    case lists:keyfind(ChildId, 1, supervisor:which_children(beamtalk_workspace_sup)) of
+        {ChildId, Pid, supervisor, [RunningModule]} when is_pid(Pid) ->
+            {ok, {beamtalk_supervisor, ClassName, RunningModule, Pid}};
+        _ ->
+            not_found
+    end.
 
 %% @private
 -dialyzer({no_return, raise_start_supervisor_type_error/1}).
