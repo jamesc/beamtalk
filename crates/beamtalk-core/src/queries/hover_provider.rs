@@ -557,9 +557,16 @@ fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> 
                 None
             }
         }
-        Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => elements
+        Pattern::Tuple { elements, .. } => elements
             .iter()
             .find_map(|p| find_hover_in_pattern(p, offset, type_map)),
+        Pattern::Array { elements, rest, .. } => elements
+            .iter()
+            .find_map(|p| find_hover_in_pattern(p, offset, type_map))
+            .or_else(|| {
+                rest.as_deref()
+                    .and_then(|r| find_hover_in_pattern(r, offset, type_map))
+            }),
         Pattern::List { elements, tail, .. } => elements
             .iter()
             .find_map(|p| find_hover_in_pattern(p, offset, type_map))
@@ -933,7 +940,7 @@ fn find_hover_in_expr(
                 None
             }
         }
-        Expression::ExpectDirective { .. } => None,
+        Expression::ExpectDirective { .. } | Expression::Spread { .. } => None,
     }
 }
 

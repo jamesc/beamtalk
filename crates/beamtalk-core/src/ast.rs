@@ -1096,6 +1096,18 @@ pub enum Expression {
         span: Span,
     },
 
+    /// Spread/rest element inside an array literal: `...ident`
+    ///
+    /// Only valid inside array destructuring patterns (`#[a, ...rest] := expr`).
+    /// Parsed as an expression so that the array literal parser can accept it,
+    /// then converted to a rest pattern during destructure assignment lowering.
+    Spread {
+        /// The identifier being spread into (e.g. `rest` in `...rest`).
+        name: Identifier,
+        /// Source location covering `...ident`.
+        span: Span,
+    },
+
     /// An error node for unparseable code.
     ///
     /// This allows the parser to recover from errors and continue.
@@ -1129,6 +1141,7 @@ impl Expression {
             | Self::Primitive { span, .. }
             | Self::StringInterpolation { span, .. }
             | Self::ExpectDirective { span, .. }
+            | Self::Spread { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,
             Self::Block(block) => block.span,
@@ -1468,6 +1481,8 @@ pub enum Pattern {
     Array {
         /// Elements of the pattern.
         elements: Vec<Pattern>,
+        /// Optional rest pattern binding remaining elements: `...rest`
+        rest: Option<Box<Pattern>>,
         /// Whether the source used `#(...)` list syntax (vs `#[...]` array syntax).
         list_syntax: bool,
         /// Source location.

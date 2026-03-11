@@ -264,3 +264,32 @@ print_string_integers_test() ->
     Result = beamtalk_array:print_string(A),
     ?assertMatch(<<"#[", _/binary>>, Result),
     ?assert(binary:match(Result, <<"1">>) =/= nomatch).
+
+%%% ============================================================================
+%%% Slicing
+%%% ============================================================================
+
+slice_from_middle_test() ->
+    A = make_array([10, 20, 30, 40, 50]),
+    Result = beamtalk_array:slice_from(A, 3),
+    ?assertEqual(3, beamtalk_array:size(Result)),
+    ?assertEqual(30, beamtalk_array:at(Result, 1)),
+    ?assertEqual(40, beamtalk_array:at(Result, 2)),
+    ?assertEqual(50, beamtalk_array:at(Result, 3)).
+
+slice_from_first_test() ->
+    A = make_array([1, 2, 3]),
+    Result = beamtalk_array:slice_from(A, 1),
+    ?assertEqual(3, beamtalk_array:size(Result)),
+    ?assertEqual(1, beamtalk_array:at(Result, 1)).
+
+slice_from_last_test() ->
+    A = make_array([1, 2, 3]),
+    Result = beamtalk_array:slice_from(A, 3),
+    ?assertEqual(1, beamtalk_array:size(Result)),
+    ?assertEqual(3, beamtalk_array:at(Result, 1)).
+
+slice_from_past_end_test() ->
+    A = make_array([1, 2]),
+    Result = beamtalk_array:slice_from(A, 3),
+    ?assertEqual(0, beamtalk_array:size(Result)).

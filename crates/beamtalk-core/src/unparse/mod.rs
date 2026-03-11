@@ -653,6 +653,9 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         Expression::DestructureAssignment { pattern, value, .. } => {
             docvec![unparse_pattern(pattern), " := ", unparse_expression(value)]
         }
+        Expression::Spread { name, .. } => {
+            docvec!["...", Document::String(name.name.to_string())]
+        }
     }
 }
 
@@ -1148,10 +1151,15 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
         }
         Pattern::Array {
             elements,
+            rest,
             list_syntax,
             ..
         } => {
-            let elem_docs: Vec<Document<'static>> = elements.iter().map(unparse_pattern).collect();
+            let mut elem_docs: Vec<Document<'static>> =
+                elements.iter().map(unparse_pattern).collect();
+            if let Some(rest_pat) = rest {
+                elem_docs.push(docvec!["...", unparse_pattern(rest_pat)]);
+            }
             let joined = join_docs(elem_docs, ", ");
             if *list_syntax {
                 docvec!["#(", joined, ")"]

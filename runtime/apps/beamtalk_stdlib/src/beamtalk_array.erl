@@ -27,7 +27,8 @@
     select/2,
     inject_into/3,
     includes/2,
-    print_string/1
+    print_string/1,
+    slice_from/2
 ]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -182,6 +183,20 @@ inject_into(#{'$beamtalk_class' := 'Array'}, _Initial, _Block) ->
     Error0 = beamtalk_error:new(type_error, 'Array'),
     Error1 = beamtalk_error:with_selector(Error0, 'inject:into:'),
     beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a binary function">>)).
+
+%%% ============================================================================
+%%% Slicing
+%%% ============================================================================
+
+%% @doc Return a new Array containing elements from 1-based index `From` to the end.
+%%
+%% Used by codegen for rest patterns in array destructuring:
+%% `#[a, b, ...rest] := arr` generates `slice_from(Arr, 3)` for the rest binding.
+-spec slice_from(map(), integer()) -> map().
+slice_from(#{'$beamtalk_class' := 'Array', 'data' := Arr}, From) when is_integer(From), From >= 1 ->
+    List = array:to_list(Arr),
+    Rest = lists:nthtail(From - 1, List),
+    from_list(Rest).
 
 %%% ============================================================================
 %%% String Representation

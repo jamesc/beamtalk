@@ -261,7 +261,8 @@ impl Analyser {
             | Error { .. }
             | ClassReference { .. }
             | Primitive { .. }
-            | ExpectDirective { .. } => {
+            | ExpectDirective { .. }
+            | Spread { .. } => {
                 // No captures or mutations
             }
 

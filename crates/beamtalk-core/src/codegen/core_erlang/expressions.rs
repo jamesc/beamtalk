@@ -1279,12 +1279,16 @@ impl CoreErlangGenerator {
                 // Destructuring: handle for both last and non-last positions.
                 // The match below checks is_last internally for Array; Tuple wraps remaining body.
                 match pattern {
-                    Pattern::Array { elements, .. } => {
+                    Pattern::Array { elements, rest, .. } => {
                         // Array destructuring: generate sequential `let` bindings using `at:`.
                         // Example: `#[a, b] := expr` →
                         //   let _Arr1 = <expr> in
                         //   let A = send(_Arr1, 'at:', [1]) in
                         //   let B = send(_Arr1, 'at:', [2]) in
+                        // With rest: `#[a, ...rest] := expr` →
+                        //   let _Arr1 = <expr> in
+                        //   let A = send(_Arr1, 'at:', [1]) in
+                        //   let Rest = beamtalk_array:slice_from(_Arr1, 2) in
                         let arr_var = self.fresh_temp_var("Arr");
                         let val_doc = self.expression_doc(value)?;
                         docs.push(docvec![
@@ -1349,6 +1353,24 @@ impl CoreErlangGenerator {
                                     });
                                 }
                             }
+                        }
+                        // Rest pattern: `...rest` binds remaining elements as a sub-array
+                        if let Some(rest_pat) = rest {
+                            if let Pattern::Variable(id) = rest_pat.as_ref() {
+                                let core_var = Self::to_core_erlang_var(&id.name);
+                                self.bind_var(&id.name, &core_var);
+                                let from_idx = Document::String((elements.len() + 1).to_string());
+                                docs.push(docvec![
+                                    "let ",
+                                    Document::String(core_var),
+                                    " = call 'beamtalk_array':'slice_from'(",
+                                    Document::String(arr_var.clone()),
+                                    ", ",
+                                    from_idx,
+                                    ") in "
+                                ]);
+                            }
+                            // Pattern::Wildcard — no binding needed
                         }
                         if is_last {
                             docs.push(Document::Str("'nil'"));
@@ -1578,7 +1600,7 @@ impl CoreErlangGenerator {
         let mut bound_pairs: Vec<(String, String)> = Vec::new();
 
         match pattern {
-            Pattern::Array { elements, .. } => {
+            Pattern::Array { elements, rest, .. } => {
                 for (idx, elem) in elements.iter().enumerate() {
                     let one_based = Document::String((idx + 1).to_string());
                     match elem {
@@ -1638,6 +1660,26 @@ impl CoreErlangGenerator {
                             });
                         }
                     }
+                }
+                // Rest pattern: `...rest` binds remaining elements as a sub-array
+                if let Some(rest_pat) = rest {
+                    if let Pattern::Variable(id) = rest_pat.as_ref() {
+                        let core_var = Self::to_core_erlang_var(&id.name);
+                        self.bind_var(&id.name, &core_var);
+                        let from_idx = Document::String((elements.len() + 1).to_string());
+                        docs.push(docvec![
+                            indent,
+                            Document::String(core_var.clone()),
+                            " = call 'beamtalk_array':'slice_from'(",
+                            Document::String(rhs_var.to_string()),
+                            ", ",
+                            from_idx,
+                            ")",
+                            terminator,
+                        ]);
+                        bound_pairs.push((id.name.to_string(), core_var));
+                    }
+                    // Pattern::Wildcard — no binding needed
                 }
             }
             Pattern::Tuple { elements, .. } => {
@@ -1812,9 +1854,7 @@ impl CoreErlangGenerator {
         let match_var = self.fresh_temp_var("Match");
         let value_doc = self.expression_doc(value)?;
 
-        // Guard against list-syntax patterns (e.g. `#(a, b)` from destructuring) reaching
-        // array-match codegen. The match arm parser always produces list_syntax: false, so
-        // this should never trigger, but prevents silent miscompilation if that ever changes.
+        // Guard against unsupported pattern forms reaching array-match codegen.
         for arm in arms {
             if let Pattern::Array {
                 list_syntax: true,
@@ -1825,6 +1865,19 @@ impl CoreErlangGenerator {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "List-syntax pattern `#(...)` in match: arm is not yet supported"
                         .to_string(),
+                    location: format!("{span:?}"),
+                });
+            }
+            // Rest patterns in match arms are not yet supported (BT-1251 only adds
+            // rest to destructuring assignments).
+            if let Pattern::Array {
+                rest: Some(_),
+                span,
+                ..
+            } = &arm.pattern
+            {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "Rest pattern `...` in match: arm is not yet supported".to_string(),
                     location: format!("{span:?}"),
                 });
             }
@@ -2604,14 +2657,20 @@ impl CoreErlangGenerator {
                 let core_var = Self::to_core_erlang_var(&id.name);
                 bind(&id.name, &core_var);
             }
-            Pattern::Tuple { elements, .. }
-            | Pattern::Array { elements, .. }
-            | Pattern::List { elements, .. } => {
+            Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
                 for elem in elements {
                     Self::collect_pattern_variables_inner(elem, bind);
                 }
                 if let Pattern::List { tail: Some(t), .. } = pattern {
                     Self::collect_pattern_variables_inner(t, bind);
+                }
+            }
+            Pattern::Array { elements, rest, .. } => {
+                for elem in elements {
+                    Self::collect_pattern_variables_inner(elem, bind);
+                }
+                if let Some(rest_pat) = rest {
+                    Self::collect_pattern_variables_inner(rest_pat, bind);
                 }
             }
             Pattern::Binary { segments, .. } => {

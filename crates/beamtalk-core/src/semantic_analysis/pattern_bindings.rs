@@ -124,9 +124,12 @@ fn extract_pattern_bindings_impl(
         }
 
         // Array patterns: duplicates are allowed — codegen emits equality checks
-        Pattern::Array { elements, .. } => {
+        Pattern::Array { elements, rest, .. } => {
             for element in elements {
                 extract_pattern_bindings_impl(element, bindings, seen, diagnostics, true);
+            }
+            if let Some(rest_pat) = rest {
+                extract_pattern_bindings_impl(rest_pat, bindings, seen, diagnostics, true);
             }
         }
 
@@ -421,6 +424,7 @@ mod tests {
                 Pattern::Variable(Identifier::new("x", test_span())),
             ],
             list_syntax: false,
+            rest: None,
             span: test_span(),
         };
         let (bindings, diagnostics) = extract_pattern_bindings(&pattern);

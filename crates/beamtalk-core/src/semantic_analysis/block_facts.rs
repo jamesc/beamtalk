@@ -100,7 +100,8 @@ fn analyze_expression(
         | Expression::Super(_)
         | Expression::ClassReference { .. }
         | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. } => {
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. } => {
             // No variable access (ClassReference resolves at compile time)
             // Primitive is a pragma, no variable access
         }
@@ -332,9 +333,17 @@ fn collect_pattern_bindings(
 
         // Container patterns may contain nested Binary segments; recurse to
         // ensure sequential binding semantics are applied throughout the tree.
-        Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
+        Pattern::Tuple { elements, .. } => {
             for elem in elements {
                 collect_pattern_bindings(elem, analysis, ctx);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for elem in elements {
+                collect_pattern_bindings(elem, analysis, ctx);
+            }
+            if let Some(rest_pat) = rest {
+                collect_pattern_bindings(rest_pat, analysis, ctx);
             }
         }
         Pattern::List { elements, tail, .. } => {
@@ -779,6 +788,7 @@ mod tests {
                 Pattern::Variable(make_id("second")),
             ],
             list_syntax: false,
+            rest: None,
             span: Span::new(1, 15),
         };
 

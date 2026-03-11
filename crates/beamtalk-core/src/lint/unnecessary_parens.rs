@@ -212,7 +212,8 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         | Expression::Super(..)
         | Expression::Primitive { .. }
         | Expression::ExpectDirective { .. }
-        | Expression::Error { .. } => {}
+        | Expression::Error { .. }
+        | Expression::Spread { .. } => {}
     }
 }
 
