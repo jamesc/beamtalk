@@ -2,12 +2,13 @@
 <!-- btfixture: fixtures/ch14map_destructuring.bt -->
 <!-- btfixture: fixtures/ch14tuple_destructuring.bt -->
 <!-- btfixture: fixtures/ch14binary_patterns.bt -->
+<!-- btfixture: fixtures/ch14match_patterns.bt -->
 
 ## Pattern Matching
 
 Beamtalk supports destructuring assignment for arrays, maps, and Erlang tuples.
 Unlike full Smalltalk, these are assignment patterns — not match expressions
-with multiple branches (for branch dispatch use `match:`, chapter 8).
+with multiple branches (for branch dispatch use `match:`, later in this chapter).
 
 Forms:
 
@@ -15,7 +16,7 @@ Forms:
 #[a, b] := array        — array destructuring
 #{#key => var} := dict  — map destructuring
 {a, b} := tuple         — Erlang tuple destructuring
-match: [...]             — binary/pattern switch expression
+match: [...]             — multi-branch pattern dispatch
 ```
 
 `_` (underscore) is the wildcard — it matches and discards.
@@ -162,6 +163,130 @@ TestCase subclass: Ch14TupleDestructuring
     self assert: b equals: 99
 ```
 
+## The match: expression
+
+For multi-branch dispatch on a value, use `match:`. This is more powerful
+than destructuring assignment — it tests multiple patterns and runs the
+first matching branch.
+
+### Literal and variable patterns
+
+```beamtalk
+TestCase subclass: Ch14MatchPatterns
+
+  testLiteralMatch =>
+    result := #ok match: [
+      #ok -> "success";
+      #error -> "failure";
+      _ -> "unknown"
+    ]
+    self assert: result equals: "success"
+
+  testVariableCapture =>
+    result := 42 match: [x -> x + 1]
+    self assert: result equals: 43
+```
+
+### Guard expressions (when:)
+
+Add a `when:` guard to constrain when an arm matches. The guard is a
+block that must evaluate to `true` for the arm to fire:
+
+```beamtalk
+  testGuardMatch =>
+    result := 10 match: [
+      x when: [x > 0] -> "positive";
+      _ -> "non-positive"
+    ]
+    self assert: result equals: "positive"
+
+  testMultipleGuards =>
+    result := 42 match: [
+      x when: [x > 100] -> "big";
+      x when: [x > 10] -> "medium";
+      _ -> "small"
+    ]
+    self assert: result equals: "medium"
+```
+
+### Array patterns in match:
+
+```beamtalk
+  testArrayPatternInMatch =>
+    result := #[10, 20] match: [
+      #[h, t] -> h + t;
+      _ -> 0
+    ]
+    self assert: result equals: 30
+
+  testArrayPatternWithGuard =>
+    result := #[1, 2] match: [
+      #[x, y] when: [x < y] -> "ascending";
+      _ -> "other"
+    ]
+    self assert: result equals: "ascending"
+```
+
+### Nested patterns
+
+Patterns can nest — match arrays within arrays:
+
+```beamtalk
+  testNestedArrayPattern =>
+    result := #[#[1, 2], 3] match: [
+      #[#[a, b], c] -> a + b + c;
+      _ -> 0
+    ]
+    self assert: result equals: 6
+```
+
+### Map patterns in match:
+
+```beamtalk
+  testMapPatternInMatch =>
+    d := #{#event => "click", #x => 5}
+    result := d match: [
+      #{#event => evName} -> evName;
+      _ -> "unknown"
+    ]
+    self assert: result equals: "click"
+```
+
+### Constructor patterns (Result)
+
+Match on `Result ok:` and `Result error:` arms:
+
+```beamtalk
+  testConstructorPattern =>
+    result := (Result ok: 42) match: [
+      Result ok: v -> v;
+      Result error: _ -> 0
+    ]
+    self assert: result equals: 42
+
+  testConstructorPatternWithGuard =>
+    result := (Result ok: 5) match: [
+      Result ok: v when: [v > 3] -> "big";
+      Result ok: _ -> "small";
+      Result error: _ -> "err"
+    ]
+    self assert: result equals: "big"
+```
+
+### Duplicate variables as equality constraints
+
+Repeating a variable name in a pattern constrains both positions to be
+equal:
+
+```beamtalk
+  testDuplicateVariableEquality =>
+    result := #[3, 3] match: [
+      #[x, x] -> "equal";
+      _ -> "differ"
+    ]
+    self assert: result equals: "equal"
+```
+
 ## Binary pattern matching (match:)
 
 For matching on binary data (strings as UTF-8 bytes, binary protocols),
@@ -214,33 +339,28 @@ TestCase subclass: Ch14BinaryPatterns
 
 ## Summary
 
-**Array destructuring:**
+**Destructuring assignment:**
 
 ```
-#[a, b, c] := someArray
-#[_, b] := arr           -- wildcard ignores first element
+#[a, b, c] := someArray           — array
+#{#key => var} := dict             — map
+{a, b} := erlangTuple              — tuple
 ```
 
-**Map destructuring:**
-
-```
-#{#key => var} := dict
-#{#k1 => v1, #k2 => v2} := dict
-```
-
-**Tuple destructuring (Erlang interop):**
-
-```
-{a, b} := erlangTuple
-{#ok, value} := okTuple  -- literal first slot
-```
-
-**Binary patterns:**
+**match: expression:**
 
 ```
 expr match: [
-  <<segment>> -> result;
-  _ -> fallback
+  literal -> result;               — literal match
+  x -> result;                     — variable capture
+  x when: [guard] -> result;       — guarded match
+  #[a, b] -> result;               — array pattern
+  #[#[a, b], c] -> result;         — nested pattern
+  #{#key => v} -> result;          — map pattern
+  Result ok: v -> result;          — constructor pattern
+  #[x, x] -> result;              — equality constraint
+  <<byte:8, rest/binary>> -> r;    — binary pattern
+  _ -> fallback                    — wildcard
 ]
 ```
 

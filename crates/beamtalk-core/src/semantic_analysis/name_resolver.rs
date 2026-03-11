@@ -297,7 +297,8 @@ impl NameResolver {
             | Error { .. }
             | ClassReference { .. }
             | Primitive { .. }
-            | ExpectDirective { .. } => {
+            | ExpectDirective { .. }
+            | Spread { .. } => {
                 // No name resolution needed
             }
 

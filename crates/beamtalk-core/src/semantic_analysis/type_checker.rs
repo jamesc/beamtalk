@@ -362,6 +362,7 @@ impl TypeChecker {
             Expression::Primitive { .. }
             | Expression::Error { .. }
             | Expression::ExpectDirective { .. }
+            | Expression::Spread { .. }
             | Expression::MessageSend { is_cast: true, .. } => InferredType::Dynamic,
 
             // Message sends — the core of type checking
@@ -4394,6 +4395,7 @@ Object subclass: Foo
         Pattern::Array {
             elements: names.iter().map(|n| Pattern::Variable(ident(n))).collect(),
             list_syntax: false,
+            rest: None,
             span: span(),
         }
     }
@@ -4402,6 +4404,7 @@ Object subclass: Foo
         Pattern::Array {
             elements: names.iter().map(|n| Pattern::Variable(ident(n))).collect(),
             list_syntax: true,
+            rest: None,
             span: span(),
         }
     }

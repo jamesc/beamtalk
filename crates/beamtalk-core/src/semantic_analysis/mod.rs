@@ -635,7 +635,8 @@ impl Analyser {
             | Error { .. }
             | ClassReference { .. }
             | Primitive { .. }
-            | ExpectDirective { .. } => {
+            | ExpectDirective { .. }
+            | Spread { .. } => {
                 // No analysis needed
             }
 
@@ -658,9 +659,17 @@ impl Analyser {
                     self.scope.define(&id.name, id.span, BindingKind::Local);
                 }
             }
-            Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
+            Pattern::Tuple { elements, .. } => {
                 for elem in elements {
                     self.define_pattern_variables_in_scope(elem);
+                }
+            }
+            Pattern::Array { elements, rest, .. } => {
+                for elem in elements {
+                    self.define_pattern_variables_in_scope(elem);
+                }
+                if let Some(rest_pat) = rest {
+                    self.define_pattern_variables_in_scope(rest_pat);
                 }
             }
             Pattern::List { elements, tail, .. } => {

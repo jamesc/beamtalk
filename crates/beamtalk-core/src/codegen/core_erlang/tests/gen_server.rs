@@ -2648,6 +2648,7 @@ fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
             Pattern::Variable(Identifier::new("b", span)),
         ],
         list_syntax: true,
+        rest: None,
         span,
     };
     let destructure = Expression::DestructureAssignment {

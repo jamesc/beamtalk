@@ -1,3 +1,7 @@
+<!-- btfixture: fixtures/ch15typed_point.bt -->
+<!-- btfixture: fixtures/ch15typed_counter.bt -->
+<!-- btfixture: fixtures/ch15typed_classes.bt -->
+
 ## Type Annotations
 
 Beamtalk uses **gradual typing**: annotations are optional. Unannotated code
@@ -88,6 +92,70 @@ Array     Dictionary  Collection
 User-defined class names are also valid types: `Point`, `BankAccount`, `Counter`.
 Any user class name works — these are resolved at class load time.
 
+## Typed classes — the `typed` keyword
+
+Prefix your class declaration with `typed` to declare it as a typed class.
+This enables the compiler to verify annotation syntax and store type
+metadata for tooling.
+
+### A typed value class
+
+```beamtalk
+typed Object subclass: Ch15TypedPoint
+  state: x :: Integer = 0
+  state: y :: Integer = 0
+
+  getX -> Integer => self.x
+  getY -> Integer => self.y
+
+  distanceSquared -> Integer =>
+    (self.x * self.x) + (self.y * self.y)
+```
+
+```beamtalk
+TestCase subclass: Ch15TypedClasses
+
+  testTypedValueClass =>
+    p := Ch15TypedPoint new: #{#x => 3, #y => 4}
+    self assert: p getX equals: 3
+    self assert: p getY equals: 4
+    self assert: p distanceSquared equals: 25
+```
+
+### A typed actor
+
+```beamtalk
+typed Actor subclass: Ch15TypedCounter
+  state: value :: Integer = 0
+
+  increment -> Integer =>
+    self.value := self.value + 1
+    self.value
+
+  add: amount :: Integer -> Integer =>
+    self.value := self.value + amount
+    self.value
+
+  current -> Integer => self.value
+```
+
+```beamtalk
+  testTypedActor =>
+    c := Ch15TypedCounter spawn
+    self assert: c increment equals: 1
+    self assert: (c add: 5) equals: 6
+    self assert: c current equals: 6
+```
+
+### Typed vs untyped
+
+| Aspect | `Object subclass:` | `typed Object subclass:` |
+|--------|---------------------|--------------------------|
+| Annotations | Optional, ignored | Optional, stored as metadata |
+| Runtime behavior | Identical | Identical |
+| Tooling | None | IDE hints, generated docs |
+| Future checking | Not eligible | Opt-in type checking |
+
 ## Practical examples (runnable)
 
 Since annotations are ignored at runtime in the current implementation,
@@ -97,32 +165,6 @@ We assert on behaviour, not on the annotations themselves.
 ```beamtalk
 3 + 4           // => 7
 "hello" size    // => 5
-```
-
-## A fully-annotated class — complete example
-
-Here is the fully-annotated version of the Counter actor from chapter 11.
-The annotations describe intent; runtime behaviour is unchanged.
-
-```beamtalk
-// Actor subclass: TypedCounter
-//   state: value :: Integer = 0
-//
-//   // Returns the new value after incrementing
-//   increment -> Integer =>
-//     self.value := self.value + 1
-//
-//   // Accept only integers, return Integer
-//   incrementBy: n :: Integer -> Integer =>
-//     self.value := self.value + n
-//
-//   // Always returns Integer
-//   getValue -> Integer =>
-//     self.value
-//
-//   // Reset to a specific value
-//   resetTo: newValue :: Integer -> Integer =>
-//     self.value := newValue
 ```
 
 ## Why bother with annotations?
@@ -155,6 +197,8 @@ Always put a space on both sides of `::`.
 param :: Type                  — parameter annotation
 methodName -> ReturnType =>    — return type
 state: slot :: Type = default  — slot annotation
+typed Object subclass: ...     — enable type metadata
+typed Actor subclass: ...      — typed actor
 ```
 
 - Union: `-> Integer | String`

@@ -958,6 +958,7 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Variable | `x` | Binds matched value to name |
 | Tuple | `{a, b}` | Destructure tuple (patterns supported; tuple literals planned) |
 | Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported |
+| Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
 
@@ -993,7 +994,27 @@ Pattern matching can bind variables in match arms:
 // {1, 2} match: [{a, b} -> a + b]
 ```
 
-> **Note:** Destructuring assignment (`{x, y} := expr`) and `collect:` with pattern blocks are planned but not yet implemented.
+### Rest Patterns in Destructuring (BT-1251)
+
+The `...identifier` syntax in array destructuring captures remaining elements:
+
+```beamtalk
+#[first, ...rest] := #[1, 2, 3, 4, 5]
+// first = 1, rest = #[2, 3, 4, 5]
+
+#[a, b, ...tail] := #[10, 20, 30, 40]
+// a = 10, b = 20, tail = #[30, 40]
+
+#[...all] := #[1, 2, 3]
+// all = #[1, 2, 3]
+
+#[head, ..._] := #[1, 2, 3]
+// head = 1 (rest discarded)
+```
+
+The rest element must be the last in the pattern. Rest patterns are supported in destructuring assignment only — they are not yet supported in `match:` arms.
+
+> **Note:** Tuple destructuring (`{x, y} := expr`) and `collect:` with pattern blocks are planned but not yet implemented.
 
 ---
 

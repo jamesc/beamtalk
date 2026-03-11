@@ -210,7 +210,8 @@ fn validate_expr(
         | Expression::ClassReference { .. }
         | Expression::Super(_)
         | Expression::Error { .. }
-        | Expression::ExpectDirective { .. } => {}
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. } => {}
 
         Expression::StringInterpolation { segments, .. } => {
             for segment in segments {
