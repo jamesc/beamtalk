@@ -4,6 +4,7 @@
 <!-- btfixture: fixtures/ch11actors.bt -->
 <!-- btfixture: fixtures/ch11bank_account.bt -->
 <!-- btfixture: fixtures/ch11multiple_actors.bt -->
+<!-- btfixture: fixtures/ch11cast_send.bt -->
 
 ## Actors
 
@@ -82,7 +83,83 @@ TestCase subclass: Ch11Actors
     self assert: c getValue equals: 101
 ```
 
+## Call vs cast: synchronous and asynchronous sends
+
+By default, sending a message to an actor is **synchronous** — the sender
+blocks until the actor processes the message and returns a result. This is
+a `call` (maps to `gen_server:call`).
+
+For fire-and-forget messages, append `!` to the send. This is a **cast** —
+the sender continues immediately without waiting. The cast always returns
+`nil` to the caller. (Maps to `gen_server:cast`.)
+
+```beamtalk
+TestCase subclass: Ch11CastSend
+
+  testCastSendIncrements =>
+    c := Counter spawn
+    c increment!
+    // Sync barrier: getValue forces cast to be processed first
+    self assert: c getValue equals: 1
+
+  testMultipleCastSends =>
+    c := Counter spawn
+    c increment!
+    c increment!
+    c increment!
+    self assert: c getValue equals: 3
+
+  testSyncCallReturnsValue =>
+    c := Counter spawn
+    c increment
+    self assert: c getValue equals: 1
+```
+
+**When to use cast (`!`):**
+
+- Logging, metrics, or notifications where you don't need the result
+- Breaking potential deadlock cycles (see below)
+- Improving throughput when ordering is handled by a later sync barrier
+
+**When to use call (default):**
+
+- You need the return value
+- You need to know the operation succeeded before continuing
+
 ## Actor lifecycle
+
+### The `initialize` method
+
+If your actor needs setup beyond default state values, define `initialize`.
+In the REPL, it runs automatically after spawn. In compiled code (including
+BUnit tests), call it explicitly after spawn.
+
+```beamtalk
+Actor subclass: StackActor
+  state: items = nil
+
+  initialize =>
+    self.items := #[]
+
+  push: item =>
+    self.items := self.items add: item
+
+  size => self.items size
+```
+
+Usage in the REPL:
+
+```text
+s := StackActor spawn    // initialize runs automatically
+s size                   // => 0
+s push: "a"
+s size                   // => 1
+```
+
+In BUnit tests, call `initialize` explicitly (see the Stack example in
+chapter 13).
+
+### Stopping actors
 
 ```beamtalk
   testIsAlive =>
@@ -101,6 +178,39 @@ TestCase subclass: Ch11Actors
     c stop
     self should: [c increment] raise: #actor_dead
 ```
+
+Lifecycle methods:
+
+| Method     | Effect                                    |
+|------------|-------------------------------------------|
+| `spawn`    | Create actor process with default state   |
+| `spawnWith:` | Create with initial slot values         |
+| `initialize` | Called after spawn (override for setup) |
+| `isAlive`  | Check if actor process is running         |
+| `stop`     | Graceful shutdown (idempotent)            |
+
+## Deadlock prevention
+
+A **deadlock** occurs when two actors call each other synchronously at the
+same time — each waits for the other's reply, and neither can proceed.
+Beamtalk detects this as a `#timeout` error after 5 seconds.
+
+**Prevention strategies:**
+
+1. **Use cast (`!`) for one direction** in cyclic relationships:
+
+```text
+// A calls B synchronously, B notifies A asynchronously:
+actorA doWork          // sync call to B inside
+actorB notify: event!  // cast back — no deadlock
+```
+
+2. **Self-sends are always safe** — they bypass gen_server entirely.
+   An actor calling its own methods within a method body dispatches directly,
+   not through the mailbox.
+
+3. **Avoid circular sync call patterns.** If A calls B and B calls A,
+   restructure so one direction uses cast.
 
 ## A richer example: a bank account
 
@@ -190,3 +300,4 @@ TestCase subclass: Ch11MultipleActors
 | Identity       | Equality by value     | Each spawn is a unique process|
 | BEAM model     | Erlang map            | gen_server process            |
 | Concurrent?    | Copy-safe (no state)  | Yes, message-passing safe     |
+| Message style  | Always synchronous    | Sync (default) or cast (`!`) |

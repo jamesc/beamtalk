@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/15-type-annotations.md (typed classes)
+
+TestCase subclass: Ch15TypedClasses
+
+  testTypedValueClass =>
+    p := Ch15TypedPoint new: #{#x => 3, #y => 4}
+    self assert: p getX equals: 3
+    self assert: p getY equals: 4
+    self assert: p distanceSquared equals: 25
+
+  testTypedActor =>
+    c := Ch15TypedCounter spawn
+    self assert: c increment equals: 1
+    self assert: (c add: 5) equals: 6
+    self assert: c current equals: 6

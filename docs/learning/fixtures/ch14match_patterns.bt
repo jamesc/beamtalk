@@ -1,0 +1,84 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/14-pattern-matching.md (match: expression patterns)
+
+TestCase subclass: Ch14MatchPatterns
+
+  testLiteralMatch =>
+    result := #ok match: [
+      #ok -> "success";
+      #error -> "failure";
+      _ -> "unknown"
+    ]
+    self assert: result equals: "success"
+
+  testVariableCapture =>
+    result := 42 match: [x -> x + 1]
+    self assert: result equals: 43
+
+  testGuardMatch =>
+    result := 10 match: [
+      x when: [x > 0] -> "positive";
+      _ -> "non-positive"
+    ]
+    self assert: result equals: "positive"
+
+  testMultipleGuards =>
+    result := 42 match: [
+      x when: [x > 100] -> "big";
+      x when: [x > 10] -> "medium";
+      _ -> "small"
+    ]
+    self assert: result equals: "medium"
+
+  testArrayPatternInMatch =>
+    result := #[10, 20] match: [
+      #[h, t] -> h + t;
+      _ -> 0
+    ]
+    self assert: result equals: 30
+
+  testArrayPatternWithGuard =>
+    result := #[1, 2] match: [
+      #[x, y] when: [x < y] -> "ascending";
+      _ -> "other"
+    ]
+    self assert: result equals: "ascending"
+
+  testNestedArrayPattern =>
+    result := #[#[1, 2], 3] match: [
+      #[#[a, b], c] -> a + b + c;
+      _ -> 0
+    ]
+    self assert: result equals: 6
+
+  testMapPatternInMatch =>
+    d := #{#event => "click", #x => 5}
+    result := d match: [
+      #{#event => evName} -> evName;
+      _ -> "unknown"
+    ]
+    self assert: result equals: "click"
+
+  testConstructorPattern =>
+    result := (Result ok: 42) match: [
+      Result ok: v -> v;
+      Result error: _ -> 0
+    ]
+    self assert: result equals: 42
+
+  testConstructorPatternWithGuard =>
+    result := (Result ok: 5) match: [
+      Result ok: v when: [v > 3] -> "big";
+      Result ok: _ -> "small";
+      Result error: _ -> "err"
+    ]
+    self assert: result equals: "big"
+
+  testDuplicateVariableEquality =>
+    result := #[3, 3] match: [
+      #[x, x] -> "equal";
+      _ -> "differ"
+    ]
+    self assert: result equals: "equal"

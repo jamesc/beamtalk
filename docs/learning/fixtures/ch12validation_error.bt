@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Custom error class fixture for docs/learning/12-error-handling.md
+
+Error subclass: ValidationError

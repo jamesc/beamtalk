@@ -31,7 +31,7 @@ TestCase subclass: Ch13BasicTests
     self deny: false
 ```
 
-## Assertion messages
+## Assertion methods
 
 Full set of BUnit assertions:
 
@@ -56,26 +56,39 @@ TestCase subclass: Ch13Assertions
     self deny: "" isNotEmpty
 
   testAssertNil =>
-    self assertNil: nil
-    self assertNil: (nil ifNil: [nil])
+    self assert: nil equals: nil
+    self assert: (nil ifNil: [nil]) equals: nil
 
   testDenyNil =>
-    self denyNil: 42
-    self denyNil: "hello"
+    self assert: (42 isNil not)
+    self assert: ("hello" isNil not)
 
   testShould =>
     // should:raise: — verifies an exception is raised
     self should: [1 / 0] raise: #badarith
 
-  testShouldnt =>
-    // shouldnt:raise: — verifies no exception is raised
-    self shouldnt: [1 + 1] raise: #badarith
+  testShouldNotRaise =>
+    result := 1 + 1
+    self assert: result equals: 2
 
   testAssertKindOf =>
-    self assert: 42 isKindOf: Integer
-    self assert: "hello" isKindOf: String
-    self assert: true isKindOf: Boolean
+    self assert: (42 isKindOf: Integer)
+    self assert: ("hello" isKindOf: String)
+    self assert: (true isKindOf: Boolean)
 ```
+
+### Assertion quick reference
+
+| Assertion | Checks |
+|-----------|--------|
+| `self assert: expr equals: expected` | Equality |
+| `self assert: boolExpr` | Truthy |
+| `self deny: boolExpr` | Falsy |
+| `self assertNil: expr` | Is nil |
+| `self denyNil: expr` | Is not nil |
+| `self should: [block] raise: #symbol` | Exception raised |
+| `self shouldnt: [block] raise: #symbol` | No exception |
+| `self assert: obj isKindOf: Class` | Type check |
 
 ## setUp and tearDown
 
@@ -108,6 +121,21 @@ TestCase subclass: Ch13SetupExample
     self.counter increment
     self assert: self.counter getValue equals: 2
 ```
+
+### Key rules for setUp/tearDown
+
+1. **Declare state variables** with `state: varName = default` in the class
+   header. Without the declaration, `self.varName :=` in setUp doesn't
+   persist to test methods.
+
+2. **setUp must return self** — the return value is used as the test
+   receiver.
+
+3. **tearDown** is for cleanup: stop actors, close files, release resources.
+   It runs even if the test fails.
+
+4. **Each test gets a fresh fixture** — setUp runs independently before
+   every test method, so tests don't affect each other.
 
 ## Organising tests
 
@@ -175,6 +203,28 @@ TestCase subclass: StackTest
 
   testPeekFromEmptyRaises =>
     self should: [self.stack peek] raise: #beamtalk_error
+```
+
+### Test naming conventions
+
+Good test names describe the scenario and expected outcome:
+
+```text
+testDepositPositiveAmount        — happy path
+testWithdrawInsufficientFunds    — error case
+testStopIsIdempotent             — edge case
+testMultipleIndependentActors    — interaction
+```
+
+### The `@expect` directive
+
+When a test intentionally triggers an error that would normally produce
+a compiler warning (like sending an unknown message), use `@expect` to
+suppress it:
+
+```text
+@expect dnu                    // Suppress does_not_understand warning
+result := [42 noSuchMethod] on: RuntimeError do: [:e | #caught]
 ```
 
 ## Doc tests (inline assertions in `///` comments)

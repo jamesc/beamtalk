@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Typed actor fixture for docs/learning/15-type-annotations.md
+
+typed Actor subclass: Ch15TypedCounter
+  state: value :: Integer = 0
+
+  increment -> Integer =>
+    self.value := self.value + 1
+    self.value
+
+  add: amount :: Integer -> Integer =>
+    self.value := self.value + amount
+    self.value
+
+  current -> Integer => self.value
