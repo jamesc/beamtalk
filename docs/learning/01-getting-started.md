@@ -42,14 +42,14 @@ Division always returns a float:
 ## Printing output
 
 `Transcript show:` prints a string to the console.
-`Transcript showLine:` prints and adds a newline.
+`Transcript show: "foo"; cr` prints and adds a newline.
 
 In the REPL you'll mostly see return values directly, but in scripts
 you'll use Transcript:
 
 ```text
-Transcript showLine: "Hello, World!"
-Transcript showLine: "Hello, " ++ "Beamtalk!"
+Transcript show: "Hello, World!"; cr
+Transcript show: "Hello, " ++ "Beamtalk!"; cr
 ```
 
 ## Everything is an object
