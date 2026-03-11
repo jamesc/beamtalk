@@ -324,6 +324,7 @@ fn compile_stdlib_file(
 /// Metadata for a single stdlib class, used to generate the load-order file
 /// and the generated builtins module.
 #[allow(clippy::struct_field_names)] // domain names like class_name match the domain model
+#[allow(clippy::struct_excessive_bools)] // mirrors ClassInfo fields from class_hierarchy
 struct ClassMeta {
     /// Erlang module name (e.g., `bt@stdlib@integer`).
     module_name: String,
@@ -337,6 +338,8 @@ struct ClassMeta {
     is_abstract: bool,
     /// Whether the class has the explicit `typed` modifier.
     is_typed: bool,
+    /// Whether this class delegates to a native Erlang backing module (ADR 0056).
+    is_native: bool,
     /// Instance state (field) names declared in the class.
     state: Vec<String>,
     /// Declared type annotations for state fields (field name → type name).
@@ -629,6 +632,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         is_sealed: class.is_sealed,
         is_abstract: class.is_abstract,
         is_typed: class.is_typed,
+        is_native: class.backing_module.is_some(),
         state,
         state_types,
         methods,
@@ -840,12 +844,13 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           is_abstract: {abstract_},\n\
          \x20           is_typed: {typed},\n\
          \x20           is_value: {is_value},\n\
-         \x20           is_native: false,\n",
+         \x20           is_native: {is_native},\n",
         name = meta.class_name,
         sealed = meta.is_sealed,
         abstract_ = meta.is_abstract,
         typed = meta.is_typed,
         is_value = meta.superclass_name == "Value",
+        is_native = meta.is_native,
     );
 
     // State
@@ -1108,6 +1113,7 @@ mod tests {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_native: false,
             state: vec!["count".to_string()],
             state_types: vec![],
             methods: vec![
@@ -1179,6 +1185,7 @@ mod tests {
             is_sealed: false,
             is_abstract: true,
             is_typed: false,
+            is_native: false,
             state: vec![],
             state_types: vec![],
             methods: vec![],
@@ -1210,6 +1217,7 @@ mod tests {
                 is_sealed: false,
                 is_abstract: false,
                 is_typed: false,
+                is_native: false,
                 state: vec![],
                 state_types: vec![],
                 methods: vec![],
@@ -1223,6 +1231,7 @@ mod tests {
                 is_sealed: true,
                 is_abstract: false,
                 is_typed: false,
+                is_native: false,
                 state: vec![],
                 state_types: vec![],
                 methods: vec![],

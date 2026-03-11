@@ -14,7 +14,7 @@
 /// Transcript cr
 /// Transcript recent
 /// ```
-Actor subclass: TranscriptStream
+Actor subclass: TranscriptStream native: beamtalk_transcript_stream
   classState: current = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
@@ -33,8 +33,7 @@ Actor subclass: TranscriptStream
   /// Transcript show: "hello"
   /// Transcript show: 42
   /// ```
-  show: value :: Object -> Nil =>
-    (Erlang beamtalk_transcript_stream) show: self value: value
+  show: value :: Object -> Nil => self delegate
 
   /// Write a newline to the transcript.
   ///
@@ -42,7 +41,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript cr
   /// ```
-  cr -> Nil => (Erlang beamtalk_transcript_stream) cr: self
+  cr -> Nil => self delegate
 
   /// Subscribe the calling process to receive transcript output.
   ///
@@ -50,7 +49,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript subscribe
   /// ```
-  subscribe -> Nil => (Erlang beamtalk_transcript_stream) subscribe: self
+  subscribe -> Nil => self delegate
 
   /// Unsubscribe the calling process from transcript output.
   ///
@@ -58,7 +57,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript unsubscribe
   /// ```
-  unsubscribe -> Nil => (Erlang beamtalk_transcript_stream) unsubscribe: self
+  unsubscribe -> Nil => self delegate
 
   /// Return recent transcript entries as a list.
   ///
@@ -66,7 +65,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript recent
   /// ```
-  recent -> List => (Erlang beamtalk_transcript_stream) recent: self
+  recent -> List => self delegate
 
   /// Clear the transcript buffer.
   ///
@@ -74,4 +73,4 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript clear
   /// ```
-  clear -> Nil => (Erlang beamtalk_transcript_stream) clear: self
+  clear -> Nil => self delegate

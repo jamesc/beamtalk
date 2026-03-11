@@ -30,28 +30,28 @@ flush_transcript() ->
     end.
 
 %%% ============================================================================
-%%% Tests
+%%% Tests — handle_call dispatch (native: selector format)
 %%% ============================================================================
 
 %% --- show: writes to buffer ---
 
 show_writes_to_buffer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
-    gen_server:cast(Pid, {'show:', <<"Hello">>}),
+    _ = gen_server:call(Pid, {'show:', [<<"Hello">>]}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"Hello">>], Result),
     gen_server:stop(Pid).
 
 show_converts_integer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
-    gen_server:cast(Pid, {'show:', 42}),
+    _ = gen_server:call(Pid, {'show:', [42]}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"42">>], Result),
     gen_server:stop(Pid).
 
 show_converts_atom_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
-    gen_server:cast(Pid, {'show:', hello}),
+    _ = gen_server:call(Pid, {'show:', [hello]}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"hello">>], Result),
     gen_server:stop(Pid).
@@ -60,7 +60,7 @@ show_converts_atom_test() ->
 
 cr_writes_newline_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
-    gen_server:cast(Pid, cr),
+    _ = gen_server:call(Pid, {cr, []}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"\n">>], Result),
     gen_server:stop(Pid).
@@ -69,8 +69,8 @@ cr_writes_newline_test() ->
 
 show_then_cr_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
-    gen_server:cast(Pid, {'show:', <<"Hello">>}),
-    gen_server:cast(Pid, cr),
+    _ = gen_server:call(Pid, {'show:', [<<"Hello">>]}),
+    _ = gen_server:call(Pid, {cr, []}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"Hello">>, <<"\n">>], Result),
     gen_server:stop(Pid).
@@ -80,8 +80,8 @@ show_then_cr_test() ->
 subscribe_unsubscribe_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {subscribe, self()}),
-    %% Should receive output after subscribing
-    gen_server:cast(Pid, {'show:', <<"sub">>}),
+    %% Use call to show: so we know it's processed after subscribe
+    _ = gen_server:call(Pid, {'show:', [<<"sub">>]}),
     receive
         {transcript_output, <<"sub">>} -> ok
     after 500 ->
@@ -89,10 +89,10 @@ subscribe_unsubscribe_test() ->
     end,
     %% Unsubscribe
     gen_server:cast(Pid, {unsubscribe, self()}),
-    %% Should NOT receive output after unsubscribing
-    gen_server:cast(Pid, {'show:', <<"after">>}),
-    %% Sync barrier: ensures both unsubscribe and show: are processed
+    %% Sync barrier: ensure unsubscribe is processed
     _ = gen_server:call(Pid, recent),
+    %% Should NOT receive output after unsubscribing
+    _ = gen_server:call(Pid, {'show:', [<<"after">>]}),
     receive
         {transcript_output, <<"after">>} -> ?assert(false)
     after 0 ->
@@ -105,8 +105,8 @@ subscribe_unsubscribe_test() ->
 subscriber_receives_output_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {subscribe, self()}),
-    gen_server:cast(Pid, {'show:', <<"msg1">>}),
-    gen_server:cast(Pid, {'show:', <<"msg2">>}),
+    _ = gen_server:call(Pid, {'show:', [<<"msg1">>]}),
+    _ = gen_server:call(Pid, {'show:', [<<"msg2">>]}),
     receive
         {transcript_output, <<"msg1">>} -> ok
     after 500 ->
@@ -135,7 +135,7 @@ dead_subscriber_auto_removed_test() ->
     exit(Sub, kill),
     %% Wait for DOWN message to be delivered and processed
     timer:sleep(50),
-    gen_server:cast(Pid, {'show:', <<"after_death">>}),
+    _ = gen_server:call(Pid, {'show:', [<<"after_death">>]}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"after_death">>], Result),
     gen_server:stop(Pid).
@@ -144,9 +144,9 @@ dead_subscriber_auto_removed_test() ->
 
 recent_returns_buffer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
-    gen_server:cast(Pid, {'show:', <<"a">>}),
-    gen_server:cast(Pid, {'show:', <<"b">>}),
-    gen_server:cast(Pid, {'show:', <<"c">>}),
+    _ = gen_server:call(Pid, {'show:', [<<"a">>]}),
+    _ = gen_server:call(Pid, {'show:', [<<"b">>]}),
+    _ = gen_server:call(Pid, {'show:', [<<"c">>]}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"a">>, <<"b">>, <<"c">>], Result),
     gen_server:stop(Pid).
@@ -161,7 +161,7 @@ recent_empty_buffer_test() ->
 
 clear_empties_buffer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
-    gen_server:cast(Pid, {'show:', <<"data">>}),
+    _ = gen_server:call(Pid, {'show:', [<<"data">>]}),
     SelfRef = gen_server:call(Pid, clear),
     ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     Result = gen_server:call(Pid, recent),
@@ -172,12 +172,12 @@ clear_empties_buffer_test() ->
 
 buffer_overflow_drops_oldest_test() ->
     MaxBuffer = 3,
-    {ok, Pid} = beamtalk_transcript_stream:start_link(MaxBuffer),
-    gen_server:cast(Pid, {'show:', <<"1">>}),
-    gen_server:cast(Pid, {'show:', <<"2">>}),
-    gen_server:cast(Pid, {'show:', <<"3">>}),
-    gen_server:cast(Pid, {'show:', <<"4">>}),
-    gen_server:cast(Pid, {'show:', <<"5">>}),
+    {ok, Pid} = beamtalk_transcript_stream:start_link(#{max_buffer => MaxBuffer}),
+    _ = gen_server:call(Pid, {'show:', [<<"1">>]}),
+    _ = gen_server:call(Pid, {'show:', [<<"2">>]}),
+    _ = gen_server:call(Pid, {'show:', [<<"3">>]}),
+    _ = gen_server:call(Pid, {'show:', [<<"4">>]}),
+    _ = gen_server:call(Pid, {'show:', [<<"5">>]}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"3">>, <<"4">>, <<"5">>], Result),
     gen_server:stop(Pid).
@@ -188,14 +188,14 @@ duplicate_subscribe_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {subscribe, self()}),
     gen_server:cast(Pid, {subscribe, self()}),
-    gen_server:cast(Pid, {'show:', <<"once">>}),
+    %% Sync barrier + show via call
+    _ = gen_server:call(Pid, {'show:', [<<"once">>]}),
     receive
         {transcript_output, <<"once">>} -> ok
     after 500 ->
         ?assert(false)
     end,
-    %% Sync barrier, then check no duplicate message
-    _ = gen_server:call(Pid, recent),
+    %% Check no duplicate message
     receive
         {transcript_output, <<"once">>} -> ?assert(false)
     after 0 ->
@@ -204,49 +204,37 @@ duplicate_subscribe_test() ->
     flush_transcript(),
     gen_server:stop(Pid).
 
-%% --- FFI shims ---
-%%
-%% The TranscriptStream FFI shims (show/2, cr/1, recent/1, clear/1, subscribe/1,
-%% unsubscribe/1) delegate to dispatch/3 which uses the process dictionary.
-%% They are designed to be called from INSIDE the actor's handle_call context
-%% where the process dictionary belongs to the gen_server. The shims are
-%% exercised end-to-end by the BUnit trace_cr_test.bt tests.
-%%
-%% Here we just verify that dispatch/3 integration works correctly, which is
-%% the underlying mechanism.
+%% --- Exports verification ---
 
-ffi_shim_dispatch_show_test() ->
-    {ok, Pid} = beamtalk_transcript_stream:spawn(),
-    Self = #beamtalk_object{
-        class = 'TranscriptStream', class_mod = 'bt@stdlib@transcript_stream', pid = Pid
-    },
-    gen_server:call(Pid, {'show:', [<<"dispatch_show">>]}),
-    Recent = gen_server:call(Pid, recent),
-    ?assertEqual([<<"dispatch_show">>], Recent),
-    gen_server:stop(Pid).
-
-ffi_shim_exports_test() ->
-    %% Verify the FFI shim functions are exported
+exports_test() ->
+    %% Verify expected public API functions are exported
     Exports = beamtalk_transcript_stream:module_info(exports),
-    ?assert(lists:member({show, 2}, Exports)),
-    ?assert(lists:member({cr, 1}, Exports)),
-    ?assert(lists:member({recent, 1}, Exports)),
-    ?assert(lists:member({clear, 1}, Exports)),
     ?assert(lists:member({subscribe, 1}, Exports)),
-    ?assert(lists:member({unsubscribe, 1}, Exports)).
+    ?assert(lists:member({unsubscribe, 1}, Exports)),
+    ?assert(lists:member({start_link, 0}, Exports)),
+    ?assert(lists:member({start_link, 1}, Exports)),
+    ?assert(lists:member({spawn, 0}, Exports)),
+    ?assert(lists:member({spawn, 1}, Exports)),
+    %% FFI shims removed after native: migration (BT-1212)
+    ?assertNot(lists:member({show, 2}, Exports)),
+    ?assertNot(lists:member({cr, 1}, Exports)),
+    ?assertNot(lists:member({recent, 1}, Exports)),
+    ?assertNot(lists:member({clear, 1}, Exports)),
+    ?assertNot(lists:member({dispatch, 3}, Exports)),
+    ?assertNot(lists:member({class_info, 0}, Exports)).
 
 %% --- spawn (unlinked) ---
 
 spawn_test() ->
     {ok, Pid} = beamtalk_transcript_stream:spawn(),
     ?assert(is_pid(Pid)),
-    gen_server:cast(Pid, {'show:', <<"spawn_test">>}),
+    _ = gen_server:call(Pid, {'show:', [<<"spawn_test">>]}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"spawn_test">>], Result),
     gen_server:stop(Pid).
 
 spawn_with_max_buffer_test() ->
-    {ok, Pid} = beamtalk_transcript_stream:spawn(5),
+    {ok, Pid} = beamtalk_transcript_stream:spawn(#{max_buffer => 5}),
     ?assert(is_pid(Pid)),
     gen_server:stop(Pid).
 
@@ -255,13 +243,13 @@ spawn_with_max_buffer_test() ->
 invalid_max_buffer_zero_test() ->
     ?assertEqual(
         {error, {invalid_max_buffer, 0}},
-        beamtalk_transcript_stream:spawn(0)
+        beamtalk_transcript_stream:spawn(#{max_buffer => 0})
     ).
 
 invalid_max_buffer_negative_test() ->
     ?assertEqual(
         {error, {invalid_max_buffer, -1}},
-        beamtalk_transcript_stream:spawn(-1)
+        beamtalk_transcript_stream:spawn(#{max_buffer => -1})
     ).
 
 %% --- non-pid subscribe is safe (no crash) ---
@@ -269,23 +257,23 @@ invalid_max_buffer_negative_test() ->
 subscribe_non_pid_safe_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {subscribe, not_a_pid}),
-    gen_server:cast(Pid, {'show:', <<"ok">>}),
+    _ = gen_server:call(Pid, {'show:', [<<"ok">>]}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"ok">>], Result),
     gen_server:stop(Pid).
 
-%% --- tuple-format calls (dispatch compatibility) ---
+%% --- tuple-format calls (native: selector dispatch) ---
 
 tuple_format_recent_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
-    gen_server:cast(Pid, {'show:', <<"data">>}),
+    _ = gen_server:call(Pid, {'show:', [<<"data">>]}),
     Result = gen_server:call(Pid, {recent, []}),
     ?assertEqual([<<"data">>], Result),
     gen_server:stop(Pid).
 
 tuple_format_clear_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
-    gen_server:cast(Pid, {'show:', <<"data">>}),
+    _ = gen_server:call(Pid, {'show:', [<<"data">>]}),
     SelfRef = gen_server:call(Pid, {clear, []}),
     ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     Result = gen_server:call(Pid, recent),
@@ -301,7 +289,7 @@ tuple_format_clear_test() ->
 show_invalid_charlist_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     %% A list with values > 0x10FFFF is not a valid Unicode charlist
-    gen_server:cast(Pid, {'show:', [16#110000, 16#FFFFFF]}),
+    _ = gen_server:call(Pid, {'show:', [[16#110000, 16#FFFFFF]]}),
     [Result] = gen_server:call(Pid, recent),
     %% Should fall back to io_lib:format ~p representation, not crash
     ?assert(is_binary(Result)),
@@ -310,7 +298,7 @@ show_invalid_charlist_test() ->
 show_incomplete_charlist_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     %% A list ending with a high surrogate (incomplete sequence)
-    gen_server:cast(Pid, {'show:', [65, 66, 16#D800]}),
+    _ = gen_server:call(Pid, {'show:', [[65, 66, 16#D800]]}),
     [Result] = gen_server:call(Pid, recent),
     ?assert(is_binary(Result)),
     gen_server:stop(Pid).
@@ -318,7 +306,7 @@ show_incomplete_charlist_test() ->
 show_mixed_list_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     %% A list with mixed types (not a charlist at all)
-    gen_server:cast(Pid, {'show:', [1, two, <<"three">>]}),
+    _ = gen_server:call(Pid, {'show:', [[1, two, <<"three">>]]}),
     [Result] = gen_server:call(Pid, recent),
     ?assert(is_binary(Result)),
     gen_server:stop(Pid).
@@ -328,7 +316,7 @@ show_mixed_list_test() ->
 show_non_utf8_binary_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     %% 0xFF 0xFE is not valid UTF-8
-    gen_server:cast(Pid, {'show:', <<255, 254, 0, 1>>}),
+    _ = gen_server:call(Pid, {'show:', [<<255, 254, 0, 1>>]}),
     [Result] = gen_server:call(Pid, recent),
     ?assert(is_binary(Result)),
     %% Must not be the raw invalid binary
@@ -338,7 +326,7 @@ show_non_utf8_binary_test() ->
 show_truncated_utf8_binary_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     %% Start of a 3-byte UTF-8 sequence but truncated
-    gen_server:cast(Pid, {'show:', <<16#E0, 16#A0>>}),
+    _ = gen_server:call(Pid, {'show:', [<<16#E0, 16#A0>>]}),
     [Result] = gen_server:call(Pid, recent),
     ?assert(is_binary(Result)),
     gen_server:stop(Pid).
@@ -346,7 +334,7 @@ show_truncated_utf8_binary_test() ->
 show_valid_utf8_binary_unchanged_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     ValidUtf8 = <<"Hello, 世界!"/utf8>>,
-    gen_server:cast(Pid, {'show:', ValidUtf8}),
+    _ = gen_server:call(Pid, {'show:', [ValidUtf8]}),
     [Result] = gen_server:call(Pid, recent),
     ?assertEqual(ValidUtf8, Result),
     gen_server:stop(Pid).
@@ -375,12 +363,12 @@ ensure_utf8_empty_binary_test() ->
     ?assertEqual(<<>>, beamtalk_transcript_stream:ensure_utf8(<<>>)).
 
 %%% ============================================================================
-%%% Sync handle_call tests (BT-1163: REPL dispatch path)
+%%% Sync handle_call tests (native: dispatch path)
 %%% ============================================================================
 
-%% The REPL sends messages via gen_server:call(Pid, {Selector, Args}).
-%% These tests verify the new handle_call clauses for show:, cr, subscribe,
-%% and unsubscribe that were added to support the sync-by-default dispatch.
+%% The native facade sends messages via gen_server:call(Pid, {Selector, Args}).
+%% These tests verify the handle_call clauses for show:, cr, subscribe,
+%% and unsubscribe.
 
 sync_show_writes_to_buffer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
@@ -411,7 +399,7 @@ sync_subscribe_unsubscribe_test() ->
     SelfRef = gen_server:call(Pid, {subscribe, []}),
     ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     %% Should receive output after subscribing
-    gen_server:cast(Pid, {'show:', <<"sync_sub">>}),
+    _ = gen_server:call(Pid, {'show:', [<<"sync_sub">>]}),
     receive
         {transcript_output, <<"sync_sub">>} -> ok
     after 500 ->
@@ -420,8 +408,7 @@ sync_subscribe_unsubscribe_test() ->
     %% Unsubscribe via sync call
     _ = gen_server:call(Pid, {unsubscribe, []}),
     %% Should NOT receive output after unsubscribing
-    gen_server:cast(Pid, {'show:', <<"after_unsub">>}),
-    _ = gen_server:call(Pid, recent),
+    _ = gen_server:call(Pid, {'show:', [<<"after_unsub">>]}),
     receive
         {transcript_output, <<"after_unsub">>} -> ?assert(false)
     after 0 ->

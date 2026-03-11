@@ -1,24 +1,26 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc TranscriptStream actor — shared workspace log with pub/sub dispatch.
+%%% @doc TranscriptStream actor — shared workspace log with pub/sub semantics.
 %%%
 %%% **DDD Context:** REPL Session Context
 %%%
-%%% TranscriptStream is the actor backing the `Transcript` binding in a
-%%% workspace.  It maintains a ring buffer of recent output and pushes text
+%%% Native backing gen_server for the TranscriptStream class (ADR 0056).
+%%% The compiled facade module (`bt@stdlib@transcript_stream`) handles
+%%% class/instance dispatch; this module only exports `start_link/N`,
+%%% `spawn/N`, and gen_server callbacks.
+%%%
+%%% TranscriptStream maintains a ring buffer of recent output and pushes text
 %%% to subscribers via `{transcript_output, Text}' messages.
 %%%
-%%% ## Instance Methods
+%%% ## Selectors
 %%%
-%%% | Selector      | Dispatch | Returns | Description                          |
-%%% |---------------|----------|---------|--------------------------------------|
-%%% | `show:'       | cast     | self    | Buffer text + push to subscribers    |
-%%% | `cr'          | cast     | self    | Buffer newline + push to subscribers |
-%%% | `subscribe'   | cast     | self    | Add caller to subscriber list        |
-%%% | `unsubscribe' | cast     | self    | Remove caller from subscriber list   |
-%%% | `recent'      | call     | list    | Return buffer contents as list       |
-%%% | `clear'       | call     | self    | Empty the buffer                     |
+%%% * `{'show:', [Value]}` — buffer text + push to subscribers, returns self
+%%% * `{cr, []}` — buffer newline + push to subscribers, returns self
+%%% * `{subscribe, []}` — add caller to subscriber list, returns self
+%%% * `{unsubscribe, []}` — remove caller from subscriber list, returns self
+%%% * `{recent, []}` — return buffer contents as list
+%%% * `{clear, []}` — empty the buffer, returns self
 %%%
 %%% ## Design
 %%%
@@ -26,6 +28,10 @@
 %%% - Subscribers: `#{pid() => reference()}' (pid → monitor ref)
 %%% - Dead subscribers auto-removed via `handle_info({'DOWN', ...})'
 %%% - When no subscribers: output goes to buffer only (no stdout)
+%%%
+%%% ## References
+%%%
+%%% * ADR 0056 "Native Erlang-Backed Actors" — native: + self delegate
 
 -module(beamtalk_transcript_stream).
 -behaviour(gen_server).
@@ -35,14 +41,8 @@
 
 %% API
 -export([start_link/0, start_link/1, start_link/2, spawn/0, spawn/1]).
--export([class_info/0]).
 -export([ensure_utf8/1]).
 -export([subscribe/1, unsubscribe/1]).
-%% FFI shims for (Erlang beamtalk_transcript_stream) dispatch
--export([show/2, cr/1, recent/1, clear/1]).
-%% Primitive dispatch — called directly by bt@stdlib@transcript_stream.
-%% Runs inside the compiled actor's gen_server process; state is in the process dictionary.
--export([dispatch/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -68,13 +68,17 @@
 %%% ============================================================================
 
 %% @doc Start a linked TranscriptStream with default buffer size (1000).
+%% Called by the native facade's `spawn/0` (no args → empty map).
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    start_link(1000).
+    start_link(#{}).
 
-%% @doc Start a linked TranscriptStream with the given max buffer size.
--spec start_link(max_buffer()) -> {ok, pid()} | {error, term()}.
-start_link(MaxBuffer) ->
+%% @doc Start a linked TranscriptStream with config map.
+%% Called by the native facade's `spawn/1` via `spawnWith:`.
+%% Optional key: `max_buffer` (pos_integer(), default 1000).
+-spec start_link(map()) -> {ok, pid()} | {error, term()}.
+start_link(Config) when is_map(Config) ->
+    MaxBuffer = maps:get(max_buffer, Config, 1000),
     gen_server:start_link(?MODULE, [MaxBuffer], []).
 
 %% @doc Start a linked, named TranscriptStream for workspace use.
@@ -86,61 +90,13 @@ start_link(ServerName, MaxBuffer) ->
 %% @doc Spawn an unlinked TranscriptStream with default buffer size.
 -spec spawn() -> {ok, pid()} | {error, term()}.
 spawn() ->
-    ?MODULE:spawn(1000).
+    ?MODULE:spawn(#{}).
 
-%% @doc Spawn an unlinked TranscriptStream with the given max buffer size.
--spec spawn(max_buffer()) -> {ok, pid()} | {error, term()}.
-spawn(MaxBuffer) ->
+%% @doc Spawn an unlinked TranscriptStream with config map.
+-spec spawn(map()) -> {ok, pid()} | {error, term()}.
+spawn(Config) when is_map(Config) ->
+    MaxBuffer = maps:get(max_buffer, Config, 1000),
     gen_server:start(?MODULE, [MaxBuffer], []).
-
-%% @doc Return class registration metadata for TranscriptStream.
-%%
-%% Used by beamtalk_stdlib to register this singleton's class.
-%% Single source of truth for class name, superclass, and method table.
--spec class_info() -> map().
-class_info() ->
-    #{
-        name => 'TranscriptStream',
-        module => ?MODULE,
-        superclass => 'Actor',
-        instance_methods => #{
-            'show:' => #{arity => 1},
-            cr => #{arity => 0},
-            subscribe => #{arity => 0},
-            unsubscribe => #{arity => 0},
-            recent => #{arity => 0},
-            clear => #{arity => 0}
-        },
-        class_methods => #{},
-        fields => []
-    }.
-
-%%% ============================================================================
-%%% Module-level subscribe/unsubscribe API
-%%% ============================================================================
-
-%%% ============================================================================
-%%% FFI Shims — (Erlang beamtalk_transcript_stream) dispatch
-%%% ============================================================================
-%%
-%% selector_to_function/1 extracts the first keyword segment as the function name.
-%%
-%% TranscriptStream method bodies are called from INSIDE the gen_server's handle_call
-%% (via actor method dispatch). Using gen_server:call/sync_send from within handle_call
-%% would deadlock — instead delegate to dispatch/3 which uses the process dictionary
-%% of the gen_server process, the same model as the legacy @primitive path.
-
-%% `show:value:` → strips to `show`, arity 2
-show(Self, Value) -> dispatch('show:', [Value], Self).
-
-%% `cr:` → strips to `cr`, arity 1
-cr(Self) -> dispatch(cr, [], Self).
-
-%% `recent:` → strips to `recent`, arity 1
-recent(Self) -> dispatch(recent, [], Self).
-
-%% `clear:` → strips to `clear`, arity 1
-clear(Self) -> dispatch(clear, [], Self).
 
 %%% ============================================================================
 %%% Module-level subscribe/unsubscribe API
@@ -148,169 +104,14 @@ clear(Self) -> dispatch(clear, [], Self).
 
 %% @doc Subscribe a process to Transcript push messages.
 %% The subscriber will receive `{transcript_output, Text}' messages.
-%% When called with a #beamtalk_object{} (FFI shim path), subscribes the caller
-%% via actor sync_send. When called with a pid/atom (external API path), casts.
--spec subscribe(#beamtalk_object{} | pid() | atom()) -> ok.
-subscribe(#beamtalk_object{} = Self) ->
-    _ = dispatch(subscribe, [], Self),
-    ok;
+-spec subscribe(pid() | atom()) -> ok.
 subscribe(TranscriptRef) ->
     gen_server:cast(TranscriptRef, {subscribe, self()}).
 
 %% @doc Unsubscribe a process from Transcript push messages.
--spec unsubscribe(#beamtalk_object{} | pid() | atom()) -> ok.
-unsubscribe(#beamtalk_object{} = Self) ->
-    _ = dispatch(unsubscribe, [], Self),
-    ok;
+-spec unsubscribe(pid() | atom()) -> ok.
 unsubscribe(TranscriptRef) ->
     gen_server:cast(TranscriptRef, {unsubscribe, self()}).
-
-%%% ============================================================================
-%%% Primitive dispatch — called from within the compiled actor's gen_server
-%%% ============================================================================
-
-%% Process dictionary keys used by dispatch/3 (runs in compiled actor's process)
--define(TS_BUFFER, '$ts_buffer').
--define(TS_BUFFER_SIZE, '$ts_buffer_size').
--define(TS_MAX_BUFFER, '$ts_max_buffer').
--define(TS_SUBSCRIBERS, '$ts_subscribers').
--define(TS_DEFAULT_MAX_BUFFER, 1000).
-
-%% @doc Dispatch a primitive method call for TranscriptStream.
-%%
-%% Called from within the compiled `bt@stdlib@transcript_stream` gen_server process
-%% via `beamtalk_transcript_stream_primitives:dispatch/3`. All state is managed in
-%% the process dictionary to avoid gen_server re-entry. The `Self` argument is the
-%% `#beamtalk_object{}` tuple wrapping the gen_server pid.
-%%
-%% The compiled handle_cast stores FuturePid in `'$bt_future_pid'` before
-%% dispatching, so subscribe/unsubscribe can identify the caller via
-%% `prim_caller_from_future/1`.
--spec dispatch(atom(), list(), term()) -> term().
-dispatch('show:', [Value], Self) ->
-    prim_ensure_initialized(),
-    Text = beamtalk_primitive:display_string(Value),
-    prim_buffer_text(Text),
-    prim_push_to_subscribers(Text),
-    Self;
-dispatch(cr, [], Self) ->
-    prim_ensure_initialized(),
-    prim_buffer_text(<<"\n">>),
-    prim_push_to_subscribers(<<"\n">>),
-    Self;
-dispatch(subscribe, [], Self) ->
-    prim_ensure_initialized(),
-    FuturePid = erlang:get('$bt_future_pid'),
-    CallerPid = prim_caller_from_future(FuturePid),
-    prim_add_subscriber(CallerPid),
-    Self;
-dispatch(unsubscribe, [], Self) ->
-    prim_ensure_initialized(),
-    FuturePid = erlang:get('$bt_future_pid'),
-    CallerPid = prim_caller_from_future(FuturePid),
-    prim_remove_subscriber(CallerPid),
-    Self;
-dispatch(recent, [], _Self) ->
-    prim_ensure_initialized(),
-    queue:to_list(erlang:get(?TS_BUFFER));
-dispatch(clear, [], Self) ->
-    prim_ensure_initialized(),
-    erlang:put(?TS_BUFFER, queue:new()),
-    erlang:put(?TS_BUFFER_SIZE, 0),
-    Self;
-dispatch(Selector, _Args, _Self) ->
-    Err0 = beamtalk_error:new(does_not_understand, 'TranscriptStream'),
-    Err1 = beamtalk_error:with_selector(Err0, Selector),
-    beamtalk_error:raise(Err1).
-
-%% @private Ensure the process dictionary state keys are initialised.
--spec prim_ensure_initialized() -> ok.
-prim_ensure_initialized() ->
-    case erlang:get(?TS_BUFFER) of
-        undefined ->
-            erlang:put(?TS_BUFFER, queue:new()),
-            erlang:put(?TS_BUFFER_SIZE, 0),
-            erlang:put(?TS_MAX_BUFFER, ?TS_DEFAULT_MAX_BUFFER),
-            erlang:put(?TS_SUBSCRIBERS, #{});
-        _ ->
-            ok
-    end.
-
-%% @private Add text to the ring buffer, dropping oldest entry if at capacity.
--spec prim_buffer_text(binary()) -> ok.
-prim_buffer_text(Text) ->
-    Buffer = erlang:get(?TS_BUFFER),
-    Size = erlang:get(?TS_BUFFER_SIZE),
-    Max = erlang:get(?TS_MAX_BUFFER),
-    Buffer1 = queue:in(Text, Buffer),
-    case Size >= Max of
-        true ->
-            {_, Buffer2} = queue:out(Buffer1),
-            erlang:put(?TS_BUFFER, Buffer2);
-        false ->
-            erlang:put(?TS_BUFFER, Buffer1),
-            erlang:put(?TS_BUFFER_SIZE, Size + 1)
-    end,
-    ok.
-
-%% @private Send text to all current subscribers, pruning any dead processes.
--spec prim_push_to_subscribers(binary()) -> ok.
-prim_push_to_subscribers(Text) ->
-    Subs = erlang:get(?TS_SUBSCRIBERS),
-    AliveSubs = maps:fold(
-        fun(Pid, Ref, Acc) ->
-            case is_process_alive(Pid) of
-                true ->
-                    Pid ! {transcript_output, Text},
-                    Acc#{Pid => Ref};
-                false ->
-                    demonitor(Ref, [flush]),
-                    Acc
-            end
-        end,
-        #{},
-        Subs
-    ),
-    erlang:put(?TS_SUBSCRIBERS, AliveSubs),
-    ok.
-
-%% @private Add a subscriber and monitor it for automatic cleanup.
--spec prim_add_subscriber(pid()) -> ok.
-prim_add_subscriber(Pid) when is_pid(Pid) ->
-    Subs = erlang:get(?TS_SUBSCRIBERS),
-    case maps:is_key(Pid, Subs) of
-        true ->
-            ok;
-        false ->
-            Ref = monitor(process, Pid),
-            erlang:put(?TS_SUBSCRIBERS, Subs#{Pid => Ref}),
-            ok
-    end.
-
-%% @private Remove a subscriber and demonitor it.
--spec prim_remove_subscriber(pid()) -> ok.
-prim_remove_subscriber(Pid) ->
-    Subs = erlang:get(?TS_SUBSCRIBERS),
-    case maps:find(Pid, Subs) of
-        {ok, Ref} ->
-            demonitor(Ref, [flush]),
-            erlang:put(?TS_SUBSCRIBERS, maps:remove(Pid, Subs)),
-            ok;
-        error ->
-            ok
-    end.
-
-%% @private Derive the caller's pid from a future process via its group_leader.
--spec prim_caller_from_future(pid() | undefined) -> pid().
-prim_caller_from_future(undefined) ->
-    self();
-prim_caller_from_future(FuturePid) when is_pid(FuturePid) ->
-    case erlang:process_info(FuturePid, group_leader) of
-        {group_leader, GL} -> GL;
-        undefined -> FuturePid
-    end;
-prim_caller_from_future(_Other) ->
-    self().
 
 %%% ============================================================================
 %%% gen_server callbacks
@@ -431,17 +232,7 @@ handle_cast({unsubscribe, [], FuturePid}, #state{self_ref = SelfRef} = State) wh
     CallerPid = caller_from_future(FuturePid),
     beamtalk_future:resolve(FuturePid, SelfRef),
     {noreply, remove_subscriber(CallerPid, State)};
-%% Legacy format (direct gen_server:cast without Future)
-handle_cast({'show:', Value}, State) ->
-    Text = beamtalk_primitive:display_string(Value),
-    State1 = buffer_text(Text, State),
-    push_to_subscribers(Text, State1),
-    {noreply, State1};
-handle_cast(cr, State) ->
-    Text = <<"\n">>,
-    State1 = buffer_text(Text, State),
-    push_to_subscribers(Text, State1),
-    {noreply, State1};
+%% Module-level subscribe/unsubscribe API (direct gen_server:cast, no Future)
 handle_cast({subscribe, Pid}, State) ->
     {noreply, add_subscriber(Pid, State)};
 handle_cast({unsubscribe, Pid}, State) ->
