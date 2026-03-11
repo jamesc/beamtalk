@@ -2740,11 +2740,13 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
         file_trailing_comments: Vec::new(),
     };
 
-    let result = generate_module(&module, CodegenOptions::new("bt@bt1213"));
-    let code = result.unwrap();
+    let code = generate_module(&module, CodegenOptions::new("bt@bt1213_actor"))
+        .expect("codegen should work");
+
+    // Actor codegen should thread count through StateAcc
     assert!(
-        code.contains("'testIt'/0"),
-        "Expected testIt method. Got:\n{code}"
+        code.contains("__local__count"),
+        "Should thread count through StateAcc. Got:\n{code}"
     );
 }
 
