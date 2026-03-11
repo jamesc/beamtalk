@@ -1615,8 +1615,10 @@ pub(crate) fn check_native_state_fields(module: &Module, diagnostics: &mut Vec<D
 /// the type checker cannot validate usage sites.
 pub(crate) fn check_native_delegate_return_type(
     module: &Module,
+    hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Check inline class methods.
     for class in &module.classes {
         // Only check classes that have a backing module (native: classes).
         // On non-native classes, `self delegate` is a regular message send to
@@ -1627,21 +1629,46 @@ pub(crate) fn check_native_delegate_return_type(
 
         for method in &class.methods {
             if is_self_delegate_body(&method.body) && method.return_type.is_none() {
-                let selector = method.selector.name();
-                diagnostics.push(
-                    Diagnostic::warning(
-                        format!(
-                            "Method `{selector}` uses `self delegate` without a return type annotation"
-                        ),
-                        method.span,
-                    )
-                    .with_hint(
-                        "Add a return type: `selector -> ReturnType => self delegate`".to_string(),
-                    ),
-                );
+                emit_delegate_return_type_warning(&method.selector, method.span, diagnostics);
             }
         }
     }
+
+    // Check standalone (Tonel-style) method definitions: `MyActor >> selector => self delegate`.
+    for standalone in &module.method_definitions {
+        if standalone.is_class_method {
+            continue;
+        }
+        let class_name = standalone.class_name.name.as_str();
+        if hierarchy.is_native(class_name)
+            && is_self_delegate_body(&standalone.method.body)
+            && standalone.method.return_type.is_none()
+        {
+            emit_delegate_return_type_warning(
+                &standalone.method.selector,
+                standalone.method.span,
+                diagnostics,
+            );
+        }
+    }
+}
+
+/// Emit the warning diagnostic for a `self delegate` method missing a return type.
+fn emit_delegate_return_type_warning(
+    selector: &MessageSelector,
+    span: crate::source_analysis::Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let selector_name = selector.name();
+    diagnostics.push(
+        Diagnostic::warning(
+            format!(
+                "Method `{selector_name}` uses `self delegate` without a return type annotation"
+            ),
+            span,
+        )
+        .with_hint("Add a return type: `selector -> ReturnType => self delegate`".to_string()),
+    );
 }
 
 /// Returns `true` if the method body is exactly `self delegate` —
@@ -3467,8 +3494,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_native_delegate_return_type(&module, &mut diagnostics);
+        check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
@@ -3485,8 +3514,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_native_delegate_return_type(&module, &mut diagnostics);
+        check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
             "Expected no warning when return type is present, got: {diagnostics:?}"
@@ -3500,8 +3531,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_native_delegate_return_type(&module, &mut diagnostics);
+        check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
             "Expected no warning for non-native class, got: {diagnostics:?}"
@@ -3515,11 +3548,49 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_native_delegate_return_type(&module, &mut diagnostics);
+        check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
             "Expected no warning for non-delegate method, got: {diagnostics:?}"
+        );
+    }
+
+    /// Standalone (Tonel-style) self delegate without return type on native class → warning.
+    #[test]
+    fn native_standalone_delegate_missing_return_type_warning() {
+        let src = "Actor subclass: MyActor native: my_mod\n  get -> Integer => self delegate\nMyActor >> getValue => self delegate";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for standalone method missing return type, got: {diagnostics:?}"
+        );
+        assert!(diagnostics[0].message.contains("getValue"));
+    }
+
+    /// Standalone self delegate with return type on native class → no warning.
+    #[test]
+    fn native_standalone_delegate_with_return_type_ok() {
+        let src = "Actor subclass: MyActor native: my_mod\n  get -> Integer => self delegate\nMyActor >> getValue -> Integer => self delegate";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warning when standalone method has return type, got: {diagnostics:?}"
         );
     }
 }
