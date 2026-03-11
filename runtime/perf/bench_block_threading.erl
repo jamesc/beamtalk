@@ -45,7 +45,28 @@
     %% BT-1326: counted loop with BOTH local + field mutations — hybrid vs StateAcc
     mixed_stateacc/1,
     mixed_hybrid/1,
-    mixed_native/1
+    mixed_native/1,
+    %% Full extraction with small map (proves JIT anomaly disappears)
+    mixed_full_extract/1,
+    %% Crossover: stateacc vs full extract on small map with 1..4 mutated fields
+    crossover_stateacc_1field/1,
+    crossover_stateacc_2fields/1,
+    crossover_stateacc_3fields/1,
+    crossover_stateacc_4fields/1,
+    crossover_full_extract_1field/1,
+    crossover_full_extract_2fields/1,
+    crossover_full_extract_3fields/1,
+    crossover_full_extract_4fields/1,
+    %% BT-1326: same as mixed_* but with a large actor state map (>32 keys)
+    %% to escape BEAM's small-map JIT optimisation and show hybrid's real advantage
+    mixed_bigmap_stateacc/1,
+    mixed_bigmap_hybrid/1,
+    %% Full extraction: lift BOTH locals AND mutated fields to direct params
+    mixed_bigmap_full_extract/1,
+    %% Arity scaling: full extraction with increasing param counts
+    mixed_bigmap_full_extract_8params/1,
+    mixed_bigmap_full_extract_12params/1,
+    mixed_bigmap_full_extract_16params/1
 ]).
 
 %%====================================================================
@@ -520,3 +541,351 @@ mixed_native(N) ->
 mixed_native_loop(I, N, Sum, _FieldN) when I > N -> Sum;
 mixed_native_loop(I, N, Sum, FieldN) ->
     mixed_native_loop(I + 1, N, Sum + 1, FieldN + 1).
+
+%% @doc Full extraction with small map — proves the JIT anomaly disappears.
+%% Same 4-key map as mixed_stateacc/mixed_hybrid, but locals AND fields
+%% are lifted to direct params. Loop body is pure arithmetic.
+-spec mixed_full_extract(non_neg_integer()) -> integer().
+mixed_full_extract(N) ->
+    InitState = #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
+                  '__methods__' => #{}, 'n' => 0},
+    FieldN0 = maps:get('n', InitState),
+    {_, FinalState} = mixed_full_extract_loop(1, N, 0, FieldN0, InitState),
+    maps:get('__local__sum', FinalState).
+
+mixed_full_extract_loop(I, N, Sum, FieldN, State) when I > N ->
+    State1 = maps:put('n', FieldN, State),
+    ExitSA = maps:put('__local__sum', Sum, State1),
+    {nil, ExitSA};
+mixed_full_extract_loop(I, N, Sum, FieldN, State) ->
+    mixed_full_extract_loop(I + 1, N, Sum + 1, FieldN + 1, State).
+
+%%====================================================================
+%% Crossover benchmarks: stateacc vs full extract on small map.
+%%
+%% Vary the number of mutated fields (1..4) to find the threshold where
+%% full extraction starts beating BEAM's small-map JIT optimisation.
+%% All use the same small base state (metadata + fields = ~6-8 keys).
+%%
+%% Each loop iteration: increments Sum (local) + increments N mutated fields.
+%% StateAcc does maps:get + maps:put for each; full extract uses params.
+%%====================================================================
+
+crossover_base_state(NumFields) ->
+    Base = #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
+             '__methods__' => #{}},
+    lists:foldl(
+        fun(I, Acc) ->
+            Key = list_to_atom("f" ++ integer_to_list(I)),
+            maps:put(Key, 0, Acc)
+        end, Base, lists:seq(1, NumFields)).
+
+%% --- 1 mutated field ---
+
+-spec crossover_stateacc_1field(non_neg_integer()) -> integer().
+crossover_stateacc_1field(N) ->
+    InitState = maps:put('__local__sum', 0, crossover_base_state(1)),
+    {_, FS} = crossover_sa1_loop(1, N, InitState),
+    maps:get('__local__sum', FS).
+
+crossover_sa1_loop(I, N, SA) when I > N -> {nil, SA};
+crossover_sa1_loop(I, N, SA) ->
+    Sum = maps:get('__local__sum', SA) + 1,
+    V1 = maps:get('f1', SA) + 1,
+    SA1 = maps:put('f1', V1, maps:put('__local__sum', Sum, SA)),
+    crossover_sa1_loop(I + 1, N, SA1).
+
+-spec crossover_full_extract_1field(non_neg_integer()) -> integer().
+crossover_full_extract_1field(N) ->
+    State = crossover_base_state(1),
+    F1 = maps:get('f1', State),
+    {_, FS} = crossover_fe1_loop(1, N, 0, F1, State),
+    maps:get('__local__sum', FS).
+
+crossover_fe1_loop(I, N, Sum, F1, State) when I > N ->
+    S1 = maps:put('f1', F1, State),
+    {nil, maps:put('__local__sum', Sum, S1)};
+crossover_fe1_loop(I, N, Sum, F1, State) ->
+    crossover_fe1_loop(I + 1, N, Sum + 1, F1 + 1, State).
+
+%% --- 2 mutated fields ---
+
+-spec crossover_stateacc_2fields(non_neg_integer()) -> integer().
+crossover_stateacc_2fields(N) ->
+    InitState = maps:put('__local__sum', 0, crossover_base_state(2)),
+    {_, FS} = crossover_sa2_loop(1, N, InitState),
+    maps:get('__local__sum', FS).
+
+crossover_sa2_loop(I, N, SA) when I > N -> {nil, SA};
+crossover_sa2_loop(I, N, SA) ->
+    Sum = maps:get('__local__sum', SA) + 1,
+    V1 = maps:get('f1', SA) + 1,
+    V2 = maps:get('f2', SA) + 1,
+    SA1 = maps:put('f2', V2, maps:put('f1', V1, maps:put('__local__sum', Sum, SA))),
+    crossover_sa2_loop(I + 1, N, SA1).
+
+-spec crossover_full_extract_2fields(non_neg_integer()) -> integer().
+crossover_full_extract_2fields(N) ->
+    State = crossover_base_state(2),
+    F1 = maps:get('f1', State),
+    F2 = maps:get('f2', State),
+    {_, FS} = crossover_fe2_loop(1, N, 0, F1, F2, State),
+    maps:get('__local__sum', FS).
+
+crossover_fe2_loop(I, N, Sum, F1, F2, State) when I > N ->
+    S1 = maps:put('f1', F1, maps:put('f2', F2, State)),
+    {nil, maps:put('__local__sum', Sum, S1)};
+crossover_fe2_loop(I, N, Sum, F1, F2, State) ->
+    crossover_fe2_loop(I + 1, N, Sum + 1, F1 + 1, F2 + 1, State).
+
+%% --- 3 mutated fields ---
+
+-spec crossover_stateacc_3fields(non_neg_integer()) -> integer().
+crossover_stateacc_3fields(N) ->
+    InitState = maps:put('__local__sum', 0, crossover_base_state(3)),
+    {_, FS} = crossover_sa3_loop(1, N, InitState),
+    maps:get('__local__sum', FS).
+
+crossover_sa3_loop(I, N, SA) when I > N -> {nil, SA};
+crossover_sa3_loop(I, N, SA) ->
+    Sum = maps:get('__local__sum', SA) + 1,
+    V1 = maps:get('f1', SA) + 1,
+    V2 = maps:get('f2', SA) + 1,
+    V3 = maps:get('f3', SA) + 1,
+    SA1 = maps:put('f3', V3, maps:put('f2', V2, maps:put('f1', V1, maps:put('__local__sum', Sum, SA)))),
+    crossover_sa3_loop(I + 1, N, SA1).
+
+-spec crossover_full_extract_3fields(non_neg_integer()) -> integer().
+crossover_full_extract_3fields(N) ->
+    State = crossover_base_state(3),
+    F1 = maps:get('f1', State),
+    F2 = maps:get('f2', State),
+    F3 = maps:get('f3', State),
+    {_, FS} = crossover_fe3_loop(1, N, 0, F1, F2, F3, State),
+    maps:get('__local__sum', FS).
+
+crossover_fe3_loop(I, N, Sum, F1, F2, F3, State) when I > N ->
+    S1 = maps:put('f1', F1, maps:put('f2', F2, maps:put('f3', F3, State))),
+    {nil, maps:put('__local__sum', Sum, S1)};
+crossover_fe3_loop(I, N, Sum, F1, F2, F3, State) ->
+    crossover_fe3_loop(I + 1, N, Sum + 1, F1 + 1, F2 + 1, F3 + 1, State).
+
+%% --- 4 mutated fields ---
+
+-spec crossover_stateacc_4fields(non_neg_integer()) -> integer().
+crossover_stateacc_4fields(N) ->
+    InitState = maps:put('__local__sum', 0, crossover_base_state(4)),
+    {_, FS} = crossover_sa4_loop(1, N, InitState),
+    maps:get('__local__sum', FS).
+
+crossover_sa4_loop(I, N, SA) when I > N -> {nil, SA};
+crossover_sa4_loop(I, N, SA) ->
+    Sum = maps:get('__local__sum', SA) + 1,
+    V1 = maps:get('f1', SA) + 1,
+    V2 = maps:get('f2', SA) + 1,
+    V3 = maps:get('f3', SA) + 1,
+    V4 = maps:get('f4', SA) + 1,
+    SA1 = maps:put('f4', V4, maps:put('f3', V3, maps:put('f2', V2, maps:put('f1', V1, maps:put('__local__sum', Sum, SA))))),
+    crossover_sa4_loop(I + 1, N, SA1).
+
+-spec crossover_full_extract_4fields(non_neg_integer()) -> integer().
+crossover_full_extract_4fields(N) ->
+    State = crossover_base_state(4),
+    F1 = maps:get('f1', State),
+    F2 = maps:get('f2', State),
+    F3 = maps:get('f3', State),
+    F4 = maps:get('f4', State),
+    {_, FS} = crossover_fe4_loop(1, N, 0, F1, F2, F3, F4, State),
+    maps:get('__local__sum', FS).
+
+crossover_fe4_loop(I, N, Sum, F1, F2, F3, F4, State) when I > N ->
+    S1 = maps:put('f1', F1, maps:put('f2', F2, maps:put('f3', F3, maps:put('f4', F4, State)))),
+    {nil, maps:put('__local__sum', Sum, S1)};
+crossover_fe4_loop(I, N, Sum, F1, F2, F3, F4, State) ->
+    crossover_fe4_loop(I + 1, N, Sum + 1, F1 + 1, F2 + 1, F3 + 1, F4 + 1, State).
+
+%%====================================================================
+%% BT-1326 large-map variants: same as mixed_* but with >32-key actor state.
+%%
+%% BEAM's JIT uses a flat tuple representation for small maps (up to ~32
+%% keys). Above that threshold maps switch to a HAMT representation where
+%% maps:get/put are O(log32 N) instead of O(1). The small-map variants
+%% above give StateAcc an unfair advantage because *all* map ops hit the
+%% fast flat path. These bigmap variants use a 34-key state map to show
+%% the real-world scaling where hybrid eliminates map ops for locals.
+%%====================================================================
+
+%% @doc Helper to build a large base state map (34 keys — above small-map threshold).
+bigmap_base_state() ->
+    lists:foldl(
+        fun(I, Acc) ->
+            Key = list_to_atom("field_" ++ integer_to_list(I)),
+            maps:put(Key, 0, Acc)
+        end,
+        #{'$beamtalk_class' => 'BigActor', '__class_mod__' => test,
+          '__methods__' => #{}, 'n' => 0},
+        lists:seq(1, 30)).
+
+%% @doc StateAcc path with large map — locals packed into same big map.
+-spec mixed_bigmap_stateacc(non_neg_integer()) -> integer().
+mixed_bigmap_stateacc(N) ->
+    BaseState = bigmap_base_state(),
+    InitState = maps:put('__local__sum', 0, BaseState),
+    {_, FinalState} = mixed_bigmap_stateacc_loop(1, N, InitState),
+    maps:get('__local__sum', FinalState).
+
+mixed_bigmap_stateacc_loop(I, N, StateAcc) when I > N ->
+    {nil, StateAcc};
+mixed_bigmap_stateacc_loop(I, N, StateAcc) ->
+    Sum = maps:get('__local__sum', StateAcc),
+    Sum1 = Sum + 1,
+    N0 = maps:get('n', StateAcc),
+    StateAcc1 = maps:put('n', N0 + 1, StateAcc),
+    StateAcc2 = maps:put('__local__sum', Sum1, StateAcc1),
+    mixed_bigmap_stateacc_loop(I + 1, N, StateAcc2).
+
+%% @doc Hybrid path with large map — locals as direct params, only State threaded.
+-spec mixed_bigmap_hybrid(non_neg_integer()) -> integer().
+mixed_bigmap_hybrid(N) ->
+    InitState = bigmap_base_state(),
+    {_, FinalState} = mixed_bigmap_hybrid_loop(1, N, 0, InitState),
+    maps:get('__local__sum', FinalState).
+
+mixed_bigmap_hybrid_loop(I, N, Sum, State) when I > N ->
+    ExitSA = maps:put('__local__sum', Sum, State),
+    {nil, ExitSA};
+mixed_bigmap_hybrid_loop(I, N, Sum, State) ->
+    Sum1 = Sum + 1,
+    N0 = maps:get('n', State),
+    State1 = maps:put('n', N0 + 1, State),
+    mixed_bigmap_hybrid_loop(I + 1, N, Sum1, State1).
+
+%% @doc Full extraction: lift both locals AND mutated fields to direct params.
+%% Extract at loop entry, pass as params, repack on exit. Zero map ops in the
+%% loop body — represents the theoretical ceiling for codegen optimisation.
+%%
+%% Hypothetical codegen:
+%%   letrec 'loop'/4 = fun(I, Sum, FieldN, State) ->
+%%     case I =< N of
+%%       true -> apply 'loop'/4 (I+1, Sum+1, FieldN+1, State)
+%%       false ->
+%%         State1 = maps:put('n', FieldN, State),
+%%         ExitSA = maps:put('__local__sum', Sum, State1),
+%%         {nil, ExitSA}
+%%     end
+%%   in
+%%     FieldN0 = maps:get('n', State),
+%%     apply 'loop'/4 (1, 0, FieldN0, State)
+-spec mixed_bigmap_full_extract(non_neg_integer()) -> integer().
+mixed_bigmap_full_extract(N) ->
+    InitState = bigmap_base_state(),
+    FieldN0 = maps:get('n', InitState),
+    {_, FinalState} = mixed_bigmap_full_extract_loop(1, N, 0, FieldN0, InitState),
+    maps:get('__local__sum', FinalState).
+
+mixed_bigmap_full_extract_loop(I, N, Sum, FieldN, State) when I > N ->
+    State1 = maps:put('n', FieldN, State),
+    ExitSA = maps:put('__local__sum', Sum, State1),
+    {nil, ExitSA};
+mixed_bigmap_full_extract_loop(I, N, Sum, FieldN, State) ->
+    mixed_bigmap_full_extract_loop(I + 1, N, Sum + 1, FieldN + 1, State).
+
+%%====================================================================
+%% Arity scaling: how does BEAM handle increasing param counts?
+%%
+%% BEAM has dedicated call opcodes for small arities. These benchmarks
+%% test whether full extraction degrades as we lift more fields out of
+%% the map (simulating actors with many mutated fields + locals).
+%%
+%% 5 params = base full_extract (I, N, Sum, FieldN, State)
+%% 8 params = + 3 extra mutated fields
+%% 12 params = + 7 extra mutated fields
+%% 16 params = + 11 extra mutated fields
+%%====================================================================
+
+%% @doc 8 params: I, N, Sum, FieldN, F1, F2, F3, State
+-spec mixed_bigmap_full_extract_8params(non_neg_integer()) -> integer().
+mixed_bigmap_full_extract_8params(N) ->
+    InitState = bigmap_base_state(),
+    FieldN0 = maps:get('n', InitState),
+    F1 = maps:get('field_1', InitState),
+    F2 = maps:get('field_2', InitState),
+    F3 = maps:get('field_3', InitState),
+    {_, FinalState} = full_extract_8p_loop(1, N, 0, FieldN0, F1, F2, F3, InitState),
+    maps:get('__local__sum', FinalState).
+
+full_extract_8p_loop(I, N, Sum, FieldN, F1, F2, F3, State) when I > N ->
+    S1 = maps:put('n', FieldN, State),
+    S2 = maps:put('field_1', F1, S1),
+    S3 = maps:put('field_2', F2, S2),
+    S4 = maps:put('field_3', F3, S3),
+    ExitSA = maps:put('__local__sum', Sum, S4),
+    {nil, ExitSA};
+full_extract_8p_loop(I, N, Sum, FieldN, F1, F2, F3, State) ->
+    full_extract_8p_loop(I + 1, N, Sum + 1, FieldN + 1, F1 + 1, F2 + 1, F3 + 1, State).
+
+%% @doc 12 params: I, N, Sum, FieldN, F1..F7, State
+-spec mixed_bigmap_full_extract_12params(non_neg_integer()) -> integer().
+mixed_bigmap_full_extract_12params(N) ->
+    InitState = bigmap_base_state(),
+    FieldN0 = maps:get('n', InitState),
+    F1 = maps:get('field_1', InitState),
+    F2 = maps:get('field_2', InitState),
+    F3 = maps:get('field_3', InitState),
+    F4 = maps:get('field_4', InitState),
+    F5 = maps:get('field_5', InitState),
+    F6 = maps:get('field_6', InitState),
+    F7 = maps:get('field_7', InitState),
+    {_, FinalState} = full_extract_12p_loop(1, N, 0, FieldN0, F1, F2, F3, F4, F5, F6, F7, InitState),
+    maps:get('__local__sum', FinalState).
+
+full_extract_12p_loop(I, N, Sum, FieldN, F1, F2, F3, F4, F5, F6, F7, State) when I > N ->
+    S1 = maps:put('n', FieldN, State),
+    S2 = maps:put('field_1', F1, S1),
+    S3 = maps:put('field_2', F2, S2),
+    S4 = maps:put('field_3', F3, S3),
+    S5 = maps:put('field_4', F4, S4),
+    S6 = maps:put('field_5', F5, S5),
+    S7 = maps:put('field_6', F6, S6),
+    S8 = maps:put('field_7', F7, S7),
+    ExitSA = maps:put('__local__sum', Sum, S8),
+    {nil, ExitSA};
+full_extract_12p_loop(I, N, Sum, FieldN, F1, F2, F3, F4, F5, F6, F7, State) ->
+    full_extract_12p_loop(I + 1, N, Sum + 1, FieldN + 1, F1 + 1, F2 + 1, F3 + 1, F4 + 1, F5 + 1, F6 + 1, F7 + 1, State).
+
+%% @doc 16 params: I, N, Sum, FieldN, F1..F11, State
+-spec mixed_bigmap_full_extract_16params(non_neg_integer()) -> integer().
+mixed_bigmap_full_extract_16params(N) ->
+    InitState = bigmap_base_state(),
+    FieldN0 = maps:get('n', InitState),
+    F1 = maps:get('field_1', InitState),
+    F2 = maps:get('field_2', InitState),
+    F3 = maps:get('field_3', InitState),
+    F4 = maps:get('field_4', InitState),
+    F5 = maps:get('field_5', InitState),
+    F6 = maps:get('field_6', InitState),
+    F7 = maps:get('field_7', InitState),
+    F8 = maps:get('field_8', InitState),
+    F9 = maps:get('field_9', InitState),
+    F10 = maps:get('field_10', InitState),
+    F11 = maps:get('field_11', InitState),
+    {_, FinalState} = full_extract_16p_loop(1, N, 0, FieldN0, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, InitState),
+    maps:get('__local__sum', FinalState).
+
+full_extract_16p_loop(I, N, Sum, FieldN, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, State) when I > N ->
+    S1 = maps:put('n', FieldN, State),
+    S2 = maps:put('field_1', F1, S1),
+    S3 = maps:put('field_2', F2, S2),
+    S4 = maps:put('field_3', F3, S3),
+    S5 = maps:put('field_4', F4, S4),
+    S6 = maps:put('field_5', F5, S5),
+    S7 = maps:put('field_6', F6, S6),
+    S8 = maps:put('field_7', F7, S7),
+    S9 = maps:put('field_8', F8, S8),
+    S10 = maps:put('field_9', F9, S9),
+    S11 = maps:put('field_10', F10, S10),
+    S12 = maps:put('field_11', F11, S11),
+    ExitSA = maps:put('__local__sum', Sum, S12),
+    {nil, ExitSA};
+full_extract_16p_loop(I, N, Sum, FieldN, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, State) ->
+    full_extract_16p_loop(I + 1, N, Sum + 1, FieldN + 1, F1 + 1, F2 + 1, F3 + 1, F4 + 1, F5 + 1, F6 + 1, F7 + 1, F8 + 1, F9 + 1, F10 + 1, F11 + 1, State).
