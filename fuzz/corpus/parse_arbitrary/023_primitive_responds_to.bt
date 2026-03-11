@@ -46,4 +46,4 @@ nil respondsTo: #notAMethod
 // => true
 3.14 respondsTo: #abs
 // => true
-3.14 respondsTo: #nonExistent// => false
+3.14 respondsTo: #nonExistent  // => false

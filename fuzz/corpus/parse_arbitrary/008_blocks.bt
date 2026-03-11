@@ -33,7 +33,10 @@
 // => 7
 
 // Block with three arguments
-[:x :y :z | x + y + z] value: 1 value: 2 value: 3
+[:x :y :z | x + y + z]
+  value: 1
+  value: 2
+  value: 3
 // => 6
 
 // Nested blocks - outer returns inner block that captures x
@@ -83,4 +86,4 @@ makeAdder := [:n | [:x | x + n]]
 // => a Block/1
 addFive := makeAdder value: 5
 // => a Block/1
-addFive value: 10// => 15
+addFive value: 10  // => 15

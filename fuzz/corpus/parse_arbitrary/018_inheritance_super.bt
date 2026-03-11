@@ -53,8 +53,7 @@ c class
 // Auto-await: REPL automatically awaits actor message futures
 c increment
 // => 1
-c getValue// => 1
-
+c getValue  // => 1
 // ===========================================================================
 // IMPLEMENTATION NOTES
 // ===========================================================================

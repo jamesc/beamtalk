@@ -495,7 +495,7 @@ impl CoreErlangGenerator {
                 let discard_var = self.fresh_temp_var("T2Discard");
                 let expr_str = self.expression_doc(expr)?;
                 let new_state = self.next_state_var();
-                docs.push(docvec![
+                let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                     "let ",
                     Document::String(tuple_var.clone()),
                     " = ",
@@ -505,11 +505,31 @@ impl CoreErlangGenerator {
                     " = call 'erlang':'element'(1, ",
                     Document::String(tuple_var.clone()),
                     ")\n in let ",
-                    Document::String(new_state),
+                    Document::String(new_state.clone()),
                     " = call 'erlang':'element'(2, ",
                     Document::String(tuple_var),
                     ") in ",
-                ]);
+                ]];
+
+                // BT-1213: Extract captured local mutations from NewState so
+                // subsequent reads resolve the updated values (not stale bindings).
+                if let Some(mutations) = Self::get_inline_block_captured_mutations(expr) {
+                    for var in &mutations {
+                        let core_var = self
+                            .lookup_var(var)
+                            .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                        doc_parts.push(docvec![
+                            "let ",
+                            Document::String(core_var),
+                            " = call 'maps':'get'('",
+                            Document::String(Self::local_state_key(var)),
+                            "', ",
+                            Document::String(new_state.clone()),
+                            ") in ",
+                        ]);
+                    }
+                }
+                docs.push(Document::Vec(doc_parts));
             } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 // Pack captured locals into State, send, extract locals from returned State.
@@ -970,7 +990,7 @@ impl CoreErlangGenerator {
                 let discard_var = self.fresh_temp_var("T2Discard");
                 let expr_str = self.expression_doc(expr)?;
                 let new_state = self.next_state_var();
-                docs.push(docvec![
+                let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                     "let ",
                     Document::String(tuple_var.clone()),
                     " = ",
@@ -980,11 +1000,31 @@ impl CoreErlangGenerator {
                     " = call 'erlang':'element'(1, ",
                     Document::String(tuple_var.clone()),
                     ")\n in let ",
-                    Document::String(new_state),
+                    Document::String(new_state.clone()),
                     " = call 'erlang':'element'(2, ",
                     Document::String(tuple_var),
                     ") in ",
-                ]);
+                ]];
+
+                // BT-1213: Extract captured local mutations from NewState so
+                // subsequent reads resolve the updated values (not stale bindings).
+                if let Some(mutations) = Self::get_inline_block_captured_mutations(expr) {
+                    for var in &mutations {
+                        let core_var = self
+                            .lookup_var(var)
+                            .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                        doc_parts.push(docvec![
+                            "let ",
+                            Document::String(core_var),
+                            " = call 'maps':'get'('",
+                            Document::String(Self::local_state_key(var)),
+                            "', ",
+                            Document::String(new_state.clone()),
+                            ") in ",
+                        ]);
+                    }
+                }
+                docs.push(Document::Vec(doc_parts));
             } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
                 // BT-851: Tier 2 self-send with stateful block arguments.
                 let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
@@ -1804,12 +1844,30 @@ impl CoreErlangGenerator {
                 crate::ast::MessageSelector::Binary(_) => false,
             };
             if is_value_selector {
+                // BT-851: Tier 2 block parameter (variable holding a stateful block)
                 if let Expression::Identifier(id) = receiver.as_ref() {
-                    return self.tier2_block_params.contains(id.name.as_str());
+                    if self.tier2_block_params.contains(id.name.as_str()) {
+                        return true;
+                    }
+                }
+                // BT-1213: Inline block literal with captured mutations
+                // (e.g. [errors := errors add: #foo] value)
+                // Only in Actor/REPL context — ValueType inlines as plain value (no tuple).
+                if let Expression::Block(block) = receiver.as_ref() {
+                    if self.context != super::super::CodeGenContext::ValueType
+                        && !Self::captured_mutations_for_block(block).is_empty()
+                    {
+                        return true;
+                    }
                 }
             }
         }
         false
+    }
+
+    // BT-1213: Delegates to the shared implementation in expressions.rs.
+    fn get_inline_block_captured_mutations(expr: &Expression) -> Option<Vec<String>> {
+        Self::inline_block_captured_mutations(expr)
     }
 
     /// Checks if a control flow expression actually threads state through mutations.

@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -36,8 +35,8 @@ Module {
                             KeywordPart {
                                 keyword: "run:",
                                 span: Span {
-                                    start: 222,
-                                    end: 226,
+                                    start: 223,
+                                    end: 227,
                                 },
                             },
                         ],
@@ -47,8 +46,8 @@ Module {
                             name: Identifier {
                                 name: "r",
                                 span: Span {
-                                    start: 227,
-                                    end: 228,
+                                    start: 228,
+                                    end: 229,
                                 },
                             },
                             type_annotation: None,
@@ -65,8 +64,8 @@ Module {
                                     Identifier {
                                         name: "r",
                                         span: Span {
-                                            start: 232,
-                                            end: 233,
+                                            start: 233,
+                                            end: 234,
                                         },
                                     },
                                 ),
@@ -76,8 +75,8 @@ Module {
                                             class: Identifier {
                                                 name: "Result",
                                                 span: Span {
-                                                    start: 242,
-                                                    end: 248,
+                                                    start: 243,
+                                                    end: 249,
                                                 },
                                             },
                                             keywords: [
@@ -87,16 +86,16 @@ Module {
                                                         Identifier {
                                                             name: "v",
                                                             span: Span {
-                                                                start: 253,
-                                                                end: 254,
+                                                                start: 254,
+                                                                end: 255,
                                                             },
                                                         },
                                                     ),
                                                 ),
                                             ],
                                             span: Span {
-                                                start: 242,
-                                                end: 254,
+                                                start: 243,
+                                                end: 255,
                                             },
                                         },
                                         guard: None,
@@ -114,8 +113,8 @@ Module {
                                                                 Identifier {
                                                                     name: "v",
                                                                     span: Span {
-                                                                        start: 259,
-                                                                        end: 260,
+                                                                        start: 260,
+                                                                        end: 261,
                                                                     },
                                                                 },
                                                             ),
@@ -128,23 +127,23 @@ Module {
                                                                         1,
                                                                     ),
                                                                     Span {
-                                                                        start: 263,
-                                                                        end: 264,
+                                                                        start: 264,
+                                                                        end: 265,
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
-                                                                start: 259,
-                                                                end: 264,
+                                                                start: 260,
+                                                                end: 265,
                                                             },
                                                         },
                                                         preceding_blank_line: false,
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 258,
-                                                    end: 265,
+                                                    start: 259,
+                                                    end: 266,
                                                 },
                                             },
                                         ),
@@ -153,14 +152,14 @@ Module {
                                             trailing: None,
                                         },
                                         span: Span {
-                                            start: 242,
-                                            end: 265,
+                                            start: 243,
+                                            end: 266,
                                         },
                                     },
                                 ],
                                 span: Span {
-                                    start: 232,
-                                    end: 266,
+                                    start: 233,
+                                    end: 267,
                                 },
                             },
                             preceding_blank_line: false,
@@ -175,8 +174,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 222,
-                        end: 266,
+                        start: 223,
+                        end: 267,
                     },
                 },
             ],
@@ -227,7 +226,7 @@ Module {
             backing_module: None,
             span: Span {
                 start: 184,
-                end: 266,
+                end: 267,
             },
         },
     ],
@@ -235,7 +234,7 @@ Module {
     expressions: [],
     span: Span {
         start: 184,
-        end: 266,
+        end: 267,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

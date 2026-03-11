@@ -21,7 +21,10 @@ TestCase subclass: TransferTest
     alice deposit: 1000
     bob deposit: 500
     agent := TransferAgent spawn
-    agent transfer: 250 from: alice to: bob
+    agent
+      transfer: 250
+      from: alice
+      to: bob
     self assert: alice balance equals: 750
     self assert: bob balance equals: 750
 
@@ -30,7 +33,10 @@ TestCase subclass: TransferTest
     bob := Account spawn
     alice deposit: 1000
     agent := TransferAgent spawn
-    agent transfer: 300 from: alice to: bob
+    agent
+      transfer: 300
+      from: alice
+      to: bob
     self assert: agent getLastAmount equals: 300
 
   testMultipleTransfers =>
@@ -38,8 +44,14 @@ TestCase subclass: TransferTest
     bob := Account spawn
     alice deposit: 1000
     agent := TransferAgent spawn
-    agent transfer: 100 from: alice to: bob
-    agent transfer: 200 from: alice to: bob
+    agent
+      transfer: 100
+      from: alice
+      to: bob
+    agent
+      transfer: 200
+      from: alice
+      to: bob
     // getLastAmount reflects the most recent transfer
     self assert: alice balance equals: 700;
       assert: bob balance equals: 300;
@@ -51,8 +63,14 @@ TestCase subclass: TransferTest
     alice deposit: 500
     bob deposit: 500
     agent := TransferAgent spawn
-    agent transfer: 100 from: alice to: bob
-    agent transfer: 50 from: bob to: alice
+    agent
+      transfer: 100
+      from: alice
+      to: bob
+    agent
+      transfer: 50
+      from: bob
+      to: alice
     self assert: alice balance equals: 450
     self assert: bob balance equals: 550
 

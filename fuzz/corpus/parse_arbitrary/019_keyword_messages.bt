@@ -41,11 +41,17 @@
 // ===========================================================================
 
 // Block with three arguments
-[:a :b :c | a + b + c] value: 1 value: 2 value: 3
+[:a :b :c | a + b + c]
+  value: 1
+  value: 2
+  value: 3
 // => 6
 
 // Three-arg block with mixed operations
-[:x :y :z | x * y + z] value: 2 value: 3 value: 4
+[:x :y :z | x * y + z]
+  value: 2
+  value: 3
+  value: 4
 // => 10
 
 // ===========================================================================
@@ -103,4 +109,4 @@ times3 value: 7
 // Passing block as argument
 applyBlock := [:block :arg | block value: arg]
 // => a Block/2
-applyBlock value: [:x | x + 100] value: 42// => 142
+applyBlock value: [:x | x + 100] value: 42  // => 142
