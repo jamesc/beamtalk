@@ -75,7 +75,7 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
 %% `Handler` is a fun/1 (block) or actor pid responding to `handle:`.
 %% Binds to 127.0.0.1 by default.
 %%
-%% Returns an HTTPServer value object with `listenerRef` and `actualPort`.
+%% Returns a `Result` wrapping an HTTPServer object.
 -spec start(non_neg_integer(), fun() | pid()) -> map().
 start(Port, Handler) ->
     start(Port, Handler, #{}).
@@ -104,13 +104,14 @@ start(Port, Handler, Opts) when is_integer(Port), Port >= 0 ->
     case cowboy:start_clear(Ref, TransOpts, ProtoOpts) of
         {ok, _Pid} ->
             ActualPort = ranch:get_port(Ref),
-            make_server(Ref, ActualPort);
+            beamtalk_result:from_tagged_tuple({ok, make_server(Ref, ActualPort)});
         {error, Reason} ->
-            server_error(
-                'start:handler:',
-                #{port => Port, reason => Reason},
-                <<"Failed to start HTTP server">>
-            )
+            Error = beamtalk_error:new(http_error, 'HTTPServer'),
+            Error1 = beamtalk_error:with_selector(Error, 'start:handler:'),
+            Error2 = beamtalk_error:with_details(Error1, #{port => Port, reason => Reason}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Failed to start HTTP server">>),
+            ExObj = beamtalk_exception_handler:ensure_wrapped(Error3),
+            beamtalk_result:from_tagged_tuple({error, ExObj})
     end;
 start(Port, _Handler, _Opts) when not is_integer(Port) ->
     type_error('start:handler:', <<"Port must be an Integer">>);
@@ -163,13 +164,11 @@ parse_ip(Bin) when is_binary(Bin) ->
             )
     end.
 
-%% @private Build an HTTPServer value object.
+%% @private Build an HTTPServer object.
 -dialyzer({nowarn_function, make_server/2}).
 -spec make_server(reference(), non_neg_integer()) -> map().
 make_server(Ref, ActualPort) ->
-    'bt@stdlib@httpserver':'class_listenerRef:actualPort:'(
-        undefined, undefined, Ref, ActualPort
-    ).
+    'bt@stdlib@httpserver':'new'(#{listenerRef => Ref, actualPort => ActualPort}).
 
 %% @private Raise a type error.
 -spec type_error(atom(), binary()) -> no_return().

@@ -11,26 +11,26 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// srv := HTTPServer start: 8080 handler: [:req |
+/// srv := (HTTPServer start: 8080 handler: [:req |
 ///   req method == "GET" ifTrue: [
 ///     HTTPResponse new: #{ #status => 200, #body => "hello" }
 ///   ] ifFalse: [
 ///     HTTPResponse new: #{ #status => 405, #body => "method not allowed" }
 ///   ]
-/// ]
+/// ]) unwrap
 /// srv port   // => 8080
 /// srv stop
 /// ```
 ///
 /// ## Ephemeral port
 /// ```beamtalk
-/// srv := HTTPServer start: 0 handler: [:req |
+/// srv := (HTTPServer start: 0 handler: [:req |
 ///   HTTPResponse new: #{ #status => 200, #body => "ok" }
-/// ]
+/// ]) unwrap
 /// srv port   // => (dynamically assigned port)
 /// srv stop
 /// ```
-sealed Value subclass: HTTPServer
+Object subclass: HTTPServer
   /// Opaque reference to the cowboy listener (internal).
   state: listenerRef = nil
   /// The actual TCP port the server is listening on.
@@ -43,11 +43,11 @@ sealed Value subclass: HTTPServer
   ///
   /// ## Examples
   /// ```beamtalk
-  /// srv := HTTPServer start: 8080 handler: [:req |
+  /// srv := (HTTPServer start: 8080 handler: [:req |
   ///   HTTPResponse new: #{ #status => 200, #body => "hello" }
-  /// ]
+  /// ]) unwrap
   /// ```
-  class start: port :: Integer handler: handler -> HTTPServer =>
+  class start: port :: Integer handler: handler -> Result =>
     (Erlang beamtalk_http_server) start: port handler: handler
 
   /// Start an HTTP server with additional options.
@@ -57,10 +57,10 @@ sealed Value subclass: HTTPServer
   ///
   /// ## Examples
   /// ```beamtalk
-  /// srv := HTTPServer start: 0 handler: handler
-  ///   options: #{ #bind => "0.0.0.0" }
+  /// srv := (HTTPServer start: 0 handler: handler
+  ///   options: #{ #bind => "0.0.0.0" }) unwrap
   /// ```
-  class start: port :: Integer handler: handler options: opts :: Dictionary -> HTTPServer =>
+  class start: port :: Integer handler: handler options: opts :: Dictionary -> Result =>
     (Erlang beamtalk_http_server)
       start: port
       handler: handler
@@ -75,7 +75,7 @@ sealed Value subclass: HTTPServer
   /// ```beamtalk
   /// srv port   // => 8080
   /// ```
-  sealed port -> Integer => self.actualPort
+  port -> Integer => self.actualPort
 
   /// Gracefully stop this HTTP server.
   ///
@@ -85,7 +85,7 @@ sealed Value subclass: HTTPServer
   /// ```beamtalk
   /// srv stop   // => #ok
   /// ```
-  sealed stop -> Symbol => (Erlang beamtalk_http_server) stop: self.listenerRef
+  stop -> Symbol => (Erlang beamtalk_http_server) stop: self.listenerRef
 
   /// Human-readable representation.
   printString -> String =>

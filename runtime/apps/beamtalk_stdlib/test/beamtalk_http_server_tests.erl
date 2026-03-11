@@ -20,7 +20,9 @@
 start_returns_server_with_port_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    Server = beamtalk_http_server:start(0, Handler),
+    Result = beamtalk_http_server:start(0, Handler),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, Result),
+    Server = maps:get('okValue', Result),
     ?assert(is_map(Server)),
     Port = maps:get(actualPort, Server),
     ?assert(is_integer(Port)),
@@ -32,7 +34,7 @@ start_returns_server_with_port_test() ->
 stop_is_idempotent_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    Server = beamtalk_http_server:start(0, Handler),
+    Server = unwrap_result(beamtalk_http_server:start(0, Handler)),
     Ref = maps:get(listenerRef, Server),
     ?assertEqual(ok, beamtalk_http_server:stop(Ref)),
     ?assertEqual(ok, beamtalk_http_server:stop(Ref)).
@@ -40,8 +42,8 @@ stop_is_idempotent_test() ->
 start_multiple_servers_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
-    Server1 = beamtalk_http_server:start(0, Handler),
-    Server2 = beamtalk_http_server:start(0, Handler),
+    Server1 = unwrap_result(beamtalk_http_server:start(0, Handler)),
+    Server2 = unwrap_result(beamtalk_http_server:start(0, Handler)),
     Port1 = maps:get(actualPort, Server1),
     Port2 = maps:get(actualPort, Server2),
     ?assertNotEqual(Port1, Port2),
@@ -69,7 +71,7 @@ handler_receives_request_and_returns_response_test() ->
     {ok, _} = application:ensure_all_started(cowboy),
     {ok, _} = application:ensure_all_started(gun),
     Handler = fun(_Req) -> make_simple_response(200, <<"hello from handler">>) end,
-    Server = beamtalk_http_server:start(0, Handler),
+    Server = unwrap_result(beamtalk_http_server:start(0, Handler)),
     Port = maps:get(actualPort, Server),
     Url = iolist_to_binary(["http://localhost:", integer_to_list(Port), "/test"]),
     #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Resp} =
@@ -81,6 +83,11 @@ handler_receives_request_and_returns_response_test() ->
 %%% ============================================================================
 %%% Helpers
 %%% ============================================================================
+
+%% @private Extract the ok value from a Result map.
+-spec unwrap_result(map()) -> term().
+unwrap_result(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Value}) ->
+    Value.
 
 %% @private Build a minimal HTTPResponse map for testing.
 %%
