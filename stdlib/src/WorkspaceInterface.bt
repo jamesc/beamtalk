@@ -169,10 +169,10 @@ sealed Object subclass: WorkspaceInterface
   stopSupervisor: aClass :: Object -> Nil =>
     (Erlang beamtalk_workspace_interface_primitives) stopSupervisor: aClass
 
-  /// List all user-attached supervisors in the workspace supervision tree.
+  /// List all supervisors in the workspace supervision tree.
   ///
-  /// Returns supervisors started via `startSupervisor:`, not the root
-  /// application supervisor (use `supervisor` for that).
+  /// Returns the root application supervisor (if registered) and all
+  /// supervisors attached via `startSupervisor:`.
   ///
   /// ## Examples
   /// ```beamtalk

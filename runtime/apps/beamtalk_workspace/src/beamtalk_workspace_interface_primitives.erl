@@ -352,15 +352,24 @@ do_stop_supervisor(ClassName) ->
             _ = supervisor:delete_child(beamtalk_workspace_sup, ChildId),
             nil;
         {error, not_found} ->
-            NameBin = atom_to_binary(ClassName, utf8),
-            Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-            Err1 = beamtalk_error:with_selector(Err0, 'stopSupervisor:'),
-            beamtalk_error:raise(
-                beamtalk_error:with_message(
-                    Err1,
-                    iolist_to_binary([NameBin, <<" is not attached to the workspace">>])
-                )
-            )
+            %% Not a workspace-attached supervisor — check if it's the root
+            %% application supervisor. If so, stop it and clear the ETS entry.
+            case beamtalk_supervisor:get_root() of
+                {beamtalk_supervisor, ClassName, _Module, Pid} ->
+                    gen_server:stop(Pid),
+                    beamtalk_supervisor:clear_root(),
+                    nil;
+                _ ->
+                    NameBin = atom_to_binary(ClassName, utf8),
+                    Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                    Err1 = beamtalk_error:with_selector(Err0, 'stopSupervisor:'),
+                    beamtalk_error:raise(
+                        beamtalk_error:with_message(
+                            Err1,
+                            iolist_to_binary([NameBin, <<" is not attached to the workspace">>])
+                        )
+                    )
+            end
     end.
 
 %% @private
@@ -370,15 +379,21 @@ raise_stop_supervisor_type_error(Message) ->
     Err1 = beamtalk_error:with_selector(Err0, 'stopSupervisor:'),
     beamtalk_error:raise(beamtalk_error:with_message(Err1, Message)).
 
-%% @doc List all user-attached supervisors in the workspace supervision tree.
+%% @doc List all supervisors in the workspace supervision tree.
 %%
 %% Called via `(Erlang beamtalk_workspace_interface_primitives) supervisors`.
 %% Returns a list of `{beamtalk_supervisor, ClassName, Module, Pid}` tuples
-%% for all supervisors started via `startSupervisor:`.
+%% including the root application supervisor (if registered) and all
+%% supervisors attached via `startSupervisor:`.
 -spec supervisors() -> [tuple()].
 supervisors() ->
+    Root =
+        case beamtalk_supervisor:get_root() of
+            nil -> [];
+            RootSup -> [RootSup]
+        end,
     Children = supervisor:which_children(beamtalk_workspace_sup),
-    lists:filtermap(
+    UserSups = lists:filtermap(
         fun
             ({{user_supervisor, ClassName}, Pid, supervisor, [Module]}) when is_pid(Pid) ->
                 {true, {beamtalk_supervisor, ClassName, Module, Pid}};
@@ -386,7 +401,8 @@ supervisors() ->
                 false
         end,
         Children
-    ).
+    ),
+    Root ++ UserSups.
 
 %%% ============================================================================
 %%% Stable external API
