@@ -2458,10 +2458,10 @@ fn test_field_at_put_self_threads_state() {
         code.contains("'maps':'put'"),
         "self fieldAt:put: must use maps:put for state threading. Got:\n{code}"
     );
-    // Verify state is threaded: State0 → maps:put → State1, then fieldAt: uses State1
+    // Verify the fieldAt: read uses the threaded State1 (not stale State)
     assert!(
-        code.contains("State1"),
-        "self fieldAt:put: must produce State1 for state threading. Got:\n{code}"
+        code.contains("'beamtalk_primitive':'send'(State1, 'fieldAt:'"),
+        "self fieldAt: read must reference State1 after fieldAt:put: threading. Got:\n{code}"
     );
 }
 

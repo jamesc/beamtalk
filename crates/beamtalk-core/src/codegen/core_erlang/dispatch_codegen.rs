@@ -1228,6 +1228,10 @@ impl CoreErlangGenerator {
             let name_var = self.fresh_var("Name");
             let val_var = self.fresh_temp_var("Val");
             let name_code = self.expression_doc(&arguments[0])?;
+            // Capture state before value expression, consistent with
+            // generate_field_assignment_open. If the value expression itself
+            // threads state (e.g., contains a nested field assignment), the
+            // maps:put uses the pre-value state — same semantics as self.x := expr.
             let current_state = self.current_state_var();
             let val_code = self.expression_doc(&arguments[1])?;
             let new_state = self.next_state_var();
