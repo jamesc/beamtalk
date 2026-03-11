@@ -1105,11 +1105,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_typed: false,
             is_value: false,
             is_native: false,
-            state: vec!["port".into(), "handler".into(), "listenerRef".into(), "actualPort".into()],
-            state_types: HashMap::from([("port".into(), "Integer".into()), ("actualPort".into(), "Integer".into())]),
+            state: vec![],
+            state_types: HashMap::new(),
             methods: vec![
-                MethodInfo { selector: "initialize".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Called after spawn — starts the cowboy listener.".into()) },
-                MethodInfo { selector: "terminate:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: None, param_types: vec![None], doc: Some("Called on actor shutdown — stops the cowboy listener.".into()) },
                 MethodInfo { selector: "port".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the TCP port this server is listening on.\n\nUseful when started with port 0 (ephemeral) to discover the\nactual assigned port.\n\n## Examples\n```beamtalk\nsrv port   // => 8080\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable representation.".into()) },
             ],
