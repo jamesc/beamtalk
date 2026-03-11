@@ -15,7 +15,10 @@
 //! **References:**
 //! - `docs/beamtalk-ddd-model.md` - Semantic Analysis Context
 
-use crate::ast::{Block, ClassDefinition, Expression, MatchArm, MethodDefinition, Module};
+use crate::ast::{
+    Block, ClassDefinition, Expression, Identifier, MatchArm, MessageSelector, MethodDefinition,
+    Module,
+};
 use crate::semantic_analysis::scope::{BindingKind, Scope};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -161,11 +164,28 @@ impl NameResolver {
         // parameters are forwarded implicitly to the underlying Erlang function;
         // none of them appear as identifiers in the AST, so the normal
         // "never referenced" heuristic produces false positives.
+        //
+        // BT-1211: Also suppress for `self delegate` bodies — parameters are
+        // used by the generated dispatch function, not the Beamtalk body.
         let is_primitive_body = matches!(
             method.body.as_slice(),
             [s] if matches!(s.expression, Expression::Primitive { .. })
         );
-        if !is_primitive_body {
+        let is_self_delegate_body = matches!(
+            method.body.as_slice(),
+            [s] if matches!(
+                &s.expression,
+                Expression::MessageSend {
+                    receiver,
+                    selector: MessageSelector::Unary(sel),
+                    arguments,
+                    ..
+                } if arguments.is_empty()
+                    && sel.as_str() == "delegate"
+                    && matches!(receiver.as_ref(), Expression::Identifier(Identifier { name, .. }) if name.as_str() == "self")
+            )
+        );
+        if !is_primitive_body && !is_self_delegate_body {
             self.collect_unused_param_warnings();
         }
 

@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc OTP gen_server for interactive subprocess management (ADR 0051, Phase 4a+4b).
+%%% @doc OTP gen_server for interactive subprocess management (ADR 0051, ADR 0056).
 %%%
 %%% **DDD Context:** Actor System Context
 %%%
@@ -9,6 +9,10 @@
 %%% Rust helper binary and manages exactly one child subprocess (ChildId = 0).
 %%% stdout and stderr data are buffered independently in OTP queues; callers
 %%% block via deferred `gen_server:reply/2` until a complete line is available.
+%%%
+%%% Native backing gen_server for the Subprocess class (ADR 0056). The compiled
+%%% facade module (`bt@stdlib@subprocess`) handles class/instance dispatch;
+%%% this module only exports `start_link/1` and gen_server callbacks.
 %%%
 %%% == State Map ==
 %%%
@@ -43,6 +47,7 @@
 %%% == References ==
 %%%
 %%% * ADR 0051 "Subprocess Execution" — Tier 2 design
+%%% * ADR 0056 "Native Erlang-Backed Actors" — native: + self delegate
 %%% * ADR 0021 "Streams and I/O" — Stream generator pattern
 %%% * `beamtalk_exec_port` — low-level port commands
 
@@ -54,12 +59,6 @@
 
 %% Public API
 -export([start_link/1, start/1]).
-%% Class-side dispatch (called from compiled bt@stdlib@subprocess)
--export([dispatch/3]).
-%% FFI shims for (Erlang beamtalk_subprocess) dispatch
--export([open/2, open/4]).
--export([writeLine/2, readLine/1, readLine/2, readStderrLine/1, readStderrLine/2]).
--export([lines/1, stderrLines/1, exitCode/1, close/1]).
 
 %% gen_server callbacks
 -export([
@@ -85,138 +84,16 @@
 }.
 
 %%% ============================================================================
-%%% Class-side dispatch — called from FFI shims open/2, open/4
-%%% ============================================================================
-
-%% @doc Dispatch a class-side method call for Subprocess.
-%%
-%% Called by the `open/2` and `open/4` FFI shims.
-%% Instance method calls go directly to the gen_server via `beamtalk_actor:sync_send/3`.
--spec dispatch(atom(), list(), term()) -> term().
-
-dispatch('open:args:', [Command, Args], _ClassSelf) when is_binary(Command) ->
-    ArgsList = bt_array_to_list(Args, 'open:args:'),
-    ensure_binary_args(ArgsList, 'open:args:'),
-    start_subprocess(#{executable => Command, args => ArgsList}, 'open:args:');
-dispatch('open:args:', [_Command, _Args], _ClassSelf) ->
-    Err = beamtalk_error:new(type_error, 'Subprocess', 'open:args:'),
-    beamtalk_error:raise(Err);
-dispatch('open:args:env:dir:', [Command, Args, Env, Dir], _ClassSelf) when
-    is_binary(Command), is_binary(Dir), is_map(Env)
-->
-    ArgsList = bt_array_to_list(Args, 'open:args:env:dir:'),
-    ensure_binary_args(ArgsList, 'open:args:env:dir:'),
-    EnvMap = maps:without(['$beamtalk_class'], Env),
-    ensure_binary_env(EnvMap, 'open:args:env:dir:'),
-    start_subprocess(
-        #{executable => Command, args => ArgsList, env => EnvMap, dir => Dir},
-        'open:args:env:dir:'
-    );
-dispatch('open:args:env:dir:', [_Command, _Args, _Env, _Dir], _ClassSelf) ->
-    Err = beamtalk_error:new(type_error, 'Subprocess', 'open:args:env:dir:'),
-    beamtalk_error:raise(Err);
-dispatch(Selector, _Args, _Self) ->
-    Err0 = beamtalk_error:new(does_not_understand, 'Subprocess'),
-    Err1 = beamtalk_error:with_selector(Err0, Selector),
-    beamtalk_error:raise(Err1).
-
-%%% ============================================================================
-%%% FFI Shims — (Erlang beamtalk_subprocess) dispatch
-%%% ============================================================================
-%%
-%% selector_to_function/1 extracts the first keyword segment as the function name.
-%% Class-side shims delegate to dispatch/3; instance-side shims use sync_send/3
-%% to route through the gen_server's handle_call.
-
-%% `open:args:` → strips to `open`, arity 2
-open(Command, Args) -> dispatch('open:args:', [Command, Args], nil).
-
-%% `open:args:env:dir:` → strips to `open`, arity 4
-open(Command, Args, Env, Dir) -> dispatch('open:args:env:dir:', [Command, Args, Env, Dir], nil).
-
-%% `writeLine:data:` → strips to `writeLine`, arity 2
-writeLine(#beamtalk_object{pid = Pid}, Data) ->
-    beamtalk_actor:sync_send(Pid, 'writeLine:', [Data]).
-
-%% `readLine:` → strips to `readLine`, arity 1
-readLine(#beamtalk_object{pid = Pid}) ->
-    beamtalk_actor:sync_send(Pid, readLine, []).
-
-%% `readLine:timeout:` → strips to `readLine`, arity 2
-readLine(#beamtalk_object{pid = Pid}, Timeout) ->
-    beamtalk_actor:sync_send(Pid, 'readLine:', [Timeout]).
-
-%% `readStderrLine:` → strips to `readStderrLine`, arity 1
-readStderrLine(#beamtalk_object{pid = Pid}) ->
-    beamtalk_actor:sync_send(Pid, readStderrLine, []).
-
-%% `readStderrLine:timeout:` → strips to `readStderrLine`, arity 2
-readStderrLine(#beamtalk_object{pid = Pid}, Timeout) ->
-    beamtalk_actor:sync_send(Pid, 'readStderrLine:', [Timeout]).
-
-%% `lines:` → strips to `lines`, arity 1
-lines(#beamtalk_object{pid = Pid}) ->
-    beamtalk_actor:sync_send(Pid, lines, []).
-
-%% `stderrLines:` → strips to `stderrLines`, arity 1
-stderrLines(#beamtalk_object{pid = Pid}) ->
-    beamtalk_actor:sync_send(Pid, stderrLines, []).
-
-%% `exitCode:` → strips to `exitCode`, arity 1
-exitCode(#beamtalk_object{pid = Pid}) ->
-    beamtalk_actor:sync_send(Pid, exitCode, []).
-
-%% `close:` → strips to `close`, arity 1
-close(#beamtalk_object{pid = Pid}) ->
-    beamtalk_actor:sync_send(Pid, close, []).
-
-%% @private Start a supervised beamtalk_subprocess gen_server.
-%%
-%% Returns `Result ok: subprocessObject` on success, `Result error:` if the
-%% process cannot be started (e.g. binary not found, permission denied).
--spec start_subprocess(map(), atom()) -> map().
-start_subprocess(Config, Selector) ->
-    case beamtalk_subprocess_sup:start_child(Config) of
-        {ok, Pid} ->
-            beamtalk_result:from_tagged_tuple(
-                {ok, #beamtalk_object{
-                    class = 'Subprocess',
-                    class_mod = 'bt@stdlib@subprocess',
-                    pid = Pid
-                }}
-            );
-        {error, Reason} ->
-            Err0 = beamtalk_error:new(runtime_error, 'Subprocess', Selector),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary(io_lib:format("Failed to start subprocess: ~p", [Reason]))
-            ),
-            beamtalk_result:from_tagged_tuple({error, Err1})
-    end.
-
-%% @private Convert a Beamtalk Array (tagged map or plain list) to an Erlang list.
--spec bt_array_to_list(term(), atom()) -> list().
-bt_array_to_list(Args, Selector) ->
-    beamtalk_subprocess_port:bt_array_to_list('Subprocess', Args, Selector).
-
-%% @private Raise type_error if any element of Args is not a binary.
--spec ensure_binary_args(list(), atom()) -> ok.
-ensure_binary_args(Args, Selector) ->
-    beamtalk_subprocess_port:ensure_binary_args('Subprocess', Args, Selector).
-
-%% @private Raise type_error if any key or value in Env is not a binary.
--spec ensure_binary_env(map(), atom()) -> ok.
-ensure_binary_env(Env, Selector) ->
-    beamtalk_subprocess_port:ensure_binary_env('Subprocess', Env, Selector).
-
-%%% ============================================================================
 %%% Public API
 %%% ============================================================================
 
 %% @doc Start a linked subprocess gen_server.
 %%
 %% Config must contain `executable` (binary path or name on PATH).
-%% Optional keys: `args` ([binary()]), `env` (#{binary() => binary()}), `dir` (binary()).
+%% Optional keys: `args` (Beamtalk Array or Erlang list of binaries),
+%% `env` (#{binary() => binary()}), `dir` (binary()).
+%%
+%% Called by the native facade's `spawn/1` via `spawnWith:`.
 -spec start_link(config()) -> {ok, pid()} | {error, term()}.
 start_link(Config) ->
     gen_server:start_link(?MODULE, Config, []).
@@ -230,30 +107,37 @@ start(Config) ->
 %%% gen_server callbacks
 %%% ============================================================================
 
-%% @doc Open the exec port and spawn the child subprocess.
+%% @doc Validate config, open the exec port and spawn the child subprocess.
+%%
+%% Accepts raw Beamtalk values from `spawnWith:`: the `args` field may be a
+%% Beamtalk Array (tagged map) which is coerced to an Erlang list. The `env`
+%% field has its `$beamtalk_class` key stripped if present.
 -spec init(config()) -> {ok, map()} | {stop, term()}.
 init(Config) ->
-    Executable = maps:get(executable, Config),
-    Args = maps:get(args, Config, []),
-    Options = maps:with([env, dir], Config),
-    Port = beamtalk_exec_port:open(),
-    ChildId = 0,
-    beamtalk_exec_port:spawn_child(Port, ChildId, Executable, Args, Options),
-    ?LOG_INFO("Subprocess spawned", #{executable => Executable, child_id => ChildId}),
-    State = #{
-        port => Port,
-        child_id => ChildId,
-        {stdout, buffer} => queue:new(),
-        {stdout, pending} => <<>>,
-        {stdout, waiting} => undefined,
-        {stderr, buffer} => queue:new(),
-        {stderr, pending} => <<>>,
-        {stderr, waiting} => undefined,
-        exit_code => nil,
-        child_exited => false,
-        port_closed => false
-    },
-    {ok, State}.
+    case validate_config(Config) of
+        {ok, #{executable := Executable, args := Args} = ValidConfig} ->
+            Options = maps:with([env, dir], ValidConfig),
+            Port = beamtalk_exec_port:open(),
+            ChildId = 0,
+            beamtalk_exec_port:spawn_child(Port, ChildId, Executable, Args, Options),
+            ?LOG_INFO("Subprocess spawned", #{executable => Executable, child_id => ChildId}),
+            State = #{
+                port => Port,
+                child_id => ChildId,
+                {stdout, buffer} => queue:new(),
+                {stdout, pending} => <<>>,
+                {stdout, waiting} => undefined,
+                {stderr, buffer} => queue:new(),
+                {stderr, pending} => <<>>,
+                {stderr, waiting} => undefined,
+                exit_code => nil,
+                child_exited => false,
+                port_closed => false
+            },
+            {ok, State};
+        {error, Reason} ->
+            {stop, Reason}
+    end.
 
 %% @doc Dispatch sync calls.
 -spec handle_call(term(), term(), map()) ->
@@ -351,6 +235,99 @@ code_change(_OldVsn, State, _Extra) ->
 terminate(_Reason, State) ->
     cleanup_port(State),
     ok.
+
+%%% ============================================================================
+%%% Config validation (moved from dispatch/3, BT-1211)
+%%% ============================================================================
+
+%% @private Validate and normalize the config map from spawnWith:.
+%%
+%% Coerces Beamtalk Arrays to Erlang lists, strips $beamtalk_class from env,
+%% and validates types. Returns {ok, CleanConfig} or {error, Reason}.
+-spec validate_config(map()) -> {ok, config()} | {error, term()}.
+validate_config(Config) when is_map(Config) ->
+    case maps:get(executable, Config, undefined) of
+        undefined ->
+            {error, {missing_key, executable}};
+        Executable when not is_binary(Executable) ->
+            {error, {type_error, executable, expected_binary}};
+        Executable ->
+            validate_config_args(Config, Executable)
+    end;
+validate_config(_Other) ->
+    {error, {type_error, config, expected_map}}.
+
+%% @private Validate and coerce the args field.
+-spec validate_config_args(map(), binary()) -> {ok, config()} | {error, term()}.
+validate_config_args(Config, Executable) ->
+    RawArgs = maps:get(args, Config, []),
+    case coerce_args(RawArgs) of
+        {ok, ArgsList} ->
+            case lists:all(fun erlang:is_binary/1, ArgsList) of
+                true ->
+                    validate_config_env(Config, Executable, ArgsList);
+                false ->
+                    {error, {type_error, args, expected_binary_elements}}
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+%% @private Validate and clean the env field.
+-spec validate_config_env(map(), binary(), [binary()]) -> {ok, config()} | {error, term()}.
+validate_config_env(Config, Executable, ArgsList) ->
+    Base = #{executable => Executable, args => ArgsList},
+    case maps:get(env, Config, undefined) of
+        undefined ->
+            maybe_add_dir(Config, Base);
+        Env when is_map(Env) ->
+            CleanEnv = maps:without(['$beamtalk_class'], Env),
+            case validate_binary_env(CleanEnv) of
+                ok ->
+                    maybe_add_dir(Config, Base#{env => CleanEnv});
+                {error, _} = Err ->
+                    Err
+            end;
+        _Other ->
+            {error, {type_error, env, expected_map}}
+    end.
+
+%% @private Optionally add the dir field.
+-spec maybe_add_dir(map(), config()) -> {ok, config()} | {error, term()}.
+maybe_add_dir(Config, Base) ->
+    case maps:get(dir, Config, undefined) of
+        undefined ->
+            {ok, Base};
+        Dir when is_binary(Dir) ->
+            {ok, Base#{dir => Dir}};
+        _Other ->
+            {error, {type_error, dir, expected_binary}}
+    end.
+
+%% @private Coerce a Beamtalk Array (tagged map) or plain list to an Erlang list.
+-spec coerce_args(term()) -> {ok, list()} | {error, term()}.
+coerce_args(#{'$beamtalk_class' := 'Array', 'data' := Arr}) ->
+    case array:is_array(Arr) of
+        true -> {ok, array:to_list(Arr)};
+        false -> {error, {type_error, args, invalid_array}}
+    end;
+coerce_args(List) when is_list(List) ->
+    {ok, List};
+coerce_args(_Other) ->
+    {error, {type_error, args, expected_list_or_array}}.
+
+%% @private Validate that all keys and values in env are binaries.
+-spec validate_binary_env(map()) -> ok | {error, term()}.
+validate_binary_env(Env) ->
+    AllBinary = maps:fold(
+        fun(K, V, Acc) -> Acc andalso is_binary(K) andalso is_binary(V) end,
+        true,
+        Env
+    ),
+    case AllBinary of
+        true -> ok;
+        false -> {error, {type_error, env, expected_binary_keys_and_values}}
+    end.
 
 %%% ============================================================================
 %%% Internal handlers
