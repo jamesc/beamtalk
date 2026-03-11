@@ -5,6 +5,9 @@
 <!-- btfixture: fixtures/ch12parser_test.bt -->
 <!-- btfixture: fixtures/ch12dnu.bt -->
 <!-- btfixture: fixtures/ch12validator.bt -->
+<!-- btfixture: fixtures/ch12validation_error.bt -->
+<!-- btfixture: fixtures/ch12custom_errors.bt -->
+<!-- btfixture: fixtures/ch12ensure.bt -->
 
 ## Error Handling
 
@@ -25,49 +28,127 @@ The handler block receives the exception object.
 ```beamtalk
 TestCase subclass: Ch12Exceptions
 
-  testBasicOnDo =>
-    // Catch any exception:
-    result := [1 / 0] on: Error do: [:e | "caught: {e messageText}"]
-    self assert: (result startsWith: "caught:")
-
   testCatchDivisionByZero =>
-    // Division by zero raises a runtime exception — catch with Exception:
     result := [10 / 0] on: Exception do: [:e | -1]
     self assert: result equals: -1
 
   testDoesNotUnderstand =>
-    // Sending an unknown message raises does_not_understand (a RuntimeError):
-    result := [42 bogusMessage] on: RuntimeError do: [:e | #caught]
+    result := [42 perform: #bogusMessage] on: RuntimeError do: [:e | #caught]
     self assert: result equals: #caught
 
   testUncaughtExceptionPropagates =>
     // When the on:do: class doesn't match, the exception propagates:
     self should: [
-      [42 bogusMessage] on: TypeError do: [:e | #wrong]
+      [42 perform: #bogusMessage] on: TypeError do: [:e | #wrong]
     ] raise: #does_not_understand
 
   testOnDoWithException =>
-    // Catch any exception:
     r1 := [1 / 0] on: Exception do: [:e | #caught]
     self assert: r1 equals: #caught
 
-  testEnsure =>
-    // ensure: always runs its block, even if an exception occurs:
-    ran := false
-    [42] ensure: [ran := true]
-    self assert: ran
-
-  testEnsureRunsOnException =>
-    ran := false
-    [
-      [1 / 0] on: Exception do: [:e | nil]
-    ] ensure: [ran := true]
-    self assert: ran
-
-  testErrorMessageText =>
-    // Exception objects have messageText:
-    text := [42 bogusMessage] on: RuntimeError do: [:e | e messageText]
+  testErrorMessage =>
+    // Exception objects expose their message:
+    text := [42 perform: #bogusMessage] on: RuntimeError do: [:e | e message]
     self assert: (text isKindOf: String)
+```
+
+### The exception hierarchy
+
+Beamtalk's exception classes form a hierarchy:
+
+```text
+Exception
+  └── Error
+        ├── RuntimeError  (does_not_understand, arity_mismatch, etc.)
+        └── TypeError     (type mismatches)
+```
+
+Catching `Exception` catches everything. Catching `RuntimeError` catches
+only runtime dispatch errors. Use the narrowest match appropriate.
+
+### Custom exception classes
+
+Define your own exception classes by subclassing `Error`:
+
+```beamtalk
+Error subclass: ValidationError
+```
+
+Signal (raise) a custom exception with `signal:`:
+
+```beamtalk
+TestCase subclass: Ch12CustomErrors
+
+  testSignalCustomError =>
+    result := [
+      ValidationError new signal: "bad input"
+    ] on: ValidationError do: [:e | e message]
+    self assert: result equals: "bad input"
+
+  testCatchByParentClass =>
+    result := [
+      ValidationError new signal: "oops"
+    ] on: Error do: [:e | "caught by Error"]
+    self assert: result equals: "caught by Error"
+
+  testCatchByRootException =>
+    result := [
+      ValidationError new signal: "oops"
+    ] on: Exception do: [:e | "caught by Exception"]
+    self assert: result equals: "caught by Exception"
+
+  testNonMatchingClassDoesNotCatch =>
+    result := [
+      [ValidationError new signal: "no"] on: TypeError do: [:e | "wrong"]
+    ] on: Exception do: [:e | "correct"]
+    self assert: result equals: "correct"
+
+  testExceptionClassPreserved =>
+    result := [
+      ValidationError new signal: "test"
+    ] on: Exception do: [:e | e class]
+    self assert: result equals: ValidationError
+```
+
+### ensure: — guaranteed cleanup
+
+`ensure:` runs its block whether the protected code succeeds or raises
+an exception. It returns the value of the protected block (not the
+cleanup block).
+
+```beamtalk
+TestCase subclass: Ch12Ensure
+
+  testEnsureReturnsBodyValue =>
+    result := [42] ensure: [99]
+    self assert: result equals: 42
+
+  testEnsureReturnsBodyValueOnSuccess =>
+    result := ["hello"] ensure: [nil]
+    self assert: result equals: "hello"
+```
+
+Use `ensure:` for cleanup that must always happen:
+
+```text
+[file := File open: path] ensure: [file close]
+[connection doQuery: sql] ensure: [connection release]
+```
+
+### Error propagation patterns
+
+Combine `on:do:` and `ensure:` for robust error handling:
+
+```text
+// Catch, clean up, and re-raise:
+[riskyOperation]
+  on: Error do: [:e |
+    logger log: "Failed: " ++ e message.
+    e signal: e message    // re-signal to propagate
+  ]
+
+// Guaranteed cleanup regardless of outcome:
+[riskyOperation] ensure: [cleanup]
 ```
 
 ## 2. Result type — explicit ok/error values
@@ -147,6 +228,15 @@ TestCase subclass: Ch12ParserTest
     self assert: r error equals: #parse_error
 ```
 
+### When to use Result vs exceptions
+
+| Situation | Approach |
+|-----------|----------|
+| Unexpected failures (bugs) | Let exceptions propagate |
+| Expected, recoverable errors | Return `Result` |
+| Parsing, validation | `Result` — caller decides how to handle |
+| Resource exhaustion, I/O | Either — depends on API style |
+
 ## 3. doesNotUnderstand (DNU)
 
 When you send a message an object doesn't understand, it raises a
@@ -169,7 +259,7 @@ TestCase subclass: Ch12DNU
     self assert: result equals: "false"
 
   testDNUCaught =>
-    result := [42 bogusMessage] on: RuntimeError do: [:e | #caught]
+    result := [42 perform: #bogusMessage] on: RuntimeError do: [:e | #caught]
     self assert: result equals: #caught
 ```
 
@@ -206,10 +296,17 @@ TestCase subclass: Ch12Validator
 **Exceptions:**
 
 ```
-[code] on: Exception do: [:e | handler]
-[code] on: RuntimeError do: [:e | handler]
-[code] ensure: [always-runs]
-self error: "message"
+[code] on: Exception do: [:e | handler]     — catch by class
+[code] on: MyCustomError do: [:e | handler]  — catch custom exception
+[code] ensure: [always-runs]                 — guaranteed cleanup
+self error: "message"                        — raise from your code
+MyError new signal: "message"                — raise custom exception
+```
+
+**Exception hierarchy:**
+
+```
+Exception → Error → RuntimeError / TypeError / YourCustomError
 ```
 
 **Result:**

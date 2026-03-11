@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/11-actors.md (cast vs call)
+
+TestCase subclass: Ch11CastSend
+
+  testCastSendIncrements =>
+    c := Counter spawn
+    c increment!
+    // Sync barrier: getValue forces cast to be processed first
+    self assert: c getValue equals: 1
+
+  testMultipleCastSends =>
+    c := Counter spawn
+    c increment!
+    c increment!
+    c increment!
+    self assert: c getValue equals: 3
+
+  testSyncCallReturnsValue =>
+    c := Counter spawn
+    c increment
+    self assert: c getValue equals: 1

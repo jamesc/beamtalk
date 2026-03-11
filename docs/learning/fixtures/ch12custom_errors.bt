@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/12-error-handling.md (custom exceptions)
+
+TestCase subclass: Ch12CustomErrors
+
+  testSignalCustomError =>
+    result := [
+      ValidationError new signal: "bad input"
+    ] on: ValidationError do: [:e | e message]
+    self assert: result equals: "bad input"
+
+  testCatchByParentClass =>
+    result := [
+      ValidationError new signal: "oops"
+    ] on: Error do: [:e | "caught by Error"]
+    self assert: result equals: "caught by Error"
+
+  testCatchByRootException =>
+    result := [
+      ValidationError new signal: "oops"
+    ] on: Exception do: [:e | "caught by Exception"]
+    self assert: result equals: "caught by Exception"
+
+  testNonMatchingClassDoesNotCatch =>
+    result := [
+      [ValidationError new signal: "no"] on: TypeError do: [:e | "wrong"]
+    ] on: Exception do: [:e | "correct"]
+    self assert: result equals: "correct"
+
+  testExceptionClassPreserved =>
+    result := [
+      ValidationError new signal: "test"
+    ] on: Exception do: [:e | e class]
+    self assert: result equals: ValidationError

@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/12-error-handling.md (ensure: blocks)
+
+TestCase subclass: Ch12Ensure
+
+  testEnsureReturnsBodyValue =>
+    result := [42] ensure: [99]
+    self assert: result equals: 42
+
+  testEnsureReturnsBodyValueOnSuccess =>
+    result := ["hello"] ensure: [nil]
+    self assert: result equals: "hello"
