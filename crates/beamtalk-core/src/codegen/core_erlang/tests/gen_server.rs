@@ -2881,3 +2881,109 @@ fn test_native_facade_spawn_error_raises_instantiation_error() {
         "Should include reason in error details. Got:\n{code}"
     );
 }
+
+/// Build a native actor with class methods and class variables for richer tests.
+fn make_native_actor_with_class_methods() -> Module {
+    let class = ClassDefinition {
+        name: Identifier::new("TestNativeRich", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
+        class_kind: ClassKind::Actor,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods: vec![MethodDefinition {
+            selector: MessageSelector::Unary("status".into()),
+            parameters: vec![],
+            body: vec![bare(Expression::Identifier(Identifier::new(
+                "self",
+                Span::new(0, 0),
+            )))],
+            kind: MethodKind::Primary,
+            return_type: None,
+            is_sealed: false,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: Span::new(0, 0),
+        }],
+        class_methods: vec![MethodDefinition {
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("connect:", Span::new(0, 0))]),
+            parameters: vec![ParameterDefinition::new(Identifier::new(
+                "config",
+                Span::new(0, 0),
+            ))],
+            body: vec![bare(Expression::Identifier(Identifier::new(
+                "config",
+                Span::new(0, 0),
+            )))],
+            kind: MethodKind::Primary,
+            return_type: None,
+            is_sealed: false,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: Span::new(0, 0),
+        }],
+        class_variables: vec![StateDeclaration {
+            name: Identifier::new("current", Span::new(0, 0)),
+            type_annotation: None,
+            default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: Span::new(0, 0),
+        }],
+        comments: CommentAttachment::default(),
+        doc_comment: Some("A test native actor with class methods.".to_string()),
+        backing_module: Some("test_rich_backing".to_string()),
+        span: Span::new(0, 0),
+    };
+    Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    }
+}
+
+#[test]
+fn test_native_facade_class_methods_exported() {
+    // ADR 0056: Class methods on native actors compile normally
+    let module = make_native_actor_with_class_methods();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'class_connect:'/3"),
+        "Should export class method 'class_connect:'/3. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_class_variables_in_builder_state() {
+    // ADR 0056: classState: should appear in BuilderState
+    let module = make_native_actor_with_class_methods();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'classState' => ~{'current' =>"),
+        "BuilderState should include class variables. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_doc_comments_in_builder_state() {
+    // Doc comments should propagate to BuilderState
+    let module = make_native_actor_with_class_methods();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'classDoc' =>"),
+        "BuilderState should include classDoc. Got:\n{code}"
+    );
+    // classDoc should not be 'none' since we set a doc comment
+    assert!(
+        !code.contains("'classDoc' => 'none'"),
+        "classDoc should not be 'none' when doc comment is set. Got:\n{code}"
+    );
+}

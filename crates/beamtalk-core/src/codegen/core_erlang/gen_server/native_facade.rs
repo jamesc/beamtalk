@@ -120,10 +120,10 @@ impl CoreErlangGenerator {
             .classes
             .first()
             .and_then(|c| c.backing_module.as_deref())
-            .unwrap_or("unknown");
+            .expect("native facade requires backing_module");
 
-        push_fn(self.generate_native_spawn_0(module, backing_module)?);
-        push_fn(self.generate_native_spawn_1(module, backing_module)?);
+        push_fn(self.generate_native_spawn_0()?);
+        push_fn(self.generate_native_spawn_1(backing_module)?);
 
         // new/0 and new/1 error methods (actors can't use new)
         push_fn(self.generate_actor_new_error_method()?);
@@ -165,11 +165,7 @@ impl CoreErlangGenerator {
     ///     call 'bt@stdlib@subprocess':'spawn'(~{}~)
     /// ```
     #[allow(clippy::unnecessary_wraps)]
-    fn generate_native_spawn_0(
-        &mut self,
-        _module: &Module,
-        _backing_module: &str,
-    ) -> Result<Document<'static>> {
+    fn generate_native_spawn_0(&mut self) -> Result<Document<'static>> {
         let doc = docvec![
             "'spawn'/0 = fun () ->",
             nest(
@@ -210,11 +206,7 @@ impl CoreErlangGenerator {
         clippy::too_many_lines,
         reason = "native spawn-with-args handles map validation and error details"
     )]
-    fn generate_native_spawn_1(
-        &mut self,
-        _module: &Module,
-        backing_module: &str,
-    ) -> Result<Document<'static>> {
+    fn generate_native_spawn_1(&mut self, backing_module: &str) -> Result<Document<'static>> {
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
         let hint_binary = Self::binary_string_literal("spawnWith: expects a Dictionary argument");
@@ -329,7 +321,10 @@ impl CoreErlangGenerator {
             return Ok(Document::Nil);
         };
 
-        let backing_module = class.backing_module.as_deref().unwrap_or("unknown");
+        let backing_module = class
+            .backing_module
+            .as_deref()
+            .expect("native facade requires backing_module");
 
         // Reuse the standard meta map and append native-specific keys
         Ok(docvec![
@@ -433,7 +428,10 @@ impl CoreErlangGenerator {
         let mut class_docs = Vec::new();
 
         for (i, class) in module.classes.iter().enumerate() {
-            let backing_module = class.backing_module.as_deref().unwrap_or("unknown");
+            let backing_module = class
+                .backing_module
+                .as_deref()
+                .expect("native facade requires backing_module");
 
             // Instance methods
             let instance_methods: Vec<_> = class
