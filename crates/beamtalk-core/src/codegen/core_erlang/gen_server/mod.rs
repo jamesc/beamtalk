@@ -25,5 +25,6 @@
 mod callbacks;
 mod dispatch;
 mod methods;
+mod native_facade;
 mod spawn;
 mod state;

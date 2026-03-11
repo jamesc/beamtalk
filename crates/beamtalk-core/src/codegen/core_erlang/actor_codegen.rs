@@ -43,6 +43,16 @@ impl CoreErlangGenerator {
             return self.generate_supervisor_module(module);
         }
 
+        // ADR 0056: Native Erlang-backed actors generate a thin facade module
+        // instead of a full gen_server module.
+        if module
+            .classes
+            .first()
+            .is_some_and(|c| c.backing_module.is_some())
+        {
+            return self.generate_native_facade_module(module);
+        }
+
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
         self.setup_class_identity(module);
@@ -263,7 +273,7 @@ impl CoreErlangGenerator {
     /// Sets up class identity and sealed method selectors from the module's class definition.
     /// BT-295: Set class identity for @primitive codegen.
     /// BT-403: Include sealed/abstract flags and collect sealed method selectors.
-    fn setup_class_identity(&mut self, module: &Module) {
+    pub(in crate::codegen::core_erlang) fn setup_class_identity(&mut self, module: &Module) {
         if let Some(class) = module.classes.first() {
             self.class_identity = Some(ClassIdentity::from_class_def(
                 &class.name.name,
@@ -310,7 +320,9 @@ impl CoreErlangGenerator {
     }
 
     /// Builds the export fragment for class-side method functions (BT-411).
-    fn build_class_method_export_doc(module: &Module) -> Document<'static> {
+    pub(in crate::codegen::core_erlang) fn build_class_method_export_doc(
+        module: &Module,
+    ) -> Document<'static> {
         let Some(class) = module.classes.first() else {
             return Document::Nil;
         };
