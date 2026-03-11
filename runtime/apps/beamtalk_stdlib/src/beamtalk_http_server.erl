@@ -120,7 +120,7 @@ ensure_started(App) ->
 -spec validate_handler(term()) -> ok | no_return().
 validate_handler(Handler) when is_function(Handler, 1) -> ok;
 validate_handler(Handler) when is_pid(Handler) -> ok;
-validate_handler(#{compiledRoutes := Routes}) when is_list(Routes) -> ok;
+validate_handler(#{compiledRoutes := Routes, notFoundHandler := _}) when is_list(Routes) -> ok;
 validate_handler(_) ->
     type_error(
         'startListener:handler:',

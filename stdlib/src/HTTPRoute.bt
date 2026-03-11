@@ -4,7 +4,7 @@
 /// HTTPRoute — Sealed value class representing a single HTTP route.
 ///
 /// Each HTTPRoute pairs an HTTP method and path pattern with a handler
-/// block. Routes are assembled into an Array and passed to
+/// block. Routes are assembled into a List and passed to
 /// `HTTPRouter routes:` to build a compiled router.
 ///
 /// ## Path patterns

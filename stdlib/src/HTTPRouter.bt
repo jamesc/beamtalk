@@ -22,7 +22,7 @@
 /// srv := HTTPServer start: 8080 handler: router
 /// ```
 ///
-/// ## Route array API
+/// ## Route list API
 /// ```beamtalk
 /// router := HTTPRouter routes: #(
 ///   HTTPRoute get: "/" handler: [:req | HTTPResponse new: #{ #status => 200, #body => "home" }],
@@ -80,7 +80,7 @@ sealed Value subclass: HTTPRouter
     builder stop
     self compileRoutes: routeList notFoundHandler: nfHandler
 
-  /// Build a router from an Array of HTTPRoute values.
+  /// Build a router from a List of HTTPRoute values.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -91,7 +91,7 @@ sealed Value subclass: HTTPRouter
   class routes: routeArray :: List -> HTTPRouter =>
     self compileRoutes: routeArray notFoundHandler: nil
 
-  /// Internal: compile an array of HTTPRoute values into a frozen router.
+  /// Internal: compile a list of HTTPRoute values into a frozen router.
   class compileRoutes: routeArray notFoundHandler: notFoundHandler -> HTTPRouter =>
     rawRoutes := routeArray collect: [:route |
       #(route method, route path, route handler)
