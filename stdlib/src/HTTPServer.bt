@@ -34,15 +34,7 @@
 /// srv port   // => (dynamically assigned port)
 /// srv stop
 /// ```
-Actor subclass: HTTPServer
-  /// The requested port (0 for ephemeral).
-  state: port :: Integer = 0
-  /// The handler block or actor.
-  state: handler = nil
-  /// Opaque reference to the cowboy listener (internal).
-  state: listenerRef = nil
-  /// The actual TCP port the server is listening on.
-  state: actualPort :: Integer = 0
+Actor subclass: HTTPServer native: beamtalk_http_server
 
   /// Start an HTTP server on the given port with a handler block or actor.
   ///
@@ -71,18 +63,6 @@ Actor subclass: HTTPServer
   class start: port :: Integer handler: handler options: opts :: Dictionary -> HTTPServer =>
     self spawnWith: (#{#port => port, #handler => handler} merge: opts)
 
-  /// Called after spawn — starts the cowboy listener.
-  initialize =>
-    result := (Erlang beamtalk_http_server) startListener: self.port handler: self.handler
-    self.listenerRef := result at: 1
-    self.actualPort := result at: 2
-
-  /// Called on actor shutdown — stops the cowboy listener.
-  terminate: _reason =>
-    self.listenerRef isNil ifFalse: [
-      (Erlang beamtalk_http_server) stopListener: self.listenerRef
-    ]
-
   /// Return the TCP port this server is listening on.
   ///
   /// Useful when started with port 0 (ephemeral) to discover the
@@ -92,8 +72,7 @@ Actor subclass: HTTPServer
   /// ```beamtalk
   /// srv port   // => 8080
   /// ```
-  port -> Integer => self.actualPort
+  port -> Integer => self delegate
 
   /// Human-readable representation.
-  printString -> String =>
-    "an HTTPServer(port: " ++ self.actualPort printString ++ ")"
+  printString -> String => self delegate

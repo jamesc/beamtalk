@@ -1,25 +1,123 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc HTTPServer lifecycle management — cowboy wrapper for Beamtalk (BT-1338).
+%%% @doc Native gen_server backing the HTTPServer actor class (BT-1338, ADR 0056).
 %%%
 %%% **DDD Context:** Object System Context
 %%%
-%%% Manages cowboy listener lifecycle for `HTTPServer` Actor class.
-%%% Called from the actor's `initialize` and `terminate` methods.
+%%% Manages cowboy listener lifecycle for the `HTTPServer` Actor class.
+%%% The compiled facade module (`bt@stdlib@httpserver`) handles class/instance
+%%% dispatch; this module exports `start_link/1` and gen_server callbacks.
+%%%
 %%% Each HTTPServer actor owns a cowboy listener identified by a unique
 %%% reference. The listener dispatches all requests to a single Beamtalk
 %%% handler (block or actor).
+%%%
+%%% == State Map ==
+%%%
+%%% ```erlang
+%%% #{
+%%%   listener_ref => reference(),      % cowboy listener ref
+%%%   actual_port  => non_neg_integer() % TCP port the server is listening on
+%%% }
+%%% ```
+%%%
+%%% == Selectors ==
+%%%
+%%% * `{port, []}` — return the TCP port the server is listening on
+%%% * `{printString, []}` — human-readable representation
 
 -module(beamtalk_http_server).
-
--export([startListener/2, startListener/3, stopListener/1, listenerPort/1]).
+-behaviour(gen_server).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+%% Native backing gen_server API (ADR 0056)
+-export([start_link/1]).
+
+%% gen_server callbacks
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2
+]).
+
+%% Legacy direct API — kept for EUnit tests and backward compatibility
+-export([startListener/2, startListener/3, stopListener/1, listenerPort/1]).
+
 %%% ============================================================================
-%%% Public API (called from HTTPServer actor methods)
+%%% Public API
+%%% ============================================================================
+
+%% @doc Start a linked HTTPServer gen_server (ADR 0056).
+%%
+%% Config must contain `port` (integer) and `handler` (fun/1, pid, or HTTPRouter).
+%% Optional: `bind` (IP address binary, default `"127.0.0.1"`).
+%%
+%% Called by the native facade's `spawn/1` via `spawnWith:`.
+-spec start_link(map()) -> {ok, pid()} | {error, term()}.
+start_link(Config) ->
+    gen_server:start_link(?MODULE, Config, []).
+
+%%% ============================================================================
+%%% gen_server callbacks
+%%% ============================================================================
+
+%% @doc Start the cowboy listener on init.
+-spec init(map()) -> {ok, map()} | {stop, term()}.
+init(Config) when is_map(Config) ->
+    Port = maps:get(port, Config, 0),
+    Handler = maps:get(handler, Config, undefined),
+    Opts = maps:without([port, handler, '$beamtalk_class'], Config),
+    try startListener(Port, Handler, Opts) of
+        [Ref, ActualPort] ->
+            {ok, #{listener_ref => Ref, actual_port => ActualPort}}
+    catch
+        error:Err ->
+            {stop, Err}
+    end;
+init(_) ->
+    {stop, bad_config}.
+
+%% @doc Dispatch sync calls from `self delegate` methods.
+-spec handle_call(term(), term(), map()) ->
+    {reply, term(), map()}.
+handle_call({port, []}, _From, #{actual_port := ActualPort} = State) ->
+    {reply, ActualPort, State};
+handle_call({printString, []}, _From, #{actual_port := ActualPort} = State) ->
+    Str = iolist_to_binary([
+        <<"an HTTPServer(port: ">>,
+        integer_to_binary(ActualPort),
+        <<")">>
+    ]),
+    {reply, Str, State};
+handle_call(Msg, _From, State) ->
+    ?LOG_WARNING("Unknown call", #{message => Msg}),
+    {reply, {error, unknown_call}, State}.
+
+%% @doc Ignore casts.
+-spec handle_cast(term(), map()) -> {noreply, map()}.
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+%% @doc No-op — cowboy manages its own processes.
+-spec handle_info(term(), map()) -> {noreply, map()}.
+handle_info(_Msg, State) ->
+    {noreply, State}.
+
+%% @doc Stop the cowboy listener on shutdown.
+-spec terminate(term(), map()) -> ok.
+terminate(_Reason, #{listener_ref := Ref}) ->
+    stopListener(Ref),
+    ok;
+terminate(_Reason, _State) ->
+    ok.
+
+%%% ============================================================================
+%%% Legacy direct API (used by EUnit tests)
 %%% ============================================================================
 
 %% @doc Start a cowboy listener on the given port with a handler.
@@ -28,7 +126,7 @@
 %% `Handler` is a fun/1 (block) or actor pid responding to `handle:`.
 %% Binds to 127.0.0.1 by default.
 %%
-%% Returns `{Ref, ActualPort}` as a tuple (Erlang list for Beamtalk).
+%% Returns `[Ref, ActualPort]`.
 -dialyzer({nowarn_function, startListener/2}).
 -spec startListener(non_neg_integer(), fun() | pid()) -> list().
 startListener(Port, Handler) ->
