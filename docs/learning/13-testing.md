@@ -84,11 +84,10 @@ TestCase subclass: Ch13Assertions
 | `self assert: expr equals: expected` | Equality |
 | `self assert: boolExpr` | Truthy |
 | `self deny: boolExpr` | Falsy |
-| `self assertNil: expr` | Is nil |
-| `self denyNil: expr` | Is not nil |
 | `self should: [block] raise: #symbol` | Exception raised |
-| `self shouldnt: [block] raise: #symbol` | No exception |
-| `self assert: obj isKindOf: Class` | Type check |
+| `self assertOk: result` | Result is ok |
+| `self assertError: result equals: reason` | Result is error with reason |
+| `self assert: (obj isKindOf: Class)` | Type check (boolean expression) |
 
 ## setUp and tearDown
 
@@ -266,11 +265,10 @@ Key assertions:
 self assert: expr equals: expected
 self assert: boolExpr
 self deny: boolExpr
-self assertNil: expr
-self denyNil: expr
-self should: [block] raise: ExceptionClass
-self shouldnt: [block] raise: ExceptionClass
-self assert: obj isKindOf: Class
+self should: [block] raise: #symbol
+self assertOk: result
+self assertError: result equals: reason
+self assert: (obj isKindOf: Class)
 ```
 
 Run tests:
