@@ -86,6 +86,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             is_value: false,
+            is_native: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
