@@ -1631,7 +1631,7 @@ pub(crate) fn check_native_delegate_return_type(
         }
 
         for method in &class.methods {
-            if is_self_delegate_body(&method.body) && method.return_type.is_none() {
+            if method.is_self_delegate() && method.return_type.is_none() {
                 emit_delegate_return_type_warning(&method.selector, method.span, diagnostics);
             }
         }
@@ -1644,7 +1644,7 @@ pub(crate) fn check_native_delegate_return_type(
         }
         let class_name = standalone.class_name.name.as_str();
         if hierarchy.is_native(class_name)
-            && is_self_delegate_body(&standalone.method.body)
+            && standalone.method.is_self_delegate()
             && standalone.method.return_type.is_none()
         {
             emit_delegate_return_type_warning(
@@ -1672,25 +1672,6 @@ fn emit_delegate_return_type_warning(
         )
         .with_hint("Add a return type: `selector -> ReturnType => self delegate`".to_string()),
     );
-}
-
-/// Returns `true` if the method body is exactly `self delegate` —
-/// a single unary message send of `delegate` to `self`.
-fn is_self_delegate_body(body: &[crate::ast::ExpressionStatement]) -> bool {
-    if body.len() != 1 {
-        return false;
-    }
-    matches!(
-        &body[0].expression,
-        Expression::MessageSend {
-            receiver,
-            selector: MessageSelector::Unary(sel),
-            arguments,
-            ..
-        } if arguments.is_empty()
-            && sel.as_str() == "delegate"
-            && matches!(receiver.as_ref(), Expression::Identifier(Identifier { name, .. }) if name.as_str() == "self")
-    )
 }
 
 #[cfg(test)]
