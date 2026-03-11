@@ -27,7 +27,7 @@
 /// router := HTTPRouter routes: #(
 ///   HTTPRoute get: "/" handler: [:req | HTTPResponse new: #{ #status => 200, #body => "home" }],
 ///   HTTPRoute get: "/users/:id" handler: [:req |
-///     HTTPResponse new: #{ #status => 200, #body => req param: "id" }
+///     HTTPResponse new: #{ #status => 200, #body => (req param: "id") }
 ///   ]
 /// )
 /// ```
