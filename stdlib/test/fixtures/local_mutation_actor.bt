@@ -147,27 +147,26 @@ Actor subclass: LocalMutationActor
   // Direct-params loop should use expanded tuple for the inner list op.
   countItemsInRangeWithDo: items times: n =>
     count := 0
-    1 to: n do: [:i |
-      items do: [:x | count := count + 1]
-    ]
+    1 to: n do: [:i | items do: [:x | count := count + 1]]
     count
 
   // BT-1329: Nested inject:into: inside counted loop — outer var assigned from inject result.
   sumItemsNTimes: items times: n =>
     total := 0
-    1 to: n do: [:i |
-      total := items inject: total into: [:acc :x | acc + x]
-    ]
+    1 to: n do: [:i | total := items inject: total into: [:acc :x | acc + x]]
     total
 
   // BT-1329: Nested collect: inside counted loop with cross-scope mutation.
   collectAndCountNTimes: items times: n =>
     count := 0
     result := #()
-    1 to: n do: [:i |
-      result := items collect: [:x |
-        count := count + 1
-        x * i
+    1
+      to: n
+      do: [:i |
+        result := items
+          collect: [:x |
+            count := count + 1
+            x * i
+          ]
       ]
-    ]
     #{#result => result, #count => count}
