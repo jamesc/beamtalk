@@ -752,21 +752,98 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Simple case: no mutations, delegate to beamtalk_collection:inject_into
-        // which wraps the block to call Block(Acc, Elem) matching Beamtalk convention.
+        // BT-1327: Pure-block fast path — emit inline lists:foldl instead of
+        // calling beamtalk_collection:inject_into at runtime.
+        // This eliminates: (1) the runtime function call overhead, (2) the to_list
+        // indirection when receiver is already a list.
+        //
         // BT-820: lists:foldl calls Fun(Elem, Acc) but Beamtalk convention is Block(Acc, Elem).
+        // For literal blocks, we compile the body directly with swapped parameter order
+        // (Elem, Acc) to avoid any wrapper overhead. For non-literal callables, we fall
+        // back to beamtalk_collection:inject_into which handles arg swapping at runtime.
+        let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
+        let safe_list_var = self.fresh_temp_var("temp");
+        let init_var = self.fresh_temp_var("temp");
         let init_code = self.expression_doc(initial)?;
-        let body_code = self.expression_doc(body)?;
+        let lambda_var = self.fresh_temp_var("temp");
+
+        // Generate the foldl fun: for literal blocks, compile body with swapped
+        // parameter order; for non-literal, use runtime arg-swap wrapper.
+        let foldl_fun_doc = if let Expression::Block(body_block) = body {
+            // Literal block: compile directly with foldl parameter order (Elem, Acc).
+            // Block params: [0] = acc, [1] = elem (Beamtalk convention)
+            // Foldl fun params: (Elem, Acc) (Erlang convention)
+            let acc_param = body_block
+                .parameters
+                .first()
+                .map_or("_", |p| p.name.as_str());
+            let elem_param = body_block
+                .parameters
+                .get(1)
+                .map_or("_", |p| p.name.as_str());
+            let acc_var = Self::to_core_erlang_var(acc_param);
+            let elem_var = Self::to_core_erlang_var(elem_param);
+
+            self.push_scope();
+            // Bind in swapped order: foldl's first param is Elem, second is Acc
+            if let Some(param) = body_block.parameters.get(1) {
+                self.bind_var(&param.name, &elem_var);
+            }
+            if let Some(param) = body_block.parameters.first() {
+                self.bind_var(&param.name, &acc_var);
+            }
+            let body_doc = self.generate_block_body(body_block)?;
+            self.pop_scope();
+
+            // fun (Elem, Acc) -> <body>
+            docvec![
+                "fun (",
+                Document::String(elem_var),
+                ", ",
+                Document::String(acc_var),
+                ") -> ",
+                body_doc,
+            ]
+        } else {
+            // Non-literal callable: wrap to swap args at runtime.
+            let body_var = self.fresh_temp_var("temp");
+            let body_code = self.expression_doc(body)?;
+            docvec![
+                "let ",
+                Document::String(body_var.clone()),
+                " = ",
+                body_code,
+                " in fun (Elem, Acc) -> apply ",
+                Document::String(body_var),
+                " (Acc, Elem)",
+            ]
+        };
 
         Ok(docvec![
-            "call 'beamtalk_collection':'inject_into'(",
+            "let ",
+            Document::String(list_var.clone()),
+            " = ",
             recv_code,
-            ", ",
+            " in let ",
+            Document::String(safe_list_var.clone()),
+            " = case call 'erlang':'is_list'(",
+            Document::String(list_var.clone()),
+            ") of <'true'> when 'true' -> ",
+            Document::String(list_var.clone()),
+            " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
+            Document::String(list_var),
+            ") end in let ",
+            Document::String(init_var.clone()),
+            " = ",
             init_code,
-            ", ",
-            body_code,
-            ")",
+            " in let ",
+            Document::String(lambda_var.clone()),
+            " = ",
+            foldl_fun_doc,
+            Document::String(format!(
+                " in call 'lists':'foldl'({lambda_var}, {init_var}, {safe_list_var})"
+            )),
         ])
     }
 
@@ -959,15 +1036,25 @@ mod tests {
     }
 
     #[test]
-    fn test_list_inject_into_generates_collection_ops_wrapper() {
-        // inject:into: (no mutations) delegates to beamtalk_collection:inject_into
-        // which adapts the Erlang lists:foldl(Fun, Acc, List) argument order to
-        // Beamtalk's Block(Acc, Elem) convention (BT-820).
+    fn test_list_inject_into_pure_generates_inline_foldl() {
+        // BT-1327: inject:into: (no mutations) with a literal block emits inline
+        // lists:foldl with the block body compiled directly in foldl arg order
+        // (Elem, Acc) — no wrapper function, no runtime helper call.
         let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items inject: 0 into: [:acc :item | acc + item]\n";
         let code = codegen(src);
         assert!(
-            code.contains("'beamtalk_collection':'inject_into'"),
-            "inject:into: should delegate to beamtalk_collection:inject_into. Got:\n{code}"
+            code.contains("'lists':'foldl'"),
+            "Pure inject:into: should emit inline lists:foldl. Got:\n{code}"
+        );
+        // Should NOT call the runtime helper
+        assert!(
+            !code.contains("'beamtalk_collection':'inject_into'"),
+            "Pure inject:into: should NOT delegate to beamtalk_collection:inject_into. Got:\n{code}"
+        );
+        // Should NOT have a wrapper apply (literal block compiles body directly)
+        assert!(
+            !code.contains("fun (Elem, Acc) -> apply"),
+            "Literal block should compile body directly, not via wrapper apply. Got:\n{code}"
         );
     }
 
