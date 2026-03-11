@@ -819,6 +819,16 @@ pub(super) struct CoreErlangGenerator {
     /// instead of `StateAcc*`, even when `in_loop_body` is also true.
     /// Set by `generate_counted_stateful_loop_hybrid` and `generate_while_loop_hybrid`.
     in_hybrid_loop: bool,
+    /// BT-1329: When `true`, the generator is inside a direct-params (or hybrid) counted
+    /// loop body. List ops that thread captured outer-scope locals should skip the
+    /// `append_repack_stateacc_doc` step and return just the result value (not
+    /// `{Result, StateAcc}`), since there is no `StateAcc` variable in scope.
+    in_direct_params_loop: bool,
+    /// BT-1329: When a list op in direct-params mode generates an open let-chain
+    /// (omitting the trailing result expression), it stores the result variable name
+    /// here so the caller can append `let AssignedVar = <result_var> in` separately.
+    /// `None` when no list op result is pending.
+    direct_params_list_op_result: Option<String>,
     /// BT-1326: Map of actor field name → Core Erlang variable name for read-only fields
     /// that have been pre-extracted before a hybrid letrec loop.
     ///
@@ -939,6 +949,8 @@ impl CoreErlangGenerator {
             state_threading: StateThreading::new(),
             in_loop_body: false,
             in_hybrid_loop: false,
+            in_direct_params_loop: false,
+            direct_params_list_op_result: None,
             hybrid_readonly_field_params: std::collections::HashMap::new(),
             is_repl_mode: false,
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
@@ -977,6 +989,8 @@ impl CoreErlangGenerator {
             state_threading: StateThreading::new(),
             in_loop_body: false,
             in_hybrid_loop: false,
+            in_direct_params_loop: false,
+            direct_params_list_op_result: None,
             hybrid_readonly_field_params: std::collections::HashMap::new(),
             is_repl_mode: false,
             context: CodeGenContext::Actor,
@@ -1235,6 +1249,42 @@ impl CoreErlangGenerator {
                     .captured_reads
                     .iter()
                     .any(|v| analysis.local_writes.contains(v))
+        }
+    }
+
+    /// BT-1329: Returns `true` if the block body contains list op message sends
+    /// (do:, collect:, select:, reject:, inject:into:) whose blocks capture and
+    /// mutate variables from the outer scope. These cross-scope mutations are
+    /// invisible to `analyze_block` (which doesn't propagate `local_writes` from
+    /// nested non-conditional blocks), so they require a separate scan.
+    pub(super) fn body_has_list_op_cross_scope_mutations(&self, body: &crate::ast::Block) -> bool {
+        let mut cross_scope_writes = std::collections::HashSet::new();
+        for stmt in &body.body {
+            Self::collect_list_op_cross_scope_mutations_recursive(
+                &stmt.expression,
+                &self.semantic_facts,
+                &mut cross_scope_writes,
+            );
+        }
+        !cross_scope_writes.is_empty()
+    }
+
+    /// BT-1329: Recursively scans an expression for list op message sends with
+    /// cross-scope mutations. Unlike `collect_list_op_cross_scope_mutations`,
+    /// this also looks inside Assignment values.
+    fn collect_list_op_cross_scope_mutations_recursive(
+        expr: &Expression,
+        facts: &crate::semantic_analysis::SemanticFacts,
+        out: &mut std::collections::HashSet<String>,
+    ) {
+        match expr {
+            Expression::Assignment { value, .. } => {
+                Self::collect_list_op_cross_scope_mutations_recursive(value, facts, out);
+            }
+            Expression::MessageSend { .. } => {
+                Self::collect_list_op_cross_scope_mutations(expr, facts, out);
+            }
+            _ => {}
         }
     }
 
@@ -1950,11 +2000,26 @@ impl CoreErlangGenerator {
                 .unwrap_or_else(|| analyze_block(body_block));
 
             // BT-1224: Use captured_reads to exclude block-local vars from threading.
-            let threaded: Vec<String> = body_analysis
-                .captured_reads
-                .intersection(&body_analysis.local_writes)
-                .cloned()
-                .collect();
+            let mut captured = body_analysis.captured_reads.clone();
+            let mut writes = body_analysis.local_writes.clone();
+            // BT-1329: Include cross-scope mutations from nested list ops
+            let mut cross_scope = std::collections::HashSet::new();
+            for stmt in &body_block.body {
+                Self::collect_list_op_cross_scope_mutations_recursive(
+                    &stmt.expression,
+                    &self.semantic_facts,
+                    &mut cross_scope,
+                );
+            }
+            captured = captured.union(&cross_scope).cloned().collect();
+            writes = writes.union(&cross_scope).cloned().collect();
+            // BT-1329: Include outer-scope write-only variables.
+            for v in &writes {
+                if !captured.contains(v) && self.lookup_var(v).is_some() {
+                    captured.insert(v.clone());
+                }
+            }
+            let threaded: Vec<String> = captured.intersection(&writes).cloned().collect();
 
             if !threaded.is_empty() {
                 return Some(threaded);
@@ -1993,9 +2058,30 @@ impl CoreErlangGenerator {
 
             // BT-1224: Use captured_reads to exclude block-local vars from threading.
             // Block params are implicitly excluded since they're not in captured_reads.
-            let threaded: Vec<String> = body_analysis
-                .captured_reads
-                .intersection(&body_analysis.local_writes)
+            let mut captured = body_analysis.captured_reads.clone();
+            let mut writes = body_analysis.local_writes.clone();
+            // BT-1329: Include cross-scope mutations from nested list ops
+            let mut cross_scope = std::collections::HashSet::new();
+            for stmt in &body_block.body {
+                Self::collect_list_op_cross_scope_mutations_recursive(
+                    &stmt.expression,
+                    &self.semantic_facts,
+                    &mut cross_scope,
+                );
+            }
+            captured = captured.union(&cross_scope).cloned().collect();
+            writes = writes.union(&cross_scope).cloned().collect();
+            // BT-1329: Include outer-scope write-only variables.
+            for v in &writes {
+                if !block_params.contains(v.as_str())
+                    && !captured.contains(v)
+                    && self.lookup_var(v).is_some()
+                {
+                    captured.insert(v.clone());
+                }
+            }
+            let threaded: Vec<String> = captured
+                .intersection(&writes)
                 .filter(|v| !block_params.contains(*v))
                 .cloned()
                 .collect();

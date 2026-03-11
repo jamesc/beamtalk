@@ -289,7 +289,10 @@ impl CoreErlangGenerator {
                         )?;
                         if let Expression::Block(body_block) = &arguments[0] {
                             let analysis = block_analysis::analyze_block(body_block);
-                            if self.needs_mutation_threading(&analysis) {
+                            // BT-1329: Also check for nested list ops with cross-scope mutations
+                            if self.needs_mutation_threading(&analysis)
+                                || self.body_has_list_op_cross_scope_mutations(body_block)
+                            {
                                 let doc = self
                                     .generate_times_repeat_with_mutations(receiver, body_block)?;
                                 return Ok(Some(doc));
@@ -312,7 +315,10 @@ impl CoreErlangGenerator {
                         )?;
                         if let Expression::Block(body_block) = &arguments[1] {
                             let analysis = block_analysis::analyze_block(body_block);
-                            if self.needs_mutation_threading(&analysis) {
+                            // BT-1329: Also check for nested list ops with cross-scope mutations
+                            if self.needs_mutation_threading(&analysis)
+                                || self.body_has_list_op_cross_scope_mutations(body_block)
+                            {
                                 let doc = self.generate_to_do_with_mutations(
                                     receiver,
                                     &arguments[0],
@@ -338,7 +344,10 @@ impl CoreErlangGenerator {
                         )?;
                         if let Expression::Block(body_block) = &arguments[2] {
                             let analysis = block_analysis::analyze_block(body_block);
-                            if self.needs_mutation_threading(&analysis) {
+                            // BT-1329: Also check for nested list ops with cross-scope mutations
+                            if self.needs_mutation_threading(&analysis)
+                                || self.body_has_list_op_cross_scope_mutations(body_block)
+                            {
                                 let doc = self.generate_to_by_do_with_mutations(
                                     receiver,
                                     &arguments[0],
