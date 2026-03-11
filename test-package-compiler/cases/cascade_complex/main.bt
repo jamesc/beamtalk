@@ -6,8 +6,7 @@
 
 // Cascade with unary, binary, and keyword messages
 counter := Counter new
-counter
-increment; increment; getValue
+counter increment; increment; getValue
 
 // Cascade with keyword messages
 object at: "key1" put: value1; at: "key2" put: value2; at: "key3" put: value3

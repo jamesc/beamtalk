@@ -6,8 +6,8 @@ Token { kind: Identifier("counter"), span: Span { start: 208, end: 215 }, leadin
 Token { kind: Assign, span: Span { start: 216, end: 218 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("Counter"), span: Span { start: 219, end: 226 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("new"), span: Span { start: 227, end: 230 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("counter"), span: Span { start: 231, end: 238 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
-Token { kind: Identifier("increment"), span: Span { start: 239, end: 248 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Identifier("counter"), span: Span { start: 231, end: 238 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("increment"), span: Span { start: 239, end: 248 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Semicolon, span: Span { start: 248, end: 249 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("increment"), span: Span { start: 250, end: 259 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Semicolon, span: Span { start: 259, end: 260 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }

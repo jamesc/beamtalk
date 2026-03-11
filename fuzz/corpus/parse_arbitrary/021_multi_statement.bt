@@ -23,8 +23,5 @@ MultiStatement new twoSideEffects
 // ===========================================================================
 
 // Block with period-separated expressions (backward compat)
-[
-  1 + 1
-  2 + 2
-  3 + 3
-] value// => 6
+[1 + 1. 2 + 2. 3 + 3] value
+// => 6

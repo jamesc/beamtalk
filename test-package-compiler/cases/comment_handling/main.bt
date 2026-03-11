@@ -21,6 +21,8 @@ b := 2
 object message: value  // and here
 
 // Block with comments
-block := [42]// Commented out code (still comments)
+block := [// Inside block
+  42]
+// Commented out code (still comments)
 // x := 999
 // y := 888

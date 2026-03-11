@@ -104,32 +104,27 @@ Module {
                 leading: [],
                 trailing: None,
             },
-            expression: Identifier(
-                Identifier {
-                    name: "counter",
+            expression: Cascade {
+                receiver: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "counter",
+                            span: Span {
+                                start: 231,
+                                end: 238,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "increment",
+                    ),
+                    arguments: [],
+                    is_cast: false,
                     span: Span {
                         start: 231,
-                        end: 238,
+                        end: 248,
                     },
                 },
-            ),
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Cascade {
-                receiver: Identifier(
-                    Identifier {
-                        name: "increment",
-                        span: Span {
-                            start: 239,
-                            end: 248,
-                        },
-                    },
-                ),
                 messages: [
                     CascadeMessage {
                         selector: Unary(
@@ -153,7 +148,7 @@ Module {
                     },
                 ],
                 span: Span {
-                    start: 239,
+                    start: 231,
                     end: 269,
                 },
             },
