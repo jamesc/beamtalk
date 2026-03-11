@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for native: class dispatch functions (BT-1210).
+//
+// Tests that self delegate methods on native: classes correctly
+// dispatch to the backing gen_server via beamtalk_actor:sync_send/3.
+
+// @load tests/e2e/fixtures/native_counter.bt
+
+// ===========================================================================
+// SPAWN AND BASIC DISPATCH
+// ===========================================================================
+
+// Spawn a native counter
+c := NativeCounter spawn
+// => #Actor<NativeCounter,_>
+
+// Call a self delegate method (unary: getValue)
+c getValue
+// => 0
+
+// Call a self delegate method (unary: increment)
+c increment
+// => 1
+
+c increment
+// => 2
+
+c getValue
+// => 2
+
+// ===========================================================================
+// KEYWORD DISPATCH
+// ===========================================================================
+
+// Call a keyword self delegate method (add:)
+c add: 10
+// => 12
+
+c getValue
+// => 12
+
+// ===========================================================================
+// BEAMTALK CLASS METHOD (NOT DELEGATED)
+// ===========================================================================
+
+// Call a class method with Beamtalk body (compiles normally)
+NativeCounter description
+// => A native counter backed by Erlang
+
+// ===========================================================================
+// ERROR PROPAGATION FROM BACKING GEN_SERVER
+// ===========================================================================
+
+// Trigger error from backing gen_server — should raise beamtalk_error
+[c failWith: "test failure"] on: Error do: [:e | e kind]
+// => runtime_error

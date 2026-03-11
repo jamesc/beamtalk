@@ -3157,3 +3157,93 @@ fn test_native_facade_doc_comments_in_builder_state() {
         "classDoc should not be 'none' when doc comment is set. Got:\n{code}"
     );
 }
+
+// ===========================================================================
+// BT-1210: Dispatch functions for self delegate methods
+// ===========================================================================
+
+#[test]
+fn test_native_facade_dispatch_exported() {
+    // BT-1210: Dispatch functions for self delegate methods must be exported
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'dispatch_doWork'/1"),
+        "dispatch_doWork/1 should be exported. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'dispatch_process:'/2"),
+        "dispatch_process:/2 should be exported. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_dispatch_extracts_pid() {
+    // BT-1210: Dispatch functions extract pid from Self via element(4, Self)
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    // Extract dispatch function body (starts with "= fun")
+    let dispatch_dowork = code
+        .split("'dispatch_doWork'/1 = fun")
+        .nth(1)
+        .expect("dispatch_doWork function body should exist");
+    assert!(
+        dispatch_dowork.contains("call 'erlang':'element'(4, Self)"),
+        "dispatch should extract pid via element(4, Self). Got:\n{dispatch_dowork}"
+    );
+}
+
+#[test]
+fn test_native_facade_dispatch_calls_sync_send() {
+    // BT-1210: Dispatch functions call beamtalk_actor:sync_send/3
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("call 'beamtalk_actor':'sync_send'(Pid, 'doWork', [])"),
+        "dispatch_doWork should call sync_send with empty args. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_actor':'sync_send'(Pid, 'process:', [Data])"),
+        "dispatch_process: should call sync_send with [Data] args. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_dispatch_unary_arity() {
+    // BT-1210: Unary self delegate dispatch has arity 1 (just Self)
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'dispatch_doWork'/1 = fun (Self) ->"),
+        "Unary dispatch should take only Self. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_dispatch_keyword_arity() {
+    // BT-1210: Keyword self delegate dispatch has arity = params + 1 (for Self)
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'dispatch_process:'/2 = fun (Data, Self) ->"),
+        "Keyword dispatch should take params then Self. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_no_dispatch_for_beamtalk_body() {
+    // BT-1210: Methods with full Beamtalk bodies should NOT get dispatch functions
+    let module = make_native_actor_with_class_methods();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
+    let code = result.unwrap();
+    // status => self (not self delegate) should not have a dispatch function
+    assert!(
+        !code.contains("'dispatch_status'"),
+        "Non-delegate method should NOT get a dispatch function. Got:\n{code}"
+    );
+}
