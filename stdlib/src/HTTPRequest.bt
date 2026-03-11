@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// HTTPRequest — Sealed value class for incoming HTTP requests.
+///
+/// Represents an incoming HTTP request received by an `HTTPServer`.
+/// HTTPRequest instances are immutable value objects created by the
+/// server handler and passed to the user's handler block or object.
+///
+/// ## Fields
+///
+/// - `method`      — HTTP method as a String (e.g. "GET", "POST")
+/// - `path`        — Request path as a String (e.g. "/api/users")
+/// - `headers`     — Request headers as a List of [name, value] binary pairs
+/// - `body`        — Request body as a String (empty for GET/DELETE)
+/// - `queryParams` — Query parameters as a Dictionary
+///
+/// ## Examples
+/// ```beamtalk
+/// srv := HTTPServer start: 8080 handler: [:req |
+///   req method       // => "GET"
+///   req path         // => "/hello"
+///   req headers      // => #(#("host", "localhost:8080"), ...)
+///   req body         // => ""
+///   req queryParams  // => #{}
+///   HTTPResponse new: #{ #status => 200, #body => "ok" }
+/// ]
+/// ```
+sealed Value subclass: HTTPRequest
+  /// HTTP method (e.g. "GET", "POST", "PUT", "DELETE").
+  state: method :: String = ""
+  /// Request path (e.g. "/api/users").
+  state: path :: String = "/"
+  /// Request headers as a List of [name, value] binary pairs.
+  state: headers :: List = #()
+  /// Request body as a String.
+  state: body :: String = ""
+  /// Query parameters as a Dictionary.
+  state: queryParams :: Dictionary = #{}
+
+  /// Human-readable representation: "an HTTPRequest(GET /path)".
+  printString -> String =>
+    "an HTTPRequest(" ++ self.method ++ " " ++ self.path ++ ")"
