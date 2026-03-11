@@ -172,7 +172,7 @@ clear_empties_buffer_test() ->
 
 buffer_overflow_drops_oldest_test() ->
     MaxBuffer = 3,
-    {ok, Pid} = beamtalk_transcript_stream:start_link(MaxBuffer),
+    {ok, Pid} = beamtalk_transcript_stream:start_link(#{max_buffer => MaxBuffer}),
     gen_server:cast(Pid, {'show:', <<"1">>}),
     gen_server:cast(Pid, {'show:', <<"2">>}),
     gen_server:cast(Pid, {'show:', <<"3">>}),
@@ -204,36 +204,23 @@ duplicate_subscribe_test() ->
     flush_transcript(),
     gen_server:stop(Pid).
 
-%% --- FFI shims ---
-%%
-%% The TranscriptStream FFI shims (show/2, cr/1, recent/1, clear/1, subscribe/1,
-%% unsubscribe/1) delegate to dispatch/3 which uses the process dictionary.
-%% They are designed to be called from INSIDE the actor's handle_call context
-%% where the process dictionary belongs to the gen_server. The shims are
-%% exercised end-to-end by the BUnit trace_cr_test.bt tests.
-%%
-%% Here we just verify that dispatch/3 integration works correctly, which is
-%% the underlying mechanism.
+%% --- Exports verification ---
 
-ffi_shim_dispatch_show_test() ->
-    {ok, Pid} = beamtalk_transcript_stream:spawn(),
-    Self = #beamtalk_object{
-        class = 'TranscriptStream', class_mod = 'bt@stdlib@transcript_stream', pid = Pid
-    },
-    gen_server:call(Pid, {'show:', [<<"dispatch_show">>]}),
-    Recent = gen_server:call(Pid, recent),
-    ?assertEqual([<<"dispatch_show">>], Recent),
-    gen_server:stop(Pid).
-
-ffi_shim_exports_test() ->
-    %% Verify the FFI shim functions are exported
+exports_test() ->
+    %% Verify expected public API functions are exported
     Exports = beamtalk_transcript_stream:module_info(exports),
-    ?assert(lists:member({show, 2}, Exports)),
-    ?assert(lists:member({cr, 1}, Exports)),
-    ?assert(lists:member({recent, 1}, Exports)),
-    ?assert(lists:member({clear, 1}, Exports)),
     ?assert(lists:member({subscribe, 1}, Exports)),
-    ?assert(lists:member({unsubscribe, 1}, Exports)).
+    ?assert(lists:member({unsubscribe, 1}, Exports)),
+    ?assert(lists:member({start_link, 0}, Exports)),
+    ?assert(lists:member({start_link, 1}, Exports)),
+    ?assert(lists:member({spawn, 0}, Exports)),
+    ?assert(lists:member({spawn, 1}, Exports)),
+    %% FFI shims removed after native: migration (BT-1212)
+    ?assertNot(lists:member({show, 2}, Exports)),
+    ?assertNot(lists:member({cr, 1}, Exports)),
+    ?assertNot(lists:member({recent, 1}, Exports)),
+    ?assertNot(lists:member({clear, 1}, Exports)),
+    ?assertNot(lists:member({dispatch, 3}, Exports)).
 
 %% --- spawn (unlinked) ---
 
@@ -246,7 +233,7 @@ spawn_test() ->
     gen_server:stop(Pid).
 
 spawn_with_max_buffer_test() ->
-    {ok, Pid} = beamtalk_transcript_stream:spawn(5),
+    {ok, Pid} = beamtalk_transcript_stream:spawn(#{max_buffer => 5}),
     ?assert(is_pid(Pid)),
     gen_server:stop(Pid).
 
@@ -255,13 +242,13 @@ spawn_with_max_buffer_test() ->
 invalid_max_buffer_zero_test() ->
     ?assertEqual(
         {error, {invalid_max_buffer, 0}},
-        beamtalk_transcript_stream:spawn(0)
+        beamtalk_transcript_stream:spawn(#{max_buffer => 0})
     ).
 
 invalid_max_buffer_negative_test() ->
     ?assertEqual(
         {error, {invalid_max_buffer, -1}},
-        beamtalk_transcript_stream:spawn(-1)
+        beamtalk_transcript_stream:spawn(#{max_buffer => -1})
     ).
 
 %% --- non-pid subscribe is safe (no crash) ---

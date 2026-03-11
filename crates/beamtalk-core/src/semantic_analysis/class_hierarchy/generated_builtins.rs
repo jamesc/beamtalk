@@ -1796,7 +1796,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             is_value: false,
-            is_native: false,
+            is_native: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -2093,7 +2093,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             is_typed: false,
             is_value: false,
-            is_native: false,
+            is_native: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
