@@ -717,64 +717,38 @@ bench_block_threading() ->
     %% BT-1329: Tuple-acc should be at least 1.5x faster than StateAcc for nested list ops.
     ?assert(NestedImprovementRatio >= 1.5),
 
-    %% --- BT-1326: counted loop with both local + field mutations (hybrid vs StateAcc) ---
+    %% --- BT-1342: counted loop with both local + field mutations ---
     MixedNativeTimings = run_benchmark(fun() ->
         bench_block_threading:mixed_native(N)
     end, ?ITERATIONS, ?WARMUP),
     MixedStateAccTimings = run_benchmark(fun() ->
         bench_block_threading:mixed_stateacc(N)
     end, ?ITERATIONS, ?WARMUP),
-    MixedHybridTimings = run_benchmark(fun() ->
-        bench_block_threading:mixed_hybrid(N)
+    MixedFullExtractTimings = run_benchmark(fun() ->
+        bench_block_threading:mixed_full_extract(N)
     end, ?ITERATIONS, ?WARMUP),
 
     MixedNativeStats = stats(MixedNativeTimings),
     MixedStateAccStats = stats(MixedStateAccTimings),
-    MixedHybridStats = stats(MixedHybridTimings),
+    MixedFullExtractStats = stats(MixedFullExtractTimings),
 
     report("block/mixed_native", MixedNativeStats, ?ITERATIONS),
     report("block/mixed_stateacc", MixedStateAccStats, ?ITERATIONS),
-    report("block/mixed_hybrid", MixedHybridStats, ?ITERATIONS),
+    report("block/mixed_full_extract", MixedFullExtractStats, ?ITERATIONS),
 
     MixedNativeMedian = maps:get(median, MixedNativeStats),
     MixedStateAccMedian = maps:get(median, MixedStateAccStats),
-    MixedHybridMedian = maps:get(median, MixedHybridStats),
+    MixedFullExtractMedian = maps:get(median, MixedFullExtractStats),
 
     io:format(standard_error,
         "PERF: block/mixed_stateacc_overhead ~.2fx vs native~n",
         [MixedStateAccMedian / max(MixedNativeMedian, 1)]),
     io:format(standard_error,
-        "PERF: block/mixed_hybrid_overhead ~.2fx vs native~n",
-        [MixedHybridMedian / max(MixedNativeMedian, 1)]),
-    MixedHybridImprovementRatio = MixedStateAccMedian / max(MixedHybridMedian, 1),
-    io:format(standard_error,
-        "PERF: block/mixed_hybrid_improvement ~.2fx hybrid vs stateacc~n",
-        [MixedHybridImprovementRatio]),
-    %% BT-1326: Hybrid mode trades maps:get/maps:put ops (eliminated for locals)
-    %% against an extra tail-call argument. On BEAM's JIT, small-map ops are
-    %% heavily optimised, so the trade-off varies with map size and field count.
-    %% The real codegen uses letrec (2 vs 3 args); this benchmark simulation
-    %% uses module functions (3 vs 4 args) which slightly overstates arg overhead.
-    %% Primary value: code clarity, read-only field pre-extraction, and scaling
-    %% with more local variables where multiple maps:get/put are eliminated.
-    %% No hard assertion — tracked as informational benchmark.
-
-    %% --- Full extraction with small map (proves JIT anomaly disappears) ---
-    SmallmapFullExtractTimings = run_benchmark(fun() ->
-        bench_block_threading:mixed_full_extract(N)
-    end, ?ITERATIONS, ?WARMUP),
-    SmallmapFullExtractStats = stats(SmallmapFullExtractTimings),
-    report("block/mixed_full_extract", SmallmapFullExtractStats, ?ITERATIONS),
-    SmallmapFullExtractMedian = maps:get(median, SmallmapFullExtractStats),
-    io:format(standard_error,
         "PERF: block/mixed_full_extract_overhead ~.2fx vs native~n",
-        [SmallmapFullExtractMedian / max(MixedNativeMedian, 1)]),
+        [MixedFullExtractMedian / max(MixedNativeMedian, 1)]),
     io:format(standard_error,
-        "PERF: block/mixed_full_extract_vs_stateacc ~.2fx full vs stateacc~n",
-        [MixedStateAccMedian / max(SmallmapFullExtractMedian, 1)]),
-    io:format(standard_error,
-        "PERF: block/mixed_full_extract_vs_hybrid ~.2fx full vs hybrid~n",
-        [MixedHybridMedian / max(SmallmapFullExtractMedian, 1)]),
+        "PERF: block/mixed_full_extract_improvement ~.2fx full-extract vs stateacc~n",
+        [MixedStateAccMedian / max(MixedFullExtractMedian, 1)]),
 
     %% --- Crossover: stateacc vs full extract on small map, 1..4 mutated fields ---
     CrossoverResults = lists:map(fun(NumFields) ->
@@ -806,48 +780,32 @@ bench_block_threading() ->
     end, [1, 2, 3, 4]),
     _ = CrossoverResults,
 
-    %% --- BT-1326: large-map variants (>32 keys, past BEAM small-map threshold) ---
+    %% --- Large-map variants (>32 keys, past BEAM small-map threshold) ---
     BigmapStateAccTimings = run_benchmark(fun() ->
         bench_block_threading:mixed_bigmap_stateacc(N)
     end, ?ITERATIONS, ?WARMUP),
-    BigmapHybridTimings = run_benchmark(fun() ->
-        bench_block_threading:mixed_bigmap_hybrid(N)
+    BigmapFullExtractTimings = run_benchmark(fun() ->
+        bench_block_threading:mixed_bigmap_full_extract(N)
     end, ?ITERATIONS, ?WARMUP),
 
     BigmapStateAccStats = stats(BigmapStateAccTimings),
-    BigmapHybridStats = stats(BigmapHybridTimings),
+    BigmapFullExtractStats = stats(BigmapFullExtractTimings),
 
     report("block/mixed_bigmap_stateacc", BigmapStateAccStats, ?ITERATIONS),
-    report("block/mixed_bigmap_hybrid", BigmapHybridStats, ?ITERATIONS),
+    report("block/mixed_bigmap_full_extract", BigmapFullExtractStats, ?ITERATIONS),
 
     BigmapStateAccMedian = maps:get(median, BigmapStateAccStats),
-    BigmapHybridMedian = maps:get(median, BigmapHybridStats),
+    BigmapFullExtractMedian = maps:get(median, BigmapFullExtractStats),
 
     io:format(standard_error,
         "PERF: block/mixed_bigmap_stateacc_overhead ~.2fx vs native~n",
         [BigmapStateAccMedian / max(MixedNativeMedian, 1)]),
-    io:format(standard_error,
-        "PERF: block/mixed_bigmap_hybrid_overhead ~.2fx vs native~n",
-        [BigmapHybridMedian / max(MixedNativeMedian, 1)]),
-    io:format(standard_error,
-        "PERF: block/mixed_bigmap_hybrid_improvement ~.2fx hybrid vs stateacc~n",
-        [BigmapStateAccMedian / max(BigmapHybridMedian, 1)]),
-
-    BigmapFullExtractTimings = run_benchmark(fun() ->
-        bench_block_threading:mixed_bigmap_full_extract(N)
-    end, ?ITERATIONS, ?WARMUP),
-    BigmapFullExtractStats = stats(BigmapFullExtractTimings),
-    report("block/mixed_bigmap_full_extract", BigmapFullExtractStats, ?ITERATIONS),
-    BigmapFullExtractMedian = maps:get(median, BigmapFullExtractStats),
     io:format(standard_error,
         "PERF: block/mixed_bigmap_full_extract_overhead ~.2fx vs native~n",
         [BigmapFullExtractMedian / max(MixedNativeMedian, 1)]),
     io:format(standard_error,
         "PERF: block/mixed_bigmap_full_extract_improvement ~.2fx full vs stateacc~n",
         [BigmapStateAccMedian / max(BigmapFullExtractMedian, 1)]),
-    io:format(standard_error,
-        "PERF: block/mixed_bigmap_full_extract_vs_hybrid ~.2fx full vs hybrid~n",
-        [BigmapHybridMedian / max(BigmapFullExtractMedian, 1)]),
 
     %% --- Arity scaling: does BEAM degrade with many params? ---
     FullExtract8pTimings = run_benchmark(fun() ->

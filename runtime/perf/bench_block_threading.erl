@@ -42,12 +42,10 @@
     collect_tuple_acc_mutation/1,
     fold_stateacc_mutation/1,
     fold_tuple_acc_mutation/1,
-    %% BT-1326: counted loop with BOTH local + field mutations — hybrid vs StateAcc
+    %% BT-1342: counted loop with both local + field mutations
     mixed_stateacc/1,
-    mixed_hybrid/1,
-    mixed_native/1,
-    %% Full extraction with small map (proves JIT anomaly disappears)
     mixed_full_extract/1,
+    mixed_native/1,
     %% Crossover: stateacc vs full extract on small map with 1..4 mutated fields
     crossover_stateacc_1field/1,
     crossover_stateacc_2fields/1,
@@ -57,11 +55,8 @@
     crossover_full_extract_2fields/1,
     crossover_full_extract_3fields/1,
     crossover_full_extract_4fields/1,
-    %% BT-1326: same as mixed_* but with a large actor state map (>32 keys)
-    %% to escape BEAM's small-map JIT optimisation and show hybrid's real advantage
+    %% Large actor state map (>32 keys) — past BEAM small-map JIT threshold
     mixed_bigmap_stateacc/1,
-    mixed_bigmap_hybrid/1,
-    %% Full extraction: lift BOTH locals AND mutated fields to direct params
     mixed_bigmap_full_extract/1,
     %% Arity scaling: full extraction with increasing param counts
     mixed_bigmap_full_extract_8params/1,
@@ -502,37 +497,6 @@ mixed_stateacc_loop(I, N, StateAcc) ->
     StateAcc2 = maps:put('__local__sum', Sum1, StateAcc1),
     mixed_stateacc_loop(I + 1, N, StateAcc2).
 
-%% @doc Simulates BT-1326 hybrid params path for a loop with both local + field mutations.
-%%
-%% Generated Core Erlang (post-BT-1326):
-%%   letrec 'loop'/3 = fun(I, Sum, State) ->
-%%     case I =< N of
-%%       true ->
-%%         Sum1 = Sum + 1,
-%%         N0 = maps:get('n', State),
-%%         State1 = maps:put('n', N0 + 1, State),
-%%         apply 'loop'/3 (I + 1, Sum1, State1)
-%%       false ->
-%%         ExitSA = maps:put('__local__sum', Sum, State),
-%%         {nil, ExitSA}
-%%     end
-%%   in apply 'loop'/3 (1, 0, State)
--spec mixed_hybrid(non_neg_integer()) -> integer().
-mixed_hybrid(N) ->
-    InitState = #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
-                  '__methods__' => #{}, 'n' => 0},
-    {_, FinalState} = mixed_hybrid_loop(1, N, 0, InitState),
-    maps:get('__local__sum', FinalState).
-
-mixed_hybrid_loop(I, N, Sum, State) when I > N ->
-    ExitSA = maps:put('__local__sum', Sum, State),
-    {nil, ExitSA};
-mixed_hybrid_loop(I, N, Sum, State) ->
-    Sum1 = Sum + 1,
-    N0 = maps:get('n', State),
-    State1 = maps:put('n', N0 + 1, State),
-    mixed_hybrid_loop(I + 1, N, Sum1, State1).
-
 %% @doc Idiomatic Erlang baseline for the mixed local + field mutation pattern.
 -spec mixed_native(non_neg_integer()) -> integer().
 mixed_native(N) ->
@@ -542,9 +506,9 @@ mixed_native_loop(I, N, Sum, _FieldN) when I > N -> Sum;
 mixed_native_loop(I, N, Sum, FieldN) ->
     mixed_native_loop(I + 1, N, Sum + 1, FieldN + 1).
 
-%% @doc Full extraction with small map — proves the JIT anomaly disappears.
-%% Same 4-key map as mixed_stateacc/mixed_hybrid, but locals AND fields
-%% are lifted to direct params. Loop body is pure arithmetic.
+%% @doc BT-1342 full-extract: both locals AND mutated fields as direct params.
+%% Same 4-key map as mixed_stateacc, but locals AND fields are lifted
+%% to direct params. Loop body is pure arithmetic — zero map ops.
 -spec mixed_full_extract(non_neg_integer()) -> integer().
 mixed_full_extract(N) ->
     InitState = #{'$beamtalk_class' => 'MyActor', '__class_mod__' => test,
@@ -743,22 +707,6 @@ mixed_bigmap_stateacc_loop(I, N, StateAcc) ->
     StateAcc1 = maps:put('n', N0 + 1, StateAcc),
     StateAcc2 = maps:put('__local__sum', Sum1, StateAcc1),
     mixed_bigmap_stateacc_loop(I + 1, N, StateAcc2).
-
-%% @doc Hybrid path with large map — locals as direct params, only State threaded.
--spec mixed_bigmap_hybrid(non_neg_integer()) -> integer().
-mixed_bigmap_hybrid(N) ->
-    InitState = bigmap_base_state(),
-    {_, FinalState} = mixed_bigmap_hybrid_loop(1, N, 0, InitState),
-    maps:get('__local__sum', FinalState).
-
-mixed_bigmap_hybrid_loop(I, N, Sum, State) when I > N ->
-    ExitSA = maps:put('__local__sum', Sum, State),
-    {nil, ExitSA};
-mixed_bigmap_hybrid_loop(I, N, Sum, State) ->
-    Sum1 = Sum + 1,
-    N0 = maps:get('n', State),
-    State1 = maps:put('n', N0 + 1, State),
-    mixed_bigmap_hybrid_loop(I + 1, N, Sum1, State1).
 
 %% @doc Full extraction: lift both locals AND mutated fields to direct params.
 %% Extract at loop entry, pass as params, repack on exit. Zero map ops in the
