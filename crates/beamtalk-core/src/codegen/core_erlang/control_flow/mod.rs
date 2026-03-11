@@ -75,14 +75,15 @@ pub(super) struct ThreadingPlan {
     /// The accumulator becomes `{Var1, Var2, ..., VarN}` (for `do:`) or
     /// `{FoldAcc, Var1, ..., VarN}` (for `collect:` / `inject:`).
     pub use_tuple_acc: bool,
-    /// BT-1326: When `true`, use hybrid direct-params + State threading for letrec loops.
+    /// BT-1326/BT-1342: When `true`, use full-extract direct-params for letrec loops.
     ///
     /// Set when the loop body has BOTH local variable mutations AND actor field mutations
-    /// (but no self-sends). The loop fun signature becomes `fun(I, Local1, ..., State)`
-    /// with locals as direct parameters and actor state as an explicit `State` parameter.
+    /// (but no self-sends). The loop fun signature becomes
+    /// `fun(I, Local1, ..., RField1, ..., MField1, ...)` with locals, read-only fields,
+    /// and mutated fields all as direct parameters. No `State` parameter.
     ///
-    /// Eliminates per-iteration `maps:get`/`maps:put` for local variables while still
-    /// threading actor state correctly through field mutations.
+    /// Eliminates ALL per-iteration `maps:get`/`maps:put` — field writes become simple
+    /// variable rebindings, repacked into the state map only at loop exit.
     /// Mutually exclusive with `use_direct_params`.
     pub use_hybrid_params: bool,
     /// BT-1326: Actor fields that are read but never written in the loop body.
