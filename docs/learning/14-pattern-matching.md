@@ -1,3 +1,8 @@
+<!-- btfixture: fixtures/ch14array_destructuring.bt -->
+<!-- btfixture: fixtures/ch14map_destructuring.bt -->
+<!-- btfixture: fixtures/ch14tuple_destructuring.bt -->
+<!-- btfixture: fixtures/ch14binary_patterns.bt -->
+
 ## Pattern Matching
 
 Beamtalk supports destructuring assignment for arrays, maps, and Erlang tuples.

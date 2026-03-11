@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/11-actors.md (Counter)
+
+TestCase subclass: Ch11Actors
+
+  testBasicCounterLifecycle =>
+    c := Counter spawn
+    self assert: c getValue equals: 0
+    c increment
+    self assert: c getValue equals: 1
+    c increment
+    c increment
+    self assert: c getValue equals: 3
+
+  testIncrementBy =>
+    c := Counter spawn
+    c incrementBy: 10
+    self assert: c getValue equals: 10
+    c incrementBy: 5
+    self assert: c getValue equals: 15
+
+  testReset =>
+    c := Counter spawn
+    c increment
+    c increment
+    c increment
+    self assert: c getValue equals: 3
+    c reset
+    self assert: c getValue equals: 0
+
+  testSpawnWithInitialState =>
+    c := Counter spawnWith: #{#value => 100}
+    self assert: c getValue equals: 100
+    c increment
+    self assert: c getValue equals: 101
+
+  testIsAlive =>
+    c := Counter spawn
+    self assert: c isAlive
+    c stop
+    self deny: c isAlive
+
+  testStopIsIdempotent =>
+    c := Counter spawn
+    self assert: (c stop) equals: #ok
+    self assert: (c stop) equals: #ok
+
+  testSendingToStoppedActorRaisesError =>
+    c := Counter spawn
+    c stop
+    self should: [c increment] raise: #actor_dead

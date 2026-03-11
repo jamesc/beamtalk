@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for docs/learning/17-otp-supervisors.md
+
+Actor subclass: PersistentWorker
+  class supervisionPolicy => #permanent
+  state: value = 0
+  increment => self.value := self.value + 1

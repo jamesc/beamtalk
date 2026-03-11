@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/17-otp-supervisors.md (lifecycle)
+
+TestCase subclass: Ch17Lifecycle
+
+  testSupervisorClassMethods =>
+    self assert: CounterApp isSupervisor
+    self assert: CounterApp strategy equals: #oneForOne
+    self assert: (CounterApp children size) equals: 1

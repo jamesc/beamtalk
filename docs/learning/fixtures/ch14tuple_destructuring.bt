@@ -1,0 +1,31 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/14-pattern-matching.md (tuples)
+
+TestCase subclass: Ch14TupleDestructuring
+
+  testBasic =>
+    {a, b} := Erlang erlang list_to_tuple: #(10, 20)
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testTaggedTuple =>
+    {status, value} := Erlang erlang list_to_tuple: #(#ok, 42)
+    self assert: status equals: #ok
+    self assert: value equals: 42
+
+  testLiteralPatternInFirstSlot =>
+    {#ok, value} := Erlang erlang list_to_tuple: #(#ok, 42)
+    self assert: value equals: 42
+
+  testLiteralMismatchRaises =>
+    result := [
+      {#ok, _val} := Erlang erlang list_to_tuple: #(#error, 42)
+      #did_not_raise
+    ] on: RuntimeError do: [:e | e message includesSubstring: "badmatch"]
+    self assert: result equals: true
+
+  testWildcard =>
+    {_, b} := Erlang erlang list_to_tuple: #(#ignore, 99)
+    self assert: b equals: 99

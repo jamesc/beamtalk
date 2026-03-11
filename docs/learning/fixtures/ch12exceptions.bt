@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/12-error-handling.md (Exceptions)
+
+TestCase subclass: Ch12Exceptions
+
+  testCatchDivisionByZero =>
+    result := [10 / 0] on: Exception do: [:e | -1]
+    self assert: result equals: -1
+
+  testDoesNotUnderstand =>
+    result := [42 perform: #bogusMessage] on: RuntimeError do: [:e | #caught]
+    self assert: result equals: #caught
+
+  testUncaughtExceptionPropagates =>
+    self should: [
+      [42 perform: #bogusMessage] on: TypeError do: [:e | #wrong]
+    ] raise: #does_not_understand
+
+  testOnDoWithException =>
+    r1 := [1 / 0] on: Exception do: [:e | #caught]
+    self assert: r1 equals: #caught
+
+  testErrorMessage =>
+    text := [42 perform: #bogusMessage] on: RuntimeError do: [:e | e message]
+    self assert: (text isKindOf: String)

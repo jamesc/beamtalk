@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/17-otp-supervisors.md (strategies)
+
+TestCase subclass: Ch17Strategies
+
+  testDefaultStrategyIsOneForOne =>
+    self assert: CounterApp strategy equals: #oneForOne

@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/13-testing.md (setUp/tearDown)
+
+TestCase subclass: Ch13SetupExample
+  state: counter = nil
+
+  setUp =>
+    self.counter := Counter spawn
+    self
+
+  tearDown =>
+    self.counter isAlive ifTrue: [self.counter stop]
+
+  testCounterStartsAtZero =>
+    self assert: self.counter getValue equals: 0
+
+  testCounterIncrements =>
+    self.counter increment
+    self assert: self.counter getValue equals: 1
+
+  testCounterIsIndependentPerTest =>
+    self assert: self.counter getValue equals: 0
+    self.counter increment
+    self.counter increment
+    self assert: self.counter getValue equals: 2

@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for docs/learning/13-testing.md
+
+Actor subclass: Stack
+  state: items = nil
+
+  initialize =>
+    self.items := #()
+
+  push: item =>
+    self.items := self.items add: item
+
+  pop =>
+    self.items isEmpty ifTrue: [self error: "Stack underflow"]
+    top := self.items last
+    self.items := self.items take: self.items size - 1
+    top
+
+  peek =>
+    self.items isEmpty ifTrue: [self error: "Stack underflow"]
+    self.items last
+
+  isEmpty => self.items isEmpty
+
+  size => self.items size

@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/17-otp-supervisors.md (supervision specs)
+
+TestCase subclass: Ch17SupervisionSpecs
+
+  testDefaultSpecHasTemporaryRestart =>
+    spec := Counter supervisionSpec
+    self assert: spec restart equals: #temporary
+
+  testCustomRestartPolicy =>
+    spec := Counter supervisionSpec withRestart: #permanent
+    self assert: spec restart equals: #permanent
+
+  testCustomId =>
+    spec := Counter supervisionSpec withId: #mainCounter
+    self assert: spec id equals: #mainCounter
+
+  testChainedBuilders =>
+    spec := Counter supervisionSpec
+      withId: #primary
+      withRestart: #permanent
+    self assert: spec id equals: #primary
+    self assert: spec restart equals: #permanent

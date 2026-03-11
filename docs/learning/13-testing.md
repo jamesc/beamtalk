@@ -1,3 +1,10 @@
+<!-- btfixture: fixtures/counter.bt -->
+<!-- btfixture: fixtures/stack.bt -->
+<!-- btfixture: fixtures/ch13basic_tests.bt -->
+<!-- btfixture: fixtures/ch13assertions.bt -->
+<!-- btfixture: fixtures/ch13setup_example.bt -->
+<!-- btfixture: fixtures/stack_test.bt -->
+
 ## Testing with BUnit
 
 Beamtalk's test framework is BUnit — a Smalltalk-style xUnit framework.
