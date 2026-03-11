@@ -86,7 +86,7 @@ start(Port, Handler) ->
 %%   - `#bind` — IP address to bind to (default `"127.0.0.1"`)
 -dialyzer({nowarn_function, start/3}).
 -spec start(non_neg_integer(), fun() | pid(), map()) -> map().
-start(Port, Handler, Opts) when is_integer(Port), Port >= 0 ->
+start(Port, Handler, Opts) when is_integer(Port), Port >= 0, is_map(Opts) ->
     validate_handler(Handler),
     {ok, _} = application:ensure_all_started(cowboy),
     %% Start gun too — HTTPClient needs it and BUnit tests don't start it automatically
@@ -107,12 +107,14 @@ start(Port, Handler, Opts) when is_integer(Port), Port >= 0 ->
             beamtalk_result:from_tagged_tuple({ok, make_server(Ref, ActualPort)});
         {error, Reason} ->
             Error = beamtalk_error:new(http_error, 'HTTPServer'),
-            Error1 = beamtalk_error:with_selector(Error, 'start:handler:'),
+            Error1 = beamtalk_error:with_selector(Error, 'start:handler:options:'),
             Error2 = beamtalk_error:with_details(Error1, #{port => Port, reason => Reason}),
             Error3 = beamtalk_error:with_hint(Error2, <<"Failed to start HTTP server">>),
             ExObj = beamtalk_exception_handler:ensure_wrapped(Error3),
             beamtalk_result:from_tagged_tuple({error, ExObj})
     end;
+start(Port, _Handler, _Opts) when is_integer(Port), Port >= 0 ->
+    type_error('start:handler:options:', <<"Options must be a Dictionary">>);
 start(Port, _Handler, _Opts) when not is_integer(Port) ->
     type_error('start:handler:', <<"Port must be an Integer">>);
 start(Port, _Handler, _Opts) when Port < 0 ->
@@ -152,7 +154,7 @@ validate_handler(_) ->
     type_error('start:handler:', <<"Handler must be a block or an actor responding to handle:">>).
 
 %% @private Parse an IP address string to a tuple.
--spec parse_ip(binary()) -> inet:ip_address().
+-spec parse_ip(term()) -> inet:ip_address().
 parse_ip(Bin) when is_binary(Bin) ->
     case inet:parse_address(binary_to_list(Bin)) of
         {ok, Ip} ->
@@ -162,7 +164,9 @@ parse_ip(Bin) when is_binary(Bin) ->
                 'start:handler:options:',
                 <<"Invalid bind address: must be a valid IP address">>
             )
-    end.
+    end;
+parse_ip(_) ->
+    type_error('start:handler:options:', <<"Bind must be a String">>).
 
 %% @private Build an HTTPServer object.
 -dialyzer({nowarn_function, make_server/2}).

@@ -63,6 +63,20 @@ invalid_handler_raises_type_error_test() ->
         beamtalk_http_server:start(0, not_a_handler)
     ).
 
+invalid_opts_raises_type_error_test() ->
+    Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
+    ?assertError(
+        #{'$beamtalk_class' := 'TypeError'},
+        beamtalk_http_server:start(0, Handler, not_a_map)
+    ).
+
+invalid_bind_raises_type_error_test() ->
+    Handler = fun(_Req) -> make_simple_response(200, <<"ok">>) end,
+    ?assertError(
+        #{'$beamtalk_class' := 'TypeError'},
+        beamtalk_http_server:start(0, Handler, #{bind => 123})
+    ).
+
 %%% ============================================================================
 %%% Integration smoke test (requires gun)
 %%% ============================================================================
@@ -73,7 +87,7 @@ handler_receives_request_and_returns_response_test() ->
     Handler = fun(_Req) -> make_simple_response(200, <<"hello from handler">>) end,
     Server = unwrap_result(beamtalk_http_server:start(0, Handler)),
     Port = maps:get(actualPort, Server),
-    Url = iolist_to_binary(["http://localhost:", integer_to_list(Port), "/test"]),
+    Url = iolist_to_binary(["http://127.0.0.1:", integer_to_list(Port), "/test"]),
     #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Resp} =
         beamtalk_http:'get:'(Url),
     ?assertEqual(200, maps:get(status, Resp)),
