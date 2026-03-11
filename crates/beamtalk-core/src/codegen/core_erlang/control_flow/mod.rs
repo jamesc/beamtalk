@@ -195,7 +195,7 @@ impl ThreadingPlan {
             // blocks can't use tuple-acc. These fall back to map-acc which references
             // StateAcc — incompatible with direct-params mode.
             let body_has_non_tuple_safe_list_op = body.body.iter().any(|s| {
-                CoreErlangGenerator::list_op_needs_stateacc_fallback(
+                CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
                     &s.expression,
                     &generator.semantic_facts,
                 )
@@ -312,7 +312,7 @@ impl ThreadingPlan {
             });
             // BT-1329: Check for nested list ops incompatible with direct-params.
             let body_has_non_tuple_safe_list_op_hybrid = body.body.iter().any(|s| {
-                CoreErlangGenerator::list_op_needs_stateacc_fallback(
+                CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
                     &s.expression,
                     &generator.semantic_facts,
                 )
@@ -2378,5 +2378,21 @@ impl CoreErlangGenerator {
         }
 
         false
+    }
+
+    /// BT-1329: Recursive wrapper for `list_op_needs_stateacc_fallback` that also
+    /// looks inside Assignment values. Without this, `result := items collect: [...]`
+    /// inside a counted loop body would not be detected by the top-level scan.
+    fn list_op_needs_stateacc_fallback_recursive(
+        expr: &Expression,
+        facts: &crate::semantic_analysis::SemanticFacts,
+    ) -> bool {
+        match expr {
+            Expression::Assignment { value, .. } => {
+                Self::list_op_needs_stateacc_fallback_recursive(value, facts)
+            }
+            Expression::MessageSend { .. } => Self::list_op_needs_stateacc_fallback(expr, facts),
+            _ => false,
+        }
     }
 }
