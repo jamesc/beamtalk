@@ -1,9 +1,10 @@
 # Learning Beamtalk
 
-A progressive language guide with runnable, tested examples.
+A progressive language guide with runnable examples.
 
-Every code example in these chapters is verified by `just test-learn` — if an example
-is wrong, CI catches it.
+Most code examples in these chapters are tested automatically — if an example
+is wrong, CI catches it. A few chapters (22 and 25) are documentation-only
+and not executable.
 
 ## How to use this guide
 
@@ -16,12 +17,6 @@ Smalltalk.
 
 ```bash
 beamtalk repl
-```
-
-**Run the examples** — all chapters are executable:
-
-```bash
-just test-learn
 ```
 
 ---
@@ -102,15 +97,6 @@ Lazy evaluation, metaprogramming, and real-world networking.
 | [23](23-streams.md) | Streams | Lazy evaluation, infinite sequences, stream pipelines, collection interop |
 | [24](24-reflection.md) | Reflection & Metaprogramming | `respondsTo:`, `fieldAt:`, `perform:`, metaclasses, class hierarchy |
 | [25](25-http.md) | HTTP Client | GET/POST/PUT/DELETE, response parsing, JSON APIs, configurable client actor |
-
----
-
-## Running the tests
-
-```bash
-just test-learn           # run all learning guide doctests
-```
-
 
 ---
 

@@ -168,7 +168,7 @@ resp bodyAsJson  → Dictionary (parsed JSON)
 
 ```text
 #body     → String (request body)
-#headers  → Array of #(name, value) tuples
+#headers  → List of #(name, value) tuples
 #timeout  → Integer (milliseconds)
 ```
 
