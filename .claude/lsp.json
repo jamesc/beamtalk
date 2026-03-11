@@ -1,0 +1,11 @@
+{
+  "beamtalk": {
+    "command": "./target/debug/beamtalk-lsp",
+    "extensionToLanguage": {
+      ".bt": "beamtalk",
+      ".btscript": "beamtalk"
+    },
+    "restartOnCrash": true,
+    "maxRestarts": 3
+  }
+}
