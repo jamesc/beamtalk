@@ -845,14 +845,22 @@ pub(super) struct CoreErlangGenerator {
     /// here so the caller can append `let AssignedVar = <result_var> in` separately.
     /// `None` when no list op result is pending.
     direct_params_list_op_result: Option<String>,
-    /// BT-1326: Map of actor field name → Core Erlang variable name for read-only fields
-    /// that have been pre-extracted before a hybrid letrec loop.
+    /// BT-1326: Map of actor field name → Core Erlang variable name for fields
+    /// that have been pre-extracted before a hybrid/full-extract letrec loop.
     ///
     /// When non-empty, `generate_field_access` substitutes the variable name directly
     /// instead of emitting `call 'maps':'get'('field', State)`, eliminating per-iteration
-    /// map reads for fields that never change during the loop body.
-    /// Cleared after the hybrid loop body is generated.
+    /// map reads for fields during the loop body.
+    /// Contains both read-only fields (BT-1326) and mutated fields (BT-1342).
+    /// Cleared after the loop body is generated.
     hybrid_readonly_field_params: std::collections::HashMap<String, String>,
+    /// BT-1342: Set of actor field names that are mutated inside the current
+    /// full-extract loop body. When a field write targets one of these fields,
+    /// `generate_field_assignment_open` emits a simple variable rebinding instead
+    /// of `maps:put` on State, and updates `hybrid_readonly_field_params` with the
+    /// new variable name so subsequent reads see the updated value.
+    /// Empty when not in full-extract mode.
+    hybrid_mutated_fields: std::collections::HashSet<String>,
     /// BT-153: Whether we're generating REPL code (vs module code).
     /// In REPL mode, local variable assignments should update bindings.
     is_repl_mode: bool,
@@ -974,6 +982,7 @@ impl CoreErlangGenerator {
             in_direct_params_loop: false,
             direct_params_list_op_result: None,
             hybrid_readonly_field_params: std::collections::HashMap::new(),
+            hybrid_mutated_fields: std::collections::HashSet::new(),
             is_repl_mode: false,
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             source_text: None,
@@ -1017,6 +1026,7 @@ impl CoreErlangGenerator {
             in_direct_params_loop: false,
             direct_params_list_op_result: None,
             hybrid_readonly_field_params: std::collections::HashMap::new(),
+            hybrid_mutated_fields: std::collections::HashSet::new(),
             is_repl_mode: false,
             context: CodeGenContext::Actor,
             source_text: None,

@@ -292,80 +292,106 @@ mod tests {
         );
     }
 
-    // ── BT-1326: hybrid direct-params + State threading ──────────────────────
+    // ── BT-1326/BT-1342: full-extract direct-params + field extraction ───────
 
     #[test]
-    fn test_to_do_field_plus_local_mutation_uses_hybrid_params() {
-        // BT-1326: When both field AND local vars are mutated, hybrid mode uses
-        // fun(I, Sum, State) — locals as direct params, State as explicit parameter.
+    fn test_to_do_field_plus_local_mutation_uses_full_extract() {
+        // BT-1342: When both field AND local vars are mutated, full-extract mode
+        // extracts mutated fields to direct params (no State param in loop).
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
             code.contains("letrec"),
-            "mixed mutations: should generate a letrec. Got:\n{code}"
+            "full-extract: should generate a letrec. Got:\n{code}"
         );
-        // Fun signature must be (I, Sum, State), not (I, StateAcc).
+        // Fun signature must NOT have State — mutated field 'n' is a direct param.
         assert!(
-            code.contains("fun (I, Sum, State)"),
-            "hybrid: letrec fun should have Sum + State as params. Got:\n{code}"
+            !code.contains("fun (I, Sum, State)"),
+            "full-extract: letrec fun must not have State as param. Got:\n{code}"
         );
         assert!(
             !code.contains("fun (I, StateAcc)"),
-            "hybrid: letrec fun must not use StateAcc signature. Got:\n{code}"
+            "full-extract: letrec fun must not use StateAcc signature. Got:\n{code}"
         );
-        // Field mutation must use State (not StateAcc) as the base map.
+        // Mutated field 'n' is pre-extracted before the letrec.
         assert!(
-            code.contains("maps':'put'('n'"),
-            "hybrid: body should update 'n' via maps:put. Got:\n{code}"
+            code.contains("NField"),
+            "full-extract: mutated field 'n' should be extracted as NField param. Got:\n{code}"
         );
-        // No per-iteration maps:get for local sum inside the loop body.
-        // The post-loop extract (maps:get after the loop) is still expected.
+        // Field 'n' is pre-extracted with maps:get('n') and repacked at exit.
         assert!(
-            code.match_indices("maps':'get'('__local__sum'").count() <= 1,
-            "hybrid: at most one maps:get for local sum (post-loop extract only). Got:\n{code}"
+            code.contains("maps':'get'('n'"),
+            "full-extract: field 'n' should be pre-extracted via maps:get. Got:\n{code}"
         );
-        // Exit arm must pack locals back into StateAcc.
+        // Exit arm packs mutated field AND locals back.
+        // Verify the repack is inside the exit arm (near ExitSA), not just from
+        // the trailing `self.n := sum` outside the loop.
+        assert!(
+            code.match_indices("maps':'put'('n'").count() >= 2,
+            "full-extract: exit arm must repack 'n' (separate from post-loop assignment). Got:\n{code}"
+        );
         assert!(
             code.contains("maps':'put'('__local__sum'"),
-            "hybrid: exit arm must pack sum into ExitSA. Got:\n{code}"
+            "full-extract: exit arm must pack sum into ExitSA. Got:\n{code}"
         );
     }
 
     #[test]
-    fn test_times_repeat_field_plus_local_mutation_uses_hybrid_params() {
-        // BT-1326: timesRepeat: with both field + local mutations uses hybrid mode.
+    fn test_times_repeat_field_plus_local_mutation_uses_full_extract() {
+        // BT-1342: timesRepeat: with both field + local mutations uses full-extract mode.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    3 timesRepeat: [sum := sum + 1. self.n := self.n + 1]\n    self.n := sum\n";
         let code = codegen(src);
+        // No State in fun signature.
         assert!(
-            code.contains("fun (I, Sum, State)"),
-            "timesRepeat: hybrid: letrec fun should have Sum + State as params. Got:\n{code}"
+            !code.contains("fun (I, Sum, State)"),
+            "timesRepeat: full-extract: must not have State as param. Got:\n{code}"
         );
         assert!(
             !code.contains("fun (I, StateAcc)"),
-            "timesRepeat: hybrid: must not use StateAcc signature. Got:\n{code}"
+            "timesRepeat: full-extract: must not use StateAcc signature. Got:\n{code}"
         );
+        // Mutated field 'n' is a direct param.
+        assert!(
+            code.contains("NField"),
+            "timesRepeat: full-extract: 'n' should be extracted as NField param. Got:\n{code}"
+        );
+        // Exit arm repacks 'n' (separate from post-loop `self.n := sum`).
+        assert!(
+            code.match_indices("maps':'put'('n'").count() >= 2,
+            "timesRepeat: full-extract: exit arm must repack 'n'. Got:\n{code}"
+        );
+        // Exit arm packs locals back.
         assert!(
             code.contains("maps':'put'('__local__sum'"),
-            "timesRepeat: hybrid: exit arm must pack sum into ExitSA. Got:\n{code}"
+            "timesRepeat: full-extract: exit arm must pack sum into ExitSA. Got:\n{code}"
         );
     }
 
     #[test]
-    fn test_to_by_do_field_plus_local_mutation_uses_hybrid_params() {
-        // BT-1326: to:by:do: with both field + local mutations uses hybrid mode.
+    fn test_to_by_do_field_plus_local_mutation_uses_full_extract() {
+        // BT-1342: to:by:do: with both field + local mutations uses full-extract mode.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
-            code.contains("fun (I, Sum, State)"),
-            "to:by:do: hybrid: letrec fun should have Sum + State as params. Got:\n{code}"
+            !code.contains("fun (I, Sum, State)"),
+            "to:by:do: full-extract: must not have State as param. Got:\n{code}"
         );
         assert!(
             !code.contains("fun (I, StateAcc)"),
-            "to:by:do: hybrid: must not use StateAcc signature. Got:\n{code}"
+            "to:by:do: full-extract: must not use StateAcc signature. Got:\n{code}"
+        );
+        assert!(
+            code.contains("NField"),
+            "to:by:do: full-extract: 'n' should be extracted as NField param. Got:\n{code}"
+        );
+        // Exit arm repacks 'n' (separate from post-loop `self.n := sum`).
+        assert!(
+            code.match_indices("maps':'put'('n'").count() >= 2,
+            "to:by:do: full-extract: exit arm must repack 'n'. Got:\n{code}"
         );
         assert!(
             code.contains("maps':'put'('__local__sum'"),
-            "to:by:do: hybrid: exit arm must pack sum into ExitSA. Got:\n{code}"
+            "to:by:do: full-extract: exit arm must pack sum into ExitSA. Got:\n{code}"
         );
     }
 
