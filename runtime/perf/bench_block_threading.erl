@@ -29,6 +29,8 @@
     %% inject:into: equivalents
     fold_native/1,
     fold_stateacc_block/1,
+    fold_inject_into_wrapper/1,
+    fold_inline_swap/1,
     %% BT-1329: nested list op inside counted loop — StateAcc fallback vs tuple target
     nested_stateacc_list_op/2,
     nested_tuple_list_op/2,
@@ -217,6 +219,32 @@ fold_stateacc_block(List) ->
     end,
     {Result, _} = lists:foldl(BlockFun, {0, InitState}, List),
     Result.
+
+%% @doc Simulates current codegen for pure inject:into: — goes through
+%% beamtalk_collection:inject_into which wraps the block for arg swap
+%% and calls to_list.
+%%
+%% BT-1327: This benchmarks the ACTUAL overhead of the pure inject:into:
+%% path (no mutations) as the compiler currently generates it.
+-spec fold_inject_into_wrapper(list()) -> integer().
+fold_inject_into_wrapper(List) ->
+    Block = fun(Acc, X) -> Acc + X end,
+    beamtalk_collection:inject_into(List, 0, Block).
+
+%% @doc Simulates BT-1327 optimized inject:into: — inline lists:foldl with
+%% compile-time arg swap and is_list guard.
+%%
+%% For a literal block [:acc :x | acc + x], the compiler can emit the block
+%% body directly with the foldl parameter order (Elem, Acc) instead of the
+%% Beamtalk convention (Acc, Elem), eliminating the wrapper function entirely:
+%%   fun (X, Acc) -> Acc + X end
+-spec fold_inline_swap(list()) -> integer().
+fold_inline_swap(List) ->
+    SafeList = case erlang:is_list(List) of
+        true -> List;
+        false -> beamtalk_collection:to_list(List)
+    end,
+    lists:foldl(fun(X, Acc) -> Acc + X end, 0, SafeList).
 
 %%====================================================================
 %% BT-1329: nested list op inside counted loop

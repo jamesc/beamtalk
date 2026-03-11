@@ -257,5 +257,4 @@ Strategies:
 #restForOne   restart crashed child + all after it
 ```
 
-Next: this is the last chapter in the guide!
-See `docs/beamtalk-language-features.md` for the full language reference.
+Next: Chapter 18 — File I/O

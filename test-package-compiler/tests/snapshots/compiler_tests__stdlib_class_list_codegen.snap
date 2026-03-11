@@ -105,42 +105,42 @@ call 'beamtalk_list':'from_to'(Self, _start20, _end21)
 'indexOf:'/2 = fun (Self, _item22) ->
     let _NlrToken23 = call 'erlang':'make_ref'() in
     try
-    let _seq24 = call 'beamtalk_collection':'inject_into'(Self, 0, fun (_i25, _each26) -> let NewI = call 'erlang':'+'(_i25, 1) in let _Unit = call 'beamtalk_message_dispatch':'send'(call 'erlang':'=:='(_each26, _item22), 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken23, NewI, Self})]) in NewI) in
-    let _BodyResult27 = 'nil' in
-    {_BodyResult27, Self}
+    let _seq24 = let _temp25 = Self in let _temp26 = case call 'erlang':'is_list'(_temp25) of <'true'> when 'true' -> _temp25 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp25) end in let _temp27 = 0 in let _temp28 = fun (Each, I) -> let NewI = call 'erlang':'+'(I, 1) in let _Unit = call 'beamtalk_message_dispatch':'send'(call 'erlang':'=:='(Each, _item22), 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken23, NewI, Self})]) in NewI in call 'lists':'foldl'(_temp28, _temp27, _temp26) in
+    let _BodyResult29 = 'nil' in
+    {_BodyResult29, Self}
 
-    of _NlrResult28 -> _NlrResult28
-    catch <_NlrCls29, _NlrErr30, _NlrStk31> ->
-      case {_NlrCls29, _NlrErr30} of
-        <{'throw', {'$bt_nlr', _CatchTok32, _NlrVal33, _NlrState34}}> when call 'erlang':'=:='(_CatchTok32, _NlrToken23) -> {_NlrVal33, _NlrState34}
-        <_OtherPair35> when 'true' -> primop 'raw_raise'(_NlrCls29, _NlrErr30, _NlrStk31)
+    of _NlrResult30 -> _NlrResult30
+    catch <_NlrCls31, _NlrErr32, _NlrStk33> ->
+      case {_NlrCls31, _NlrErr32} of
+        <{'throw', {'$bt_nlr', _CatchTok34, _NlrVal35, _NlrState36}}> when call 'erlang':'=:='(_CatchTok34, _NlrToken23) -> {_NlrVal35, _NlrState36}
+        <_OtherPair37> when 'true' -> primop 'raw_raise'(_NlrCls31, _NlrErr32, _NlrStk33)
       end
 
 
-'eachWithIndex:'/2 = fun (Self, _block36) ->
-    let _seq37 = call 'beamtalk_collection':'inject_into'(Self, 0, fun (_i38, _each39) -> let NewI = call 'erlang':'+'(_i38, 1) in let _Unit = let _ValRecv40 = _block36 in let _ValArg41 = _each39 in let _ValArg42 = NewI in case call 'erlang':'is_function'(_ValRecv40) of 'true' when 'true' -> apply _ValRecv40 (_ValArg41, _ValArg42) 'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv40, 'value:value:', [_ValArg41, _ValArg42]) end in NewI) in
+'eachWithIndex:'/2 = fun (Self, _block38) ->
+    let _seq39 = let _temp40 = Self in let _temp41 = case call 'erlang':'is_list'(_temp40) of <'true'> when 'true' -> _temp40 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp40) end in let _temp42 = 0 in let _temp43 = fun (Each, I) -> let NewI = call 'erlang':'+'(I, 1) in let _Unit = let _ValRecv44 = _block38 in let _ValArg45 = Each in let _ValArg46 = NewI in case call 'erlang':'is_function'(_ValRecv44) of 'true' when 'true' -> apply _ValRecv44 (_ValArg45, _ValArg46) 'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv44, 'value:value:', [_ValArg45, _ValArg46]) end in NewI in call 'lists':'foldl'(_temp43, _temp42, _temp41) in
     'nil'
 
-'zip:'/2 = fun (Self, _other43) ->
-call 'beamtalk_list':'zip'(Self, _other43)
+'zip:'/2 = fun (Self, _other47) ->
+call 'beamtalk_list':'zip'(Self, _other47)
 
-'groupBy:'/2 = fun (Self, _block44) ->
-call 'beamtalk_list':'group_by'(Self, _block44)
+'groupBy:'/2 = fun (Self, _block48) ->
+call 'beamtalk_list':'group_by'(Self, _block48)
 
-'partition:'/2 = fun (Self, _block45) ->
-call 'beamtalk_list':'partition'(Self, _block45)
+'partition:'/2 = fun (Self, _block49) ->
+call 'beamtalk_list':'partition'(Self, _block49)
 
-'takeWhile:'/2 = fun (Self, _block46) ->
-call 'lists':'takewhile'(_block46, Self)
+'takeWhile:'/2 = fun (Self, _block50) ->
+call 'lists':'takewhile'(_block50, Self)
 
-'dropWhile:'/2 = fun (Self, _block47) ->
-call 'lists':'dropwhile'(_block47, Self)
+'dropWhile:'/2 = fun (Self, _block51) ->
+call 'lists':'dropwhile'(_block51, Self)
 
-'intersperse:'/2 = fun (Self, _separator48) ->
-call 'beamtalk_list':'intersperse'(Self, _separator48)
+'intersperse:'/2 = fun (Self, _separator52) ->
+call 'beamtalk_list':'intersperse'(Self, _separator52)
 
-'add:'/2 = fun (Self, _item49) ->
-call 'erlang':'++'(Self, [_item49|[]])
+'add:'/2 = fun (Self, _item53) ->
+call 'erlang':'++'(Self, [_item53|[]])
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of
