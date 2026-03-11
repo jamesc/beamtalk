@@ -1534,7 +1534,7 @@ fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnosti
             class, keywords, ..
         } = &arm.pattern
         {
-            let selector: String = keywords.iter().map(|(kw, _)| kw.as_str()).collect();
+            let selector: String = keywords.iter().map(|(kw, _)| kw.name.as_str()).collect();
             covered
                 .entry(class.name.as_str())
                 .or_default()
@@ -1588,7 +1588,10 @@ pub(crate) fn check_native_state_fields(module: &Module, diagnostics: &mut Vec<D
     for class in &module.classes {
         if class.backing_module.is_some() && !class.state.is_empty() {
             let class_name = &class.name.name;
-            let module_name = class.backing_module.as_deref().unwrap_or("?");
+            let module_name = class
+                .backing_module
+                .as_ref()
+                .map_or("?", |id| id.name.as_str());
             for field in &class.state {
                 diagnostics.push(
                     Diagnostic::error(

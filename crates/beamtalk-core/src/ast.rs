@@ -365,7 +365,7 @@ pub struct ClassDefinition {
     ///
     /// Set by the parser when `native: <module>` appears on the `subclass:` declaration.
     /// `None` for all ordinary Beamtalk classes.
-    pub backing_module: Option<String>,
+    pub backing_module: Option<Identifier>,
     /// Source location of the entire class definition.
     pub span: Span,
 }
@@ -1517,8 +1517,8 @@ pub enum Pattern {
     Constructor {
         /// The class name (e.g. `"Result"`).
         class: Identifier,
-        /// Keyword-binding pairs (e.g. `[("ok:", Variable("v"))]`).
-        keywords: Vec<(EcoString, Pattern)>,
+        /// Keyword-binding pairs (e.g. `[(Identifier("ok:"), Variable("v"))]`).
+        keywords: Vec<(Identifier, Pattern)>,
         /// Source location.
         span: Span,
     },
@@ -2377,7 +2377,10 @@ mod tests {
             vec![],
             Span::new(0, 20),
         );
-        class.backing_module = Some("my_erlang_module".to_string());
-        assert_eq!(class.backing_module, Some("my_erlang_module".to_string()));
+        class.backing_module = Some(Identifier::new("my_erlang_module", Span::new(0, 16)));
+        assert_eq!(
+            class.backing_module.as_ref().map(|id| id.name.as_str()),
+            Some("my_erlang_module")
+        );
     }
 }
