@@ -42,9 +42,9 @@ startListener(Port, Handler) ->
 -spec startListener(non_neg_integer(), fun() | pid(), map()) -> list().
 startListener(Port, Handler, Opts) when is_integer(Port), Port >= 0, is_map(Opts) ->
     validate_handler(Handler),
-    {ok, _} = application:ensure_all_started(cowboy),
+    ensure_started(cowboy),
     %% Start gun too — HTTPClient needs it and BUnit tests don't start it automatically
-    {ok, _} = application:ensure_all_started(gun),
+    ensure_started(gun),
     Bind = maps:get(bind, Opts, <<"127.0.0.1">>),
     IpTuple = parse_ip(Bind),
     Ref = make_ref(),
@@ -98,6 +98,23 @@ listenerPort(_) ->
 %%% ============================================================================
 %%% Internal
 %%% ============================================================================
+
+%% @private Ensure an OTP application is started, raising a structured error on failure.
+-spec ensure_started(atom()) -> ok | no_return().
+ensure_started(App) ->
+    case application:ensure_all_started(App) of
+        {ok, _} ->
+            ok;
+        {error, Reason} ->
+            server_error(
+                'startListener:handler:',
+                #{application => App, reason => Reason},
+                iolist_to_binary([
+                    <<"Failed to start dependency: ">>,
+                    atom_to_binary(App, utf8)
+                ])
+            )
+    end.
 
 %% @private Validate that the handler is a fun/1 or a pid.
 -spec validate_handler(term()) -> ok | no_return().
