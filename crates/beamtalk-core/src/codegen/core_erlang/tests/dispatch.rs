@@ -2422,6 +2422,7 @@ fn test_field_at_self_no_sync_send() {
 #[test]
 fn test_field_at_put_self_no_sync_send() {
     // BT-1321: `self fieldAt: name put: val` inside an actor must NOT route through sync_send.
+    // BT-1324: Must thread state update via maps:put so subsequent reads see the new value.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2434,8 +2435,33 @@ fn test_field_at_put_self_no_sync_send() {
         "self fieldAt:put: must not route through sync_send (deadlock risk). Got:\n{code}"
     );
     assert!(
-        code.contains("'beamtalk_primitive':'send'"),
-        "self fieldAt:put: must route through beamtalk_primitive:send. Got:\n{code}"
+        code.contains("'maps':'put'"),
+        "self fieldAt:put: must thread state via maps:put (BT-1324). Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_field_at_put_self_threads_state() {
+    // BT-1324: After `self fieldAt: #x put: val`, subsequent `self fieldAt: #x`
+    // must read from the updated state, not the stale snapshot.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  mutateAndRead =>\n",
+        "    self fieldAt: #x put: 42.\n",
+        "    self fieldAt: #x\n",
+    );
+    let code = codegen_source(src);
+    // The maps:put must produce a new State variable (State1)
+    // and the subsequent fieldAt: read must use State1, not State0.
+    assert!(
+        code.contains("'maps':'put'"),
+        "self fieldAt:put: must use maps:put for state threading. Got:\n{code}"
+    );
+    // Verify state is threaded: State0 → maps:put → State1, then fieldAt: uses State1
+    assert!(
+        code.contains("State1"),
+        "self fieldAt:put: must produce State1 for state threading. Got:\n{code}"
     );
 }
 

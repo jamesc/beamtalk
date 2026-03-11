@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1324: Fixture actor for testing self fieldAt:put: state threading.
+// Uses reflective mutation on self and reads back via fieldAt: and direct access.
+
+Actor subclass: ReflectionSelfMutateActor
+  state: x = 0
+  state: y = 0
+
+  // Mutate via fieldAt:put: on self, then read back via fieldAt:
+  mutateAndReadReflective =>
+    self fieldAt: #x put: 42
+    self fieldAt: #x
+
+  // Mutate via fieldAt:put: on self, then read back via direct field access
+  mutateAndReadDirect =>
+    self fieldAt: #x put: 99
+    self.x
+
+  // Mutate two fields via fieldAt:put: on self
+  mutateTwoFields =>
+    self fieldAt: #x put: 10
+    self fieldAt: #y put: 20
+    (self fieldAt: #x) + (self fieldAt: #y)
+
+  // Compare: normal assignment then reflective read
+  assignAndReadReflective =>
+    self.x := 77
+    self fieldAt: #x
