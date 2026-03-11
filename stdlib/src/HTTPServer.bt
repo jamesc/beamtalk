@@ -1,0 +1,99 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// HTTPServer — cowboy-backed HTTP server actor for Beamtalk.
+///
+/// Wraps a cowboy listener lifecycle: start on a given port (or ephemeral
+/// port 0), dispatch incoming requests to a handler, and stop gracefully.
+///
+/// The handler may be a block receiving an `HTTPRequest` and returning
+/// an `HTTPResponse`, or an actor responding to `handle:`.
+///
+/// As an Actor, HTTPServer can be supervised for automatic restart on
+/// failure and integrates with the standard Actor lifecycle (`stop`,
+/// `isAlive`, `monitor`).
+///
+/// ## Examples
+/// ```beamtalk
+/// srv := HTTPServer start: 8080 handler: [:req |
+///   req method == "GET" ifTrue: [
+///     HTTPResponse new: #{ #status => 200, #body => "hello" }
+///   ] ifFalse: [
+///     HTTPResponse new: #{ #status => 405, #body => "method not allowed" }
+///   ]
+/// ]
+/// srv port   // => 8080
+/// srv stop
+/// ```
+///
+/// ## Ephemeral port
+/// ```beamtalk
+/// srv := HTTPServer start: 0 handler: [:req |
+///   HTTPResponse new: #{ #status => 200, #body => "ok" }
+/// ]
+/// srv port   // => (dynamically assigned port)
+/// srv stop
+/// ```
+Actor subclass: HTTPServer
+  /// The requested port (0 for ephemeral).
+  state: port :: Integer = 0
+  /// The handler block or actor.
+  state: handler = nil
+  /// Opaque reference to the cowboy listener (internal).
+  state: listenerRef = nil
+  /// The actual TCP port the server is listening on.
+  state: actualPort :: Integer = 0
+
+  /// Start an HTTP server on the given port with a handler block or actor.
+  ///
+  /// Use port 0 for an ephemeral (OS-assigned) port.
+  /// Binds to 127.0.0.1 by default.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// srv := HTTPServer start: 8080 handler: [:req |
+  ///   HTTPResponse new: #{ #status => 200, #body => "hello" }
+  /// ]
+  /// ```
+  class start: port :: Integer handler: handler -> HTTPServer =>
+    self spawnWith: #{#port => port, #handler => handler}
+
+  /// Start an HTTP server with additional options.
+  ///
+  /// Options:
+  ///   - `#bind` — IP address to bind to (default `"127.0.0.1"`)
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// srv := HTTPServer start: 0 handler: handler
+  ///   options: #{ #bind => "0.0.0.0" }
+  /// ```
+  class start: port :: Integer handler: handler options: opts :: Dictionary -> HTTPServer =>
+    self spawnWith: (#{#port => port, #handler => handler} merge: opts)
+
+  /// Called after spawn — starts the cowboy listener.
+  initialize =>
+    result := (Erlang beamtalk_http_server) startListener: self.port handler: self.handler
+    self.listenerRef := result at: 1
+    self.actualPort := result at: 2
+
+  /// Called on actor shutdown — stops the cowboy listener.
+  terminate: _reason =>
+    self.listenerRef isNil ifFalse: [
+      (Erlang beamtalk_http_server) stopListener: self.listenerRef
+    ]
+
+  /// Return the TCP port this server is listening on.
+  ///
+  /// Useful when started with port 0 (ephemeral) to discover the
+  /// actual assigned port.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// srv port   // => 8080
+  /// ```
+  port -> Integer => self.actualPort
+
+  /// Human-readable representation.
+  printString -> String =>
+    "an HTTPServer(port: " ++ self.actualPort printString ++ ")"

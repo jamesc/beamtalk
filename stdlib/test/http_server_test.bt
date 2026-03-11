@@ -1,0 +1,147 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1338: BUnit integration tests for HTTPServer.
+//
+// Tests cover:
+//   - Start/stop lifecycle
+//   - Ephemeral port assignment
+//   - Request handling with block handlers
+//   - HTTPRequest fields (method, path, body)
+//   - Response status codes
+//   - printString
+
+TestCase subclass: HTTPServerTest
+  state: srv = nil
+
+  tearDown => self.srv isNil ifFalse: [self.srv stop]
+
+  // ===== Lifecycle =====
+  testStartAndStop =>
+    self.srv := HTTPServer start: 0 handler: [:req |
+      HTTPResponse new: #{#status => 200, #body => "ok"}
+    ]
+    self assert: self.srv port > 0
+    self.srv stop
+    self.srv := nil
+
+  testEphemeralPort =>
+    self.srv := HTTPServer start: 0 handler: [:req |
+      HTTPResponse new: #{#status => 200, #body => "ok"}
+    ]
+    self assert: self.srv port > 0
+
+  testStopIsIdempotent =>
+    self.srv := HTTPServer start: 0 handler: [:req |
+      HTTPResponse new: #{#status => 200, #body => "ok"}
+    ]
+    self.srv stop
+    self.srv := nil
+
+  // ===== Request handling =====
+  testGetRequest =>
+    self.srv := HTTPServer start: 0 handler: [:req |
+      HTTPResponse new: #{#status => 200, #body => "hello"}
+    ]
+    url := "http://localhost:" ++ self.srv port asString ++ "/test"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp status equals: 200
+    @expect type
+    self assert: resp body equals: "hello"
+
+  testPostRequestWithBody =>
+    self.srv := HTTPServer
+      start: 0
+      handler: [:req |
+        @expect type
+        body := req body
+        HTTPResponse new: #{#status => 200, #body => "echo: " ++ body}
+      ]
+    url := "http://localhost:" ++ self.srv port asString ++ "/echo"
+    resp := (HTTPClient post: url body: "test data") unwrap
+    @expect type
+    self assert: resp status equals: 200
+    @expect type
+    self assert: resp body equals: "echo: test data"
+
+  testHandlerReceivesMethod =>
+    self.srv := HTTPServer
+      start: 0
+      handler: [:req |
+        @expect type
+        HTTPResponse new: #{#status => 200, #body => req method}
+      ]
+    url := "http://localhost:" ++ self.srv port asString ++ "/method"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp body equals: "GET"
+
+  testHandlerReceivesPath =>
+    self.srv := HTTPServer
+      start: 0
+      handler: [:req |
+        @expect type
+        HTTPResponse new: #{#status => 200, #body => req path}
+      ]
+    url := "http://localhost:" ++ self.srv port asString ++ "/hello/world"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp body equals: "/hello/world"
+
+  // ===== Response codes =====
+  testCustomStatusCode =>
+    self.srv := HTTPServer start: 0 handler: [:req |
+      HTTPResponse new: #{#status => 404, #body => "not found"}
+    ]
+    url := "http://localhost:" ++ self.srv port asString ++ "/missing"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp status equals: 404
+    @expect type
+    self assert: resp body equals: "not found"
+
+  testMethodBasedRouting =>
+    self.srv := HTTPServer
+      start: 0
+      handler: [:req |
+        @expect type
+        m := req method
+        m == "GET" ifTrue: [
+          HTTPResponse new: #{#status => 200, #body => "get ok"}
+        ] ifFalse: [
+          HTTPResponse new: #{#status => 405, #body => "method not allowed"}
+        ]
+      ]
+    url := "http://localhost:" ++ self.srv port asString ++ "/route"
+    getResp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: getResp status equals: 200
+    @expect type
+    self assert: getResp body equals: "get ok"
+    deleteResp := (HTTPClient delete: url) unwrap
+    @expect type
+    self assert: deleteResp status equals: 405
+
+  // ===== Identity =====
+  testPrintString =>
+    self.srv := HTTPServer start: 0 handler: [:req |
+      HTTPResponse new: #{#status => 200, #body => "ok"}
+    ]
+    str := self.srv printString
+    self assert: (str startsWith: "an HTTPServer(port: ")
+
+  testClassIdentity => self assert: HTTPServer superclass equals: Actor
+
+  testHTTPRequestPrintString =>
+    self.srv := HTTPServer
+      start: 0
+      handler: [:req |
+        @expect type
+        HTTPResponse new: #{#status => 200, #body => req printString}
+      ]
+    url := "http://localhost:" ++ self.srv port asString ++ "/identity"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    ps := resp body
+    self assert: (ps startsWith: "an HTTPRequest(")
