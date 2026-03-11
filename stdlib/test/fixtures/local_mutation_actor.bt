@@ -142,6 +142,30 @@ Actor subclass: LocalMutationActor
       ]
     #{#sum => sum, #log => self.log}
 
+  // BT-1342: whileTrue: with both local var AND field mutation (full-extract mode).
+  sumAndCountWhileTrue: n =>
+    sum := 0
+    i := 1
+    [i <= n]
+      whileTrue: [
+        sum := sum + i
+        self.log := self.log + 1
+        i := i + 1
+      ]
+    #{#sum => sum, #log => self.log}
+
+  // BT-1342: Multiple field mutations in a counted loop.
+  // Both self.log and self.step are mutated (step used as accumulator).
+  multiFieldMutation: n =>
+    self.step := 0
+    1
+      to: n
+      do: [:i |
+        self.step := self.step + i
+        self.log := self.log + 1
+      ]
+    #{#step => self.step, #log => self.log}
+
   // BT-1329: Nested list op (do:) inside counted loop with cross-scope mutation.
   // The do: block captures and mutates `count` from the outer to:do: scope.
   // Direct-params loop should use expanded tuple for the inner list op.

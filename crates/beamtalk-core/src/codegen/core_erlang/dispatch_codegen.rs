@@ -1155,6 +1155,37 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                // BT-1342: Full-extract mode — rebind field param instead of maps:put.
+                // When the field is in hybrid_mutated_fields, the field has been extracted
+                // to a direct fun parameter. We rebind it to a fresh variable and update
+                // the readonly params map so subsequent reads use the new variable.
+                if self.in_hybrid_loop && self.hybrid_mutated_fields.contains(field.name.as_str()) {
+                    let val_var = self.fresh_temp_var("Val");
+                    // Snapshot field params before evaluating RHS so nested field
+                    // assignments (e.g. `self.x := (self.y := 42)`) don't leak
+                    // inner updates past the outer assignment.
+                    let saved_field_params = self.hybrid_readonly_field_params.clone();
+                    let val_doc = self.expression_doc(value)?;
+                    self.hybrid_readonly_field_params = saved_field_params;
+                    let new_field_var = self
+                        .fresh_temp_var(&format!("{}Field", Self::to_core_erlang_var(&field.name)));
+                    // Update the param map so subsequent reads use the new var.
+                    self.hybrid_readonly_field_params
+                        .insert(field.name.to_string(), new_field_var.clone());
+                    self.last_open_scope_result = Some(val_var.clone());
+                    return Ok(docvec![
+                        "let ",
+                        Document::String(val_var.clone()),
+                        " = ",
+                        val_doc,
+                        " in let ",
+                        Document::String(new_field_var),
+                        " = ",
+                        Document::String(val_var),
+                        " in ",
+                    ]);
+                }
+
                 let val_var = self.fresh_temp_var("Val");
                 let current_state = self.current_state_var();
                 let val_doc = self.expression_doc(value)?;

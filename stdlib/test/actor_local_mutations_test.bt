@@ -53,6 +53,22 @@ TestCase subclass: ActorLocalMutationsTest
     self assert: (r2 at: #log) equals: 4
     self assert: (b getLog) equals: 4
 
+  // BT-1342: whileTrue: with both local var AND field mutations uses full-extract mode.
+  testFullExtractWhileTrue =>
+    a := LocalMutationActor spawn
+    r := a sumAndCountWhileTrue: 5
+    self assert: (r at: #sum) equals: 15
+    self assert: (r at: #log) equals: 5
+    self assert: (a getLog) equals: 5
+
+  // BT-1342: Multiple field mutations in a counted loop (both step and log mutated).
+  testMultiFieldMutation =>
+    a := LocalMutationActor spawn
+    r := a multiFieldMutation: 4
+    // step = 1+2+3+4 = 10, log = 4
+    self assert: (r at: #step) equals: 10
+    self assert: (r at: #log) equals: 4
+
   testHybridReadonlyFieldOptimization =>
     // BT-1326: Read-only field (self.step=1) is pre-extracted before the letrec.
     // Verifies the optimization produces correct results at runtime.
