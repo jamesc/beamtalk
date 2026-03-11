@@ -85,7 +85,7 @@ sealed Value subclass: HTTPServer
   /// ```beamtalk
   /// srv stop   // => #ok
   /// ```
-  sealed stop => (Erlang beamtalk_http_server) stop: self.listenerRef
+  sealed stop -> Symbol => (Erlang beamtalk_http_server) stop: self.listenerRef
 
   /// Human-readable representation.
   printString -> String =>
