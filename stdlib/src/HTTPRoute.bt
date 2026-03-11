@@ -1,0 +1,57 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// HTTPRoute — Sealed value class representing a single HTTP route.
+///
+/// Each HTTPRoute pairs an HTTP method and path pattern with a handler
+/// block. Routes are assembled into an Array and passed to
+/// `HTTPRouter routes:` to build a compiled router.
+///
+/// ## Path patterns
+///
+/// - `/users`       — exact match
+/// - `/users/:id`   — named parameter (captured in request params)
+/// - `/static/*path` — wildcard (captures remaining path)
+///
+/// ## Examples
+/// ```beamtalk
+/// routes := #(
+///   HTTPRoute get: "/" handler: [:req | HTTPResponse new: #{ #status => 200, #body => "home" }],
+///   HTTPRoute get: "/users/:id" handler: [:req |
+///     id := req param: "id"
+///     HTTPResponse new: #{ #status => 200, #body => id }
+///   ]
+/// )
+/// router := HTTPRouter routes: routes
+/// ```
+sealed Value subclass: HTTPRoute
+  /// HTTP method (e.g. "GET", "POST").
+  state: method :: String = ""
+  /// Path pattern (e.g. "/users/:id").
+  state: path :: String = "/"
+  /// Handler block receiving an HTTPRequest.
+  state: handler = nil
+
+  /// Create a GET route.
+  class get: path :: String handler: handler -> HTTPRoute =>
+    self new: #{#method => "GET", #path => path, #handler => handler}
+
+  /// Create a POST route.
+  class post: path :: String handler: handler -> HTTPRoute =>
+    self new: #{#method => "POST", #path => path, #handler => handler}
+
+  /// Create a PUT route.
+  class put: path :: String handler: handler -> HTTPRoute =>
+    self new: #{#method => "PUT", #path => path, #handler => handler}
+
+  /// Create a DELETE route.
+  class delete: path :: String handler: handler -> HTTPRoute =>
+    self new: #{#method => "DELETE", #path => path, #handler => handler}
+
+  /// Create a PATCH route.
+  class patch: path :: String handler: handler -> HTTPRoute =>
+    self new: #{#method => "PATCH", #path => path, #handler => handler}
+
+  /// Human-readable representation: "an HTTPRoute(GET /users/:id)".
+  printString -> String =>
+    "an HTTPRoute(" ++ self.method ++ " " ++ self.path ++ ")"
