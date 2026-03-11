@@ -265,8 +265,11 @@ it by 3, then convert the result back to a string. What do you get?
 <details>
 <summary>Hint</summary>
 
-`("123" asInteger * 3) printString` gives `"369"`. Use `asInteger` to parse
-and `printString` to convert back.
+```text
+("123" asInteger * 3) printString    // => "369"
+```
+
+Use `asInteger` to parse and `printString` to convert back.
 </details>
 
 **2. Nil-safe access.** Write an expression using `ifNil:ifNotNil:` that returns
@@ -276,8 +279,10 @@ Test it with both `nil` and `42`.
 <details>
 <summary>Hint</summary>
 
-`nil ifNil: ["unknown"] ifNotNil: [:v | v class printString]` returns `"unknown"`.
-`42 ifNil: ["unknown"] ifNotNil: [:v | v class printString]` returns `"Integer"`.
+```text
+nil ifNil: ["unknown"] ifNotNil: [:v | v class printString]    // => "unknown"
+42 ifNil: ["unknown"] ifNotNil: [:v | v class printString]     // => "Integer"
+```
 </details>
 
 **3. Symbol vs String.** Create a symbol `#hello` and a string `"hello"`. Are they
@@ -286,7 +291,8 @@ equal with `=:=`? What about after converting the symbol with `asString`?
 <details>
 <summary>Hint</summary>
 
-`#hello =:= "hello"` is `false` — they are different types. But
-`#hello asString =:= "hello"` is `true` — `asString` converts the symbol to
-a string value.
+```text
+#hello =:= "hello"             // => false (different types)
+#hello asString =:= "hello"    // => true  (asString converts to String)
+```
 </details>

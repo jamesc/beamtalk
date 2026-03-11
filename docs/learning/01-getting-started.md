@@ -91,8 +91,13 @@ There are no multi-line block comments.
 <details>
 <summary>Hint</summary>
 
-Try expressions like `42 class`, `3.14 class`, `"hello" class`, `true class`,
-and `nil class` in the REPL.
+```text
+42 class       // => Integer
+3.14 class     // => Float
+"hello" class  // => String
+true class     // => True
+nil class      // => UndefinedObject
+```
 </details>
 
 **2. Build a greeting.** Using string concatenation (`++`) and the `printString`
@@ -101,8 +106,11 @@ message, build the string `"I am 25 years old"` from the integer `25`.
 <details>
 <summary>Hint</summary>
 
-Use `"I am " ++ 25 printString ++ " years old"`. The `printString` message
-converts any value to its string representation.
+```text
+"I am " ++ 25 printString ++ " years old"    // => "I am 25 years old"
+```
+
+`printString` converts any value to its string representation.
 </details>
 
 **3. Chain unary messages.** What does `-42 abs class` evaluate to? Predict the
@@ -110,6 +118,10 @@ answer before running it, then verify in the REPL.
 
 <details>
 <summary>Hint</summary>
+
+```text
+-42 abs class    // => Integer
+```
 
 Unary messages chain left-to-right: `(-42 abs)` gives `42`, then `42 class`
 gives `Integer`.
