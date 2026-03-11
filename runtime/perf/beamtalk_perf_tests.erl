@@ -758,5 +758,127 @@ bench_block_threading() ->
     %% Primary value: code clarity, read-only field pre-extraction, and scaling
     %% with more local variables where multiple maps:get/put are eliminated.
     %% No hard assertion — tracked as informational benchmark.
+
+    %% --- Full extraction with small map (proves JIT anomaly disappears) ---
+    SmallmapFullExtractTimings = run_benchmark(fun() ->
+        bench_block_threading:mixed_full_extract(N)
+    end, ?ITERATIONS, ?WARMUP),
+    SmallmapFullExtractStats = stats(SmallmapFullExtractTimings),
+    report("block/mixed_full_extract", SmallmapFullExtractStats, ?ITERATIONS),
+    SmallmapFullExtractMedian = maps:get(median, SmallmapFullExtractStats),
+    io:format(standard_error,
+        "PERF: block/mixed_full_extract_overhead ~.2fx vs native~n",
+        [SmallmapFullExtractMedian / max(MixedNativeMedian, 1)]),
+    io:format(standard_error,
+        "PERF: block/mixed_full_extract_vs_stateacc ~.2fx full vs stateacc~n",
+        [MixedStateAccMedian / max(SmallmapFullExtractMedian, 1)]),
+    io:format(standard_error,
+        "PERF: block/mixed_full_extract_vs_hybrid ~.2fx full vs hybrid~n",
+        [MixedHybridMedian / max(SmallmapFullExtractMedian, 1)]),
+
+    %% --- Crossover: stateacc vs full extract on small map, 1..4 mutated fields ---
+    CrossoverResults = lists:map(fun(NumFields) ->
+        SAFun = list_to_atom("crossover_stateacc_" ++ integer_to_list(NumFields) ++ "field" ++
+            case NumFields of 1 -> ""; _ -> "s" end),
+        FEFun = list_to_atom("crossover_full_extract_" ++ integer_to_list(NumFields) ++ "field" ++
+            case NumFields of 1 -> ""; _ -> "s" end),
+        SATimings = run_benchmark(fun() ->
+            bench_block_threading:SAFun(N)
+        end, ?ITERATIONS, ?WARMUP),
+        FETimings = run_benchmark(fun() ->
+            bench_block_threading:FEFun(N)
+        end, ?ITERATIONS, ?WARMUP),
+        SAStats = stats(SATimings),
+        FEStats = stats(FETimings),
+        SALabel = "block/crossover_sa_" ++ integer_to_list(NumFields) ++ "f",
+        FELabel = "block/crossover_fe_" ++ integer_to_list(NumFields) ++ "f",
+        report(SALabel, SAStats, ?ITERATIONS),
+        report(FELabel, FEStats, ?ITERATIONS),
+        SAMedian = maps:get(median, SAStats),
+        FEMedian = maps:get(median, FEStats),
+        Ratio = SAMedian / max(FEMedian, 1),
+        io:format(standard_error,
+            "PERF: block/crossover_~Bf winner=~s ratio=~.2fx~n",
+            [NumFields,
+             case Ratio >= 1.0 of true -> "full_extract"; false -> "stateacc" end,
+             case Ratio >= 1.0 of true -> Ratio; false -> 1.0 / Ratio end]),
+        {NumFields, SAMedian, FEMedian, Ratio}
+    end, [1, 2, 3, 4]),
+    _ = CrossoverResults,
+
+    %% --- BT-1326: large-map variants (>32 keys, past BEAM small-map threshold) ---
+    BigmapStateAccTimings = run_benchmark(fun() ->
+        bench_block_threading:mixed_bigmap_stateacc(N)
+    end, ?ITERATIONS, ?WARMUP),
+    BigmapHybridTimings = run_benchmark(fun() ->
+        bench_block_threading:mixed_bigmap_hybrid(N)
+    end, ?ITERATIONS, ?WARMUP),
+
+    BigmapStateAccStats = stats(BigmapStateAccTimings),
+    BigmapHybridStats = stats(BigmapHybridTimings),
+
+    report("block/mixed_bigmap_stateacc", BigmapStateAccStats, ?ITERATIONS),
+    report("block/mixed_bigmap_hybrid", BigmapHybridStats, ?ITERATIONS),
+
+    BigmapStateAccMedian = maps:get(median, BigmapStateAccStats),
+    BigmapHybridMedian = maps:get(median, BigmapHybridStats),
+
+    io:format(standard_error,
+        "PERF: block/mixed_bigmap_stateacc_overhead ~.2fx vs native~n",
+        [BigmapStateAccMedian / max(MixedNativeMedian, 1)]),
+    io:format(standard_error,
+        "PERF: block/mixed_bigmap_hybrid_overhead ~.2fx vs native~n",
+        [BigmapHybridMedian / max(MixedNativeMedian, 1)]),
+    io:format(standard_error,
+        "PERF: block/mixed_bigmap_hybrid_improvement ~.2fx hybrid vs stateacc~n",
+        [BigmapStateAccMedian / max(BigmapHybridMedian, 1)]),
+
+    BigmapFullExtractTimings = run_benchmark(fun() ->
+        bench_block_threading:mixed_bigmap_full_extract(N)
+    end, ?ITERATIONS, ?WARMUP),
+    BigmapFullExtractStats = stats(BigmapFullExtractTimings),
+    report("block/mixed_bigmap_full_extract", BigmapFullExtractStats, ?ITERATIONS),
+    BigmapFullExtractMedian = maps:get(median, BigmapFullExtractStats),
+    io:format(standard_error,
+        "PERF: block/mixed_bigmap_full_extract_overhead ~.2fx vs native~n",
+        [BigmapFullExtractMedian / max(MixedNativeMedian, 1)]),
+    io:format(standard_error,
+        "PERF: block/mixed_bigmap_full_extract_improvement ~.2fx full vs stateacc~n",
+        [BigmapStateAccMedian / max(BigmapFullExtractMedian, 1)]),
+    io:format(standard_error,
+        "PERF: block/mixed_bigmap_full_extract_vs_hybrid ~.2fx full vs hybrid~n",
+        [BigmapHybridMedian / max(BigmapFullExtractMedian, 1)]),
+
+    %% --- Arity scaling: does BEAM degrade with many params? ---
+    FullExtract8pTimings = run_benchmark(fun() ->
+        bench_block_threading:mixed_bigmap_full_extract_8params(N)
+    end, ?ITERATIONS, ?WARMUP),
+    FullExtract12pTimings = run_benchmark(fun() ->
+        bench_block_threading:mixed_bigmap_full_extract_12params(N)
+    end, ?ITERATIONS, ?WARMUP),
+    FullExtract16pTimings = run_benchmark(fun() ->
+        bench_block_threading:mixed_bigmap_full_extract_16params(N)
+    end, ?ITERATIONS, ?WARMUP),
+
+    FullExtract8pStats = stats(FullExtract8pTimings),
+    FullExtract12pStats = stats(FullExtract12pTimings),
+    FullExtract16pStats = stats(FullExtract16pTimings),
+
+    report("block/full_extract_5params", BigmapFullExtractStats, ?ITERATIONS),
+    report("block/full_extract_8params", FullExtract8pStats, ?ITERATIONS),
+    report("block/full_extract_12params", FullExtract12pStats, ?ITERATIONS),
+    report("block/full_extract_16params", FullExtract16pStats, ?ITERATIONS),
+
+    FullExtract8pMedian = maps:get(median, FullExtract8pStats),
+    FullExtract12pMedian = maps:get(median, FullExtract12pStats),
+    FullExtract16pMedian = maps:get(median, FullExtract16pStats),
+
+    io:format(standard_error,
+        "PERF: block/arity_scaling 5p=~.1fx 8p=~.1fx 12p=~.1fx 16p=~.1fx vs native~n",
+        [BigmapFullExtractMedian / max(MixedNativeMedian, 1),
+         FullExtract8pMedian / max(MixedNativeMedian, 1),
+         FullExtract12pMedian / max(MixedNativeMedian, 1),
+         FullExtract16pMedian / max(MixedNativeMedian, 1)]),
+
     ok.
 
