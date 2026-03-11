@@ -47,7 +47,8 @@
     build_child_specs/1,
     is_supervisor/1,
     register_root/1,
-    get_root/0
+    get_root/0,
+    clear_root/0
 ]).
 
 -include("beamtalk.hrl").
@@ -390,6 +391,16 @@ get_root() ->
         [{root, Sup}] -> Sup;
         [] -> nil
     end.
+
+%% @doc Clear the registered root supervisor entry.
+%%
+%% Called when the root supervisor is stopped via `Workspace stopSupervisor:`.
+%% Removes the ETS entry so that `get_root/0` returns `nil` afterwards.
+-spec clear_root() -> ok.
+clear_root() ->
+    ensure_root_table(),
+    ets:delete(?ROOT_SUPERVISOR_TABLE, root),
+    ok.
 
 %%% ============================================================================
 %%% Internal helpers
