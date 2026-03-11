@@ -2873,13 +2873,19 @@ fn test_native_facade_has_method_includes_all_selectors() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
+    // Extract the has_method/1 function body to avoid matching selectors in method_info/meta
+    let has_method_fn = code
+        .split("'has_method'/1 = fun")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("has_method/1 function not found in generated code");
     assert!(
-        code.contains("'doWork'"),
-        "has_method should include 'doWork'. Got:\n{code}"
+        has_method_fn.contains("'doWork'"),
+        "has_method/1 body should include 'doWork'. Got:\n{has_method_fn}"
     );
     assert!(
-        code.contains("'process:'"),
-        "has_method should include 'process:'. Got:\n{code}"
+        has_method_fn.contains("'process:'"),
+        "has_method/1 body should include 'process:'. Got:\n{has_method_fn}"
     );
 }
 
@@ -2889,13 +2895,19 @@ fn test_native_facade_meta_includes_native_flag() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
+    // Extract the __beamtalk_meta/0 function body to avoid matching keys in BuilderState.meta
+    let meta_fn = code
+        .split("'__beamtalk_meta'/0 = fun")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("__beamtalk_meta/0 function not found in generated code");
     assert!(
-        code.contains("'native' => 'true'"),
-        "Meta should include native => true. Got:\n{code}"
+        meta_fn.contains("'native' => 'true'"),
+        "__beamtalk_meta/0 body should include native => true. Got:\n{meta_fn}"
     );
     assert!(
-        code.contains("'backing_module' => 'test_backing_mod'"),
-        "Meta should include backing_module. Got:\n{code}"
+        meta_fn.contains("'backing_module' => 'test_backing_mod'"),
+        "__beamtalk_meta/0 body should include backing_module. Got:\n{meta_fn}"
     );
 }
 
@@ -2937,17 +2949,28 @@ fn test_native_facade_register_class_includes_meta() {
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
+    // Extract the register_class/0 function body
+    let register_fn = code
+        .split("'register_class'/0 = fun")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n\n").next())
+        .expect("register_class/0 function not found in generated code");
     assert!(
-        code.contains("'register_class'/0"),
-        "Should have register_class/0. Got:\n{code}"
+        register_fn.contains("'beamtalk_class_builder':'register'"),
+        "register_class/0 should call beamtalk_class_builder:register. Got:\n{register_fn}"
     );
     assert!(
-        code.contains("'beamtalk_class_builder':'register'"),
-        "Should call beamtalk_class_builder:register. Got:\n{code}"
+        register_fn.contains("'isConstructible' => 'false'"),
+        "BuilderState should mark native actors as not constructible. Got:\n{register_fn}"
+    );
+    // BuilderState.meta should contain native-specific keys
+    assert!(
+        register_fn.contains("'native' => 'true'"),
+        "BuilderState.meta should include native => true. Got:\n{register_fn}"
     );
     assert!(
-        code.contains("'isConstructible' => 'false'"),
-        "Native actors should not be constructible via new. Got:\n{code}"
+        register_fn.contains("'backing_module' => 'test_backing_mod'"),
+        "BuilderState.meta should include backing_module. Got:\n{register_fn}"
     );
 }
 
