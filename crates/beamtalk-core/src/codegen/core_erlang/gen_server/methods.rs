@@ -1964,11 +1964,31 @@ impl CoreErlangGenerator {
     /// runtime-patched and deliberately absent from the static meta. When `true`
     /// (used for `BuilderState.meta`), standalone methods are included so that
     /// return-type information is available to `init/1` during `on_load`.
-    fn build_meta_map_doc(
+    pub(super) fn build_meta_map_doc(
         class: &ClassDefinition,
         module: &Module,
         include_standalone: bool,
         synthesize_supervision_spec: bool,
+    ) -> Document<'static> {
+        Self::build_meta_map_doc_with_extra(
+            class,
+            module,
+            include_standalone,
+            synthesize_supervision_spec,
+            Document::Nil,
+        )
+    }
+
+    /// Like `build_meta_map_doc` but appends extra map entries before closing the map.
+    ///
+    /// Used by native facade codegen to add `'native'` and `'backing_module'` keys
+    /// while reusing the standard meta map structure.
+    pub(super) fn build_meta_map_doc_with_extra(
+        class: &ClassDefinition,
+        module: &Module,
+        include_standalone: bool,
+        synthesize_supervision_spec: bool,
+        extra_entries: Document<'static>,
     ) -> Document<'static> {
         let class_name = class.name.name.to_string();
         let superclass_name = class
@@ -2032,6 +2052,7 @@ impl CoreErlangGenerator {
             method_info_doc,
             ",\n      'class_method_info' => ",
             class_method_info_doc,
+            extra_entries,
             "\n    }~",
         ]
     }

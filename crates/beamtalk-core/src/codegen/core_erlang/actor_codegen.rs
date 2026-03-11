@@ -45,11 +45,20 @@ impl CoreErlangGenerator {
 
         // ADR 0056: Native Erlang-backed actors generate a thin facade module
         // instead of a full gen_server module.
-        if module
+        // Validate uniform native-ness: all classes must be either native or non-native.
+        let native_count = module
             .classes
-            .first()
-            .is_some_and(|c| c.backing_module.is_some())
-        {
+            .iter()
+            .filter(|c| c.backing_module.is_some())
+            .count();
+        if native_count > 0 {
+            if native_count != module.classes.len() {
+                return Err(super::CodeGenError::Internal(format!(
+                    "module '{}' mixes native and non-native classes; \
+                     all classes in a module must be uniformly native or non-native",
+                    self.module_name
+                )));
+            }
             return self.generate_native_facade_module(module);
         }
 

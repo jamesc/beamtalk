@@ -120,7 +120,11 @@ impl CoreErlangGenerator {
             .classes
             .first()
             .and_then(|c| c.backing_module.as_deref())
-            .expect("native facade requires backing_module");
+            .ok_or_else(|| {
+                super::super::CodeGenError::Internal(
+                    "native facade requires backing_module".to_string(),
+                )
+            })?;
 
         push_fn(self.generate_native_spawn_0()?);
         push_fn(self.generate_native_spawn_1(backing_module)?);
@@ -321,98 +325,47 @@ impl CoreErlangGenerator {
             return Ok(Document::Nil);
         };
 
-        let backing_module = class
-            .backing_module
-            .as_deref()
-            .expect("native facade requires backing_module");
+        let Some(backing_module) = class.backing_module.as_deref() else {
+            return Err(super::super::CodeGenError::Internal(
+                "native facade requires backing_module".to_string(),
+            ));
+        };
 
         // Reuse the standard meta map and append native-specific keys
+        // include_standalone: false — standalone methods are runtime-patched, not static
         Ok(docvec![
             "'__beamtalk_meta'/0 = fun () ->\n",
             "    ",
-            Self::build_native_meta_map_doc(class, module, backing_module),
+            Self::build_native_meta_map_doc(class, module, backing_module, false),
             "\n\n",
         ])
     }
 
-    /// Builds the Core Erlang map for native facade `__beamtalk_meta/0`.
+    /// Builds the Core Erlang map for native facade meta, reusing the standard meta builder.
     ///
-    /// Extends the standard meta map with:
+    /// Delegates to `build_meta_map_doc_with_extra` and appends native-specific keys:
     /// - `'native' => 'true'`
-    /// - `'backing_module' => 'beamtalk_subprocess'`
+    /// - `'backing_module' => 'beamtalk_subprocess'` (or whatever the backing module is)
     fn build_native_meta_map_doc(
         class: &crate::ast::ClassDefinition,
         module: &Module,
         backing_module: &str,
+        include_standalone: bool,
     ) -> Document<'static> {
-        use crate::ast::ClassKind;
-
-        let class_name = class.name.name.to_string();
-        let superclass_name = class
-            .superclass
-            .as_ref()
-            .map_or_else(|| "nil".to_string(), |s| s.name.to_string());
-
-        // Build fields list — should be empty for native actors, but include for completeness
-        let fields: Vec<String> = class
-            .state
-            .iter()
-            .map(|s| s.name.name.to_string())
-            .collect();
-        let fields_doc = Self::meta_atom_list(&fields);
-
-        // Boolean flags
-        let is_sealed_doc = Self::meta_bool(class.is_sealed);
-        let is_abstract_doc = Self::meta_bool(class.is_abstract);
-        let is_value_doc = Self::meta_bool(class.class_kind == ClassKind::Value);
-        let is_typed_doc = Self::meta_bool(class.is_typed);
-
-        // field_types
-        let field_types_doc = Self::meta_field_types_map(&class.state);
-
-        // Method info (reuse standard helpers)
-        let auto =
-            crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class);
-        let method_info_doc = Self::meta_method_info_map(&Self::meta_instance_method_entries(
-            class,
-            module,
-            auto.as_ref(),
-            false,
-        ));
-        let class_method_info_doc = Self::meta_method_info_map(&Self::meta_class_method_entries(
-            class,
-            module,
-            auto.as_ref(),
-            false,
-            false,
-        ));
-
-        docvec![
-            "~{'class' => '",
-            Document::String(class_name),
-            "',\n      'superclass' => '",
-            Document::String(superclass_name),
-            "',\n      'fields' => ",
-            fields_doc,
-            ",\n      'is_sealed' => ",
-            is_sealed_doc,
-            ",\n      'is_abstract' => ",
-            is_abstract_doc,
-            ",\n      'is_value' => ",
-            is_value_doc,
-            ",\n      'is_typed' => ",
-            is_typed_doc,
-            ",\n      'field_types' => ",
-            field_types_doc,
-            ",\n      'method_info' => ",
-            method_info_doc,
-            ",\n      'class_method_info' => ",
-            class_method_info_doc,
+        let native_entries = docvec![
             ",\n      'native' => 'true'",
             ",\n      'backing_module' => '",
             Document::String(backing_module.to_string()),
-            "'\n    }~",
-        ]
+            "'",
+        ];
+
+        Self::build_meta_map_doc_with_extra(
+            class,
+            module,
+            include_standalone,
+            false, // native actors don't synthesize supervision specs
+            native_entries,
+        )
     }
 
     /// Generates `register_class/0` for native facade — includes `native:` in `ClassBuilder` cascade.
@@ -428,10 +381,11 @@ impl CoreErlangGenerator {
         let mut class_docs = Vec::new();
 
         for (i, class) in module.classes.iter().enumerate() {
-            let backing_module = class
-                .backing_module
-                .as_deref()
-                .expect("native facade requires backing_module");
+            let Some(backing_module) = class.backing_module.as_deref() else {
+                return Err(super::super::CodeGenError::Internal(
+                    "native facade requires backing_module".to_string(),
+                ));
+            };
 
             // Instance methods
             let instance_methods: Vec<_> = class
@@ -594,7 +548,9 @@ impl CoreErlangGenerator {
                         "}~,",
                         line(),
                         "'meta' => ",
-                        Self::build_native_meta_map_doc(class, module, backing_module),
+                        // include_standalone: true — standalone methods included in BuilderState.meta
+                        // so that init/1 can register their return types during on_load.
+                        Self::build_native_meta_map_doc(class, module, backing_module, true),
                         ",",
                         line(),
                         "'isConstructible' => 'false'",
