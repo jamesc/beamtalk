@@ -2394,11 +2394,11 @@ impl CoreErlangGenerator {
     fn generate_constructor_pattern(
         &mut self,
         class: &crate::ast::Identifier,
-        keywords: &[(ecow::EcoString, Pattern)],
+        keywords: &[(crate::ast::Identifier, Pattern)],
         span: crate::source_analysis::Span,
     ) -> Result<Document<'static>> {
         // Build the full selector from keyword parts (e.g. "ok:" or "attempt:identifier:")
-        let selector: String = keywords.iter().map(|(kw, _)| kw.as_str()).collect();
+        let selector: String = keywords.iter().map(|(kw, _)| kw.name.as_str()).collect();
 
         let fields = sealed_constructor_fields(&class.name, &selector).ok_or_else(|| {
             CodeGenError::UnsupportedFeature {

@@ -1439,7 +1439,7 @@ impl Parser {
         };
         let class = Identifier::new(class_name, start);
 
-        let mut keywords: Vec<(EcoString, Pattern)> = Vec::new();
+        let mut keywords: Vec<(Identifier, Pattern)> = Vec::new();
         let mut end_span = start;
 
         while let TokenKind::Keyword(kw) = self.current_kind() {
@@ -1448,11 +1448,12 @@ impl Parser {
             if kw.as_str() == "when:" {
                 break;
             }
-            let kw = kw.clone();
+            let kw_name = kw.clone();
+            let kw_span = self.current_token().span();
             self.advance(); // consume keyword
             let binding = self.parse_constructor_binding();
             end_span = binding.span();
-            keywords.push((kw, binding));
+            keywords.push((Identifier::new(kw_name, kw_span), binding));
         }
 
         if keywords.is_empty() {

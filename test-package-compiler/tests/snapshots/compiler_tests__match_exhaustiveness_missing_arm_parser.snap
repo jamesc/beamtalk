@@ -81,7 +81,13 @@ Module {
                                             },
                                             keywords: [
                                                 (
-                                                    "ok:",
+                                                    Identifier {
+                                                        name: "ok:",
+                                                        span: Span {
+                                                            start: 250,
+                                                            end: 253,
+                                                        },
+                                                    },
                                                     Variable(
                                                         Identifier {
                                                             name: "v",

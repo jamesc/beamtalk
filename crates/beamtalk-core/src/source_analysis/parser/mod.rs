@@ -1545,7 +1545,10 @@ mod tests {
         assert_eq!(module.classes.len(), 1);
         let class = &module.classes[0];
         assert_eq!(class.name.name.as_str(), "MyNative");
-        assert_eq!(class.backing_module.as_deref(), Some("my_erl_module"));
+        assert_eq!(
+            class.backing_module.as_ref().map(|id| id.name.as_str()),
+            Some("my_erl_module")
+        );
     }
 
     #[test]
@@ -1557,7 +1560,10 @@ mod tests {
         );
         assert_eq!(module.classes.len(), 1);
         let class = &module.classes[0];
-        assert_eq!(class.backing_module.as_deref(), Some("foo_impl"));
+        assert_eq!(
+            class.backing_module.as_ref().map(|id| id.name.as_str()),
+            Some("foo_impl")
+        );
         assert_eq!(class.state.len(), 1);
         assert_eq!(class.methods.len(), 1);
     }
