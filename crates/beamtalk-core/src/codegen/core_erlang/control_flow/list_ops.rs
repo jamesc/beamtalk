@@ -1063,6 +1063,28 @@ mod tests {
     }
 
     #[test]
+    fn test_list_inject_into_non_literal_generates_wrapper() {
+        // BT-1327: inject:into: with a non-literal block (variable) emits inline
+        // lists:foldl with an arg-swap wrapper: fun (Elem, Acc) -> apply Block (Acc, Elem).
+        let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items inject: 0 into: block\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("'lists':'foldl'"),
+            "Non-literal inject:into: should emit inline lists:foldl. Got:\n{code}"
+        );
+        // Non-literal needs an arg-swap wrapper
+        assert!(
+            code.contains("fun (Elem, Acc) -> apply"),
+            "Non-literal inject:into: should emit arg-swap wrapper. Got:\n{code}"
+        );
+        // Should NOT call the runtime helper
+        assert!(
+            !code.contains("'beamtalk_collection':'inject_into'"),
+            "Non-literal inject:into: should NOT delegate to runtime helper. Got:\n{code}"
+        );
+    }
+
+    #[test]
     fn test_list_do_with_field_mutation_threads_state() {
         // do: with field mutation generates a state-threading foldl (not foreach)
         let src = "Actor subclass: Ctr\n  state: sum = 0\n\n  run: items =>\n    items do: [:item | self.sum := self.sum + item]\n";
