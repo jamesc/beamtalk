@@ -2269,7 +2269,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "supervisors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![], doc: Some("List all user-attached supervisors in the workspace supervision tree.\n\nReturns supervisors started via `startSupervisor:`, not the root\napplication supervisor (use `supervisor` for that).\n\n## Examples\n```beamtalk\nWorkspace supervisors                 // => #(#Supervisor<MySup, <0.200.0>>)\n```".into()) },
             ],
             class_methods: vec![
-                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("WorkspaceInterface".into()), param_types: vec![], doc: Some("Return the current singleton instance (nil before workspace bootstrap).".into()) },
+                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Return the current singleton instance (nil before workspace bootstrap).".into()) },
                 MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("WorkspaceInterface".into())], doc: Some("Set the current singleton instance.".into()) },
             ],
             class_variables: vec!["current".into()],
