@@ -1181,6 +1181,88 @@ impl CoreErlangGenerator {
         self.generate_expression(expr)
     }
 
+    /// BT-1324: Checks if an expression is `self fieldAt: <name> put: <value>` in actor context.
+    /// These need state threading via maps:put, similar to field assignments.
+    pub(super) fn is_self_field_at_put(&self, expr: &Expression) -> bool {
+        if self.context != super::CodeGenContext::Actor {
+            return false;
+        }
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        {
+            if let Expression::Identifier(id) = receiver.as_ref() {
+                if id.name == "self"
+                    && self.lookup_var("self").is_none()
+                    && parts.len() == 2
+                    && parts[0].keyword == "fieldAt:"
+                    && parts[1].keyword == "put:"
+                    && arguments.len() == 2
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// BT-1324: Generates the opening part of a `self fieldAt: name put: value` with state threading.
+    ///
+    /// Similar to `generate_field_assignment_open` but with a dynamic field name.
+    /// Generates:
+    /// ```erlang
+    /// let _Name = <name> in
+    /// let _Val = <value> in
+    /// let StateN = call 'maps':'put'(_Name, _Val, StateN-1) in
+    /// ```
+    ///
+    /// The caller is responsible for closing the expression.
+    pub(super) fn generate_self_field_at_put_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        if let Expression::MessageSend { arguments, .. } = expr {
+            let name_var = self.fresh_var("Name");
+            let val_var = self.fresh_temp_var("Val");
+            let name_code = self.expression_doc(&arguments[0])?;
+            // Capture state before value expression, consistent with
+            // generate_field_assignment_open. If the value expression itself
+            // threads state (e.g., contains a nested field assignment), the
+            // maps:put uses the pre-value state — same semantics as self.x := expr.
+            let current_state = self.current_state_var();
+            let val_code = self.expression_doc(&arguments[1])?;
+            let new_state = self.next_state_var();
+
+            let doc = docvec![
+                "let ",
+                Document::String(name_var.clone()),
+                " = ",
+                name_code,
+                " in let ",
+                Document::String(val_var.clone()),
+                " = ",
+                val_code,
+                " in let ",
+                Document::String(new_state),
+                " = call 'maps':'put'(",
+                Document::String(name_var),
+                ", ",
+                Document::String(val_var.clone()),
+                ", ",
+                Document::String(current_state),
+                ") in ",
+            ];
+
+            self.last_open_scope_result = Some(val_var);
+
+            return Ok(doc);
+        }
+        self.generate_expression(expr)
+    }
+
     /// Generates code for a super message send.
     ///
     /// Super calls use `beamtalk_dispatch:super/5` to invoke the superclass
