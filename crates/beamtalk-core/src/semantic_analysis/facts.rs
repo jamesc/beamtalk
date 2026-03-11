@@ -210,7 +210,8 @@ fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
         | Expression::Super(..)
         | Expression::Primitive { .. }
         | Expression::Error { .. }
-        | Expression::ExpectDirective { .. } => false,
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. } => false,
     }
 }
 
@@ -425,7 +426,8 @@ fn collect_expression_facts(expr: &Expression, facts: &mut SemanticFacts) {
         | Expression::Primitive { .. }
         | Expression::Super(_)
         | Expression::Error { .. }
-        | Expression::ExpectDirective { .. } => {}
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. } => {}
     }
 }
 

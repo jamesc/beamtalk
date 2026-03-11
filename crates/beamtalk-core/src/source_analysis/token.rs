@@ -143,6 +143,9 @@ pub enum TokenKind {
     /// Fat arrow for method definitions: `=>`
     FatArrow,
 
+    /// Ellipsis (rest/spread operator): `...`
+    Ellipsis,
+
     /// Binary pattern open: `<<`
     LtLt,
 
@@ -265,6 +268,7 @@ impl TokenKind {
             | Self::Arrow
             | Self::Hash
             | Self::FatArrow
+            | Self::Ellipsis
             | Self::AtPrimitive
             | Self::AtIntrinsic
             | Self::AtExpect
@@ -313,6 +317,7 @@ impl std::fmt::Display for TokenKind {
             Self::Arrow => write!(f, "->"),
             Self::Hash => write!(f, "#"),
             Self::FatArrow => write!(f, "=>"),
+            Self::Ellipsis => write!(f, "..."),
             Self::AtPrimitive => write!(f, "@primitive"),
             Self::AtIntrinsic => write!(f, "@intrinsic"),
             Self::AtExpect => write!(f, "@expect"),

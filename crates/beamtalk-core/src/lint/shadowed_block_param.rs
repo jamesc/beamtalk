@@ -129,9 +129,17 @@ fn define_pattern_vars_in_scope(pattern: &crate::ast::Pattern, scope: &mut LintS
     use crate::ast::Pattern;
     match pattern {
         Pattern::Variable(id) => scope.define(id.name.as_str()),
-        Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
+        Pattern::Tuple { elements, .. } => {
             for elem in elements {
                 define_pattern_vars_in_scope(elem, scope);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for elem in elements {
+                define_pattern_vars_in_scope(elem, scope);
+            }
+            if let Some(rest_pat) = rest {
+                define_pattern_vars_in_scope(rest_pat, scope);
             }
         }
         Pattern::List { elements, tail, .. } => {
@@ -264,7 +272,8 @@ fn check_expr(expr: &Expression, scope: &mut LintScope, diagnostics: &mut Vec<Di
         | Error { .. }
         | ClassReference { .. }
         | Primitive { .. }
-        | ExpectDirective { .. } => {}
+        | ExpectDirective { .. }
+        | Spread { .. } => {}
     }
 }
 

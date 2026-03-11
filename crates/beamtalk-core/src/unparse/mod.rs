@@ -248,7 +248,11 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     ];
 
     let header = if let Some(module) = &class.backing_module {
-        docvec![class_header, " native: ", Document::String(module.clone())]
+        docvec![
+            class_header,
+            " native: ",
+            Document::String(module.name.to_string())
+        ]
     } else {
         class_header
     };
@@ -652,6 +656,9 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         }
         Expression::DestructureAssignment { pattern, value, .. } => {
             docvec![unparse_pattern(pattern), " := ", unparse_expression(value)]
+        }
+        Expression::Spread { name, .. } => {
+            docvec!["...", Document::String(name.name.to_string())]
         }
     }
 }
@@ -1148,10 +1155,15 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
         }
         Pattern::Array {
             elements,
+            rest,
             list_syntax,
             ..
         } => {
-            let elem_docs: Vec<Document<'static>> = elements.iter().map(unparse_pattern).collect();
+            let mut elem_docs: Vec<Document<'static>> =
+                elements.iter().map(unparse_pattern).collect();
+            if let Some(rest_pat) = rest {
+                elem_docs.push(docvec!["...", unparse_pattern(rest_pat)]);
+            }
             let joined = join_docs(elem_docs, ", ");
             if *list_syntax {
                 docvec!["#(", joined, ")"]
@@ -1179,7 +1191,7 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
             let mut parts: Vec<Document<'static>> = vec![Document::String(class.name.to_string())];
             for (kw, binding) in keywords {
                 parts.push(Document::Str(" "));
-                parts.push(Document::String(kw.to_string()));
+                parts.push(Document::String(kw.name.to_string()));
                 parts.push(Document::Str(" "));
                 parts.push(unparse_pattern(binding));
             }
@@ -2140,7 +2152,10 @@ mod tests {
         let module2 = parse_source(&unparsed);
         assert_eq!(module2.classes.len(), 1);
         assert_eq!(
-            module2.classes[0].backing_module.as_deref(),
+            module2.classes[0]
+                .backing_module
+                .as_ref()
+                .map(|id| id.name.as_str()),
             Some("my_module"),
             "backing_module lost after round-trip.\n  unparsed: {unparsed:?}"
         );

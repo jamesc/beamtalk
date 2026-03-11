@@ -79,3 +79,22 @@ TestCase subclass: ActorLocalMutationsTest
     r := a rejectNegativeWithCount: #(-1, 2, -3, 4, 5)
     self assert: (r at: #result) equals: #(2, 4, 5)
     self assert: (r at: #count) equals: 5
+
+  // BT-1329: Nested list op inside counted loop — direct-params with expanded tuple.
+  testNestedDoInsideCountedLoop =>
+    a := LocalMutationActor spawn
+    // 3 items × 2 iterations = 6 total increments
+    self assert: (a countItemsInRangeWithDo: #(10, 20, 30) times: 2) equals: 6
+
+  testNestedInjectInsideCountedLoop =>
+    a := LocalMutationActor spawn
+    // inject accumulates: iteration 1: 0+1+2+3=6, iteration 2: 6+1+2+3=12
+    self assert: (a sumItemsNTimes: #(1, 2, 3) times: 2) equals: 12
+
+  testNestedCollectInsideCountedLoop =>
+    a := LocalMutationActor spawn
+    r := a collectAndCountNTimes: #(1, 2) times: 2
+    // Last iteration (i=2): collect: [:x | x * 2] => #(2, 4)
+    self assert: (r at: #result) equals: #(2, 4)
+    // 2 items × 2 iterations = 4 count increments
+    self assert: (r at: #count) equals: 4

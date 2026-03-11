@@ -34,8 +34,11 @@ impl CoreErlangGenerator {
         if let Expression::Block(body_block) = body {
             // Use mutations version if there are any writes (local or field)
             // BT-153: Include local_writes only in REPL mode
+            // BT-1329: Also check for nested list ops with cross-scope mutations
             let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
+            if self.needs_mutation_threading(&analysis)
+                || self.body_has_list_op_cross_scope_mutations(body_block)
+            {
                 return self.generate_while_true_with_mutations(condition, body_block);
             }
         }
@@ -109,8 +112,11 @@ impl CoreErlangGenerator {
         if let Expression::Block(body_block) = body {
             // Use mutations version if there are any writes (local or field)
             // BT-153: Include local_writes only in REPL mode
+            // BT-1329: Also check for nested list ops with cross-scope mutations
             let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
+            if self.needs_mutation_threading(&analysis)
+                || self.body_has_list_op_cross_scope_mutations(body_block)
+            {
                 return self.generate_while_false_with_mutations(condition, body_block);
             }
         }

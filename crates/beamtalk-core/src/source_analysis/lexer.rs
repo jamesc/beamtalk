@@ -261,6 +261,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Lexes a token kind based on the first character.
+    #[allow(clippy::too_many_lines)]
     fn lex_token_kind(&mut self, c: char, start: u32) -> TokenKind {
         match c {
             // Identifiers and keywords
@@ -313,7 +314,13 @@ impl<'src> Lexer<'src> {
             }
             '.' => {
                 self.advance();
-                TokenKind::Period
+                if self.peek_char() == Some('.') && self.peek_char_n(1) == Some('.') {
+                    self.advance(); // second dot
+                    self.advance(); // third dot
+                    TokenKind::Ellipsis
+                } else {
+                    TokenKind::Period
+                }
             }
             '!' => {
                 self.advance();
