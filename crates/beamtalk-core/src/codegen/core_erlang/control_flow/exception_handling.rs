@@ -717,5 +717,4 @@ Actor subclass: Foo
             "ensure: catch should re-raise after cleanup. Got:\n{code}"
         );
     }
-
 }
