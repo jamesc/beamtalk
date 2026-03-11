@@ -74,6 +74,17 @@ Pattern matching, the type system, and BEAM interoperability for when you need t
 | [16](16-beam-interop.md) | BEAM Interop | Calling Erlang from Beamtalk, atoms, tuples, `Erlang module function:` |
 | [17](17-otp-supervisors.md) | OTP Supervisors | `Supervisor subclass:`, restart strategies, fault-tolerant trees |
 
+### Part 5 — Practical Stdlib
+
+The standard library APIs you'll reach for most often: file handling, text processing, and data interchange.
+
+| # | Chapter | What you'll learn |
+|---|---------|-------------------|
+| [18](18-file-io.md) | File I/O | Reading, writing, directory operations, lazy file streams |
+| [19](19-regex.md) | Regular Expressions | Pattern matching, find/replace, splitting, compiled regex |
+| [20](20-json.md) | JSON | Parsing, generation, nested structures, round-tripping |
+| [21](21-datetime.md) | DateTime & Time | Construction, formatting, arithmetic, comparisons, high-resolution timestamps |
+
 ---
 
 ## Running the tests
@@ -87,14 +98,14 @@ just test-learn           # run all learning guide doctests
 
 ## Format conventions
 
-**Expression chapters** (chapters 1–9, 15) — inline assertions:
+**Expression chapters** (chapters 1–9, 15, 19–21) — inline assertions:
 
 ```beamtalk
 3 + 4           // => 7
 "hello" size    // => 5
 ```
 
-**Class chapters** (chapters 10–14, 16) — BUnit assertions:
+**Class chapters** (chapters 10–14, 16, 18) — BUnit assertions:
 
 ```beamtalk
 TestCase subclass: Ch10Examples

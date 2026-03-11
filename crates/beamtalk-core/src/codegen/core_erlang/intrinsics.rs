@@ -1525,13 +1525,15 @@ impl CoreErlangGenerator {
                         // BT-1321: Fast-path for `self` receiver in actor context.
                         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
                         //
-                        // **Limitation (BT-1324):** This fast-path does NOT thread the state update
-                        // back into the current method's state variable. After `self fieldAt: name put: value`,
-                        // subsequent reads (e.g., `self name`) will NOT see the updated value because
-                        // beamtalk_primitive:send returns a value but doesn't persist to actor State.
-                        //
-                        // For persistent actor slot mutation, use `self.slotName := value` instead.
-                        // Reflective mutation via fieldAt:put: is primarily for value object semantics.
+                        // BT-1324: Method-body-level state threading is handled by
+                        // generate_method_body_with_reply via is_self_field_at_put/
+                        // generate_self_field_at_put_open, which intercepts before
+                        // expression_doc is called. This intrinsic path is a
+                        // deadlock-avoidance fallback for contexts where method-body
+                        // threading is unavailable (e.g., inside blocks). It delegates
+                        // to beamtalk_primitive:send(State, 'fieldAt:put:', ...) which
+                        // returns the assigned value but does NOT thread the updated
+                        // state back into the actor's State variable.
                         if let Expression::Identifier(id) = receiver {
                             if id.name == "self"
                                 && self.context == super::CodeGenContext::Actor
