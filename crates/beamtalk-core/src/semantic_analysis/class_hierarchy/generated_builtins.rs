@@ -46,7 +46,9 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "FileHandle"
             | "Float"
             | "HTTPClient"
+            | "HTTPRequest"
             | "HTTPResponse"
+            | "HTTPServer"
             | "InstantiationError"
             | "Integer"
             | "Interval"
@@ -935,6 +937,38 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "HTTPRequest".into(),
+        ClassInfo {
+            name: "HTTPRequest".into(),
+            superclass: Some("Value".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec!["method".into(), "path".into(), "headers".into(), "body".into(), "queryParams".into()],
+            state_types: HashMap::from([("method".into(), "String".into()), ("path".into(), "String".into()), ("headers".into(), "List".into()), ("body".into(), "String".into()), ("queryParams".into(), "Dictionary".into())]),
+            methods: vec![
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable representation: \"an HTTPRequest(GET /path)\".".into()) },
+                MethodInfo { selector: "method".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Returns the `method` field value. Default: `\"\"`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withMethod:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("String".into())], doc: Some("Returns a new `HTTPRequest` with `method` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "path".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Returns the `path` field value. Default: `\"/\"`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withPath:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("String".into())], doc: Some("Returns a new `HTTPRequest` with `path` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "headers".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Returns the `headers` field value. Default: `...`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withHeaders:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("List".into())], doc: Some("Returns a new `HTTPRequest` with `headers` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "body".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Returns the `body` field value. Default: `\"\"`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withBody:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("String".into())], doc: Some("Returns a new `HTTPRequest` with `body` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "queryParams".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("Dictionary".into()), param_types: vec![], doc: Some("Returns the `queryParams` field value. Default: `...`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withQueryParams:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("Dictionary".into())], doc: Some("Returns a new `HTTPRequest` with `queryParams` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "method:path:headers:body:queryParams:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("String".into()), Some("String".into()), Some("List".into()), Some("String".into()), Some("Dictionary".into())], doc: Some("Creates a new `HTTPRequest`. Args: method (default: \"\"), path (default: \"/\"), headers (default: ...), body (default: \"\"), queryParams (default: ...).\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
         "HTTPResponse".into(),
         ClassInfo {
             name: "HTTPResponse".into(),
@@ -959,6 +993,36 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![
                 MethodInfo { selector: "status:headers:body:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("Integer".into()), Some("List".into()), Some("String".into())], doc: Some("Creates a new `HTTPResponse`. Args: status (default: 0), headers (default: ...), body (default: \"\").\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "HTTPServer".into(),
+        ClassInfo {
+            name: "HTTPServer".into(),
+            superclass: Some("Value".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec!["listenerRef".into(), "actualPort".into()],
+            state_types: HashMap::from([("actualPort".into(), "Integer".into())]),
+            methods: vec![
+                MethodInfo { selector: "port".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the TCP port this server is listening on.\n\nUseful when started with port 0 (ephemeral) to discover the\nactual assigned port.\n\n## Examples\n```beamtalk\nsrv port   // => 8080\n```".into()) },
+                MethodInfo { selector: "stop".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: true, return_type: None, param_types: vec![], doc: Some("Gracefully stop this HTTP server.\n\nIdempotent: stopping an already-stopped server succeeds silently.\n\n## Examples\n```beamtalk\nsrv stop   // => #ok\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable representation.".into()) },
+                MethodInfo { selector: "listenerRef".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Returns the `listenerRef` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withListenerRef:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: Some("HTTPServer".into()), param_types: vec![None], doc: Some("Returns a new `HTTPServer` with `listenerRef` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "actualPort".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Returns the `actualPort` field value. Default: `0`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withActualPort:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: Some("HTTPServer".into()), param_types: vec![Some("Integer".into())], doc: Some("Returns a new `HTTPServer` with `actualPort` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "start:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: Some("HTTPServer".into()), param_types: vec![Some("Integer".into()), None], doc: Some("Start an HTTP server on the given port with a handler block or actor.\n\nUse port 0 for an ephemeral (OS-assigned) port.\nBinds to 127.0.0.1 by default.\n\n## Examples\n```beamtalk\nsrv := HTTPServer start: 8080 handler: [:req |\n  HTTPResponse new: #{ #status => 200, #body => \"hello\" }\n]\n```".into()) },
+                MethodInfo { selector: "start:handler:options:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: Some("HTTPServer".into()), param_types: vec![Some("Integer".into()), None, Some("Dictionary".into())], doc: Some("Start an HTTP server with additional options.\n\nOptions:\n  - `#bind` — IP address to bind to (default `\"127.0.0.1\"`)\n\n## Examples\n```beamtalk\nsrv := HTTPServer start: 0 handler: handler\n  options: #{ #bind => \"0.0.0.0\" }\n```".into()) },
+                MethodInfo { selector: "listenerRef:actualPort:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, return_type: Some("HTTPServer".into()), param_types: vec![None, Some("Integer".into())], doc: Some("Creates a new `HTTPServer`. Args: listenerRef (default: nil), actualPort (default: 0).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
         },

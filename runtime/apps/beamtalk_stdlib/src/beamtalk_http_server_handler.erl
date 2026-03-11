@@ -1,0 +1,137 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+%%% @doc Cowboy handler that bridges HTTP requests to Beamtalk handlers (BT-1338).
+%%%
+%%% **DDD Context:** Object System Context
+%%%
+%%% Each incoming HTTP request is converted to an `HTTPRequest` value object
+%%% and passed to the user-supplied handler. The handler may be:
+%%%
+%%% - A block (Erlang `fun/1`) receiving an `HTTPRequest`
+%%% - An actor pid responding to `handle:` with an `HTTPRequest`
+%%%
+%%% The handler must return an `HTTPResponse` value object. The response's
+%%% `status`, `headers`, and `body` fields are extracted and sent back to
+%%% the client via cowboy.
+
+-module(beamtalk_http_server_handler).
+
+-behaviour(cowboy_handler).
+
+-export([init/2]).
+
+-include_lib("kernel/include/logger.hrl").
+
+%% @doc Handle a cowboy HTTP request by delegating to the Beamtalk handler.
+%%
+%% State is `#{handler := Handler}` where Handler is a fun/1 or actor pid.
+-spec init(cowboy_req:req(), map()) -> {ok, cowboy_req:req(), map()}.
+init(Req0, #{handler := Handler} = State) ->
+    HttpRequest = build_request(Req0),
+    try call_handler(Handler, HttpRequest) of
+        Response when is_map(Response) ->
+            Status = get_response_field(Response, status, 200),
+            Headers = get_response_headers(Response),
+            Body = get_response_field(Response, body, <<>>),
+            Req = cowboy_req:reply(Status, Headers, Body, Req0),
+            {ok, Req, State};
+        Other ->
+            ?LOG_ERROR(
+                "beamtalk_http_server: handler returned non-HTTPResponse: ~p",
+                [Other]
+            ),
+            Req = cowboy_req:reply(
+                500,
+                #{<<"content-type">> => <<"text/plain">>},
+                <<"Internal Server Error">>,
+                Req0
+            ),
+            {ok, Req, State}
+    catch
+        Class:Reason:Stack ->
+            ?LOG_ERROR(
+                "beamtalk_http_server: handler crashed: ~p:~p~n~p",
+                [Class, Reason, Stack]
+            ),
+            Req = cowboy_req:reply(
+                500,
+                #{<<"content-type">> => <<"text/plain">>},
+                <<"Internal Server Error">>,
+                Req0
+            ),
+            {ok, Req, State}
+    end.
+
+%%% ============================================================================
+%%% Internal
+%%% ============================================================================
+
+%% @private Build an HTTPRequest value object from a cowboy request.
+-dialyzer({nowarn_function, build_request/1}).
+-spec build_request(cowboy_req:req()) -> map().
+build_request(Req) ->
+    Method = cowboy_req:method(Req),
+    Path = cowboy_req:path(Req),
+    HeadersList = maps:to_list(cowboy_req:headers(Req)),
+    Headers = [[Name, Value] || {Name, Value} <- HeadersList],
+    Body = read_body(Req),
+    QsMap = parse_query_params(Req),
+    'bt@stdlib@httprequest':'class_method:path:headers:body:queryParams:'(
+        undefined, undefined, Method, Path, Headers, Body, QsMap
+    ).
+
+%% @private Read the full request body (may be chunked).
+-spec read_body(cowboy_req:req()) -> binary().
+read_body(Req) ->
+    read_body(Req, <<>>).
+
+-spec read_body(cowboy_req:req(), binary()) -> binary().
+read_body(Req0, Acc) ->
+    case cowboy_req:read_body(Req0) of
+        {ok, Data, _Req} ->
+            <<Acc/binary, Data/binary>>;
+        {more, Data, Req} ->
+            read_body(Req, <<Acc/binary, Data/binary>>)
+    end.
+
+%% @private Parse query string into a Beamtalk Dictionary (Erlang map).
+-spec parse_query_params(cowboy_req:req()) -> map().
+parse_query_params(Req) ->
+    QsList = cowboy_req:parse_qs(Req),
+    maps:from_list([{Key, value_or_true(Val)} || {Key, Val} <- QsList]).
+
+%% @private Query params without a value (e.g. "?flag") get `true`.
+-spec value_or_true(binary() | true) -> binary() | true.
+value_or_true(true) -> <<"true">>;
+value_or_true(Val) -> Val.
+
+%% @private Call the handler with the request.
+%%
+%% Supports blocks (funs) and actor pids responding to `handle:`.
+-spec call_handler(fun((map()) -> map()) | pid(), map()) -> term().
+call_handler(Handler, Request) when is_function(Handler, 1) ->
+    Handler(Request);
+call_handler(Handler, Request) when is_pid(Handler) ->
+    beamtalk_actor:sync_send(Handler, 'handle:', [Request]).
+
+%% @private Extract a field from an HTTPResponse value object.
+%%
+%% HTTPResponse objects store fields in their map under the field name atom.
+%% The generated accessor methods use these keys.
+-spec get_response_field(map(), atom(), term()) -> term().
+get_response_field(Response, Field, Default) ->
+    maps:get(Field, Response, Default).
+
+%% @private Convert HTTPResponse headers to cowboy headers map.
+%%
+%% HTTPResponse headers are `[[Name, Value], ...]`.
+%% Cowboy expects `#{Name => Value, ...}`.
+-spec get_response_headers(map()) -> map().
+get_response_headers(Response) ->
+    case maps:get(headers, Response, []) of
+        Headers when is_list(Headers) ->
+            maps:from_list([{Name, Value} || [Name, Value] <- Headers]);
+        _ ->
+            #{}
+    end.
