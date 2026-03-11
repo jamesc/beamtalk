@@ -393,22 +393,22 @@ Module {
                         KeywordPart {
                             keyword: "connect:",
                             span: Span {
-                                start: 337,
-                                end: 345,
+                                start: 339,
+                                end: 347,
                             },
                         },
                         KeywordPart {
                             keyword: "port:",
                             span: Span {
-                                start: 358,
-                                end: 363,
+                                start: 362,
+                                end: 367,
                             },
                         },
                         KeywordPart {
                             keyword: "timeout:",
                             span: Span {
-                                start: 378,
-                                end: 386,
+                                start: 384,
+                                end: 392,
                             },
                         },
                     ],
@@ -419,8 +419,8 @@ Module {
                             "localhost",
                         ),
                         Span {
-                            start: 346,
-                            end: 357,
+                            start: 348,
+                            end: 359,
                         },
                     ),
                     MessageSend {
@@ -429,8 +429,8 @@ Module {
                                 8080,
                             ),
                             Span {
-                                start: 364,
-                                end: 368,
+                                start: 368,
+                                end: 372,
                             },
                         ),
                         selector: Binary(
@@ -441,16 +441,16 @@ Module {
                                 Identifier {
                                     name: "offset",
                                     span: Span {
-                                        start: 371,
-                                        end: 377,
+                                        start: 375,
+                                        end: 381,
                                     },
                                 },
                             ),
                         ],
                         is_cast: false,
                         span: Span {
-                            start: 364,
-                            end: 377,
+                            start: 368,
+                            end: 381,
                         },
                     },
                     MessageSend {
@@ -458,8 +458,8 @@ Module {
                             Identifier {
                                 name: "maxTime",
                                 span: Span {
-                                    start: 387,
-                                    end: 394,
+                                    start: 393,
+                                    end: 400,
                                 },
                             },
                         ),
@@ -472,22 +472,22 @@ Module {
                                     2,
                                 ),
                                 Span {
-                                    start: 397,
-                                    end: 398,
+                                    start: 403,
+                                    end: 404,
                                 },
                             ),
                         ],
                         is_cast: false,
                         span: Span {
-                            start: 387,
-                            end: 398,
+                            start: 393,
+                            end: 404,
                         },
                     },
                 ],
                 is_cast: false,
                 span: Span {
                     start: 330,
-                    end: 398,
+                    end: 404,
                 },
             },
             preceding_blank_line: true,
@@ -498,8 +498,8 @@ Module {
                     Comment {
                         content: "Nested blocks and operators",
                         span: Span {
-                            start: 431,
-                            end: 440,
+                            start: 437,
+                            end: 446,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -512,8 +512,8 @@ Module {
                     Identifier {
                         name: "processor",
                         span: Span {
-                            start: 431,
-                            end: 440,
+                            start: 437,
+                            end: 446,
                         },
                     },
                 ),
@@ -522,29 +522,29 @@ Module {
                         KeywordPart {
                             keyword: "transform:",
                             span: Span {
-                                start: 441,
-                                end: 451,
+                                start: 449,
+                                end: 459,
                             },
                         },
                         KeywordPart {
                             keyword: "range:",
                             span: Span {
-                                start: 473,
-                                end: 479,
+                                start: 480,
+                                end: 486,
                             },
                         },
                         KeywordPart {
                             keyword: "to:",
                             span: Span {
-                                start: 486,
-                                end: 489,
+                                start: 495,
+                                end: 498,
                             },
                         },
                         KeywordPart {
                             keyword: "step:",
                             span: Span {
-                                start: 504,
-                                end: 509,
+                                start: 515,
+                                end: 520,
                             },
                         },
                     ],
@@ -556,8 +556,8 @@ Module {
                                 BlockParameter {
                                     name: "x",
                                     span: Span {
-                                        start: 454,
-                                        end: 455,
+                                        start: 462,
+                                        end: 463,
                                     },
                                 },
                             ],
@@ -572,8 +572,8 @@ Module {
                                             Identifier {
                                                 name: "x",
                                                 span: Span {
-                                                    start: 460,
-                                                    end: 461,
+                                                    start: 466,
+                                                    end: 467,
                                                 },
                                             },
                                         ),
@@ -585,24 +585,24 @@ Module {
                                                 Identifier {
                                                     name: "factor",
                                                     span: Span {
-                                                        start: 464,
-                                                        end: 470,
+                                                        start: 470,
+                                                        end: 476,
                                                     },
                                                 },
                                             ),
                                         ],
                                         is_cast: false,
                                         span: Span {
-                                            start: 460,
-                                            end: 470,
+                                            start: 466,
+                                            end: 476,
                                         },
                                     },
                                     preceding_blank_line: false,
                                 },
                             ],
                             span: Span {
-                                start: 452,
-                                end: 472,
+                                start: 460,
+                                end: 477,
                             },
                         },
                     ),
@@ -610,8 +610,8 @@ Module {
                         Identifier {
                             name: "start",
                             span: Span {
-                                start: 480,
-                                end: 485,
+                                start: 487,
+                                end: 492,
                             },
                         },
                     ),
@@ -620,8 +620,8 @@ Module {
                             Identifier {
                                 name: "start",
                                 span: Span {
-                                    start: 490,
-                                    end: 495,
+                                    start: 499,
+                                    end: 504,
                                 },
                             },
                         ),
@@ -633,16 +633,16 @@ Module {
                                 Identifier {
                                     name: "count",
                                     span: Span {
-                                        start: 498,
-                                        end: 503,
+                                        start: 507,
+                                        end: 512,
                                     },
                                 },
                             ),
                         ],
                         is_cast: false,
                         span: Span {
-                            start: 490,
-                            end: 503,
+                            start: 499,
+                            end: 512,
                         },
                     },
                     MessageSend {
@@ -650,8 +650,8 @@ Module {
                             Identifier {
                                 name: "increment",
                                 span: Span {
-                                    start: 510,
-                                    end: 519,
+                                    start: 521,
+                                    end: 530,
                                 },
                             },
                         ),
@@ -664,22 +664,22 @@ Module {
                                     1,
                                 ),
                                 Span {
-                                    start: 522,
-                                    end: 523,
+                                    start: 533,
+                                    end: 534,
                                 },
                             ),
                         ],
                         is_cast: false,
                         span: Span {
-                            start: 510,
-                            end: 523,
+                            start: 521,
+                            end: 534,
                         },
                     },
                 ],
                 is_cast: false,
                 span: Span {
-                    start: 431,
-                    end: 523,
+                    start: 437,
+                    end: 534,
                 },
             },
             preceding_blank_line: true,
@@ -687,7 +687,7 @@ Module {
     ],
     span: Span {
         start: 189,
-        end: 523,
+        end: 534,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

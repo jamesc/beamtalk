@@ -2,8 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
-Semantic errors (7):
-  - Undefined variable: increment
+Semantic errors (6):
   - Undefined variable: object
   - Undefined variable: value1
   - Undefined variable: value2

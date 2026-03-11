@@ -1,3 +1,11 @@
+<!-- btfixture: fixtures/parser.bt -->
+<!-- btfixture: fixtures/validator.bt -->
+<!-- btfixture: fixtures/ch12exceptions.bt -->
+<!-- btfixture: fixtures/ch12result.bt -->
+<!-- btfixture: fixtures/ch12parser_test.bt -->
+<!-- btfixture: fixtures/ch12dnu.bt -->
+<!-- btfixture: fixtures/ch12validator.bt -->
+
 ## Error Handling
 
 Beamtalk has three error-handling mechanisms:

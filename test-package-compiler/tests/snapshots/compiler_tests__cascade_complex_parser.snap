@@ -104,32 +104,27 @@ Module {
                 leading: [],
                 trailing: None,
             },
-            expression: Identifier(
-                Identifier {
-                    name: "counter",
+            expression: Cascade {
+                receiver: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "counter",
+                            span: Span {
+                                start: 231,
+                                end: 238,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "increment",
+                    ),
+                    arguments: [],
+                    is_cast: false,
                     span: Span {
                         start: 231,
-                        end: 238,
+                        end: 248,
                     },
                 },
-            ),
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Cascade {
-                receiver: Identifier(
-                    Identifier {
-                        name: "increment",
-                        span: Span {
-                            start: 244,
-                            end: 253,
-                        },
-                    },
-                ),
                 messages: [
                     CascadeMessage {
                         selector: Unary(
@@ -137,8 +132,8 @@ Module {
                         ),
                         arguments: [],
                         span: Span {
-                            start: 259,
-                            end: 268,
+                            start: 250,
+                            end: 259,
                         },
                     },
                     CascadeMessage {
@@ -147,14 +142,14 @@ Module {
                         ),
                         arguments: [],
                         span: Span {
-                            start: 274,
-                            end: 282,
+                            start: 261,
+                            end: 269,
                         },
                     },
                 ],
                 span: Span {
-                    start: 244,
-                    end: 282,
+                    start: 231,
+                    end: 269,
                 },
             },
             preceding_blank_line: false,
@@ -165,8 +160,8 @@ Module {
                     Comment {
                         content: "Cascade with keyword messages",
                         span: Span {
-                            start: 317,
-                            end: 323,
+                            start: 304,
+                            end: 310,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -180,8 +175,8 @@ Module {
                         Identifier {
                             name: "object",
                             span: Span {
-                                start: 317,
-                                end: 323,
+                                start: 304,
+                                end: 310,
                             },
                         },
                     ),
@@ -190,15 +185,15 @@ Module {
                             KeywordPart {
                                 keyword: "at:",
                                 span: Span {
-                                    start: 328,
-                                    end: 331,
+                                    start: 311,
+                                    end: 314,
                                 },
                             },
                             KeywordPart {
                                 keyword: "put:",
                                 span: Span {
-                                    start: 339,
-                                    end: 343,
+                                    start: 322,
+                                    end: 326,
                                 },
                             },
                         ],
@@ -209,24 +204,24 @@ Module {
                                 "key1",
                             ),
                             Span {
-                                start: 332,
-                                end: 338,
+                                start: 315,
+                                end: 321,
                             },
                         ),
                         Identifier(
                             Identifier {
                                 name: "value1",
                                 span: Span {
-                                    start: 344,
-                                    end: 350,
+                                    start: 327,
+                                    end: 333,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 317,
-                        end: 350,
+                        start: 304,
+                        end: 333,
                     },
                 },
                 messages: [
@@ -236,15 +231,15 @@ Module {
                                 KeywordPart {
                                     keyword: "at:",
                                     span: Span {
-                                        start: 356,
-                                        end: 359,
+                                        start: 335,
+                                        end: 338,
                                     },
                                 },
                                 KeywordPart {
                                     keyword: "put:",
                                     span: Span {
-                                        start: 367,
-                                        end: 371,
+                                        start: 346,
+                                        end: 350,
                                     },
                                 },
                             ],
@@ -255,23 +250,23 @@ Module {
                                     "key2",
                                 ),
                                 Span {
-                                    start: 360,
-                                    end: 366,
+                                    start: 339,
+                                    end: 345,
                                 },
                             ),
                             Identifier(
                                 Identifier {
                                     name: "value2",
                                     span: Span {
-                                        start: 372,
-                                        end: 378,
+                                        start: 351,
+                                        end: 357,
                                     },
                                 },
                             ),
                         ],
                         span: Span {
-                            start: 356,
-                            end: 378,
+                            start: 335,
+                            end: 357,
                         },
                     },
                     CascadeMessage {
@@ -280,15 +275,15 @@ Module {
                                 KeywordPart {
                                     keyword: "at:",
                                     span: Span {
-                                        start: 384,
-                                        end: 387,
+                                        start: 359,
+                                        end: 362,
                                     },
                                 },
                                 KeywordPart {
                                     keyword: "put:",
                                     span: Span {
-                                        start: 395,
-                                        end: 399,
+                                        start: 370,
+                                        end: 374,
                                     },
                                 },
                             ],
@@ -299,29 +294,29 @@ Module {
                                     "key3",
                                 ),
                                 Span {
-                                    start: 388,
-                                    end: 394,
+                                    start: 363,
+                                    end: 369,
                                 },
                             ),
                             Identifier(
                                 Identifier {
                                     name: "value3",
                                     span: Span {
-                                        start: 400,
-                                        end: 406,
+                                        start: 375,
+                                        end: 381,
                                     },
                                 },
                             ),
                         ],
                         span: Span {
-                            start: 384,
-                            end: 406,
+                            start: 359,
+                            end: 381,
                         },
                     },
                 ],
                 span: Span {
-                    start: 317,
-                    end: 406,
+                    start: 304,
+                    end: 381,
                 },
             },
             preceding_blank_line: true,
@@ -332,8 +327,8 @@ Module {
                     Comment {
                         content: "Nested cascade (cascade result used in another message)",
                         span: Span {
-                            start: 467,
-                            end: 473,
+                            start: 442,
+                            end: 448,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -346,8 +341,8 @@ Module {
                     Identifier {
                         name: "result",
                         span: Span {
-                            start: 467,
-                            end: 473,
+                            start: 442,
+                            end: 448,
                         },
                     },
                 ),
@@ -358,8 +353,8 @@ Module {
                                 Identifier {
                                     name: "array",
                                     span: Span {
-                                        start: 478,
-                                        end: 483,
+                                        start: 453,
+                                        end: 458,
                                     },
                                 },
                             ),
@@ -368,8 +363,8 @@ Module {
                                     KeywordPart {
                                         keyword: "add:",
                                         span: Span {
-                                            start: 489,
-                                            end: 493,
+                                            start: 459,
+                                            end: 463,
                                         },
                                     },
                                 ],
@@ -380,15 +375,15 @@ Module {
                                         1,
                                     ),
                                     Span {
-                                        start: 494,
-                                        end: 495,
+                                        start: 464,
+                                        end: 465,
                                     },
                                 ),
                             ],
                             is_cast: false,
                             span: Span {
-                                start: 478,
-                                end: 495,
+                                start: 453,
+                                end: 465,
                             },
                         },
                         messages: [
@@ -398,8 +393,8 @@ Module {
                                         KeywordPart {
                                             keyword: "add:",
                                             span: Span {
-                                                start: 501,
-                                                end: 505,
+                                                start: 467,
+                                                end: 471,
                                             },
                                         },
                                     ],
@@ -410,14 +405,14 @@ Module {
                                             2,
                                         ),
                                         Span {
-                                            start: 506,
-                                            end: 507,
+                                            start: 472,
+                                            end: 473,
                                         },
                                     ),
                                 ],
                                 span: Span {
-                                    start: 501,
-                                    end: 507,
+                                    start: 467,
+                                    end: 473,
                                 },
                             },
                             CascadeMessage {
@@ -426,24 +421,24 @@ Module {
                                 ),
                                 arguments: [],
                                 span: Span {
-                                    start: 513,
-                                    end: 517,
+                                    start: 475,
+                                    end: 479,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 478,
-                            end: 517,
+                            start: 453,
+                            end: 479,
                         },
                     },
                     span: Span {
-                        start: 477,
-                        end: 518,
+                        start: 452,
+                        end: 480,
                     },
                 },
                 span: Span {
-                    start: 467,
-                    end: 518,
+                    start: 442,
+                    end: 480,
                 },
             },
             preceding_blank_line: true,
@@ -454,8 +449,8 @@ Module {
                     Comment {
                         content: "Cascade with blocks",
                         span: Span {
-                            start: 543,
-                            end: 552,
+                            start: 505,
+                            end: 514,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -469,8 +464,8 @@ Module {
                         Identifier {
                             name: "processor",
                             span: Span {
-                                start: 543,
-                                end: 552,
+                                start: 505,
+                                end: 514,
                             },
                         },
                     ),
@@ -479,8 +474,8 @@ Module {
                             KeywordPart {
                                 keyword: "with:",
                                 span: Span {
-                                    start: 557,
-                                    end: 562,
+                                    start: 515,
+                                    end: 520,
                                 },
                             },
                         ],
@@ -492,8 +487,8 @@ Module {
                                     BlockParameter {
                                         name: "x",
                                         span: Span {
-                                            start: 565,
-                                            end: 566,
+                                            start: 523,
+                                            end: 524,
                                         },
                                     },
                                 ],
@@ -508,8 +503,8 @@ Module {
                                                 Identifier {
                                                     name: "x",
                                                     span: Span {
-                                                        start: 569,
-                                                        end: 570,
+                                                        start: 527,
+                                                        end: 528,
                                                     },
                                                 },
                                             ),
@@ -522,31 +517,31 @@ Module {
                                                         1,
                                                     ),
                                                     Span {
-                                                        start: 573,
-                                                        end: 574,
+                                                        start: 531,
+                                                        end: 532,
                                                     },
                                                 ),
                                             ],
                                             is_cast: false,
                                             span: Span {
-                                                start: 569,
-                                                end: 574,
+                                                start: 527,
+                                                end: 532,
                                             },
                                         },
                                         preceding_blank_line: false,
                                     },
                                 ],
                                 span: Span {
-                                    start: 563,
-                                    end: 575,
+                                    start: 521,
+                                    end: 533,
                                 },
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 543,
-                        end: 575,
+                        start: 505,
+                        end: 533,
                     },
                 },
                 messages: [
@@ -556,8 +551,8 @@ Module {
                                 KeywordPart {
                                     keyword: "with:",
                                     span: Span {
-                                        start: 581,
-                                        end: 586,
+                                        start: 535,
+                                        end: 540,
                                     },
                                 },
                             ],
@@ -569,8 +564,8 @@ Module {
                                         BlockParameter {
                                             name: "x",
                                             span: Span {
-                                                start: 589,
-                                                end: 590,
+                                                start: 543,
+                                                end: 544,
                                             },
                                         },
                                     ],
@@ -585,8 +580,8 @@ Module {
                                                     Identifier {
                                                         name: "x",
                                                         span: Span {
-                                                            start: 593,
-                                                            end: 594,
+                                                            start: 547,
+                                                            end: 548,
                                                         },
                                                     },
                                                 ),
@@ -599,30 +594,30 @@ Module {
                                                             2,
                                                         ),
                                                         Span {
-                                                            start: 597,
-                                                            end: 598,
+                                                            start: 551,
+                                                            end: 552,
                                                         },
                                                     ),
                                                 ],
                                                 is_cast: false,
                                                 span: Span {
-                                                    start: 593,
-                                                    end: 598,
+                                                    start: 547,
+                                                    end: 552,
                                                 },
                                             },
                                             preceding_blank_line: false,
                                         },
                                     ],
                                     span: Span {
-                                        start: 587,
-                                        end: 599,
+                                        start: 541,
+                                        end: 553,
                                     },
                                 },
                             ),
                         ],
                         span: Span {
-                            start: 581,
-                            end: 599,
+                            start: 535,
+                            end: 553,
                         },
                     },
                     CascadeMessage {
@@ -631,14 +626,14 @@ Module {
                         ),
                         arguments: [],
                         span: Span {
-                            start: 605,
-                            end: 612,
+                            start: 555,
+                            end: 562,
                         },
                     },
                 ],
                 span: Span {
-                    start: 543,
-                    end: 612,
+                    start: 505,
+                    end: 562,
                 },
             },
             preceding_blank_line: true,
@@ -646,7 +641,7 @@ Module {
     ],
     span: Span {
         start: 208,
-        end: 612,
+        end: 562,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

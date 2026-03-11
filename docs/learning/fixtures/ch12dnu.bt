@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/12-error-handling.md (DNU)
+
+TestCase subclass: Ch12DNU
+
+  testRespondsTo =>
+    self assert: (42 respondsTo: #isZero)
+    self deny: (42 respondsTo: #bogusMessage)
+
+  testGuardedDispatch =>
+    obj := 42
+    result := (obj respondsTo: #isZero)
+      ifTrue: [obj isZero printString]
+      ifFalse: ["does not respond"]
+    self assert: result equals: "false"
+
+  testDNUCaught =>
+    result := [42 perform: #bogusMessage] on: RuntimeError do: [:e | #caught]
+    self assert: result equals: #caught

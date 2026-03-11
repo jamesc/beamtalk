@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/17-otp-supervisors.md (dynamic supervisor)
+
+TestCase subclass: Ch17DynamicSupervisor
+
+  testDynamicSupervisorIsSupervisorFlag =>
+    self assert: WorkerPool isSupervisor
+
+  testDynamicSupervisorHasNoStaticChildren =>
+    self assert: WorkerPool childClass equals: Counter

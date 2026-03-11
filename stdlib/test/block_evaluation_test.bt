@@ -36,6 +36,27 @@ TestCase subclass: BlockEvaluationTest
     // Value still accessible
     self assert: baseValue equals: 100
 
+  // BT-1213: Block literal with captured mutation (same var on LHS and RHS)
+  // Previously crashed with error:{badarity,...} because the Tier 2 stateful block
+  // expected a StateAcc parameter but value called it with zero args.
+  testBlockValueWithCapturedMutation =>
+    count := 0
+    [count := count + 1] value
+    self assert: count equals: 1
+
+  testBlockValueWithCapturedMutationMultipleStatements =>
+    x := 10
+    [
+      x := x + 5
+      x := x * 2
+    ] value
+    self assert: x equals: 30
+
+  testBlockValueKeywordWithCapturedMutation =>
+    total := 0
+    [:n | total := total + n] value: 7
+    self assert: total equals: 7
+
   testValueKeywordOnBlockVariable =>
     // BT-1260: value:/value:value:/value:value:value: on a variable holding a block
     // emits a runtime is_function guard (apply if function, send if not).

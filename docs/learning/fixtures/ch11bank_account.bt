@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/11-actors.md (BankAccount)
+
+TestCase subclass: Ch11BankAccount
+
+  testDepositAndWithdraw =>
+    account := BankAccount spawnWith: #{#owner => "Alice"}
+    account deposit: 100
+    account deposit: 50
+    self assert: account getBalance equals: 150
+    account withdraw: 30
+    self assert: account getBalance equals: 120
+
+  testOwner =>
+    account := BankAccount spawnWith: #{#owner => "Bob"}
+    self assert: account getOwner equals: "Bob"
+
+  testWithdrawInsufficientFunds =>
+    account := BankAccount spawn
+    account deposit: 50
+    self should: [account withdraw: 100] raise: #user_error
+
+  testDepositNegativeAmount =>
+    account := BankAccount spawn
+    self should: [account deposit: -10] raise: #user_error

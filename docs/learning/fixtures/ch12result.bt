@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/12-error-handling.md (Result)
+
+TestCase subclass: Ch12Result
+
+  testOkResult =>
+    r := Result ok: 42
+    self assert: r ok
+    self deny: r isError
+    self assert: r value equals: 42
+
+  testErrorResult =>
+    r := Result error: #not_found
+    self assert: r isError
+    self deny: r ok
+    self assert: r error equals: #not_found
+
+  testValueOr =>
+    self assert: ((Result ok: 42) valueOr: 0) equals: 42
+    self assert: ((Result error: #x) valueOr: 0) equals: 0
+
+  testValueOrDo =>
+    result := (Result error: #not_found) valueOrDo: [:e | "Error: {e}"]
+    self assert: result equals: "Error: not_found"
+
+  testUnwrap =>
+    self assert: (Result ok: 99) unwrap equals: 99
+    self should: [(Result error: #oops) unwrap] raise: #signal
+
+  testMapOnOk =>
+    r := (Result ok: 5) map: [:v | v * 2]
+    self assert: r value equals: 10
+
+  testMapOnError =>
+    r := (Result error: #fail) map: [:v | v * 2]
+    self assert: r isError
+    self assert: r error equals: #fail

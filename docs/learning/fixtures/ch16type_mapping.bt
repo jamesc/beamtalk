@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/16-beam-interop.md (type mapping)
+
+TestCase subclass: Ch16TypeMapping
+
+  testSymbolsAreAtoms =>
+    result := Erlang erlang is_atom: #hello
+    self assert: result
+
+  testStringsAreBinaries =>
+    result := Erlang erlang is_binary: "hello"
+    self assert: result
+
+  testIntegersAreIntegers =>
+    result := Erlang erlang is_integer: 42
+    self assert: result
+
+  testBooleansAreAtoms =>
+    result := Erlang erlang is_atom: true
+    self assert: result
+
+  testListsAreLists =>
+    result := Erlang erlang is_list: #(1, 2, 3)
+    self assert: result
+
+  testDictsAreMaps =>
+    result := Erlang erlang is_map: #{#a => 1}
+    self assert: result
