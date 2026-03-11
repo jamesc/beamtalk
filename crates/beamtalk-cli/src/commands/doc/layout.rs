@@ -26,7 +26,7 @@ pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
     } else {
         format!(
             "<a href=\"{nav_prefix}docs/installation.html\">Installation</a>\n\
-             <a href=\"{nav_prefix}learning/\">Getting Started</a>\n\
+             <a href=\"{nav_prefix}learning/\">Learn Beamtalk</a>\n\
              <a href=\"{nav_prefix}docs/\">Documentation</a>\n\
              <a href=\"{nav_prefix}apidocs/\">Standard Library</a>\n"
         )
@@ -126,7 +126,19 @@ pub(super) fn build_sidebar_html(classes: &[ClassInfo], asset_prefix: &str) -> S
         let _ = writeln!(html, "<li><a href=\"{asset_prefix}\">Home</a></li>");
         let _ = writeln!(
             html,
+            "<li><a href=\"{asset_prefix}learning/\">Learn Beamtalk</a></li>"
+        );
+        let _ = writeln!(
+            html,
             "<li><a href=\"{asset_prefix}docs/\">Documentation</a></li>"
+        );
+        let _ = writeln!(
+            html,
+            "<li><a href=\"{asset_prefix}apidocs/\">API Reference</a></li>"
+        );
+        let _ = writeln!(
+            html,
+            "<li><a href=\"{asset_prefix}adr/\">Architecture Decisions</a></li>"
         );
         html.push_str("</ul>\n");
     }

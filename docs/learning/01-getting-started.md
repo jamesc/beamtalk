@@ -83,6 +83,50 @@ There are no multi-line block comments.
 1 + 1  // => 2
 ```
 
+## Exercises
+
+**1. Explore object classes.** Send the `class` message to five different values
+(an integer, a float, a string, a boolean, and `nil`). What class does each report?
+
+<details>
+<summary>Hint</summary>
+
+```text
+42 class       // => Integer
+3.14 class     // => Float
+"hello" class  // => String
+true class     // => True
+nil class      // => UndefinedObject
+```
+</details>
+
+**2. Build a greeting.** Using string concatenation (`++`) and the `printString`
+message, build the string `"I am 25 years old"` from the integer `25`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+"I am " ++ 25 printString ++ " years old"    // => "I am 25 years old"
+```
+
+`printString` converts any value to its string representation.
+</details>
+
+**3. Chain unary messages.** What does `-42 abs class` evaluate to? Predict the
+answer before running it, then verify in the REPL.
+
+<details>
+<summary>Hint</summary>
+
+```text
+-42 abs class    // => Integer
+```
+
+Unary messages chain left-to-right: `(-42 abs)` gives `42`, then `42 class`
+gives `Integer`.
+</details>
+
 ## What's next
 
 Chapter 2 covers the built-in types: integers, floats, strings, booleans,

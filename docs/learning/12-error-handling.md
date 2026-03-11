@@ -328,4 +328,52 @@ r map: [:v | transform]
 obj respondsTo: #selector
 ```
 
+## Exercises
+
+**1. Safe division.** Write a block that divides 10 by a given number, catching
+any error and returning `nil` instead. Test it with 2 (→ 5.0) and 0 (→ nil).
+
+<details>
+<summary>Hint</summary>
+
+```text
+safeDivide := [:n | [10 / n] on: Exception do: [:e | nil]]
+safeDivide value: 2    // => 5.0
+safeDivide value: 0    // => nil
+```
+</details>
+
+**2. Result pipeline.** Create a `Result ok: 5`, use `map:` to double it, then
+use `map:` again to add 1. Unwrap the final result.
+
+<details>
+<summary>Hint</summary>
+
+```text
+r := (Result ok: 5) map: [:v | v * 2]    // Result ok: 10
+r2 := r map: [:v | v + 1]                // Result ok: 11
+r2 unwrap                                // => 11
+```
+
+`map:` chains on ok values; on error values it's a no-op.
+</details>
+
+**3. Guard with respondsTo:.** Write an expression that sends `factorial` to a
+value only if it responds to that message, otherwise returns `"not supported"`.
+Test with `5` and `"hello"`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+safeFactorial := [:obj |
+  (obj respondsTo: #factorial)
+    ifTrue: [obj factorial]
+    ifFalse: ["not supported"]
+]
+safeFactorial value: 5         // => 120
+safeFactorial value: "hello"   // => "not supported"
+```
+</details>
+
 Next: Chapter 13 — Testing with BUnit

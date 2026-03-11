@@ -189,4 +189,40 @@ multiline size  // => 22
 - Split/Join: `split:`, `words`, `join:`
 - Convert: `asInteger`, `asFloat`, `printString`
 
+## Exercises
+
+**1. Self-describing string.** Write an expression that produces
+`"hello has 5 characters"` using string interpolation and the `size` message.
+
+<details>
+<summary>Hint</summary>
+
+```text
+word := "hello"
+"{word} has {word size} characters"
+```
+</details>
+
+**2. Clean and normalize.** Take the string `"  Hello, World!  "` and produce
+`"hello, world!"` — trimmed and lowercased — in a single expression chain.
+
+<details>
+<summary>Hint</summary>
+
+`"  Hello, World!  " trim lowercase` — unary messages chain left-to-right.
+</details>
+
+**3. Split, reverse, rejoin.** Split `"one:two:three"` on `":"`, reverse the
+resulting array, and join it back with `"-"`. What string do you get?
+
+<details>
+<summary>Hint</summary>
+
+```text
+("one:two:three" split: ":") reversed join: "-"
+```
+
+Result: `"three-two-one"`.
+</details>
+
 Next: Chapter 7 — Blocks

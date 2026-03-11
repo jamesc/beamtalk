@@ -209,3 +209,52 @@ TestCase subclass: Ch10MoneyExample
     m := Money amount: 42 currency: #EUR
     self assert: m printString equals: "42 EUR"
 ```
+
+## Exercises
+
+**1. Functional update chain.** Create a `Point x: 0 y: 0` and use chained
+`withX:` and `withY:` to produce `Point(5, 10)`. Verify the original point
+is still `Point(0, 0)`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+p := Point x: 0 y: 0
+p2 := (p withX: 5) withY: 10
+// p2 is Point(5, 10), p is still Point(0, 0)
+```
+
+Each `with*:` method returns a new Point — the original is never modified.
+</details>
+
+**2. Value equality.** Create two Points with the same coordinates using
+different construction forms (`x:y:` and `new:`). Are they `=:=`?
+
+<details>
+<summary>Hint</summary>
+
+```text
+p1 := Point x: 3 y: 4
+p2 := Point new: #{#x => 3, #y => 4}
+p1 =:= p2    // => true
+```
+
+Value objects compare by slot values, not identity.
+</details>
+
+**3. Currency mismatch.** Create two Money values — one USD and one EUR — and
+try to add them. What error do you get? How would you handle it with `on:do:`?
+
+<details>
+<summary>Hint</summary>
+
+```text
+usd := Money amount: 10 currency: #USD
+eur := Money amount: 5 currency: #EUR
+[usd add: eur] on: Error do: [:e | e message]
+// => "Currency mismatch"
+```
+
+The `add:` method checks that currencies match and raises an error if they don't.
+</details>

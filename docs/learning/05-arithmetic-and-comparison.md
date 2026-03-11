@@ -183,4 +183,41 @@ Square root (returns Float):
 
 Key difference from classic Smalltalk: standard math precedence, not left-to-right.
 
+## Exercises
+
+**1. Hypotenuse.** Compute the hypotenuse of a right triangle with sides 3 and 4
+using `sqrt`. What value do you get?
+
+<details>
+<summary>Hint</summary>
+
+`((3 * 3) + (4 * 4)) sqrt` → `5.0`. The Pythagorean theorem:
+`sqrt(a² + b²)`.
+</details>
+
+**2. GCD and LCM.** Find the GCD and LCM of 24 and 36. Then verify that
+`(a gcd: b) * (a lcm: b) =:= a * b` (a fundamental identity).
+
+<details>
+<summary>Hint</summary>
+
+`24 gcd: 36` → `12`, `24 lcm: 36` → `72`. And `12 * 72 =:= 24 * 36` → `true`
+(both equal `864`).
+</details>
+
+**3. Clamping a value.** Using `max:` and `min:`, write an expression that clamps
+a value to the range 0–100. Test with values -5, 50, and 150.
+
+<details>
+<summary>Hint</summary>
+
+```text
+(-5 max: 0) min: 100    // => 0
+(50 max: 0) min: 100    // => 50
+(150 max: 0) min: 100   // => 100
+```
+
+`max: 0` ensures the floor, `min: 100` ensures the ceiling.
+</details>
+
 Next: Chapter 6 — Strings

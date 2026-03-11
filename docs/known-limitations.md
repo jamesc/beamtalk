@@ -19,23 +19,11 @@ Beamtalk v0.1 uses a **flat global namespace**: all classes are globally visible
 
 ### No `try`/`catch` Keywords
 
-Exception handling uses block-based syntax only. There are no `try`, `catch`, or `throw` keywords.
+Beamtalk uses Smalltalk-style block-based exception handling instead of `try`/`catch` keywords. The `on:do:` and `ensure:` messages are the idiomatic way to handle exceptions — this is a deliberate design choice, not a missing feature.
 
-**Workaround:**
 ```beamtalk
 [riskyOperation] on: Error do: [:e | e message]
 [riskyOperation] ensure: [cleanup]
-```
-
-### No Destructuring Assignment
-
-You cannot destructure tuples or collections in assignment. Use pattern matching in `match:` expressions instead.
-
-**Workaround:**
-```beamtalk
-result := getCoordinates
-x := result at: 1
-y := result at: 2
 ```
 
 ### No Macros or Compile-Time Metaprogramming
@@ -62,13 +50,18 @@ Classes compile to Erlang modules. They are not yet actor objects that you can p
 
 **Tracking:** [BT-507](https://linear.app/beamtalk/issue/BT-507)
 
-### No Supervision DSL
+### Supervision API Is Low-Level
 
-Actors are supervised internally via OTP, but there is no user-facing syntax for defining supervision trees or restart strategies.
+The `Supervisor` and `DynamicSupervisor` classes provide programmatic access to OTP supervision trees, but there is no declarative DSL for defining supervision hierarchies or restart strategies inline with class definitions.
 
-**Workaround:** Actors automatically restart on crash via OTP defaults. For custom supervision, use `Erlang` FFI to call OTP supervisor APIs directly.
-
-**Tracking:** [BT-448](https://linear.app/beamtalk/issue/BT-448)
+**Current API:**
+```beamtalk
+sup := Supervisor start: {
+  SupervisionSpec strategy: #one_for_one children: {
+    SupervisionSpec child: MyWorker id: "worker1"
+  }
+}
+```
 
 ## Type System
 
@@ -83,13 +76,7 @@ This is by design — types are documentation-first in Beamtalk.
 
 ## Standard Library Gaps
 
-The following common utilities are not yet in the stdlib:
-
-| Missing | Erlang FFI Workaround |
-|---------|----------------------|
-| HTTP client | `Erlang httpc` |
-
-The following are now implemented in the stdlib: `Regex`, `DateTime`, `JSON`, `Integer`/`Float` math (sqrt, trig, log), `System` (environment variables).
+Most common utilities are now in the stdlib: `Regex`, `DateTime`, `JSON`, `Integer`/`Float` math (sqrt, trig, log), `System` (environment variables), `HTTPClient`, `Supervisor`, `DynamicSupervisor`.
 
 ## Pattern Matching
 

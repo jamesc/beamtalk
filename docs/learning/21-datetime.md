@@ -164,4 +164,52 @@ DateTime now
 
 **High-resolution:** `Time nowMs` (milliseconds), `Time nowUs` (microseconds)
 
+## Exercises
+
+**1. Days between dates.** Compute the number of days between January 1 and
+March 1, 2026. Remember `diffSeconds:` returns seconds.
+
+<details>
+<summary>Hint</summary>
+
+```text
+d1 := DateTime year: 2026 month: 1 day: 1
+d2 := DateTime year: 2026 month: 3 day: 1
+seconds := d2 diffSeconds: d1
+days := seconds div: 86400    // => 59
+```
+
+January has 31 days + February has 28 days = 59 days.
+</details>
+
+**2. Add a week.** Create a DateTime for today, add 7 days, and verify the
+result is after the original using `>`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+today := DateTime now
+nextWeek := today addDays: 7
+nextWeek > today    // => true
+```
+</details>
+
+**3. ISO round-trip.** Create a DateTime, convert it to an ISO string with
+`asString`, parse it back with `fromString:`, and verify the year, month, and
+day are preserved.
+
+<details>
+<summary>Hint</summary>
+
+```text
+dt := DateTime year: 2026 month: 6 day: 15 hour: 10 minute: 30 second: 0
+iso := dt asString                    // => "2026-06-15T10:30:00Z"
+dt2 := DateTime fromString: iso
+dt2 year =:= dt year    // => true
+dt2 month =:= dt month  // => true
+dt2 day =:= dt day      // => true
+```
+</details>
+
 Next: Chapter 22 — Workspace & Globals

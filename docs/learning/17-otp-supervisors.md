@@ -257,4 +257,49 @@ Strategies:
 #restForOne   restart crashed child + all after it
 ```
 
+## Exercises
+
+**1. Default restart policy.** What restart policy does a new actor class have
+by default? How do you check it?
+
+<details>
+<summary>Hint</summary>
+
+```text
+Counter supervisionPolicy    // => #temporary
+```
+
+All actors default to `#temporary` — they are never automatically restarted.
+Override `class supervisionPolicy => #permanent` to change this.
+</details>
+
+**2. Custom supervision spec.** Create a supervision spec for `Counter` with
+a `#permanent` restart policy and a custom ID of `#mainCounter`. Chain the
+builder methods.
+
+<details>
+<summary>Hint</summary>
+
+```text
+spec := Counter supervisionSpec
+  withId: #mainCounter
+  withRestart: #permanent
+spec id         // => #mainCounter
+spec restart    // => #permanent
+```
+</details>
+
+**3. Strategy choice.** When would you choose `#oneForAll` over `#oneForOne`?
+Give a concrete example.
+
+<details>
+<summary>Hint</summary>
+
+Use `#oneForAll` when children depend on each other and can't function
+independently. Example: a database connection pool and a cache actor — if the
+pool crashes, the cache holds stale connections and must also restart.
+`#oneForOne` (default) is best when children are independent, like multiple
+worker processes handling separate requests.
+</details>
+
 Next: Chapter 18 — File I/O

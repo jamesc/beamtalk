@@ -256,3 +256,43 @@ Every object responds to `class`, `isNil`, `notNil`, `printString`, and `respond
 42 respondsTo: #isZero        // => true
 42 respondsTo: #unknownMessage  // => false
 ```
+
+## Exercises
+
+**1. Type conversion chain.** Convert the string `"123"` to an integer, multiply
+it by 3, then convert the result back to a string. What do you get?
+
+<details>
+<summary>Hint</summary>
+
+```text
+("123" asInteger * 3) printString    // => "369"
+```
+
+Use `asInteger` to parse and `printString` to convert back.
+</details>
+
+**2. Nil-safe access.** Write an expression using `ifNil:ifNotNil:` that returns
+`"unknown"` when given `nil` and the value's class name when given a real value.
+Test it with both `nil` and `42`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+nil ifNil: ["unknown"] ifNotNil: [:v | v class printString]    // => "unknown"
+42 ifNil: ["unknown"] ifNotNil: [:v | v class printString]     // => "Integer"
+```
+</details>
+
+**3. Symbol vs String.** Create a symbol `#hello` and a string `"hello"`. Are they
+equal with `=:=`? What about after converting the symbol with `asString`?
+
+<details>
+<summary>Hint</summary>
+
+```text
+#hello =:= "hello"             // => false (different types)
+#hello asString =:= "hello"    // => true  (asString converts to String)
+```
+</details>

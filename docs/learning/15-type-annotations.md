@@ -207,4 +207,53 @@ typed Actor subclass: ...      — typed actor
 Annotations are optional and currently informational.
 Type checking is planned for a future release.
 
+## Exercises
+
+**1. Annotate a method.** Write a method signature for `add: a :: Integer to: b :: Integer -> Integer`
+and explain what each `::` and `->` means.
+
+<details>
+<summary>Hint</summary>
+
+```text
+add: a :: Integer to: b :: Integer -> Integer =>
+  a + b
+```
+
+- `a :: Integer` — parameter `a` has type `Integer`
+- `b :: Integer` — parameter `b` has type `Integer`
+- `-> Integer` — the return type is `Integer`
+- `::` means "has type", `->` means "returns"
+</details>
+
+**2. Typed class.** Write a `typed Object subclass: Temperature` with a
+`degrees :: Float` slot and a `isFreezing -> Boolean` method that checks if
+degrees is below 0.
+
+<details>
+<summary>Hint</summary>
+
+```text
+typed Object subclass: Temperature
+  state: degrees :: Float = 0.0
+  isFreezing -> Boolean => self.degrees < 0
+```
+
+The `typed` keyword enables type metadata storage. Annotations are currently
+informational — they don't enforce types at runtime.
+</details>
+
+**3. When to annotate.** What's the practical difference between
+`typed Object subclass:` and plain `Object subclass:` today? When would you
+choose one over the other?
+
+<details>
+<summary>Hint</summary>
+
+Both behave identically at runtime. `typed` stores annotation metadata for
+IDE tooling, generated docs (`beamtalk doc`), and future type checking.
+Choose `typed` for public APIs and libraries. Plain classes are fine for
+scripts, tests, and internal code where documentation overhead isn't worth it.
+</details>
+
 Next: Chapter 16 — BEAM Interop

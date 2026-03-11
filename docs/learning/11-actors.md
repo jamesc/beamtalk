@@ -301,3 +301,52 @@ TestCase subclass: Ch11MultipleActors
 | BEAM model     | Erlang map            | gen_server process            |
 | Concurrent?    | Copy-safe (no state)  | Yes, message-passing safe     |
 | Message style  | Always synchronous    | Sync (default) or cast (`!`) |
+
+## Exercises
+
+**1. Counter lifecycle.** Spawn a Counter, increment it 5 times, verify the value
+is 5, then stop it and confirm it is no longer alive.
+
+<details>
+<summary>Hint</summary>
+
+```text
+c := Counter spawn
+5 timesRepeat: [c increment]
+c getValue        // => 5
+c stop
+c isAlive         // => false
+```
+</details>
+
+**2. Independent actors.** Spawn two Counters and increment them different
+numbers of times. Verify they have completely separate state.
+
+<details>
+<summary>Hint</summary>
+
+```text
+c1 := Counter spawn
+c2 := Counter spawn
+c1 incrementBy: 10
+c2 incrementBy: 3
+c1 getValue    // => 10
+c2 getValue    // => 3
+```
+
+Each `spawn` creates an independent BEAM process with its own state.
+</details>
+
+**3. Error handling with actors.** Create a BankAccount, deposit 50, then try
+to withdraw 100. Catch the error and return a meaningful message.
+
+<details>
+<summary>Hint</summary>
+
+```text
+acct := BankAccount spawn
+acct deposit: 50
+result := [acct withdraw: 100] on: Error do: [:e | "Insufficient funds"]
+// result => "Insufficient funds"
+```
+</details>

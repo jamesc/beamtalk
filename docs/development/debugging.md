@@ -162,6 +162,76 @@ erl -pa build
 3> fprof:analyse().
 ```
 
+## Codegen Diagnostics (BT-1343)
+
+The compiler can emit detailed diagnostics about code generation decisions.
+These are off by default (too noisy for normal use) and gated behind environment variables.
+
+### Environment Variables
+
+| Variable | Effect |
+|---|---|
+| `BEAMTALK_CODEGEN_DIAGNOSTICS=1` | Enable all codegen diagnostics (info-level hints) |
+| `BEAMTALK_WARN_STATEACC=1` | Promote StateAcc fallback diagnostics to warning level (requires `BEAMTALK_CODEGEN_DIAGNOSTICS=1`) |
+
+```bash
+# See all codegen decisions
+BEAMTALK_CODEGEN_DIAGNOSTICS=1 beamtalk build myfile.bt
+
+# Highlight StateAcc fallbacks as warnings
+BEAMTALK_CODEGEN_DIAGNOSTICS=1 BEAMTALK_WARN_STATEACC=1 beamtalk build myfile.bt
+```
+
+### Diagnostic Categories
+
+**1. Block calling convention chosen**
+
+Reports which optimization mode was selected for each stateful loop:
+- `direct-params` — pure locals, no field mutations (BT-1275)
+- `tuple-acc` — local mutations in foldl list ops (BT-1276)
+- `hybrid` — locals + field reads/mutations as direct params (BT-1326)
+- `StateAcc` — fallback map-based threading
+
+Example: `Loop at line 42: using direct-params (3 locals, 0 field mutations)`
+
+**2. StateAcc fallback reason**
+
+When falling back to StateAcc, includes the specific reason:
+- `self-send in loop body`
+- `nested list op with cross-scope mutation`
+- `tier-2 value call on threaded local`
+- `inline conditional writing to threaded local`
+- `condition has state effects`
+- `control-flow sub-expression with mutations`
+
+Example: `Loop at line 15: StateAcc fallback — self-send in loop body`
+
+**3. Non-local return (^) in block**
+
+Emitted when `^` inside a block generates throw/catch, which can prevent BEAM JIT
+from optimizing the enclosing function.
+
+Example: `Non-local return at line 15: compiled via throw/catch, may inhibit JIT optimization`
+
+**4. Synchronous self-send in loop**
+
+Flags deadlock risk when a loop body sends a message to `self`.
+
+Example: `Self-send 'self bar' inside loop at line 30: synchronous call to own mailbox, potential deadlock`
+
+**5. Dynamic dispatch fallback**
+
+When a message send can't be statically resolved and uses runtime dispatch
+via `beamtalk_message_dispatch:send/3`.
+
+Example: `Send 'foo:' at line 23: dynamic dispatch (receiver type unknown)`
+
+**6. Large extracted arity**
+
+Informational when a loop extracts >8 parameters as direct fun arguments.
+
+Example: `Loop at line 10: 14 extracted params`
+
 ## When All Else Fails
 
 1. **Simplify** — Remove code until it works, then add back
