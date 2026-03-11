@@ -1903,7 +1903,16 @@ impl CoreErlangGenerator {
                 .block_profile(&block.span)
                 .cloned()
                 .unwrap_or_else(|| block_analysis::analyze_block(block));
-            return self.needs_mutation_threading(&analysis);
+            if self.needs_mutation_threading(&analysis) {
+                return true;
+            }
+            // BT-1329: Also check for nested list ops with cross-scope mutations.
+            // `analyze_block` doesn't propagate local_writes from nested blocks,
+            // so variables mutated inside do:/collect:/inject:/select:/reject: blocks
+            // are invisible to the standard `needs_mutation_threading` check.
+            if self.body_has_list_op_cross_scope_mutations(block) {
+                return true;
+            }
         }
 
         false

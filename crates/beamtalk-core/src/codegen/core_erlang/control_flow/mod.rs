@@ -191,9 +191,19 @@ impl ThreadingPlan {
                 }
                 false
             });
+            // BT-1329: Check for nested list ops with cross-scope mutations whose inner
+            // blocks can't use tuple-acc. These fall back to map-acc which references
+            // StateAcc — incompatible with direct-params mode.
+            let body_has_non_tuple_safe_list_op = body.body.iter().any(|s| {
+                CoreErlangGenerator::list_op_needs_stateacc_fallback(
+                    &s.expression,
+                    &generator.semantic_facts,
+                )
+            });
             !body_analysis.has_state_effects()
                 && !cond_has_state_effects
                 && !body_has_tier2_threaded_assign
+                && !body_has_non_tuple_safe_list_op
         };
 
         // BT-1276: Tuple accumulator optimization for foldl list-ops.
@@ -300,6 +310,13 @@ impl ThreadingPlan {
                     &generator.semantic_facts,
                 )
             });
+            // BT-1329: Check for nested list ops incompatible with direct-params.
+            let body_has_non_tuple_safe_list_op_hybrid = body.body.iter().any(|s| {
+                CoreErlangGenerator::list_op_needs_stateacc_fallback(
+                    &s.expression,
+                    &generator.semantic_facts,
+                )
+            });
             // Eligible when body has field mutations but no self-sends:
             // - self-sends require async gen_server dispatch; hybrid mode only handles
             //   direct field-map mutations which produce simple maps:put code.
@@ -309,6 +326,7 @@ impl ThreadingPlan {
                 && !body_has_tier2_threaded_assign_hybrid
                 && !body_has_cf_mutations_hybrid
                 && !body_has_conditional_threaded_writes_hybrid
+                && !body_has_non_tuple_safe_list_op_hybrid
         };
 
         // BT-1326: In hybrid mode, collect fields that are read but never written.
@@ -1229,7 +1247,14 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         match kind {
             BodyKind::Letrec => {
-                if is_last && !has_direct_field_assignments {
+                if self.in_direct_params_loop {
+                    // BT-1329: In direct-params mode, list ops omit the trailing 'nil' and
+                    // leave their let-chain open. We emit the expression directly so that
+                    // variable rebindings (e.g. `let Count = element(1, FoldResult) in`)
+                    // escape to the outer scope where the loop recursion can see them.
+                    let expr_code = self.expression_doc(expr)?;
+                    docs.push(expr_code);
+                } else if is_last && !has_direct_field_assignments {
                     // BT-478/BT-483: Mutations come from nested constructs.
                     // Extract updated state via element(2).
                     let next_version = self.state_version() + 1;
@@ -1520,8 +1545,11 @@ impl CoreErlangGenerator {
         // Condition + true arm
         docs.push(frame.continue_header.clone());
 
-        // Body
+        // Body — set in_direct_params_loop so nested list ops skip StateAcc repack (BT-1329).
+        let prev_direct_params_loop = self.in_direct_params_loop;
+        self.in_direct_params_loop = true;
         let (body_doc, _) = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
+        self.in_direct_params_loop = prev_direct_params_loop;
         docs.push(body_doc);
 
         // Collect final var names after body execution (updated bindings inside scope).
@@ -1680,14 +1708,17 @@ impl CoreErlangGenerator {
         // Run body with in_hybrid_loop = true so field mutations use State* naming
         // and read-only fields resolve to direct parameters.
         let prev_hybrid = self.in_hybrid_loop;
+        let prev_direct_params_loop = self.in_direct_params_loop;
         let prev_readonly_field_params = std::mem::replace(
             &mut self.hybrid_readonly_field_params,
             readonly_params.iter().cloned().collect(),
         );
         self.in_hybrid_loop = true;
+        self.in_direct_params_loop = true; // BT-1329: nested list ops skip StateAcc repack
         let body_result = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec);
         self.hybrid_readonly_field_params = prev_readonly_field_params;
         self.in_hybrid_loop = prev_hybrid;
+        self.in_direct_params_loop = prev_direct_params_loop;
         let (body_doc, final_state_version) = match body_result {
             Ok(result) => result,
             Err(err) => {
@@ -1828,6 +1859,20 @@ impl CoreErlangGenerator {
         let block_params: std::collections::HashSet<String> =
             body.parameters.iter().map(|p| p.name.to_string()).collect();
 
+        // BT-1329: Include variables captured and mutated by nested list op blocks.
+        // `analyze_block` doesn't propagate local_writes from nested (non-conditional) blocks,
+        // so variables mutated inside `do:`, `collect:`, `inject:into:`, `select:`, `reject:`
+        // blocks are invisible to the outer loop's threaded_locals computation.
+        // Scan the body for list op message sends and include their cross-scope mutations.
+        let mut list_op_cross_scope_writes = std::collections::HashSet::new();
+        for stmt in &body.body {
+            Self::collect_list_op_cross_scope_mutations_recursive(
+                &stmt.expression,
+                &self.semantic_facts,
+                &mut list_op_cross_scope_writes,
+            );
+        }
+
         match self.context {
             CodeGenContext::Actor => {
                 // BT-1224: Only thread vars captured from the outer scope that are also
@@ -1851,6 +1896,30 @@ impl CoreErlangGenerator {
                         .cloned()
                         .collect();
                 }
+                // BT-1329: Add cross-scope list op mutations to both reads and writes.
+                // These vars are both read and written in the nested block, so they need
+                // threading through the outer loop.
+                all_captured_reads = all_captured_reads
+                    .union(&list_op_cross_scope_writes)
+                    .cloned()
+                    .collect();
+                all_writes = all_writes
+                    .union(&list_op_cross_scope_writes)
+                    .cloned()
+                    .collect();
+                // BT-1329: Also include outer-scope variables that are written in the loop
+                // body but not read (write-only). These variables need their final value
+                // to escape the loop via StateAcc. We detect them by checking if the
+                // variable already has a binding in the generator's scope (meaning it was
+                // defined before the loop in the method body).
+                for v in &all_writes {
+                    if !block_params.contains(v.as_str())
+                        && !all_captured_reads.contains(v)
+                        && self.lookup_var(v).is_some()
+                    {
+                        all_captured_reads.insert(v.clone());
+                    }
+                }
                 all_captured_reads
                     .intersection(&all_writes)
                     .filter(|v| !block_params.contains(*v))
@@ -1862,9 +1931,27 @@ impl CoreErlangGenerator {
             CodeGenContext::ValueType => {
                 // BT-1053: Only thread vars captured from the outer scope that are also
                 // written in the block. `captured_reads` excludes block-internal temps.
-                analysis
-                    .captured_reads
-                    .intersection(&analysis.local_writes)
+                let mut captured = analysis.captured_reads.clone();
+                let mut writes = analysis.local_writes.clone();
+                captured = captured
+                    .union(&list_op_cross_scope_writes)
+                    .cloned()
+                    .collect();
+                writes = writes
+                    .union(&list_op_cross_scope_writes)
+                    .cloned()
+                    .collect();
+                // BT-1329: Include outer-scope write-only variables (same as Actor above).
+                for v in &writes {
+                    if !block_params.contains(v.as_str())
+                        && !captured.contains(v)
+                        && self.lookup_var(v).is_some()
+                    {
+                        captured.insert(v.clone());
+                    }
+                }
+                captured
+                    .intersection(&writes)
                     .filter(|v| !block_params.contains(*v))
                     .cloned()
                     .collect::<std::collections::BTreeSet<_>>()
@@ -1945,7 +2032,29 @@ impl CoreErlangGenerator {
     ) -> Result<(Document<'static>, Option<String>)> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
+                // BT-1329: Clear any pending list op result before generating the value.
+                self.direct_params_list_op_result = None;
                 let value_code = self.expression_doc(value)?;
+
+                // BT-1329: If the value expression was a list op in direct-params mode,
+                // it produced an open let-chain and stored the result variable name.
+                // We emit the chain directly (so variable rebindings escape to outer scope),
+                // then bind the assigned variable to the stored result.
+                if let Some(result_var) = self.direct_params_list_op_result.take() {
+                    let new_var =
+                        self.fresh_temp_var(&CoreErlangGenerator::to_core_erlang_var(&id.name));
+                    self.bind_var(&id.name, &new_var);
+                    let doc = docvec![
+                        value_code,
+                        "let ",
+                        Document::String(new_var.clone()),
+                        " = ",
+                        Document::String(result_var),
+                        " in ",
+                    ];
+                    return Ok((doc, Some(new_var)));
+                }
+
                 // Allocate a fresh versioned name (e.g. Sum1, Sum2 ...) and rebind.
                 let new_var =
                     self.fresh_temp_var(&CoreErlangGenerator::to_core_erlang_var(&id.name));
@@ -2113,6 +2222,164 @@ impl CoreErlangGenerator {
                 }
             }
         }
+        false
+    }
+
+    /// BT-1329: Collects variables that are captured and mutated by nested list op blocks.
+    ///
+    /// Scans a body expression for list op message sends (do:, collect:, etc.) with literal
+    /// blocks, and adds any variables that are captured from the outer scope and written
+    /// inside the block to `out`. These variables need threading through the outer loop.
+    pub(in crate::codegen::core_erlang) fn collect_list_op_cross_scope_mutations(
+        expr: &Expression,
+        facts: &crate::semantic_analysis::SemanticFacts,
+        out: &mut std::collections::HashSet<String>,
+    ) {
+        use crate::ast::MessageSelector;
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        else {
+            return;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        let body_block = match sel.as_str() {
+            "do:" | "collect:" | "select:" | "reject:" => {
+                if let Some(Expression::Block(block)) = arguments.first() {
+                    block
+                } else {
+                    return;
+                }
+            }
+            "inject:into:" => {
+                if arguments.len() == 2 {
+                    if let Expression::Block(block) = &arguments[1] {
+                        block
+                    } else {
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+            _ => return,
+        };
+
+        let analysis = facts
+            .block_profile(&body_block.span)
+            .cloned()
+            .unwrap_or_else(|| block_analysis::analyze_block(body_block));
+
+        let block_params: std::collections::HashSet<String> = body_block
+            .parameters
+            .iter()
+            .map(|p| p.name.to_string())
+            .collect();
+
+        for v in analysis.captured_reads.intersection(&analysis.local_writes) {
+            if !block_params.contains(v.as_str()) {
+                out.insert(v.clone());
+            }
+        }
+    }
+
+    /// BT-1329: Returns `true` if `expr` is a list op (do:, collect:, select:, reject:,
+    /// inject:into:) whose block captures and mutates outer-scope locals but whose inner
+    /// block is NOT eligible for tuple-acc optimization.
+    ///
+    /// When this returns `true`, the list op would fall back to map-accumulator mode which
+    /// references `StateAcc` — incompatible with direct-params loops. The outer loop must
+    /// fall back to StateAcc mode.
+    fn list_op_needs_stateacc_fallback(
+        expr: &Expression,
+        facts: &crate::semantic_analysis::SemanticFacts,
+    ) -> bool {
+        use crate::ast::MessageSelector;
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        else {
+            return false;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+        // Identify list ops and their body block argument
+        let body_block = match sel.as_str() {
+            "do:" | "collect:" | "select:" | "reject:" => {
+                if let Some(Expression::Block(block)) = arguments.first() {
+                    block
+                } else {
+                    return false;
+                }
+            }
+            "inject:into:" => {
+                if arguments.len() == 2 {
+                    if let Expression::Block(block) = &arguments[1] {
+                        block
+                    } else {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+            _ => return false,
+        };
+
+        let analysis = facts
+            .block_profile(&body_block.span)
+            .cloned()
+            .unwrap_or_else(|| block_analysis::analyze_block(body_block));
+
+        // Check if inner block captures and mutates outer-scope locals
+        let block_params: std::collections::HashSet<String> = body_block
+            .parameters
+            .iter()
+            .map(|p| p.name.to_string())
+            .collect();
+        let has_cross_scope_mutations = analysis
+            .captured_reads
+            .intersection(&analysis.local_writes)
+            .any(|v| !block_params.contains(v.as_str()));
+
+        if !has_cross_scope_mutations {
+            return false;
+        }
+
+        // Inner block has cross-scope mutations. Check if tuple-acc would be blocked.
+        // These mirror the guards in ThreadingPlan::new_impl for use_tuple_acc.
+        if analysis.has_state_effects() {
+            // Field mutations — outer direct-params is already blocked by has_state_effects
+            // propagation through analyze_block's nested Block handling. But be safe.
+            return true;
+        }
+
+        // Check for conditional writes to threaded locals within the inner block body
+        let inner_threaded: Vec<String> = analysis
+            .captured_reads
+            .intersection(&analysis.local_writes)
+            .filter(|v| !block_params.contains(v.as_str()))
+            .cloned()
+            .collect();
+        for stmt in &body_block.body {
+            if Self::inline_conditional_writes_threaded(&stmt.expression, &inner_threaded, facts) {
+                return true;
+            }
+        }
+
+        // Check for destructure as last expression
+        if body_block
+            .body
+            .last()
+            .is_some_and(|s| matches!(s.expression, Expression::DestructureAssignment { .. }))
+        {
+            return true;
+        }
+
         false
     }
 }
