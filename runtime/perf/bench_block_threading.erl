@@ -240,7 +240,11 @@ fold_inject_into_wrapper(List) ->
 %%   fun (X, Acc) -> Acc + X end
 -spec fold_inline_swap(list()) -> integer().
 fold_inline_swap(List) ->
-    lists:foldl(fun(X, Acc) -> Acc + X end, 0, List).
+    SafeList = case erlang:is_list(List) of
+        true -> List;
+        false -> beamtalk_collection:to_list(List)
+    end,
+    lists:foldl(fun(X, Acc) -> Acc + X end, 0, SafeList).
 
 %%====================================================================
 %% BT-1329: nested list op inside counted loop

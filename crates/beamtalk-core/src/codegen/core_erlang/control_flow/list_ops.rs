@@ -841,9 +841,13 @@ impl CoreErlangGenerator {
             Document::String(lambda_var.clone()),
             " = ",
             foldl_fun_doc,
-            Document::String(format!(
-                " in call 'lists':'foldl'({lambda_var}, {init_var}, {safe_list_var})"
-            )),
+            " in call 'lists':'foldl'(",
+            Document::String(lambda_var),
+            ", ",
+            Document::String(init_var),
+            ", ",
+            Document::String(safe_list_var),
+            ")",
         ])
     }
 
