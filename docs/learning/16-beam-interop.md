@@ -1,3 +1,8 @@
+<!-- btfixture: fixtures/ch16erlang_calls.bt -->
+<!-- btfixture: fixtures/ch16type_mapping.bt -->
+<!-- btfixture: fixtures/ch16practical_patterns.bt -->
+<!-- btfixture: fixtures/ch16error_handling.bt -->
+
 ## BEAM Interop
 
 Beamtalk is a first-class BEAM citizen. Beamtalk actors are standard OTP

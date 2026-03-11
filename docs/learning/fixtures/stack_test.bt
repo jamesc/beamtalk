@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/13-testing.md (Stack)
+
+TestCase subclass: StackTest
+  state: stack = nil
+
+  setUp =>
+    self.stack := Stack spawn
+    self
+
+  testNewStackIsEmpty =>
+    self assert: self.stack isEmpty
+
+  testPushIncreasesSize =>
+    self.stack push: 1
+    self assert: self.stack size equals: 1
+    self.stack push: 2
+    self assert: self.stack size equals: 2
+
+  testPopReturnsLastPushed =>
+    self.stack push: "a"
+    self.stack push: "b"
+    self.stack push: "c"
+    self assert: self.stack pop equals: "c"
+    self assert: self.stack pop equals: "b"
+    self assert: self.stack pop equals: "a"
+
+  testPeekDoesNotRemove =>
+    self.stack push: 42
+    self assert: self.stack peek equals: 42
+    self assert: self.stack size equals: 1
+
+  testPopFromEmptyRaises =>
+    self should: [self.stack pop] raise: #user_error
+
+  testPeekFromEmptyRaises =>
+    self should: [self.stack peek] raise: #user_error

@@ -14,7 +14,8 @@ increment := [
 ]
 
 // Get current value (no mutation)
-getValue := [^self.value]
-// Note: Multi-statement blocks with parameters (e.g., [:n | self.value := n. ^self.value])
+getValue := [
+  ^self.value
+]// Note: Multi-statement blocks with parameters (e.g., [:n | self.value := n. ^self.value])
 // have a known parser limitation tracked for future work. The increment and getValue
 // methods above demonstrate state threading works correctly.

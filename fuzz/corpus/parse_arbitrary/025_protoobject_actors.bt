@@ -36,4 +36,4 @@ counter decrement
 // => 2
 
 // Final state verification
-counter getValue// => 2
+counter getValue  // => 2

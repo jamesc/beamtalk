@@ -290,6 +290,7 @@ fn parse_class_info_from_meta_term(
         is_sealed,
         is_abstract,
         is_value,
+        is_native: false, // BEAM cache doesn't carry native flag; re-derived at parse time
         is_typed,
         state,
         state_types,

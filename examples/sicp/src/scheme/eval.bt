@@ -40,29 +40,30 @@ Object subclass: SchemeEval
   /// (env lookup: "+")   // => a Block
   /// ```
   defaultEnv =>
-    SchemeEnv spawnWith: #{
-      #bindings => #{
-        "+" => [:args | (args at: 1) + (args at: 2)],
-        "-" => [:args | (args at: 1) - (args at: 2)],
-        "*" => [:args | (args at: 1) * (args at: 2)],
-        "/" => [:args | (args at: 1) div: (args at: 2)],
-        "=" => [:args | (args at: 1) =:= (args at: 2)],
-        "<" => [:args | (args at: 1) < (args at: 2)],
-        ">" => [:args | (args at: 1) > (args at: 2)],
-        "<=" => [:args | (args at: 1) <= (args at: 2)],
-        ">=" => [:args | (args at: 1) >= (args at: 2)],
-        "car" => [:args | (args at: 1) first],
-        "cdr" => [:args | (args at: 1) rest],
-        "cons" => [:args | (#() add: (args at: 1)) ++ (args at: 2)],
-        "list" => [:args | args],
-        "not" => [:args | (args at: 1) not],
-        "null?" => [:args |
-          v := args at: 1
-          v isNil or: [v class =:= List and: [v isEmpty]]
-        ]
-      },
-      #parent => nil
-    }
+    SchemeEnv
+      spawnWith: #{
+        #bindings => #{
+          "+" => [:args | (args at: 1) + (args at: 2)],
+          "-" => [:args | (args at: 1) - (args at: 2)],
+          "*" => [:args | (args at: 1) * (args at: 2)],
+          "/" => [:args | (args at: 1) div: (args at: 2)],
+          "=" => [:args | (args at: 1) =:= (args at: 2)],
+          "<" => [:args | (args at: 1) < (args at: 2)],
+          ">" => [:args | (args at: 1) > (args at: 2)],
+          "<=" => [:args | (args at: 1) <= (args at: 2)],
+          ">=" => [:args | (args at: 1) >= (args at: 2)],
+          "car" => [:args | (args at: 1) first],
+          "cdr" => [:args | (args at: 1) rest],
+          "cons" => [:args | (#() add: (args at: 1)) ++ (args at: 2)],
+          "list" => [:args | args],
+          "not" => [:args | (args at: 1) not],
+          "null?" => [:args |
+            v := args at: 1
+            v isNil or: [v class =:= List and: [v isEmpty]]
+          ]
+        },
+        #parent => nil
+      }
 
   /// Evaluate `expr` in `env` and return the result.
   ///
@@ -94,10 +95,17 @@ Object subclass: SchemeEval
     tail := expr rest
 
     // Special form dispatch (symbols) or function application
-    (head class =:= SchemeSymbol) ifTrue: [
-      ^self evalSpecialOrApply: head tail: tail in: env
-    ]
-    self evalApply: head tail: tail in: env
+    (head class =:= SchemeSymbol)
+      ifTrue: [
+        ^self
+          evalSpecialOrApply: head
+          tail: tail
+          in: env
+      ]
+    self
+      evalApply: head
+      tail: tail
+      in: env
 
   /// Dispatch `head` as a special form or function application.
   /// Called when `head` is a `SchemeSymbol`; `tail` is the rest of the list.
@@ -118,7 +126,10 @@ Object subclass: SchemeEval
       // (lambda (params...) body) — create a closure
       "lambda" -> [
         params := (tail at: 1) collect: [:p | p name]
-        SchemeLambda withParams: params body: (tail at: 2) env: env
+        SchemeLambda
+          withParams: params
+          body: (tail at: 2)
+          env: env
       ] value;
 
       // (if test then else?) — conditional branch
@@ -152,14 +163,22 @@ Object subclass: SchemeEval
       ] value;
 
       // Not a special form — evaluate head as a function and apply
-      _ -> [self evalApply: head tail: tail in: env] value
+      _ -> [
+        self
+          evalApply: head
+          tail: tail
+          in: env
+      ] value
     ]
 
   /// Evaluate `head` as a procedure and apply it to the evaluated `tail` args.
   evalApply: head tail: tail in: env =>
     func := self eval: head in: env
     evalArgs := tail collect: [:a | self eval: a in: env]
-    self apply: func args: evalArgs in: env
+    self
+      apply: func
+      args: evalArgs
+      in: env
 
   /// Apply `func` to the evaluated argument list `args`.
   ///

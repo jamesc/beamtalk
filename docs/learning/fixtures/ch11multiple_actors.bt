@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/11-actors.md (multiple actors)
+
+TestCase subclass: Ch11MultipleActors
+
+  testIdGeneratorProducesUniqueIds =>
+    gen := IdGenerator spawn
+    id1 := gen nextId
+    id2 := gen nextId
+    id3 := gen nextId
+    self assert: id1 equals: 1
+    self assert: id2 equals: 2
+    self assert: id3 equals: 3
+
+  testMultipleIndependentActors =>
+    c1 := Counter spawn
+    c2 := Counter spawn
+    c1 increment
+    c1 increment
+    c2 increment
+    self assert: c1 getValue equals: 2
+    self assert: c2 getValue equals: 1

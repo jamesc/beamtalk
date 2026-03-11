@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for docs/learning/17-otp-supervisors.md
+
+DynamicSupervisor subclass: WorkerPool
+  class childClass => Counter

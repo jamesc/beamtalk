@@ -10,18 +10,18 @@ Token { kind: Assign, span: Span { start: 384, end: 386 }, leading_trivia: [], t
 Token { kind: String("This is an extremely long string literal that contains a lot of text to test the lexer and parser ability to handle very long string tokens without issues or buffer overflows and to ensure proper memory allocation"), span: Span { start: 387, end: 602 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("result"), span: Span { start: 662, end: 668 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Long keyword message selector (multiple long keywords)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 669, end: 671 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("veryLongObjectWithManyMethods"), span: Span { start: 672, end: 701 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("thisIsAVeryLongKeywordPart:"), span: Span { start: 702, end: 729 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("value1"), span: Span { start: 730, end: 736 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("andAnotherVeryLongKeywordPart:"), span: Span { start: 737, end: 767 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("value2"), span: Span { start: 768, end: 774 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("andYetAnotherExtremelyLongKeywordPart:"), span: Span { start: 775, end: 813 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("value3"), span: Span { start: 814, end: 820 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("anotherVeryLongIdentifierForTestingPurposes"), span: Span { start: 859, end: 902 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Long identifier in nested context"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Assign, span: Span { start: 903, end: 905 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftParen, span: Span { start: 906, end: 907 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("yetAnotherLongIdentifierName"), span: Span { start: 907, end: 935 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("at:"), span: Span { start: 936, end: 939 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("evenMoreLongIdentifierNames"), span: Span { start: 940, end: 967 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: RightParen, span: Span { start: 967, end: 968 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 969, end: 969 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Identifier("veryLongObjectWithManyMethods"), span: Span { start: 672, end: 701 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("thisIsAVeryLongKeywordPart:"), span: Span { start: 704, end: 731 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value1"), span: Span { start: 732, end: 738 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("andAnotherVeryLongKeywordPart:"), span: Span { start: 741, end: 771 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value2"), span: Span { start: 772, end: 778 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("andYetAnotherExtremelyLongKeywordPart:"), span: Span { start: 781, end: 819 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value3"), span: Span { start: 820, end: 826 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("anotherVeryLongIdentifierForTestingPurposes"), span: Span { start: 865, end: 908 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Long identifier in nested context"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 909, end: 911 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftParen, span: Span { start: 912, end: 913 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("yetAnotherLongIdentifierName"), span: Span { start: 913, end: 941 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("at:"), span: Span { start: 942, end: 945 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("evenMoreLongIdentifierNames"), span: Span { start: 946, end: 973 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightParen, span: Span { start: 973, end: 974 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 975, end: 975 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

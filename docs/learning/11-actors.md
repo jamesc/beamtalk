@@ -1,3 +1,10 @@
+<!-- btfixture: fixtures/counter.bt -->
+<!-- btfixture: fixtures/bank_account.bt -->
+<!-- btfixture: fixtures/id_generator.bt -->
+<!-- btfixture: fixtures/ch11actors.bt -->
+<!-- btfixture: fixtures/ch11bank_account.bt -->
+<!-- btfixture: fixtures/ch11multiple_actors.bt -->
+
 ## Actors
 
 An actor is a concurrent object — it runs as an independent BEAM process with

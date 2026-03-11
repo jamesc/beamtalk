@@ -938,6 +938,12 @@ impl CoreErlangGenerator {
                 // values are visible to all subsequent method body expressions.
                 let doc = self.generate_value_type_do_open(expr)?;
                 body_parts.push(doc);
+            } else if let Some(mutations) = Self::inline_block_captured_mutations(expr) {
+                // BT-1213: Non-last block value with captured mutations.
+                // Emit the block body as open let-chains so mutations are visible
+                // to subsequent expressions (not scoped inside `let _seq = (...) in`).
+                let doc = self.generate_vt_block_value_open(expr, &mutations)?;
+                body_parts.push(doc);
             } else {
                 // Non-last expressions: wrap in let to sequence side effects
                 let tmp_var = self.fresh_temp_var("seq");
@@ -1032,6 +1038,125 @@ impl CoreErlangGenerator {
         Ok(Document::String(format!(
             "    let {tmp_var} = {expr_code} in\n"
         )))
+    }
+
+    /// BT-1213: Generate an open let-chain for a non-last `[block_withmutations] value`
+    /// in `ValueType` context. Each assignment in the block body becomes a top-level
+    /// `let Var = val in\n` so the mutation is visible to subsequent expressions.
+    fn generate_vt_block_value_open(
+        &mut self,
+        expr: &Expression,
+        mutations: &[String],
+    ) -> Result<Document<'static>> {
+        let (block, arguments) = if let Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } = expr
+        {
+            if let Expression::Block(block) = receiver.as_ref() {
+                (block, arguments.as_slice())
+            } else {
+                // Fallback: sequence as side effect
+                let tmp_var = self.fresh_temp_var("seq");
+                let doc = self.expression_doc(expr)?;
+                return Ok(docvec![
+                    "    let ",
+                    Document::String(tmp_var),
+                    " = ",
+                    doc,
+                    " in\n",
+                ]);
+            }
+        } else {
+            let tmp_var = self.fresh_temp_var("seq");
+            let doc = self.expression_doc(expr)?;
+            return Ok(docvec![
+                "    let ",
+                Document::String(tmp_var),
+                " = ",
+                doc,
+                " in\n",
+            ]);
+        };
+
+        let mut parts: Vec<Document<'static>> = Vec::new();
+
+        // Use a nested scope so block parameters and block-local variables
+        // don't leak into the method scope. Only captured mutations are
+        // re-bound in the outer scope after the block finishes.
+        self.push_scope();
+
+        // Bind block parameters to arguments (for value: variants)
+        for (i, param) in block.parameters.iter().enumerate() {
+            if i < arguments.len() {
+                let arg_var = self.fresh_temp_var(&param.name);
+                let arg_doc = self.expression_doc(&arguments[i])?;
+                parts.push(docvec![
+                    "    let ",
+                    Document::String(arg_var.clone()),
+                    " = ",
+                    arg_doc,
+                    " in\n",
+                ]);
+                self.bind_var(&param.name, &arg_var);
+            }
+        }
+
+        // Emit block body as open let-chains.
+        // Track which variables are captured mutations so we can re-bind them
+        // in the outer scope after popping the parameter scope.
+        let mut rebound_vars: Vec<(String, String)> = Vec::new();
+
+        let body: Vec<&Expression> = block
+            .body
+            .iter()
+            .map(|s| &s.expression)
+            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+            .collect();
+
+        for body_expr in &body {
+            if Self::is_local_var_assignment(body_expr) {
+                if let Expression::Assignment { target, value, .. } = body_expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let core_var = self
+                            .lookup_var(&id.name)
+                            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                        let val_doc = self.expression_doc(value)?;
+                        parts.push(docvec![
+                            "    let ",
+                            Document::String(core_var.clone()),
+                            " = ",
+                            val_doc,
+                            " in\n",
+                        ]);
+                        self.bind_var(&id.name, &core_var);
+                        // Track for re-binding in outer scope
+                        if mutations.iter().any(|m| m == id.name.as_str()) {
+                            rebound_vars.push((id.name.to_string(), core_var));
+                        }
+                    }
+                }
+            } else {
+                let tmp = self.fresh_temp_var("seq");
+                let doc = self.expression_doc(body_expr)?;
+                parts.push(docvec![
+                    "    let ",
+                    Document::String(tmp),
+                    " = ",
+                    doc,
+                    " in\n",
+                ]);
+            }
+        }
+
+        // Pop the block scope, then re-bind only captured mutations in the outer scope
+        self.pop_scope();
+        for (name, core_var) in &rebound_vars {
+            self.bind_var(name, core_var);
+        }
+
+        Ok(Document::Vec(parts))
     }
 
     /// BT-1053: Returns `true` if `expr` is a `do:` message send with a literal

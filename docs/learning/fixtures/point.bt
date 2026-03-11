@@ -8,11 +8,11 @@ Value subclass: Point
   state: y = 0
 
   x => self.x
+
   y => self.y
 
   distanceSquared => (self.x * self.x) + (self.y * self.y)
 
-  translateBy: dx and: dy =>
-    Point x: (self.x + dx) y: (self.y + dy)
+  translateBy: dx and: dy => Point x: (self.x + dx) y: (self.y + dy)
 
   printString => "Point({self.x}, {self.y})"

@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/16-beam-interop.md (practical patterns)
+
+TestCase subclass: Ch16PracticalPatterns
+
+  testCallingStringModule =>
+    result := Erlang string uppercase: "hello"
+    self assert: result equals: "HELLO"
+
+  testCallingMathModule =>
+    result := Erlang math pow: 2.0 with: 10.0
+    self assert: (result > 1023.0)
+    self assert: (result < 1025.0)
+
+  testCallingCryptoHash =>
+    hash := Erlang crypto hash: #sha256 with: "hello"
+    self assert: hash class equals: String
+
+  testListsFlattening =>
+    nested := #(#(1, 2), #(3, 4), #(5))
+    flat := Erlang lists flatten: nested
+    self assert: flat equals: #(1, 2, 3, 4, 5)
+
+  testMapsToList =>
+    d := #{#a => 1, #b => 2}
+    pairs := Erlang maps to_list: d
+    self assert: pairs size equals: 2

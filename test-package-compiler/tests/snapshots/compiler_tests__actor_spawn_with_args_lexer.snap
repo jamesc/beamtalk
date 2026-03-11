@@ -21,5 +21,5 @@ Token { kind: RightBracket, span: Span { start: 420, end: 421 }, leading_trivia:
 Token { kind: Identifier("counter1"), span: Span { start: 464, end: 472 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Spawn with default values (value = 0)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 473, end: 475 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Identifier("Counter"), span: Span { start: 476, end: 483 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("spawn"), span: Span { start: 484, end: 489 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 604, end: 604 }, leading_trivia: [Whitespace("\n"), LineComment("// TODO: When map literal syntax #{key => value} is implemented:"), Whitespace("\n"), LineComment("// counter2 := Counter spawnWith: #{value => 10}"), Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Identifier("spawn"), span: Span { start: 484, end: 489 }, leading_trivia: [], trailing_trivia: [LineComment("// TODO: When map literal syntax #{key => value} is implemented:")] }
+Token { kind: Eof, span: Span { start: 603, end: 603 }, leading_trivia: [Whitespace("\n"), LineComment("// counter2 := Counter spawnWith: #{value => 10}"), Whitespace("\n")], trailing_trivia: [] }

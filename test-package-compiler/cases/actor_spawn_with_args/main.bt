@@ -13,6 +13,5 @@ value := 0
 increment := [self.value := self.value + 1]
 
 // Spawn with default values (value = 0)
-counter1 := Counter spawn
-// TODO: When map literal syntax #{key => value} is implemented:
+counter1 := Counter spawn// TODO: When map literal syntax #{key => value} is implemented:
 // counter2 := Counter spawnWith: #{value => 10}

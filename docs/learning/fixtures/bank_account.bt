@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for docs/learning/11-actors.md
+
+Actor subclass: BankAccount
+  state: balance = 0
+  state: owner = ""
+
+  deposit: amount =>
+    amount > 0
+      ifFalse: [^self error: "Amount must be positive"]
+    self.balance := self.balance + amount
+
+  withdraw: amount =>
+    amount > self.balance
+      ifTrue: [^self error: "Insufficient funds"]
+    self.balance := self.balance - amount
+
+  getBalance => self.balance
+
+  getOwner => self.owner

@@ -154,8 +154,7 @@ integerClass class_name
 // => Integer
 trueClass := Beamtalk classNamed: #True
 // => _
-trueClass class_name// => True
-
+trueClass class_name  // => True
 // ===========================================================================
 // IMPLEMENTATION STATUS
 // ===========================================================================

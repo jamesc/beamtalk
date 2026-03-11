@@ -40,9 +40,7 @@ TestCase subclass: Ch10ValueClasses
 
   testImmutableByDefault =>
     p := Point x: 1 y: 2
-    self
-      should: [p fieldAt: #x put: 99]
-      raise: #immutable_value
+    self should: [p fieldAt: #x put: 99] raise: #immutable_value
 
   testValueEquality =>
     p1 := Point x: 3 y: 4
@@ -82,5 +80,4 @@ TestCase subclass: Ch10ValueClasses
     p := Point x: 3 y: 4
     self assert: p class equals: Point
 
-  testSuperclass =>
-    self assert: Point superclass equals: Value
+  testSuperclass => self assert: Point superclass equals: Value
