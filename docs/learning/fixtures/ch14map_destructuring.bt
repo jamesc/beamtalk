@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/14-pattern-matching.md (maps)
+
+TestCase subclass: Ch14MapDestructuring
+
+  testSingleKey =>
+    dict := #{#name => "Alice"}
+    #{#name => name} := dict
+    self assert: name equals: "Alice"
+
+  testMultipleKeys =>
+    dict := #{#x => 10, #y => 20}
+    #{#x => x, #y => y} := dict
+    self assert: x equals: 10
+    self assert: y equals: 20
+
+  testWildcard =>
+    dict := #{#sid => "abc123", #runner => "runner1"}
+    #{#sid => sid, #runner => _} := dict
+    self assert: sid equals: "abc123"
+
+  testSubsetDestructuring =>
+    dict := #{#a => 1, #b => 2, #c => 3}
+    #{#a => a, #c => c} := dict
+    self assert: a equals: 1
+    self assert: c equals: 3
+
+  testMissingKeyRaises =>
+    result := [
+      #{#missing => _val} := #{#present => 42}
+      #did_not_raise
+    ] on: RuntimeError do: [:e | e message includesSubstring: "badkey"]
+    self assert: result equals: true
+
+  testInCollectBlock =>
+    dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]
+    sums := dicts collect: [:d |
+      #{#x => x, #y => y} := d
+      x + y
+    ]
+    self assert: sums equals: #[11, 22]

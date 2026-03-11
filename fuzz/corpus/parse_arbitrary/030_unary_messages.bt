@@ -127,4 +127,4 @@
 // not - covered in booleans.bt but verify here too
 true not
 // => false
-false not// => true
+false not  // => true

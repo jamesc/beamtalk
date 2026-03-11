@@ -253,7 +253,17 @@ Module {
                         preceding_blank_line: true,
                     },
                 ],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "TODO: When map literal syntax #{key => value} is implemented:",
+                        span: Span {
+                            start: 484,
+                            end: 489,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -304,19 +314,10 @@ Module {
     file_leading_comments: [],
     file_trailing_comments: [
         Comment {
-            content: "TODO: When map literal syntax #{key => value} is implemented:",
-            span: Span {
-                start: 604,
-                end: 604,
-            },
-            kind: Line,
-            preceding_blank_line: false,
-        },
-        Comment {
             content: "counter2 := Counter spawnWith: #{value => 10}",
             span: Span {
-                start: 604,
-                end: 604,
+                start: 603,
+                end: 603,
             },
             kind: Line,
             preceding_blank_line: false,

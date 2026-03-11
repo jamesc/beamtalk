@@ -19,4 +19,4 @@ counter getValue
 // => 5
 counter setValue: 10
 // => _
-counter getValue// => 10
+counter getValue  // => 10

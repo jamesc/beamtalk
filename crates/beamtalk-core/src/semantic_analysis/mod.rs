@@ -333,6 +333,14 @@ fn analyse_full(
         &mut result.diagnostics,
     );
 
+    // BT-1207: Native actor validation (ADR 0056)
+    validators::check_native_state_fields(module, &mut result.diagnostics);
+    validators::check_native_delegate_return_type(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+
     // BT-1299: Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
     validators::check_match_exhaustiveness(module, &mut result.diagnostics);
 
@@ -4024,6 +4032,7 @@ mod tests {
             is_abstract: false,
             is_typed: false,
             is_value: false,
+            is_native: false,
             state: vec![],
             state_types: std::collections::HashMap::new(),
             methods: vec![],

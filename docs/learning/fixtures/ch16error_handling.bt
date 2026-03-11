@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/16-beam-interop.md (error handling)
+
+TestCase subclass: Ch16ErrorHandling
+
+  testErlangErrorCaught =>
+    result := [
+      Erlang lists nonexistent_function: 42
+    ] on: RuntimeError do: [:e | #caught]
+    self assert: result equals: #caught
+
+  testErlangBadargCaught =>
+    result := [
+      Erlang lists reverse: 42
+    ] on: RuntimeError do: [:e | #caught]
+    self assert: result equals: #caught

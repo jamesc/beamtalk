@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for docs/learning/12-error-handling.md
+
+Object subclass: Validator
+  validate: x =>
+    x isNil ifTrue: [self error: "value must not be nil"]
+    x < 0   ifTrue: [self error: "value must not be negative"]
+    x

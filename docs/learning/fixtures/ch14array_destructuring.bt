@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/14-pattern-matching.md (arrays)
+
+TestCase subclass: Ch14ArrayDestructuring
+
+  testBasic =>
+    #[a, b] := #[10, 20]
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testThreeElements =>
+    #[a, b, c] := #[1, 2, 3]
+    self assert: a equals: 1
+    self assert: b equals: 2
+    self assert: c equals: 3
+
+  testWildcard =>
+    #[_, b] := #[99, 42]
+    self assert: b equals: 42
+
+  testExtraElementsIgnored =>
+    #[a, b] := #[10, 20, 30, 40]
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testStrings =>
+    #[first, second] := #["hello", "world"]
+    self assert: first equals: "hello"
+    self assert: second equals: "world"
+
+  testSequential =>
+    #[a, b] := #[1, 2]
+    #[c, d] := #[3, 4]
+    self assert: a + b + c + d equals: 10
+
+  testInCollectBlock =>
+    pairs := #[#[1, 10], #[2, 20], #[3, 30]]
+    sums := pairs collect: [:pair |
+      #[a, b] := pair
+      a + b
+    ]
+    self assert: sums equals: #[11, 22, 33]
+
+  testInSelectBlock =>
+    result := #[#[1, 10], #[15, 5], #[2, 20]]
+      select: [:pair |
+        #[a, b] := pair
+        a < b
+      ]
+    self assert: result equals: #[#[1, 10], #[2, 20]]
+
+  testInInjectBlock =>
+    result := #[#[1, 10], #[2, 20]]
+      inject: 0
+      into: [:acc :pair |
+        #[a, b] := pair
+        acc + a + b
+      ]
+    self assert: result equals: 33

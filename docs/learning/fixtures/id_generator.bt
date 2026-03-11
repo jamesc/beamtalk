@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for docs/learning/11-actors.md
+
+Actor subclass: IdGenerator
+  state: next = 1
+
+  nextId =>
+    id := self.next
+    self.next := self.next + 1
+    id

@@ -262,7 +262,17 @@ Module {
                         preceding_blank_line: true,
                     },
                 ],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "Note: Multi-statement blocks with parameters (e.g., [:n | self.value := n. ^self.value])",
+                        span: Span {
+                            start: 438,
+                            end: 439,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -289,26 +299,26 @@ Module {
                                             Identifier {
                                                 name: "self",
                                                 span: Span {
-                                                    start: 424,
-                                                    end: 428,
+                                                    start: 427,
+                                                    end: 431,
                                                 },
                                             },
                                         ),
                                         field: Identifier {
                                             name: "value",
                                             span: Span {
-                                                start: 429,
-                                                end: 434,
+                                                start: 432,
+                                                end: 437,
                                             },
                                         },
                                         span: Span {
-                                            start: 424,
-                                            end: 434,
+                                            start: 427,
+                                            end: 437,
                                         },
                                     },
                                     span: Span {
-                                        start: 423,
-                                        end: 434,
+                                        start: 426,
+                                        end: 437,
                                     },
                                 },
                                 preceding_blank_line: false,
@@ -316,13 +326,13 @@ Module {
                         ],
                         span: Span {
                             start: 422,
-                            end: 435,
+                            end: 439,
                         },
                     },
                 ),
                 span: Span {
                     start: 410,
-                    end: 435,
+                    end: 439,
                 },
             },
             preceding_blank_line: true,
@@ -330,24 +340,15 @@ Module {
     ],
     span: Span {
         start: 255,
-        end: 435,
+        end: 439,
     },
     file_leading_comments: [],
     file_trailing_comments: [
         Comment {
-            content: "Note: Multi-statement blocks with parameters (e.g., [:n | self.value := n. ^self.value])",
-            span: Span {
-                start: 676,
-                end: 676,
-            },
-            kind: Line,
-            preceding_blank_line: false,
-        },
-        Comment {
             content: "have a known parser limitation tracked for future work. The increment and getValue",
             span: Span {
-                start: 676,
-                end: 676,
+                start: 679,
+                end: 679,
             },
             kind: Line,
             preceding_blank_line: false,
@@ -355,8 +356,8 @@ Module {
         Comment {
             content: "methods above demonstrate state threading works correctly.",
             span: Span {
-                start: 676,
-                end: 676,
+                start: 679,
+                end: 679,
             },
             kind: Line,
             preceding_blank_line: false,

@@ -8,11 +8,11 @@ Value subclass: Money
   state: currency = #USD
 
   amount => self.amount
+
   currency => self.currency
 
   add: other =>
-    other currency =:= self.currency
-      ifFalse: [^self error: "Currency mismatch"]
+    other currency =:= self.currency ifFalse: [^self error: "Currency mismatch"]
     Money amount: (self.amount + other amount) currency: self.currency
 
   printString => "{self.amount} {self.currency}"

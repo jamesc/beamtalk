@@ -164,5 +164,4 @@ DateTime now
 
 **High-resolution:** `Time nowMs` (milliseconds), `Time nowUs` (microseconds)
 
-Next: this completes the stdlib chapters!
-See `docs/beamtalk-language-features.md` for the full language reference.
+Next: Chapter 22 — Workspace & Globals

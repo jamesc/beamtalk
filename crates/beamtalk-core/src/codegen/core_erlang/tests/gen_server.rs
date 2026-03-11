@@ -2358,6 +2358,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
         is_abstract: false,
         is_typed: false,
         is_value: false,
+        is_native: false,
         state: vec![],
         state_types: HashMap::new(),
         methods: vec![],
@@ -2662,6 +2663,88 @@ fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
     assert!(
         code.contains("call 'maps':'put'('b'"),
         "Must persist 'b' to REPL state map. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt1213_block_value_with_captured_mutation_actor() {
+    // BT-1213: [count := count + 1] value in actor context
+    // Parse from source to get a realistic AST
+    // Build AST manually: Object subclass: BT1213Actor
+    //   testIt => count := 0. [count := count + 1] value. count
+    let s = Span::new(0, 0);
+    let count_id = || Expression::Identifier(Identifier::new("count", s));
+
+    // count := count + 1
+    let add_expr = Expression::MessageSend {
+        receiver: Box::new(count_id()),
+        selector: MessageSelector::Binary("+".into()),
+        arguments: vec![Expression::Literal(Literal::Integer(1), s)],
+        is_cast: false,
+        span: s,
+    };
+    let assign = Expression::Assignment {
+        target: Box::new(count_id()),
+        value: Box::new(add_expr),
+        span: s,
+    };
+
+    // [count := count + 1] value
+    let block = Block::new(vec![], vec![bare(assign)], s);
+    let block_value = Expression::MessageSend {
+        receiver: Box::new(Expression::Block(block)),
+        selector: MessageSelector::Unary("value".into()),
+        arguments: vec![],
+        is_cast: false,
+        span: s,
+    };
+
+    // count := 0
+    let init_count = Expression::Assignment {
+        target: Box::new(count_id()),
+        value: Box::new(Expression::Literal(Literal::Integer(0), s)),
+        span: s,
+    };
+
+    let method = MethodDefinition::new(
+        MessageSelector::Unary("testIt".into()),
+        vec![],
+        vec![bare(init_count), bare(block_value), bare(count_id())],
+        s,
+    );
+
+    let class = ClassDefinition {
+        name: Identifier::new("BT1213Actor", s),
+        superclass: Some(Identifier::new("Actor", s)),
+        class_kind: ClassKind::Actor,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods: vec![method],
+        class_methods: vec![],
+        class_variables: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        span: Span::new(0, 0),
+    };
+
+    let module = Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+
+    let result = generate_module(&module, CodegenOptions::new("bt@bt1213"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'testIt'/0"),
+        "Expected testIt method. Got:\n{code}"
     );
 }
 

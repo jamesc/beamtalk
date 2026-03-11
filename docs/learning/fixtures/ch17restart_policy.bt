@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/17-otp-supervisors.md (restart policy)
+
+TestCase subclass: Ch17RestartPolicy
+
+  testDefaultPolicyIsTemporary =>
+    self assert: Counter supervisionPolicy equals: #temporary
+
+  testSpecInheritsActorPolicy =>
+    spec := Counter supervisionSpec
+    self assert: spec restart equals: #temporary

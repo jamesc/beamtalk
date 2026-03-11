@@ -86,6 +86,11 @@ pub struct ClassInfo {
     /// `true` only for classes whose direct superclass is `Value`. To check
     /// the full inheritance chain, use [`ClassHierarchy::is_value_subclass`].
     pub is_value: bool,
+    /// Whether this class is a native Actor (declared with `native:` keyword, ADR 0056).
+    ///
+    /// Native actors delegate to a backing Erlang module and cannot declare
+    /// `state:` fields (state is owned by the Erlang `gen_server`).
+    pub is_native: bool,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
     /// Declared type annotations for state fields (field name → type name).
@@ -225,6 +230,7 @@ impl ClassHierarchy {
                         is_abstract: false,
                         is_typed: false,
                         is_value: superclass_name == "Value",
+                        is_native: false,
                         state: Vec::new(),
                         state_types: HashMap::new(),
                         methods: Vec::new(),
@@ -310,6 +316,17 @@ impl ClassHierarchy {
         self.superclass_chain(class_name)
             .iter()
             .any(|s| s.as_str() == "DynamicSupervisor")
+    }
+
+    /// Returns true if the named class is a native Actor (ADR 0056).
+    ///
+    /// Native actors are declared with `native: module_name` and delegate
+    /// to a backing Erlang module. They cannot declare `state:` fields.
+    #[must_use]
+    pub fn is_native(&self, class_name: &str) -> bool {
+        self.classes
+            .get(class_name)
+            .is_some_and(|info| info.is_native)
     }
 
     /// Returns true if the named class is Value or a subclass of Value (ADR 0042).
@@ -1072,6 +1089,7 @@ impl ClassHierarchy {
                 is_abstract: class.is_abstract,
                 is_typed: class.is_typed,
                 is_value: class.class_kind == ClassKind::Value,
+                is_native: class.backing_module.is_some(),
                 state: class.state.iter().map(|s| s.name.name.clone()).collect(),
                 state_types: class
                     .state
@@ -2044,6 +2062,7 @@ mod tests {
                 is_abstract: false,
                 is_typed: false,
                 is_value: false,
+                is_native: false,
                 state: vec![],
                 state_types: HashMap::new(),
                 methods: vec![builtin_method("methodA", 0, "A")],
@@ -2060,6 +2079,7 @@ mod tests {
                 is_abstract: false,
                 is_typed: false,
                 is_value: false,
+                is_native: false,
                 state: vec![],
                 state_types: HashMap::new(),
                 methods: vec![builtin_method("methodB", 0, "B")],
@@ -3265,6 +3285,7 @@ mod tests {
             is_abstract: false,
             is_typed: false,
             is_value: false,
+            is_native: false,
             state: vec![EcoString::from("count")],
             state_types: HashMap::new(),
             methods: vec![MethodInfo {
@@ -3299,6 +3320,7 @@ mod tests {
             is_abstract: false,
             is_typed: false,
             is_value: false,
+            is_native: false,
             state: vec![EcoString::from("count")],
             state_types: HashMap::new(),
             methods: vec![MethodInfo {
@@ -3324,6 +3346,7 @@ mod tests {
             is_abstract: false,
             is_typed: false,
             is_value: false,
+            is_native: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![MethodInfo {
@@ -3358,6 +3381,7 @@ mod tests {
             is_abstract: false,
             is_typed: false,
             is_value: false,
+            is_native: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
