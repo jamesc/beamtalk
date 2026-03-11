@@ -313,7 +313,17 @@ Module {
                         preceding_blank_line: true,
                     },
                 ],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "Commented out code (still comments)",
+                        span: Span {
+                            start: 416,
+                            end: 417,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -339,8 +349,8 @@ Module {
                                         42,
                                     ),
                                     Span {
-                                        start: 432,
-                                        end: 434,
+                                        start: 414,
+                                        end: 416,
                                     },
                                 ),
                                 preceding_blank_line: false,
@@ -348,13 +358,13 @@ Module {
                         ],
                         span: Span {
                             start: 413,
-                            end: 435,
+                            end: 417,
                         },
                     },
                 ),
                 span: Span {
                     start: 404,
-                    end: 435,
+                    end: 417,
                 },
             },
             preceding_blank_line: true,
@@ -362,24 +372,15 @@ Module {
     ],
     span: Span {
         start: 161,
-        end: 435,
+        end: 417,
     },
     file_leading_comments: [],
     file_trailing_comments: [
         Comment {
-            content: "Commented out code (still comments)",
-            span: Span {
-                start: 499,
-                end: 499,
-            },
-            kind: Line,
-            preceding_blank_line: false,
-        },
-        Comment {
             content: "x := 999",
             span: Span {
-                start: 499,
-                end: 499,
+                start: 480,
+                end: 480,
             },
             kind: Line,
             preceding_blank_line: false,
@@ -387,8 +388,8 @@ Module {
         Comment {
             content: "y := 888",
             span: Span {
-                start: 499,
-                end: 499,
+                start: 480,
+                end: 480,
             },
             kind: Line,
             preceding_blank_line: false,

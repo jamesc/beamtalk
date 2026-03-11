@@ -5,4 +5,5 @@
 // should produce a compile error.
 
 Object subclass: ExhaustivenessTest
+
   run: r => r match: [Result ok: v -> [v + 1]]

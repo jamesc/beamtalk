@@ -53,4 +53,4 @@ c perform: #increment
 // => 43
 
 // Verify increment worked via getValue
-c getValue// => 43
+c getValue  // => 43

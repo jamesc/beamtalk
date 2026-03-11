@@ -19,7 +19,7 @@ Token { kind: Keyword("message:"), span: Span { start: 352, end: 360 }, leading_
 Token { kind: Identifier("value"), span: Span { start: 361, end: 366 }, leading_trivia: [], trailing_trivia: [Whitespace("  "), LineComment("// and here")] }
 Token { kind: Identifier("block"), span: Span { start: 404, end: 409 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Block with comments"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 410, end: 412 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: LeftBracket, span: Span { start: 413, end: 414 }, leading_trivia: [], trailing_trivia: [LineComment("// Inside block")] }
-Token { kind: Integer("42"), span: Span { start: 432, end: 434 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [] }
-Token { kind: RightBracket, span: Span { start: 434, end: 435 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 499, end: 499 }, leading_trivia: [Whitespace("\n"), LineComment("// Commented out code (still comments)"), Whitespace("\n"), LineComment("// x := 999"), Whitespace("\n"), LineComment("// y := 888"), Whitespace("\n")], trailing_trivia: [] }
+Token { kind: LeftBracket, span: Span { start: 413, end: 414 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("42"), span: Span { start: 414, end: 416 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 416, end: 417 }, leading_trivia: [], trailing_trivia: [LineComment("// Commented out code (still comments)")] }
+Token { kind: Eof, span: Span { start: 480, end: 480 }, leading_trivia: [Whitespace("\n"), LineComment("// x := 999"), Whitespace("\n"), LineComment("// y := 888"), Whitespace("\n")], trailing_trivia: [] }

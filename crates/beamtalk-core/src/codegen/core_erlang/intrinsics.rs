@@ -23,8 +23,8 @@
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
 use super::document::Document;
-use super::{CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::{Expression, Literal, MessageSelector};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use crate::ast::{Block, Expression, Literal, MessageSelector};
 use crate::docvec;
 
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
@@ -180,6 +180,17 @@ impl CoreErlangGenerator {
                         return Ok(Some(doc));
                     }
                 }
+                // BT-1213: Inline Tier 2 block literal with mutations.
+                // When a block literal has captured mutations (e.g. [errors := errors add: #foo]),
+                // inline the body with state threading instead of generating fun + apply.
+                // Without this, generate_block_stateful produces fun(StateAcc) but
+                // generate_block_value_call calls it with 0 args → badarity crash.
+                if let Expression::Block(block) = receiver
+                    && !Self::captured_mutations_for_block(block).is_empty()
+                {
+                    let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
+                    return Ok(Some(doc));
+                }
                 let doc = if matches!(receiver, Expression::Block { .. }) {
                     self.generate_block_value_call(receiver, &[])?
                 } else {
@@ -222,6 +233,14 @@ impl CoreErlangGenerator {
                                     self.generate_block_value_call_stateful(receiver, arguments)?;
                                 return Ok(Some(doc));
                             }
+                        }
+                        // BT-1213: Inline Tier 2 block literal with mutations (keyword variant)
+                        if let Expression::Block(block) = receiver
+                            && !Self::captured_mutations_for_block(block).is_empty()
+                        {
+                            let doc =
+                                self.generate_block_value_inline_with_mutations(block, arguments)?;
+                            return Ok(Some(doc));
                         }
                         // Fast path: block literal receiver → fast inline apply
                         if matches!(receiver, Expression::Block(_)) {
@@ -684,6 +703,146 @@ impl CoreErlangGenerator {
             ")",
         ];
         Ok(doc)
+    }
+
+    /// BT-1213: Generates inline code for `[block_with_mutations] value` (or `value:`).
+    ///
+    /// When a block literal has captured mutations (variables read AND written, like
+    /// `[errors := errors add: #foo]`), this inlines the block body with state threading
+    /// instead of generating a Tier 2 fun + apply (which would produce a fun with an extra
+    /// `StateAcc` parameter, causing a badarity crash when called with `value`).
+    ///
+    /// Returns a `{Result, NewState}` tuple (same contract as `generate_if_true_with_mutations`).
+    /// Callers must unpack via `is_inline_tier2_block_value` / `repl_loop_mutated`.
+    ///
+    /// For `value:` variants, block parameters are bound to the provided arguments
+    /// before inlining the body.
+    fn generate_block_value_inline_with_mutations(
+        &mut self,
+        block: &Block,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        // For value: variants, bind block parameters to argument values.
+        // Use a scope for parameter bindings so they don't leak.
+        let mut arg_bindings: Vec<Document<'static>> = Vec::new();
+        if !arguments.is_empty() {
+            self.push_scope();
+        }
+        for (i, param) in block.parameters.iter().enumerate() {
+            if i < arguments.len() {
+                let arg_var = self.fresh_temp_var(&param.name);
+                let arg_doc = self.expression_doc(&arguments[i])?;
+                arg_bindings.push(docvec![
+                    "let ",
+                    Document::String(arg_var.clone()),
+                    " = ",
+                    arg_doc,
+                    " in ",
+                ]);
+                self.bind_var(&param.name, &arg_var);
+            }
+        }
+
+        // ValueType context: inline block body directly as sequential let-bindings.
+        // No StateAcc needed — mutations are just Core Erlang variable shadowing.
+        // Don't push/pop scope — the let-bindings must be visible to subsequent
+        // method body expressions (the whole point of the mutation).
+        if self.context == CodeGenContext::ValueType && !self.in_loop_body {
+            let body: Vec<&Expression> = block
+                .body
+                .iter()
+                .map(|s| &s.expression)
+                .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+                .collect();
+
+            let mut parts: Vec<Document<'static>> = Vec::new();
+            parts.extend(arg_bindings);
+
+            for (i, expr) in body.iter().enumerate() {
+                let is_last = i == body.len() - 1;
+                if Self::is_local_var_assignment(expr) {
+                    // Local assignment: shadow the variable with the new value
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let core_var = self
+                                .lookup_var(&id.name)
+                                .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                            let val_doc = self.expression_doc(value)?;
+                            if is_last {
+                                // Last assignment: bind AND return the new value
+                                parts.push(docvec![
+                                    "let ",
+                                    Document::String(core_var.clone()),
+                                    " = ",
+                                    val_doc,
+                                    " in ",
+                                    Document::String(core_var.clone()),
+                                ]);
+                            } else {
+                                parts.push(docvec![
+                                    "let ",
+                                    Document::String(core_var.clone()),
+                                    " = ",
+                                    val_doc,
+                                    " in ",
+                                ]);
+                            }
+                            // Bind in the OUTER scope so subsequent reads see the update
+                            self.bind_var(&id.name, &core_var);
+                        }
+                    }
+                } else if is_last {
+                    // Last non-assignment: block result value
+                    let doc = self.expression_doc(expr)?;
+                    parts.push(doc);
+                } else {
+                    // Non-last non-assignment: sequence with let
+                    let tmp = self.fresh_temp_var("seq");
+                    let doc = self.expression_doc(expr)?;
+                    parts.push(docvec!["let ", Document::String(tmp), " = ", doc, " in ",]);
+                }
+            }
+
+            if !arguments.is_empty() {
+                self.pop_scope();
+            }
+            return Ok(Document::Vec(parts));
+        }
+
+        // Actor/REPL context: use StateAcc-based inlining (generate_conditional_branch_inline)
+        let outer_state = self.current_state_var();
+
+        // Save state threading context
+        let saved_version = self.state_version();
+        let saved_in_loop = self.in_loop_body;
+        self.set_state_version(0);
+        self.in_loop_body = true;
+
+        // Set repl_loop_mutated so the REPL module unpacks the {Result, State} tuple
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
+        let (branch_doc, _) = self.generate_conditional_branch_inline(block)?;
+
+        // Restore state threading context
+        self.in_loop_body = saved_in_loop;
+        self.set_state_version(saved_version);
+
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.extend(arg_bindings);
+        // Seed StateAcc from outer state
+        parts.push(docvec![
+            "let StateAcc = ",
+            Document::String(outer_state),
+            " in ",
+        ]);
+        parts.push(branch_doc);
+
+        if !arguments.is_empty() {
+            self.pop_scope();
+        }
+        Ok(Document::Vec(parts))
     }
 
     /// Tries to generate code for `ProtoObject` methods.

@@ -554,6 +554,36 @@ impl CoreErlangGenerator {
             .collect()
     }
 
+    /// BT-1213: Returns captured mutation variable names if `expr` is a
+    /// `[block] value`/`value:`/etc. with a literal block that mutates outer locals.
+    pub(super) fn inline_block_captured_mutations(expr: &Expression) -> Option<Vec<String>> {
+        if let Expression::MessageSend {
+            receiver, selector, ..
+        } = expr
+        {
+            let is_value_selector = match selector {
+                crate::ast::MessageSelector::Unary(name) => name == "value",
+                crate::ast::MessageSelector::Keyword(parts) => {
+                    let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+                    matches!(
+                        sel.as_str(),
+                        "value:" | "value:value:" | "value:value:value:"
+                    )
+                }
+                crate::ast::MessageSelector::Binary(_) => false,
+            };
+            if is_value_selector {
+                if let Expression::Block(block) = receiver.as_ref() {
+                    let mutations = Self::captured_mutations_for_block(block);
+                    if !mutations.is_empty() {
+                        return Some(mutations);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
         let captured_mutations = Self::captured_mutations_for_block(block);
 
