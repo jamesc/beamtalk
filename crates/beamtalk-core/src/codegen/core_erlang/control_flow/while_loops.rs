@@ -582,6 +582,8 @@ impl CoreErlangGenerator {
         ]);
 
         self.in_hybrid_loop = true;
+        let prev_direct_params_loop = self.in_direct_params_loop;
+        self.in_direct_params_loop = true;
         // Re-set field params for body generation (condition may have modified them).
         self.hybrid_readonly_field_params = all_field_params;
         self.hybrid_mutated_fields = plan.mutated_fields.iter().cloned().collect();
@@ -608,6 +610,7 @@ impl CoreErlangGenerator {
         self.hybrid_readonly_field_params = prev_readonly_field_params;
         self.hybrid_mutated_fields = prev_mutated_fields;
         self.in_hybrid_loop = prev_hybrid;
+        self.in_direct_params_loop = prev_direct_params_loop;
         let (body_doc, _final_state_version) = body_result?;
         docs.push(body_doc);
 

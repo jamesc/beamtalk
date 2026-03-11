@@ -321,9 +321,11 @@ mod tests {
             "full-extract: field 'n' should be pre-extracted via maps:get. Got:\n{code}"
         );
         // Exit arm packs mutated field AND locals back.
+        // Verify the repack is inside the exit arm (near ExitSA), not just from
+        // the trailing `self.n := sum` outside the loop.
         assert!(
-            code.contains("maps':'put'('n'"),
-            "full-extract: exit arm must repack 'n' into ExitSA. Got:\n{code}"
+            code.match_indices("maps':'put'('n'").count() >= 2,
+            "full-extract: exit arm must repack 'n' (separate from post-loop assignment). Got:\n{code}"
         );
         assert!(
             code.contains("maps':'put'('__local__sum'"),
@@ -350,6 +352,11 @@ mod tests {
             code.contains("NField"),
             "timesRepeat: full-extract: 'n' should be extracted as NField param. Got:\n{code}"
         );
+        // Exit arm repacks 'n' (separate from post-loop `self.n := sum`).
+        assert!(
+            code.match_indices("maps':'put'('n'").count() >= 2,
+            "timesRepeat: full-extract: exit arm must repack 'n'. Got:\n{code}"
+        );
         // Exit arm packs locals back.
         assert!(
             code.contains("maps':'put'('__local__sum'"),
@@ -373,6 +380,11 @@ mod tests {
         assert!(
             code.contains("NField"),
             "to:by:do: full-extract: 'n' should be extracted as NField param. Got:\n{code}"
+        );
+        // Exit arm repacks 'n' (separate from post-loop `self.n := sum`).
+        assert!(
+            code.match_indices("maps':'put'('n'").count() >= 2,
+            "to:by:do: full-extract: exit arm must repack 'n'. Got:\n{code}"
         );
         assert!(
             code.contains("maps':'put'('__local__sum'"),
