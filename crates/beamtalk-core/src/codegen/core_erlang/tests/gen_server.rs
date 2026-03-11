@@ -2358,6 +2358,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
         is_abstract: false,
         is_typed: false,
         is_value: false,
+        is_native: false,
         state: vec![],
         state_types: HashMap::new(),
         methods: vec![],
