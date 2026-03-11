@@ -1,9 +1,10 @@
 # Learning Beamtalk
 
-A progressive language guide with runnable, tested examples.
+A progressive language guide with runnable examples.
 
-Every code example in these chapters is verified by automated tests — if an example
-is wrong, CI catches it.
+Most code examples in these chapters are tested automatically — if an example
+is wrong, CI catches it. A few chapters (22 and 25) are documentation-only
+and not executable.
 
 ## How to use this guide
 
