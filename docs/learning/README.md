@@ -85,6 +85,24 @@ The standard library APIs you'll reach for most often: file handling, text proce
 | [20](20-json.md) | JSON | Parsing, generation, nested structures, round-tripping |
 | [21](21-datetime.md) | DateTime & Time | Construction, formatting, arithmetic, comparisons, high-resolution timestamps |
 
+### Part 6 — The Environment
+
+The workspace globals you'll use in every REPL session.
+
+| # | Chapter | What you'll learn |
+|---|---------|-------------------|
+| [22](22-workspace-globals.md) | Workspace & Globals | Transcript logging, Workspace introspection, Beamtalk reflection, custom bindings |
+
+### Part 7 — Advanced Topics
+
+Lazy evaluation, metaprogramming, and real-world networking.
+
+| # | Chapter | What you'll learn |
+|---|---------|-------------------|
+| [23](23-streams.md) | Streams | Lazy evaluation, infinite sequences, stream pipelines, collection interop |
+| [24](24-reflection.md) | Reflection & Metaprogramming | `respondsTo:`, `fieldAt:`, `perform:`, metaclasses, class hierarchy |
+| [25](25-http.md) | HTTP Client | GET/POST/PUT/DELETE, response parsing, JSON APIs, configurable client actor |
+
 ---
 
 ## Running the tests
@@ -98,14 +116,14 @@ just test-learn           # run all learning guide doctests
 
 ## Format conventions
 
-**Expression chapters** (chapters 1–9, 15, 19–21) — inline assertions:
+**Expression chapters** (chapters 1–9, 15, 19–21, 23) — inline assertions:
 
 ```beamtalk
 3 + 4           // => 7
 "hello" size    // => 5
 ```
 
-**Class chapters** (chapters 10–14, 16, 18) — BUnit assertions:
+**Class chapters** (chapters 10–14, 16, 18, 24–25) — BUnit assertions:
 
 ```beamtalk
 TestCase subclass: Ch10Examples
