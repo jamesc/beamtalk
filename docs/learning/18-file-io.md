@@ -213,4 +213,54 @@ stream select: [:l | ...]             → Stream (lazy)
 stream inject: init into: [:a :l | …] → value
 ```
 
+## Exercises
+
+**1. Write and read back.** Write `"Beamtalk is fun!"` to a temporary file, read
+it back, and verify the contents match. Don't forget cleanup.
+
+<details>
+<summary>Hint</summary>
+
+```text
+// In a TestCase with setUp/tearDown for temp dir:
+path := tmpDir ++ "/test.txt"
+File writeAll: path contents: "Beamtalk is fun!"
+content := (File readAll: path) unwrap
+self assert: content equals: "Beamtalk is fun!"
+```
+</details>
+
+**2. File vs directory.** Use `File isFile:` and `File isDirectory:` to check
+both a file path and a directory path. How do the two predicates differ from
+`File exists:`?
+
+<details>
+<summary>Hint</summary>
+
+```text
+File exists: "docs/learning/README.md"       // => true
+File isFile: "docs/learning/README.md"       // => true
+File isDirectory: "docs/learning/README.md"  // => false
+File isDirectory: "docs/learning"            // => true
+```
+
+`exists:` returns true for both files and directories. `isFile:` and
+`isDirectory:` distinguish between them.
+</details>
+
+**3. Lazy line counting.** Use `File open:do:` and stream operations to count
+the number of lines in a file without reading the entire contents into memory.
+
+<details>
+<summary>Hint</summary>
+
+```text
+count := (File open: path do: [:h |
+  h lines inject: 0 into: [:c :_ | c + 1]
+]) unwrap
+```
+
+The stream is lazy — `inject:into:` processes one line at a time.
+</details>
+
 Next: Chapter 19 — Regular Expressions

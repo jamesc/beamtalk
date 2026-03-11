@@ -278,4 +278,57 @@ beamtalk test                     # all BUnit tests
 beamtalk test test/my_test.bt     # one file
 ```
 
+## Exercises
+
+**1. Your first test.** Write a `TestCase subclass: StringTest` with a test that
+verifies `"hello" reverse` equals `"olleh"` and `"hello" size` equals `5`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+TestCase subclass: StringTest
+  testReverse =>
+    self assert: "hello" reverse equals: "olleh"
+  testSize =>
+    self assert: "hello" size equals: 5
+```
+</details>
+
+**2. Exception testing.** Write a test using `should:raise:` that verifies
+dividing by zero raises a `#badarith` error.
+
+<details>
+<summary>Hint</summary>
+
+```text
+TestCase subclass: ArithTest
+  testDivisionByZero =>
+    self should: [1 / 0] raise: #badarith
+```
+</details>
+
+**3. setUp pattern.** Write a TestCase with a `state: items` variable. In
+`setUp`, initialize it to `#[1, 2, 3]`. Write two tests: one checking the size
+is 3, another checking `includes: 2`. Why must `state:` be declared?
+
+<details>
+<summary>Hint</summary>
+
+```text
+TestCase subclass: ArraySetupTest
+  state: items = nil
+  setUp =>
+    self.items := #[1, 2, 3]
+    self
+  testSize =>
+    self assert: self.items size equals: 3
+  testIncludes =>
+    self assert: (self.items includes: 2)
+```
+
+`state:` must be declared because without it, `self.items :=` in setUp does
+not persist to the test methods — instance variables need slot declarations.
+</details>
+
 Next: Chapter 14 — Pattern Matching

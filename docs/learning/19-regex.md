@@ -150,4 +150,46 @@ Regex from: pattern options: #(#caseless) → Result<Regex>
 regex source                              → String
 ```
 
+## Exercises
+
+**1. Digit censoring.** Use `replaceAllRegex:with:` to replace all digits in
+`"My phone is 555-1234"` with `"*"`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+"My phone is 555-1234" replaceAllRegex: "[0-9]" with: "*"
+// => "My phone is ***-****"
+```
+</details>
+
+**2. Extract numbers.** Use `allMatches:` to find all numbers in the string
+`"Order 42 has 3 items at $15 each"`. How many matches are there?
+
+<details>
+<summary>Hint</summary>
+
+```text
+matches := "Order 42 has 3 items at $15 each" allMatches: "[0-9]+"
+matches size    // => 3  (42, 3, 15)
+```
+</details>
+
+**3. Split on whitespace.** Use `splitRegex:` to split `"hello   world   foo"`
+on one or more spaces. Compare with the `words` message — do they produce the
+same result?
+
+<details>
+<summary>Hint</summary>
+
+```text
+"hello   world   foo" splitRegex: " +"    // => ["hello", "world", "foo"]
+"hello   world   foo" words               // => ["hello", "world", "foo"]
+```
+
+Both produce the same result. `words` is a convenience method that splits on
+any whitespace.
+</details>
+
 Next: Chapter 20 — JSON

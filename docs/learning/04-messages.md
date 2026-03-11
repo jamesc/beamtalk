@@ -212,4 +212,43 @@ Precedence (left to right, then by kind): Unary > Binary (math precedence within
 Use parentheses to override.
 Use semicolons for cascade (same receiver, multiple messages).
 
+## Exercises
+
+**1. Precedence puzzle.** What does `2 + 3 * 4 factorial` evaluate to? Work
+through the precedence rules (unary > binary) before running it.
+
+<details>
+<summary>Hint</summary>
+
+Unary binds tightest: `4 factorial` → `24`. Then binary with math precedence:
+`3 * 24` → `72`, then `2 + 72` → `74`.
+</details>
+
+**2. Keyword precedence.** Given `d := #{7 => "seven", 3 => "three"}`, what does
+`d at: 3 + 4` return? How would you change it to get `"three"` concatenated
+with `" and more"`?
+
+<details>
+<summary>Hint</summary>
+
+`d at: 3 + 4` evaluates the binary `3 + 4` first (→ `7`), then sends
+`at: 7` to `d`, returning `"seven"`. To get `"three and more"`, use
+parentheses: `(d at: 3) ++ " and more"`.
+</details>
+
+**3. Cascade practice.** Create an array `#[1, 2, 3]` and use cascade (`;`) to
+check `includes: 1`, `includes: 2`, and `includes: 5` on the same receiver.
+What is the result of the cascade expression?
+
+<details>
+<summary>Hint</summary>
+
+```text
+#[1, 2, 3] includes: 1; includes: 2; includes: 5
+```
+
+The result of a cascade is the last message's result: `false` (since 5 is
+not in the array).
+</details>
+
 Next: Chapter 5 — Arithmetic & Comparison
