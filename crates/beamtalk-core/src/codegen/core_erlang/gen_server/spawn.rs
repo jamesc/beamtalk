@@ -17,7 +17,7 @@ impl CoreErlangGenerator {
     /// Generates a Document for registering an actor instance with the hot reload
     /// tracking registry. Uses try-catch to handle cases where the registry isn't
     /// running (e.g., stdlib tests).
-    fn instance_registration_doc(class_name: &str) -> Document<'static> {
+    pub(super) fn instance_registration_doc(class_name: &str) -> Document<'static> {
         docvec![
             docvec![
                 "let _InstReg = try call 'beamtalk_object_instances':'register'('",

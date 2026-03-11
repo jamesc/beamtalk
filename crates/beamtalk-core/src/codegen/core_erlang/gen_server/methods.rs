@@ -20,7 +20,7 @@ use crate::unparse::unparse_method_display_signature;
 /// Tuple representing a method entry for `method_info` / `class_method_info` meta maps.
 ///
 /// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`, `is_sealed`)
-type MethodInfoEntry = (String, usize, Option<String>, Vec<Option<String>>, bool);
+pub(super) type MethodInfoEntry = (String, usize, Option<String>, Vec<Option<String>>, bool);
 
 impl CoreErlangGenerator {
     /// Generates dispatch case clauses for all methods in a class definition.
@@ -1819,7 +1819,7 @@ impl CoreErlangGenerator {
     /// and fell back to the selector name for synthesized methods. The unparser fixes
     /// both deficiencies — see ADR 0044 Phase 4.
     #[allow(clippy::unused_self)]
-    fn extract_method_source(&self, method: &MethodDefinition) -> String {
+    pub(super) fn extract_method_source(&self, method: &MethodDefinition) -> String {
         crate::unparse::unparse_method(method)
     }
 
@@ -2031,11 +2031,31 @@ impl CoreErlangGenerator {
     /// runtime-patched and deliberately absent from the static meta. When `true`
     /// (used for `BuilderState.meta`), standalone methods are included so that
     /// return-type information is available to `init/1` during `on_load`.
-    fn build_meta_map_doc(
+    pub(super) fn build_meta_map_doc(
         class: &ClassDefinition,
         module: &Module,
         include_standalone: bool,
         synthesize_supervision_spec: bool,
+    ) -> Document<'static> {
+        Self::build_meta_map_doc_with_extra(
+            class,
+            module,
+            include_standalone,
+            synthesize_supervision_spec,
+            Document::Nil,
+        )
+    }
+
+    /// Like `build_meta_map_doc` but appends extra map entries before closing the map.
+    ///
+    /// Used by native facade codegen to add `'native'` and `'backing_module'` keys
+    /// while reusing the standard meta map structure.
+    pub(super) fn build_meta_map_doc_with_extra(
+        class: &ClassDefinition,
+        module: &Module,
+        include_standalone: bool,
+        synthesize_supervision_spec: bool,
+        extra_entries: Document<'static>,
     ) -> Document<'static> {
         let class_name = class.name.name.to_string();
         let superclass_name = class
@@ -2099,6 +2119,7 @@ impl CoreErlangGenerator {
             method_info_doc,
             ",\n      'class_method_info' => ",
             class_method_info_doc,
+            extra_entries,
             "\n    }~",
         ]
     }
@@ -2107,7 +2128,7 @@ impl CoreErlangGenerator {
     ///
     /// Example: `["field1", "field2"]` → `['field1', 'field2']`
     /// Empty slice → `[]`
-    fn meta_atom_list(names: &[String]) -> Document<'static> {
+    pub(super) fn meta_atom_list(names: &[String]) -> Document<'static> {
         if names.is_empty() {
             return Document::Str("[]");
         }
@@ -2124,7 +2145,7 @@ impl CoreErlangGenerator {
     }
 
     /// Produces the Core Erlang atom for a boolean value.
-    fn meta_bool(b: bool) -> Document<'static> {
+    pub(super) fn meta_bool(b: bool) -> Document<'static> {
         if b {
             Document::Str("'true'")
         } else {
@@ -2136,7 +2157,7 @@ impl CoreErlangGenerator {
     ///
     /// Example: `[StateDecl{name: "value", type: Integer}]` → `~{'value' => 'Integer'}~`
     /// Empty slice → `~{}~`
-    fn meta_field_types_map(state: &[StateDeclaration]) -> Document<'static> {
+    pub(super) fn meta_field_types_map(state: &[StateDeclaration]) -> Document<'static> {
         if state.is_empty() {
             return Document::Str("~{}~");
         }
@@ -2161,7 +2182,7 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    fn meta_instance_method_entries(
+    pub(super) fn meta_instance_method_entries(
         class: &ClassDefinition,
         module: &Module,
         auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
@@ -2205,7 +2226,7 @@ impl CoreErlangGenerator {
 
     /// Collects `MethodInfoEntry` tuples for all primary class methods of `class`,
     /// including the auto-generated keyword constructor for Value subclasses.
-    fn meta_class_method_entries(
+    pub(super) fn meta_class_method_entries(
         class: &ClassDefinition,
         module: &Module,
         auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
@@ -2275,7 +2296,7 @@ impl CoreErlangGenerator {
     ///
     /// Each entry: `'selector' => ~{'arity' => N, 'param_types' => [...], 'return_type' => 'T'}~`
     /// Empty slice → `~{}~`
-    fn meta_method_info_map(methods: &[MethodInfoEntry]) -> Document<'static> {
+    pub(super) fn meta_method_info_map(methods: &[MethodInfoEntry]) -> Document<'static> {
         if methods.is_empty() {
             return Document::Str("~{}~");
         }
