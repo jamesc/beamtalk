@@ -9,6 +9,32 @@
 
 use super::*;
 
+/// Extract a Core Erlang function body from generated code by cutting at the
+/// next function header rather than relying on blank-line formatting.
+///
+/// Given a `marker` like `"'has_method'/1 = fun"`, returns the text from
+/// that marker to the next top-level function definition (`'name'/N = fun`).
+fn extract_core_fn<'a>(code: &'a str, marker: &str) -> Option<&'a str> {
+    let start = code.find(marker)?;
+    let body = &code[start + marker.len()..];
+    // Scan for the next Core Erlang function header: a line starting with
+    // `'<name>'/<digits> = fun`.  Track byte offset via cumulative line lengths
+    // to avoid ambiguous substring matching.
+    let mut offset = 0;
+    for (i, line) in body.split('\n').enumerate() {
+        if i == 0 {
+            offset += line.len() + 1;
+            continue;
+        }
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('\'') && trimmed.contains("'/") && trimmed.contains("= fun") {
+            return Some(&body[..offset]);
+        }
+        offset += line.len() + 1;
+    }
+    Some(body)
+}
+
 #[test]
 fn test_generate_empty_module() {
     let module = Module::new(Vec::new(), Span::new(0, 0));
@@ -2729,14 +2755,14 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
-        span: s,
+        span: Span::new(0, 0),
     };
 
     let module = Module {
         classes: vec![class],
         method_definitions: Vec::new(),
         expressions: Vec::new(),
-        span: s,
+        span: Span::new(0, 0),
         file_leading_comments: vec![],
         file_trailing_comments: Vec::new(),
     };
@@ -2748,5 +2774,386 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
     assert!(
         code.contains("__local__count"),
         "Should thread count through StateAcc. Got:\n{code}"
+    );
+}
+
+// ─── Native Facade (ADR 0056) ───────────────────────────────────────────────
+
+/// Build a Module for `Actor subclass: TestNative native: test_backing_mod`
+/// with two delegate methods.
+fn make_native_actor_module() -> Module {
+    let self_expr = || Expression::Identifier(Identifier::new("self", Span::new(0, 0)));
+    let delegate_send = || {
+        bare(Expression::MessageSend {
+            receiver: Box::new(self_expr()),
+            selector: MessageSelector::Unary("delegate".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: Span::new(0, 0),
+        })
+    };
+
+    let class = ClassDefinition {
+        name: Identifier::new("TestNative", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
+        class_kind: ClassKind::Actor,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods: vec![
+            MethodDefinition {
+                selector: MessageSelector::Unary("doWork".into()),
+                parameters: vec![],
+                body: vec![delegate_send()],
+                kind: MethodKind::Primary,
+                return_type: None,
+                is_sealed: false,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: Span::new(0, 0),
+            },
+            MethodDefinition {
+                selector: MessageSelector::Keyword(vec![KeywordPart::new(
+                    "process:",
+                    Span::new(0, 0),
+                )]),
+                parameters: vec![ParameterDefinition::new(Identifier::new(
+                    "data",
+                    Span::new(0, 0),
+                ))],
+                body: vec![delegate_send()],
+                kind: MethodKind::Primary,
+                return_type: None,
+                is_sealed: false,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: Span::new(0, 0),
+            },
+        ],
+        class_methods: vec![],
+        class_variables: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: Some(Identifier::new("test_backing_mod", Span::new(0, 0))),
+        span: Span::new(0, 0),
+    };
+    Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    }
+}
+
+#[test]
+fn test_native_facade_spawn_calls_backing_module() {
+    // ADR 0056: spawn/1 should call BackingModule:start_link, not gen_server:start_link
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'test_backing_mod':'start_link'(Config)"),
+        "spawn/1 should call backing module's start_link. Got:\n{code}"
+    );
+    // Should NOT contain gen_server:start_link (that's for regular actors)
+    assert!(
+        !code.contains("'gen_server':'start_link'"),
+        "Native facade should not use gen_server:start_link. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_spawn_wraps_beamtalk_object() {
+    // ADR 0056: spawn result is wrapped as #beamtalk_object{} record
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("{'beamtalk_object', 'TestNative', 'bt@test_native', Pid}"),
+        "spawn should wrap result as beamtalk_object. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_spawn_0_delegates_to_spawn_1() {
+    // ADR 0056: spawn/0 calls spawn/1 with empty map
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'spawn'/0 = fun () ->"),
+        "Should have spawn/0. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'bt@test_native':'spawn'(~{}~)"),
+        "spawn/0 should call spawn/1 with empty map. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_has_method_includes_all_selectors() {
+    // ADR 0056: has_method/1 returns true for all declared selectors
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    // Extract the has_method/1 function body to avoid matching selectors in method_info/meta
+    let has_method_fn =
+        extract_core_fn(&code, "'has_method'/1 = fun").expect("has_method/1 not found");
+    assert!(
+        has_method_fn.contains("'doWork'"),
+        "has_method/1 body should include 'doWork'. Got:\n{has_method_fn}"
+    );
+    assert!(
+        has_method_fn.contains("'process:'"),
+        "has_method/1 body should include 'process:'. Got:\n{has_method_fn}"
+    );
+}
+
+#[test]
+fn test_native_facade_meta_includes_native_flag() {
+    // ADR 0056: __beamtalk_meta/0 includes native => true and backing_module
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    // Extract the __beamtalk_meta/0 function body to avoid matching keys in BuilderState.meta
+    let meta_fn =
+        extract_core_fn(&code, "'__beamtalk_meta'/0 = fun").expect("__beamtalk_meta/0 not found");
+    assert!(
+        meta_fn.contains("'native' => 'true'"),
+        "__beamtalk_meta/0 body should include native => true. Got:\n{meta_fn}"
+    );
+    assert!(
+        meta_fn.contains("'backing_module' => 'test_backing_mod'"),
+        "__beamtalk_meta/0 body should include backing_module. Got:\n{meta_fn}"
+    );
+}
+
+#[test]
+fn test_native_facade_no_gen_server_behaviour() {
+    // ADR 0056: Native facade does not declare gen_server behaviour
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        !code.contains("'behaviour' = ['gen_server']"),
+        "Native facade should not declare gen_server behaviour. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_no_gen_server_callbacks() {
+    // ADR 0056: Native facade should not have init/1, handle_cast/2, etc.
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        !code.contains("'init'/1"),
+        "Native facade should not have init/1. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'handle_cast'/2"),
+        "Native facade should not have handle_cast/2. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'handle_call'/3"),
+        "Native facade should not have handle_call/3. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_register_class_includes_meta() {
+    // ADR 0056: register_class/0 should include native meta in BuilderState
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    // Extract the register_class/0 function body
+    let register_fn =
+        extract_core_fn(&code, "'register_class'/0 = fun").expect("register_class/0 not found");
+    assert!(
+        register_fn.contains("'beamtalk_class_builder':'register'"),
+        "register_class/0 should call beamtalk_class_builder:register. Got:\n{register_fn}"
+    );
+    assert!(
+        register_fn.contains("'isConstructible' => 'false'"),
+        "BuilderState should mark native actors as not constructible. Got:\n{register_fn}"
+    );
+    // BuilderState.meta should contain native-specific keys
+    assert!(
+        register_fn.contains("'native' => 'true'"),
+        "BuilderState.meta should include native => true. Got:\n{register_fn}"
+    );
+    assert!(
+        register_fn.contains("'backing_module' => 'test_backing_mod'"),
+        "BuilderState.meta should include backing_module. Got:\n{register_fn}"
+    );
+}
+
+#[test]
+fn test_native_facade_spawn_error_raises_instantiation_error() {
+    // ADR 0056: spawn failure should raise instantiation_error with reason in details
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'instantiation_error'"),
+        "Should raise instantiation_error on spawn failure. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'reason' => Reason"),
+        "Should include reason in error details. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_spawn_handles_ignore() {
+    // BT-1337: spawn/1 should handle `ignore` from start_link (init/1 returned ignore)
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("<'ignore'> when 'true' ->"),
+        "spawn/1 should have an 'ignore' match arm. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'reason' => 'ignore'"),
+        "ignore case should set reason => 'ignore' in details. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_spawn_wraps_crash_in_try_catch() {
+    // BT-1337: spawn/1 should wrap start_link in try-catch for crash handling
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("let StartResult = try call"),
+        "spawn/1 should wrap start_link in try-catch. Got:\n{code}"
+    );
+    assert!(
+        code.contains("of _StartOk -> _StartOk"),
+        "try-catch should have of clause for success passthrough. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'__bt_spawn_crash', SpawnCrashReason}"),
+        "catch arm should wrap crash reason in __bt_spawn_crash tuple. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<{'__bt_spawn_crash', SpawnCrashReason}> when 'true' ->"),
+        "case should match __bt_spawn_crash tuple. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'reason' => SpawnCrashReason"),
+        "crash case should include SpawnCrashReason in details. Got:\n{code}"
+    );
+}
+
+/// Build a native actor with class methods and class variables for richer tests.
+fn make_native_actor_with_class_methods() -> Module {
+    let class = ClassDefinition {
+        name: Identifier::new("TestNativeRich", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
+        class_kind: ClassKind::Actor,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods: vec![MethodDefinition {
+            selector: MessageSelector::Unary("status".into()),
+            parameters: vec![],
+            body: vec![bare(Expression::Identifier(Identifier::new(
+                "self",
+                Span::new(0, 0),
+            )))],
+            kind: MethodKind::Primary,
+            return_type: None,
+            is_sealed: false,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: Span::new(0, 0),
+        }],
+        class_methods: vec![MethodDefinition {
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("connect:", Span::new(0, 0))]),
+            parameters: vec![ParameterDefinition::new(Identifier::new(
+                "config",
+                Span::new(0, 0),
+            ))],
+            body: vec![bare(Expression::Identifier(Identifier::new(
+                "config",
+                Span::new(0, 0),
+            )))],
+            kind: MethodKind::Primary,
+            return_type: None,
+            is_sealed: false,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: Span::new(0, 0),
+        }],
+        class_variables: vec![StateDeclaration {
+            name: Identifier::new("current", Span::new(0, 0)),
+            type_annotation: None,
+            default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: Span::new(0, 0),
+        }],
+        comments: CommentAttachment::default(),
+        doc_comment: Some("A test native actor with class methods.".to_string()),
+        backing_module: Some(Identifier::new("test_rich_backing", Span::new(0, 0))),
+        span: Span::new(0, 0),
+    };
+    Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    }
+}
+
+#[test]
+fn test_native_facade_class_methods_exported() {
+    // ADR 0056: Class methods on native actors compile normally
+    let module = make_native_actor_with_class_methods();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'class_connect:'/3"),
+        "Should export class method 'class_connect:'/3. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_class_variables_in_builder_state() {
+    // ADR 0056: classState: should appear in BuilderState
+    let module = make_native_actor_with_class_methods();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'classState' => ~{'current' =>"),
+        "BuilderState should include class variables. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_doc_comments_in_builder_state() {
+    // Doc comments should propagate to BuilderState
+    let module = make_native_actor_with_class_methods();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'classDoc' =>"),
+        "BuilderState should include classDoc. Got:\n{code}"
+    );
+    // classDoc should not be 'none' since we set a doc comment
+    assert!(
+        !code.contains("'classDoc' => 'none'"),
+        "classDoc should not be 'none' when doc comment is set. Got:\n{code}"
     );
 }

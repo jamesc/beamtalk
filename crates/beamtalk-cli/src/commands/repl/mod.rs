@@ -369,6 +369,29 @@ pub fn run(
     let current_dir = std::env::current_dir().into_diagnostic()?;
     let project_root = workspace::discovery::discover_project_root(&current_dir);
 
+    // Read [application] config from beamtalk.toml so the OTP application
+    // supervisor is started after workspace bootstrap (BT-1340).
+    // The OTP app atom is the Erlang application name derived from the package name.
+    let otp_app_name: Option<String> =
+        camino::Utf8Path::from_path(&project_root).and_then(|root| {
+            let manifest = match crate::commands::manifest::find_manifest(root) {
+                Ok(Some(m)) => m,
+                Ok(None) => return None,
+                Err(e) => {
+                    warn!("Failed to read beamtalk.toml: {e}");
+                    return None;
+                }
+            };
+            match crate::commands::manifest::find_application_config(root) {
+                Ok(Some(_app)) => Some(manifest.name),
+                Ok(None) => None,
+                Err(e) => {
+                    warn!("Failed to read [application] config: {e}");
+                    None
+                }
+            }
+        });
+
     // Choose startup mode: workspace (default) or foreground (debug)
     let (beam_guard_opt, is_new_workspace, workspace_id_opt, connect_host, connect_port, cookie): (
         Option<BeamChildGuard>,
@@ -391,6 +414,7 @@ pub fn run(
             Some(bind_addr),
             ssl_dist_conf.as_deref(),
             web_port,
+            otp_app_name.as_deref(),
         )?;
 
         // Discover the actual port from the BEAM node's stdout.
@@ -450,7 +474,7 @@ pub fn run(
             Some(bind_addr),
             ssl_dist_conf.as_deref(),
             web_port,
-            None,
+            otp_app_name.as_deref(),
         )?;
 
         let actual_port = node_info.port;

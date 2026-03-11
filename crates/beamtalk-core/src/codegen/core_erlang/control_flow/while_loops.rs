@@ -399,11 +399,14 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// BT-1326: Hybrid direct-params + State threading variant of `generate_while_loop_with_mutations`.
+    /// BT-1326/BT-1342: Full-extract variant of `generate_while_loop_with_mutations`.
     ///
-    /// Uses `fun (Var1, ..., VarN, RField1, ..., State)` — locals and read-only fields as
-    /// direct params, actor state as an explicit `State` parameter.
-    /// Field mutations use `State*` naming (not `StateAcc*`).
+    /// Uses `fun (Var1, ..., VarN, RField1, ..., MField1, ...)` — locals, read-only fields,
+    /// AND mutated fields as direct fun parameters. No `State` parameter.
+    ///
+    /// Field reads resolve to direct parameters. Field writes become simple variable
+    /// rebindings (no `maps:put` per iteration). At loop exit, mutated fields are repacked
+    /// into the initial State map.
     #[allow(clippy::too_many_lines)]
     fn generate_while_loop_hybrid(
         &mut self,
@@ -415,10 +418,33 @@ impl CoreErlangGenerator {
         let initial_local_args = plan.initial_direct_args(self);
         let initial_state = plan.initial_state_var.clone();
 
-        // BT-1326: Pre-extract read-only fields before the letrec.
+        // Pre-extract ALL fields (readonly + mutated) before the letrec.
         let mut pre_extract_docs: Vec<Document<'static>> = Vec::new();
+
         let readonly_params: Vec<(String, String)> = plan
             .readonly_fields
+            .iter()
+            .map(|field| {
+                let var_name = self.fresh_temp_var(&format!(
+                    "{}Field",
+                    CoreErlangGenerator::to_core_erlang_var(field)
+                ));
+                pre_extract_docs.push(docvec![
+                    "let ",
+                    Document::String(var_name.clone()),
+                    " = call 'maps':'get'('",
+                    Document::String(field.clone()),
+                    "', ",
+                    Document::String(initial_state.clone()),
+                    ") in ",
+                ]);
+                (field.clone(), var_name)
+            })
+            .collect();
+
+        // BT-1342: Mutated fields — also pre-extracted to direct params.
+        let mutated_params: Vec<(String, String)> = plan
+            .mutated_fields
             .iter()
             .map(|field| {
                 let var_name = self.fresh_temp_var(&format!(
@@ -445,10 +471,12 @@ impl CoreErlangGenerator {
             .collect();
         let readonly_param_names: Vec<String> =
             readonly_params.iter().map(|(_, v)| v.clone()).collect();
-        let state_param_name = "State".to_string();
-        let arity = local_param_names.len() + readonly_param_names.len() + 1;
+        let mutated_param_names: Vec<String> =
+            mutated_params.iter().map(|(_, v)| v.clone()).collect();
+        let arity =
+            local_param_names.len() + readonly_param_names.len() + mutated_param_names.len();
 
-        // Param list: (Var1, ..., VarN, RField1, ..., State)
+        // Param list: (Var1, ..., VarN, RField1, ..., MField1, ...)
         let param_list_doc = || {
             join(
                 local_param_names
@@ -459,12 +487,23 @@ impl CoreErlangGenerator {
                             .iter()
                             .map(|v| Document::String(v.clone())),
                     )
-                    .chain(std::iter::once(Document::String(state_param_name.clone()))),
+                    .chain(
+                        mutated_param_names
+                            .iter()
+                            .map(|v| Document::String(v.clone())),
+                    ),
                 &Document::Str(", "),
             )
         };
 
         let cond_var = self.fresh_temp_var("CondFun");
+
+        // Build combined field params map: readonly + mutated fields.
+        let mut all_field_params: std::collections::HashMap<String, String> =
+            readonly_params.iter().cloned().collect();
+        for (field, var) in &mutated_params {
+            all_field_params.insert(field.clone(), var.clone());
+        }
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.extend(pre_extract_docs);
@@ -484,7 +523,7 @@ impl CoreErlangGenerator {
             "hybrid while: unpack should emit no code"
         );
 
-        // Condition closure captures local vars + readonly fields + State parameter.
+        // Condition closure captures local vars + all field params.
         docs.push(docvec![
             "let ",
             Document::String(cond_var.clone()),
@@ -498,7 +537,11 @@ impl CoreErlangGenerator {
         let prev_state_version = self.state_version();
         let prev_readonly_field_params = std::mem::replace(
             &mut self.hybrid_readonly_field_params,
-            readonly_params.iter().cloned().collect(),
+            all_field_params.clone(),
+        );
+        let prev_mutated_fields = std::mem::replace(
+            &mut self.hybrid_mutated_fields,
+            plan.mutated_fields.iter().cloned().collect(),
         );
         self.in_loop_body = true;
         self.in_hybrid_loop = true;
@@ -518,6 +561,7 @@ impl CoreErlangGenerator {
             Ok(doc) => doc,
             Err(e) => {
                 self.hybrid_readonly_field_params = prev_readonly_field_params;
+                self.hybrid_mutated_fields = prev_mutated_fields;
                 return Err(e);
             }
         };
@@ -538,22 +582,37 @@ impl CoreErlangGenerator {
         ]);
 
         self.in_hybrid_loop = true;
-        // Re-set readonly params for body generation (they were modified during condition codegen).
-        self.hybrid_readonly_field_params = readonly_params.iter().cloned().collect();
+        let prev_direct_params_loop = self.in_direct_params_loop;
+        self.in_direct_params_loop = true;
+        // Re-set field params for body generation (condition may have modified them).
+        self.hybrid_readonly_field_params = all_field_params;
+        self.hybrid_mutated_fields = plan.mutated_fields.iter().cloned().collect();
         let body_result = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec);
-        self.hybrid_readonly_field_params = prev_readonly_field_params;
-        self.in_hybrid_loop = prev_hybrid;
-        let (body_doc, final_state_version) = body_result?;
-        docs.push(body_doc);
 
-        let final_state_var = if final_state_version == 0 {
-            Document::String(state_param_name.clone())
-        } else {
-            docvec![
-                Document::String(state_param_name.clone()),
-                Document::String(final_state_version.to_string()),
-            ]
-        };
+        // BT-1342: Capture final mutated field var names BEFORE restoring maps.
+        let final_mutated_field_args: Vec<String> = plan
+            .mutated_fields
+            .iter()
+            .map(|field| {
+                self.hybrid_readonly_field_params
+                    .get(field)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        mutated_params
+                            .iter()
+                            .find(|(f, _)| f == field)
+                            .map(|(_, v)| v.clone())
+                            .unwrap_or_default()
+                    })
+            })
+            .collect();
+
+        self.hybrid_readonly_field_params = prev_readonly_field_params;
+        self.hybrid_mutated_fields = prev_mutated_fields;
+        self.in_hybrid_loop = prev_hybrid;
+        self.in_direct_params_loop = prev_direct_params_loop;
+        let (body_doc, _final_state_version) = body_result?;
+        docs.push(body_doc);
 
         let final_local_args: Vec<String> = plan
             .threaded_locals
@@ -565,10 +624,14 @@ impl CoreErlangGenerator {
             })
             .collect();
 
-        let exit_stateacc =
-            plan.generate_exit_stateacc_hybrid(&local_param_names, &state_param_name, self);
+        let exit_stateacc = plan.generate_exit_stateacc_full_extract(
+            &local_param_names,
+            &mutated_param_names,
+            &initial_state,
+            self,
+        );
 
-        // Recursive call: updated locals, readonly fields (unchanged), updated state
+        // Recursive call: updated locals, readonly fields (unchanged), updated mutated fields
         let final_args_doc = join(
             final_local_args
                 .into_iter()
@@ -578,7 +641,7 @@ impl CoreErlangGenerator {
                         .iter()
                         .map(|v| Document::String(v.clone())),
                 )
-                .chain(std::iter::once(final_state_var)),
+                .chain(final_mutated_field_args.into_iter().map(Document::String)),
             &Document::Str(", "),
         );
         let exit_arm = if negate {
@@ -599,7 +662,7 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
 
-        // Initial call: initial locals, initial readonly vals, initial state
+        // Initial call: initial locals, initial readonly vals, initial mutated vals
         let initial_args_doc = join(
             initial_local_args
                 .into_iter()
@@ -609,7 +672,11 @@ impl CoreErlangGenerator {
                         .iter()
                         .map(|v| Document::String(v.clone())),
                 )
-                .chain(std::iter::once(Document::String(initial_state))),
+                .chain(
+                    mutated_param_names
+                        .iter()
+                        .map(|v| Document::String(v.clone())),
+                ),
             &Document::Str(", "),
         );
         docs.push(docvec![
@@ -751,48 +818,52 @@ mod tests {
         );
     }
 
-    // ── BT-1326: hybrid direct-params + State threading ──────────────────────
+    // ── BT-1326/BT-1342: full-extract direct-params + field extraction ───────
 
     #[test]
-    fn test_while_true_field_plus_local_mutation_uses_hybrid_params() {
-        // whileTrue: with BOTH local var mutation AND field mutation uses hybrid mode:
-        // fun(LocalVar, State) — locals as direct params, actor State as explicit param.
+    fn test_while_true_field_plus_local_mutation_uses_full_extract() {
+        // BT-1342: whileTrue: with BOTH local var mutation AND field mutation uses
+        // full-extract mode — mutated field 'n' is a direct param, no State param.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + 1. self.n := self.n + 1]\n    sum\n";
         let code = codegen(src);
         assert!(
             code.contains("letrec"),
-            "hybrid: whileTrue: should generate a letrec. Got:\n{code}"
+            "full-extract: whileTrue: should generate a letrec. Got:\n{code}"
         );
-        // Hybrid signature: fun (Sum, State) — local as direct param, State explicit
+        // No State in fun signature — mutated field 'n' is a direct param.
         assert!(
-            code.contains("fun (Sum, State)"),
-            "hybrid: whileTrue: fun should take (Sum, State) as params. Got:\n{code}"
+            !code.contains("fun (Sum, State)"),
+            "full-extract: whileTrue: fun must not have State param. Got:\n{code}"
         );
         assert!(
             !code.contains("fun (StateAcc)"),
-            "hybrid: whileTrue: fun must not use StateAcc signature. Got:\n{code}"
+            "full-extract: whileTrue: fun must not use StateAcc signature. Got:\n{code}"
         );
-        // Field mutation uses maps:put on State (not StateAcc)
+        // Mutated field 'n' pre-extracted as NField param.
         assert!(
-            code.contains("maps':'put'('n'"),
-            "hybrid: whileTrue: field mutation should use maps:put. Got:\n{code}"
+            code.contains("NField"),
+            "full-extract: whileTrue: 'n' should be extracted as NField param. Got:\n{code}"
         );
-        // Exit rebuilds StateAcc from State + local params
+        // Exit rebuilds StateAcc with repacked field + locals.
         assert!(
             code.contains("ExitSA"),
-            "hybrid: whileTrue: exit StateAcc rebuild expected. Got:\n{code}"
+            "full-extract: whileTrue: exit StateAcc rebuild expected. Got:\n{code}"
         );
-        // Exit packs local into ExitSA via maps:put
+        // Exit packs mutated field + local into ExitSA.
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "full-extract: whileTrue: exit arm must repack 'n'. Got:\n{code}"
+        );
         assert!(
             code.match_indices("maps':'put'('__local__sum'").count() <= 1,
-            "hybrid: whileTrue: at most one maps:put for local (exit rebuild). Got:\n{code}"
+            "full-extract: whileTrue: at most one maps:put for local (exit rebuild). Got:\n{code}"
         );
     }
 
     #[test]
     fn test_while_true_readonly_field_pre_extracted_as_direct_param() {
-        // BT-1326: whileTrue: body reads self.step (never written) and writes self.n:
-        // self.step is pre-extracted before the letrec and passed as a direct param.
+        // BT-1326/BT-1342: whileTrue: body reads self.step (never written) and writes self.n:
+        // self.step is pre-extracted as read-only param, self.n is pre-extracted as mutated param.
         let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + self.step. self.n := self.n + 1]\n    sum\n";
         let code = codegen(src);
         assert!(
@@ -809,10 +880,14 @@ mod tests {
             code.match_indices("maps':'get'('step'").count() == 1,
             "readonly field: whileTrue: exactly one maps:get for 'step'. Got:\n{code}"
         );
-        // Mutable field 'n' still uses maps:put for writes.
+        // Mutable field 'n' is also pre-extracted and repacked at exit.
+        assert!(
+            code.contains("NField"),
+            "readonly field: whileTrue: 'n' should be extracted as NField param. Got:\n{code}"
+        );
         assert!(
             code.contains("maps':'put'('n'"),
-            "readonly field: whileTrue: 'n' writes should still use maps:put. Got:\n{code}"
+            "readonly field: whileTrue: exit arm must repack 'n'. Got:\n{code}"
         );
     }
 }
