@@ -1,0 +1,109 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// HTTPRouter — Compiled route dispatch for HTTPServer (BT-1344).
+///
+/// HTTPRouter is a sealed Value that holds a compiled route table. It is
+/// created once (via `build:` or `routes:`) and then passed as the handler
+/// to `HTTPServer start:handler:`. The router matches incoming requests
+/// by method and path, extracts path parameters, and dispatches to the
+/// appropriate handler block.
+///
+/// ## Builder API (preferred for multi-route apps)
+/// ```beamtalk
+/// router := HTTPRouter build: [:r |
+///   r get: "/" handler: [:req | HTTPResponse new: #{ #status => 200, #body => "home" }].
+///   r get: "/users/:id" handler: [:req |
+///     id := req param: "id"
+///     HTTPResponse new: #{ #status => 200, #body => "User " ++ id }
+///   ].
+///   r post: "/users" handler: [:req | HTTPResponse new: #{ #status => 201, #body => "created" }]
+/// ]
+/// srv := HTTPServer start: 8080 handler: router
+/// ```
+///
+/// ## Route list API
+/// ```beamtalk
+/// router := HTTPRouter routes: #(
+///   HTTPRoute get: "/" handler: [:req | HTTPResponse new: #{ #status => 200, #body => "home" }],
+///   HTTPRoute get: "/users/:id" handler: [:req |
+///     HTTPResponse new: #{ #status => 200, #body => (req param: "id") }
+///   ]
+/// )
+/// ```
+///
+/// ## Path parameters
+///
+/// Path segments prefixed with `:` capture that segment as a named parameter:
+///
+/// ```beamtalk
+/// r get: "/users/:id/posts/:postId" handler: [:req |
+///   id := req param: "id"
+///   postId := req param: "postId"
+///   // ...
+/// ]
+/// ```
+///
+/// ## Wildcards
+///
+/// A segment prefixed with `*` captures all remaining path segments:
+///
+/// ```beamtalk
+/// r get: "/static/*path" handler: [:req |
+///   filePath := req param: "path"   // => "css/main.css"
+/// ]
+/// ```
+sealed Value subclass: HTTPRouter
+  /// Compiled route table (opaque Erlang term, internal).
+  state: compiledRoutes = nil
+  /// Custom not-found handler (internal).
+  state: notFoundHandler = nil
+  /// Number of routes in this router.
+  state: routeCount :: Integer = 0
+
+  /// Build a router using a builder block.
+  ///
+  /// The block receives an `HTTPRouteBuilder` with methods like
+  /// `get:handler:`, `post:handler:`, etc.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// router := HTTPRouter build: [:r |
+  ///   r get: "/" handler: [:req | HTTPResponse new: #{ #status => 200, #body => "ok" }]
+  /// ]
+  /// ```
+  class build: block -> HTTPRouter =>
+    builder := HTTPRouteBuilder spawn
+    block value: builder
+    routeList := builder routes
+    nfHandler := builder notFoundHandler
+    builder stop
+    self compileRoutes: routeList notFoundHandler: nfHandler
+
+  /// Build a router from a List of HTTPRoute values.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// router := HTTPRouter routes: #(
+  ///   HTTPRoute get: "/" handler: [:req | HTTPResponse new: #{ #status => 200, #body => "ok" }]
+  /// )
+  /// ```
+  class routes: routeArray :: List -> HTTPRouter =>
+    self compileRoutes: routeArray notFoundHandler: nil
+
+  /// Internal: compile a list of HTTPRoute values into a frozen router.
+  class compileRoutes: routeArray notFoundHandler: notFoundHandler -> HTTPRouter =>
+    rawRoutes := routeArray collect: [:route |
+      #(route method, route path, route handler)
+    ]
+    compiled := (Erlang beamtalk_http_router) compile: rawRoutes
+    self
+      new: #{
+        #compiledRoutes => compiled,
+        #notFoundHandler => notFoundHandler,
+        #routeCount => routeArray size
+      }
+
+  /// Human-readable representation: "an HTTPRouter(6 routes)".
+  printString -> String =>
+    "an HTTPRouter(" ++ self.routeCount printString ++ " routes)"

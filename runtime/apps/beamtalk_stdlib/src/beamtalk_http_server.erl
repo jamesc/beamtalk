@@ -116,14 +116,15 @@ ensure_started(App) ->
             )
     end.
 
-%% @private Validate that the handler is a fun/1 or a pid.
+%% @private Validate that the handler is a fun/1, a pid, or an HTTPRouter value.
 -spec validate_handler(term()) -> ok | no_return().
 validate_handler(Handler) when is_function(Handler, 1) -> ok;
 validate_handler(Handler) when is_pid(Handler) -> ok;
+validate_handler(#{compiledRoutes := Routes, notFoundHandler := _}) when is_list(Routes) -> ok;
 validate_handler(_) ->
     type_error(
         'startListener:handler:',
-        <<"Handler must be a block or an actor responding to handle:">>
+        <<"Handler must be a block, an actor, or an HTTPRouter">>
     ).
 
 %% @private Parse an IP address string to a tuple.

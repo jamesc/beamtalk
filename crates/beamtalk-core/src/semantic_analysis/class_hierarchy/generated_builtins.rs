@@ -48,6 +48,9 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "HTTPClient"
             | "HTTPRequest"
             | "HTTPResponse"
+            | "HTTPRoute"
+            | "HTTPRouteBuilder"
+            | "HTTPRouter"
             | "HTTPServer"
             | "InstantiationError"
             | "Integer"
@@ -946,9 +949,10 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_typed: false,
             is_value: true,
             is_native: false,
-            state: vec!["method".into(), "path".into(), "headers".into(), "body".into(), "queryParams".into()],
-            state_types: HashMap::from([("method".into(), "String".into()), ("path".into(), "String".into()), ("headers".into(), "List".into()), ("body".into(), "String".into()), ("queryParams".into(), "Dictionary".into())]),
+            state: vec!["method".into(), "path".into(), "headers".into(), "body".into(), "queryParams".into(), "params".into()],
+            state_types: HashMap::from([("method".into(), "String".into()), ("path".into(), "String".into()), ("headers".into(), "List".into()), ("body".into(), "String".into()), ("queryParams".into(), "Dictionary".into()), ("params".into(), "Dictionary".into())]),
             methods: vec![
+                MethodInfo { selector: "param:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("String".into())], doc: Some("Return the value of a named path parameter.\n\nPath parameters are populated by HTTPRouter when the request matches\na parameterized route (e.g. `/users/:id`).\n\n## Examples\n```beamtalk\nreq param: \"id\"   // => \"42\"\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable representation: \"an HTTPRequest(GET /path)\".".into()) },
                 MethodInfo { selector: "method".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Returns the `method` field value. Default: `\"\"`.\n\n*(compiler-generated)*".into()) },
                 MethodInfo { selector: "withMethod:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("String".into())], doc: Some("Returns a new `HTTPRequest` with `method` set to the given value.\n\n*(compiler-generated)*".into()) },
@@ -960,9 +964,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "withBody:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("String".into())], doc: Some("Returns a new `HTTPRequest` with `body` set to the given value.\n\n*(compiler-generated)*".into()) },
                 MethodInfo { selector: "queryParams".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("Dictionary".into()), param_types: vec![], doc: Some("Returns the `queryParams` field value. Default: `...`.\n\n*(compiler-generated)*".into()) },
                 MethodInfo { selector: "withQueryParams:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("Dictionary".into())], doc: Some("Returns a new `HTTPRequest` with `queryParams` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "params".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("Dictionary".into()), param_types: vec![], doc: Some("Returns the `params` field value. Default: `...`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withParams:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("Dictionary".into())], doc: Some("Returns a new `HTTPRequest` with `params` set to the given value.\n\n*(compiler-generated)*".into()) },
             ],
             class_methods: vec![
-                MethodInfo { selector: "method:path:headers:body:queryParams:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("String".into()), Some("String".into()), Some("List".into()), Some("String".into()), Some("Dictionary".into())], doc: Some("Creates a new `HTTPRequest`. Args: method (default: \"\"), path (default: \"/\"), headers (default: ...), body (default: \"\"), queryParams (default: ...).\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "method:path:headers:body:queryParams:params:".into(), arity: 6, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("String".into()), Some("String".into()), Some("List".into()), Some("String".into()), Some("Dictionary".into()), Some("Dictionary".into())], doc: Some("Creates a new `HTTPRequest`. Args: method (default: \"\"), path (default: \"/\"), headers (default: ...), body (default: \"\"), queryParams (default: ...), params (default: ...).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
         },
@@ -993,6 +999,97 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![
                 MethodInfo { selector: "status:headers:body:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("Integer".into()), Some("List".into()), Some("String".into())], doc: Some("Creates a new `HTTPResponse`. Args: status (default: 0), headers (default: ...), body (default: \"\").\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "HTTPRoute".into(),
+        ClassInfo {
+            name: "HTTPRoute".into(),
+            superclass: Some("Value".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec!["method".into(), "path".into(), "handler".into()],
+            state_types: HashMap::from([("method".into(), "String".into()), ("path".into(), "String".into())]),
+            methods: vec![
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable representation: \"an HTTPRoute(GET /users/:id)\".".into()) },
+                MethodInfo { selector: "method".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Returns the `method` field value. Default: `\"\"`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withMethod:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("HTTPRoute".into()), param_types: vec![Some("String".into())], doc: Some("Returns a new `HTTPRoute` with `method` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "path".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Returns the `path` field value. Default: `\"/\"`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withPath:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("HTTPRoute".into()), param_types: vec![Some("String".into())], doc: Some("Returns a new `HTTPRoute` with `path` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "handler".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Returns the `handler` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withHandler:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("HTTPRoute".into()), param_types: vec![None], doc: Some("Returns a new `HTTPRoute` with `handler` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "get:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("HTTPRoute".into()), param_types: vec![Some("String".into()), None], doc: Some("Create a GET route.".into()) },
+                MethodInfo { selector: "post:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("HTTPRoute".into()), param_types: vec![Some("String".into()), None], doc: Some("Create a POST route.".into()) },
+                MethodInfo { selector: "put:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("HTTPRoute".into()), param_types: vec![Some("String".into()), None], doc: Some("Create a PUT route.".into()) },
+                MethodInfo { selector: "delete:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("HTTPRoute".into()), param_types: vec![Some("String".into()), None], doc: Some("Create a DELETE route.".into()) },
+                MethodInfo { selector: "patch:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("HTTPRoute".into()), param_types: vec![Some("String".into()), None], doc: Some("Create a PATCH route.".into()) },
+                MethodInfo { selector: "method:path:handler:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, return_type: Some("HTTPRoute".into()), param_types: vec![Some("String".into()), Some("String".into()), None], doc: Some("Creates a new `HTTPRoute`. Args: method (default: \"\"), path (default: \"/\"), handler (default: nil).\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "HTTPRouteBuilder".into(),
+        ClassInfo {
+            name: "HTTPRouteBuilder".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec!["routes".into(), "notFoundHandler".into()],
+            state_types: HashMap::from([("routes".into(), "List".into())]),
+            methods: vec![
+                MethodInfo { selector: "get:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRouteBuilder".into(), is_sealed: false, return_type: None, param_types: vec![Some("String".into()), None], doc: Some("Add a GET route.".into()) },
+                MethodInfo { selector: "post:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRouteBuilder".into(), is_sealed: false, return_type: None, param_types: vec![Some("String".into()), None], doc: Some("Add a POST route.".into()) },
+                MethodInfo { selector: "put:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRouteBuilder".into(), is_sealed: false, return_type: None, param_types: vec![Some("String".into()), None], doc: Some("Add a PUT route.".into()) },
+                MethodInfo { selector: "delete:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRouteBuilder".into(), is_sealed: false, return_type: None, param_types: vec![Some("String".into()), None], doc: Some("Add a DELETE route.".into()) },
+                MethodInfo { selector: "patch:handler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRouteBuilder".into(), is_sealed: false, return_type: None, param_types: vec![Some("String".into()), None], doc: Some("Add a PATCH route.".into()) },
+                MethodInfo { selector: "notFound:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRouteBuilder".into(), is_sealed: false, return_type: None, param_types: vec![None], doc: Some("Set a custom handler for requests that match no route (404).\n\nThe handler receives the HTTPRequest and should return an HTTPResponse.\nIf not set, a default 404 plain-text response is returned.".into()) },
+                MethodInfo { selector: "routes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRouteBuilder".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return the accumulated routes list.".into()) },
+                MethodInfo { selector: "notFoundHandler".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRouteBuilder".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Return the custom not-found handler (or nil).".into()) },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "HTTPRouter".into(),
+        ClassInfo {
+            name: "HTTPRouter".into(),
+            superclass: Some("Value".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec!["compiledRoutes".into(), "notFoundHandler".into(), "routeCount".into()],
+            state_types: HashMap::from([("routeCount".into(), "Integer".into())]),
+            methods: vec![
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable representation: \"an HTTPRouter(6 routes)\".".into()) },
+                MethodInfo { selector: "compiledRoutes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Returns the `compiledRoutes` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withCompiledRoutes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: Some("HTTPRouter".into()), param_types: vec![None], doc: Some("Returns a new `HTTPRouter` with `compiledRoutes` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "notFoundHandler".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Returns the `notFoundHandler` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withNotFoundHandler:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: Some("HTTPRouter".into()), param_types: vec![None], doc: Some("Returns a new `HTTPRouter` with `notFoundHandler` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "routeCount".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Returns the `routeCount` field value. Default: `0`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withRouteCount:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: Some("HTTPRouter".into()), param_types: vec![Some("Integer".into())], doc: Some("Returns a new `HTTPRouter` with `routeCount` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "build:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: Some("HTTPRouter".into()), param_types: vec![None], doc: Some("Build a router using a builder block.\n\nThe block receives an `HTTPRouteBuilder` with methods like\n`get:handler:`, `post:handler:`, etc.\n\n## Examples\n```beamtalk\nrouter := HTTPRouter build: [:r |\n  r get: \"/\" handler: [:req | HTTPResponse new: #{ #status => 200, #body => \"ok\" }]\n]\n```".into()) },
+                MethodInfo { selector: "routes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: Some("HTTPRouter".into()), param_types: vec![Some("List".into())], doc: Some("Build a router from a List of HTTPRoute values.\n\n## Examples\n```beamtalk\nrouter := HTTPRouter routes: #(\n  HTTPRoute get: \"/\" handler: [:req | HTTPResponse new: #{ #status => 200, #body => \"ok\" }]\n)\n```".into()) },
+                MethodInfo { selector: "compileRoutes:notFoundHandler:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: Some("HTTPRouter".into()), param_types: vec![None, None], doc: Some("Internal: compile a list of HTTPRoute values into a frozen router.".into()) },
+                MethodInfo { selector: "compiledRoutes:notFoundHandler:routeCount:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, return_type: Some("HTTPRouter".into()), param_types: vec![None, None, Some("Integer".into())], doc: Some("Creates a new `HTTPRouter`. Args: compiledRoutes (default: nil), notFoundHandler (default: nil), routeCount (default: 0).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
         },

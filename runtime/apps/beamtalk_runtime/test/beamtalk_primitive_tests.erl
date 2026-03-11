@@ -471,7 +471,7 @@ class_name_to_module_single_char_test() ->
 
 class_name_to_module_acronym_test() ->
     %% Consecutive capitals are not separated (matches Rust to_module_name)
-    ?assertEqual('bt@httprouter', beamtalk_primitive:class_name_to_module('HTTPRouter')).
+    ?assertEqual('bt@xmlparser', beamtalk_primitive:class_name_to_module('XMLParser')).
 
 %% --- Value type send/3 routing ---
 

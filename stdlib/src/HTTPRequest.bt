@@ -37,6 +37,19 @@ sealed Value subclass: HTTPRequest
   state: body :: String = ""
   /// Query parameters as a Dictionary.
   state: queryParams :: Dictionary = #{}
+  /// Path parameters extracted by HTTPRouter (e.g. `:id` → "42").
+  state: params :: Dictionary = #{}
+
+  /// Return the value of a named path parameter.
+  ///
+  /// Path parameters are populated by HTTPRouter when the request matches
+  /// a parameterized route (e.g. `/users/:id`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// req param: "id"   // => "42"
+  /// ```
+  param: name :: String -> String => self.params at: name
 
   /// Human-readable representation: "an HTTPRequest(GET /path)".
   printString -> String =>

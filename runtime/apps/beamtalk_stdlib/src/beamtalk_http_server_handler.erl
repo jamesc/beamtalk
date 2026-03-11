@@ -25,11 +25,12 @@
 
 %% @doc Handle a cowboy HTTP request by delegating to the Beamtalk handler.
 %%
-%% State is `#{handler := Handler}` where Handler is a fun/1 or actor pid.
+%% State is `#{handler := Handler}` where Handler is a fun/1, actor pid,
+%% or an HTTPRouter Value object (map with `compiledRoutes` key, BT-1344).
 -spec init(cowboy_req:req(), map()) -> {ok, cowboy_req:req(), map()}.
 init(Req0, #{handler := Handler} = State) ->
     {HttpRequest, Req1} = build_request(Req0),
-    try call_handler(Handler, HttpRequest) of
+    try dispatch_handler(Handler, HttpRequest) of
         Response when is_map(Response) ->
             Status = get_response_field(Response, status, 200),
             Headers = get_response_headers(Response),
@@ -80,8 +81,8 @@ build_request(Req0) ->
     Headers = [[Name, Value] || {Name, Value} <- HeadersList],
     {Body, Req1} = read_body(Req0),
     QsMap = parse_query_params(Req1),
-    HttpRequest = 'bt@stdlib@httprequest':'class_method:path:headers:body:queryParams:'(
-        undefined, undefined, Method, Path, Headers, Body, QsMap
+    HttpRequest = 'bt@stdlib@httprequest':'class_method:path:headers:body:queryParams:params:'(
+        undefined, undefined, Method, Path, Headers, Body, QsMap, #{}
     ),
     {HttpRequest, Req1}.
 
@@ -113,6 +114,35 @@ parse_query_params(Req) ->
 value_or_true(true) -> <<"true">>;
 value_or_true(Val) -> Val.
 
+%% @private Dispatch the request to the appropriate handler.
+%%
+%% Supports three handler types:
+%%   - HTTPRouter Value object (map with `compiledRoutes` key) — compiled router (BT-1344)
+%%   - `fun/1` — block handler
+%%   - `pid()` — actor responding to `handle:`
+-spec dispatch_handler(term(), map()) -> term().
+dispatch_handler(#{compiledRoutes := Routes, notFoundHandler := NotFoundHandler}, Request) ->
+    dispatch_router(Routes, NotFoundHandler, Request);
+dispatch_handler(Handler, Request) ->
+    call_handler(Handler, Request).
+
+%% @private Route dispatch: match method+path, inject params, call handler.
+-spec dispatch_router(list(), term(), map()) -> term().
+dispatch_router(Routes, NotFoundHandler, Request) ->
+    Method = maps:get(method, Request),
+    Path = maps:get(path, Request),
+    case beamtalk_http_router:match(Routes, Method, Path) of
+        {ok, Handler, Params} ->
+            EnrichedRequest = Request#{params => Params},
+            call_handler(Handler, EnrichedRequest);
+        method_not_allowed ->
+            make_error_response(405, <<"Method Not Allowed">>);
+        not_found when NotFoundHandler =:= nil; NotFoundHandler =:= undefined ->
+            make_error_response(404, <<"Not Found">>);
+        not_found ->
+            call_handler(NotFoundHandler, Request)
+    end.
+
 %% @private Call the handler with the request.
 %%
 %% Supports blocks (funs) and actor pids responding to `handle:`.
@@ -121,6 +151,16 @@ call_handler(Handler, Request) when is_function(Handler, 1) ->
     Handler(Request);
 call_handler(Handler, Request) when is_pid(Handler) ->
     beamtalk_actor:sync_send(Handler, 'handle:', [Request]).
+
+%% @private Build a simple HTTPResponse map for error responses.
+-spec make_error_response(integer(), binary()) -> map().
+make_error_response(Status, Body) ->
+    #{
+        '$beamtalk_class' => 'HTTPResponse',
+        status => Status,
+        headers => [[<<"content-type">>, <<"text/plain">>]],
+        body => Body
+    }.
 
 %% @private Extract a field from an HTTPResponse value object.
 %%

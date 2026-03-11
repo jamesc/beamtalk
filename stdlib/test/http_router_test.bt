@@ -1,0 +1,306 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1344: BUnit integration tests for HTTPRouter.
+//
+// Tests cover:
+//   - Builder API (build:)
+//   - Route array API (routes:)
+//   - Exact match routing
+//   - Parameterized routes and param extraction
+//   - Wildcard routes
+//   - Method-based dispatch
+//   - 404 Not Found (default and custom)
+//   - 405 Method Not Allowed
+//   - Controller-object dispatch via block closures
+//   - printString
+
+TestCase subclass: HTTPRouterTest
+  state: srv = nil
+
+  tearDown => self.srv isNil ifFalse: [self.srv stop]
+
+  // ===== Builder API =====
+  testBuilderExactMatch =>
+    router := HTTPRouter
+      build: [:r |
+        r get: "/" handler: [:req |
+          HTTPResponse new: #{#status => 200, #body => "home"}
+        ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp status equals: 200
+    @expect type
+    self assert: resp body equals: "home"
+
+  testBuilderMultipleRoutes =>
+    router := HTTPRouter
+      build: [:r |
+        r get: "/" handler: [:req |
+          HTTPResponse new: #{#status => 200, #body => "home"}
+        ]
+        r get: "/about" handler: [:req |
+          HTTPResponse new: #{#status => 200, #body => "about"}
+        ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    base := "http://localhost:" ++ self.srv port asString
+    homeResp := (HTTPClient get: base ++ "/") unwrap
+    @expect type
+    self assert: homeResp body equals: "home"
+    aboutResp := (HTTPClient get: base ++ "/about") unwrap
+    @expect type
+    self assert: aboutResp body equals: "about"
+
+  testBuilderPostRoute =>
+    router := HTTPRouter
+      build: [:r |
+        r
+          post: "/items"
+          handler: [:req |
+            @expect type
+            HTTPResponse new: #{
+              #status => 201,
+              #body => "created: " ++ req body
+            }
+          ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/items"
+    resp := (HTTPClient post: url body: "widget") unwrap
+    @expect type
+    self assert: resp status equals: 201
+    @expect type
+    self assert: resp body equals: "created: widget"
+
+  // ===== Route array API =====
+  testRouteArrayAPI =>
+    router := HTTPRouter
+      routes: #(HTTPRoute get: "/" handler: [:req |
+        HTTPResponse new: #{#status => 200, #body => "array home"}
+      ])
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp body equals: "array home"
+
+  // ===== Path parameters =====
+  testSinglePathParam =>
+    router := HTTPRouter
+      build: [:r |
+        r
+          get: "/users/:id"
+          handler: [:req |
+            @expect type
+            id := req param: "id"
+            HTTPResponse new: #{#status => 200, #body => id}
+          ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/users/42"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp body equals: "42"
+
+  testMultiplePathParams =>
+    router := HTTPRouter
+      build: [:r |
+        r
+          get: "/users/:userId/posts/:postId"
+          handler: [:req |
+            @expect type
+            uid := req param: "userId"
+            @expect type
+            pid := req param: "postId"
+            HTTPResponse new: #{#status => 200, #body => uid ++ ":" ++ pid}
+          ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/users/7/posts/99"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp body equals: "7:99"
+
+  // ===== Wildcard routes =====
+  testWildcardRoute =>
+    router := HTTPRouter
+      build: [:r |
+        r
+          get: "/static/*path"
+          handler: [:req |
+            @expect type
+            p := req param: "path"
+            HTTPResponse new: #{#status => 200, #body => p}
+          ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/static/css/main.css"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp body equals: "css/main.css"
+
+  // ===== Method dispatch =====
+  testMethodBasedDispatch =>
+    router := HTTPRouter
+      build: [:r |
+        r get: "/items" handler: [:req |
+          HTTPResponse new: #{#status => 200, #body => "listed"}
+        ]
+        r post: "/items" handler: [:req |
+          HTTPResponse new: #{#status => 201, #body => "created"}
+        ]
+        r delete: "/items" handler: [:req |
+          HTTPResponse new: #{#status => 200, #body => "deleted"}
+        ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/items"
+    getResp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: getResp body equals: "listed"
+    postResp := (HTTPClient post: url body: "") unwrap
+    @expect type
+    self assert: postResp body equals: "created"
+    deleteResp := (HTTPClient delete: url) unwrap
+    @expect type
+    self assert: deleteResp body equals: "deleted"
+
+  // ===== 404 Not Found =====
+  testDefault404 =>
+    router := HTTPRouter
+      build: [:r |
+        r get: "/" handler: [:req |
+          HTTPResponse new: #{#status => 200, #body => "home"}
+        ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/nonexistent"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp status equals: 404
+    @expect type
+    self assert: resp body equals: "Not Found"
+
+  testCustomNotFoundHandler =>
+    router := HTTPRouter
+      build: [:r |
+        r get: "/" handler: [:req |
+          HTTPResponse new: #{#status => 200, #body => "home"}
+        ]
+        r
+          notFound: [:req |
+            @expect type
+            body := "Custom 404: " ++ req path
+            HTTPResponse new: #{#status => 404, #body => body}
+          ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/missing"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp status equals: 404
+    @expect type
+    self assert: resp body equals: "Custom 404: /missing"
+
+  // ===== 405 Method Not Allowed =====
+  testMethodNotAllowed =>
+    router := HTTPRouter
+      build: [:r |
+        r get: "/items" handler: [:req |
+          HTTPResponse new: #{#status => 200, #body => "listed"}
+        ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/items"
+    resp := (HTTPClient post: url body: "") unwrap
+    @expect type
+    self assert: resp status equals: 405
+
+  // ===== Controller object dispatch =====
+  testControllerObjectDispatch =>
+    // Block closes over controller state naturally
+    state := "hello from controller"
+    router := HTTPRouter
+      build: [:r |
+        r get: "/api/state" handler: [:req |
+          HTTPResponse new: #{#status => 200, #body => state}
+        ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/api/state"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp body equals: "hello from controller"
+
+  // ===== printString =====
+  testRouterPrintString =>
+    router := HTTPRouter
+      build: [:r |
+        r get: "/" handler: [:req |
+          HTTPResponse new: #{#status => 200, #body => "ok"}
+        ]
+        r post: "/items" handler: [:req |
+          HTTPResponse new: #{#status => 201, #body => "ok"}
+        ]
+      ]
+    self assert: router printString equals: "an HTTPRouter(2 routes)"
+
+  testRoutePrintString =>
+    route := HTTPRoute get: "/users/:id" handler: [:req | nil]
+    self assert: route printString equals: "an HTTPRoute(GET /users/:id)"
+
+  // ===== HTTPRequest params field =====
+  testHTTPRequestParamsDefault =>
+    self.srv := HTTPServer
+      start: 0
+      handler: [:req |
+        @expect type
+        sz := req params size asString
+        HTTPResponse new: #{#status => 200, #body => sz}
+      ]
+    url := "http://localhost:" ++ self.srv port asString ++ "/test"
+    resp := (HTTPClient get: url) unwrap
+    @expect type
+    self assert: resp body equals: "0"
+
+  // ===== All builder HTTP methods =====
+  testPutRoute =>
+    router := HTTPRouter
+      build: [:r |
+        r
+          put: "/items/:id"
+          handler: [:req |
+            @expect type
+            id := req param: "id"
+            HTTPResponse new: #{#status => 200, #body => "updated " ++ id}
+          ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/items/5"
+    resp := (HTTPClient put: url body: "data") unwrap
+    @expect type
+    self assert: resp body equals: "updated 5"
+
+  testPatchRoute =>
+    router := HTTPRouter
+      build: [:r |
+        r
+          patch: "/items/:id"
+          handler: [:req |
+            @expect type
+            id := req param: "id"
+            HTTPResponse new: #{#status => 200, #body => "patched " ++ id}
+          ]
+      ]
+    self.srv := HTTPServer start: 0 handler: router
+    url := "http://localhost:" ++ self.srv port asString ++ "/items/3"
+    resp := (HTTPClient
+      request: "PATCH"
+      url: url
+      options: #{#body => "data"}) unwrap
+    @expect type
+    self assert: resp body equals: "patched 3"
