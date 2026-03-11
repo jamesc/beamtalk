@@ -119,7 +119,7 @@ impl CoreErlangGenerator {
         let backing_module = module
             .classes
             .first()
-            .and_then(|c| c.backing_module.as_deref())
+            .and_then(|c| c.backing_module.as_ref().map(|id| id.name.as_str()))
             .ok_or_else(|| {
                 super::super::CodeGenError::Internal(
                     "native facade requires backing_module".to_string(),
@@ -325,7 +325,7 @@ impl CoreErlangGenerator {
             return Ok(Document::Nil);
         };
 
-        let Some(backing_module) = class.backing_module.as_deref() else {
+        let Some(backing_module) = class.backing_module.as_ref().map(|id| id.name.as_str()) else {
             return Err(super::super::CodeGenError::Internal(
                 "native facade requires backing_module".to_string(),
             ));
@@ -381,7 +381,8 @@ impl CoreErlangGenerator {
         let mut class_docs = Vec::new();
 
         for (i, class) in module.classes.iter().enumerate() {
-            let Some(backing_module) = class.backing_module.as_deref() else {
+            let Some(backing_module) = class.backing_module.as_ref().map(|id| id.name.as_str())
+            else {
                 return Err(super::super::CodeGenError::Internal(
                     "native facade requires backing_module".to_string(),
                 ));

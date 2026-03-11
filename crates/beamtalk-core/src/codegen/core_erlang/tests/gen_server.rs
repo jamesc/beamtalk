@@ -2836,7 +2836,7 @@ fn make_native_actor_module() -> Module {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
-        backing_module: Some("test_backing_mod".to_string()),
+        backing_module: Some(Identifier::new("test_backing_mod", Span::new(0, 0))),
         span: Span::new(0, 0),
     };
     Module {
@@ -3060,7 +3060,7 @@ fn make_native_actor_with_class_methods() -> Module {
         }],
         comments: CommentAttachment::default(),
         doc_comment: Some("A test native actor with class methods.".to_string()),
-        backing_module: Some("test_rich_backing".to_string()),
+        backing_module: Some(Identifier::new("test_rich_backing", Span::new(0, 0))),
         span: Span::new(0, 0),
     };
     Module {
