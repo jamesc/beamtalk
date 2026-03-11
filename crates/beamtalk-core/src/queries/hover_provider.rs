@@ -940,7 +940,17 @@ fn find_hover_in_expr(
                 None
             }
         }
-        Expression::ExpectDirective { .. } | Expression::Spread { .. } => None,
+        Expression::ExpectDirective { .. } => None,
+        Expression::Spread { name, span } => {
+            if offset >= span.start() && offset < span.end() {
+                Some(HoverInfo::new(
+                    format!("Rest pattern: `...{}`", name.name),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
     }
 }
 

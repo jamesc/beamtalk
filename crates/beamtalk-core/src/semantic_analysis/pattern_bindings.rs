@@ -123,12 +123,13 @@ fn extract_pattern_bindings_impl(
             }
         }
 
-        // Array patterns: duplicates are allowed — codegen emits equality checks
+        // Array patterns: duplicates are allowed — codegen emits equality checks (BT-1315)
         Pattern::Array { elements, rest, .. } => {
             for element in elements {
                 extract_pattern_bindings_impl(element, bindings, seen, diagnostics, true);
             }
             if let Some(rest_pat) = rest {
+                // TODO(BT-1315): validate rest name doesn't shadow an element binding
                 extract_pattern_bindings_impl(rest_pat, bindings, seen, diagnostics, true);
             }
         }

@@ -293,3 +293,8 @@ slice_from_past_end_test() ->
     A = make_array([1, 2]),
     Result = beamtalk_array:slice_from(A, 3),
     ?assertEqual(0, beamtalk_array:size(Result)).
+
+slice_from_well_past_end_test() ->
+    A = make_array([1, 2]),
+    Result = beamtalk_array:slice_from(A, 100),
+    ?assertEqual(0, beamtalk_array:size(Result)).

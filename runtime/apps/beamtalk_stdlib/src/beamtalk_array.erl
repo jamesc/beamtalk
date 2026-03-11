@@ -194,9 +194,14 @@ inject_into(#{'$beamtalk_class' := 'Array'}, _Initial, _Block) ->
 %% `#[a, b, ...rest] := arr` generates `slice_from(Arr, 3)` for the rest binding.
 -spec slice_from(map(), integer()) -> map().
 slice_from(#{'$beamtalk_class' := 'Array', 'data' := Arr}, From) when is_integer(From), From >= 1 ->
-    List = array:to_list(Arr),
-    Rest = lists:nthtail(From - 1, List),
-    from_list(Rest).
+    case From > array:size(Arr) of
+        true ->
+            from_list([]);
+        false ->
+            List = array:to_list(Arr),
+            Rest = lists:nthtail(From - 1, List),
+            from_list(Rest)
+    end.
 
 %%% ============================================================================
 %%% String Representation

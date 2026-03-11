@@ -1012,9 +1012,9 @@ The `...identifier` syntax in array destructuring captures remaining elements:
 // head = 1 (rest discarded)
 ```
 
-The rest element must be the last in the pattern. Works with both `#[...]` array and `#(...)` list syntax.
+The rest element must be the last in the pattern. Rest patterns are supported in destructuring assignment only — they are not yet supported in `match:` arms.
 
-> **Note:** Destructuring assignment (`{x, y} := expr`) and `collect:` with pattern blocks are planned but not yet implemented.
+> **Note:** Tuple destructuring (`{x, y} := expr`) and `collect:` with pattern blocks are planned but not yet implemented.
 
 ---
 
