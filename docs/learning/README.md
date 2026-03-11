@@ -63,18 +63,7 @@ Classes, concurrency, and error handling — the three pillars of production Bea
 | [12](12-error-handling.md) | Error Handling | `on:do:` exceptions, the `Result` type, `doesNotUnderstand` |
 | [13](13-testing.md) | Testing with BUnit | `TestCase subclass:`, `assert:equals:`, `should:raise:`, `setUp`/`tearDown` |
 
-### Part 4 — Practical Stdlib
-
-The standard library APIs you'll reach for most often: file handling, text processing, and data interchange.
-
-| # | Chapter | What you'll learn |
-|---|---------|-------------------|
-| [18](18-file-io.md) | File I/O | Reading, writing, directory operations, lazy file streams |
-| [19](19-regex.md) | Regular Expressions | Pattern matching, find/replace, splitting, compiled regex |
-| [20](20-json.md) | JSON | Parsing, generation, nested structures, round-tripping |
-| [21](21-datetime.md) | DateTime & Time | Construction, formatting, arithmetic, comparisons, high-resolution timestamps |
-
-### Part 5 — Advanced Features
+### Part 4 — Advanced Features
 
 Pattern matching, the type system, and BEAM interoperability for when you need the full power of the platform.
 
@@ -84,6 +73,17 @@ Pattern matching, the type system, and BEAM interoperability for when you need t
 | [15](15-type-annotations.md) | Type Annotations | The `::` syntax, gradual typing, method signatures |
 | [16](16-beam-interop.md) | BEAM Interop | Calling Erlang from Beamtalk, atoms, tuples, `Erlang module function:` |
 | [17](17-otp-supervisors.md) | OTP Supervisors | `Supervisor subclass:`, restart strategies, fault-tolerant trees |
+
+### Part 5 — Practical Stdlib
+
+The standard library APIs you'll reach for most often: file handling, text processing, and data interchange.
+
+| # | Chapter | What you'll learn |
+|---|---------|-------------------|
+| [18](18-file-io.md) | File I/O | Reading, writing, directory operations, lazy file streams |
+| [19](19-regex.md) | Regular Expressions | Pattern matching, find/replace, splitting, compiled regex |
+| [20](20-json.md) | JSON | Parsing, generation, nested structures, round-tripping |
+| [21](21-datetime.md) | DateTime & Time | Construction, formatting, arithmetic, comparisons, high-resolution timestamps |
 
 ---
 
