@@ -157,10 +157,11 @@ sealed Object subclass: WorkspaceInterface
   startSupervisor: aClass :: Object -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) startSupervisor: aClass
 
-  /// Stop and remove a supervisor from the workspace supervision tree.
+  /// Stop and remove a supervisor from the workspace.
   ///
-  /// Cleanly shuts down the supervisor and all its children before removing.
-  /// Raises an error if the supervisor is not currently attached.
+  /// Works for both workspace-attached supervisors and the root application
+  /// supervisor. Cleanly shuts down the supervisor and all its children.
+  /// Raises an error if the supervisor is not running or not visible.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -169,10 +170,12 @@ sealed Object subclass: WorkspaceInterface
   stopSupervisor: aClass :: Object -> Nil =>
     (Erlang beamtalk_workspace_interface_primitives) stopSupervisor: aClass
 
-  /// List all user-attached supervisors in the workspace supervision tree.
+  /// List all supervisors visible from the workspace.
   ///
-  /// Returns supervisors started via `startSupervisor:`, not the root
-  /// application supervisor (use `supervisor` for that).
+  /// Returns the root application supervisor (if registered) and all
+  /// supervisors attached via `startSupervisor:`. The root supervisor
+  /// is not part of the workspace supervision tree but is included
+  /// for discoverability.
   ///
   /// ## Examples
   /// ```beamtalk
