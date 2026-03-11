@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for docs/learning/12-error-handling.md
+
+Object subclass: Parser
+  safeParseInt: str =>
+    [Result ok: str asInteger]
+      on: Error
+      do: [:e | Result error: #parse_error]

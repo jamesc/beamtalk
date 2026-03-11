@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for docs/learning/11-actors.md
+// Reused by chapters 13 and 17
+
+Actor subclass: Counter
+  state: value = 0
+
+  increment =>
+    self.value := self.value + 1
+
+  getValue =>
+    self.value
+
+  incrementBy: n =>
+    self.value := self.value + n
+
+  reset =>
+    self.value := 0

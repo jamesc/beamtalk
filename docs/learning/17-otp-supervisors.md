@@ -1,3 +1,14 @@
+<!-- btfixture: fixtures/ch17counter.bt -->
+<!-- btfixture: fixtures/ch17counter_app.bt -->
+<!-- btfixture: fixtures/ch17persistent_worker.bt -->
+<!-- btfixture: fixtures/ch17worker_pool.bt -->
+<!-- btfixture: fixtures/ch17static_supervisor.bt -->
+<!-- btfixture: fixtures/ch17supervision_specs.bt -->
+<!-- btfixture: fixtures/ch17restart_policy.bt -->
+<!-- btfixture: fixtures/ch17strategies.bt -->
+<!-- btfixture: fixtures/ch17dynamic_supervisor.bt -->
+<!-- btfixture: fixtures/ch17lifecycle.bt -->
+
 ## OTP Supervisors
 
 Beamtalk actors are OTP gen_servers. When an actor crashes, you want

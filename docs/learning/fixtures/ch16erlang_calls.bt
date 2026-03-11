@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/16-beam-interop.md (Erlang calls)
+
+TestCase subclass: Ch16ErlangCalls
+
+  testListsReverse =>
+    result := Erlang lists reverse: #(3, 2, 1)
+    self assert: result equals: #(1, 2, 3)
+
+  testListsSeq =>
+    result := Erlang lists seq: 1 with: 5
+    self assert: result equals: #(1, 2, 3, 4, 5)
+
+  testListsNth =>
+    result := Erlang lists nth: 2 with: #(10, 20, 30)
+    self assert: result equals: 20
+
+  testMapsMerge =>
+    result := Erlang maps merge: #{#a => 1} with: #{#b => 2}
+    self assert: (result at: #a) equals: 1
+    self assert: (result at: #b) equals: 2
+
+  testErlangNode =>
+    node := (Erlang erlang) node
+    self assert: node notNil
+
+  testCachedProxy =>
+    lists := Erlang lists
+    self assert: lists class equals: ErlangModule
+    self assert: (lists reverse: #(1, 2, 3)) equals: #(3, 2, 1)

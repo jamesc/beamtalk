@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/13-testing.md (assertions)
+
+TestCase subclass: Ch13Assertions
+
+  testAssertEquals =>
+    self assert: 1 + 1 equals: 2
+    self assert: "hello" uppercase equals: "HELLO"
+
+  testAssert =>
+    self assert: true
+    self assert: (3 > 2)
+    self assert: "hello" isNotEmpty
+
+  testDeny =>
+    self deny: false
+    self deny: (3 > 5)
+    self deny: "" isNotEmpty
+
+  testAssertNil =>
+    self assert: nil equals: nil
+    self assert: (nil ifNil: [nil]) equals: nil
+
+  testDenyNil =>
+    self assert: (42 isNil not)
+    self assert: ("hello" isNil not)
+
+  testShould =>
+    self should: [1 / 0] raise: #badarith
+
+  testShouldNotRaise =>
+    result := 1 + 1
+    self assert: result equals: 2
+
+  testAssertKindOf =>
+    self assert: (42 isKindOf: Integer)
+    self assert: ("hello" isKindOf: String)
+    self assert: (true isKindOf: Boolean)

@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/12-error-handling.md (Validator)
+
+TestCase subclass: Ch12Validator
+
+  testValidOk =>
+    v := Validator new
+    self assert: (v validate: 5) equals: 5
+
+  testNilRaises =>
+    v := Validator new
+    self should: [v validate: nil] raise: #user_error
+
+  testNegativeRaises =>
+    v := Validator new
+    self should: [v validate: -1] raise: #user_error

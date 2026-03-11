@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/13-testing.md (basics)
+
+TestCase subclass: Ch13BasicTests
+
+  testAddition =>
+    self assert: (3 + 4) equals: 7
+
+  testString =>
+    self assert: "hello" size equals: 5
+
+  testBoolean =>
+    self assert: true
+    self deny: false

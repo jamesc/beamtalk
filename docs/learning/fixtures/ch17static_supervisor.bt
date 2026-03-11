@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/17-otp-supervisors.md (static supervisor)
+
+TestCase subclass: Ch17StaticSupervisor
+
+  testSupervisorClass =>
+    self assert: CounterApp strategy equals: #oneForOne
+    self assert: CounterApp children size equals: 1
+
+  testSupervisorIsSupervisorFlag =>
+    self assert: CounterApp isSupervisor
+    self deny: Counter isSupervisor

@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/12-error-handling.md (Parser)
+
+TestCase subclass: Ch12ParserTest
+
+  testSafeParseOk =>
+    p := Parser new
+    r := p safeParseInt: "42"
+    self assert: r ok
+    self assert: r value equals: 42
+
+  testSafeParseError =>
+    p := Parser new
+    r := p safeParseInt: "not-a-number"
+    self assert: r isError
+    self assert: r error equals: #parse_error
