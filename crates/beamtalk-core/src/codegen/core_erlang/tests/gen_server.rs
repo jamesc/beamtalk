@@ -9,6 +9,32 @@
 
 use super::*;
 
+/// Extract a Core Erlang function body from generated code by cutting at the
+/// next function header rather than relying on blank-line formatting.
+///
+/// Given a `marker` like `"'has_method'/1 = fun"`, returns the text from
+/// that marker to the next top-level function definition (`'name'/N = fun`).
+fn extract_core_fn<'a>(code: &'a str, marker: &str) -> Option<&'a str> {
+    let start = code.find(marker)?;
+    let body = &code[start + marker.len()..];
+    // Scan for the next Core Erlang function header: a line starting with
+    // `'<name>'/<digits> = fun`.  Track byte offset via cumulative line lengths
+    // to avoid ambiguous substring matching.
+    let mut offset = 0;
+    for (i, line) in body.split('\n').enumerate() {
+        if i == 0 {
+            offset += line.len() + 1;
+            continue;
+        }
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('\'') && trimmed.contains("'/") && trimmed.contains("= fun") {
+            return Some(&body[..offset]);
+        }
+        offset += line.len() + 1;
+    }
+    Some(body)
+}
+
 #[test]
 fn test_generate_empty_module() {
     let module = Module::new(Vec::new(), Span::new(0, 0));
@@ -2874,11 +2900,8 @@ fn test_native_facade_has_method_includes_all_selectors() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
     // Extract the has_method/1 function body to avoid matching selectors in method_info/meta
-    let has_method_fn = code
-        .split("'has_method'/1 = fun")
-        .nth(1)
-        .and_then(|rest| rest.split("\n\n").next())
-        .expect("has_method/1 function not found in generated code");
+    let has_method_fn =
+        extract_core_fn(&code, "'has_method'/1 = fun").expect("has_method/1 not found");
     assert!(
         has_method_fn.contains("'doWork'"),
         "has_method/1 body should include 'doWork'. Got:\n{has_method_fn}"
@@ -2896,11 +2919,8 @@ fn test_native_facade_meta_includes_native_flag() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
     // Extract the __beamtalk_meta/0 function body to avoid matching keys in BuilderState.meta
-    let meta_fn = code
-        .split("'__beamtalk_meta'/0 = fun")
-        .nth(1)
-        .and_then(|rest| rest.split("\n\n").next())
-        .expect("__beamtalk_meta/0 function not found in generated code");
+    let meta_fn =
+        extract_core_fn(&code, "'__beamtalk_meta'/0 = fun").expect("__beamtalk_meta/0 not found");
     assert!(
         meta_fn.contains("'native' => 'true'"),
         "__beamtalk_meta/0 body should include native => true. Got:\n{meta_fn}"
@@ -2950,11 +2970,8 @@ fn test_native_facade_register_class_includes_meta() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
     // Extract the register_class/0 function body
-    let register_fn = code
-        .split("'register_class'/0 = fun")
-        .nth(1)
-        .and_then(|rest| rest.split("\n\n\n").next())
-        .expect("register_class/0 function not found in generated code");
+    let register_fn =
+        extract_core_fn(&code, "'register_class'/0 = fun").expect("register_class/0 not found");
     assert!(
         register_fn.contains("'beamtalk_class_builder':'register'"),
         "register_class/0 should call beamtalk_class_builder:register. Got:\n{register_fn}"
