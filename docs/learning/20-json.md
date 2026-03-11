@@ -146,4 +146,51 @@ Json prettyPrint: value    → pretty-printed JSON String
 
 **Type mapping:** Integer, Float, Boolean, nil, String, List, Dictionary.
 
+## Exercises
+
+**1. Round-trip a dictionary.** Create a dictionary `#{"language" => "Beamtalk", "year" => 2026}`,
+convert it to JSON with `Json generate:`, parse it back, and verify both keys
+are preserved.
+
+<details>
+<summary>Hint</summary>
+
+```text
+original := #{"language" => "Beamtalk", "year" => 2026}
+json := Json generate: original
+parsed := (Json parse: json) unwrap
+parsed at: "language"    // => "Beamtalk"
+parsed at: "year"        // => 2026
+```
+</details>
+
+**2. Sum a JSON array.** Parse the JSON string `"[10, 20, 30, 40]"` and compute
+the sum of all elements using `inject:into:`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+nums := (Json parse: "[10, 20, 30, 40]") unwrap
+nums inject: 0 into: [:sum :n | sum + n]    // => 100
+```
+</details>
+
+**3. Handle invalid JSON.** Try parsing `"not valid json"` — what does the
+Result contain? How would you provide a fallback value?
+
+<details>
+<summary>Hint</summary>
+
+```text
+result := Json parse: "not valid json"
+result isError    // => true
+result isOk       // => false
+
+// Provide a fallback:
+value := result isOk ifTrue: [result unwrap] ifFalse: [#{}]
+// value => #{}  (empty dictionary as fallback)
+```
+</details>
+
 Next: Chapter 21 — DateTime & Time

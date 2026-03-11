@@ -172,5 +172,64 @@ resp bodyAsJson  → Dictionary (parsed JSON)
 #timeout  → Integer (milliseconds)
 ```
 
+## Exercises
+
+**1. Check a response.** Describe how you would make a GET request to a URL and
+check whether it succeeded (status 200–299). What method on `HTTPResponse`
+tells you this?
+
+<details>
+<summary>Hint</summary>
+
+```text
+result := HTTPClient get: "https://api.example.com/health"
+result isOk ifTrue: [
+  resp := result unwrap
+  resp ok          // => true if status is 200-299
+  resp status      // => the actual status code (e.g. 200)
+]
+```
+
+`resp ok` returns `true` for 2xx status codes. `result isOk` tells you the
+request completed (no network error), while `resp ok` tells you the server
+returned a success status.
+</details>
+
+**2. Reusable client.** How would you set up an `HTTPClient` actor for repeated
+requests to `https://api.example.com` with a 10-second timeout?
+
+<details>
+<summary>Hint</summary>
+
+```text
+client := HTTPClient spawnWith: #{
+  #baseUrl => "https://api.example.com",
+  #headers => #(),
+  #timeout => 10000
+}
+// All requests use relative paths:
+resp := (client get: "/users") unwrap
+client stop    // clean up when done
+```
+</details>
+
+**3. POST JSON.** How would you POST a JSON payload with the correct
+Content-Type header using `request:url:options:`?
+
+<details>
+<summary>Hint</summary>
+
+```text
+payload := Json generate: #{"name" => "Alice", "age" => 30}
+resp := (HTTPClient request: #post url: url options: #{
+  #body => payload,
+  #headers => #(#("Content-Type", "application/json"))
+}) unwrap
+```
+
+Use `Json generate:` to serialize the dictionary, then set the Content-Type
+header so the server knows to parse it as JSON.
+</details>
+
 Next: this completes the learning guide!
 See `docs/beamtalk-language-features.md` for the full language reference.

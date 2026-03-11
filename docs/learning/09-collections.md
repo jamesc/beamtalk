@@ -254,4 +254,47 @@ also be collected into arrays:
 **Set:** `Set withAll: #[...]`
 - `includes:`, `add:`, `size`
 
+## Exercises
+
+**1. Find the maximum.** Use `inject:into:` to find the maximum value in
+`#[3, 1, 4, 1, 5, 9, 2, 6]`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+#[3, 1, 4, 1, 5, 9, 2, 6] inject: 0 into: [:max :x |
+  (x > max) ifTrue: [x] ifFalse: [max]
+]
+// => 9
+```
+</details>
+
+**2. Dictionary filtering.** Create a dictionary mapping names to ages:
+`#{#alice => 28, #bob => 17, #carol => 35}`. Extract just the values and
+use `select:` to find ages over 21.
+
+<details>
+<summary>Hint</summary>
+
+```text
+people := #{#alice => 28, #bob => 17, #carol => 35}
+people values select: [:age | age > 21]    // => contains 28 and 35
+```
+</details>
+
+**3. Remove duplicates.** Use `Set withAll:` to remove duplicates from
+`#(1, 2, 2, 3, 3, 3, 4, 4, 4, 4)`. How many unique elements remain?
+
+<details>
+<summary>Hint</summary>
+
+```text
+s := Set withAll: #(1, 2, 2, 3, 3, 3, 4, 4, 4, 4)
+s size    // => 4
+```
+
+The Set keeps only unique values: 1, 2, 3, 4.
+</details>
+
 Next: Chapter 10 — Value Classes

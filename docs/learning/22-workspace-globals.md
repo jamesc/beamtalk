@@ -162,4 +162,53 @@ Beamtalk help: aClass                 → class documentation
 Beamtalk help: aClass selector: sel   → method documentation
 ```
 
+## Exercises
+
+**1. Explore loaded classes.** In the REPL, use `Workspace classes` to see all
+loaded classes. How many are there? Can you find `Integer` and `String`?
+
+<details>
+<summary>Hint</summary>
+
+```text
+classes := Workspace classes
+classes size    // shows the count
+// Look for specific classes:
+classes includes: Integer    // likely not — classes are names
+// Use Beamtalk allClasses to find by name
+Beamtalk allClasses
+```
+
+`Workspace classes` lists user-loaded classes. `Beamtalk allClasses` lists
+all registered classes including built-ins.
+</details>
+
+**2. Transcript cascade.** Use Transcript with cascade (`;`) to log your name,
+a newline, your favorite number, and another newline — all in one expression.
+
+<details>
+<summary>Hint</summary>
+
+```text
+Transcript show: "Alice"; cr; show: 42; cr
+```
+
+Each message in the cascade goes to the same `Transcript` receiver.
+</details>
+
+**3. Help system.** Use `Beamtalk help: Integer` to explore the Integer class.
+Then use `Beamtalk help: Integer selector: #factorial` to see documentation
+for a specific method.
+
+<details>
+<summary>Hint</summary>
+
+```text
+Beamtalk help: Integer                     // shows class docs
+Beamtalk help: Integer selector: #factorial  // shows method docs
+```
+
+The help system shows available methods, their signatures, and documentation.
+</details>
+
 Next: Chapter 23 — Streams

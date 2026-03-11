@@ -212,4 +212,46 @@ stream allSatisfy: [:n | ...]           → Boolean
 stream do: [:n | ...]                   → nil (side effects)
 ```
 
+## Exercises
+
+**1. First 10 squares.** Use a stream to generate the first 10 perfect squares
+(1, 4, 9, 16, ...).
+
+<details>
+<summary>Hint</summary>
+
+```text
+squares := (Stream from: 1) collect: [:n | n * n]
+squares take: 10    // => [1,4,9,16,25,36,49,64,81,100]
+```
+</details>
+
+**2. Find a number.** Using an infinite stream starting from 1, find the first
+number greater than 100 that is divisible by 7.
+
+<details>
+<summary>Hint</summary>
+
+```text
+(Stream from: 1) detect: [:n | n > 100 and: [(n % 7) =:= 0]]
+// => 105
+```
+
+`detect:` stops at the first match — safe on infinite streams.
+</details>
+
+**3. Powers of 2.** Create an infinite stream of powers of 2 (1, 2, 4, 8, 16, ...)
+using `from:by:` and take the first 8 elements.
+
+<details>
+<summary>Hint</summary>
+
+```text
+powers := Stream from: 1 by: [:n | n * 2]
+powers take: 8    // => [1,2,4,8,16,32,64,128]
+```
+
+The step block `[:n | n * 2]` produces each value by doubling the previous one.
+</details>
+
 Next: Chapter 24 — Reflection & Metaprogramming

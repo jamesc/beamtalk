@@ -124,4 +124,47 @@ x                read
 #[a, b] := arr   destructure
 ```
 
+## Exercises
+
+**1. Swap two variables.** Assign `x := 10` and `y := 20`, then swap their values
+using a temporary variable so that `x` is `20` and `y` is `10`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+x := 10
+y := 20
+tmp := x
+x := y
+y := tmp
+// x is now 20, y is now 10
+```
+</details>
+
+**2. Destructuring with wildcards.** Given `#[a, _, c] := #[10, 20, 30]`, what
+are the values of `a` and `c`? What happens to the middle element?
+
+<details>
+<summary>Hint</summary>
+
+`a` is `10`, `c` is `30`. The `_` wildcard matches and discards the value `20` —
+it is not bound to any variable.
+</details>
+
+**3. Rectangle calculations.** Create variables `width` and `height`, then compute
+both the area (`width * height`) and perimeter (`2 * (width + height)`) and store
+each in its own variable.
+
+<details>
+<summary>Hint</summary>
+
+```text
+width := 8
+height := 5
+area := width * height            // 40
+perimeter := 2 * (width + height) // 26
+```
+</details>
+
 Next: Chapter 4 — Messages (the fundamental Beamtalk concept)

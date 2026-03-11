@@ -204,4 +204,57 @@ Dispatch:
 val match: [pattern -> result; pattern -> result; _ -> default]
 ```
 
+## Exercises
+
+**1. Sum 1 to 100.** Use `whileTrue:` to compute the sum of all integers from 1
+to 100. Verify the result is 5050.
+
+<details>
+<summary>Hint</summary>
+
+```text
+sum := 0
+i := 1
+[i <= 100] whileTrue: [sum := sum + i. i := i + 1]
+sum    // => 5050
+```
+
+Or more concisely with `to:do:`: `sum := 0. 1 to: 100 do: [:n | sum := sum + n]`.
+</details>
+
+**2. Number classifier.** Write a `match:` expression that classifies an integer
+as `"negative"`, `"zero"`, or `"positive"` using guard expressions.
+
+<details>
+<summary>Hint</summary>
+
+```text
+classify := [:n |
+  n match: [
+    x when: [x < 0] -> "negative";
+    0 -> "zero";
+    _ -> "positive"
+  ]
+]
+classify value: -5    // => "negative"
+classify value: 0     // => "zero"
+classify value: 42    // => "positive"
+```
+</details>
+
+**3. Odd sum.** Use `to:by:do:` to sum all odd numbers from 1 to 19. Verify the
+result is 100.
+
+<details>
+<summary>Hint</summary>
+
+```text
+sum := 0
+1 to: 19 by: 2 do: [:n | sum := sum + n]
+sum    // => 100
+```
+
+Odd numbers from 1 to 19: 1, 3, 5, 7, 9, 11, 13, 15, 17, 19 = 100.
+</details>
+
 Next: Chapter 9 — Collections

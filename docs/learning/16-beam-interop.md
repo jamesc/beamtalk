@@ -229,4 +229,47 @@ Beamtalk actors are gen_servers — callable from any BEAM language with
 
 Erlang exceptions → Beamtalk `RuntimeError` (catchable with `on:do:`).
 
+## Exercises
+
+**1. Erlang list operations.** Use `Erlang lists reverse:` to reverse `#(5, 4, 3, 2, 1)`
+and verify the result is `#(1, 2, 3, 4, 5)`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+result := Erlang lists reverse: #(5, 4, 3, 2, 1)
+// result => #(1, 2, 3, 4, 5)
+```
+</details>
+
+**2. Maps merge.** Use `Erlang maps merge:with:` to combine
+`#{#a => 1}` and `#{#b => 2, #c => 3}` into a single dictionary with all
+three keys.
+
+<details>
+<summary>Hint</summary>
+
+```text
+merged := Erlang maps merge: #{#a => 1} with: #{#b => 2, #c => 3}
+merged at: #a    // => 1
+merged at: #b    // => 2
+merged at: #c    // => 3
+```
+</details>
+
+**3. Catching Erlang errors.** Call a non-existent Erlang function and catch
+the error with `on:do:`. What exception class catches Erlang errors?
+
+<details>
+<summary>Hint</summary>
+
+```text
+result := [Erlang lists bogus_function: 42] on: RuntimeError do: [:e | #caught]
+// result => #caught
+```
+
+Erlang exceptions (error, exit, throw) are caught as `RuntimeError` in Beamtalk.
+</details>
+
 Next: Chapter 17 — OTP Supervisors

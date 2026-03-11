@@ -366,4 +366,55 @@ expr match: [
 
 Wildcard: `_` (matches and discards any value)
 
+## Exercises
+
+**1. Nested destructuring.** Given `pairs := #[#[1, 2], #[3, 4]]`, use
+destructuring inside `inject:into:` to sum all four values.
+
+<details>
+<summary>Hint</summary>
+
+```text
+pairs := #[#[1, 2], #[3, 4]]
+pairs inject: 0 into: [:acc :pair |
+  #[a, b] := pair
+  acc + a + b
+]
+// => 10
+```
+</details>
+
+**2. match: with guards.** Write a `match:` expression that classifies a number
+as `"even"` or `"odd"` using a guard that checks `isEven`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+7 match: [
+  x when: [x isEven] -> "even";
+  _ -> "odd"
+]
+// => "odd"
+```
+</details>
+
+**3. Map pattern matching.** Given a dictionary `#{#event => "click", #x => 5, #y => 10}`,
+use a map pattern in `match:` to extract the event name.
+
+<details>
+<summary>Hint</summary>
+
+```text
+d := #{#event => "click", #x => 5, #y => 10}
+d match: [
+  #{#event => name} -> name;
+  _ -> "unknown"
+]
+// => "click"
+```
+
+Map patterns match a subset of keys — extra keys are ignored.
+</details>
+
 Next: Chapter 15 — Type Annotations

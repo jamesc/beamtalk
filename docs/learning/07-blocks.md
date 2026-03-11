@@ -187,4 +187,52 @@ total                              // => 5
 - Capture: blocks close over outer variables
 - Non-local `^`: exits the *enclosing method* (not just the block)
 
+## Exercises
+
+**1. Max block.** Write a block that takes two numbers and returns the larger one.
+Test it with `value: 3 value: 7` and `value: 10 value: 2`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+max := [:a :b | (a > b) ifTrue: [a] ifFalse: [b]]
+max value: 3 value: 7     // => 7
+max value: 10 value: 2    // => 10
+```
+</details>
+
+**2. Block factory.** Create a `makeMultiplier` block that takes a factor and
+returns a new block that multiplies its argument by that factor. Use it to
+create a tripler and a doubler.
+
+<details>
+<summary>Hint</summary>
+
+```text
+makeMultiplier := [:factor | [:n | n * factor]]
+triple := makeMultiplier value: 3
+triple value: 5     // => 15
+double := makeMultiplier value: 2
+double value: 7     // => 14
+```
+
+The inner block captures `factor` from the outer block's scope.
+</details>
+
+**3. Arity exploration.** Create blocks with 0, 1, 2, and 3 arguments. Verify
+each one's `arity`, then call the 3-argument block using `valueWithArguments:`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+[42] arity                                                // => 0
+[:x | x] arity                                            // => 1
+[:x :y | x + y] arity                                     // => 2
+[:x :y :z | x + y + z] arity                              // => 3
+[:x :y :z | x + y + z] valueWithArguments: #(10, 20, 30)  // => 60
+```
+</details>
+
 Next: Chapter 8 — Control Flow

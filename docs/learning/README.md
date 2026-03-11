@@ -1,6 +1,7 @@
 # Learning Beamtalk
 
-A progressive language guide with runnable examples.
+A progressive language guide with runnable examples. Each chapter includes
+exercises with collapsible solution hints to help you practice.
 
 Most code examples in these chapters are tested automatically — if an example
 is wrong, CI catches it. A few chapters (22 and 25) are documentation-only
@@ -97,6 +98,12 @@ Lazy evaluation, metaprogramming, and real-world networking.
 | [23](23-streams.md) | Streams | Lazy evaluation, infinite sequences, stream pipelines, collection interop |
 | [24](24-reflection.md) | Reflection & Metaprogramming | `respondsTo:`, `fieldAt:`, `perform:`, metaclasses, class hierarchy |
 | [25](25-http.md) | HTTP Client | GET/POST/PUT/DELETE, response parsing, JSON APIs, configurable client actor |
+
+### Appendix
+
+| # | Chapter | What you'll learn |
+|---|---------|-------------------|
+| [26](26-glossary.md) | Glossary | Key terms: slot, message, actor, block, non-local return, value class, cascade, DNU, BEAM, OTP |
 
 ---
 

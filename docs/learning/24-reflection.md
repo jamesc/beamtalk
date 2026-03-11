@@ -206,4 +206,53 @@ metaclass name        → "MyClass class"
 metaclass thisClass   → MyClass
 ```
 
+## Exercises
+
+**1. Inspect all fields.** Create a `Point x: 3 y: 4` and use `fieldNames`
+and `fieldAt:` to build a description string like `"x=3, y=4"`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+p := Point x: 3 y: 4
+names := p fieldNames
+// Iterate and build: "x=3, y=4"
+// Each field: name printString ++ "=" ++ (p fieldAt: name) printString
+```
+</details>
+
+**2. Dynamic dispatch.** Store a method name as a symbol in a variable, then
+use `perform:` to call it on an object. Try calling `#size` on the string
+`"hello"`.
+
+<details>
+<summary>Hint</summary>
+
+```text
+method := #size
+"hello" perform: method    // => 5
+```
+
+`perform:` sends the message named by the symbol — useful when the method
+name is determined at runtime.
+</details>
+
+**3. Metaclass exploration.** What is `Integer class class`? Is it the same as
+`Integer class class class`? What does this tell you about the metaclass
+hierarchy?
+
+<details>
+<summary>Hint</summary>
+
+```text
+Integer class              // => Integer class (the metaclass)
+Integer class class        // => some metaclass
+Integer class class class  // => same as above
+```
+
+The metaclass hierarchy is self-grounding — at some point, the metaclass of
+a metaclass is itself, preventing infinite regress.
+</details>
+
 Next: Chapter 25 — HTTP Client
