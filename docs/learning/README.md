@@ -63,7 +63,18 @@ Classes, concurrency, and error handling — the three pillars of production Bea
 | [12](12-error-handling.md) | Error Handling | `on:do:` exceptions, the `Result` type, `doesNotUnderstand` |
 | [13](13-testing.md) | Testing with BUnit | `TestCase subclass:`, `assert:equals:`, `should:raise:`, `setUp`/`tearDown` |
 
-### Part 4 — Advanced Features
+### Part 4 — Practical Stdlib
+
+The standard library APIs you'll reach for most often: file handling, text processing, and data interchange.
+
+| # | Chapter | What you'll learn |
+|---|---------|-------------------|
+| [18](18-file-io.md) | File I/O | Reading, writing, directory operations, lazy file streams |
+| [19](19-regex.md) | Regular Expressions | Pattern matching, find/replace, splitting, compiled regex |
+| [20](20-json.md) | JSON | Parsing, generation, nested structures, round-tripping |
+| [21](21-datetime.md) | DateTime & Time | Construction, formatting, arithmetic, comparisons, high-resolution timestamps |
+
+### Part 5 — Advanced Features
 
 Pattern matching, the type system, and BEAM interoperability for when you need the full power of the platform.
 
@@ -87,14 +98,14 @@ just test-learn           # run all learning guide doctests
 
 ## Format conventions
 
-**Expression chapters** (chapters 1–9, 15) — inline assertions:
+**Expression chapters** (chapters 1–9, 15, 19–21) — inline assertions:
 
 ```beamtalk
 3 + 4           // => 7
 "hello" size    // => 5
 ```
 
-**Class chapters** (chapters 10–14, 16) — BUnit assertions:
+**Class chapters** (chapters 10–14, 16, 18) — BUnit assertions:
 
 ```beamtalk
 TestCase subclass: Ch10Examples
