@@ -281,6 +281,10 @@ pub struct CodegenOptions {
     /// Injected into the `ClassHierarchy` before codegen so user-defined REPL
     /// classes are visible to `is_actor_class` and related checks.
     pre_class_hierarchy: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// BT-1343: Override for codegen diagnostics flag.
+    /// `None` = read from `BEAMTALK_CODEGEN_DIAGNOSTICS` env var at generator creation.
+    /// `Some(true/false)` = override the env var (used by tests).
+    codegen_diagnostics: Option<bool>,
 }
 
 impl CodegenOptions {
@@ -296,6 +300,7 @@ impl CodegenOptions {
             source_path: None,
             stdlib_mode: false,
             pre_class_hierarchy: Vec::new(),
+            codegen_diagnostics: None,
         }
     }
 
@@ -324,6 +329,13 @@ impl CodegenOptions {
     #[must_use]
     pub fn with_workspace_mode(mut self, enabled: bool) -> Self {
         self.workspace_mode = enabled;
+        self
+    }
+
+    /// BT-1343: Explicitly enable or disable codegen diagnostics, overriding the env var.
+    #[must_use]
+    pub fn with_codegen_diagnostics(mut self, enabled: bool) -> Self {
+        self.codegen_diagnostics = Some(enabled);
         self
     }
 
@@ -468,6 +480,10 @@ pub fn generate_module_with_warnings(
     generator.stdlib_mode = options.stdlib_mode;
     generator.class_module_index = options.class_module_index;
     generator.source_path = options.source_path;
+    // BT-1343: Override codegen diagnostics flag if explicitly set in options.
+    if let Some(enabled) = options.codegen_diagnostics {
+        generator.codegen_diagnostics_enabled = enabled;
+    }
 
     // BT-1288: Compute semantic facts before codegen begins.
     let semantic_facts = crate::semantic_analysis::compute_semantic_facts(module);
@@ -946,6 +962,12 @@ pub(super) struct CoreErlangGenerator {
     /// BT-1288: Pre-computed semantic facts from the pre-codegen analysis pass.
     /// Used for block profile lookups and dispatch classification.
     pub(super) semantic_facts: crate::semantic_analysis::SemanticFacts,
+    /// BT-1343: Whether codegen diagnostics are enabled (`BEAMTALK_CODEGEN_DIAGNOSTICS=1`).
+    /// When true, emits `Diagnostic::hint` for calling convention choices, dynamic dispatch
+    /// fallbacks, non-local returns, and other codegen decisions.
+    codegen_diagnostics_enabled: bool,
+    /// BT-1343: Whether `StateAcc` fallback should be promoted to warning (`BEAMTALK_WARN_STATEACC=1`).
+    warn_stateacc: bool,
 }
 
 impl CoreErlangGenerator {
@@ -987,6 +1009,9 @@ impl CoreErlangGenerator {
             tier2_method_info: std::collections::HashMap::new(),
             codegen_warnings: Vec::new(),
             semantic_facts: crate::semantic_analysis::SemanticFacts::default(),
+            codegen_diagnostics_enabled: std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS")
+                .is_ok_and(|v| v == "1"),
+            warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
         }
     }
 
@@ -1028,6 +1053,9 @@ impl CoreErlangGenerator {
             tier2_method_info: std::collections::HashMap::new(),
             codegen_warnings: Vec::new(),
             semantic_facts: crate::semantic_analysis::SemanticFacts::default(),
+            codegen_diagnostics_enabled: std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS")
+                .is_ok_and(|v| v == "1"),
+            warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
         }
     }
 
@@ -1153,6 +1181,29 @@ impl CoreErlangGenerator {
     /// Warnings are returned to callers via [`generate_module_with_warnings`].
     pub(super) fn add_codegen_warning(&mut self, diag: Diagnostic) {
         self.codegen_warnings.push(diag);
+    }
+
+    /// BT-1343: Emits a codegen diagnostic (gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`).
+    ///
+    /// These are informational diagnostics about codegen decisions (calling conventions,
+    /// dynamic dispatch, NLR throw/catch, etc.). Emitted as `Diagnostic::hint` by default.
+    pub(super) fn emit_codegen_diagnostic(&mut self, message: String, span: Span) {
+        if self.codegen_diagnostics_enabled {
+            self.add_codegen_warning(Diagnostic::hint(message, span));
+        }
+    }
+
+    /// BT-1343: Emits a `StateAcc` fallback diagnostic, gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`.
+    ///
+    /// Promoted to `Diagnostic::warning` when `BEAMTALK_WARN_STATEACC=1` is also set.
+    pub(super) fn emit_stateacc_fallback_diagnostic(&mut self, message: String, span: Span) {
+        if self.codegen_diagnostics_enabled {
+            if self.warn_stateacc {
+                self.add_codegen_warning(Diagnostic::warning(message, span));
+            } else {
+                self.add_codegen_warning(Diagnostic::hint(message, span));
+            }
+        }
     }
 
     /// BT-855: Emits the standard warning for a stateful block at an Erlang call boundary.
@@ -1755,11 +1806,24 @@ impl CoreErlangGenerator {
                 // the block/method scope, but for now we generate just the value.
                 self.generate_expression(value)
             }
-            Expression::Return { value, .. } => {
+            Expression::Return { value, span, .. } => {
                 // BT-754: If inside a block with NLR infrastructure active, generate a throw
                 // so the return escapes from the block closure back to the enclosing method.
                 // Otherwise (at method body level, or no NLR), just emit the value.
                 if let Some(nlr_token) = self.current_nlr_token.clone() {
+                    // BT-1343: Emit diagnostic for NLR throw/catch generation.
+                    self.emit_codegen_diagnostic(
+                        {
+                            let line_info = self
+                                .span_to_line(*span)
+                                .map_or(String::new(), |l| format!(" at line {l}"));
+                            format!(
+                                "Non-local return{line_info}: compiled via throw/catch, \
+                                 may inhibit JIT optimization"
+                            )
+                        },
+                        *span,
+                    );
                     let val_doc = self.generate_expression(value)?;
                     // BT-761/BT-854: All NLR throws carry state as a 4-tuple.
                     // Actor methods use the current gen_server state; value type

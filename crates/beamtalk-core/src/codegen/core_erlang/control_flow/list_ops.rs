@@ -56,6 +56,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // BT-1276: Use tuple accumulator when eligible (no field/self-send mutations).
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        self.emit_loop_convention_diagnostic(&plan, body.span);
 
         // BT-524: Add is_list guard for non-list collection types.
         let list_var = self.fresh_temp_var("temp");
@@ -245,6 +246,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // BT-1276: Use tuple accumulator when eligible.
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -493,6 +495,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // BT-1276: Use tuple accumulator when eligible.
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -929,6 +932,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // BT-1276: Use tuple accumulator when eligible.
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        self.emit_loop_convention_diagnostic(&plan, body.span);
 
         // BT-524: Add is_list guard for non-list collection types.
         let list_var = self.fresh_temp_var("temp");

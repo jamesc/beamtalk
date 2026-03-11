@@ -177,6 +177,7 @@ impl CoreErlangGenerator {
         negate: bool,
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_letrec(self, body, Some(condition));
+        self.emit_loop_convention_diagnostic(&plan, body.span);
 
         if plan.use_direct_params {
             return self.generate_while_loop_direct(condition, body, &plan, negate);
@@ -888,6 +889,69 @@ mod tests {
         assert!(
             code.contains("maps':'put'('n'"),
             "readonly field: whileTrue: exit arm must repack 'n'. Got:\n{code}"
+        );
+    }
+
+    // ── BT-1343: codegen diagnostics ─────────────────────────────────────────
+
+    fn codegen_with_diagnostics(
+        src: &str,
+        enabled: bool,
+    ) -> (String, Vec<crate::source_analysis::Diagnostic>) {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let result = crate::codegen::core_erlang::generate_module_with_warnings(
+            &module,
+            crate::codegen::core_erlang::CodegenOptions::new("test")
+                .with_workspace_mode(true)
+                .with_codegen_diagnostics(enabled),
+        )
+        .expect("codegen should succeed");
+        (result.code, result.warnings)
+    }
+
+    #[test]
+    fn test_bt1343_diagnostics_off_by_default() {
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    x := 0\n    [x < 10] whileTrue: [x := x + 1]\n";
+        let (_, warnings) = codegen_with_diagnostics(src, false);
+        let codegen_diags: Vec<&str> = warnings
+            .iter()
+            .filter(|w| {
+                let m = w.message.as_str();
+                m.contains("direct-params")
+                    || m.contains("tuple-acc")
+                    || m.contains("StateAcc fallback")
+                    || m.contains("dynamic dispatch")
+            })
+            .map(|w| w.message.as_str())
+            .collect();
+        assert!(
+            codegen_diags.is_empty(),
+            "Expected no codegen diagnostics when disabled. Got: {codegen_diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_bt1343_direct_params_diagnostic() {
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    x := 0\n    [x < 10] whileTrue: [x := x + 1]\n";
+        let (_, warnings) = codegen_with_diagnostics(src, true);
+        let diag_msgs: Vec<&str> = warnings.iter().map(|w| w.message.as_str()).collect();
+        assert!(
+            diag_msgs.iter().any(|m| m.contains("direct-params")),
+            "Expected direct-params diagnostic. Got: {diag_msgs:?}"
+        );
+    }
+
+    #[test]
+    fn test_bt1343_stateacc_fallback_diagnostic() {
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    [self.n < 10] whileTrue: [self.n := self.n + 1]\n";
+        let (_, warnings) = codegen_with_diagnostics(src, true);
+        let diag_msgs: Vec<&str> = warnings.iter().map(|w| w.message.as_str()).collect();
+        assert!(
+            diag_msgs
+                .iter()
+                .any(|m| m.contains("StateAcc fallback") || m.contains("hybrid")),
+            "Expected StateAcc or hybrid diagnostic for field-only mutations. Got: {diag_msgs:?}"
         );
     }
 }
