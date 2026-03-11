@@ -1602,8 +1602,7 @@ Supervisor subclass: E2EOtpRootSup\n\
 
     // Start a BEAM node with OTP app startup — uses the same code path
     // as `beamtalk repl` when a beamtalk.toml has [application] supervisor.
-    let eval_cmd =
-        repl_startup::build_eval_cmd(0, None, None, Some("e2e_otp_test"));
+    let eval_cmd = repl_startup::build_eval_cmd(0, None, None, Some("e2e_otp_test"));
 
     let mut pa_args = repl_startup::beam_pa_args(&paths);
     // Add the project's ebin to the code path

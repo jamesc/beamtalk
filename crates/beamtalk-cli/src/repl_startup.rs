@@ -460,7 +460,10 @@ mod tests {
         // OTP app start must come after workspace_sup:start_link
         let ws_pos = cmd.find("beamtalk_workspace_sup:start_link").unwrap();
         let app_pos = cmd.find("application:ensure_all_started(my_app)").unwrap();
-        assert!(app_pos > ws_pos, "OTP app must start after workspace supervisor");
+        assert!(
+            app_pos > ws_pos,
+            "OTP app must start after workspace supervisor"
+        );
         // OTP app start must come before get_port
         let port_pos = cmd.find("beamtalk_repl_server:get_port()").unwrap();
         assert!(app_pos < port_pos, "OTP app must start before port query");
