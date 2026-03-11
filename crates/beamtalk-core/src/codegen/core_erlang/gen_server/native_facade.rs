@@ -10,7 +10,7 @@
 //! and provides `has_method/1`, `__beamtalk_meta/0`, `register_class/0`, and
 //! dispatch functions for `self delegate` methods (BT-1210).
 
-use super::super::document::{Document, INDENT, line, nest};
+use super::super::document::{Document, INDENT, join, line, nest};
 use super::super::spec_codegen;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{
@@ -695,25 +695,26 @@ impl CoreErlangGenerator {
         let dispatch_arity = method.selector.arity() + 1; // +1 for Self
 
         // Build parameter list: method params (capitalized) + Self
-        let mut param_names: Vec<String> = method
+        let mut param_docs: Vec<Document<'static>> = method
             .parameters
             .iter()
-            .map(|p| Self::to_core_erlang_var(&p.name.name))
+            .map(|p| Document::String(Self::to_core_erlang_var(&p.name.name)))
             .collect();
-        param_names.push("Self".to_string());
-
-        let params_str = param_names.join(", ");
+        param_docs.push(Document::Str("Self"));
+        let params_doc = join(param_docs, &Document::Str(", "));
 
         // Build the sync_send arguments list: [Param1, Param2, ...]
         let args_list = if method.parameters.is_empty() {
             Document::Str("[]")
         } else {
-            let arg_names: Vec<String> = method
-                .parameters
-                .iter()
-                .map(|p| Self::to_core_erlang_var(&p.name.name))
-                .collect();
-            docvec!["[", Document::String(arg_names.join(", ")), "]",]
+            let arg_docs = join(
+                method
+                    .parameters
+                    .iter()
+                    .map(|p| Document::String(Self::to_core_erlang_var(&p.name.name))),
+                &Document::Str(", "),
+            );
+            docvec!["[", arg_docs, "]"]
         };
 
         docvec![
@@ -722,7 +723,7 @@ impl CoreErlangGenerator {
             "'/",
             Document::String(dispatch_arity.to_string()),
             " = fun (",
-            Document::String(params_str),
+            params_doc,
             ") ->",
             nest(
                 INDENT,
