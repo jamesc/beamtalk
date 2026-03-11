@@ -318,12 +318,27 @@ raise_start_supervisor_error(Reason) ->
 stopSupervisor(ClassArg) ->
     case beamtalk_class_registry:is_class_object(ClassArg) of
         false ->
-            raise_stop_supervisor_type_error();
+            raise_stop_supervisor_type_error(<<"Expected a Supervisor class">>);
         true ->
             ok
     end,
     ClassPid = element(4, ClassArg),
     ClassName = beamtalk_object_class:class_name(ClassPid),
+    case beamtalk_supervisor:is_supervisor(ClassName) of
+        false ->
+            raise_stop_supervisor_type_error(
+                iolist_to_binary([
+                    atom_to_binary(ClassName, utf8),
+                    <<" is not a Supervisor or DynamicSupervisor subclass">>
+                ])
+            );
+        true ->
+            ok
+    end,
+    do_stop_supervisor(ClassName).
+
+%% @private
+do_stop_supervisor(ClassName) ->
     ChildId = {user_supervisor, ClassName},
     case supervisor:terminate_child(beamtalk_workspace_sup, ChildId) of
         ok ->
@@ -342,13 +357,11 @@ stopSupervisor(ClassArg) ->
     end.
 
 %% @private
--dialyzer({no_return, raise_stop_supervisor_type_error/0}).
-raise_stop_supervisor_type_error() ->
+-dialyzer({no_return, raise_stop_supervisor_type_error/1}).
+raise_stop_supervisor_type_error(Message) ->
     Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, 'stopSupervisor:'),
-    beamtalk_error:raise(
-        beamtalk_error:with_message(Err1, <<"Expected a Supervisor class">>)
-    ).
+    beamtalk_error:raise(beamtalk_error:with_message(Err1, Message)).
 
 %% @doc List all user-attached supervisors in the workspace supervision tree.
 %%

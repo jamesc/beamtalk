@@ -154,7 +154,7 @@ sealed Object subclass: WorkspaceInterface
   /// Workspace startSupervisor: MySup      // => #Supervisor<MySup, <0.200.0>>
   /// Workspace startSupervisor: MySup      // => #Supervisor<MySup, <0.200.0>>  (idempotent)
   /// ```
-  startSupervisor: aClass :: Object -> Supervisor =>
+  startSupervisor: aClass :: Object -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) startSupervisor: aClass
 
   /// Stop and remove a supervisor from the workspace supervision tree.
