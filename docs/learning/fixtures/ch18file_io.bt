@@ -1,0 +1,122 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/18-file-io.md
+
+TestCase subclass: Ch18FileIO
+  state: tmpDir = "target/bt-doctest-tmp/ch18"
+  state: nl = ""
+
+  setUp =>
+    self.nl := String fromCodePoint: 10
+    File mkdirAll: self.tmpDir
+    self
+
+  tearDown =>
+    File deleteAll: self.tmpDir
+    self
+
+  // — Reading and writing —
+
+  testWriteAndRead =>
+    path := self.tmpDir ++ "/hello.txt"
+    File writeAll: path contents: "Hello, Beamtalk!"
+    result := File readAll: path
+    self assert: result isOk
+    self assert: result unwrap equals: "Hello, Beamtalk!"
+
+  testReadMissingFile =>
+    result := File readAll: self.tmpDir ++ "/missing.txt"
+    self assert: result isError
+
+  testOverwrite =>
+    path := self.tmpDir ++ "/overwrite.txt"
+    File writeAll: path contents: "first"
+    File writeAll: path contents: "second"
+    self assert: (File readAll: path) unwrap equals: "second"
+
+  testFileExists =>
+    path := self.tmpDir ++ "/exists.txt"
+    self deny: (File exists: path)
+    File writeAll: path contents: "data"
+    self assert: (File exists: path)
+
+  // — Directory operations —
+
+  testMkdir =>
+    dir := self.tmpDir ++ "/subdir"
+    result := File mkdir: dir
+    self assert: result isOk
+    self assert: (File isDirectory: dir)
+
+  testMkdirAll =>
+    dir := self.tmpDir ++ "/a/b/c"
+    result := File mkdirAll: dir
+    self assert: result isOk
+    self assert: (File isDirectory: dir)
+
+  testListDirectory =>
+    File writeAll: self.tmpDir ++ "/a.txt" contents: "a"
+    File writeAll: self.tmpDir ++ "/b.txt" contents: "b"
+    entries := (File listDirectory: self.tmpDir) unwrap
+    self assert: (entries printString includesSubstring: "a.txt")
+    self assert: (entries printString includesSubstring: "b.txt")
+
+  testIsFileAndIsDirectory =>
+    path := self.tmpDir ++ "/check.txt"
+    File writeAll: path contents: "data"
+    self assert: (File isFile: path)
+    self deny: (File isDirectory: path)
+    self assert: (File isDirectory: self.tmpDir)
+    self deny: (File isFile: self.tmpDir)
+
+  testDelete =>
+    path := self.tmpDir ++ "/deleteme.txt"
+    File writeAll: path contents: "bye"
+    self assert: (File exists: path)
+    File delete: path
+    self deny: (File exists: path)
+
+  testRename =>
+    src := self.tmpDir ++ "/old.txt"
+    dst := self.tmpDir ++ "/new.txt"
+    File writeAll: src contents: "moved"
+    File rename: src to: dst
+    self deny: (File exists: src)
+    self assert: (File readAll: dst) unwrap equals: "moved"
+
+  testCwd =>
+    cwd := File cwd
+    self assert: (cwd isKindOf: String)
+    self assert: cwd size > 0
+
+  // — File streams —
+
+  testLinesStream =>
+    path := self.tmpDir ++ "/lines.txt"
+    content := "one" ++ self.nl ++ "two" ++ self.nl ++ "three"
+    File writeAll: path contents: content
+    count := (File open: path do: [:h |
+      h lines asList size
+    ]) unwrap
+    self assert: count equals: 3
+
+  testOpenDoReadLines =>
+    path := self.tmpDir ++ "/stream.txt"
+    content := "alpha" ++ self.nl ++ "beta" ++ self.nl ++ "gamma"
+    File writeAll: path contents: content
+    lines := (File open: path do: [:h |
+      h lines asList
+    ]) unwrap
+    self assert: lines size equals: 3
+    self assert: (lines at: 1) equals: "alpha"
+    self assert: (lines at: 3) equals: "gamma"
+
+  testLazyTake =>
+    path := self.tmpDir ++ "/many.txt"
+    content := "1" ++ self.nl ++ "2" ++ self.nl ++ "3" ++ self.nl ++ "4" ++ self.nl ++ "5"
+    File writeAll: path contents: content
+    count := (File open: path do: [:h |
+      (h lines take: 2) inject: 0 into: [:c :_ | c + 1]
+    ]) unwrap
+    self assert: count equals: 2

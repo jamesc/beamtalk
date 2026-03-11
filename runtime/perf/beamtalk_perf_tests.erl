@@ -590,14 +590,32 @@ bench_block_threading() ->
         bench_block_threading:fold_stateacc_block(List)
     end, ?ITERATIONS, ?WARMUP),
 
+    %% BT-1327: inject:into: pure-path variants (no mutations)
+    FoldInjectIntoTimings = run_benchmark(fun() ->
+        bench_block_threading:fold_inject_into_wrapper(List)
+    end, ?ITERATIONS, ?WARMUP),
+    FoldInlineSwapTimings = run_benchmark(fun() ->
+        bench_block_threading:fold_inline_swap(List)
+    end, ?ITERATIONS, ?WARMUP),
+
     FoldNativeStats = stats(FoldNativeTimings),
     FoldStateAccStats = stats(FoldStateAccTimings),
+    FoldInjectIntoStats = stats(FoldInjectIntoTimings),
+    FoldInlineSwapStats = stats(FoldInlineSwapTimings),
 
     report("block/fold_native", FoldNativeStats, ?ITERATIONS),
     report("block/fold_stateacc_block", FoldStateAccStats, ?ITERATIONS),
+    report("block/fold_inject_into_wrapper", FoldInjectIntoStats, ?ITERATIONS),
+    report("block/fold_inline_swap", FoldInlineSwapStats, ?ITERATIONS),
+    io:format(standard_error,
+        "PERF: block/fold_stateacc_overhead ~.2fx vs native~n",
+        [maps:get(median, FoldStateAccStats) / max(maps:get(median, FoldNativeStats), 1)]),
+    io:format(standard_error,
+        "PERF: block/fold_inject_into_overhead ~.2fx vs native~n",
+        [maps:get(median, FoldInjectIntoStats) / max(maps:get(median, FoldNativeStats), 1)]),
     io:format(standard_error,
         "PERF: block/fold_pure_overhead ~.2fx vs native~n",
-        [maps:get(median, FoldStateAccStats) / max(maps:get(median, FoldNativeStats), 1)]),
+        [maps:get(median, FoldInlineSwapStats) / max(maps:get(median, FoldNativeStats), 1)]),
 
     %% --- BT-1276: list-op with local variable mutation (StateAcc map vs tuple acc) ---
     DoNativeMutTimings = run_benchmark(fun() ->
