@@ -377,3 +377,58 @@ stderrLines_stream_yields_correct_sequence_test() ->
 %%% migration. Result wrapping is now handled by the Beamtalk class method.
 %%% Equivalent coverage: SubprocessTest>>testSpawnAndReadLine in BUnit.
 %%% ============================================================================
+
+%%% ============================================================================
+%%% validate_config — error paths (BT-1211)
+%%% ============================================================================
+
+validate_config_missing_executable_test() ->
+    {error, {missing_key, executable}} =
+        beamtalk_subprocess:start(#{}).
+
+validate_config_non_binary_executable_test() ->
+    {error, {type_error, executable, expected_binary}} =
+        beamtalk_subprocess:start(#{executable => 42}).
+
+validate_config_non_binary_args_test() ->
+    case os:type() of
+        {unix, _} ->
+            {error, {type_error, args, expected_binary_elements}} =
+                beamtalk_subprocess:start(#{executable => <<"/bin/echo">>, args => [123]});
+        _ ->
+            {skip, "Unix-only test"}
+    end.
+
+validate_config_non_map_env_test() ->
+    case os:type() of
+        {unix, _} ->
+            {error, {type_error, env, expected_map}} =
+                beamtalk_subprocess:start(#{executable => <<"/bin/echo">>, args => [], env => 42});
+        _ ->
+            {skip, "Unix-only test"}
+    end.
+
+validate_config_non_binary_dir_test() ->
+    case os:type() of
+        {unix, _} ->
+            {error, {type_error, dir, expected_binary}} =
+                beamtalk_subprocess:start(#{executable => <<"/bin/echo">>, args => [], dir => 42});
+        _ ->
+            {skip, "Unix-only test"}
+    end.
+
+validate_config_beamtalk_array_coercion_test() ->
+    case os:type() of
+        {unix, _} ->
+            %% Beamtalk Array tagged map should be coerced to a plain list
+            BtArray = #{'$beamtalk_class' => 'Array', 'data' => array:from_list([<<"hello">>])},
+            {ok, Pid} = beamtalk_subprocess:start(#{
+                executable => <<"/bin/echo">>,
+                args => BtArray
+            }),
+            Line = gen_server:call(Pid, {readLine, []}, 5000),
+            ?assertEqual(<<"hello">>, Line),
+            gen_server:stop(Pid);
+        _ ->
+            {skip, "Unix-only test"}
+    end.
