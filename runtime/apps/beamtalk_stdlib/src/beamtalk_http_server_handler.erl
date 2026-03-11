@@ -28,13 +28,13 @@
 %% State is `#{handler := Handler}` where Handler is a fun/1 or actor pid.
 -spec init(cowboy_req:req(), map()) -> {ok, cowboy_req:req(), map()}.
 init(Req0, #{handler := Handler} = State) ->
-    HttpRequest = build_request(Req0),
+    {HttpRequest, Req1} = build_request(Req0),
     try call_handler(Handler, HttpRequest) of
         Response when is_map(Response) ->
             Status = get_response_field(Response, status, 200),
             Headers = get_response_headers(Response),
             Body = get_response_field(Response, body, <<>>),
-            Req = cowboy_req:reply(Status, Headers, Body, Req0),
+            Req = cowboy_req:reply(Status, Headers, Body, Req1),
             {ok, Req, State};
         Other ->
             ?LOG_ERROR(
@@ -45,7 +45,7 @@ init(Req0, #{handler := Handler} = State) ->
                 500,
                 #{<<"content-type">> => <<"text/plain">>},
                 <<"Internal Server Error">>,
-                Req0
+                Req1
             ),
             {ok, Req, State}
     catch
@@ -58,7 +58,7 @@ init(Req0, #{handler := Handler} = State) ->
                 500,
                 #{<<"content-type">> => <<"text/plain">>},
                 <<"Internal Server Error">>,
-                Req0
+                Req1
             ),
             {ok, Req, State}
     end.
@@ -68,29 +68,36 @@ init(Req0, #{handler := Handler} = State) ->
 %%% ============================================================================
 
 %% @private Build an HTTPRequest value object from a cowboy request.
+%%
+%% Returns `{HTTPRequest, UpdatedReq}` — the updated Req must be used for
+%% the reply, since `read_body` consumes the body stream from the socket.
 -dialyzer({nowarn_function, build_request/1}).
--spec build_request(cowboy_req:req()) -> map().
-build_request(Req) ->
-    Method = cowboy_req:method(Req),
-    Path = cowboy_req:path(Req),
-    HeadersList = maps:to_list(cowboy_req:headers(Req)),
+-spec build_request(cowboy_req:req()) -> {map(), cowboy_req:req()}.
+build_request(Req0) ->
+    Method = cowboy_req:method(Req0),
+    Path = cowboy_req:path(Req0),
+    HeadersList = maps:to_list(cowboy_req:headers(Req0)),
     Headers = [[Name, Value] || {Name, Value} <- HeadersList],
-    Body = read_body(Req),
-    QsMap = parse_query_params(Req),
-    'bt@stdlib@httprequest':'class_method:path:headers:body:queryParams:'(
+    {Body, Req1} = read_body(Req0),
+    QsMap = parse_query_params(Req1),
+    HttpRequest = 'bt@stdlib@httprequest':'class_method:path:headers:body:queryParams:'(
         undefined, undefined, Method, Path, Headers, Body, QsMap
-    ).
+    ),
+    {HttpRequest, Req1}.
 
 %% @private Read the full request body (may be chunked).
--spec read_body(cowboy_req:req()) -> binary().
+%%
+%% Returns `{Body, UpdatedReq}` so the caller can use the updated Req
+%% for subsequent cowboy operations (e.g. reply).
+-spec read_body(cowboy_req:req()) -> {binary(), cowboy_req:req()}.
 read_body(Req) ->
     read_body(Req, <<>>).
 
--spec read_body(cowboy_req:req(), binary()) -> binary().
+-spec read_body(cowboy_req:req(), binary()) -> {binary(), cowboy_req:req()}.
 read_body(Req0, Acc) ->
     case cowboy_req:read_body(Req0) of
-        {ok, Data, _Req} ->
-            <<Acc/binary, Data/binary>>;
+        {ok, Data, Req} ->
+            {<<Acc/binary, Data/binary>>, Req};
         {more, Data, Req} ->
             read_body(Req, <<Acc/binary, Data/binary>>)
     end.
