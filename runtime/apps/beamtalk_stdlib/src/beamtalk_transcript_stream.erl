@@ -41,7 +41,6 @@
 
 %% API
 -export([start_link/0, start_link/1, start_link/2, spawn/0, spawn/1]).
--export([class_info/0]).
 -export([ensure_utf8/1]).
 -export([subscribe/1, unsubscribe/1]).
 
@@ -98,28 +97,6 @@ spawn() ->
 spawn(Config) when is_map(Config) ->
     MaxBuffer = maps:get(max_buffer, Config, 1000),
     gen_server:start(?MODULE, [MaxBuffer], []).
-
-%% @doc Return class registration metadata for TranscriptStream.
-%%
-%% Used by beamtalk_stdlib to register this singleton's class.
-%% Single source of truth for class name, superclass, and method table.
--spec class_info() -> map().
-class_info() ->
-    #{
-        name => 'TranscriptStream',
-        module => ?MODULE,
-        superclass => 'Actor',
-        instance_methods => #{
-            'show:' => #{arity => 1},
-            cr => #{arity => 0},
-            subscribe => #{arity => 0},
-            unsubscribe => #{arity => 0},
-            recent => #{arity => 0},
-            clear => #{arity => 0}
-        },
-        class_methods => #{},
-        fields => []
-    }.
 
 %%% ============================================================================
 %%% Module-level subscribe/unsubscribe API
@@ -255,17 +232,7 @@ handle_cast({unsubscribe, [], FuturePid}, #state{self_ref = SelfRef} = State) wh
     CallerPid = caller_from_future(FuturePid),
     beamtalk_future:resolve(FuturePid, SelfRef),
     {noreply, remove_subscriber(CallerPid, State)};
-%% Legacy format (direct gen_server:cast without Future)
-handle_cast({'show:', Value}, State) ->
-    Text = beamtalk_primitive:display_string(Value),
-    State1 = buffer_text(Text, State),
-    push_to_subscribers(Text, State1),
-    {noreply, State1};
-handle_cast(cr, State) ->
-    Text = <<"\n">>,
-    State1 = buffer_text(Text, State),
-    push_to_subscribers(Text, State1),
-    {noreply, State1};
+%% Module-level subscribe/unsubscribe API (direct gen_server:cast, no Future)
 handle_cast({subscribe, Pid}, State) ->
     {noreply, add_subscriber(Pid, State)};
 handle_cast({unsubscribe, Pid}, State) ->
