@@ -551,6 +551,7 @@ pub fn check_native_delegate<'a>(
         if *file_path != location.file {
             continue;
         }
+        // Check inline class methods
         for class in &module.classes {
             let backing_module = match &class.backing_module {
                 Some(ident) => &ident.name,
@@ -561,6 +562,22 @@ pub fn check_native_delegate<'a>(
                     return Some(NativeDelegateInfo {
                         backing_module: backing_module.clone(),
                     });
+                }
+            }
+        }
+        // Check Tonel-style standalone method definitions (e.g., `MyNative >> sel => self delegate`)
+        for smd in &module.method_definitions {
+            if smd.method.span == location.span && smd.method.is_self_delegate() {
+                // Find the backing module from the class definition in this or any file
+                let class_name = smd.class_name.name.as_str();
+                for class in &module.classes {
+                    if class.name.name == class_name {
+                        if let Some(ident) = &class.backing_module {
+                            return Some(NativeDelegateInfo {
+                                backing_module: ident.name.clone(),
+                            });
+                        }
+                    }
                 }
             }
         }

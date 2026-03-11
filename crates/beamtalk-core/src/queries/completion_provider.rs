@@ -641,7 +641,7 @@ fn add_receiver_type_completions(
     match receiver_type {
         Some(ReceiverSide::Instance(class_name)) if hierarchy.has_class(class_name) => {
             for method in hierarchy.all_methods(class_name) {
-                if should_exclude_delegate(&method.selector, context) {
+                if should_exclude_delegate(&method.selector, &method.defined_in, context) {
                     continue;
                 }
                 if seen.insert(method.selector.clone()) {
@@ -657,7 +657,7 @@ fn add_receiver_type_completions(
         }
         Some(ReceiverSide::Class(class_name)) if hierarchy.has_class(class_name) => {
             for method in hierarchy.all_class_methods(class_name) {
-                if should_exclude_delegate(&method.selector, context) {
+                if should_exclude_delegate(&method.selector, &method.defined_in, context) {
                     continue;
                 }
                 if seen.insert(method.selector.clone()) {
@@ -719,13 +719,16 @@ fn method_completion_doc(
     }
 }
 
-/// Returns `true` if the selector `delegate` should be excluded from completions.
+/// Returns `true` if the `delegate` method from `Actor` should be excluded from completions.
 ///
 /// The sealed `delegate` method on `Actor` is only meaningful for native classes
 /// (those with a `native:` declaration). Showing it on non-native actors would be
 /// misleading since calling it raises an error at runtime (ADR 0056).
-fn should_exclude_delegate(selector: &str, context: &ClassContext<'_>) -> bool {
-    if selector != "delegate" {
+///
+/// Only filters `delegate` when it is defined on `Actor` — user-defined methods
+/// named `delegate` on other classes are not affected.
+fn should_exclude_delegate(selector: &str, defined_in: &str, context: &ClassContext<'_>) -> bool {
+    if selector != "delegate" || defined_in != "Actor" {
         return false;
     }
     match context {
@@ -766,7 +769,7 @@ fn add_hierarchy_completions(
             // Add instance methods for the enclosing class (including inherited)
             let class_name = class.name.name.as_str();
             for method in hierarchy.all_methods(class_name) {
-                if should_exclude_delegate(&method.selector, context) {
+                if should_exclude_delegate(&method.selector, &method.defined_in, context) {
                     continue;
                 }
                 if seen.insert(method.selector.clone()) {
@@ -789,7 +792,7 @@ fn add_hierarchy_completions(
             // Add class-side methods for the enclosing class (including inherited)
             let class_name = class.name.name.as_str();
             for method in hierarchy.all_class_methods(class_name) {
-                if should_exclude_delegate(&method.selector, context) {
+                if should_exclude_delegate(&method.selector, &method.defined_in, context) {
                     continue;
                 }
                 if seen.insert(method.selector.clone()) {
@@ -802,7 +805,7 @@ fn add_hierarchy_completions(
             }
             // Also include instance methods (class methods can access them via instances)
             for method in hierarchy.all_methods(class_name) {
-                if should_exclude_delegate(&method.selector, context) {
+                if should_exclude_delegate(&method.selector, &method.defined_in, context) {
                     continue;
                 }
                 if seen.insert(method.selector.clone()) {
@@ -818,7 +821,7 @@ fn add_hierarchy_completions(
             // Add methods from all classes defined in the module
             for class in &module.classes {
                 for method in hierarchy.all_methods(class.name.name.as_str()) {
-                    if should_exclude_delegate(&method.selector, context) {
+                    if should_exclude_delegate(&method.selector, &method.defined_in, context) {
                         continue;
                     }
                     if seen.insert(method.selector.clone()) {
@@ -831,7 +834,7 @@ fn add_hierarchy_completions(
                 }
                 // Also add class-side methods for top-level completions
                 for method in hierarchy.all_class_methods(class.name.name.as_str()) {
-                    if should_exclude_delegate(&method.selector, context) {
+                    if should_exclude_delegate(&method.selector, &method.defined_in, context) {
                         continue;
                     }
                     if seen.insert(method.selector.clone()) {
@@ -846,7 +849,7 @@ fn add_hierarchy_completions(
 
             // Always include common Object/ProtoObject methods for general completions
             for method in hierarchy.all_methods("Object") {
-                if should_exclude_delegate(&method.selector, context) {
+                if should_exclude_delegate(&method.selector, &method.defined_in, context) {
                     continue;
                 }
                 if seen.insert(method.selector.clone()) {
