@@ -191,29 +191,61 @@ impl CoreErlangGenerator {
 
     /// Generates `spawn/1` for native facade — calls `BackingModule:start_link/1`.
     ///
+    /// Wraps `start_link` in try-catch to handle crashes, and matches all three
+    /// OTP return values (`{ok, Pid}`, `{error, Reason}`, `ignore`).
+    ///
     /// ```erlang
     /// 'spawn'/1 = fun (Config) ->
     ///     case call 'erlang':'is_map'(Config) of
     ///       <'false'> when 'true' ->
     ///         %% type_error for non-map arguments
     ///       <'true'> when 'true' ->
-    ///         case call 'backing_module':'start_link'(Config) of
+    ///         let StartResult = try call 'backing_module':'start_link'(Config)
+    ///           of _StartOk -> _StartOk
+    ///           catch <_C, CrashReason, _S> -> {'__bt_spawn_crash', CrashReason}
+    ///         in
+    ///         case StartResult of
     ///           <{'ok', Pid}> when 'true' ->
     ///             {'beamtalk_object', 'ClassName', 'module_name', Pid}
     ///           <{'error', Reason}> when 'true' ->
-    ///             %% instantiation_error
+    ///             %% instantiation_error with reason
+    ///           <'ignore'> when 'true' ->
+    ///             %% instantiation_error with reason => 'ignore'
+    ///           <{'__bt_spawn_crash', CrashReason}> when 'true' ->
+    ///             %% instantiation_error with reason => CrashReason
     ///         end
     ///     end
     /// ```
     #[allow(clippy::unnecessary_wraps)]
     #[expect(
         clippy::too_many_lines,
-        reason = "native spawn-with-args handles map validation and error details"
+        reason = "native spawn-with-args handles map validation, try-catch, and error details"
     )]
     fn generate_native_spawn_1(&mut self, backing_module: &str) -> Result<Document<'static>> {
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
         let hint_binary = Self::binary_string_literal("spawnWith: expects a Dictionary argument");
+
+        // Helper: build an instantiation_error with reason in details
+        let spawn_error_with_reason = |class: &str, reason_var: &str| -> Document<'static> {
+            docvec![
+                docvec![
+                    "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '",
+                    Document::String(class.to_string()),
+                    "') in",
+                ],
+                line(),
+                "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in",
+                line(),
+                docvec![
+                    "let SpawnErr2 = call 'beamtalk_error':'with_details'(SpawnErr1, ~{'reason' => ",
+                    Document::String(reason_var.to_string()),
+                    "}~) in",
+                ],
+                line(),
+                "call 'beamtalk_error':'raise'(SpawnErr2)",
+            ]
+        };
 
         let doc = docvec![
             "'spawn'/1 = fun (Config) ->",
@@ -254,11 +286,25 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
+                                    // BT-1337: Wrap start_link in try-catch to handle crashes
                                     docvec![
-                                        "case call '",
+                                        "let StartResult = try call '",
                                         Document::String(backing_module.to_string()),
-                                        "':'start_link'(Config) of",
+                                        "':'start_link'(Config)",
                                     ],
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "of _StartOk -> _StartOk",
+                                            line(),
+                                            "catch <_SpawnC, SpawnCrashReason, _SpawnS> -> {'__bt_spawn_crash', SpawnCrashReason}",
+                                        ]
+                                    ),
+                                    line(),
+                                    "in",
+                                    line(),
+                                    "case StartResult of",
                                     nest(
                                         INDENT,
                                         docvec![
@@ -286,17 +332,33 @@ impl CoreErlangGenerator {
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    docvec![
-                                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '",
-                                                        Document::String(class_name.clone()),
-                                                        "') in",
-                                                    ],
+                                                    spawn_error_with_reason(&class_name, "Reason"),
+                                                ]
+                                            ),
+                                            line(),
+                                            // BT-1337: Handle `ignore` from init/1
+                                            "<'ignore'> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
                                                     line(),
-                                                    "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in",
+                                                    spawn_error_with_reason(
+                                                        &class_name,
+                                                        "'ignore'"
+                                                    ),
+                                                ]
+                                            ),
+                                            line(),
+                                            // BT-1337: Handle crash from start_link
+                                            "<{'__bt_spawn_crash', SpawnCrashReason}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
                                                     line(),
-                                                    "let SpawnErr2 = call 'beamtalk_error':'with_details'(SpawnErr1, ~{'reason' => Reason}~) in",
-                                                    line(),
-                                                    "call 'beamtalk_error':'raise'(SpawnErr2)",
+                                                    spawn_error_with_reason(
+                                                        &class_name,
+                                                        "SpawnCrashReason"
+                                                    ),
                                                 ]
                                             ),
                                         ]

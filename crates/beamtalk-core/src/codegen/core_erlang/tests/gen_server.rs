@@ -3008,6 +3008,50 @@ fn test_native_facade_spawn_error_raises_instantiation_error() {
     );
 }
 
+#[test]
+fn test_native_facade_spawn_handles_ignore() {
+    // BT-1337: spawn/1 should handle `ignore` from start_link (init/1 returned ignore)
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("<'ignore'> when 'true' ->"),
+        "spawn/1 should have an 'ignore' match arm. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'reason' => 'ignore'"),
+        "ignore case should set reason => 'ignore' in details. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_spawn_wraps_crash_in_try_catch() {
+    // BT-1337: spawn/1 should wrap start_link in try-catch for crash handling
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("let StartResult = try call"),
+        "spawn/1 should wrap start_link in try-catch. Got:\n{code}"
+    );
+    assert!(
+        code.contains("of _StartOk -> _StartOk"),
+        "try-catch should have of clause for success passthrough. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'__bt_spawn_crash', SpawnCrashReason}"),
+        "catch arm should wrap crash reason in __bt_spawn_crash tuple. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<{'__bt_spawn_crash', SpawnCrashReason}> when 'true' ->"),
+        "case should match __bt_spawn_crash tuple. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'reason' => SpawnCrashReason"),
+        "crash case should include SpawnCrashReason in details. Got:\n{code}"
+    );
+}
+
 /// Build a native actor with class methods and class variables for richer tests.
 fn make_native_actor_with_class_methods() -> Module {
     let class = ClassDefinition {
