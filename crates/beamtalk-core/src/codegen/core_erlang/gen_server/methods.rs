@@ -196,6 +196,7 @@ impl CoreErlangGenerator {
             let is_last = i == body.len() - 1;
             let is_field_assignment = Self::is_field_assignment(expr);
             let is_local_assignment = Self::is_local_var_assignment(expr);
+            let is_self_field_at_put = self.is_self_field_at_put(expr);
 
             // Check for early return
             if let Expression::Return { value, .. } = expr {
@@ -234,8 +235,24 @@ impl CoreErlangGenerator {
 
             if is_last {
                 // Last expression: bind to Result and generate reply tuple
+                // BT-1324: self fieldAt:put: with state threading
+                if is_self_field_at_put {
+                    let doc = self.generate_self_field_at_put_open(expr)?;
+                    docs.push(doc);
+                    let val_var = self
+                        .last_open_scope_result
+                        .clone()
+                        .unwrap_or_else(|| "_".to_string());
+                    let final_state = self.current_state_var();
+                    docs.push(docvec![
+                        "{'reply', ",
+                        Document::String(val_var),
+                        ", ",
+                        Document::String(final_state),
+                        "}",
+                    ]);
                 // If the last expression is a field assignment, handle specially
-                if is_field_assignment {
+                } else if is_field_assignment {
                     // Generate the assignment (leaves state binding open)
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::FieldAccess { field, .. } = target.as_ref() {
@@ -364,6 +381,10 @@ impl CoreErlangGenerator {
                     ];
                     docs.push(doc);
                 }
+            } else if is_self_field_at_put {
+                // BT-1324: self fieldAt:put: not at end: open let chain for state threading
+                let doc = self.generate_self_field_at_put_open(expr)?;
+                docs.push(doc);
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 let doc = self.generate_field_assignment_open(expr)?;
@@ -579,11 +600,28 @@ impl CoreErlangGenerator {
             let is_last = i == body.len() - 1;
             let is_field_assignment = Self::is_field_assignment(expr);
             let is_local_assignment = Self::is_local_var_assignment(expr);
+            let is_self_field_at_put = self.is_self_field_at_put(expr);
 
             if is_last {
                 // Last expression: bind to Result and generate reply tuple
+                // BT-1324: self fieldAt:put: with state threading
+                if is_self_field_at_put {
+                    let doc = self.generate_self_field_at_put_open(expr)?;
+                    docs.push(doc);
+                    let val_var = self
+                        .last_open_scope_result
+                        .clone()
+                        .unwrap_or_else(|| "_".to_string());
+                    let final_state = self.current_state_var();
+                    docs.push(docvec![
+                        "{'reply', ",
+                        Document::String(val_var),
+                        ", ",
+                        Document::String(final_state),
+                        "}",
+                    ]);
                 // If the last expression is a field assignment, handle specially
-                if is_field_assignment {
+                } else if is_field_assignment {
                     // Generate the assignment (leaves state binding open)
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::FieldAccess { field, .. } = target.as_ref() {
@@ -712,6 +750,10 @@ impl CoreErlangGenerator {
                     ];
                     docs.push(doc);
                 }
+            } else if is_self_field_at_put {
+                // BT-1324: self fieldAt:put: not at end: open let chain for state threading
+                let doc = self.generate_self_field_at_put_open(expr)?;
+                docs.push(doc);
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 let doc = self.generate_field_assignment_open(expr)?;
