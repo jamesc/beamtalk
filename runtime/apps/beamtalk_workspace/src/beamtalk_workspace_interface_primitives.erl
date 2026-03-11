@@ -316,11 +316,11 @@ raise_start_supervisor_error(Reason) ->
         )
     ).
 
-%% @doc Stop and remove a user supervisor from the workspace supervision tree.
+%% @doc Stop and remove a supervisor from the workspace.
 %%
 %% Called via `(Erlang beamtalk_workspace_interface_primitives) stopSupervisor: MySup`.
-%% Cleanly shuts down the supervisor and all its children before removing the
-%% child spec from the workspace supervisor.
+%% Works for both workspace-attached supervisors and the root application
+%% supervisor. Cleanly shuts down the supervisor and all its children.
 -spec stopSupervisor(tuple()) -> nil.
 stopSupervisor(ClassArg) ->
     case beamtalk_class_registry:is_class_object(ClassArg) of
@@ -356,7 +356,11 @@ do_stop_supervisor(ClassName) ->
             %% application supervisor. If so, stop it and clear the ETS entry.
             case beamtalk_supervisor:get_root() of
                 {beamtalk_supervisor, ClassName, _Module, Pid} ->
-                    gen_server:stop(Pid),
+                    try
+                        gen_server:stop(Pid)
+                    catch
+                        exit:{noproc, _} -> ok
+                    end,
                     beamtalk_supervisor:clear_root(),
                     nil;
                 _ ->
