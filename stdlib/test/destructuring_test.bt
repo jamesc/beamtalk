@@ -301,3 +301,56 @@ TestCase subclass: DestructuringTest
         x + y
       ]
     self assert: sums equals: #[11, 22]
+
+  // === Array rest pattern (#[a, ...rest] := expr) ===
+  testArrayRestPatternBasic =>
+    #[first, ...rest] := #[1, 2, 3, 4, 5]
+    self assert: first equals: 1
+    self assert: rest equals: #[2, 3, 4, 5]
+
+  testArrayRestPatternTwoPositional =>
+    #[a, b, ...remaining] := #[10, 20, 30, 40]
+    self assert: a equals: 10
+    self assert: b equals: 20
+    self assert: remaining equals: #[30, 40]
+
+  testArrayRestPatternNoRemainder =>
+    // When array has exact number of positional elements, rest is empty
+    #[x, y, ...tail] := #[1, 2]
+    self assert: x equals: 1
+    self assert: y equals: 2
+    self assert: tail equals: #[]
+
+  testArrayRestPatternOnlyRest =>
+    // No positional elements, just rest — captures the whole array
+    #[...all] := #[10, 20, 30]
+    self assert: all equals: #[10, 20, 30]
+
+  testArrayRestPatternWithWildcardPositional =>
+    // Wildcard in a positional slot, rest captures remainder
+    #[_, ...rest] := #[99, 42, 7]
+    self assert: rest equals: #[42, 7]
+
+  testArrayRestPatternWithLiteralPositional =>
+    // Literal in a positional slot with rest
+    #[#ok, ...values] := #[#ok, 1, 2, 3]
+    self assert: values equals: #[1, 2, 3]
+
+  testArrayRestPatternWithWildcardRest =>
+    // ..._ discards the rest (no binding)
+    #[head, ..._] := #[1, 2, 3, 4, 5]
+    self assert: head equals: 1
+
+  testArrayRestPatternInBlock =>
+    // Rest pattern inside a collect: block
+    result := #[#[1, 2, 3], #[10, 20, 30]]
+      collect: [:arr |
+        #[_, ...rest] := arr
+        rest
+      ]
+    self assert: result equals: #[#[2, 3], #[20, 30]]
+
+  testArrayRestPatternSingleElement =>
+    // Array with one element, no positional, rest gets it all
+    #[...items] := #[42]
+    self assert: items equals: #[42]

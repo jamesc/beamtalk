@@ -272,7 +272,17 @@ impl Parser {
         list_syntax: bool,
     ) -> Result<Pattern, Span> {
         let mut patterns = Vec::new();
+        let mut rest = None;
         for elem in elements {
+            if let Expression::Spread { name, span: s } = elem {
+                let rest_pat = if name.name == "_" {
+                    Pattern::Wildcard(*s)
+                } else {
+                    Pattern::Variable(name.clone())
+                };
+                rest = Some(Box::new(rest_pat));
+                break; // rest is always last; ignore anything after
+            }
             let pat = match elem {
                 Expression::Identifier(id) if id.name == "_" => Pattern::Wildcard(id.span),
                 Expression::Identifier(id) => Pattern::Variable(id.clone()),
@@ -283,6 +293,7 @@ impl Parser {
         }
         Ok(Pattern::Array {
             elements: patterns,
+            rest,
             list_syntax,
             span,
         })
@@ -1220,19 +1231,28 @@ impl Parser {
         Pattern::Tuple { elements, span }
     }
 
-    /// Parses an array destructuring pattern: `#[p1, p2, ...]`
+    /// Parses an array destructuring pattern: `#[p1, p2, ...rest]`
     fn parse_array_pattern(&mut self) -> Pattern {
         let start = self
             .expect(&TokenKind::ArrayOpen, "Expected '#['")
             .map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
         let mut elements = Vec::new();
+        let mut rest = None;
 
         if !self.check(&TokenKind::RightBracket) {
-            elements.push(self.parse_pattern());
-            while self.match_binary_selector(",") {
+            if self.check(&TokenKind::Ellipsis) {
+                rest = Some(Box::new(self.parse_rest_pattern()));
+            } else {
+                elements.push(self.parse_pattern());
+            }
+            while rest.is_none() && self.match_binary_selector(",") {
                 if self.check(&TokenKind::RightBracket) {
                     break; // trailing comma
+                }
+                if self.check(&TokenKind::Ellipsis) {
+                    rest = Some(Box::new(self.parse_rest_pattern()));
+                    break;
                 }
                 elements.push(self.parse_pattern());
             }
@@ -1244,8 +1264,32 @@ impl Parser {
 
         Pattern::Array {
             elements,
+            rest,
             list_syntax: false,
             span: start.merge(end),
+        }
+    }
+
+    /// Parses a rest pattern: `...identifier` or `..._`
+    fn parse_rest_pattern(&mut self) -> Pattern {
+        let ellipsis_span = self
+            .expect(&TokenKind::Ellipsis, "Expected '...'")
+            .map_or_else(|| self.current_token().span(), |t: Token| t.span());
+
+        match self.current_token().kind() {
+            TokenKind::Identifier(name) if name.as_str() == "_" => {
+                let span = self.current_token().span();
+                self.advance();
+                Pattern::Wildcard(ellipsis_span.merge(span))
+            }
+            TokenKind::Identifier(_) => {
+                let id = self.parse_identifier("Expected identifier after '...'");
+                Pattern::Variable(Identifier::new(&id.name, ellipsis_span.merge(id.span)))
+            }
+            _ => {
+                self.error("Expected identifier after '...'");
+                Pattern::Wildcard(ellipsis_span)
+            }
         }
     }
 
@@ -2000,10 +2044,21 @@ impl Parser {
 
         // Parse elements
         loop {
-            // Parse element as a full keyword message (lowest message precedence), so
-            // `#(obj kw: arg)` is a single-element list containing the keyword send.
-            // `,`, `|`, and `)` are not keyword or binary selectors so they terminate naturally.
-            let elem = self.parse_keyword_message();
+            // Rest/spread element: `...ident` — only valid in destructuring patterns
+            let is_spread = self.check(&TokenKind::Ellipsis);
+            let elem = if is_spread {
+                let ellipsis_token = self.advance();
+                let ellipsis_span = ellipsis_token.span();
+                let name = self.parse_identifier("Expected identifier after '...'");
+                let span = ellipsis_span.merge(name.span);
+                Expression::Spread { name, span }
+            } else {
+                // Parse element as a full keyword message (lowest message precedence), so
+                // `#(obj kw: arg)` is a single-element list containing the keyword send.
+                // `,`, `|`, and `)` are not keyword or binary selectors so they terminate naturally.
+                self.parse_keyword_message()
+            };
+            let elem_span = elem.span();
             elements.push(elem);
 
             // Check for cons operator `|`
@@ -2030,6 +2085,12 @@ impl Parser {
 
             // Check for comma (continue) or closing paren (end)
             if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
+                if is_spread {
+                    self.diagnostics.push(Diagnostic::error(
+                        "Rest pattern `...` must be the last element in a list pattern",
+                        elem_span,
+                    ));
+                }
                 self.advance(); // consume comma
                 // Allow trailing comma
                 if self.check(&TokenKind::RightParen) {
@@ -2088,12 +2149,29 @@ impl Parser {
 
         // Parse elements
         loop {
-            // Parse element as a full keyword message so `#[obj kw: arg]` works.
-            let elem = self.parse_keyword_message();
+            // Rest/spread element: `...ident` — only valid in destructuring patterns
+            let is_spread = self.check(&TokenKind::Ellipsis);
+            let elem = if is_spread {
+                let ellipsis_token = self.advance();
+                let ellipsis_span = ellipsis_token.span();
+                let name = self.parse_identifier("Expected identifier after '...'");
+                let span = ellipsis_span.merge(name.span);
+                Expression::Spread { name, span }
+            } else {
+                // Parse element as a full keyword message so `#[obj kw: arg]` works.
+                self.parse_keyword_message()
+            };
+            let elem_span = elem.span();
             elements.push(elem);
 
             // Check for comma (continue) or closing bracket (end)
             if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
+                if is_spread {
+                    self.diagnostics.push(Diagnostic::error(
+                        "Rest pattern `...` must be the last element in an array pattern",
+                        elem_span,
+                    ));
+                }
                 self.advance(); // consume comma
                 // Allow trailing comma
                 if self.check(&TokenKind::RightBracket) {

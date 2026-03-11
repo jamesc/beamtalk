@@ -195,7 +195,8 @@ fn has_error_node(expr: &Expression) -> bool {
         | Expression::ClassReference { .. }
         | Expression::Super(..)
         | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. } => false,
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. } => false,
     }
 }
 

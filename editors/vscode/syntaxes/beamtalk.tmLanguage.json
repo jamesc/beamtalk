@@ -143,6 +143,10 @@
           "match": ":="
         },
         {
+          "name": "keyword.operator.spread.beamtalk",
+          "match": "\\.\\.\\."
+        },
+        {
           "name": "keyword.operator.return.beamtalk",
           "match": "\\^"
         },

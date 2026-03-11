@@ -1813,6 +1813,10 @@ impl CoreErlangGenerator {
                 location: format!("{span:?}"),
             }),
             Expression::ExpectDirective { .. } => Ok(Document::Nil),
+            Expression::Spread { name, .. } => Err(CodeGenError::UnsupportedFeature {
+                feature: format!("spread expression: {}", name.name),
+                location: format!("{:?}", name.span),
+            }),
         }
     }
 
