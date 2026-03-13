@@ -13,7 +13,7 @@ use tracing::debug;
 
 use super::highlighter::highlight_beamtalk;
 use super::layout::{page_footer_simple, page_header};
-use super::renderer::{html_escape, render_doc};
+use super::renderer::{html_escape, render_doc_trusted};
 
 // ---------------------------------------------------------------------------
 // Prose docs
@@ -74,7 +74,7 @@ pub(super) fn generate_prose_docs(
         html.push_str("<a href=\"index.html\">Documentation</a> &rsaquo; ");
         html.push_str(&html_escape(title));
         html.push_str("</div>\n");
-        html.push_str(&render_doc(&markdown));
+        html.push_str(&render_doc_trusted(&markdown));
         html.push_str("</main>\n");
         html.push_str(&page_footer_simple());
 
@@ -470,7 +470,7 @@ fn render_adr_page(
     html.push_str("<a href=\"index.html\">Architecture Decisions</a> &rsaquo; ");
     let _ = write!(html, "ADR {}", html_escape(&adr.number));
     html.push_str("</div>\n");
-    html.push_str(&render_doc(content));
+    html.push_str(&render_doc_trusted(content));
     html.push_str("</main>\n");
     html.push_str(&page_footer_simple());
 
@@ -741,7 +741,7 @@ fn render_learning_index(
                 "../beamtalk-syntax-rationale.md",
                 "../docs/syntax-rationale.html",
             );
-        html.push_str(&render_doc(&content));
+        html.push_str(&render_doc_trusted(&content));
     } else {
         html.push_str("<h1>Learn Beamtalk</h1>\n");
         html.push_str(
@@ -830,7 +830,7 @@ fn render_chapter_page(
     html.push_str(&html_escape(&chapter.title));
     html.push_str("</div>\n");
     html.push_str(&chapter_nav(prev, next));
-    html.push_str(&render_doc(content));
+    html.push_str(&render_doc_trusted(content));
     html.push_str(&chapter_nav(prev, next));
     html.push_str("</main>\n");
     html.push_str(&page_footer_simple());
