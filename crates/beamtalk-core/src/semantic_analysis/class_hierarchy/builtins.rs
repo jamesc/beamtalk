@@ -34,6 +34,7 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
         kind: MethodKind::Primary,
         defined_in: defined_in.into(),
         is_sealed: false,
+        spawns_block: false,
         return_type: None,
         param_types: vec![None; arity],
         doc: None,

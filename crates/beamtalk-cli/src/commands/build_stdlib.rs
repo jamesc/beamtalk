@@ -362,6 +362,8 @@ struct MethodMeta {
     kind: MethodKindMeta,
     /// Whether this method is sealed (cannot be overridden).
     is_sealed: bool,
+    /// Whether this method spawns its block argument in a separate BEAM process.
+    spawns_block: bool,
     /// Return type annotation (e.g., `"Integer"`), if present.
     return_type: Option<String>,
     /// Parameter type annotations, one per parameter. `None` means untyped.
@@ -454,6 +456,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
             arity: m.selector.arity(),
             kind: MethodKindMeta::from_ast(m.kind),
             is_sealed: m.is_sealed,
+            spawns_block: false,
             return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
             param_types: m
                 .parameters
@@ -476,6 +479,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
             arity: m.selector.arity(),
             kind: MethodKindMeta::from_ast(m.kind),
             is_sealed: m.is_sealed,
+            spawns_block: false,
             return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
             param_types: m
                 .parameters
@@ -541,6 +545,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                     arity: 0,
                     kind: MethodKindMeta::Primary,
                     is_sealed: false,
+                    spawns_block: false,
                     return_type: slot
                         .type_annotation
                         .as_ref()
@@ -574,6 +579,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                     arity: 1,
                     kind: MethodKindMeta::Primary,
                     is_sealed: false,
+                    spawns_block: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![param_type],
                     doc: Some(setter_doc),
@@ -618,10 +624,22 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                 arity,
                 kind: MethodKindMeta::Primary,
                 is_sealed: false,
+                spawns_block: false,
                 return_type: Some(class_name.clone()),
                 param_types,
                 doc: Some(ctor_doc),
             });
+        }
+    }
+
+    // Timer's `after:do:` and `every:do:` spawn their block argument in a
+    // separate BEAM process. Mark them so the self-capture validator can skip
+    // false-positive warnings (BT-1312, replaces hardcoded list in validators.rs).
+    if class_name == "Timer" {
+        for m in &mut class_methods {
+            if m.selector == "after:do:" || m.selector == "every:do:" {
+                m.spawns_block = true;
+            }
         }
     }
 
@@ -959,10 +977,12 @@ fn generate_method_list(
             code,
             "                MethodInfo {{ selector: \"{selector}\".into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
+             spawns_block: {spawns_block}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr} }},",
             arity = m.arity,
             class = class_name,
             sealed = m.is_sealed,
+            spawns_block = m.spawns_block,
         );
     }
     code.push_str("            ],\n");
@@ -1122,6 +1142,7 @@ mod tests {
                     arity: 0,
                     kind: MethodKindMeta::Primary,
                     is_sealed: false,
+                    spawns_block: false,
                     return_type: None,
                     param_types: vec![],
                     doc: None,
@@ -1131,6 +1152,7 @@ mod tests {
                     arity: 1,
                     kind: MethodKindMeta::Primary,
                     is_sealed: true,
+                    spawns_block: false,
                     return_type: Some("Counter".to_string()),
                     param_types: vec![Some("Integer".to_string())],
                     doc: None,
@@ -1141,6 +1163,7 @@ mod tests {
                 arity: 0,
                 kind: MethodKindMeta::Primary,
                 is_sealed: false,
+                spawns_block: false,
                 return_type: Some("Counter".to_string()),
                 param_types: vec![],
                 doc: None,
@@ -1265,6 +1288,7 @@ mod tests {
             arity: 1,
             kind: MethodKindMeta::Primary,
             is_sealed: false,
+            spawns_block: false,
             return_type: Some("Counter".to_string()),
             param_types: vec![Some("Integer".to_string())],
             doc: None,
@@ -1288,6 +1312,7 @@ mod tests {
             arity: 0,
             kind: MethodKindMeta::Primary,
             is_sealed: false,
+            spawns_block: false,
             return_type: None,
             param_types: vec![],
             doc: None,

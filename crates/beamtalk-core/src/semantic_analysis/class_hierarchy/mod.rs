@@ -38,6 +38,12 @@ pub struct MethodInfo {
     pub defined_in: EcoString,
     /// Whether this method is sealed (cannot be overridden).
     pub is_sealed: bool,
+    /// Whether this method spawns its block argument in a separate BEAM process.
+    ///
+    /// When `true`, self-sends inside the block are safe for Actor classes
+    /// because they execute in a different process and cannot re-enter the
+    /// actor's own call-stack (`calling_self` dispatch does not apply).
+    pub spawns_block: bool,
     /// Inferred return type (e.g., "Integer", "String", "Boolean").
     /// `None` means the return type is unknown (Dynamic).
     pub return_type: Option<EcoString>,
@@ -635,6 +641,22 @@ impl ClassHierarchy {
         None
     }
 
+    /// Returns `true` if any class in the hierarchy declares a method with the
+    /// given selector that has `spawns_block: true`.
+    ///
+    /// Used by the self-capture validator to skip false-positive warnings for
+    /// methods that run their block argument in a separate BEAM process (e.g.,
+    /// `Timer after:do:` and `Timer every:do:`).
+    #[must_use]
+    pub fn selector_spawns_block(&self, selector: &str) -> bool {
+        self.classes.values().any(|info| {
+            info.methods
+                .iter()
+                .chain(info.class_methods.iter())
+                .any(|m| m.selector.as_str() == selector && m.spawns_block)
+        })
+    }
+
     /// Check if a class explicitly overrides `doesNotUnderstand:args:` on the instance side.
     ///
     /// Returns true only if the class itself (not an ancestor) defines the method.
@@ -934,6 +956,7 @@ impl ClassHierarchy {
                     kind: MethodKind::Primary,
                     defined_in: class_name.clone(),
                     is_sealed: false,
+                    spawns_block: false,
                     return_type: slot.type_annotation.as_ref().map(TypeAnnotation::type_name),
                     param_types: vec![],
                     doc: Some(getter_doc.into()),
@@ -961,6 +984,7 @@ impl ClassHierarchy {
                     kind: MethodKind::Primary,
                     defined_in: class_name.clone(),
                     is_sealed: false,
+                    spawns_block: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None],
                     doc: Some(setter_doc.into()),
@@ -1002,6 +1026,7 @@ impl ClassHierarchy {
                     kind: MethodKind::Primary,
                     defined_in: class_name.clone(),
                     is_sealed: false,
+                    spawns_block: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None; arity],
                     doc: Some(ctor_doc.into()),
@@ -1046,6 +1071,7 @@ impl ClassHierarchy {
                     kind: m.kind,
                     defined_in: class.name.name.clone(),
                     is_sealed: m.is_sealed,
+                    spawns_block: false,
                     return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
                     param_types: m
                         .parameters
@@ -1065,6 +1091,7 @@ impl ClassHierarchy {
                     kind: m.kind,
                     defined_in: class.name.name.clone(),
                     is_sealed: m.is_sealed,
+                    spawns_block: false,
                     return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
                     param_types: m
                         .parameters
@@ -3294,6 +3321,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 defined_in: EcoString::from("Counter"),
                 is_sealed: false,
+                spawns_block: false,
                 return_type: Some(EcoString::from("Integer")),
                 param_types: vec![],
                 doc: None,
@@ -3329,6 +3357,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 defined_in: EcoString::from("Counter"),
                 is_sealed: false,
+                spawns_block: false,
                 return_type: None,
                 param_types: vec![],
                 doc: None,
@@ -3355,6 +3384,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 defined_in: EcoString::from("Counter"),
                 is_sealed: false,
+                spawns_block: false,
                 return_type: None,
                 param_types: vec![],
                 doc: None,

@@ -681,7 +681,7 @@ pub(crate) fn check_self_capture_in_actor_block(
         for method in class.methods.iter().chain(class.class_methods.iter()) {
             for stmt in &method.body {
                 walk_expression(&stmt.expression, &mut |e| {
-                    check_self_capture_at(e, diagnostics);
+                    check_self_capture_at(e, hierarchy, diagnostics);
                 });
             }
         }
@@ -694,7 +694,7 @@ pub(crate) fn check_self_capture_in_actor_block(
         }
         for stmt in &standalone.method.body {
             walk_expression(&stmt.expression, &mut |e| {
-                check_self_capture_at(e, diagnostics);
+                check_self_capture_at(e, hierarchy, diagnostics);
             });
         }
     }
@@ -710,18 +710,6 @@ fn is_self_receiver(expr: &Expression) -> bool {
     }
 }
 
-/// Returns `true` if this selector spawns a block in a separate BEAM process,
-/// meaning self-sends inside the block are safe for Actor classes (BT-1301).
-///
-/// `Timer after:do:` and `Timer every:do:` execute their block argument in a
-/// separate process via `erlang:send_after` / `timer:apply_interval`.  A
-/// `self someMethod` call from inside such a block is a regular `gen_server`
-/// call *to* the actor — it cannot re-enter the actor's own call-stack, so
-/// the `calling_self` deadlock mechanism does not apply.
-fn is_timer_spawn_selector(selector: &str) -> bool {
-    matches!(selector, "after:do:" | "every:do:")
-}
-
 /// Searches an expression tree for a `MessageSend` or `Cascade` whose
 /// immediate receiver is `self`.
 ///
@@ -730,9 +718,10 @@ fn is_timer_spawn_selector(selector: &str) -> bool {
 /// `FieldAccess { receiver: self }` (`self.field`) compiles to `maps:get` /
 /// `maps:put` — a direct in-process map operation — and is safe.
 ///
-/// Block arguments of Timer spawn calls (`after:do:`, `every:do:`) are skipped:
-/// they run in a separate BEAM process and self-sends there are always safe.
-fn find_self_message_send(expr: &Expression) -> Option<Span> {
+/// Block arguments of methods marked `spawns_block` in the class hierarchy
+/// are skipped: they run in a separate BEAM process and self-sends there are
+/// always safe (BT-1312).
+fn find_self_message_send(expr: &Expression, hierarchy: &ClassHierarchy) -> Option<Span> {
     match expr {
         Expression::MessageSend { receiver, span, .. }
         | Expression::Cascade { receiver, span, .. } => {
@@ -742,8 +731,8 @@ fn find_self_message_send(expr: &Expression) -> Option<Span> {
         }
         _ => {}
     }
-    // Timer after:do: / every:do: run their block in a separate process —
-    // skip the block argument so we don't flag safe self-sends (BT-1301).
+    // Methods with `spawns_block: true` run their block in a separate process —
+    // skip the block argument so we don't flag safe self-sends (BT-1301/BT-1312).
     // The receiver is NOT skipped: `(self getTimer) after:do:` still warns
     // because `self getTimer` is a real calling_self dispatch in the HOF.
     if let Expression::MessageSend {
@@ -753,27 +742,27 @@ fn find_self_message_send(expr: &Expression) -> Option<Span> {
         ..
     } = expr
     {
-        if is_timer_spawn_selector(selector.name().as_str()) {
+        if hierarchy.selector_spawns_block(selector.name().as_str()) {
             return std::iter::once(receiver.as_ref())
                 .chain(
                     arguments
                         .iter()
                         .filter(|a| !matches!(a, Expression::Block(_))),
                 )
-                .find_map(find_self_message_send);
+                .find_map(|e| find_self_message_send(e, hierarchy));
         }
     }
     child_expressions(expr)
         .into_iter()
-        .find_map(find_self_message_send)
+        .find_map(|e| find_self_message_send(e, hierarchy))
 }
 
 /// Searches a block's body for a message send or cascade directly to `self`.
-fn find_self_reference_in_block(block: &Block) -> Option<Span> {
+fn find_self_reference_in_block(block: &Block, hierarchy: &ClassHierarchy) -> Option<Span> {
     block
         .body
         .iter()
-        .find_map(|s| find_self_message_send(&s.expression))
+        .find_map(|s| find_self_message_send(&s.expression, hierarchy))
 }
 
 /// Checks a single expression node for the self-capture pattern.
@@ -781,7 +770,11 @@ fn find_self_reference_in_block(block: &Block) -> Option<Span> {
 /// Called by [`check_self_capture_in_actor_block`]; the
 /// walker handles recursive traversal, so this function only inspects the
 /// current node.
-fn check_self_capture_at(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+fn check_self_capture_at(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     if let Expression::MessageSend {
         selector,
         arguments,
@@ -802,7 +795,7 @@ fn check_self_capture_at(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
                 continue;
             }
             if let Expression::Block(block) = arg {
-                if find_self_reference_in_block(block).is_some() {
+                if find_self_reference_in_block(block, hierarchy).is_some() {
                     diagnostics.push(
                         Diagnostic::hint(
                             format!(
