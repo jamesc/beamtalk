@@ -20,6 +20,7 @@ use crate::ast::{
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
 use crate::semantic_analysis::{BlockContext, ClassHierarchy};
+use std::collections::HashSet;
 #[cfg(test)]
 use crate::source_analysis::lex_with_eof;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -674,6 +675,10 @@ pub(crate) fn check_self_capture_in_actor_block(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Precompute the set of selectors whose block arguments run in a separate
+    // BEAM process, so lookups are O(1) per expression node (BT-1312).
+    let spawn_selectors = hierarchy.spawns_block_selectors();
+
     for class in &module.classes {
         if !hierarchy.is_actor_subclass(class.name.name.as_str()) {
             continue;
@@ -681,7 +686,7 @@ pub(crate) fn check_self_capture_in_actor_block(
         for method in class.methods.iter().chain(class.class_methods.iter()) {
             for stmt in &method.body {
                 walk_expression(&stmt.expression, &mut |e| {
-                    check_self_capture_at(e, hierarchy, diagnostics);
+                    check_self_capture_at(e, &spawn_selectors, diagnostics);
                 });
             }
         }
@@ -694,7 +699,7 @@ pub(crate) fn check_self_capture_in_actor_block(
         }
         for stmt in &standalone.method.body {
             walk_expression(&stmt.expression, &mut |e| {
-                check_self_capture_at(e, hierarchy, diagnostics);
+                check_self_capture_at(e, &spawn_selectors, diagnostics);
             });
         }
     }
@@ -718,10 +723,13 @@ fn is_self_receiver(expr: &Expression) -> bool {
 /// `FieldAccess { receiver: self }` (`self.field`) compiles to `maps:get` /
 /// `maps:put` — a direct in-process map operation — and is safe.
 ///
-/// Block arguments of methods marked `spawns_block` in the class hierarchy
-/// are skipped: they run in a separate BEAM process and self-sends there are
+/// Block arguments of methods whose selectors are in `spawn_selectors` are
+/// skipped: they run in a separate BEAM process and self-sends there are
 /// always safe (BT-1312).
-fn find_self_message_send(expr: &Expression, hierarchy: &ClassHierarchy) -> Option<Span> {
+fn find_self_message_send(
+    expr: &Expression,
+    spawn_selectors: &HashSet<EcoString>,
+) -> Option<Span> {
     match expr {
         Expression::MessageSend { receiver, span, .. }
         | Expression::Cascade { receiver, span, .. } => {
@@ -742,27 +750,30 @@ fn find_self_message_send(expr: &Expression, hierarchy: &ClassHierarchy) -> Opti
         ..
     } = expr
     {
-        if hierarchy.selector_spawns_block(selector.name().as_str()) {
+        if spawn_selectors.contains(selector.name().as_str()) {
             return std::iter::once(receiver.as_ref())
                 .chain(
                     arguments
                         .iter()
                         .filter(|a| !matches!(a, Expression::Block(_))),
                 )
-                .find_map(|e| find_self_message_send(e, hierarchy));
+                .find_map(|e| find_self_message_send(e, spawn_selectors));
         }
     }
     child_expressions(expr)
         .into_iter()
-        .find_map(|e| find_self_message_send(e, hierarchy))
+        .find_map(|e| find_self_message_send(e, spawn_selectors))
 }
 
 /// Searches a block's body for a message send or cascade directly to `self`.
-fn find_self_reference_in_block(block: &Block, hierarchy: &ClassHierarchy) -> Option<Span> {
+fn find_self_reference_in_block(
+    block: &Block,
+    spawn_selectors: &HashSet<EcoString>,
+) -> Option<Span> {
     block
         .body
         .iter()
-        .find_map(|s| find_self_message_send(&s.expression, hierarchy))
+        .find_map(|s| find_self_message_send(&s.expression, spawn_selectors))
 }
 
 /// Checks a single expression node for the self-capture pattern.
@@ -772,7 +783,7 @@ fn find_self_reference_in_block(block: &Block, hierarchy: &ClassHierarchy) -> Op
 /// current node.
 fn check_self_capture_at(
     expr: &Expression,
-    hierarchy: &ClassHierarchy,
+    spawn_selectors: &HashSet<EcoString>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Expression::MessageSend {
@@ -795,7 +806,7 @@ fn check_self_capture_at(
                 continue;
             }
             if let Expression::Block(block) = arg {
-                if find_self_reference_in_block(block, hierarchy).is_some() {
+                if find_self_reference_in_block(block, spawn_selectors).is_some() {
                     diagnostics.push(
                         Diagnostic::hint(
                             format!(

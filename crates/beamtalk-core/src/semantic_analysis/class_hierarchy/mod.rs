@@ -641,20 +641,20 @@ impl ClassHierarchy {
         None
     }
 
-    /// Returns `true` if any class in the hierarchy declares a method with the
-    /// given selector that has `spawns_block: true`.
+    /// Collects the set of selectors that have `spawns_block: true` anywhere
+    /// in the hierarchy.
     ///
-    /// Used by the self-capture validator to skip false-positive warnings for
-    /// methods that run their block argument in a separate BEAM process (e.g.,
-    /// `Timer after:do:` and `Timer every:do:`).
+    /// Used by the self-capture validator to precompute which selectors should
+    /// skip false-positive warnings. Call once before walking the AST, then
+    /// use `HashSet::contains` for O(1) lookups per expression node.
     #[must_use]
-    pub fn selector_spawns_block(&self, selector: &str) -> bool {
-        self.classes.values().any(|info| {
-            info.methods
-                .iter()
-                .chain(info.class_methods.iter())
-                .any(|m| m.selector.as_str() == selector && m.spawns_block)
-        })
+    pub fn spawns_block_selectors(&self) -> HashSet<EcoString> {
+        self.classes
+            .values()
+            .flat_map(|info| info.methods.iter().chain(info.class_methods.iter()))
+            .filter(|m| m.spawns_block)
+            .map(|m| m.selector.clone())
+            .collect()
     }
 
     /// Check if a class explicitly overrides `doesNotUnderstand:args:` on the instance side.
