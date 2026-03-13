@@ -270,7 +270,7 @@ mod tests {
 
     use camino::Utf8Path;
     use extractor::{find_source_files, parse_class_info};
-    use renderer::{html_escape, method_anchor, render_doc};
+    use renderer::{html_escape, method_anchor, render_doc, render_doc_trusted};
 
     #[test]
     fn test_find_source_files_single_file() {
@@ -492,6 +492,53 @@ mod tests {
         assert!(
             !html.contains("<!--"),
             "inline comment in paragraph should be removed"
+        );
+    }
+
+    #[test]
+    fn test_render_doc_trusted_preserves_details_blocks() {
+        let md = "Some text.\n\n<details>\n<summary>Hint</summary>\n\nThe answer is 42.\n\n</details>\n\nMore text.";
+        let html = render_doc_trusted(md);
+        assert!(
+            html.contains("<details>"),
+            "trusted render should preserve <details> tag, got: {html}"
+        );
+        assert!(
+            html.contains("<summary>"),
+            "trusted render should preserve <summary> tag, got: {html}"
+        );
+        assert!(
+            html.contains("</details>"),
+            "trusted render should preserve closing </details> tag"
+        );
+        assert!(
+            html.contains("The answer is 42."),
+            "hint content should be present"
+        );
+
+        // Untrusted render should escape the same content
+        let escaped = render_doc(md);
+        assert!(
+            !escaped.contains("<details>"),
+            "untrusted render should escape <details> tag"
+        );
+    }
+
+    #[test]
+    fn test_render_doc_trusted_still_drops_comments() {
+        let md = "<!-- license -->\n# Title\n\nBody.";
+        let html = render_doc_trusted(md);
+        assert!(
+            !html.contains("<!--"),
+            "trusted render should still drop HTML comments"
+        );
+        assert!(
+            !html.contains("license"),
+            "comment content should not appear"
+        );
+        assert!(
+            html.contains("<h1>Title</h1>"),
+            "non-comment content should render"
         );
     }
 

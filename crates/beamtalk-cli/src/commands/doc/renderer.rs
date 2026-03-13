@@ -33,6 +33,17 @@ pub(super) fn class_link(name: &str, classes: &HashMap<String, &ClassInfo>) -> S
     }
 }
 
+/// Render trusted first-party markdown as HTML, preserving structural HTML.
+///
+/// Use this for learning guide chapters, prose docs, and ADR pages where
+/// the markdown source is trusted first-party content that may contain
+/// HTML elements like `<details>` / `<summary>` for collapsible sections.
+///
+/// HTML comments are still stripped, but other HTML is passed through.
+pub(super) fn render_doc_trusted(doc: &str) -> String {
+    render_doc_inner(doc, true)
+}
+
 /// Render markdown doc comment as HTML.
 ///
 /// Uses `pulldown-cmark` for full `CommonMark` + GFM table support.
@@ -42,6 +53,11 @@ pub(super) fn class_link(name: &str, classes: &HashMap<String, &ClassInfo>) -> S
 /// Block-level HTML comments (`<!-- … -->`) are silently dropped so that
 /// license headers in README files do not appear in rendered output.
 pub(super) fn render_doc(doc: &str) -> String {
+    render_doc_inner(doc, false)
+}
+
+/// Inner implementation shared by `render_doc` and `render_doc_trusted`.
+fn render_doc_inner(doc: &str, trusted: bool) -> String {
     use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 
     let options =
@@ -58,7 +74,11 @@ pub(super) fn render_doc(doc: &str) -> String {
     // first so we can examine each HtmlBlock span as a whole before deciding
     // whether it is a pure comment and should be dropped.
     let raw_events: Vec<Event<'_>> = parser.collect();
-    let events = strip_html_comments(raw_events);
+    let events = if trusted {
+        strip_html_comments_trusted(raw_events)
+    } else {
+        strip_html_comments(raw_events)
+    };
 
     let events = events.into_iter().filter_map(|event| match event {
         Event::Start(Tag::CodeBlock(ref kind)) => {
@@ -138,6 +158,50 @@ fn strip_html_comments(events: Vec<pulldown_cmark::Event<'_>>) -> Vec<pulldown_c
                 let trimmed = raw.trim();
                 if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
                     out.push(Event::Text(raw));
+                }
+            }
+            other => out.push(other),
+        }
+    }
+
+    out
+}
+
+/// Strip HTML comments from trusted content, preserving all other HTML.
+///
+/// Like `strip_html_comments` but does **not** escape non-comment HTML,
+/// because the content is trusted first-party markdown (learning guide
+/// chapters, prose docs) that may use structural HTML like `<details>`.
+fn strip_html_comments_trusted(
+    events: Vec<pulldown_cmark::Event<'_>>,
+) -> Vec<pulldown_cmark::Event<'_>> {
+    use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
+
+    let mut out = Vec::with_capacity(events.len());
+    let mut iter = events.into_iter();
+
+    while let Some(event) = iter.next() {
+        match event {
+            Event::Start(Tag::HtmlBlock) => {
+                let mut content = String::new();
+                for inner in iter.by_ref() {
+                    match inner {
+                        Event::End(TagEnd::HtmlBlock) => break,
+                        Event::Html(s) => content.push_str(&s),
+                        _ => {}
+                    }
+                }
+                let trimmed = content.trim();
+                if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
+                    // Trusted content — re-emit as raw HTML so tags render.
+                    out.push(Event::Html(CowStr::Boxed(content.into_boxed_str())));
+                }
+            }
+            Event::InlineHtml(raw) | Event::Html(raw) => {
+                let trimmed = raw.trim();
+                if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
+                    // Preserve inline HTML in trusted content.
+                    out.push(Event::Html(raw));
                 }
             }
             other => out.push(other),
