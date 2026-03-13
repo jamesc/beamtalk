@@ -1,0 +1,18 @@
+// Array destructuring with rest patterns
+arr := #[1, 2, 3, 4, 5]
+#[first, ...rest] := arr
+first
+// => 1
+
+#[a, b, ...tail] := #[10, 20, 30, 40]
+a + b
+// => 30
+
+#[_, ...rest] := #[99, 42, 7]
+rest
+// => #[42, 7]
+
+// Literal patterns in array destructuring
+#[1, x] := #[1, 42]
+x
+// => 42

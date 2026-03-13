@@ -42,11 +42,15 @@ const FRAGMENTS: &[&str] = &[
     "super bar",
     "^42",
     "#(1, 2, 3)",
-    "#{a => 1, b => 2}",
+    "#{#a => 1, #b => 2}",
     "x match: { 1 => \"one\", _ => \"other\" }",
     "Actor subclass: Counter\n  state: count = 0\n  increment => count := count + 1",
     "3 timesRepeat: [x := x + 1]",
     "x > 0 ifTrue: ['positive'] ifFalse: ['non-positive']",
+    "#[first, ...rest] := #[1, 2, 3]",
+    "sealed Object subclass: Shape",
+    "Actor subclass: Wrapper native: my_mod",
+    "[1] ensure: [nil]",
 ];
 
 fn valid_fragment() -> impl Strategy<Value = String> {

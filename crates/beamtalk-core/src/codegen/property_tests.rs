@@ -36,10 +36,13 @@ const FRAGMENTS: &[&str] = &[
     "Object subclass: Foo\n  state: x = 0\n  bar => x",
     "Actor subclass: Counter\n  state: count = 0\n  increment => count := count + 1",
     "#(1, 2, 3)",
-    "#{a => 1}",
+    "#{#a => 1}",
     "self",
     "^42",
     "3 timesRepeat: [x := x + 1]",
+    "#[first, ...rest] := #[1, 2, 3]",
+    "[1] ensure: [nil]",
+    "x match: { 1 => \"one\", _ => \"other\" }",
 ];
 
 fn valid_fragment() -> impl Strategy<Value = String> {

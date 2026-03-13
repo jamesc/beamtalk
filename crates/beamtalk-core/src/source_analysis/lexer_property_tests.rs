@@ -52,6 +52,7 @@ const VALID_SINGLE_TOKENS: &[&str] = &[
     "=>",
     "@primitive",
     "@intrinsic",
+    "...",
 ];
 
 /// Multi-token valid expressions that should lex cleanly.
@@ -67,6 +68,8 @@ const VALID_EXPRESSIONS: &[&str] = &[
     "#{a => 1}",
     "x := 42",
     "3 timesRepeat: [x := x + 1]",
+    "#[a, ...rest] := #[1, 2, 3]",
+    "[42] ensure: [nil]",
 ];
 
 fn valid_single_token() -> impl Strategy<Value = String> {
