@@ -1723,9 +1723,12 @@ mod property_tests {
         "^42",
         "self",
         "#(1, 2, 3)",
-        "#{a => 1}",
+        "#{#a => 1}",
         "Object subclass: Counter\n  state: count = 0\n  increment => count := count + 1",
         "3 timesRepeat: [x := x + 1]",
+        "#[first, ...rest] := #[1, 2, 3]",
+        "[1] ensure: [nil]",
+        "x match: { 1 => \"one\", _ => \"other\" }",
     ];
 
     /// Generates a near-valid Beamtalk input using one of several mutation strategies.
@@ -1765,11 +1768,19 @@ mod property_tests {
         ]
     }
 
+    /// Default is 512 cases for standard CI; override via `PROPTEST_CASES` env var
+    /// for nightly extended runs (e.g., `PROPTEST_CASES=10000`).
+    fn proptest_config() -> ProptestConfig {
+        let default = ProptestConfig::default();
+        ProptestConfig {
+            // Use at least 512 cases, but allow PROPTEST_CASES to increase beyond that
+            cases: default.cases.max(512),
+            ..default
+        }
+    }
+
     proptest! {
-        #![proptest_config(ProptestConfig {
-            cases: 512,
-            .. ProptestConfig::default()
-        })]
+        #![proptest_config(proptest_config())]
 
         /// Property 1a: `handle_compile` never panics on arbitrary string input.
         #[test]

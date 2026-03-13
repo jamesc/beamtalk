@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ensure: block for cleanup
+result := [42] ensure: [nil]
+result
+// => 42
+
+// on:do: exception handling
+result := [1 / 0] on: Error do: [:e | "caught"]
+result
+// => "caught"
+
+// Map with explicit symbol keys
+map := #{#name => "Alice", #age => 30}
+map at: #name
+// => "Alice"

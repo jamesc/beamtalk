@@ -54,6 +54,11 @@ const FRAGMENTS: &[&str] = &[
     "Object subclass: Counter\n  state: count = 0\n  increment => count := count + 1",
     "3 timesRepeat: [x := x + 1]",
     "x > 0 ifTrue: ['positive'] ifFalse: ['non-positive']",
+    "#[first, ...rest] := #[1, 2, 3]",
+    "sealed Object subclass: Shape",
+    "Actor subclass: Wrapper native: my_mod",
+    "[1] ensure: [nil]",
+    "x match: { 1 => \"one\", _ => \"other\" }",
 ];
 
 /// Generates a Beamtalk fragment from the seed corpus.

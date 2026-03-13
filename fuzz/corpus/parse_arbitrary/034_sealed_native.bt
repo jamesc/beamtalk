@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Sealed class definition
+sealed Object subclass: Shape
+  area => 0
+
+// Native class definition
+Actor subclass: MyWrapper native: my_erlang_module
+  getValue => self delegate
+
+// Match expression
+x := 42
+result := x match: {
+  1 => "one",
+  2 => "two",
+  _ => "other"
+}
+result
+// => "other"
