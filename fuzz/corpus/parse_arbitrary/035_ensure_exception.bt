@@ -1,3 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
 // ensure: block for cleanup
 result := [42] ensure: [nil]
 result
