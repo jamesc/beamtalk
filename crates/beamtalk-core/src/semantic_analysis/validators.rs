@@ -20,11 +20,11 @@ use crate::ast::{
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
 use crate::semantic_analysis::{BlockContext, ClassHierarchy};
-use std::collections::HashSet;
 #[cfg(test)]
 use crate::source_analysis::lex_with_eof;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
+use std::collections::HashSet;
 
 /// BT-105: Check for attempts to instantiate abstract classes.
 ///
@@ -726,10 +726,7 @@ fn is_self_receiver(expr: &Expression) -> bool {
 /// Block arguments of methods whose selectors are in `spawn_selectors` are
 /// skipped: they run in a separate BEAM process and self-sends there are
 /// always safe (BT-1312).
-fn find_self_message_send(
-    expr: &Expression,
-    spawn_selectors: &HashSet<EcoString>,
-) -> Option<Span> {
+fn find_self_message_send(expr: &Expression, spawn_selectors: &HashSet<EcoString>) -> Option<Span> {
     match expr {
         Expression::MessageSend { receiver, span, .. }
         | Expression::Cascade { receiver, span, .. } => {
