@@ -311,7 +311,7 @@ Of these, (3) is the strongest near-term argument but weakest long-term. Once mo
 |---|---|
 | **AI tooling advocate** | "Agents don't always use the right keywords. 'How do I loop over elements' should find `do:` and `collect:`, but keyword search requires the agent to already know those names. Semantic search closes that vocabulary gap. The corpus is small enough that a lightweight model (e.g., ONNX MiniLM) adds ~30MB, not 200MB. You're building a search tool for AI agents — the one user who would most benefit from semantic understanding — and giving them grep." |
 
-**Counter:** The vocabulary gap is real but addressable without a model. Synonym tags (e.g., "loop" → `do:`, "lambda" → blocks, "for each" → `do:`) close the most common mismatches at negligible cost. The corpus is ~300 entries — small enough that well-chosen tags cover the search space. Adding an ONNX model introduces a new dependency category (native ML runtime), complicates cross-compilation, and increases binary size by 30MB+ for a marginal improvement over tags. Crucially, structured telemetry on every search call (query, result_count, top_score) makes this a data-driven decision: if zero-result queries exceed ~15% or cluster around vocabulary mismatches that tags can't cover, that's concrete evidence to invest in semantic search. The tool interface (`search_examples(query, limit)`) is deliberately stable — the backend can be swapped without changing the agent integration.
+**Counter:** The vocabulary gap is real but addressable without a model. Synonym tags (e.g., "loop" → `do:`, "lambda" → blocks, "for each" → `do:`) close the most common mismatches at negligible cost. The corpus is ~300 entries — small enough that well-chosen tags cover the search space. Adding an ONNX model introduces a new dependency category (native ML runtime), complicates cross-compilation, and increases binary size by 30MB+ for a marginal improvement over tags. Crucially, structured telemetry on every search call (`query_hash`, `result_count`, `top_score`) makes this a data-driven decision: if zero-result queries exceed ~15% or cluster around vocabulary mismatches that tags can't cover, that's concrete evidence to invest in semantic search. (Raw `query` is DEBUG-only opt-in.) The tool interface (`search_examples(query, limit)`) is deliberately stable — the backend can be swapped without changing the agent integration.
 
 ### Alternative: Context7-style two-tool pattern
 
@@ -414,7 +414,7 @@ Keep `CorpusEntry`, `Corpus`, and search logic as modules inside `beamtalk-mcp` 
 
 1. Add `beamtalk-examples` as a dependency of `beamtalk-mcp`
 2. Add `SearchExamplesParams` and `search_examples` tool handler in `server.rs` — delegates to `beamtalk_examples::search()`
-3. Add structured `tracing` telemetry — log query, result_count, top_score, duration_us on every search call
+3. Add structured `tracing` telemetry — log `query_hash`, `result_count`, `top_score`, `duration_us` on every search call (raw `query` at DEBUG only)
 4. Update server instructions text to mention the new tool
 
 ### Phase 3: Corpus Curation (M)
