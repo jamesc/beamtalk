@@ -152,6 +152,8 @@ A `just build-corpus` task runs a binary crate that:
 
 The generator lives at `crates/beamtalk-examples/build-corpus/` as a small binary crate. It depends on `beamtalk-core` for parsing `.bt` files — this is the key reason the generator is a crate rather than a standalone script. A script cannot access workspace dependencies, so it would have to use fragile regex heuristics instead of the real parser for method boundary detection.
 
+**Deterministic output:** The CI freshness check (`git diff --exit-code`) requires identical output across runs. The generator must use sorted file traversal (not OS-dependent directory order), stable entry ordering (sorted by source path, then byte offset), and sorted tag arrays within each entry. All maps serialized to JSON must use sorted keys. This prevents flaky CI failures from non-deterministic ordering.
+
 **Freshness check in CI:** `just ci` runs `just build-corpus` and asserts no diff. This catches corpus drift when test files or examples change.
 
 ### Crate Structure
@@ -210,12 +212,13 @@ The claim that keyword search with synonym tags is sufficient for ~300 entries n
 
 | Field | Purpose |
 |---|---|
-| `query` | The raw query string |
+| `query_hash` | SHA-256 hash of the query (default; for counting unique queries without exposing content) |
+| `query` | The raw query string (only at `DEBUG` level — opt-in, since queries may contain proprietary code snippets or PII from agent prompts) |
 | `result_count` | Number of results returned |
 | `top_score` | Score of the highest-ranked result (0 = no matches) |
 | `duration_us` | Search latency in microseconds |
 
-This is local-only logging via `tracing` (already a dependency of `beamtalk-mcp`), not a phone-home service. The MCP server runs on the developer's machine; logs go to stderr or a log file.
+This is local-only logging via `tracing` (already a dependency of `beamtalk-mcp`), not a phone-home service. The MCP server runs on the developer's machine; logs go to stderr or a log file. At the default `INFO` level, raw queries are never logged — only the hash and numeric metrics. Set `RUST_LOG=beamtalk_mcp::search=debug` to include raw queries for local eval sessions.
 
 **What this enables:**
 
@@ -436,5 +439,5 @@ Keep `CorpusEntry`, `Corpus`, and search logic as modules inside `beamtalk-mcp` 
 - Related ADRs: [ADR 0033](0033-runtime-embedded-documentation.md) (Runtime-embedded documentation — prior art for embedding content in the runtime)
 - Context7: https://github.com/upstash/context7
 - Forge MCP: https://developer.atlassian.com/platform/forge/forge-mcp/
-- MCP specification: https://modelcontextprotocol.io/specification/2025-06-18/server/resources
+- MCP specification (tools): https://modelcontextprotocol.io/specification/2025-06-18/server/tools
 - Existing MCP server: `crates/beamtalk-mcp/src/server.rs`
