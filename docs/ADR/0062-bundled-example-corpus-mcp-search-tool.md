@@ -343,10 +343,11 @@ Extract corpus storage and search into a shared library crate that both `beamtal
 **Affected components:** Build tooling
 
 1. Create `scripts/build-corpus.rs` (or a small crate at `crates/beamtalk-mcp/build-corpus/`)
-2. Implement parsers for each content source:
-   - `.bt` test files: extract test methods with class context
-   - `.bt` example files: extract notable patterns
-   - `.md` learning modules: extract fenced code blocks with prose
+2. Implement extractors for each content source:
+   - `.bt` fixture files (`stdlib/test/fixtures/`, `tests/e2e/fixtures/`, `docs/learning/fixtures/`): include as whole-file entries with auto-generated tags from class names, selectors, and file path
+   - `.bt` test files (`stdlib/test/*.bt`): extract individual test methods with class context
+   - `.bt` example files (`examples/**/*.bt`): extract notable patterns
+   - `.md` learning modules: extract fenced code blocks with surrounding prose
    - `beamtalk-language-features.md`: extract per-feature examples
 3. Generate `crates/beamtalk-mcp/corpus.json`
 4. Add `just build-corpus` task
