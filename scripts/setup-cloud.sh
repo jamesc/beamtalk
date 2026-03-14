@@ -43,18 +43,25 @@ fail()  { echo -e "  ${RED}✗${NC} $1"; }
 
 have() { command -v "$1" &>/dev/null; }
 
-need_sudo() {
-  if [ "$(id -u)" -ne 0 ]; then
-    if have sudo; then
-      echo "sudo"
-    else
-      fail "Root privileges required but sudo not available"
-      exit 1
-    fi
+# Compute SUDO prefix — defer failure until a command actually needs it.
+# This allows the script to succeed when all tools are pre-installed even if
+# sudo is unavailable (e.g. rootless container with everything cached).
+if [ "$(id -u)" -eq 0 ]; then
+  SUDO=""
+elif have sudo; then
+  SUDO="sudo"
+else
+  SUDO=""
+  _NEED_SUDO_WARNING=1
+fi
+
+# Call before any privileged operation to fail fast with a clear message.
+require_sudo() {
+  if [ "${_NEED_SUDO_WARNING:-}" = "1" ]; then
+    fail "Root privileges required but sudo not available"
+    exit 1
   fi
 }
-
-SUDO="$(need_sudo)"
 
 # Detect OS
 if [ -f /etc/os-release ]; then
@@ -81,6 +88,7 @@ elif have erl; then
   ok "Erlang/OTP already installed (OTP ${OTP_VSN})"
 else
   info "Installing Erlang/OTP 27..."
+  require_sudo
   case "$OS_ID" in
     ubuntu|debian)
       $SUDO apt-get update -qq
@@ -128,6 +136,7 @@ case "$OS_ID" in
       fi
     done
     if [ -n "$PKGS" ]; then
+      require_sudo
       $SUDO apt-get update -qq
       # shellcheck disable=SC2086
       $SUDO apt-get install -y -qq --no-install-recommends $PKGS
@@ -149,6 +158,7 @@ elif have node; then
   ok "Node.js already installed ($(node --version))"
 else
   info "Installing Node.js LTS..."
+  require_sudo
   curl -fsSL https://deb.nodesource.com/setup_lts.x | $SUDO bash -
   $SUDO apt-get install -y -qq nodejs
   ok "Node.js $(node --version) installed"
@@ -160,6 +170,7 @@ if have gh; then
   ok "GitHub CLI already installed ($(gh --version | head -1))"
 else
   info "Installing GitHub CLI..."
+  require_sudo
   curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | $SUDO dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
   $SUDO chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
@@ -244,11 +255,14 @@ if have rebar3; then
   ok "rebar3 already installed ($(rebar3 --version))"
 else
   info "Installing rebar3 v${REBAR3_VERSION}..."
-  TMPDIR="$(mktemp -d)"
-  git clone --depth 1 --branch "${REBAR3_VERSION}" https://github.com/erlang/rebar3.git "$TMPDIR/rebar3"
-  (cd "$TMPDIR/rebar3" && ./bootstrap)
-  $SUDO install -m 755 "$TMPDIR/rebar3/rebar3" /usr/local/bin/rebar3
-  rm -rf "$TMPDIR"
+  require_sudo
+  REBAR3_TMPDIR="$(mktemp -d)"
+  trap 'rm -rf "${REBAR3_TMPDIR}"' EXIT
+  git clone --depth 1 --branch "${REBAR3_VERSION}" https://github.com/erlang/rebar3.git "$REBAR3_TMPDIR/rebar3"
+  (cd "$REBAR3_TMPDIR/rebar3" && ./bootstrap)
+  $SUDO install -m 755 "$REBAR3_TMPDIR/rebar3/rebar3" /usr/local/bin/rebar3
+  rm -rf "$REBAR3_TMPDIR"
+  trap - EXIT
   ok "rebar3 v${REBAR3_VERSION} installed"
 fi
 

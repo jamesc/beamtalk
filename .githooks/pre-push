@@ -35,7 +35,7 @@ all_changes_in_skip_dirs() {
 }
 
 if all_changes_in_skip_dirs; then
-  echo "⏭️  All changes in .devcontainer/, scripts/, or docs/ — skipping lint"
+  echo "⏭️  All changes in non-code paths (config, scripts, docs) — skipping lint"
   exit 0
 fi
 

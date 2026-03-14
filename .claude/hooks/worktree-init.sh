@@ -18,9 +18,12 @@ if [[ ! -f "${MARKER}" ]] && ! command -v erl &>/dev/null; then
     bash "${SETUP_SCRIPT}"
     touch "${MARKER}"
   else
-    # Fallback: fetch from GitHub raw
+    # Fallback: download from GitHub, then execute (avoids partial-download execution)
     echo "First session — fetching and running cloud environment setup..."
-    curl -fsSL https://raw.githubusercontent.com/jamesc/beamtalk/main/scripts/setup-cloud.sh | bash
+    _SETUP_TMP="$(mktemp)"
+    curl -fsSL https://raw.githubusercontent.com/jamesc/beamtalk/main/scripts/setup-cloud.sh -o "${_SETUP_TMP}"
+    bash "${_SETUP_TMP}"
+    rm -f "${_SETUP_TMP}"
     touch "${MARKER}"
   fi
 fi
