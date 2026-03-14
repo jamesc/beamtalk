@@ -159,7 +159,10 @@ elif have node; then
 else
   info "Installing Node.js LTS..."
   require_sudo
-  curl -fsSL https://deb.nodesource.com/setup_lts.x | $SUDO bash -
+  _NODE_TMP="$(mktemp)"
+  curl -fsSL https://deb.nodesource.com/setup_lts.x -o "${_NODE_TMP}"
+  $SUDO bash "${_NODE_TMP}"
+  rm -f "${_NODE_TMP}"
   $SUDO apt-get install -y -qq nodejs
   ok "Node.js $(node --version) installed"
 fi

@@ -8,10 +8,10 @@
 set -euo pipefail
 
 # --- Cloud environment bootstrap ---
-# If core tools are missing (e.g. fresh Claude cloud session), run setup-cloud.sh
-# Uses a marker file to avoid re-running on every session start.
+# Run setup-cloud.sh on first session (marker file prevents re-runs).
+# The setup script is idempotent so it's safe to run even if some tools exist.
 MARKER="${HOME}/.beamtalk-cloud-setup-done"
-if [[ ! -f "${MARKER}" ]] && ! command -v erl &>/dev/null; then
+if [[ ! -f "${MARKER}" ]]; then
   SETUP_SCRIPT="${CLAUDE_PROJECT_DIR:-${PWD}}/scripts/setup-cloud.sh"
   if [[ -f "${SETUP_SCRIPT}" ]]; then
     echo "First session — running cloud environment setup..."
