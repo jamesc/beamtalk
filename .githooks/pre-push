@@ -27,7 +27,7 @@ all_changes_in_skip_dirs() {
   fi
   while IFS= read -r file; do
     case "$file" in
-      .devcontainer/*|.claude/*|.githooks/*|scripts/*|docs/*) ;;
+      .devcontainer/*|.claude/*|.githooks/*|scripts/*|docs/*|.gitignore|.gitattributes|*.md|LICENSE*) ;;
       *) return 1 ;;
     esac
   done <<< "$changed_files"
