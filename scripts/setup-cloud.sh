@@ -20,6 +20,7 @@ set -euo pipefail
 #   SKIP_RUST_TOOLS - set to 1 to skip cargo tool installation
 #   SKIP_ERLANG     - set to 1 to skip Erlang installation
 #   SKIP_NODE       - set to 1 to skip Node.js installation
+#   SKIP_SKILLS     - set to 1 to skip Claude Code skills setup
 
 REBAR3_VERSION="${REBAR3_VERSION:-3.26.0}"
 
@@ -233,6 +234,19 @@ else
   $SUDO install -m 755 "$TMPDIR/rebar3/rebar3" /usr/local/bin/rebar3
   rm -rf "$TMPDIR"
   ok "rebar3 v${REBAR3_VERSION} installed"
+fi
+
+# --- Skills repo (Claude Code skills & agents) ---
+
+if [ "${SKIP_SKILLS:-}" = "1" ]; then
+  warn "Skipping skills setup (SKIP_SKILLS=1)"
+else
+  info "Setting up Claude Code skills..."
+  # init.sh clones the skills repo into .claude/skills-repo and links
+  # skills/agents into .claude/commands/ and .claude/agents/.
+  # It's idempotent — pulls latest if already cloned.
+  curl -fsSL https://raw.githubusercontent.com/jamesc/skills/main/scripts/init.sh | bash
+  ok "Skills and agents linked"
 fi
 
 # --- Verify ---
