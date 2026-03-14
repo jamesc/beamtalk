@@ -228,10 +228,13 @@ if have streamlinear-cli; then
   ok "streamlinear-cli already installed"
 else
   info "Installing streamlinear CLI..."
-  if npm install -g streamlinear@github:obra/streamlinear --ignore-scripts 2>/dev/null; then
+  # simple-git-hooks is a build-time dep that fails when installed globally;
+  # pre-install it with --ignore-scripts so streamlinear's npm install succeeds.
+  npm install -g --ignore-scripts simple-git-hooks 2>/dev/null || true
+  if npm install -g streamlinear@github:obra/streamlinear 2>/dev/null; then
     ok "streamlinear-cli installed"
   else
-    warn "streamlinear-cli installation failed (non-critical, skipping)"
+    warn "streamlinear-cli installation failed — Linear skills won't be available"
   fi
 fi
 
