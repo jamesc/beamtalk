@@ -7,6 +7,24 @@
 
 set -euo pipefail
 
+# --- Cloud environment bootstrap ---
+# If core tools are missing (e.g. fresh Claude cloud session), run setup-cloud.sh
+# Uses a marker file to avoid re-running on every session start.
+MARKER="${HOME}/.beamtalk-cloud-setup-done"
+if [[ ! -f "${MARKER}" ]] && ! command -v erl &>/dev/null; then
+  SETUP_SCRIPT="${CLAUDE_PROJECT_DIR:-${PWD}}/scripts/setup-cloud.sh"
+  if [[ -f "${SETUP_SCRIPT}" ]]; then
+    echo "First session — running cloud environment setup..."
+    bash "${SETUP_SCRIPT}"
+    touch "${MARKER}"
+  else
+    # Fallback: fetch from GitHub raw
+    echo "First session — fetching and running cloud environment setup..."
+    curl -fsSL https://raw.githubusercontent.com/jamesc/beamtalk/main/scripts/setup-cloud.sh | bash
+    touch "${MARKER}"
+  fi
+fi
+
 # Ensure the pre-push lint hook is active (local config, needs setting per-clone/worktree)
 git config core.hooksPath .githooks 2>/dev/null || true
 
