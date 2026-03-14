@@ -86,13 +86,23 @@ else
       $SUDO apt-get update -qq
       $SUDO apt-get install -y -qq --no-install-recommends ca-certificates gnupg curl
       $SUDO mkdir -p /etc/apt/keyrings
+      # Remove any stale erlang-solutions list from a previous partial run
+      $SUDO rm -f /etc/apt/sources.list.d/erlang-solutions.list
       curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
         https://binaries2.erlang-solutions.com/GPG-KEY-pmanager.asc \
         -o /tmp/GPG-KEY-pmanager.asc
-      $SUDO gpg --dearmor -o /etc/apt/keyrings/erlang-solutions.gpg /tmp/GPG-KEY-pmanager.asc
+      $SUDO rm -f /etc/apt/keyrings/erlang-solutions.gpg
+      gpg --batch --dearmor -o /tmp/erlang-solutions.gpg /tmp/GPG-KEY-pmanager.asc
+      $SUDO mv /tmp/erlang-solutions.gpg /etc/apt/keyrings/erlang-solutions.gpg
       rm -f /tmp/GPG-KEY-pmanager.asc
-      CODENAME="${VERSION_CODENAME:-bookworm}"
-      echo "deb [signed-by=/etc/apt/keyrings/erlang-solutions.gpg] http://binaries2.erlang-solutions.com/debian/ ${CODENAME}-esl-erlang-27 contrib" \
+      # Erlang Solutions only publishes Debian codenames (not Ubuntu ones).
+      # Map Ubuntu codenames to the closest Debian base.
+      case "${VERSION_CODENAME:-}" in
+        noble|jammy|focal) CODENAME="bookworm" ;;
+        mantic|lunar)      CODENAME="bookworm" ;;
+        *)                 CODENAME="${VERSION_CODENAME:-bookworm}" ;;
+      esac
+      echo "deb [signed-by=/etc/apt/keyrings/erlang-solutions.gpg] https://binaries2.erlang-solutions.com/debian/ ${CODENAME}-esl-erlang-27 contrib" \
         | $SUDO tee /etc/apt/sources.list.d/erlang-solutions.list > /dev/null
       $SUDO apt-get update -qq
       $SUDO apt-get install -y -qq --no-install-recommends esl-erlang
@@ -218,8 +228,11 @@ if have streamlinear-cli; then
   ok "streamlinear-cli already installed"
 else
   info "Installing streamlinear CLI..."
-  npm install -g streamlinear@github:obra/streamlinear --ignore-scripts
-  ok "streamlinear-cli installed"
+  if npm install -g streamlinear@github:obra/streamlinear --ignore-scripts 2>/dev/null; then
+    ok "streamlinear-cli installed"
+  else
+    warn "streamlinear-cli installation failed (non-critical, skipping)"
+  fi
 fi
 
 # --- rebar3 ---
