@@ -265,10 +265,16 @@ pub struct SearchExamplesParams {
 
 | Cohort | Strongest argument |
 |---|---|
-| **Smalltalk purist** | "The system should be self-describing. If an agent wants examples, it should ask the running system — `ExampleFinder search: 'blocks'`. This is live, always current, and the corpus is exactly what's loaded. You're building a dead snapshot of content that drifts from the real system. The freshness problem you're solving with CI checks simply doesn't exist with a live approach." |
-| **Pragmatist** | "The MCP server already has a running REPL connection. You could embed test source strings in the stdlib and search them at runtime — ten lines of Erlang, no Rust crate, no JSON file, no build step. The REPL already hot-reloads, so the corpus updates when the stdlib updates." |
+| **Smalltalk purist** | "The system should be self-describing. If an agent wants examples, it should ask the running system — `ExamplesFinder search: 'blocks'`. This is live, always current, and the corpus is exactly what's loaded. You're building a dead snapshot of content that drifts from the real system. The freshness problem you're solving with CI checks simply doesn't exist with a live approach." |
+| **Pragmatist** | "The MCP server already has a running REPL connection. Once Beamtalk has modules, you emit an `ExamplesFinder` module as part of the dev-mode stdlib — opt-in for development, stripped from production builds. No Rust crate, no JSON file, no build step. The module hot-reloads with the stdlib, so the corpus is always current. The bloat argument doesn't apply — production binaries never see it." |
 
-**Counter:** Embedding test sources in the stdlib means shipping ~1MB of example strings in every BEAM binary, not just the MCP server — the stdlib is loaded by all Beamtalk programs. The MCP server is the only consumer today. Also, a REPL-based approach couples search availability to REPL connectivity; the static corpus works even when the REPL is disconnected (useful during startup, reconnection, or error states). Finally, the Erlang-side search would need to be reimplemented if we add semantic search later, whereas the Rust-side approach keeps the search logic in one place.
+**Counter:** The dev-only module approach is viable and addresses the bloat concern. The remaining arguments against it are operational:
+
+1. **REPL coupling.** A REPL-based approach ties search availability to REPL connectivity. The static corpus works during startup, reconnection, and error states — exactly when an agent most needs to look up examples (e.g., diagnosing why a REPL connection failed). The MCP server's `search_examples` tool works even with `"repl_connected": false`.
+2. **Search evolution.** Keyword search in Erlang is straightforward, but if we later want synonym expansion, fuzzy matching, or (eventually) semantic search, maintaining that in Erlang means a parallel implementation. The Rust-side approach keeps search logic in one place, co-located with the MCP server that consumes it.
+3. **Module system dependency.** This approach blocks on Beamtalk's module system, which doesn't exist yet. The static corpus can ship today.
+
+Of these, (3) is the strongest near-term argument but weakest long-term. Once modules land, this alternative becomes more compelling — especially if the corpus proves hard to keep fresh via CI checks.
 
 ### Alternative: Semantic/vector search
 
