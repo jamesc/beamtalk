@@ -52,7 +52,7 @@ Two production MCP servers already implement documentation-search patterns:
 
 Add one MCP tool to the `beamtalk-mcp` server:
 
-```
+```text
 search_examples(query: string, limit?: integer) -> CallToolResult
 ```
 
@@ -132,7 +132,7 @@ Not all source content is equally useful as a corpus entry. The strategy is cura
 
 Keyword-based scoring with weighted fields. No external dependencies.
 
-```
+```text
 score = (title_matches * 10) + (tag_matches * 8) + (category_matches * 5)
       + (explanation_matches * 2) + (source_matches * 1)
 ```
@@ -158,7 +158,7 @@ The generator lives at `crates/beamtalk-examples/build-corpus/` as a small binar
 
 A new `beamtalk-examples` library crate owns the corpus types, storage, and search logic. The corpus generator is a sub-binary crate within it.
 
-```
+```text
 crates/beamtalk-examples/
 ├── Cargo.toml           # lib crate — depends on serde, serde_json
 ├── corpus.json          # checked-in generated corpus
@@ -176,7 +176,7 @@ crates/beamtalk-examples/
 
 The corpus generator needs two dependencies: `beamtalk-core` (to parse `.bt` files) and the `CorpusEntry` type (to serialize the corpus). If `CorpusEntry` lives in `beamtalk-mcp`, the generator would depend on the entire MCP server — REPL client, MCP transport, etc. — just for one struct. A shared `beamtalk-examples` crate gives a clean dependency graph:
 
-```
+```text
 beamtalk-mcp        → beamtalk-examples  (search at runtime)
 beamtalk-examples   → serde, serde_json  (no other deps)
 build-corpus        → beamtalk-examples + beamtalk-core  (generate corpus)
