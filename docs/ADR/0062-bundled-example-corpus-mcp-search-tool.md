@@ -80,13 +80,13 @@ This is a single-tool pattern (not Context7's two-tool pattern) because we have 
 
 ### Corpus Format and Storage
 
-The corpus is a JSON file checked into the repo at `crates/beamtalk-mcp/corpus.json` and embedded at compile time via `include_bytes!`. It is deserialized once at startup using `std::sync::LazyLock`.
+The corpus is a JSON file checked into the repo at `crates/beamtalk-examples/corpus.json` and embedded at compile time via `include_bytes!`. It is deserialized once at startup using `std::sync::LazyLock`.
 
 **Why checked-in JSON (not `build.rs`, not bincode):**
 
 - `serde_json` is already a dependency — no new crates
 - A checked-in file is reviewable in PRs and diffable
-- CI can verify freshness: `just build-corpus && git diff --exit-code`
+- CI can verify freshness: `just build-corpus && git diff --exit-code crates/beamtalk-examples/corpus.json`
 - No `build.rs` latency on every `cargo build`
 - JSON is human-readable for manual inspection and editing
 
@@ -143,32 +143,48 @@ The query is tokenized into keywords (split on whitespace, lowercased). Each key
 
 ### Corpus Generation
 
-A `just build-corpus` task runs a Rust script that:
+A `just build-corpus` task runs a binary crate that:
 
 1. Walks the content source directories
-2. Parses `.bt` files to extract test methods and example patterns
+2. Parses `.bt` files using `beamtalk-core` to extract class names, selectors, and method boundaries
 3. Parses `.md` files to extract fenced code blocks with surrounding context
-4. Writes `crates/beamtalk-mcp/corpus.json`
+4. Writes `crates/beamtalk-examples/corpus.json`
 
-The script lives at `crates/beamtalk-mcp/build-corpus/` as a small binary crate (or a script in `scripts/`). It uses `beamtalk-core` for parsing `.bt` files to extract method boundaries.
+The generator lives at `crates/beamtalk-examples/build-corpus/` as a small binary crate. It depends on `beamtalk-core` for parsing `.bt` files — this is the key reason the generator is a crate rather than a standalone script. A script cannot access workspace dependencies, so it would have to use fragile regex heuristics instead of the real parser for method boundary detection.
 
 **Freshness check in CI:** `just ci` runs `just build-corpus` and asserts no diff. This catches corpus drift when test files or examples change.
 
-### Module Structure
+### Crate Structure
 
-New code lives in `crates/beamtalk-mcp/src/`:
+A new `beamtalk-examples` library crate owns the corpus types, storage, and search logic. The corpus generator is a sub-binary crate within it.
 
 ```
-crates/beamtalk-mcp/src/
-├── main.rs          # existing
-├── server.rs        # existing — add search_examples tool handler
-├── client.rs        # existing
-├── workspace.rs     # existing
-├── corpus.rs        # NEW — CorpusEntry, Corpus, deserialization, LazyLock
-└── search.rs        # NEW — keyword search scoring
+crates/beamtalk-examples/
+├── Cargo.toml           # lib crate — depends on serde, serde_json
+├── corpus.json          # checked-in generated corpus
+├── src/
+│   ├── lib.rs           # re-exports
+│   ├── corpus.rs        # CorpusEntry, Corpus, LazyLock deserialization
+│   └── search.rs        # weighted keyword search scoring
+└── build-corpus/
+    ├── Cargo.toml       # binary crate — depends on beamtalk-examples + beamtalk-core
+    └── src/
+        └── main.rs      # corpus generator: parses .bt/.md files, writes corpus.json
 ```
 
-No new crate. The MCP server is the only consumer. If the LSP later needs corpus access, extraction to a `beamtalk-examples` library crate is a mechanical refactor.
+**Why a separate crate (not modules in `beamtalk-mcp`):**
+
+The corpus generator needs two dependencies: `beamtalk-core` (to parse `.bt` files) and the `CorpusEntry` type (to serialize the corpus). If `CorpusEntry` lives in `beamtalk-mcp`, the generator would depend on the entire MCP server — REPL client, MCP transport, etc. — just for one struct. A shared `beamtalk-examples` crate gives a clean dependency graph:
+
+```
+beamtalk-mcp        → beamtalk-examples  (search at runtime)
+beamtalk-examples   → serde, serde_json  (no other deps)
+build-corpus        → beamtalk-examples + beamtalk-core  (generate corpus)
+```
+
+No circular dependencies, no pulling MCP machinery into the generator. And if the LSP later wants example lookups, it depends on `beamtalk-examples` directly — no extraction refactor needed.
+
+The MCP server's `server.rs` adds a thin `search_examples` tool handler that delegates to `beamtalk_examples::search()`.
 
 ### Tool Registration
 
@@ -249,26 +265,27 @@ pub struct SearchExamplesParams {
 
 | Cohort | Strongest argument |
 |---|---|
-| **Smalltalk purist** | "The system should be self-describing. If an agent wants examples, it should ask the running system — `ExampleFinder search: 'blocks'`. This is live, always current, and the corpus is exactly what's loaded. You're building a dead snapshot of content that drifts from the real system." |
-| **Pragmatist** | "The MCP server already has a running REPL connection. You don't need a build step, a corpus format, or search code. Just add a REPL op that greps loaded test sources. Ten lines of Erlang." |
+| **Smalltalk purist** | "The system should be self-describing. If an agent wants examples, it should ask the running system — `ExampleFinder search: 'blocks'`. This is live, always current, and the corpus is exactly what's loaded. You're building a dead snapshot of content that drifts from the real system. The freshness problem you're solving with CI checks simply doesn't exist with a live approach." |
+| **Pragmatist** | "The MCP server already has a running REPL connection. You could embed test source strings in the stdlib and search them at runtime — ten lines of Erlang, no Rust crate, no JSON file, no build step. The REPL already hot-reloads, so the corpus updates when the stdlib updates." |
 
-**Counter:** The whole point is helping agents that don't have the repo. An external agent using the MCP server over stdio has no test files loaded. The REPL approach only works for agents with full repo access — and those agents can already grep.
+**Counter:** Embedding test sources in the stdlib means shipping ~1MB of example strings in every BEAM binary, not just the MCP server — the stdlib is loaded by all Beamtalk programs. The MCP server is the only consumer today. Also, a REPL-based approach couples search availability to REPL connectivity; the static corpus works even when the REPL is disconnected (useful during startup, reconnection, or error states). Finally, the Erlang-side search would need to be reimplemented if we add semantic search later, whereas the Rust-side approach keeps the search logic in one place.
 
 ### Alternative: Semantic/vector search
 
 | Cohort | Strongest argument |
 |---|---|
-| **AI tooling advocate** | "Agents don't always use the right keywords. 'How do I loop over elements' should find `do:` and `collect:`, but keyword search requires the agent to already know those names. Semantic search closes that vocabulary gap. The corpus is small enough that a lightweight model (e.g., ONNX MiniLM) adds ~30MB, not 200MB." |
+| **AI tooling advocate** | "Agents don't always use the right keywords. 'How do I loop over elements' should find `do:` and `collect:`, but keyword search requires the agent to already know those names. Semantic search closes that vocabulary gap. The corpus is small enough that a lightweight model (e.g., ONNX MiniLM) adds ~30MB, not 200MB. You're building a search tool for AI agents — the one user who would most benefit from semantic understanding — and giving them grep." |
 
-**Counter:** Beamtalk agents are prompted with CLAUDE.md which names the constructs. Queries are keyword-rich by design. The vocabulary gap is small for a single-language technical corpus. If keyword search proves insufficient in practice, semantic search can be added later without changing the tool interface.
+**Counter:** The vocabulary gap is real but addressable without a model. Synonym tags (e.g., "loop" → `do:`, "lambda" → blocks, "for each" → `do:`) close the most common mismatches at negligible cost. The corpus is ~300 entries — small enough that well-chosen tags cover the search space. Adding an ONNX model introduces a new dependency category (native ML runtime), complicates cross-compilation, and increases binary size by 30MB+ for a marginal improvement over tags. The tool interface (`search_examples(query, limit)`) is deliberately stable — if tags prove insufficient, semantic search can be swapped in later without changing the agent integration.
 
 ### Alternative: Context7-style two-tool pattern
 
 | Cohort | Strongest argument |
 |---|---|
-| **MCP protocol purist** | "Browsable topic resolution is worth the extra round-trip. `resolve-library-id` lets the agent discover what's available before searching. A flat keyword search gives no affordance for browsing the corpus structure." |
+| **MCP protocol purist** | "A `list_categories` or `browse_examples(category)` tool lets agents discover the corpus structure before searching. Without it, the agent is shooting blind — it doesn't know whether to search 'actors', 'processes', 'concurrency', or 'message passing' for the same concept. Context7's resolve step isn't just disambiguation — it's discoverability." |
+| **Agent developer** | "Two tools let agents build a mental model of the corpus. First call lists topics, second call dives into one. With a single search tool, the agent has no way to know what topics exist. It can't ask 'what categories of examples do you have?' — it can only guess keywords." |
 
-**Counter:** We have one corpus for one language. The "browsing" affordance can be achieved by querying with an empty or generic term. Adding a second tool doubles the integration surface for agents with no functional benefit.
+**Counter:** The discoverability argument is real but doesn't justify a second tool. A single `search_examples` call with a broad query (e.g., "concurrency") already returns results with `category` fields that reveal the corpus structure. We could also add a `categories` field to the tool's schema description listing available categories. The two-tool pattern doubles the integration surface (agents must learn two tools, handle the round-trip, deal with empty resolve results) for a discoverability benefit achievable within one tool.
 
 ### Alternative: LSP bundling instead of MCP
 
@@ -276,13 +293,13 @@ pub struct SearchExamplesParams {
 |---|---|
 | **IDE developer** | "The LSP already runs in every editor session. If the corpus lives there, VSCode completions and hover docs can show examples inline — not just MCP agents. One corpus, two consumers." |
 
-**Counter:** The LSP has repo access (it runs in the workspace). It can already grep test files. The corpus solves a problem specific to MCP agents that lack repo access. Bundling into the LSP adds binary bloat for a capability the LSP doesn't need. If we later want LSP example lookups, it can call the same corpus module as a library dependency — but that's a separate decision.
+**Counter:** The LSP has repo access (it runs in the workspace). It can already grep test files. The corpus solves a problem specific to MCP agents that lack repo access. Bundling into the LSP adds binary bloat for a capability the LSP doesn't need. That said, the `beamtalk-examples` crate architecture makes LSP integration trivial if desired later — just add the dependency.
 
 ### Tension Points
 
 - **Freshness vs simplicity:** A checked-in JSON file is simple but can drift. A `build.rs` generator is always fresh but adds build complexity. CI freshness checks are the compromise.
 - **Curation vs automation:** Hand-curated tags and explanations produce better search results but don't scale. Auto-generated entries from test method names are lower quality but zero-maintenance. The recommendation is auto-generate with manual refinement.
-- **Single crate vs shared library:** Keeping corpus code in `beamtalk-mcp` is simpler now but means extraction later if the LSP wants it. YAGNI wins for v0.1.
+- **Crate boundary:** A separate `beamtalk-examples` crate adds workspace complexity but is justified by the generator's dependency needs (it needs `beamtalk-core` + `CorpusEntry` without pulling in MCP server deps).
 
 ## Alternatives Considered
 
@@ -310,11 +327,11 @@ Extend the existing `docs` MCP tool to return examples alongside API documentati
 
 **Rejected because:** `///` doc comments are API-level documentation, not tutorial-style examples. They document what a method does, not how to use the language feature it exemplifies. The gap is "how do I use closures?" not "what does `Array >> #do:` return?". Different content, different tool.
 
-### Alternative E: New `beamtalk-examples` Library Crate
+### Alternative E: Keep Everything in `beamtalk-mcp` (No Separate Crate)
 
-Extract corpus storage and search into a shared library crate that both `beamtalk-mcp` and `beamtalk-lsp` can depend on.
+Keep `CorpusEntry`, `Corpus`, and search logic as modules inside `beamtalk-mcp` rather than creating a separate `beamtalk-examples` crate. Only one consumer exists today.
 
-**Rejected for now:** Only one consumer exists today. Creating a crate for a single consumer contradicts the "don't design for hypothetical future requirements" principle. If the LSP needs it later, extraction is a mechanical refactor — move `corpus.rs` and `search.rs`, add `Cargo.toml`, update imports.
+**Rejected because:** The corpus generator binary needs both `beamtalk-core` (to parse `.bt` files) and the `CorpusEntry` type (to serialize the corpus). If `CorpusEntry` lives in `beamtalk-mcp`, the generator depends on the entire MCP server — REPL client, MCP transport, etc. — just for one struct. A separate `beamtalk-examples` crate with minimal dependencies (`serde`, `serde_json`) gives a clean dependency graph and avoids pulling MCP machinery into the generator. The separate crate is justified by the generator's needs today, not hypothetical future consumers.
 
 ## Consequences
 
@@ -338,30 +355,30 @@ Extract corpus storage and search into a shared library crate that both `beamtal
 
 ## Implementation
 
-### Phase 1: Corpus Generator (S)
+### Phase 1: `beamtalk-examples` Crate and Corpus Generator (S)
 
-**Affected components:** Build tooling
+**Affected components:** New `beamtalk-examples` crate, build tooling
 
-1. Create `scripts/build-corpus.rs` (or a small crate at `crates/beamtalk-mcp/build-corpus/`)
-2. Implement extractors for each content source:
+1. Create `crates/beamtalk-examples/` library crate with `CorpusEntry`, `Corpus`, `LazyLock` deserialization, and `search.rs`
+2. Create `crates/beamtalk-examples/build-corpus/` binary crate (depends on `beamtalk-examples` + `beamtalk-core`)
+3. Implement extractors for each content source:
    - `.bt` fixture files (`stdlib/test/fixtures/`, `tests/e2e/fixtures/`, `docs/learning/fixtures/`): include as whole-file entries with auto-generated tags from class names, selectors, and file path
    - `.bt` test files (`stdlib/test/*.bt`): extract individual test methods with class context
    - `.bt` example files (`examples/**/*.bt`): extract notable patterns
    - `.md` learning modules: extract fenced code blocks with surrounding prose
    - `beamtalk-language-features.md`: extract per-feature examples
-3. Generate `crates/beamtalk-mcp/corpus.json`
-4. Add `just build-corpus` task
-5. Add CI freshness check to `just ci`
+4. Generate `crates/beamtalk-examples/corpus.json`
+5. Add `just build-corpus` task
+6. Add CI freshness check to `just ci`
+7. Add unit tests for search scoring and edge cases (empty query, no matches, limit capping)
 
-### Phase 2: Search and MCP Tool (S)
+### Phase 2: MCP Tool Integration (S)
 
 **Affected components:** `beamtalk-mcp`
 
-1. Add `corpus.rs` — `CorpusEntry`, `Corpus` structs, `LazyLock` deserialization from `include_bytes!`
-2. Add `search.rs` — weighted keyword search
-3. Add `SearchExamplesParams` and `search_examples` tool handler in `server.rs`
-4. Update server instructions text to mention the new tool
-5. Add unit tests for search scoring and edge cases (empty query, no matches, limit capping)
+1. Add `beamtalk-examples` as a dependency of `beamtalk-mcp`
+2. Add `SearchExamplesParams` and `search_examples` tool handler in `server.rs` — delegates to `beamtalk_examples::search()`
+3. Update server instructions text to mention the new tool
 
 ### Phase 3: Corpus Curation (M)
 
