@@ -130,3 +130,5 @@ _rel/
 _bt_stdlib_*.txt
 _bt_stdlib_subdir/
 _site/
+.claude/skills-repo
+.claude/commands/
