@@ -970,7 +970,7 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Literal character | `$a` | Exact character match |
 | Negative number | `-1` | Negative integer/float match |
 | Variable | `x` | Binds matched value to name |
-| Tuple | `{a, b}` | Destructure tuple (destructuring assignment only; match arms not yet supported) |
+| Tuple | `{a, b}` | Destructure tuple in assignment and match arms |
 | Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported |
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
@@ -1004,8 +1004,10 @@ Pattern matching can bind variables in match arms:
 10 match: [x when: [x > 100] -> "big"; x when: [x > 5] -> "medium"; _ -> "small"]
 // => "medium"
 
-// Tuple destructuring in match arms (parser supports; runtime not yet supported)
-// {1, 2} match: [{a, b} -> a + b]
+// Tuple destructuring in match arms
+t := Erlang erlang list_to_tuple: #(#ok, 42)
+t match: [{#ok, v} -> v; {#error, _} -> 0]
+// => 42
 ```
 
 ### Rest Patterns in Destructuring (BT-1251)
@@ -1028,7 +1030,7 @@ The `...identifier` syntax in array destructuring captures remaining elements:
 
 The rest element must be the last in the pattern. Rest patterns are supported in destructuring assignment only — they are not yet supported in `match:` arms.
 
-> **Note:** Tuple destructuring in assignment (`{x, y} := expr`) is implemented. Tuple destructuring in `match:` arms and `collect:` with pattern blocks are not yet supported.
+> **Note:** Tuple destructuring works in both assignment (`{x, y} := expr`) and `match:` arms. `collect:` with pattern blocks is not yet supported.
 
 ---
 
