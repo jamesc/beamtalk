@@ -26,17 +26,20 @@ const POLL_INTERVAL_MS: u64 = 500;
 const READ_TIMEOUT_MS: u64 = 10_000;
 
 /// Run the transcript viewer command.
-pub fn run(workspace_name: Option<&str>, recent: Option<usize>) -> Result<()> {
-    // Discover workspace
-    let current_dir = std::env::current_dir().into_diagnostic()?;
-    let project_root = workspace::discovery::discover_project_root(&current_dir);
-    let workspace_id = workspace::workspace_id_for(&project_root, workspace_name)?;
+pub fn run(name_or_id: Option<&str>, recent: Option<usize>) -> Result<()> {
+    // Resolve workspace by name/ID or current directory (same as workspace stop/status/attach)
+    let workspace_id = workspace::lifecycle::resolve_workspace_id_or_cwd(name_or_id)?;
 
     // Check workspace exists
     if !workspace::workspace_exists(&workspace_id)? {
-        return Err(miette!(
-            "No workspace found. Start one with `beamtalk repl`."
-        ));
+        return Err(match name_or_id {
+            Some(name) => {
+                miette!("Workspace '{name}' does not exist. Start one with `beamtalk repl`.")
+            }
+            None => {
+                miette!("No workspace found for current directory. Start one with `beamtalk repl`.")
+            }
+        });
     }
 
     // Get node info

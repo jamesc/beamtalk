@@ -253,41 +253,6 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
     }
 }
 
-/// Resolve the TLS `ssl_dist.conf` path for a workspace, if `--tls` is enabled.
-///
-/// Returns `Some(path)` when TLS is requested and certs are found,
-/// `None` when TLS is not requested, or an error if certs are missing.
-fn resolve_ssl_dist_conf(
-    project_root: &Path,
-    workspace_name: Option<&str>,
-    tls: bool,
-) -> Result<Option<PathBuf>> {
-    if !tls {
-        return Ok(None);
-    }
-    let workspace_id = workspace::workspace_id_for_project(project_root, workspace_name)?;
-    match super::tls::ssl_dist_conf_path(&workspace_id)? {
-        Some(path) => {
-            println!("🔒 TLS distribution enabled");
-            Ok(Some(path))
-        }
-        None => Err(miette!(
-            "TLS certificates not found. Run `beamtalk tls init` first."
-        )),
-    }
-}
-
-/// Public wrapper for resolving TLS distribution config for workspace startup.
-///
-/// Used by `workspace create --background` to resolve TLS config without
-/// going through the REPL startup flow.
-pub fn resolve_ssl_dist_conf_for_workspace(
-    project_root: &Path,
-    workspace_name: Option<&str>,
-) -> Result<Option<PathBuf>> {
-    resolve_ssl_dist_conf(project_root, workspace_name, true)
-}
-
 /// Read the Erlang default cookie from ~/.erlang.cookie.
 /// Used for foreground mode where no workspace cookie exists.
 fn read_erlang_cookie() -> Option<String> {
@@ -324,7 +289,7 @@ pub(crate) fn should_stop_workspace(ephemeral: bool, beam_guard_present: bool) -
 )]
 #[expect(
     clippy::fn_params_excessive_bools,
-    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network, tls, web)"
+    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network, web)"
 )]
 pub fn run(
     port_arg: Option<u16>,
@@ -337,7 +302,6 @@ pub fn run(
     no_color: bool,
     bind: Option<&str>,
     confirm_network: bool,
-    tls: bool,
     web: bool,
     web_port: Option<u16>,
 ) -> Result<()> {
@@ -404,15 +368,11 @@ pub fn run(
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
 
-        // Resolve TLS config for foreground mode (ADR 0020 Phase 2)
-        let ssl_dist_conf = resolve_ssl_dist_conf(&project_root, workspace_name, tls)?;
-
         let mut child = start_beam_node(
             port,
             node_name.as_ref(),
             &project_root,
             Some(bind_addr),
-            ssl_dist_conf.as_deref(),
             web_port,
             otp_app_name.as_deref(),
         )?;
@@ -460,9 +420,6 @@ pub fn run(
         // Auto-compile package if beamtalk.toml is present (BT-606)
         let extra_code_paths = auto_compile_package(&project_root);
 
-        // Resolve TLS config for workspace mode (ADR 0020 Phase 2)
-        let ssl_dist_conf = resolve_ssl_dist_conf(&project_root, workspace_name, tls)?;
-
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,
             workspace_name,
@@ -472,7 +429,6 @@ pub fn run(
             !persistent, // auto_cleanup is opposite of persistent flag
             timeout,
             Some(bind_addr),
-            ssl_dist_conf.as_deref(),
             web_port,
             otp_app_name.as_deref(),
         )?;
@@ -493,12 +449,6 @@ pub fn run(
             std::thread::sleep(Duration::from_millis(2000));
         } else {
             println!("✓ Connected to existing workspace: {}", node_info.node_name);
-            if tls {
-                eprintln!(
-                    "  ⚠️  --tls has no effect on an already-running workspace.\n  \
-                     Stop the workspace first with `beamtalk workspace stop` to restart with TLS."
-                );
-            }
             if timeout.is_some() {
                 eprintln!(
                     "  ⚠️  Workspace already running (timeout unchanged). \
@@ -593,7 +543,7 @@ pub fn run(
 
     println!();
 
-    // Enter the shared REPL loop (also used by `beamtalk attach`)
+    // Enter the shared REPL loop (also used by `beamtalk workspace attach`)
     let repl_res = repl_loop(&mut client, &connect_host, connect_port, &cookie);
 
     // BEAM child is cleaned up automatically by BeamChildGuard::drop()
@@ -693,7 +643,7 @@ fn display_eval_response(response: &ReplResponse) {
     }
 }
 
-/// Shared REPL loop used by both `beamtalk repl` and `beamtalk attach`.
+/// Shared REPL loop used by both `beamtalk repl` and `beamtalk workspace attach`.
 ///
 /// Sets up rustyline with tab completion and history, registers the SIGINT
 /// handler, then enters the read-eval-print loop. Returns when the user

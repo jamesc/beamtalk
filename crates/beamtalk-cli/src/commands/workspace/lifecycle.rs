@@ -104,7 +104,6 @@ pub fn get_or_start_workspace(
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
     bind_addr: Option<Ipv4Addr>,
-    ssl_dist_optfile: Option<&Path>,
     web_port: Option<u16>,
     otp_app_name: Option<&str>,
 ) -> Result<(NodeInfo, bool, String)> {
@@ -164,7 +163,6 @@ pub fn get_or_start_workspace(
             auto_cleanup,
             max_idle_seconds,
             bind_addr,
-            ssl_dist_optfile,
             web_port,
             otp_app_name,
         ) {
@@ -419,7 +417,7 @@ pub fn resolve_workspace_id(name_or_id: &str) -> Result<String> {
 /// If `name_or_id` is `Some`, delegates to [`resolve_workspace_id`].
 /// If `None`, discovers the project root from `cwd` and looks up (or generates)
 /// the workspace ID for that path.
-pub(super) fn resolve_workspace_id_or_cwd(name_or_id: Option<&str>) -> Result<String> {
+pub(crate) fn resolve_workspace_id_or_cwd(name_or_id: Option<&str>) -> Result<String> {
     if let Some(name) = name_or_id {
         resolve_workspace_id(name)
     } else {

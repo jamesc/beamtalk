@@ -11,7 +11,7 @@
 //! **DDD Context:** CLI
 
 use std::net::{Ipv4Addr, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -105,7 +105,6 @@ pub fn start_detached_node(
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
     bind_addr: Option<Ipv4Addr>,
-    ssl_dist_optfile: Option<&Path>,
     web_port: Option<u16>,
     otp_app_name: Option<&str>,
 ) -> Result<NodeInfo> {
@@ -213,7 +212,6 @@ pub fn start_detached_node(
         extra_code_paths,
         &eval_cmd,
         &project_path,
-        ssl_dist_optfile,
     );
 
     // Override the default /dev/null stderr with a workspace log file.

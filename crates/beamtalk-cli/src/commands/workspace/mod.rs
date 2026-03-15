@@ -31,12 +31,7 @@
 //!     └── abc123/              # Workspace ID (hash of project path)
 //!         ├── cookie           # Erlang cookie (chmod 600)
 //!         ├── node.info        # Node name, port, PID
-//!         ├── metadata.json    # Project path, created_at
-//!         └── tls/             # TLS certificates (ADR 0020, optional)
-//!             ├── ca.pem
-//!             ├── node.pem
-//!             ├── node-key.pem # chmod 600
-//!             └── ssl_dist.conf
+//!         └── metadata.json    # Project path, created_at
 //! ```
 //!
 //! # Usage
@@ -55,7 +50,7 @@ pub mod discovery;
 /// epmd client: TCP NAMES_REQ protocol, deregistration polling, conflict detection.
 mod epmd;
 /// Workspace lifecycle operations: create, start, list, status.
-mod lifecycle;
+pub(crate) mod lifecycle;
 /// Node liveness queries: OS process checks, port-file nonce validation, health probes.
 mod node_state;
 /// Workspace node startup sequence.
@@ -67,15 +62,12 @@ mod startup_command;
 /// File I/O operations for workspace metadata, cookies, and node information.
 pub mod storage;
 
-pub use lifecycle::{
-    WorkspaceStatus, WorkspaceSummary, create_workspace, get_or_start_workspace, list_workspaces,
-    resolve_workspace_id, workspace_status,
-};
+pub use lifecycle::{create_workspace, get_or_start_workspace, list_workspaces, workspace_status};
 pub use node_state::is_node_running;
 pub use shutdown::stop_workspace;
 pub use storage::{
     cleanup_stale_node_info, get_node_info, get_workspace_metadata, read_workspace_cookie,
-    workspace_exists, workspace_id_for,
+    workspace_exists,
 };
 
 /// Resolve a workspace ID from a project path and optional name.
@@ -100,7 +92,7 @@ mod tests {
     use super::storage::{
         NodeInfo, WorkspaceMetadata, generate_cookie, generate_workspace_id, read_port_file,
         read_workspace_cookie, save_node_info, save_workspace_cookie, save_workspace_metadata,
-        validate_workspace_name, workspace_dir, workspaces_base_dir,
+        validate_workspace_name, workspace_dir, workspace_id_for, workspaces_base_dir,
     };
     use super::*;
     use serial_test::serial;
@@ -1057,18 +1049,7 @@ mod tests {
             let tw = TestWorkspace::new(&format!("{prefix}{attempt_suffix}"));
             let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
 
-            match start_detached_node(
-                &tw.id,
-                0,
-                &paths,
-                &[],
-                false,
-                Some(60),
-                None,
-                None,
-                None,
-                None,
-            ) {
+            match start_detached_node(&tw.id, 0, &paths, &[], false, Some(60), None, None, None) {
                 Ok(node_info) => {
                     let guard = NodeGuard::new(&node_info);
                     return (tw, node_info, guard);
@@ -1208,7 +1189,6 @@ mod tests {
             false,
             Some(60),
             None,
-            None, // ssl_dist_optfile
             None, // web_port
             None, // otp_app_name
         )
@@ -1231,7 +1211,6 @@ mod tests {
             false,
             Some(60),
             None,
-            None, // ssl_dist_optfile
             None, // web_port
             None, // otp_app_name
         )
@@ -1263,7 +1242,6 @@ mod tests {
             false,
             Some(60),
             None,
-            None, // ssl_dist_optfile
             None, // web_port
             None, // otp_app_name
         )
@@ -1323,7 +1301,6 @@ mod tests {
                         false,
                         Some(60),
                         None,
-                        None, // ssl_dist_optfile
                         None, // web_port
                         None, // otp_app_name
                     )
@@ -1400,19 +1377,9 @@ mod tests {
         let paths = beam_dirs_for_tests();
 
         // Step 1: Start a node to get a real port, then kill it without cleanup.
-        let first_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None,
-            None,
-            None,
-        )
-        .expect("first start should succeed");
+        let first_info =
+            start_detached_node(&tw.id, 0, &paths, &[], false, Some(60), None, None, None)
+                .expect("first start should succeed");
         let stale_port = first_info.port;
         kill_node_raw(&first_info);
 
@@ -1444,7 +1411,6 @@ mod tests {
             &[],
             false,
             Some(60),
-            None,
             None,
             None,
             None,
@@ -1486,19 +1452,9 @@ mod tests {
         let paths = beam_dirs_for_tests();
 
         // Step 1: Start a node to produce real runtime files, then kill it.
-        let first_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None,
-            None,
-            None,
-        )
-        .expect("first start should succeed");
+        let first_info =
+            start_detached_node(&tw.id, 0, &paths, &[], false, Some(60), None, None, None)
+                .expect("first start should succeed");
         kill_node_raw(&first_info);
 
         // Step 2: Write a `starting` tombstone to simulate a partial startup that
@@ -1523,7 +1479,6 @@ mod tests {
             &[],
             false,
             Some(60),
-            None,
             None,
             None,
             None,

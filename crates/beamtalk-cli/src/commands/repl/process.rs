@@ -23,14 +23,11 @@ use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
 /// The BEAM process's working directory is set to `project_root` so that
 /// relative file paths (e.g., `File lines: "data.csv"`) resolve correctly.
 ///
-/// If `ssl_dist_optfile` is `Some`, the node is started with TLS-secured
-/// Erlang distribution (`-proto_dist inet_tls`).
 pub(crate) fn start_beam_node(
     port: u16,
     node_name: Option<&String>,
     project_root: &Path,
     bind_addr: Option<std::net::Ipv4Addr>,
-    ssl_dist_optfile: Option<&Path>,
     web_port: Option<u16>,
     otp_app_name: Option<&str>,
 ) -> Result<Child> {
@@ -108,16 +105,6 @@ pub(crate) fn start_beam_node(
             args.push(OsString::from("-sname"));
         }
         args.push(OsString::from(name.as_str()));
-    }
-
-    // Add TLS distribution args if configured (ADR 0020 Phase 2)
-    if let Some(conf_path) = ssl_dist_optfile {
-        args.push(OsString::from("-proto_dist"));
-        args.push(OsString::from("inet_tls"));
-        args.push(OsString::from("-ssl_dist_optfile"));
-        // Normalize path separators for Erlang (backslashes → forward slashes on Windows)
-        let normalized = conf_path.to_string_lossy().replace('\\', "/");
-        args.push(OsString::from(normalized));
     }
 
     args.push(OsString::from("-eval"));

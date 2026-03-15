@@ -1,30 +1,27 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `beamtalk attach` — connect to a running workspace without starting one.
+//! `beamtalk workspace attach` — connect to a running workspace without starting one.
 //!
 //! **DDD Context:** CLI
 //!
 //! Unlike `beamtalk repl`, which auto-discovers or starts a workspace,
-//! `beamtalk attach` only connects to an already-running workspace. This
-//! enables multiple REPLs sharing the same workspace, scripted attach to
-//! pre-started workspaces, and explicit port-based connections.
+//! `beamtalk workspace attach` only connects to an already-running workspace.
+//! This enables multiple REPLs sharing the same workspace and scripted
+//! attach to pre-started workspaces.
 
 use miette::{Result, miette};
 
 use super::repl::client::ReplClient;
 use super::repl::color;
-use super::workspace::{
-    self, WorkspaceStatus, WorkspaceSummary, get_node_info, list_workspaces, read_workspace_cookie,
-    resolve_workspace_id,
-};
+use super::workspace::{self, get_node_info, read_workspace_cookie};
 
-/// Run the `beamtalk attach` command.
+/// Run the `beamtalk workspace attach` command.
 ///
-/// Resolves a workspace to connect to (by ID, by port, or interactively),
-/// validates it is running, and enters the shared REPL loop.
+/// Resolves a workspace to connect to (by name/ID, by port, or by current
+/// directory lookup), validates it is running, and enters the shared REPL loop.
 pub fn run(
-    workspace_id: Option<&str>,
+    name_or_id: Option<&str>,
     port: Option<u16>,
     cookie: Option<&str>,
     no_color: bool,
@@ -41,31 +38,34 @@ pub fn run(
         })?;
 
         connect_and_run("127.0.0.1", port, &connect_cookie)
-    } else if let Some(ws_id) = workspace_id {
-        // Explicit workspace ID
-        attach_by_workspace_id(ws_id)
     } else {
-        // No args: list running workspaces and prompt/select
-        attach_interactive()
+        // Resolve by name/ID or current directory (same as `workspace stop`/`status`)
+        attach_by_workspace_id(name_or_id)
     }
 }
 
-/// Attach to a workspace by its ID.
-fn attach_by_workspace_id(name_or_id: &str) -> Result<()> {
-    let workspace_id = resolve_workspace_id(name_or_id)?;
+/// Attach to a workspace resolved by name/ID or current directory.
+fn attach_by_workspace_id(name_or_id: Option<&str>) -> Result<()> {
+    let workspace_id = super::workspace::lifecycle::resolve_workspace_id_or_cwd(name_or_id)?;
 
     if !workspace::workspace_exists(&workspace_id)? {
-        return Err(miette!(
-            "Workspace '{name_or_id}' does not exist. \
-             Create it with `beamtalk workspace create` or start a new one with `beamtalk repl`"
-        ));
+        return Err(match name_or_id {
+            Some(name) => miette!(
+                "Workspace '{name}' does not exist. \
+                 Create it with `beamtalk workspace create` or start a new one with `beamtalk repl`"
+            ),
+            None => miette!(
+                "No workspace found for current directory. \
+                 Specify a name: beamtalk workspace attach <name>"
+            ),
+        });
     }
 
-    let node_info =
-        get_node_info(&workspace_id)?.ok_or_else(|| workspace_not_running(name_or_id))?;
+    let node_info = get_node_info(&workspace_id)?
+        .ok_or_else(|| workspace_not_running(&workspace_id, name_or_id))?;
 
     if !workspace::is_node_running(&node_info, Some(&workspace_id)) {
-        return Err(workspace_not_running(name_or_id));
+        return Err(workspace_not_running(&workspace_id, name_or_id));
     }
 
     let cookie = read_workspace_cookie(&workspace_id)?.trim().to_string();
@@ -82,47 +82,12 @@ fn attach_by_workspace_id(name_or_id: &str) -> Result<()> {
     connect_and_run(host, node_info.port, &cookie)
 }
 
-/// When no args are provided, list running workspaces and auto-select or error.
-fn attach_interactive() -> Result<()> {
-    let workspaces = list_workspaces()?;
-    let running: Vec<&WorkspaceSummary> = workspaces
-        .iter()
-        .filter(|ws| ws.status == WorkspaceStatus::Running)
-        .collect();
-
-    if running.is_empty() {
-        return Err(miette!(
-            "No workspaces running. Start one with `beamtalk repl`"
-        ));
-    }
-
-    if running.len() == 1 {
-        let ws = running[0];
-        return attach_by_workspace_id(&ws.workspace_id);
-    }
-
-    // Multiple running workspaces — list them and ask user to specify
-    eprintln!("Multiple workspaces running. Specify which one to attach to:\n");
-    for ws in &running {
-        let port_str = ws.port.map_or_else(String::new, |p| format!(" (port {p})"));
-        eprintln!(
-            "  beamtalk attach {}{}  — {}",
-            ws.workspace_id,
-            port_str,
-            ws.project_path.display()
-        );
-    }
-    eprintln!();
-    Err(miette!(
-        "Multiple workspaces running. Use `beamtalk attach <workspace-id>` to specify one."
-    ))
-}
-
 /// Error for when a workspace exists but is not running.
-fn workspace_not_running(name_or_id: &str) -> miette::Report {
+fn workspace_not_running(workspace_id: &str, name_or_id: Option<&str>) -> miette::Report {
+    let label = name_or_id.unwrap_or(workspace_id);
     miette!(
-        "Workspace '{name_or_id}' is not running. \
-         Start it with `beamtalk repl` or `beamtalk workspace create`"
+        "Workspace '{label}' is not running. \
+         Start it with `beamtalk repl` or `beamtalk workspace create --background`"
     )
 }
 
