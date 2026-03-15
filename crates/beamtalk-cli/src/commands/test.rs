@@ -195,6 +195,10 @@ pub(crate) fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &s
         };
 
         // Run test method inside try/after for tearDown
+        // BT-1353: skipTest/1 uses error (not throw) to survive Erlang proxy dispatch.
+        // The wrapped error is #{error := {beamtalk_error, bunit_skip, _, _, _, _, _}}.
+        // Catch both the throw form (from skip/1) and the error form (from skipTest/1)
+        // so that `self skip:` works correctly in EUnit wrappers on all platforms.
         if has_teardown {
             let _ = writeln!(erl, "        try");
             let _ = writeln!(
@@ -202,7 +206,8 @@ pub(crate) fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &s
                 "            '{bt_module}':dispatch('{method_name}', [], {instance_var})"
             );
             let _ = writeln!(erl, "        catch");
-            let _ = writeln!(erl, "            throw:{{bunit_skip, _}} -> ok");
+            let _ = writeln!(erl, "            throw:{{bunit_skip, _}} -> ok;");
+            let _ = writeln!(erl, "            error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok");
             let _ = writeln!(erl, "        after");
             let _ = writeln!(
                 erl,
@@ -216,7 +221,8 @@ pub(crate) fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &s
                 "            '{bt_module}':dispatch('{method_name}', [], {instance_var})"
             );
             let _ = writeln!(erl, "        catch");
-            let _ = writeln!(erl, "            throw:{{bunit_skip, _}} -> ok");
+            let _ = writeln!(erl, "            throw:{{bunit_skip, _}} -> ok;");
+            let _ = writeln!(erl, "            error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok");
             let _ = writeln!(erl, "        end");
         }
 
@@ -1512,7 +1518,12 @@ mod tests {
         // No setUp/tearDown, but skip handling wraps dispatch in try/catch
         assert!(!wrapper.contains("setUp"));
         assert!(!wrapper.contains("tearDown"));
-        assert!(wrapper.contains("bunit_skip"));
+        // BT-1353: Must catch both throw form (skip/1) and error form (skipTest/1)
+        assert!(wrapper.contains("throw:{bunit_skip, _}"));
+        assert!(
+            wrapper.contains("error:#{error := {beamtalk_error, bunit_skip,"),
+            "EUnit wrapper must catch error-form bunit_skip from skipTest/1"
+        );
     }
 
     #[test]
@@ -1820,6 +1831,12 @@ mod tests {
         // Both test methods present
         assert!(wrapper.contains("'testA_test_'()"));
         assert!(wrapper.contains("'testB_test_'()"));
+        // BT-1353: skip handling must catch both forms even with tearDown
+        assert!(wrapper.contains("throw:{bunit_skip, _}"));
+        assert!(
+            wrapper.contains("error:#{error := {beamtalk_error, bunit_skip,"),
+            "EUnit wrapper with tearDown must catch error-form bunit_skip"
+        );
     }
 
     /// Inserting `"."` and the absolute CWD into `seen` without canonicalization would
