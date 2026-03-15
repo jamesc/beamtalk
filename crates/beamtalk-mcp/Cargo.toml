@@ -50,5 +50,11 @@ tokio-tungstenite.workspace = true
 # why: Stream/Sink combinators for WebSocket I/O
 futures-util = "0.3"
 
+# Bundled example corpus and search (ADR 0062)
+beamtalk-examples.workspace = true
+
+# why: SHA-256 hashing for search telemetry query_hash field
+sha2.workspace = true
+
 [lints]
 workspace = true
