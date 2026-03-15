@@ -85,7 +85,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-release-
             ${{ runner.os }}-cargo-
@@ -164,7 +164,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-x86_64-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-x86_64-cargo-release-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-x86_64-cargo-release-
             ${{ runner.os }}-cargo-
@@ -243,7 +243,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-arm64-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-arm64-cargo-release-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-arm64-cargo-release-
             ${{ runner.os }}-cargo-
@@ -321,7 +321,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-release-
 
