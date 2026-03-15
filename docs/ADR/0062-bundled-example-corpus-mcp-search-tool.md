@@ -303,9 +303,9 @@ A `just search-eval` task can parse structured logs and produce a summary report
 
 1. **REPL coupling.** A REPL-based approach ties search availability to REPL connectivity. The static corpus works during startup, reconnection, and error states — exactly when an agent most needs to look up examples (e.g., diagnosing why a REPL connection failed). The MCP server's `search_examples` tool works even with `"repl_connected": false`.
 2. **Search evolution.** Keyword search in Erlang is straightforward, but if we later want synonym expansion, fuzzy matching, or (eventually) semantic search, maintaining that in Erlang means a parallel implementation. The Rust-side approach keeps search logic in one place, co-located with the MCP server that consumes it.
-3. **Module system dependency.** This approach blocks on Beamtalk's module system, which doesn't exist yet. The static corpus can ship today.
+3. **Content isolation.** The corpus is ~300 entries drawn from test fixtures, e2e cases, and learning docs. A stdlib class or runtime module would load all that tutorial content into the BEAM VM for every REPL session — dead weight for users who never search. The Rust-side approach keeps the corpus in the `beamtalk-mcp` binary only, where the sole consumer (MCP agents) lives. The runtime stays lean.
 
-Of these, (3) is the strongest near-term argument but weakest long-term. Once modules land, this alternative becomes more compelling — especially if the corpus proves hard to keep fresh via CI checks.
+Of these, (1) and (3) are the strongest. The live approach is compelling philosophically but forces a choice between always-loaded bloat and conditional loading complexity, while the Rust-side corpus avoids both.
 
 ### Alternative: Semantic/vector search
 
