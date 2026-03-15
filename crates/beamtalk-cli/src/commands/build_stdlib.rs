@@ -13,6 +13,7 @@
 //! Part of ADR 0007 (Compilable Stdlib with Primitive Injection).
 
 use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
+use crate::commands::util;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fmt::Write;
@@ -259,23 +260,7 @@ fn oldest_mtime_in_dir(dir: &Utf8Path, ext: &str) -> Option<SystemTime> {
 
 /// Find all `.bt` files in the stdlib source directory.
 fn find_stdlib_files(lib_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let mut files = Vec::new();
-
-    for entry in fs::read_dir(lib_dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read directory '{lib_dir}'"))?
-    {
-        let entry = entry.into_diagnostic()?;
-        let path = Utf8PathBuf::from_path_buf(entry.path())
-            .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", lib_dir))?;
-
-        if path.extension() == Some("bt") {
-            files.push(path);
-        }
-    }
-
-    files.sort();
-    Ok(files)
+    util::find_files(lib_dir, &["bt"])
 }
 
 /// Extract the module name from a `.bt` file path.

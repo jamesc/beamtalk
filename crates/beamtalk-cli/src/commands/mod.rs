@@ -21,4 +21,5 @@ pub mod test;
 pub mod test_docs;
 pub mod test_stdlib;
 pub mod transcript;
+pub(crate) mod util;
 pub mod workspace;

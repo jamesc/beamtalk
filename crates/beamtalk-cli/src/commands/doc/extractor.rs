@@ -11,6 +11,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use tracing::{debug, warn};
 
+use crate::commands::util;
+
 /// Information about a documented class.
 pub struct ClassInfo {
     /// The class name (e.g., `Counter`).
@@ -44,33 +46,7 @@ pub struct MethodInfo {
 
 /// Find all `.bt` source files in a path.
 pub(super) fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let mut files = Vec::new();
-
-    if path.is_file() {
-        if path.extension() == Some("bt") {
-            files.push(path.to_path_buf());
-        } else {
-            miette::bail!("File '{}' is not a .bt source file", path);
-        }
-    } else if path.is_dir() {
-        for entry in fs::read_dir(path)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to read directory '{path}'"))?
-        {
-            let entry = entry.into_diagnostic()?;
-            let entry_path = Utf8PathBuf::from_path_buf(entry.path())
-                .map_err(|_| miette::miette!("Non-UTF-8 path"))?;
-
-            if entry_path.extension() == Some("bt") {
-                files.push(entry_path);
-            }
-        }
-    } else {
-        miette::bail!("Path '{}' does not exist", path);
-    }
-
-    files.sort();
-    Ok(files)
+    util::find_files(path, &["bt"])
 }
 
 /// Parse a `.bt` source file and extract class documentation info.
