@@ -260,49 +260,29 @@ impl ReplClient {
     /// the server. A retry after partial success would redefine already-loaded
     /// classes and produce duplicate errors.
     pub async fn load_file(&self, path: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "load-file",
-            "id": next_msg_id(),
-            "path": path
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request_with_param("load-file", "path", path))
+            .await
     }
 
     /// Send an inspect operation.
     pub async fn inspect(&self, actor: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "inspect",
-            "id": next_msg_id(),
-            "actor": actor
-        });
-        self.send(&request).await
+        self.send(&Self::request_with_param("inspect", "actor", actor))
+            .await
     }
 
     /// Send an actors operation.
     pub async fn actors(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "actors",
-            "id": next_msg_id()
-        });
-        self.send(&request).await
+        self.send(&Self::request("actors")).await
     }
 
     /// Send a modules operation.
     pub async fn modules(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "modules",
-            "id": next_msg_id()
-        });
-        self.send(&request).await
+        self.send(&Self::request("modules")).await
     }
 
     /// Send a bindings operation.
     pub async fn bindings(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "bindings",
-            "id": next_msg_id()
-        });
-        self.send(&request).await
+        self.send(&Self::request("bindings")).await
     }
 
     /// Send a reload operation.
@@ -310,12 +290,8 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — reloading a module is a mutating operation;
     /// a retry could reload an already-updated module with stale bytecode.
     pub async fn reload(&self, module: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "reload",
-            "id": next_msg_id(),
-            "module": module
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request_with_param("reload", "module", module))
+            .await
     }
 
     /// Send a clear operation to reset REPL bindings.
@@ -323,11 +299,7 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — clearing bindings is a mutating operation
     /// that could interleave badly with other operations on reconnect.
     pub async fn clear(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "clear",
-            "id": next_msg_id()
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request("clear")).await
     }
 
     /// Send an unload operation to remove a module from the workspace.
@@ -335,12 +307,8 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — a retry after the module was already
     /// unloaded would produce a not-found error.
     pub async fn unload(&self, module: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "unload",
-            "id": next_msg_id(),
-            "module": module
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request_with_param("unload", "module", module))
+            .await
     }
 
     /// Send an interrupt operation to cancel a running evaluation.
@@ -353,21 +321,13 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — a retry after reconnect could cancel
     /// a different evaluation that started after the session was resumed.
     pub async fn interrupt(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "interrupt",
-            "id": next_msg_id()
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request("interrupt")).await
     }
 
     /// Send a show-codegen operation to inspect generated Core Erlang.
     pub async fn show_codegen(&self, code: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "show-codegen",
-            "id": next_msg_id(),
-            "code": code
-        });
-        self.send(&request).await
+        self.send(&Self::request_with_param("show-codegen", "code", code))
+            .await
     }
 
     /// Send a show-codegen operation for a loaded class (BT-1236).
@@ -392,44 +352,28 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — tests may have side effects; a retry
     /// could run the same test suite twice and produce misleading results.
     pub async fn test_class(&self, class: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "test",
-            "id": next_msg_id(),
-            "class": class
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request_with_param("test", "class", class))
+            .await
     }
 
     /// Send a test operation scoped to a specific source file path.
     ///
     /// Uses [`send_once`] (no retry) — see [`test_class`] for rationale.
     pub async fn test_file(&self, file: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "test",
-            "id": next_msg_id(),
-            "file": file
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request_with_param("test", "file", file))
+            .await
     }
 
     /// Send a test-all operation to run all `BUnit` tests.
     ///
     /// Uses [`send_once`] (no retry) — see [`test_class`] for rationale.
     pub async fn test_all(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "test-all",
-            "id": next_msg_id()
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request("test-all")).await
     }
 
     /// Send a describe operation for capability discovery.
     pub async fn describe(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "describe",
-            "id": next_msg_id()
-        });
-        self.send(&request).await
+        self.send(&Self::request("describe")).await
     }
 
     /// Send a load-project operation.
@@ -567,6 +511,20 @@ impl ReplClient {
         }
 
         unreachable!("send_once loop always returns on attempt 1")
+    }
+
+    // --- Request builder helpers ---
+
+    /// Build a no-param request for the given operation.
+    fn request(op: &str) -> serde_json::Value {
+        serde_json::json!({"op": op, "id": next_msg_id()})
+    }
+
+    /// Build a single-param request for the given operation.
+    fn request_with_param(op: &str, key: &str, value: &str) -> serde_json::Value {
+        let mut req = serde_json::json!({"op": op, "id": next_msg_id()});
+        req[key] = serde_json::Value::String(value.to_string());
+        req
     }
 
     /// Send a docs operation.

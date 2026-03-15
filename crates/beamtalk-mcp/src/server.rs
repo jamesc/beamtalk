@@ -36,6 +36,23 @@ fn error_result(msg: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![Content::text(msg.into())])
 }
 
+/// Pretty-print a JSON value, falling back to `Display` on serialization error.
+fn pretty_json(value: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+}
+
+/// Check a REPL response for errors and return early with a formatted error result.
+///
+/// The `$fallback` string is used when the response has no error message.
+macro_rules! check_response {
+    ($response:expr, $fallback:expr) => {
+        if $response.is_error() {
+            let msg = $response.error_message().unwrap_or($fallback);
+            return Ok(error_result(format!("ERROR: {msg}")));
+        }
+    };
+}
+
 // --- Tool parameter types ---
 
 /// Parameters for the `evaluate` MCP tool.
@@ -290,10 +307,7 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response.error_message().unwrap_or("Completion failed");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Completion failed");
 
         let completions = response.completions.unwrap_or_default();
         let text = if completions.is_empty() {
@@ -320,10 +334,7 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response.error_message().unwrap_or("Failed to load project");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to load project");
 
         let classes = response.classes.unwrap_or_default();
         let errors = response.errors.unwrap_or_default();
@@ -383,10 +394,7 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response.error_message().unwrap_or("Failed to load file");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to load file");
 
         let classes = response.classes.unwrap_or_default();
         let text = if classes.is_empty() {
@@ -421,18 +429,11 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response
-                .error_message()
-                .unwrap_or("Failed to inspect actor");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to inspect actor");
 
         let text = match response.state {
             Some(serde_json::Value::String(s)) => s,
-            Some(state) => {
-                serde_json::to_string_pretty(&state).unwrap_or_else(|_| state.to_string())
-            }
+            Some(state) => pretty_json(&state),
             None => "No state available".to_string(),
         };
 
@@ -450,10 +451,7 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response.error_message().unwrap_or("Failed to list actors");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to list actors");
 
         let actors = response.actors.unwrap_or_default();
         let text = if actors.is_empty() {
@@ -480,10 +478,7 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response.error_message().unwrap_or("Failed to list modules");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to list modules");
 
         let modules = response.modules.unwrap_or_default();
         let text = if modules.is_empty() {
@@ -515,15 +510,10 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response.error_message().unwrap_or("Failed to get bindings");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to get bindings");
 
         let text = match response.bindings {
-            Some(bindings) => {
-                serde_json::to_string_pretty(&bindings).unwrap_or_else(|_| bindings.to_string())
-            }
+            Some(bindings) => pretty_json(&bindings),
             None => "No bindings".to_string(),
         };
 
@@ -544,12 +534,7 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response
-                .error_message()
-                .unwrap_or("Failed to reload module");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to reload module");
 
         let mut parts = vec![Content::text("Module reloaded successfully")];
 
@@ -579,10 +564,7 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response.error_message().unwrap_or("No documentation found");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "No documentation found");
 
         let text = response
             .docs
@@ -602,12 +584,7 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response
-                .error_message()
-                .unwrap_or("Failed to clear bindings");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to clear bindings");
 
         Ok(CallToolResult::success(vec![Content::text(
             "Bindings cleared",
@@ -628,12 +605,7 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response
-                .error_message()
-                .unwrap_or("Failed to unload module");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to unload module");
 
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Module '{}' unloaded",
@@ -652,12 +624,7 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response
-                .error_message()
-                .unwrap_or("Failed to send interrupt");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to send interrupt");
 
         Ok(CallToolResult::success(vec![Content::text(
             "Interrupt sent",
@@ -699,12 +666,7 @@ impl BeamtalkMcp {
         }
         .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response
-                .error_message()
-                .unwrap_or("Failed to generate Core Erlang");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Failed to generate Core Erlang");
 
         let mut parts = Vec::new();
 
@@ -743,17 +705,12 @@ impl BeamtalkMcp {
         }
         .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response.error_message().unwrap_or("Test execution failed");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Test execution failed");
 
         let has_failures = response.has_test_error();
 
         let text = match response.results {
-            Some(results) => {
-                serde_json::to_string_pretty(&results).unwrap_or_else(|_| results.to_string())
-            }
+            Some(results) => pretty_json(&results),
             None => "Tests completed (no structured results)".to_string(),
         };
 
@@ -859,23 +816,20 @@ impl BeamtalkMcp {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        if response.is_error() {
-            let msg = response.error_message().unwrap_or("Describe failed");
-            return Ok(error_result(format!("ERROR: {msg}")));
-        }
+        check_response!(response, "Describe failed");
 
         let mut parts = Vec::new();
 
         if let Some(ops) = response.ops {
             parts.push(Content::text(format!(
                 "Supported operations:\n{}",
-                serde_json::to_string_pretty(&ops).unwrap_or_else(|_| ops.to_string())
+                pretty_json(&ops)
             )));
         }
         if let Some(versions) = response.versions {
             parts.push(Content::text(format!(
                 "Versions: {}",
-                serde_json::to_string_pretty(&versions).unwrap_or_else(|_| versions.to_string())
+                pretty_json(&versions)
             )));
         }
 
