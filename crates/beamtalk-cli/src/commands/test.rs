@@ -207,7 +207,10 @@ pub(crate) fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &s
             );
             let _ = writeln!(erl, "        catch");
             let _ = writeln!(erl, "            throw:{{bunit_skip, _}} -> ok;");
-            let _ = writeln!(erl, "            error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok");
+            let _ = writeln!(
+                erl,
+                "            error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok"
+            );
             let _ = writeln!(erl, "        after");
             let _ = writeln!(
                 erl,
@@ -222,7 +225,10 @@ pub(crate) fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &s
             );
             let _ = writeln!(erl, "        catch");
             let _ = writeln!(erl, "            throw:{{bunit_skip, _}} -> ok;");
-            let _ = writeln!(erl, "            error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok");
+            let _ = writeln!(
+                erl,
+                "            error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok"
+            );
             let _ = writeln!(erl, "        end");
         }
 
