@@ -121,7 +121,7 @@ Not all source content is equally useful as a corpus entry. The strategy is cura
 | `docs/learning/fixtures/*.bt` | Include as whole-file examples | One entry per fixture file | **High** — pedagogical, tied to learning modules, typed classes, destructuring, FFI |
 | `stdlib/test/*.bt` | Extract individual test methods | One entry per test method (with class context) | **Medium** — shows how to *use* patterns, but test scaffolding adds noise |
 | `examples/**/*.bt` | Extract key patterns from each project | One entry per notable pattern | **Medium** — multi-file projects, harder to chunk into standalone entries |
-| `docs/learning/*.md` | Extract code blocks with surrounding explanation | One entry per code block with prose | **Medium** — explanatory context, but code is often duplicated from fixtures |
+| `docs/learning/*.md` | Extract fenced `.bt` code blocks only if they pass parser validation | One entry per validated code block with surrounding prose | **Medium** — explanatory context, but snippets may be illustrative/non-working; only include blocks that parse successfully via `beamtalk-core` |
 | `docs/beamtalk-language-features.md` | Extract each feature section's examples | One entry per language feature | **Medium** — reference-style, terse |
 | `crates/beamtalk-core/src/unparse/fixtures/*.bt` | Include selectively | One entry per file | **Low** — compiler internals, but shows valid syntax patterns |
 | `stdlib/bootstrap-test/*.bt` | Skip | — | **Low** — too low-level for agent consumption |
@@ -147,7 +147,7 @@ A `just build-corpus` task runs a binary crate that:
 
 1. Walks the content source directories
 2. Parses `.bt` files using `beamtalk-core` to extract class names, selectors, and method boundaries
-3. Parses `.md` files to extract fenced code blocks with surrounding context
+3. Parses `.md` files to extract fenced `.bt` code blocks with surrounding context — **only includes blocks that pass `beamtalk-core` parser validation** (markdown snippets can be illustrative/non-working; the parser gate prevents false examples from entering the corpus)
 4. Writes `crates/beamtalk-examples/corpus.json`
 
 The generator lives at `crates/beamtalk-examples/build-corpus/` as a small binary crate. It depends on `beamtalk-core` for parsing `.bt` files — this is the key reason the generator is a crate rather than a standalone script. A script cannot access workspace dependencies, so it would have to use fragile regex heuristics instead of the real parser for method boundary detection.
@@ -404,7 +404,7 @@ Keep `CorpusEntry`, `Corpus`, and search logic as modules inside `beamtalk-mcp` 
    - `.bt` fixture files (`stdlib/test/fixtures/`, `tests/e2e/fixtures/`, `docs/learning/fixtures/`): include as whole-file entries with auto-generated tags from class names, selectors, and file path
    - `.bt` test files (`stdlib/test/*.bt`): extract individual test methods with class context
    - `.bt` example files (`examples/**/*.bt`): extract notable patterns
-   - `.md` learning modules: extract fenced code blocks with surrounding prose
+   - `.md` learning modules: extract fenced `.bt` code blocks that pass parser validation, with surrounding prose (skip illustrative/non-working snippets)
    - `beamtalk-language-features.md`: extract per-feature examples
 4. Generate `crates/beamtalk-examples/corpus.json`
 5. Add `just build-corpus` task
