@@ -22,7 +22,7 @@ default:
 #        + just test-integration test-mcp test-e2e (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test test-integration test-mcp test-e2e
+ci: build lint test test-integration test-mcp test-e2e check-corpus
 
 [windows]
 ci: build clippy fmt-check-rust test test-integration test-mcp test-e2e
@@ -174,6 +174,24 @@ test-examples: build-stdlib
         exit 1
     fi
     echo "✅ All example tests passed (${passed} packages)"
+
+# Generate the example corpus for the MCP search tool (ADR 0062)
+build-corpus: build-rust
+    @echo "📚 Building example corpus..."
+    @cargo run --bin build-corpus --quiet
+    @echo "✅ Corpus build complete"
+
+# Check that the checked-in corpus.json is up to date (CI freshness check)
+[unix]
+check-corpus: build-rust
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo run --bin build-corpus --quiet
+    if ! git diff --exit-code crates/beamtalk-examples/corpus.json > /dev/null 2>&1; then
+        echo "❌ corpus.json is out of date — run 'just build-corpus' and commit"
+        exit 1
+    fi
+    echo "✅ corpus.json is up to date"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format

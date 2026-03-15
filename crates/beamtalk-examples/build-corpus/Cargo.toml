@@ -1,0 +1,29 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "build-corpus"
+description = "Corpus generator for beamtalk-examples — parses .bt/.md files and writes corpus.json"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["beamtalk", "corpus", "generator"]
+categories = ["development-tools"]
+
+[[bin]]
+name = "build-corpus"
+path = "src/main.rs"
+
+[dependencies]
+beamtalk-examples = { path = ".." }
+beamtalk-core = { path = "../../beamtalk-core" }
+serde.workspace = true
+serde_json.workspace = true
+pulldown-cmark.workspace = true
+
+[lints]
+workspace = true

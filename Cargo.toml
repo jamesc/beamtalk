@@ -3,7 +3,7 @@
 
 [workspace]
 resolver = "2"
-members = ["crates/*", "test-package-compiler"]
+members = ["crates/*", "crates/beamtalk-examples/build-corpus", "test-package-compiler"]
 exclude = ["fuzz"]
 
 [workspace.package]
