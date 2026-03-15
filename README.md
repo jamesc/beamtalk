@@ -260,7 +260,7 @@ nil
 - **Docker Desktop** — For devcontainer support  
 - **VS Code** — With the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)  
 - **Rust** (latest stable) — For building the compiler  
-- **Erlang/OTP 26+** — With `erlc` on PATH
+- **Erlang/OTP 27+** — With `erlc` on PATH
 
 #### Optional Dependencies
 
@@ -289,7 +289,7 @@ nil
 
 The devcontainer includes all dependencies pre-configured:
 - Rust toolchain with `clippy`, `rustfmt`, `rust-analyzer`
-- Erlang/OTP 26+ and `rebar3`
+- Erlang/OTP 27+ and `rebar3`
 - Node.js LTS for build tooling
 - GitHub CLI (`gh`) with authentication
 - GitHub Copilot CLI for AI assistance
@@ -373,8 +373,8 @@ ssh-add ~/.ssh/id_ed25519_signing
 | `clippy` | Latest | Rust linter |
 | `rustfmt` | Latest | Rust code formatter |
 | `just` | Latest | Task runner (alternative to Make) |
-| `erlc` | OTP 26+ | Erlang compiler |
-| `erl` | OTP 26+ | Erlang runtime |
+| `erlc` | OTP 27+ | Erlang compiler |
+| `erl` | OTP 27+ | Erlang runtime |
 | `rebar3` | Latest | Erlang build tool |
 | `gh` | Latest | GitHub CLI |
 | `copilot` | Latest | GitHub Copilot CLI (AI assistant) |

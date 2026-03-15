@@ -11,7 +11,7 @@ Be kind, respectful, and constructive. We're building something fun — let's ke
 ### Prerequisites
 
 - **Rust** (latest stable) — compiler is written in Rust
-- **Erlang/OTP 26+** — runtime target; `erlc` must be on your PATH
+- **Erlang/OTP 27+** — runtime target; `erlc` must be on your PATH
 - **Docker Desktop** — for devcontainer support (recommended)
 - **VS Code** — with the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
 
@@ -38,7 +38,7 @@ The devcontainer includes all tools pre-configured: Rust toolchain, Erlang/OTP, 
 If you prefer a local setup:
 
 1. Install Rust via [rustup](https://rustup.rs/)
-2. Install Erlang/OTP 26+ (e.g., via [asdf](https://github.com/asdf-vm/asdf-erlang) or your package manager)
+2. Install Erlang/OTP 27+ (e.g., via [asdf](https://github.com/asdf-vm/asdf-erlang) or your package manager)
 3. Install [Just](https://github.com/casey/just): `cargo install just`
 4. Install [rebar3](https://rebar3.org/)
 5. Build and test:
