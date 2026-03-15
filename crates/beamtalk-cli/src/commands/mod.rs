@@ -9,6 +9,7 @@ pub mod build;
 pub mod build_stdlib;
 pub mod doc;
 pub(crate) mod doc_tests;
+pub mod doctor;
 pub mod fmt;
 pub mod lint;
 pub mod manifest;

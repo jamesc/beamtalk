@@ -76,7 +76,11 @@ adding `C:\Users\<you>\beamtalk-<version>\bin`.
 
 ```
 beamtalk --version
+beamtalk doctor
 ```
+
+The `doctor` command checks all prerequisites (Erlang/OTP version, `erlc`,
+runtime, stdlib) and prints actionable fix instructions for any problems.
 
 ## VS Code extension
 
@@ -116,3 +120,19 @@ Or open the project folder in VS Code — the extension will start a workspace
 automatically.
 
 See [Language Features](language-features.html) for a tour of the language.
+
+## Troubleshooting
+
+If `beamtalk repl` or `beamtalk build` fails with cryptic errors, run:
+
+```bash
+beamtalk doctor
+```
+
+This checks your environment and reports any issues with clear instructions
+on how to fix them. Common problems:
+
+- **Wrong OTP version** — Beamtalk requires Erlang/OTP 27 or later.
+- **Missing `erlc`** — usually installed alongside `erl`; reinstall Erlang if missing.
+- **Missing stdlib (development)** — run `just build` from the repository root.
+- **Missing stdlib (installed)** — reinstall Beamtalk via the install script or set `BEAMTALK_RUNTIME_DIR` to point to a valid sysroot.

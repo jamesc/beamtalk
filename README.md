@@ -194,6 +194,12 @@ just uninstall PREFIX=$HOME/.local
 
 The install layout follows the OTP convention (`PREFIX/lib/beamtalk/lib/<app>/ebin/`), so `beamtalk repl` and `beamtalk build` work correctly from any directory when the binary is on `PATH`.
 
+After installing, verify your environment:
+
+```bash
+beamtalk doctor
+```
+
 ### VS Code Extension (Local Dev)
 
 For local extension development (debug LSP, no `.vsix` packaging):
