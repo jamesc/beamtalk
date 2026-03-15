@@ -241,7 +241,11 @@ enum Command {
     },
 
     /// Check environment setup (Erlang, runtime, stdlib)
-    Doctor,
+    Doctor {
+        /// Include developer toolchain checks (rebar3, just, rustc)
+        #[arg(long)]
+        dev: bool,
+    },
 
     /// Generate HTML API documentation from source files
     Doc {
@@ -440,7 +444,7 @@ fn run() -> Result<()> {
             path,
             warnings_as_errors,
         } => commands::test::run_tests(&path, warnings_as_errors),
-        Command::Doctor => commands::doctor::run(),
+        Command::Doctor { dev } => commands::doctor::run(dev),
         Command::Doc {
             path,
             output,

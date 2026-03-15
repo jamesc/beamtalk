@@ -4,7 +4,9 @@
 //! `beamtalk doctor` — verify environment setup and report actionable diagnostics.
 //!
 //! Checks all prerequisites for running Beamtalk: Erlang/OTP version, `erlc`,
-//! optional `rebar3`, sysroot validity, stdlib module count, and runtime apps.
+//! sysroot validity, stdlib module count, and runtime apps.
+//!
+//! With `--dev`, additionally checks developer toolchain: `rebar3`, `just`, `rustc`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,21 +17,30 @@ use beamtalk_cli::repl_startup::{self, RuntimeLayout, beam_paths_for_layout, has
 
 /// Run all doctor checks and print results.
 ///
+/// When `dev` is true, additionally checks developer toolchain tools
+/// (`rebar3`, `just`, `rustc`).
+///
 /// Returns `Ok(())` if all required checks pass, or an error if any fail.
-pub fn run() -> Result<()> {
+pub fn run(dev: bool) -> Result<()> {
     let mut has_failure = false;
     let mut has_warning = false;
 
     // Resolve runtime once — stdlib and runtime-app checks reuse this.
     let runtime_info = repl_startup::find_runtime_dir_with_layout().ok();
 
-    let checks = [
+    let mut checks = vec![
         check_erl(),
         check_erlc(),
         check_runtime(runtime_info.as_ref()),
         check_stdlib(runtime_info.as_ref()),
         check_runtime_apps(runtime_info.as_ref()),
     ];
+
+    if dev {
+        checks.push(check_tool("rebar3"));
+        checks.push(check_tool("just"));
+        checks.push(check_rustc());
+    }
 
     for result in checks {
         match result {
@@ -171,6 +182,37 @@ fn check_runtime_apps(info: Option<&RuntimeInfo>) -> CheckResult {
         CheckResult::Pass(format!("Runtime: {}", present.join(", ")))
     } else {
         CheckResult::Fail(format!("Runtime: missing apps: {}", missing.join(", ")))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dev-only checks
+// ---------------------------------------------------------------------------
+
+/// Check that a named tool is on PATH (used for dev toolchain checks).
+fn check_tool(name: &str) -> CheckResult {
+    match which(name) {
+        Some(p) => CheckResult::Pass(format!("{name} found ({p})")),
+        None => CheckResult::Fail(format!("{name} not found on PATH")),
+    }
+}
+
+/// Check that `rustc` is on PATH and report its version.
+fn check_rustc() -> CheckResult {
+    let Some(rustc_path) = which("rustc") else {
+        return CheckResult::Fail("rustc not found on PATH".into());
+    };
+
+    let version = Command::new("rustc")
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    match version {
+        Some(v) => CheckResult::Pass(format!("{v} ({rustc_path})")),
+        None => CheckResult::Warn(format!("rustc found ({rustc_path}) but could not get version")),
     }
 }
 
