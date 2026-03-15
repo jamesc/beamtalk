@@ -800,7 +800,10 @@ mod tests {
         ]));
 
         let result = handle_command(&req, &writer, &children);
-        assert!(result.is_ok(), "spawn `env true` should succeed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "spawn `env true` should succeed: {result:?}"
+        );
 
         // Wait briefly for the reaper thread to clean up.
         let deadline = Instant::now() + Duration::from_secs(5);
