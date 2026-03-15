@@ -22,6 +22,14 @@ use tracing::instrument;
 /// Default timeout for REPL I/O operations.
 const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Timeout for establishing a WebSocket connection.
+///
+/// On Linux, connecting to a closed port fails instantly ("connection refused").
+/// On Windows, TCP SYN to a closed port can block for ~21 s waiting for the
+/// OS-level retransmit timeout.  A 5 s cap keeps tests and MCP startup snappy
+/// on all platforms while still being generous for localhost connections.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Async WebSocket client for the beamtalk REPL protocol.
 pub struct ReplClient {
     inner: Mutex<ReplClientInner>,
@@ -57,9 +65,16 @@ impl ReplClient {
         resume: Option<&str>,
     ) -> Result<Self, String> {
         let url = format!("ws://127.0.0.1:{port}/ws");
-        let (mut ws, _response) = tokio_tungstenite::connect_async(&url)
-            .await
-            .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
+        let (mut ws, _response) =
+            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&url))
+                .await
+                .map_err(|_| {
+                    format!(
+                        "Timed out connecting to REPL at {url} ({}s)",
+                        CONNECT_TIMEOUT.as_secs()
+                    )
+                })?
+                .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
 
         let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
 
@@ -84,9 +99,16 @@ impl ReplClient {
     pub async fn reconnect(&self) -> Result<bool, String> {
         let requested_session = { self.session.lock().await.clone() };
         let url = format!("ws://127.0.0.1:{}/ws", self.port);
-        let (mut ws, _response) = tokio_tungstenite::connect_async(&url)
-            .await
-            .map_err(|e| format!("Failed to reconnect to REPL at {url}: {e}"))?;
+        let (mut ws, _response) =
+            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&url))
+                .await
+                .map_err(|_| {
+                    format!(
+                        "Timed out reconnecting to REPL at {url} ({}s)",
+                        CONNECT_TIMEOUT.as_secs()
+                    )
+                })?
+                .map_err(|e| format!("Failed to reconnect to REPL at {url}: {e}"))?;
 
         let session_id =
             perform_auth_handshake(&mut ws, &self.cookie, requested_session.as_deref()).await?;
@@ -856,11 +878,14 @@ mod tests {
             None => return Err("REPL did not report workspace ID".to_string()),
         };
 
-        // Wait for TCP readiness (15s default, configurable)
+        // Wait for TCP readiness (configurable; default is higher on Windows
+        // because epmd + BEAM node startup is slower there, especially when
+        // epmd is not already running).
+        let default_timeout_ms: u64 = if cfg!(windows) { 30_000 } else { 15_000 };
         let timeout_ms: u64 = std::env::var("BEAMTALK_REPL_STARTUP_TIMEOUT_MS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(15_000);
+            .unwrap_or(default_timeout_ms);
         let max_attempts = timeout_ms.div_ceil(300);
 
         for _ in 0..max_attempts {
