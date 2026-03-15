@@ -26,14 +26,16 @@ pub fn run(dev: bool) -> Result<()> {
     let mut has_warning = false;
 
     // Resolve runtime once — stdlib and runtime-app checks reuse this.
-    let runtime_info = repl_startup::find_runtime_dir_with_layout().ok();
+    // Keep the error for actionable diagnostics (e.g. invalid BEAMTALK_RUNTIME_DIR).
+    let runtime_result = repl_startup::find_runtime_dir_with_layout();
+    let runtime_info = runtime_result.as_ref().ok();
 
     let mut checks = vec![
         check_erl(),
         check_erlc(),
-        check_runtime(runtime_info.as_ref()),
-        check_stdlib(runtime_info.as_ref()),
-        check_runtime_apps(runtime_info.as_ref()),
+        check_runtime(runtime_info, runtime_result.as_ref().err()),
+        check_stdlib(runtime_info),
+        check_runtime_apps(runtime_info),
     ];
 
     if dev {
@@ -99,11 +101,11 @@ fn check_erl() -> CheckResult {
             Some(major) => CheckResult::Fail(format!(
                 "Erlang/OTP {version_str} ({erl_path}) — version {major} is too old, need 27+"
             )),
-            None => CheckResult::Warn(format!(
+            None => CheckResult::Fail(format!(
                 "Erlang/OTP found ({erl_path}) but could not parse version: {version_str}"
             )),
         },
-        None => CheckResult::Warn(format!(
+        None => CheckResult::Fail(format!(
             "erl found ({erl_path}) but could not determine OTP version"
         )),
     }
@@ -118,12 +120,16 @@ fn check_erlc() -> CheckResult {
 }
 
 /// Check that the Beamtalk runtime directory can be found.
-fn check_runtime(info: Option<&RuntimeInfo>) -> CheckResult {
+fn check_runtime(
+    info: Option<&RuntimeInfo>,
+    err: Option<&miette::Report>,
+) -> CheckResult {
     let Some((path, layout)) = info else {
-        return CheckResult::Fail(
-            "Beamtalk runtime not found — run from the repo root or set BEAMTALK_RUNTIME_DIR"
-                .into(),
+        let detail = err.map_or_else(
+            || "run from the repo root or set BEAMTALK_RUNTIME_DIR".into(),
+            |e| format!("{e}"),
         );
+        return CheckResult::Fail(format!("Beamtalk runtime not found — {detail}"));
     };
 
     let label = match layout {
