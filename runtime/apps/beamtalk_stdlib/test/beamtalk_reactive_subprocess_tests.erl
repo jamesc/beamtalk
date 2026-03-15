@@ -286,7 +286,7 @@ exitCode_integer_after_exit_test() ->
         {unix, _} ->
             {Notify, Collector} = make_collector(),
             {ok, Pid} = beamtalk_reactive_subprocess:start(#{
-                executable => <<"/bin/true">>,
+                executable => <<"/usr/bin/true">>,
                 args => [],
                 notify => Notify
             }),

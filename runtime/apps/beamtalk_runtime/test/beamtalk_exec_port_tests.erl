@@ -103,7 +103,7 @@ spawn_child_true_exits_with_zero_test() ->
     case os:type() of
         {unix, _} ->
             Port = beamtalk_exec_port:open(),
-            beamtalk_exec_port:spawn_child(Port, 1, <<"/bin/true">>, []),
+            beamtalk_exec_port:spawn_child(Port, 1, <<"/usr/bin/true">>, []),
             ExitCode = receive_exit(Port, 1, 5000),
             beamtalk_exec_port:close(Port),
             ?assertEqual(0, ExitCode);
