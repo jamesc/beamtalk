@@ -464,8 +464,14 @@ Pre-compute embeddings for all corpus entries at build time and store vectors in
 
 The decision of which tier to pursue should be data-driven, informed by Phase 4 eval results. If zero-result queries cluster around morphological mismatches ("iterating" vs "iterate"), Tier 1 suffices. If they cluster around vocabulary gaps ("for loop" → `do:`), Tier 2 is the sweet spot. If novel phrasings dominate, Tier 3 is warranted.
 
+## Implementation Tracking
+
+**Parent issue:** BT-1347
+**Issues:** BT-1350 (crate + generator + search, M), BT-1351 (MCP tool + eval, S) — BT-1351 blocked by BT-1350
+**Status:** Planned
+
 ## References
-- Related issues: BT-1347
+- Related issues: BT-1347, BT-1350, BT-1351
 - Related ADRs: [ADR 0033](0033-runtime-embedded-documentation.md) (Runtime-embedded documentation — prior art for embedding content in the runtime)
 - Context7: https://github.com/upstash/context7
 - Forge MCP: https://developer.atlassian.com/platform/forge/forge-mcp/
