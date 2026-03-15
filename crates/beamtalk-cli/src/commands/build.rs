@@ -137,6 +137,13 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
         "Build completed successfully"
     );
 
+    // Clean stale .beam/.core/.app artifacts from previous builds (e.g. renamed/deleted
+    // source files, package name changes). Compares the set of files just produced
+    // against what exists on disk and removes orphans.
+    if let Some(ref pkg) = pkg_manifest {
+        clean_stale_artifacts(&build_dir, &beam_files, &pkg.name)?;
+    }
+
     // ADR 0026 §3: Generate .app file in package mode
     if let Some(ref pkg) = pkg_manifest {
         generate_package_outputs(
@@ -275,6 +282,88 @@ fn generate_otp_app_callback(
             "erlc failed to compile OTP app callback '{}'. Is Erlang/OTP installed?",
             cb_module_name
         );
+    }
+
+    Ok(())
+}
+
+/// Remove stale build artifacts from the build directory.
+///
+/// After a successful build, compares the set of `.beam` files just produced
+/// against all `bt@*.beam` files on disk. Any on-disk file not in the produced
+/// set is stale (from a deleted source file, renamed class, or package rename)
+/// and is removed along with its corresponding `.core` file.
+///
+/// Also removes `.app` files that don't match the current package name (from
+/// package renames).
+fn clean_stale_artifacts(
+    build_dir: &Utf8Path,
+    produced_beams: &[Utf8PathBuf],
+    pkg_name: &str,
+) -> Result<()> {
+    let produced: std::collections::HashSet<&Utf8Path> =
+        produced_beams.iter().map(Utf8PathBuf::as_path).collect();
+
+    let current_app_file = format!("{pkg_name}.app");
+
+    let entries = fs::read_dir(build_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read build directory '{build_dir}'"))?;
+
+    for entry in entries {
+        let entry = entry.into_diagnostic()?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        let ext = path.extension().and_then(|e| e.to_str());
+
+        // Clean stale .app files from package renames
+        if ext == Some("app") && name != current_app_file {
+            let utf8 = Utf8PathBuf::from_path_buf(path.clone())
+                .map_err(|_| miette::miette!("Non-UTF-8 path in build dir"))?;
+            debug!(file = %utf8, "Removing stale .app artifact");
+            fs::remove_file(&utf8).into_diagnostic()?;
+            continue;
+        }
+
+        // Only consider bt@* files (user/package modules) for beam/core cleanup
+        if !name.starts_with("bt@") {
+            continue;
+        }
+
+        match ext {
+            Some("beam") => {
+                let utf8 = Utf8PathBuf::from_path_buf(path.clone())
+                    .map_err(|_| miette::miette!("Non-UTF-8 path in build dir"))?;
+                if !produced.contains(utf8.as_path()) {
+                    debug!(file = %utf8, "Removing stale .beam artifact");
+                    fs::remove_file(&utf8).into_diagnostic()?;
+                    // Also remove the companion .core file if present
+                    let core = utf8.with_extension("core");
+                    if core.exists() {
+                        fs::remove_file(&core).into_diagnostic()?;
+                    }
+                }
+            }
+            Some("core") => {
+                // Stale .core files whose .beam was already removed (or never produced).
+                // Tolerates NotFound because the .beam branch may have already removed
+                // the companion .core in the same cleanup pass.
+                let beam_path = path.with_extension("beam");
+                if !beam_path.exists() {
+                    let utf8 = Utf8PathBuf::from_path_buf(path.clone())
+                        .map_err(|_| miette::miette!("Non-UTF-8 path in build dir"))?;
+                    match fs::remove_file(&utf8) {
+                        Ok(()) => debug!(file = %utf8, "Removing orphaned .core artifact"),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => return Err(e).into_diagnostic(),
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     Ok(())
@@ -1084,5 +1173,61 @@ mod tests {
             !core_content.contains("'bt@gang_of_four@event_bus'"),
             "Should NOT use heuristic module name that drops observer@ segment. Generated:\n{core_content}"
         );
+    }
+
+    #[test]
+    fn test_clean_stale_artifacts_removes_orphaned_beam() {
+        let temp = TempDir::new().unwrap();
+        let build_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create a stale .beam and .core from a previous build
+        write_test_file(&build_dir.join("bt@old_pkg@counter.beam"), "stale");
+        write_test_file(&build_dir.join("bt@old_pkg@counter.core"), "stale");
+        // Create the current build's .beam
+        let current = build_dir.join("bt@new_pkg@counter.beam");
+        write_test_file(&current, "current");
+        write_test_file(&build_dir.join("bt@new_pkg@counter.core"), "current");
+
+        clean_stale_artifacts(&build_dir, &[current.clone()], "new_pkg").unwrap();
+
+        // Stale files should be removed
+        assert!(!build_dir.join("bt@old_pkg@counter.beam").exists());
+        assert!(!build_dir.join("bt@old_pkg@counter.core").exists());
+        // Current files should remain
+        assert!(current.exists());
+        assert!(build_dir.join("bt@new_pkg@counter.core").exists());
+    }
+
+    #[test]
+    fn test_clean_stale_artifacts_removes_old_app_file() {
+        let temp = TempDir::new().unwrap();
+        let build_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        write_test_file(&build_dir.join("old_name.app"), "stale");
+        write_test_file(&build_dir.join("new_name.app"), "current");
+        let beam = build_dir.join("bt@new_name@main.beam");
+        write_test_file(&beam, "current");
+
+        clean_stale_artifacts(&build_dir, &[beam], "new_name").unwrap();
+
+        assert!(!build_dir.join("old_name.app").exists());
+        assert!(build_dir.join("new_name.app").exists());
+    }
+
+    #[test]
+    fn test_clean_stale_artifacts_preserves_non_bt_files() {
+        let temp = TempDir::new().unwrap();
+        let build_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Non-bt@ beam files (like OTP callback modules) should be preserved
+        write_test_file(&build_dir.join("beamtalk_myapp_app.beam"), "callback");
+        write_test_file(&build_dir.join("beamtalk_myapp_app.erl"), "source");
+        let beam = build_dir.join("bt@myapp@main.beam");
+        write_test_file(&beam, "current");
+
+        clean_stale_artifacts(&build_dir, &[beam], "myapp").unwrap();
+
+        assert!(build_dir.join("beamtalk_myapp_app.beam").exists());
+        assert!(build_dir.join("beamtalk_myapp_app.erl").exists());
     }
 }

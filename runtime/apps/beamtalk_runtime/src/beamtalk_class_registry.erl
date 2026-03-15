@@ -279,12 +279,24 @@ validate_class_update(ClassName, OldModule, ClassInfo) ->
         false ->
             case OldModule =:= NewModule of
                 false ->
-                    ?LOG_WARNING("Class redefined from different module", #{
-                        class => ClassName,
-                        old_module => OldModule,
-                        new_module => NewModule
-                    }),
-                    record_class_collision_warning(ClassName, OldModule, NewModule);
+                    %% Bootstrap stubs (Class, Metaclass, ClassBuilder) are intentionally
+                    %% replaced by compiled stdlib modules during startup. This is expected
+                    %% behaviour, not a collision — suppress the warning.
+                    case is_bootstrap_stub_module(OldModule) andalso is_stdlib_module(NewModule) of
+                        true ->
+                            ?LOG_DEBUG("Bootstrap stub replaced by stdlib module", #{
+                                class => ClassName,
+                                stub => OldModule,
+                                stdlib => NewModule
+                            });
+                        false ->
+                            ?LOG_WARNING("Class redefined from different module", #{
+                                class => ClassName,
+                                old_module => OldModule,
+                                new_module => NewModule
+                            }),
+                            record_class_collision_warning(ClassName, OldModule, NewModule)
+                    end;
                 true ->
                     ok
             end,
@@ -301,6 +313,16 @@ is_stdlib_module(Module) when is_atom(Module) ->
     end;
 is_stdlib_module(_) ->
     false.
+
+%% @private Returns true if the given module atom is a bootstrap stub.
+%% Bootstrap stubs are hand-written modules that register placeholder classes
+%% (Class, Metaclass, ClassBuilder) before the compiled stdlib loads.
+%% They are intentionally replaced during stdlib initialization.
+-spec is_bootstrap_stub_module(atom()) -> boolean().
+is_bootstrap_stub_module(beamtalk_class_bt) -> true;
+is_bootstrap_stub_module(beamtalk_metaclass_bt) -> true;
+is_bootstrap_stub_module(beamtalk_class_builder_bt) -> true;
+is_bootstrap_stub_module(_) -> false.
 
 %% @private Ensure the pending load errors ETS table exists.
 -spec ensure_pending_errors_table() -> ok.
