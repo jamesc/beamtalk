@@ -34,7 +34,10 @@ pub fn run(name_or_id: Option<&str>, recent: Option<usize>) -> Result<()> {
     if !workspace::workspace_exists(&workspace_id)? {
         return Err(match name_or_id {
             Some(name) => {
-                miette!("Workspace '{name}' does not exist. Start one with `beamtalk repl`.")
+                miette!(
+                    "Workspace '{name}' does not exist. \
+                     Start one with `beamtalk repl --workspace {name}`."
+                )
             }
             None => {
                 miette!("No workspace found for current directory. Start one with `beamtalk repl`.")

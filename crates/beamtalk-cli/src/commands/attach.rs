@@ -52,7 +52,8 @@ fn attach_by_workspace_id(name_or_id: Option<&str>) -> Result<()> {
         return Err(match name_or_id {
             Some(name) => miette!(
                 "Workspace '{name}' does not exist. \
-                 Create it with `beamtalk workspace create` or start a new one with `beamtalk repl`"
+                 Create it with `beamtalk workspace create {name} --background` \
+                 or start a new one with `beamtalk repl --workspace {name}`"
             ),
             None => miette!(
                 "No workspace found for current directory. \
@@ -87,7 +88,8 @@ fn workspace_not_running(workspace_id: &str, name_or_id: Option<&str>) -> miette
     let label = name_or_id.unwrap_or(workspace_id);
     miette!(
         "Workspace '{label}' is not running. \
-         Start it with `beamtalk repl` or `beamtalk workspace create --background`"
+         Start it with `beamtalk repl --workspace {label}` \
+         or `beamtalk workspace create {label} --background`"
     )
 }
 
