@@ -85,8 +85,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.publish) ||
-      (github.event_name == 'workflow_call' && inputs.publish)
+      ((github.event_name == 'workflow_dispatch' && inputs.publish) ||
+       (github.event_name == 'workflow_call' && inputs.publish)) &&
+      secrets.VSCE_PAT != ''
     steps:
       - name: Download VSIX
         uses: actions/download-artifact@v8
