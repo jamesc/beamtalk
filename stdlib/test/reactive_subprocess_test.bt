@@ -4,8 +4,9 @@
 // BT-1187: BUnit tests for ReactiveSubprocess actor — push-mode stdout/stderr
 // delivery, exit notification, writeLine:, close, exitCode.
 //
-// All tests require Unix (absolute paths: /bin/echo, /bin/sh, /bin/cat,
-// /bin/sleep, /bin/true). Non-Unix platforms are skipped via self skip:.
+// Cross-platform: uses platform-appropriate commands on Unix and Windows.
+// Interactive stdin-echo tests (writeLine→readLine) are Unix-only because
+// Windows programs buffer stdout on pipes (no cat equivalent flushes immediately).
 //
 // StubDelegate actor is defined in fixtures/stub_delegate_fixture.bt.
 
@@ -14,12 +15,53 @@ TestCase subclass: ReactiveSubprocessTest
 
   setUp => self.isUnix := System osFamily == "unix"
 
+  // --- Platform command helpers ---
+  shellExe => self.isUnix ifTrue: ["/bin/sh"] ifFalse: ["cmd"]
+
+  shellArgs: cmd => self.isUnix ifTrue: [#("-c", cmd)] ifFalse: [#("/c", cmd)]
+
+  sleepExe => self.isUnix ifTrue: ["/bin/sleep"] ifFalse: ["cmd"]
+
+  sleepArgs =>
+    self.isUnix ifTrue: [
+      #("10")
+    ] ifFalse: [#("/c", "ping -n 60 127.0.0.1 >nul")]
+
+  trueExe => self.isUnix ifTrue: ["/bin/true"] ifFalse: ["cmd"]
+
+  trueArgs => self.isUnix ifTrue: [#()] ifFalse: [#("/c", "exit 0")]
+
+  multilineScript =>
+    self.isUnix ifTrue: [
+      "printf 'alpha\nbeta\ngamma\n'"
+    ] ifFalse: ["(echo alpha& echo beta& echo gamma)"]
+
+  stderrMultilineScript =>
+    self.isUnix ifTrue: [
+      "printf 'x\ny\nz\n' >&2"
+    ] ifFalse: ["(echo x& echo y& echo z)>&2"]
+
+  partialLineScript =>
+    self.isUnix ifTrue: ["printf hello"] ifFalse: ["<nul set /p =hello"]
+
+  stdoutStderrScript =>
+    self.isUnix ifTrue: [
+      "echo out; echo err >&2"
+    ] ifFalse: ["echo out& echo err>&2"]
+
+  envScript =>
+    self.isUnix ifTrue: [
+      "echo $BT_TEST_SEED; pwd"
+    ] ifFalse: ["echo %BT_TEST_SEED%& cd"]
+
+  envDir => self.isUnix ifTrue: ["/tmp"] ifFalse: [System getEnv: "TEMP"]
+
+  // --- Tests ---
   testStdoutLinesPushedToNotify =>
-    self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
     proc := (ReactiveSubprocess
-      open: "/bin/sh"
-      args: #("-c", "printf 'alpha\nbeta\ngamma\n'")
+      open: self shellExe
+      args: (self shellArgs: self multilineScript)
       notify: delegate) unwrap
     // Wait for exit
     self waitForExit: delegate from: proc
@@ -29,11 +71,10 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
 
   testStderrLinesPushedToNotify =>
-    self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
     proc := (ReactiveSubprocess
-      open: "/bin/sh"
-      args: #("-c", "printf 'x\ny\nz\n' >&2")
+      open: self shellExe
+      args: (self shellArgs: self stderrMultilineScript)
       notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: delegate stderrLines equals: #("x", "y", "z")
@@ -43,11 +84,10 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
 
   testExitCodePushedToNotify =>
-    self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
     proc := (ReactiveSubprocess
-      open: "/bin/true"
-      args: #()
+      open: self trueExe
+      args: self trueArgs
       notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: delegate exitCode equals: 0
@@ -56,11 +96,10 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
 
   testPartialLineFlushedOnExit =>
-    self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
     proc := (ReactiveSubprocess
-      open: "/bin/sh"
-      args: #("-c", "printf hello")
+      open: self shellExe
+      args: (self shellArgs: self partialLineScript)
       notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: delegate stdoutLines equals: #("hello")
@@ -69,11 +108,10 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
 
   testStdoutAndStderrIndependent =>
-    self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
     proc := (ReactiveSubprocess
-      open: "/bin/sh"
-      args: #("-c", "echo out; echo err >&2")
+      open: self shellExe
+      args: (self shellArgs: self stdoutStderrScript)
       notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: delegate stdoutLines equals: #("out")
@@ -83,7 +121,10 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
 
   testWriteLineDeliversThroughCat =>
-    self.isUnix ifFalse: [^self skip: "Unix only"]
+    // Unix-only: Windows programs buffer stdout on pipes, no interactive cat equivalent
+    self.isUnix ifFalse: [
+      ^self skip: "Unix only: no unbuffered stdin echo on Windows"
+    ]
     delegate := StubDelegate spawn
     proc := (ReactiveSubprocess
       open: "/bin/cat"
@@ -103,11 +144,10 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
 
   testExitCodeNilWhileRunning =>
-    self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
     proc := (ReactiveSubprocess
-      open: "/bin/sleep"
-      args: #("10")
+      open: self sleepExe
+      args: self sleepArgs
       notify: delegate) unwrap
     @expect type
     self assert: proc exitCode equals: nil
@@ -118,11 +158,10 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
 
   testCloseIsIdempotent =>
-    self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
     proc := (ReactiveSubprocess
-      open: "/bin/cat"
-      args: #()
+      open: self sleepExe
+      args: self sleepArgs
       notify: delegate) unwrap
     @expect type
     self assert: proc close equals: nil
@@ -133,18 +172,21 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
 
   testOpenWithEnvAndDir =>
-    self.isUnix ifFalse: [^self skip: "Unix only"]
     delegate := StubDelegate spawn
     // Print the env var and the working directory to verify both are passed through
     proc := (ReactiveSubprocess
-      open: "/bin/sh"
-      args: #("-c", "echo $BT_TEST_SEED; pwd")
+      open: self shellExe
+      args: (self shellArgs: self envScript)
       env: #{"BT_TEST_SEED" => "hello1187"}
-      dir: "/tmp"
+      dir: self envDir
       notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: (delegate stdoutLines includes: "hello1187")
-    self assert: (delegate stdoutLines includes: "/tmp")
+    // On Windows, cd prints path with drive letter; on Unix, pwd prints /tmp
+    dir := self envDir
+    self assert: (delegate stdoutLines anySatisfy: [:line |
+      line includesSubstring: dir
+    ])
     self assert: delegate stop equals: #ok
     @expect type
     self assert: proc stop equals: #ok

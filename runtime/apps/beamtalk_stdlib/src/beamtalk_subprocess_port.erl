@@ -59,7 +59,17 @@ split_lines(Data) ->
         Parts ->
             %% Last element is the remainder after the last newline (may be <<>>)
             {Lines, [Remainder]} = lists:split(length(Parts) - 1, Parts),
-            {Lines, Remainder}
+            {[strip_cr(L) || L <- Lines], Remainder}
+    end.
+
+%% @private Strip trailing \r from a line (normalises Windows \r\n → \n).
+-spec strip_cr(binary()) -> binary().
+strip_cr(<<>>) ->
+    <<>>;
+strip_cr(Bin) ->
+    case binary:last(Bin) of
+        $\r -> binary:part(Bin, 0, byte_size(Bin) - 1);
+        _ -> Bin
     end.
 
 %% @doc Prepend Pending to Data then split on newlines.
