@@ -10,6 +10,7 @@
 //! functions — hierarchy-walking logic lives in pure Beamtalk.
 
 use super::super::document::Document;
+use crate::docvec;
 
 /// Zero-arg Behaviour intrinsics: selector name equals the runtime function name.
 const BEHAVIOUR_ZERO_ARG: &[&str] = &[
@@ -29,16 +30,22 @@ const BEHAVIOUR_ZERO_ARG: &[&str] = &[
 
 /// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self)` Document.
 fn intrinsic_self(func: &str) -> Document<'static> {
-    Document::String(format!(
-        "call 'beamtalk_behaviour_intrinsics':'{func}'(Self)"
-    ))
+    docvec![
+        "call 'beamtalk_behaviour_intrinsics':'",
+        func.to_owned(),
+        "'(Self)"
+    ]
 }
 
 /// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self, Arg)` Document.
 fn intrinsic_self_arg(func: &str, arg: &str) -> Document<'static> {
-    Document::String(format!(
-        "call 'beamtalk_behaviour_intrinsics':'{func}'(Self, {arg})"
-    ))
+    docvec![
+        "call 'beamtalk_behaviour_intrinsics':'",
+        func.to_owned(),
+        "'(Self, ",
+        arg.to_owned(),
+        ")"
+    ]
 }
 
 /// Generates Core Erlang for a Behaviour primitive.
@@ -66,9 +73,13 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
         "classSetMethodDoc" => {
             let sel = params.first()?;
             let doc = params.get(1)?;
-            Some(Document::String(format!(
-                "call 'beamtalk_behaviour_intrinsics':'classSetMethodDoc'(Self, {sel}, {doc})"
-            )))
+            Some(docvec![
+                "call 'beamtalk_behaviour_intrinsics':'classSetMethodDoc'(Self, ",
+                sel.clone(),
+                ", ",
+                doc.clone(),
+                ")"
+            ])
         }
         _ => None,
     }

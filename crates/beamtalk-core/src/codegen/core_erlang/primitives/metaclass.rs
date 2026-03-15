@@ -10,6 +10,7 @@
 //! data-access functions following the pattern established in ADR 0032.
 
 use super::super::document::Document;
+use crate::docvec;
 
 /// Zero-arg Metaclass intrinsics that take Self.
 const METACLASS_ZERO_ARG: &[&str] = &[
@@ -27,22 +28,26 @@ const METACLASS_ZERO_ARG: &[&str] = &[
 pub fn generate_metaclass_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     // Check zero-arg intrinsics table first
     if METACLASS_ZERO_ARG.contains(&selector) {
-        return Some(Document::String(format!(
-            "call 'beamtalk_behaviour_intrinsics':'{selector}'(Self)"
-        )));
+        return Some(docvec![
+            "call 'beamtalk_behaviour_intrinsics':'",
+            selector.to_owned(),
+            "'(Self)"
+        ]);
     }
 
     match selector {
         "metaclassIncludesSelector" => {
             let sel = params.first()?;
-            Some(Document::String(format!(
-                "call 'beamtalk_behaviour_intrinsics':'metaclassIncludesSelector'(Self, {sel})"
-            )))
+            Some(docvec![
+                "call 'beamtalk_behaviour_intrinsics':'metaclassIncludesSelector'(Self, ",
+                sel.clone(),
+                ")"
+            ])
         }
         // Used by `class sealed new => @primitive "metaclassNew"`.
         // Generates a no-arg call; the delegating new/0 wrapper supplies no Self.
-        "metaclassNew" => Some(Document::String(
-            "call 'beamtalk_behaviour_intrinsics':'metaclassNew'()".to_owned(),
+        "metaclassNew" => Some(Document::Str(
+            "call 'beamtalk_behaviour_intrinsics':'metaclassNew'()",
         )),
         _ => None,
     }
