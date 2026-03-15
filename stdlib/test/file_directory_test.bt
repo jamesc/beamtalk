@@ -30,8 +30,7 @@ TestCase subclass: FileDirectoryTest
   testIsDirectoryOnMissingPath =>
     self deny: (File isDirectory: "target/bt-test-tmp/fdt/no_such_dir")
 
-  testIsDirectoryInvalidPath =>
-    self deny: (File isDirectory: "../parent")
+  testIsDirectoryInvalidPath => self deny: (File isDirectory: "../parent")
 
   testIsFileOnFile =>
     self assert: (File writeAll: "target/bt-test-tmp/fdt/isfile_check.txt" contents: "data") isOk
@@ -42,8 +41,7 @@ TestCase subclass: FileDirectoryTest
   testIsFileOnMissingPath =>
     self deny: (File isFile: "target/bt-test-tmp/fdt/no_such_file.txt")
 
-  testIsFileInvalidPath =>
-    self deny: (File isFile: "../secret.txt")
+  testIsFileInvalidPath => self deny: (File isFile: "../secret.txt")
 
   testMkdir =>
     self assert: (File mkdir: "target/bt-test-tmp/fdt/mkdir_test") isOk
