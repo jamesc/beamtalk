@@ -12,51 +12,51 @@
 use super::super::document::Document;
 use crate::docvec;
 
+/// Zero-arg Metaclass intrinsics that take Self.
+const METACLASS_ZERO_ARG: &[&str] = &[
+    "metaclassThisClass",
+    "metaclassSuperclass",
+    "metaclassAllMethods",
+    "metaclassClassMethods",
+    "metaclassLocalClassMethods",
+];
+
 /// Generates Core Erlang for a Metaclass primitive.
 ///
 /// These back the `@primitive "metaclassXxx"` method bodies in `Metaclass.bt`.
 /// Each maps to a direct call to `beamtalk_behaviour_intrinsics:Func(Self)`.
 pub fn generate_metaclass_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    // Check zero-arg intrinsics table first
+    if METACLASS_ZERO_ARG.contains(&selector) {
+        return Some(docvec![
+            "call 'beamtalk_behaviour_intrinsics':'",
+            selector.to_owned(),
+            "'(Self)"
+        ]);
+    }
+
     match selector {
-        "metaclassThisClass" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'metaclassThisClass'(Self)"
-        ]),
-        "metaclassSuperclass" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'metaclassSuperclass'(Self)"
-        ]),
-        "metaclassAllMethods" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'metaclassAllMethods'(Self)"
-        ]),
-        "metaclassClassMethods" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'metaclassClassMethods'(Self)"
-        ]),
-        "metaclassLocalClassMethods" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'metaclassLocalClassMethods'(Self)"
-        ]),
         "metaclassIncludesSelector" => {
             let sel = params.first()?;
             Some(docvec![
                 "call 'beamtalk_behaviour_intrinsics':'metaclassIncludesSelector'(Self, ",
                 sel.clone(),
-                ")",
+                ")"
             ])
         }
         // Used by `class sealed new => @primitive "metaclassNew"`.
         // Generates a no-arg call; the delegating new/0 wrapper supplies no Self.
-        "metaclassNew" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'metaclassNew'()"
-        ]),
+        "metaclassNew" => Some(Document::Str(
+            "call 'beamtalk_behaviour_intrinsics':'metaclassNew'()",
+        )),
         _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::doc_to_string;
     use super::*;
-
-    fn doc_to_string(doc: Option<Document<'_>>) -> Option<String> {
-        doc.map(|d| d.to_pretty_string())
-    }
 
     #[test]
     fn test_metaclass_this_class() {

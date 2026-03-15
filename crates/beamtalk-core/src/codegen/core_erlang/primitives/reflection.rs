@@ -29,9 +29,7 @@ pub(crate) fn generate_symbol_bif(selector: &str, params: &[String]) -> Option<D
             Some(Document::Str("Self"))
         }
         // Display — delegate to runtime primitive for consistent formatting
-        "printString" => Some(Document::Str(
-            "call 'beamtalk_primitive':'print_string'(Self)",
-        )),
+        "printString" => Some(super::PRINT_STRING),
         // Identity
         "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
         _ => None,
