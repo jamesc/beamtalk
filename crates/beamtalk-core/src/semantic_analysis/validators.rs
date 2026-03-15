@@ -723,6 +723,17 @@ fn is_self_receiver(expr: &Expression) -> bool {
 /// `FieldAccess { receiver: self }` (`self.field`) compiles to `maps:get` /
 /// `maps:put` — a direct in-process map operation — and is safe.
 ///
+/// Returns `true` if the expression is a block literal, possibly wrapped in
+/// parentheses (e.g. `([self work])`). Used to filter block arguments of
+/// `spawns_block` methods so we don't traverse into separate-process code.
+fn is_block_literal_like(expr: &Expression) -> bool {
+    match expr {
+        Expression::Block(_) => true,
+        Expression::Parenthesized { expression, .. } => is_block_literal_like(expression),
+        _ => false,
+    }
+}
+
 /// Block arguments of methods whose selectors are in `spawn_selectors` are
 /// skipped: they run in a separate BEAM process and self-sends there are
 /// always safe (BT-1312).
@@ -749,11 +760,7 @@ fn find_self_message_send(expr: &Expression, spawn_selectors: &HashSet<EcoString
     {
         if spawn_selectors.contains(selector.name().as_str()) {
             return std::iter::once(receiver.as_ref())
-                .chain(
-                    arguments
-                        .iter()
-                        .filter(|a| !matches!(a, Expression::Block(_))),
-                )
+                .chain(arguments.iter().filter(|a| !is_block_literal_like(a)))
                 .find_map(|e| find_self_message_send(e, spawn_selectors));
         }
     }
@@ -769,7 +776,7 @@ fn find_self_message_send(expr: &Expression, spawn_selectors: &HashSet<EcoString
             let found = if spawn_selectors.contains(msg.selector.name().as_str()) {
                 msg.arguments
                     .iter()
-                    .filter(|a| !matches!(a, Expression::Block(_)))
+                    .filter(|a| !is_block_literal_like(a))
                     .find_map(|e| find_self_message_send(e, spawn_selectors))
             } else {
                 msg.arguments

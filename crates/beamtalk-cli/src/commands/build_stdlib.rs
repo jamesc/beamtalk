@@ -1344,4 +1344,24 @@ mod tests {
             "Should emit empty param_types. Got: {code}"
         );
     }
+
+    #[test]
+    fn test_generate_method_list_emits_spawns_block_true() {
+        let methods = vec![MethodMeta {
+            selector: "after:do:".to_string(),
+            arity: 2,
+            kind: MethodKindMeta::Primary,
+            is_sealed: false,
+            spawns_block: true,
+            return_type: None,
+            param_types: vec![Some("Integer".to_string()), None],
+            doc: None,
+        }];
+        let mut code = String::new();
+        generate_method_list(&mut code, "class_methods", &methods, "Timer");
+        assert!(
+            code.contains("spawns_block: true"),
+            "Should emit spawns_block: true. Got: {code}"
+        );
+    }
 }
