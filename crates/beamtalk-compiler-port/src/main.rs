@@ -228,6 +228,7 @@ fn parse_method_infos_from_map(
                 kind: MethodKind::Primary,
                 defined_in: ecow::EcoString::from(class_name),
                 is_sealed: false,
+                spawns_block: false,
                 return_type,
                 param_types,
                 doc: None,
