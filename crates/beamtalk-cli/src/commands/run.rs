@@ -180,23 +180,8 @@ fn run_script(
     let pid = std::process::id();
     let workspace_id = format!("run_{pid}");
 
-    let eval_cmd = format!(
-        "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
-         {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
-                                                          project_path => <<\"{project_path_escaped}\">>, \
-                                                          repl => false}}), \
-         ClassPid = beamtalk_class_registry:whereis_class('{class_name}'), \
-         case ClassPid of \
-             undefined -> \
-                 io:format(standard_error, \"Error: class '{class_name}' not found~n\", []), \
-                 halt(1); \
-             _ -> \
-                 %% class_send uses gen_server:call (synchronous) so halt(0) \
-                 %% only runs after the method returns. \
-                 beamtalk_class_dispatch:class_send(ClassPid, {selector}, []), \
-                 halt(0) \
-         end."
-    );
+    let eval_cmd =
+        build_script_eval_cmd(&workspace_id, &project_path_escaped, class_name, selector);
 
     let mut args = repl_startup::beam_pa_args(&paths);
 
@@ -249,6 +234,33 @@ fn run_script(
 
     info!("Script run completed");
     Ok(())
+}
+
+/// Build the Erlang `-eval` string for script mode.
+///
+/// Separated from `run_script` so the generated code can be unit-tested without
+/// needing a full Erlang runtime or compiled project.
+fn build_script_eval_cmd(
+    workspace_id: &str,
+    project_path_escaped: &str,
+    class_name: &str,
+    selector: &str,
+) -> String {
+    format!(
+        "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+         {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
+                                                          project_path => <<\"{project_path_escaped}\">>, \
+                                                          repl => false}}), \
+         ClassPid = beamtalk_class_registry:whereis_class('{class_name}'), \
+         case ClassPid of \
+             undefined -> \
+                 io:format(standard_error, \"Error: class '{class_name}' not found~n\", []), \
+                 halt(1); \
+             _ -> \
+                 beamtalk_class_dispatch:class_send(ClassPid, {selector}, []), \
+                 halt(0) \
+         end."
+    )
 }
 
 /// Run a package as a persistent OTP service (BT-1191, BT-1319).
@@ -641,6 +653,54 @@ mod tests {
         assert!(
             err.contains("No entry point defined"),
             "Old [package] start should not be used: {err}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_no_erlang_comments() {
+        // Regression: Erlang %% comments in a -eval string comment out
+        // everything to end-of-line, which is the entire eval string.
+        let cmd = build_script_eval_cmd("run_42", "/tmp/foo", "SmokeTest", "answer");
+        assert!(
+            !cmd.contains("%%"),
+            "Eval string must not contain Erlang line comments: {cmd}"
+        );
+        assert!(
+            !cmd.contains(" % "),
+            "Eval string must not contain Erlang line comments: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_contains_dispatch_and_halt() {
+        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run");
+        assert!(
+            cmd.contains("class_send(ClassPid, run, [])"),
+            "Eval should dispatch the selector: {cmd}"
+        );
+        assert!(
+            cmd.contains("halt(0)"),
+            "Eval should halt on success: {cmd}"
+        );
+        assert!(
+            cmd.contains("halt(1)"),
+            "Eval should halt(1) on class-not-found: {cmd}"
+        );
+        assert!(cmd.ends_with("end."), "Eval should end with 'end.': {cmd}");
+    }
+
+    #[test]
+    fn test_script_eval_cmd_interpolates_parameters() {
+        let cmd = build_script_eval_cmd("run_99", "/my/project", "Counter", "increment");
+        assert!(cmd.contains("run_99"), "workspace_id not interpolated");
+        assert!(cmd.contains("/my/project"), "project_path not interpolated");
+        assert!(
+            cmd.contains("'Counter'"),
+            "class_name not interpolated: {cmd}"
+        );
+        assert!(
+            cmd.contains("increment"),
+            "selector not interpolated: {cmd}"
         );
     }
 }
