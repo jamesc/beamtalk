@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Workspace Management
 //!
-//! Provides `beamtalk workspace {list,stop,status,create}` subcommands.
+//! Provides `beamtalk workspace {list,stop,status,attach,transcript,create}` subcommands.
 
 use clap::Subcommand;
 use miette::Result;
@@ -14,6 +14,7 @@ use super::{
     create_workspace, discovery, get_or_start_workspace, list_workspaces, stop_workspace,
     workspace_status,
 };
+use crate::commands::{attach, transcript};
 
 /// Workspace management subcommands.
 #[derive(Debug, Subcommand)]
@@ -41,6 +42,34 @@ pub enum WorkspaceCommand {
         name: Option<String>,
     },
 
+    /// Attach a REPL to a running workspace (without starting one)
+    Attach {
+        /// Workspace name or ID (default: current project's workspace)
+        name: Option<String>,
+
+        /// Connect to a workspace at an explicit localhost port
+        #[arg(long, conflicts_with = "name")]
+        port: Option<u16>,
+
+        /// Erlang cookie for authentication (required with --port)
+        #[arg(long, requires = "port")]
+        cookie: Option<String>,
+
+        /// Disable colored output (also respects `NO_COLOR` environment variable)
+        #[arg(long)]
+        no_color: bool,
+    },
+
+    /// Stream Transcript output from a running workspace
+    Transcript {
+        /// Workspace name or ID (default: current project's workspace)
+        name: Option<String>,
+
+        /// Display last N entries from ring buffer on connect
+        #[arg(long)]
+        recent: Option<usize>,
+    },
+
     /// Create a new named workspace
     Create {
         /// Name for the workspace
@@ -66,10 +95,6 @@ pub enum WorkspaceCommand {
         #[arg(long)]
         idle_timeout: Option<u64>,
 
-        /// Enable TLS for Erlang distribution
-        #[arg(long)]
-        tls: bool,
-
         /// Port for the web interface
         #[arg(long)]
         web_port: Option<u16>,
@@ -86,6 +111,13 @@ pub fn run(command: WorkspaceCommand) -> Result<()> {
         WorkspaceCommand::List { json } => run_list(json),
         WorkspaceCommand::Stop { name, force } => stop_workspace(name.as_deref(), force),
         WorkspaceCommand::Status { name } => run_status(name.as_deref()),
+        WorkspaceCommand::Attach {
+            name,
+            port,
+            cookie,
+            no_color,
+        } => attach::run(name.as_deref(), port, cookie.as_deref(), no_color),
+        WorkspaceCommand::Transcript { name, recent } => transcript::run(name.as_deref(), recent),
         WorkspaceCommand::Create {
             name,
             background,
@@ -93,7 +125,6 @@ pub fn run(command: WorkspaceCommand) -> Result<()> {
             bind,
             persistent,
             idle_timeout,
-            tls,
             web_port,
             confirm_network,
         } => {
@@ -104,7 +135,6 @@ pub fn run(command: WorkspaceCommand) -> Result<()> {
                     bind.as_deref(),
                     persistent,
                     idle_timeout,
-                    tls,
                     web_port,
                     confirm_network,
                 )
@@ -235,7 +265,6 @@ fn run_create_background(
     bind: Option<&str>,
     persistent: bool,
     idle_timeout: Option<u64>,
-    tls: bool,
     web_port: Option<u16>,
     confirm_network: bool,
 ) -> Result<()> {
@@ -253,22 +282,21 @@ fn run_create_background(
     let project_root = discovery::discover_project_root(&cwd);
 
     // Check if workspace already exists and is running before validating
-    // startup-only flags (bind/TLS). This avoids errors like "missing TLS certs"
-    // when the user just wants to check that a workspace is running.
+    // startup-only flags. This avoids spurious errors when the user just
+    // wants to check that a workspace is running.
     let workspace_id = super::workspace_id_for_project(&project_root, Some(name))?;
     if let Ok(true) = super::storage::workspace_exists(&workspace_id) {
         if let Ok(Some(info)) = super::storage::get_node_info(&workspace_id) {
             if super::is_node_running(&info, Some(&workspace_id)) {
                 println!("Workspace '{workspace_id}' already running");
-                let has_startup_flags = tls
-                    || bind.is_some()
+                let has_startup_flags = bind.is_some()
                     || port != 0
                     || web_port.is_some()
                     || persistent
                     || idle_timeout.is_some();
                 if has_startup_flags {
                     eprintln!(
-                        "  ⚠️  Startup flags (--port, --bind, --tls, --web-port, --persistent, \
+                        "  ⚠️  Startup flags (--port, --bind, --web-port, --persistent, \
                          --idle-timeout) have no effect on an already-running workspace.\n  \
                          Stop it first with `beamtalk workspace stop {name}` to restart with new settings."
                     );
@@ -289,13 +317,6 @@ fn run_create_background(
     let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()?;
     let paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
-    // Resolve TLS config if requested
-    let ssl_dist_conf = if tls {
-        crate::commands::repl::resolve_ssl_dist_conf_for_workspace(&project_root, Some(name))?
-    } else {
-        None
-    };
-
     let (node_info, _is_new, workspace_id) = get_or_start_workspace(
         &project_root,
         Some(name),
@@ -305,7 +326,6 @@ fn run_create_background(
         !persistent,
         idle_timeout,
         Some(bind_addr),
-        ssl_dist_conf.as_deref(),
         web_port,
         None,
     )?;

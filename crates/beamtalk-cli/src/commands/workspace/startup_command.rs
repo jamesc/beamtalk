@@ -72,7 +72,6 @@ pub(super) fn build_detached_node_command(
     extra_code_paths: &[PathBuf],
     eval_cmd: &str,
     project_root: &Path,
-    ssl_dist_optfile: Option<&Path>,
 ) -> Command {
     let (node_flag, node_arg) = if node_name.contains('@') {
         ("-name", node_name.to_string())
@@ -103,14 +102,6 @@ pub(super) fn build_detached_node_command(
     // Add extra code paths (e.g. package ebin from auto-compile)
     for path in extra_code_paths {
         cmd.arg("-pa").arg(path_to_erlang_arg(path));
-    }
-
-    // Add TLS distribution args if configured (ADR 0020 Phase 2)
-    if let Some(conf_path) = ssl_dist_optfile {
-        cmd.arg("-proto_dist")
-            .arg("inet_tls")
-            .arg("-ssl_dist_optfile")
-            .arg(path_to_erlang_arg(conf_path));
     }
 
     cmd.arg("-eval").arg(eval_cmd);
@@ -238,7 +229,6 @@ mod tests {
             &[],
             "ok.",
             &tmp,
-            None,
         )
     }
 
