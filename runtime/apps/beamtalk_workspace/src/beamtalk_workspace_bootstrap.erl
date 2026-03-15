@@ -213,7 +213,10 @@ class_module(ClassName) ->
 -spec set_class_variable(atom(), term()) -> ok | {error, class_not_found}.
 set_class_variable(ClassName, Obj) ->
     try
-        beamtalk_runtime_api:set_class_var(ClassName, current, Obj)
+        %% set_class_var returns the value that was set (from gen_server reply),
+        %% not `ok`. Normalise to ok for callers.
+        _ = beamtalk_runtime_api:set_class_var(ClassName, current, Obj),
+        ok
     catch
         error:#beamtalk_error{kind = class_not_found} ->
             {error, class_not_found}
