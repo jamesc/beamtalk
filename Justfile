@@ -388,13 +388,12 @@ test-install: build-release build-stdlib
     test -d "$RUNTIME_DIR"
     echo "✅ Stdlib and runtime directories present"
 
-    # 3. Verify compiler + runtime end-to-end via beamtalk run
-    PROJ="$TMPDIR/smoke-project"
-    mkdir -p "$PROJ/src"
-    printf '[package]\nname = "smoke"\nversion = "0.1.0"\n\n[dependencies]\n' > "$PROJ/beamtalk.toml"
-    printf 'Object subclass: SmokeTest\n  class run => 21 + 21\n' > "$PROJ/src/SmokeTest.bt"
-    (cd "$PROJ" && "$TMPDIR/bin/beamtalk" run SmokeTest run)
-    echo "✅ Compiler + runtime smoke test passed (beamtalk run)"
+    # 3. Scaffold a project, add a class, and run it end-to-end
+    (cd "$TMPDIR" && "$TMPDIR/bin/beamtalk" new smoke_project)
+    echo "✅ beamtalk new smoke_project OK"
+    printf 'Object subclass: SmokeTest\n  class run => 21 + 21\n' > "$TMPDIR/smoke_project/src/SmokeTest.bt"
+    (cd "$TMPDIR/smoke_project" && "$TMPDIR/bin/beamtalk" run SmokeTest run)
+    echo "✅ beamtalk run SmokeTest>>run OK"
 
     echo "✅ All smoke tests passed"
 
