@@ -193,6 +193,59 @@ check-corpus: build-rust
     fi
     echo "✅ corpus.json is up to date"
 
+# Evaluate search quality from structured MCP server logs (ADR 0062)
+# Usage: just search-eval /path/to/mcp-server.log
+[unix]
+search-eval logfile:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f "{{logfile}}" ]; then
+        echo "❌ Log file not found: {{logfile}}"
+        exit 1
+    fi
+
+    echo "═══ Search Examples Eval Report ═══"
+    echo ""
+
+    # Extract search_examples log lines (structured tracing format)
+    total=$(grep -c 'search_examples' "{{logfile}}" 2>/dev/null || true)
+    echo "Total searches: $total"
+
+    if [ "$total" -eq 0 ]; then
+        echo "No search_examples calls found in log."
+        exit 0
+    fi
+
+    # Zero-result queries
+    zero=$(grep 'search_examples' "{{logfile}}" | grep -c 'result_count=0' 2>/dev/null || true)
+    echo "Zero-result queries: $zero ($((zero * 100 / total))%)"
+    echo ""
+
+    if [ "$zero" -gt 0 ]; then
+        echo "── Zero-result query hashes ──"
+        grep 'search_examples' "{{logfile}}" | grep 'result_count=0' | sed -n 's/.*query_hash=\([a-f0-9]*\).*/\1/p' | sort | uniq -c | sort -rn | head -20
+        echo ""
+    fi
+
+    # Low-score queries (top_score < 5)
+    echo "── Low-score queries (top_score < 5) ──"
+    grep 'search_examples' "{{logfile}}" | sed -n 's/.*top_score=\([0-9]*\).*/\1/p' | awk '$1 > 0 && $1 < 5' | wc -l | xargs -I{} echo "Count: {}"
+    echo ""
+
+    # Score distribution
+    echo "── Score distribution ──"
+    grep 'search_examples' "{{logfile}}" | sed -n 's/.*top_score=\([0-9]*\).*/\1/p' | sort -n | uniq -c | sort -rn | head -20
+    echo ""
+
+    # Query frequency (by hash)
+    echo "── Top query hashes (by frequency) ──"
+    grep 'search_examples' "{{logfile}}" | sed -n 's/.*query_hash=\([a-f0-9]*\).*/\1/p' | sort | uniq -c | sort -rn | head -20
+    echo ""
+
+    # Duration stats
+    echo "── Duration (μs) ──"
+    grep 'search_examples' "{{logfile}}" | sed -n 's/.*duration_us=\([0-9]*\).*/\1/p' | awk '{sum+=$1; count++; if($1>max)max=$1; if(min==""||$1<min)min=$1} END {if(count==0){print "min=n/a avg=n/a max=n/a count=0"; exit 0} printf "min=%d avg=%d max=%d count=%d\n", min, sum/count, max, count}'
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════

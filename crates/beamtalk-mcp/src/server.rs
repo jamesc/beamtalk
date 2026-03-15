@@ -18,6 +18,7 @@ use rmcp::{
     model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
     schemars, tool, tool_handler, tool_router,
 };
+use sha2::{Digest, Sha256};
 
 use crate::client::ReplClient;
 
@@ -175,6 +176,19 @@ pub struct LintParams {
         description = "Path to a .bt source file or directory to lint. Defaults to the current directory."
     )]
     pub path: Option<String>,
+}
+
+/// Parameters for the `search_examples` MCP tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SearchExamplesParams {
+    /// Search query — keywords or natural language describing what you're looking for.
+    #[schemars(
+        description = "Keywords or natural language query (e.g. 'closures', 'actor state', 'pattern matching')"
+    )]
+    pub query: String,
+    /// Maximum number of results (default 5, max 20).
+    #[schemars(description = "Maximum results to return. Default 5, max 20.")]
+    pub limit: Option<usize>,
 }
 
 // --- MCP Tool implementations ---
@@ -775,6 +789,65 @@ impl BeamtalkMcp {
         Ok(call_result)
     }
 
+    /// Search the bundled example corpus for Beamtalk code examples.
+    #[tool(
+        description = "Search for Beamtalk code examples by keyword or topic. Returns matching examples with source code, explanation, and tags. Use this to find idiomatic patterns, syntax examples, and working code before writing .bt files. Works offline — no REPL connection needed."
+    )]
+    async fn search_examples(
+        &self,
+        Parameters(params): Parameters<SearchExamplesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let start = std::time::Instant::now();
+        let results = beamtalk_examples::search(&params.query, params.limit);
+        let duration_us = start.elapsed().as_micros();
+
+        let result_count = results.len();
+        let top_score = results.first().map_or(0, |r| r.score);
+
+        // Telemetry: hash the query for counting unique queries without exposing content.
+        let hash_bytes = Sha256::digest(params.query.as_bytes());
+        let query_hash = hash_bytes
+            .iter()
+            .fold(String::with_capacity(64), |mut acc, b| {
+                use std::fmt::Write as _;
+                let _ = write!(acc, "{b:02x}");
+                acc
+            });
+
+        tracing::info!(
+            query_hash = %query_hash,
+            result_count = result_count,
+            top_score = top_score,
+            duration_us = duration_us,
+            "search_examples"
+        );
+        tracing::debug!(query = %params.query, "search_examples query");
+
+        if results.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No examples found for that query. Try different keywords — e.g. 'closures', 'actor state', 'collections'.",
+            )]));
+        }
+
+        let text = results
+            .iter()
+            .map(|r| {
+                format!(
+                    "## {} (score: {})\n**Category:** {} | **Tags:** {}\n\n```beamtalk\n{}\n```\n\n{}\n",
+                    r.entry.title,
+                    r.score,
+                    r.entry.category,
+                    r.entry.tags.join(", "),
+                    r.entry.source,
+                    r.entry.explanation,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n---\n\n");
+
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
     /// Discover supported REPL operations and protocol version.
     #[tool(
         description = "Discover supported REPL operations and protocol version. Returns the list of available ops with their parameters, and version information."
@@ -994,6 +1067,7 @@ impl ServerHandler for BeamtalkMcp {
                  'list_actors' to see running actors, 'inspect' to examine actor state, \
                  'reload_module' for hot code reloading, 'test' to run BUnit tests, \
                  'lint' to run style/redundancy checks on .bt source files, \
+                 'search_examples' to find Beamtalk code examples by keyword (works offline, no REPL needed), \
                  'show_codegen' to inspect generated Core Erlang (use class+selector for loaded classes), 'info' for symbol details, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
                  'unload' to remove a module, and 'interrupt' to cancel evaluations.",
@@ -1064,5 +1138,46 @@ mod tests {
         assert_eq!(result.total, 1);
         assert!(result.errors.len() == 1);
         assert!(result.errors[0].message.contains(".bt source file"));
+    }
+
+    // --- search_examples ---
+
+    #[test]
+    fn search_examples_returns_results_for_known_query() {
+        let results = beamtalk_examples::search("closures", None);
+        assert!(
+            !results.is_empty(),
+            "searching 'closures' should return results from the bundled corpus"
+        );
+    }
+
+    #[test]
+    fn search_examples_respects_limit() {
+        let results = beamtalk_examples::search("a", Some(2));
+        assert!(
+            results.len() <= 2,
+            "limit=2 should return at most 2 results, got {}",
+            results.len()
+        );
+    }
+
+    #[test]
+    fn search_examples_empty_query_returns_empty() {
+        let results = beamtalk_examples::search("", None);
+        assert!(results.is_empty(), "empty query should return no results");
+    }
+
+    #[test]
+    fn search_examples_tool_registered() {
+        // Verify that search_examples appears in the tool router by checking
+        // that the tool_router lists it. The #[tool_router] macro generates
+        // a tool_router() method that includes all #[tool] handlers.
+        let router = BeamtalkMcp::tool_router();
+        let tools = router.list_all();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        assert!(
+            tool_names.contains(&"search_examples"),
+            "search_examples should be in tool list, found: {tool_names:?}"
+        );
     }
 }
