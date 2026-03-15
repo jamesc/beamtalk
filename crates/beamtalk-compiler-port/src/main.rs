@@ -424,7 +424,10 @@ fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("core_erlang"), binary(core_erlang)),
-        (atom("warnings"), Term::from(List::from(build_warning_terms(warnings)))),
+        (
+            atom("warnings"),
+            Term::from(List::from(build_warning_terms(warnings))),
+        ),
     ]))
 }
 
@@ -442,8 +445,14 @@ fn class_definition_ok_response(
         (atom("kind"), atom("class_definition")),
         (atom("core_erlang"), binary(core_erlang)),
         (atom("module_name"), binary(module_name)),
-        (atom("classes"), Term::from(List::from(build_class_terms(classes)))),
-        (atom("warnings"), Term::from(List::from(build_warning_terms(warnings)))),
+        (
+            atom("classes"),
+            Term::from(List::from(build_class_terms(classes))),
+        ),
+        (
+            atom("warnings"),
+            Term::from(List::from(build_warning_terms(warnings))),
+        ),
     ]);
     if let Some(trailing) = trailing_core_erlang {
         map.insert(atom("trailing_core_erlang"), binary(trailing));
@@ -473,7 +482,10 @@ fn method_definition_ok_response(
             },
         ),
         (atom("method_source"), binary(method_source)),
-        (atom("warnings"), Term::from(List::from(build_warning_terms(warnings)))),
+        (
+            atom("warnings"),
+            Term::from(List::from(build_warning_terms(warnings))),
+        ),
     ]))
 }
 
@@ -488,8 +500,14 @@ fn compile_ok_response(
         (atom("status"), atom("ok")),
         (atom("core_erlang"), binary(core_erlang)),
         (atom("module_name"), binary(module_name)),
-        (atom("classes"), Term::from(List::from(build_class_terms(classes)))),
-        (atom("warnings"), Term::from(List::from(build_warning_terms(warnings)))),
+        (
+            atom("classes"),
+            Term::from(List::from(build_class_terms(classes))),
+        ),
+        (
+            atom("warnings"),
+            Term::from(List::from(build_warning_terms(warnings))),
+        ),
     ]))
 }
 
@@ -640,10 +658,11 @@ fn handle_compile_expression(request: &Map) -> Term {
         .and_then(term_to_string_list)
         .unwrap_or_default();
 
-    let class_superclass_index = match extract_optional_string_map(request, "class_superclass_index") {
-        Ok(map) => map,
-        Err(resp) => return resp,
-    };
+    let class_superclass_index =
+        match extract_optional_string_map(request, "class_superclass_index") {
+            Ok(map) => map,
+            Err(resp) => return resp,
+        };
     let class_module_index = match extract_optional_string_map(request, "class_module_index") {
         Ok(map) => map,
         Err(resp) => return resp,
@@ -1033,10 +1052,11 @@ fn handle_compile(request: &Map) -> Term {
         Ok(map) => map,
         Err(resp) => return resp,
     };
-    let class_superclass_index = match extract_optional_string_map(request, "class_superclass_index") {
-        Ok(map) => map,
-        Err(resp) => return resp,
-    };
+    let class_superclass_index =
+        match extract_optional_string_map(request, "class_superclass_index") {
+            Ok(map) => map,
+            Err(resp) => return resp,
+        };
 
     // BT-845/BT-860: Extract optional source file path to embed as beamtalk_source attribute.
     let source_path = map_get(request, "source_path").and_then(term_to_string);
