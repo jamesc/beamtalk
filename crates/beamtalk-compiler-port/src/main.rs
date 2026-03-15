@@ -88,25 +88,28 @@ fn map_get<'a>(map: &'a Map, key: &str) -> Option<&'a Term> {
     map.map.get(&atom(key))
 }
 
-/// Extract a string→string map from a Term (for `class_module_index`).
+/// Extract a string→string map from a Term.
 /// Returns `Err` if the term is present but contains non-string keys or values,
 /// so callers can surface the problem rather than silently falling back.
-fn term_to_string_map(term: &Term) -> Result<std::collections::HashMap<String, String>, String> {
+fn term_to_string_map(
+    term: &Term,
+    field_name: &str,
+) -> Result<std::collections::HashMap<String, String>, String> {
     match term {
         Term::Map(m) => {
             let mut result = std::collections::HashMap::new();
             for (k, v) in &m.map {
                 let key = term_to_string(k)
-                    .ok_or_else(|| format!("class_module_index key is not a string: {k:?}"))?;
+                    .ok_or_else(|| format!("{field_name} key is not a string: {k:?}"))?;
                 let val = term_to_string(v).ok_or_else(|| {
-                    format!("class_module_index value for '{key}' is not a string: {v:?}")
+                    format!("{field_name} value for '{key}' is not a string: {v:?}")
                 })?;
                 result.insert(key, val);
             }
             Ok(result)
         }
         _ => Err(format!(
-            "class_module_index must be a map of string→string, got: {term:?}"
+            "{field_name} must be a map of string→string, got: {term:?}"
         )),
     }
 }
@@ -351,7 +354,7 @@ fn extract_optional_string_map(
 ) -> Result<std::collections::HashMap<String, String>, Term> {
     match map_get(request, key) {
         None => Ok(std::collections::HashMap::new()),
-        Some(term) => term_to_string_map(term).map_err(|e| error_response(&[e])),
+        Some(term) => term_to_string_map(term, key).map_err(|e| error_response(&[e])),
     }
 }
 
