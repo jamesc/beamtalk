@@ -757,6 +757,31 @@ fn find_self_message_send(expr: &Expression, spawn_selectors: &HashSet<EcoString
                 .find_map(|e| find_self_message_send(e, spawn_selectors));
         }
     }
+    // Cascade: apply the same spawns_block skipping per-message.
+    if let Expression::Cascade {
+        receiver, messages, ..
+    } = expr
+    {
+        if let Some(span) = find_self_message_send(receiver, spawn_selectors) {
+            return Some(span);
+        }
+        for msg in messages {
+            let found = if spawn_selectors.contains(msg.selector.name().as_str()) {
+                msg.arguments
+                    .iter()
+                    .filter(|a| !matches!(a, Expression::Block(_)))
+                    .find_map(|e| find_self_message_send(e, spawn_selectors))
+            } else {
+                msg.arguments
+                    .iter()
+                    .find_map(|e| find_self_message_send(e, spawn_selectors))
+            };
+            if found.is_some() {
+                return found;
+            }
+        }
+        return None;
+    }
     child_expressions(expr)
         .into_iter()
         .find_map(|e| find_self_message_send(e, spawn_selectors))

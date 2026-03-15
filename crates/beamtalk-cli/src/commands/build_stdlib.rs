@@ -636,10 +636,26 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
     // separate BEAM process. Mark them so the self-capture validator can skip
     // false-positive warnings (BT-1312, replaces hardcoded list in validators.rs).
     if class_name == "Timer" {
+        let mut found_after = false;
+        let mut found_every = false;
         for m in &mut class_methods {
-            if m.selector == "after:do:" || m.selector == "every:do:" {
-                m.spawns_block = true;
+            match m.selector.as_str() {
+                "after:do:" => {
+                    m.spawns_block = true;
+                    found_after = true;
+                }
+                "every:do:" => {
+                    m.spawns_block = true;
+                    found_every = true;
+                }
+                _ => {}
             }
+        }
+        if !found_after || !found_every {
+            miette::bail!(
+                "Timer metadata mismatch: expected class methods `after:do:` and `every:do:` \
+                 but found_after={found_after}, found_every={found_every}"
+            );
         }
     }
 
