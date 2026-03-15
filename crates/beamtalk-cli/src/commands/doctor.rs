@@ -212,7 +212,9 @@ fn check_rustc() -> CheckResult {
 
     match version {
         Some(v) => CheckResult::Pass(format!("{v} ({rustc_path})")),
-        None => CheckResult::Warn(format!("rustc found ({rustc_path}) but could not get version")),
+        None => CheckResult::Warn(format!(
+            "rustc found ({rustc_path}) but could not get version"
+        )),
     }
 }
 
