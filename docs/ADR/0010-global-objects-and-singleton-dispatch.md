@@ -246,7 +246,7 @@ In Pharo, Transcript is a **separate window** from the Playground (REPL). You wr
 
 ```
                     ┌─────────────────────┐
-  REPL eval    ──→  │                     │ ──→ `beamtalk transcript` (CLI viewer)
+  REPL eval    ──→  │                     │ ──→ `beamtalk workspace transcript` (CLI viewer)
   MyHttpServer ──→  │  Transcript Actor   │ ──→ REPL-2 (opted in via subscribe)
   background   ──→  │  (shared log sink)  │ ──→ IDE Transcript panel (future)
                     └─────────────────────┘
@@ -258,7 +258,7 @@ The actor maintains a ring buffer of recent output and a list of subscriber pids
 
 ```bash
 # Separate CLI viewer (like `tail -f` on the workspace log)
-beamtalk transcript
+beamtalk workspace transcript
 ```
 
 ```beamtalk
@@ -498,7 +498,7 @@ In Pharo, `Transcript show: 'Hello'` is a synchronous method call on a shared in
 
 A newcomer types `Transcript show: 'Hello'` in their REPL and sees `=> nil`. Where's "Hello"? It went to the Transcript channel, which they haven't subscribed to. In Python, `print('Hello')` shows output immediately. Beamtalk requires knowing that Transcript is a separate output channel and that you need to subscribe or open a viewer. That's a steeper learning curve for the most basic debugging tool.
 
-**Counter:** The mental model is clear and consistent: Transcript is a shared log, like a separate window in Pharo's IDE. The REPL tutorial can explain this in one line: "Type `Transcript subscribe` to see output here, or run `beamtalk transcript` in another terminal." And since Transcript is a real object, the newcomer learns the object model by interacting with it — `Transcript subscribe`, `Transcript recent`, `Transcript class`. Every interaction reinforces "everything is a message send." The alternative — inline output that sometimes interleaves with unrelated background actor output — is more confusing, not less.
+**Counter:** The mental model is clear and consistent: Transcript is a shared log, like a separate window in Pharo's IDE. The REPL tutorial can explain this in one line: "Type `Transcript subscribe` to see output here, or run `beamtalk workspace transcript` in another terminal." And since Transcript is a real object, the newcomer learns the object model by interacting with it — `Transcript subscribe`, `Transcript recent`, `Transcript class`. Every interaction reinforces "everything is a message send." The alternative — inline output that sometimes interleaves with unrelated background actor output — is more confusing, not less.
 
 
 ## Alternatives Considered

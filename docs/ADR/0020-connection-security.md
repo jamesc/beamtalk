@@ -5,6 +5,7 @@ Implemented (2026-02-18)
 
 **Update (2026-02-17):** Phase 0 (WebSocket transport + cookie auth) implemented in BT-683. ADR accepted based on validated implementation.
 **Update (2026-02-18):** Phases 0–2 complete (BT-683, BT-691, BT-692). Phase 3 (SPIFFE/SPIRE) remains future.
+**Update (2026-03-15):** TLS distribution support removed (PR #1401). `beamtalk workspace attach` and `beamtalk transcript` moved under `beamtalk workspace` subcommand. References below reflect the original design; current commands are `beamtalk workspace attach` and `beamtalk workspace transcript`.
 
 ## Context
 
@@ -16,7 +17,7 @@ Beamtalk has several TCP communication channels that need security consideration
 | **CLI ↔ Compiler** | OTP Port (stdin/stdout) | Process isolation (ADR 0022) | `beamtalk build`, LSP |
 | **Distributed Erlang** | Erlang distribution protocol | Cookie file (`chmod 600`) | Workspace-to-workspace |
 | **Web terminal** | Not yet implemented | — | Browser-based REPL |
-| **Remote attach** | Not yet implemented | — | `beamtalk attach prod@host` |
+| **Remote attach** | Not yet implemented | — | `beamtalk workspace attach prod@host` |
 
 ### Threat Model
 
@@ -52,7 +53,7 @@ Beamtalk has several TCP communication channels that need security consideration
 **Update (2026-02-17):** The REPL now uses WebSocket over TCP (BT-683), not raw TCP. The original reasoning for choosing TCP over Unix sockets still applies — WebSocket inherits TCP's network capability while adding HTTP-upgrade compatibility for browser access and standard proxy support.
 
 1. **The workspace is an Erlang/OTP process.** Cowboy (HTTP/WebSocket server) is native to the BEAM ecosystem and well-supported. Unix socket support in Erlang requires workarounds (`afunix` or NIF-based solutions) and isn't portable to Windows.
-2. **Remote attach needs network transport.** The REPL protocol must work over the network for `beamtalk attach`. WebSocket is HTTP-upgrade-compatible, so standard proxies (Caddy, nginx) can terminate TLS without custom bridging code.
+2. **Remote attach needs network transport.** The REPL protocol must work over the network for `beamtalk workspace attach`. WebSocket is HTTP-upgrade-compatible, so standard proxies (Caddy, nginx) can terminate TLS without custom bridging code.
 3. **Browser access requires HTTP.** Raw TCP cannot be reached from a browser. WebSocket provides bidirectional communication over HTTP, enabling browser-based workspaces (ADR 0017).
 4. **The compiler is now an OTP Port (ADR 0022).** The Unix socket daemon was eliminated — the compiler runs as a child process of the workspace, communicating via stdin/stdout.
 
@@ -184,7 +185,7 @@ beamtalk run server.bt --bind 0.0.0.0
 
 ### Layer 3: Remote attach via mTLS or network overlay
 
-For `beamtalk attach prod@host`, two approaches are supported. The user chooses based on their infrastructure.
+For `beamtalk workspace attach prod@host`, two approaches are supported. The user chooses based on their infrastructure.
 
 #### Option A: Network overlay (Tailscale, WireGuard, VPN)
 
@@ -196,7 +197,7 @@ The simplest path. The overlay provides encryption and identity. Beamtalk treats
 │  100.64.0.1  │     (encrypted)            │  100.64.0.2      │
 └──────────────┘                            └──────────────────┘
         │                                            │
-beamtalk attach prod@100.64.0.2               beamtalk repl
+beamtalk workspace attach prod@100.64.0.2               beamtalk repl
 (connects to 100.64.0.2:{port})               (listens on 100.64.0.2:{port})
 ```
 
@@ -211,12 +212,12 @@ beamtalk run server.bt --bind tailscale
 # → Binds to Tailscale IP (100.64.x.x), only reachable by Tailscale peers
 
 # Connect from another machine on same tailnet
-beamtalk attach my-server.tail12345.ts.net
+beamtalk workspace attach my-server.tail12345.ts.net
 ```
 
 **Tailscale-specific integration:**
 - Auto-detect Tailscale IP via `tailscale status --json`
-- Use Tailscale's MagicDNS for discovery (`beamtalk attach my-server`)
+- Use Tailscale's MagicDNS for discovery (`beamtalk workspace attach my-server`)
 - Leverage Tailscale ACLs for authorization (who can attach to what)
 - `--bind tailscale` as shorthand for "bind to my Tailscale IP"
 
@@ -279,7 +280,7 @@ beamtalk workspace create my-feature --tls
 # → Creates per-workspace server + client certs signed by CA
 
 # Attach with mTLS
-beamtalk attach prod@host --tls
+beamtalk workspace attach prod@host --tls
 # → Uses client cert from ~/.beamtalk/tls/workspaces/{id}/
 ```
 
@@ -305,8 +306,8 @@ This is deferred to a future ADR when Kubernetes deployment becomes a priority. 
 | `beamtalk repl` (local) | Loopback binding | Cookie handshake | Default, zero config |
 | Browser (local) | Direct WebSocket | Cookie handshake | `beamtalk web` serves xterm.js |
 | Browser (remote) | Caddy/nginx TLS | Cookie + proxy auth (OAuth, mTLS) | Standard reverse proxy |
-| `beamtalk attach` via Tailscale | WireGuard | Tailscale identity + cookie | `--bind tailscale` |
-| `beamtalk attach` via mTLS | TLS (`ssl_dist`) | Client certificate | `--tls` flag |
+| `beamtalk workspace attach` via Tailscale | WireGuard | Tailscale identity + cookie | `--bind tailscale` |
+| `beamtalk workspace attach` via mTLS | TLS (`ssl_dist`) | Client certificate | `--tls` flag |
 | Future: K8s/SPIFFE | mTLS (SVID) | SPIFFE workload identity | SPIRE agent |
 
 ## Prior Art
@@ -360,12 +361,12 @@ This is deferred to a future ADR when Kubernetes deployment becomes a priority. 
 
 ### Erlang/BEAM developer
 - **Recognizable patterns.** Cookie auth mirrors Erlang's `--setcookie` pattern. `ssl_dist` is standard OTP.
-- **`beamtalk attach`** parallels `erl -remsh` with better security defaults.
+- **`beamtalk workspace attach`** parallels `erl -remsh` with better security defaults.
 - **May expect:** Distributed Erlang features (connecting nodes, `:rpc`) — need docs on how security applies to node-to-node communication.
 
 ### Operator (production)
 - **Clear upgrade path.** Start with Tailscale (zero code change), graduate to mTLS for stricter environments.
-- **`beamtalk attach`** requires explicit `--bind tailscale` or `--tls` — no accidental exposure.
+- **`beamtalk workspace attach`** requires explicit `--bind tailscale` or `--tls` — no accidental exposure.
 - **Audit logging** (see Consequences) enables compliance and incident response.
 - **Team environments:** OAuth/OIDC on web terminal for shared workspaces with SSO integration.
 
@@ -402,7 +403,7 @@ This is deferred to a future ADR when Kubernetes deployment becomes a priority. 
 - **Rejected:** Erlang lacks first-class Unix socket support (requires `afunix` driver or NIF). Maintaining two transports (UDS local, TCP remote) doubles protocol surface. Cookie auth on TCP provides comparable security. See "Why TCP" in Context section.
 
 ### SSH tunneling for remote attach
-- `beamtalk attach` could SSH to the remote host and forward the REPL port
+- `beamtalk workspace attach` could SSH to the remote host and forward the REPL port
 - **Rejected:** Adds SSH as a dependency, doesn't help with web terminal, doesn't integrate with Erlang distribution. Fine as a user-level workaround but not a platform feature.
 
 ### Token-only auth (no TLS)
@@ -464,7 +465,7 @@ This is deferred to a future ADR when Kubernetes deployment becomes a priority. 
 ### Phase 2: mTLS for Erlang distribution
 - `beamtalk tls init` — generate self-signed CA
 - Auto-generate per-workspace certs on `workspace create`
-- `--tls` flag for `beamtalk attach` and `beamtalk run`
+- `--tls` flag for `beamtalk workspace attach` and `beamtalk run`
 - Wire up OTP `ssl_dist` configuration
 - **v1 scope:** Auto-generated certs with no rotation or revocation. Cert lifecycle management is a follow-up issue.
 - **Components:** CLI commands, cert generation, `vm.args` templating

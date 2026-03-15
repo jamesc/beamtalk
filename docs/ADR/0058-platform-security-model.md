@@ -2,6 +2,7 @@
 
 ## Status
 Accepted (2026-03-07)
+**Update (2026-03-15):** TLS distribution support (`--tls`, `beamtalk tls init`) was removed in PR #1401. The mTLS examples below are not currently implemented; use Tailscale or reverse proxy TLS termination instead.
 
 ## Context
 
@@ -262,9 +263,10 @@ The operator running Beamtalk in a server context (automated testing, scripting,
 Operators deploying Beamtalk for remote access must follow ADR 0020 Layer 3 (mTLS or overlay network). The operator's checklist:
 
 ```bash
-beamtalk tls init                    # Generate per-workspace mTLS certs
-beamtalk workspace create --tls      # Workspace uses ssl_dist
-beamtalk attach prod@host --tls      # mTLS on Erlang distribution
+# NOTE: mTLS via --tls is not currently implemented (removed in PR #1401).
+# Use Tailscale or reverse proxy TLS termination instead:
+beamtalk repl --bind tailscale       # Bind to Tailscale interface
+beamtalk workspace attach my-server  # Attach via Tailscale overlay
 # Add Caddy/Nginx reverse proxy for browser TLS termination
 # Configure Tailscale ACLs for access control
 ```

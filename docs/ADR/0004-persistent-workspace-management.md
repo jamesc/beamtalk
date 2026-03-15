@@ -343,7 +343,7 @@ Workspaces serve different purposes in development and production:
 │   - Application supervisor manages services                  │
 │                                                              │
 │   # Live debugging (attach session to running node)          │
-│   beamtalk attach prod@host                                  │
+│   beamtalk workspace attach prod@host                                  │
 │   - Creates debug session in production node                 │
 │   - Can inspect actors, send messages, hot reload            │
 │   - Detach when done, node keeps running                     │
@@ -357,7 +357,7 @@ Workspaces serve different purposes in development and production:
 
 **Key insight:** The same attach mechanism works for both:
 - **Dev:** `beamtalk repl` → auto-create node + session
-- **Prod:** `beamtalk attach` → session on existing node
+- **Prod:** `beamtalk workspace attach` → session on existing node
 
 This is `erl -remsh` / `iex --remsh` productized with automatic node discovery and cookie management.
 
