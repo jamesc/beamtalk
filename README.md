@@ -59,7 +59,7 @@ Actor subclass: Counter
 
   increment => self.value := self.value + 1
   decrement => self.value := self.value - 1
-  getValue => ^self.value
+  getValue => self.value
 ```
 
 ### Pattern Matching

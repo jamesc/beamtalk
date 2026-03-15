@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-03-02)
+Deferred (2026-03-15) — revisit post-0.1.0. Originally proposed 2026-03-02.
 
 ## Context
 

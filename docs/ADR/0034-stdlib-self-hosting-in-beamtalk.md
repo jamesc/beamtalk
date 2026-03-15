@@ -296,7 +296,7 @@ deny: condition: Object -> Nil =>
 
 `should:raise:`, `fail:`, `runAll`, `run:`, and test lifecycle (`setUp`/`tearDown` orchestration, test discovery) remain as `@primitive` — they require process spawning, try/catch infrastructure, and class reflection that the runtime provides.
 
-**Bootstrapping trust:** Self-hosted assertions depend on `ifFalse:`, `ifTrue:`, string interpolation, and `fail:` all working correctly. Since `fail:` remains `@primitive` (Erlang-backed), the error-raising path is stable. The `ifTrue:`/`ifFalse:` methods on `True.bt`/`False.bt` are already pure Beamtalk and have been exercised since the earliest stdlib work. String interpolation (ADR 0023) is compiler-generated and tested independently. The risk of a silent assertion failure is low, but as a safeguard: existing Erlang-backed bootstrap tests (`stdlib/bootstrap-test/*.bt`) continue to validate core primitives independently.
+**Bootstrapping trust:** Self-hosted assertions depend on `ifFalse:`, `ifTrue:`, string interpolation, and `fail:` all working correctly. Since `fail:` remains `@primitive` (Erlang-backed), the error-raising path is stable. The `ifTrue:`/`ifFalse:` methods on `True.bt`/`False.bt` are already pure Beamtalk and have been exercised since the earliest stdlib work. String interpolation (ADR 0023) is compiler-generated and tested independently. The risk of a silent assertion failure is low, but as a safeguard: existing Erlang-backed bootstrap tests (`stdlib/bootstrap-test/*.btscript`) continue to validate core primitives independently.
 
 ### What Stays in Erlang
 
@@ -467,7 +467,7 @@ Rejected because:
 No user-facing migration needed. All method signatures and behavior remain identical. The change is internal: implementation moves from Erlang to Beamtalk. Concrete collection performance is unaffected (BIF overrides retained).
 
 Testing strategy:
-- Existing `stdlib/test/*.bt` and `stdlib/bootstrap-test/*.bt` tests validate behavioral equivalence
+- Existing `stdlib/test/*.bt` and `stdlib/bootstrap-test/*.btscript` tests validate behavioral equivalence
 - Add explicit tests for user-defined Collection subclasses to verify default implementations work
 - Benchmark `collect:`/`select:` on abstract vs concrete paths to quantify performance difference
 - Benchmark `detect:`/`anySatisfy:` to measure non-local return (throw/catch) overhead vs Erlang tail-recursive versions

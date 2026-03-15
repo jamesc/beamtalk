@@ -53,7 +53,7 @@ cargo test test_name -- --nocapture
 
 # 2. Check what the test expects
 # - Snapshot test: see tests/snapshots/*.snap
-# - E2E test: see tests/e2e/cases/*.bt
+# - E2E test: see tests/e2e/cases/*.btscript
 # - Unit test: read test source
 
 # 3. Update snapshots if intentional

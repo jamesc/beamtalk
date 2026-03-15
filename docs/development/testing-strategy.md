@@ -11,7 +11,7 @@ Beamtalk uses a multi-layered testing strategy covering the Rust compiler, Erlan
 | Unit Tests | Rust `#[test]` | `crates/*/src/*.rs` | Test individual functions and modules |
 | Snapshot Tests | insta | `test-package-compiler/` | Validate lexer, parser, and codegen output |
 | Compilation Tests | erlc | `test-package-compiler/` | Verify generated Core Erlang compiles |
-| **Stdlib Tests** | **EUnit (compiled)** | **`stdlib/bootstrap-test/*.bt`** | **Bootstrap primitive validation (no REPL needed)** |
+| **Stdlib Tests** | **EUnit (compiled)** | **`stdlib/bootstrap-test/*.btscript`** | **Bootstrap primitive validation (no REPL needed)** |
 | **BUnit Tests** | **EUnit (TestCase)** | **`stdlib/test/*.bt`** | **Language feature tests via TestCase (`beamtalk test`)** |
 | Runtime Unit Tests | EUnit | `runtime/apps/beamtalk_runtime/test/*_tests.erl` | Test Erlang runtime modules |
 | Integration Tests | EUnit + daemon | `runtime/apps/beamtalk_runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
@@ -233,7 +233,7 @@ These tests verify that generated Core Erlang actually compiles with `erlc`.
 
 Expression tests for bootstrap-critical primitives that TestCase transitively depends on. These must remain as expression tests because TestCase itself relies on these features working correctly.
 
-**Location:** `stdlib/bootstrap-test/*.bt`
+**Location:** `stdlib/bootstrap-test/*.btscript`
 
 **Count:** ~11 test files
 
@@ -475,7 +475,7 @@ REPL and workspace integration tests that require a running REPL daemon.
 
 **Location:** `tests/e2e/`
 
-**Test cases:** `tests/e2e/cases/*.bt` (~23 files)
+**Test cases:** `tests/e2e/cases/*.btscript` (~23 files)
 
 **Test harness:** `crates/beamtalk-cli/tests/e2e.rs`
 

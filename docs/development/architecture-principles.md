@@ -27,7 +27,12 @@ The beamtalk codebase is organized into **layers with unidirectional dependencie
 ```
 ┌─────────────────────────────────────┐
 │ beamtalk-cli (binary)               │  ← User-facing CLI tool
-│ beamtalk-lsp (binary, future)       │  ← IDE language server
+│ beamtalk-lsp (binary)               │  ← IDE language server
+│ beamtalk-mcp (binary)               │  ← Model Context Protocol server
+│ beamtalk-compiler-port (binary)     │  ← Erlang compiler bridge
+├─────────────────────────────────────┤
+│ beamtalk-exec (library)             │  ← REPL/execution engine
+│ beamtalk-workspace (library)        │  ← Workspace/session management
 ├─────────────────────────────────────┤
 │ beamtalk-core (library)             │  ← Compiler core (reusable)
 │  ├─ queries/     (Language Service) │
@@ -182,12 +187,12 @@ The beamtalk test suite follows the **testing pyramid** pattern: many fast unit 
 ### Test Layers
 
 ```
-        ╱ ╲  E2E Tests (tests/e2e/cases/*.bt)
+        ╱ ╲  E2E Tests (tests/e2e/cases/*.btscript)
        ╱   ╲  - Real Beamtalk → BEAM execution
       ╱ 10% ╲  - Slow, high confidence
      ╱───────╲  - User-facing scenarios
     ╱         ╲
-   ╱   20-30%  ╲  Integration Tests (runtime/test/*.erl)
+   ╱   20-30%  ╲  Integration Tests (runtime/apps/*/test/*.erl)
   ╱             ╲  - Multiple units working together
  ╱───────────────╲  - Codegen + runtime simulation
 ╱                 ╲
@@ -238,7 +243,7 @@ mod tests {
 
 ### Integration Tests
 
-**Location:** `runtime/test/*_tests.erl` (EUnit tests in Erlang)
+**Location:** `runtime/apps/*/test/*_tests.erl` (EUnit tests in Erlang)
 
 **Characteristics:**
 - Medium speed (10-100ms per test)
@@ -252,7 +257,7 @@ mod tests {
 
 ### End-to-End Tests
 
-**Location:** `tests/e2e/cases/*.bt` (real Beamtalk source files)
+**Location:** `tests/e2e/cases/*.btscript` (real Beamtalk source files)
 
 **Characteristics:**
 - Slow (100ms-1s per test)

@@ -424,7 +424,7 @@ testUnixOnlyFeature =>
 
 ### Moving E2E Tests to Compiled Tests
 
-1. **Classify** each `tests/e2e/cases/*.bt` file:
+1. **Classify** each `tests/e2e/cases/*.btscript` file:
    - No `@load`, no workspace bindings → move to `test/` (compiled)
    - Uses `@load` but no workspace bindings → move to `test/` with `@load` support
    - Uses workspace bindings → keep in `tests/e2e/` (needs REPL)

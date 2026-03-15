@@ -25,7 +25,7 @@ Beamtalk has rich content that could serve as an example corpus:
 | `examples/**/*.bt` | 6 projects | Getting-started, bank, chat-room, GoF patterns, OTP tree, SICP |
 | `docs/beamtalk-language-features.md` | 1 file | Curated language reference |
 | `crates/beamtalk-core/src/unparse/fixtures/*.bt` | 7 files | Parser round-trip fixtures showing valid syntax patterns |
-| `stdlib/bootstrap-test/*.bt` | ~20 files | Bootstrap primitive tests (too low-level for agents) |
+| `stdlib/bootstrap-test/*.btscript` | ~20 files | Bootstrap primitive tests (too low-level for agents) |
 
 The test fixtures are the most valuable source — they are complete, self-contained, tested class definitions that directly answer "how do I write X in Beamtalk?". For example, `stdlib/test/fixtures/counter.bt` is a 15-line actor with state, mutation, and accessors; `tests/e2e/fixtures/bank_account.bt` shows error handling, early returns, and string interpolation in a realistic domain.
 
@@ -124,7 +124,7 @@ Not all source content is equally useful as a corpus entry. The strategy is cura
 | `docs/learning/*.md` | Extract fenced `.bt` code blocks only if they pass parser validation | One entry per validated code block with surrounding prose | **Medium** — explanatory context, but snippets may be illustrative/non-working; only include blocks that parse successfully via `beamtalk-core` |
 | `docs/beamtalk-language-features.md` | Extract each feature section's examples | One entry per language feature | **Medium** — reference-style, terse |
 | `crates/beamtalk-core/src/unparse/fixtures/*.bt` | Include selectively | One entry per file | **Low** — compiler internals, but shows valid syntax patterns |
-| `stdlib/bootstrap-test/*.bt` | Skip | — | **Low** — too low-level for agent consumption |
+| `stdlib/bootstrap-test/*.btscript` | Skip | — | **Low** — too low-level for agent consumption |
 
 **Estimated corpus size:** ~300-400 entries, ~1-1.5MB as JSON.
 

@@ -82,7 +82,7 @@ Beamtalk has **3 layers of tests**:
    - Medium speed, 20-30% of test suite
    - Test codegen + runtime interaction
 
-3. **E2E Tests** (`tests/e2e/cases/*.bt`)
+3. **E2E Tests** (`tests/e2e/cases/*.btscript`)
    - Slow, 10% of test suite
    - Full pipeline: source → BEAM execution
 

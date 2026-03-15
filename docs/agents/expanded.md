@@ -49,7 +49,7 @@ Beamtalk is a Smalltalk/Newspeak-inspired programming language that compiles to 
 
 ### Test File Rules
 
-In test files (`stdlib/bootstrap-test/*.bt` and `tests/e2e/cases/*.bt`):
+In test files (`stdlib/bootstrap-test/*.btscript` and `tests/e2e/cases/*.btscript`):
 - **Every expression MUST have a `// =>` assertion** (even `// => _` for wildcard)
 - **No assertion = no execution** — expressions are silently skipped
 - **Missing assertions fail CI** (BT-249)
@@ -79,7 +79,7 @@ x
 Before using ANY Beamtalk syntax, verify it exists in at least one of:
 1. **Language spec:** [docs/beamtalk-language-features.md](../docs/beamtalk-language-features.md)
 2. **Examples:** `examples/*.bt`
-3. **Tests:** `stdlib/bootstrap-test/*.bt`, `tests/e2e/cases/*.bt`
+3. **Tests:** `stdlib/bootstrap-test/*.btscript`, `tests/e2e/cases/*.btscript`
 4. **Parser tests:** `crates/beamtalk-core/src/source_analysis/parser/`
 
 **If it doesn't appear in any of these → it's likely hallucinated. Search the codebase or ask.**
@@ -450,20 +450,28 @@ runtime/
 │       ├── src/            # Application metadata (beamtalk_stdlib.app.src)
 │       └── ebin/           # Generated .beam files (Actor, Block, Integer, etc.) created by build-stdlib
 
-tests/
-├── stdlib/                # Compiled language feature tests (ADR 0014)
-│   ├── arithmetic.bt      # ~32 test files, ~654 assertions
-│   ├── blocks.bt          # Run via `just test-stdlib`
+stdlib/
+├── bootstrap-test/        # Bootstrap expression tests (ADR 0014)
+│   ├── arithmetic.btscript  # 12 test files — run via `just test-stdlib`
+│   ├── booleans.btscript
 │   └── ...
+└── test/                  # BUnit TestCase tests
+    ├── actor_test.bt        # 151 test files — run via `just test-bunit`
+    ├── array_test.bt
+    └── ...
+
+tests/
 └── e2e/
-    ├── cases/             # REPL integration tests (~23 files)
+    ├── cases/             # REPL integration tests (54 .btscript files)
     └── fixtures/          # Shared test fixtures
         └── counter.bt     # CANONICAL counter implementation (BT-239)
 
 examples/
-├── counter.bt             # Simple working example for REPL
-├── hello.bt              # Minimal example
-└── repl-tutorial.md      # Beginner tutorial (BT-239)
+├── getting-started/       # Beginner tutorial project
+├── bank/                  # Banking example with actors
+├── chat-room/             # Multi-actor chat example
+├── otp-tree/              # Supervision tree example
+└── repl-tutorial.md       # REPL tutorial (BT-239)
 ```
 
 **Dependency direction (ADR 0009):**
@@ -503,7 +511,7 @@ beamtalk_stdlib (compiled stdlib)
 - See `docs/development/testing-strategy.md` for compilation workflow details
 
 #### 4. Stdlib Tests (Compiled Expression Tests) — ADR 0014
-**Location:** `stdlib/bootstrap-test/*.bt` (~57 files)
+**Location:** `stdlib/bootstrap-test/*.btscript` (12 files)
 - **Pure language feature tests** compiled directly to EUnit (no REPL needed)
 - Uses same `// =>` assertion format as E2E tests
 - Runs via `just test-stdlib` (fast, ~14s vs ~50s for E2E)
@@ -522,7 +530,7 @@ beamtalk_stdlib (compiled stdlib)
 - **Use this for stateful tests, complex actor interactions, multi-assertion scenarios**
 
 #### 6. End-to-End Tests (REPL Integration)
-**Location:** `tests/e2e/cases/*.bt` (~18 files)
+**Location:** `tests/e2e/cases/*.btscript` (54 files)
 - Require a running REPL daemon (started automatically by test harness)
 - Test workspace bindings, REPL commands, variable persistence, auto-await
 - Test `ERROR:` assertion patterns and `@load-error` directives
@@ -573,8 +581,9 @@ Detailed coding standards are in `docs/development/`:
 ```bash
 just ci                      # Run all CI checks (build, lint, test, test-stdlib, test-integration, test-mcp, test-e2e)
 just build                   # Build Rust + Erlang runtime
-just test                    # Run fast tests (~10s)
+just test                    # Rust + stdlib + BUnit + runtime tests
 just test-stdlib             # Compiled language feature tests (~14s)
+just test-bunit              # BUnit TestCase tests
 just test-e2e                # Run E2E tests (~50s)
 just fmt                     # Format all code
 just clippy                  # Lints (warnings = errors)

@@ -3,7 +3,7 @@
 > **Last updated:** 2026-02-12
 > **Issue:** BT-247
 > **Methodology:** Audit of `stdlib/src/*.bt` files, compiler intrinsics (`intrinsics.rs`, `primitive_bindings.rs`),
-> runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`stdlib/bootstrap-test/*.bt`), and E2E test coverage (`tests/e2e/cases/*.bt`).
+> runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`stdlib/bootstrap-test/*.btscript`), and E2E test coverage (`tests/e2e/cases/*.btscript`).
 
 ## Executive Summary
 
@@ -705,8 +705,8 @@ with no coverage in either test suite:
 
 For each method, testing was performed in this priority order:
 
-1. **Stdlib tests** (`stdlib/bootstrap-test/*.bt`) — compiled expression tests (ADR 0014)
-2. **E2E test files** (`tests/e2e/cases/*.bt`) — REPL integration tests
+1. **Stdlib tests** (`stdlib/bootstrap-test/*.btscript`) — compiled expression tests (ADR 0014)
+2. **E2E test files** (`tests/e2e/cases/*.btscript`) — REPL integration tests
 3. **Compiler intrinsics** (`crates/beamtalk-core/src/codegen/core_erlang/intrinsics.rs`) — verified codegen handler exists
 4. **Primitive bindings** (`crates/beamtalk-core/src/codegen/core_erlang/primitive_bindings.rs`, `primitive_implementations.rs`) — verified selector-based dispatch codegen
 5. **Runtime dispatch** (`runtime/apps/beamtalk_runtime/src/beamtalk_*.erl`) — verified dispatch clause handles the selector
