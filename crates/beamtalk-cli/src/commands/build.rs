@@ -137,15 +137,9 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
         "Build completed successfully"
     );
 
-    // Clean stale .beam/.core/.app artifacts from previous builds (e.g. renamed/deleted
-    // source files, package name changes). Compares the set of files just produced
-    // against what exists on disk and removes orphans.
+    // ADR 0026 §3: Package mode post-processing — clean stale artifacts and generate .app
     if let Some(ref pkg) = pkg_manifest {
         clean_stale_artifacts(&build_dir, &beam_files, &pkg.name)?;
-    }
-
-    // ADR 0026 §3: Generate .app file in package mode
-    if let Some(ref pkg) = pkg_manifest {
         generate_package_outputs(
             &build_dir,
             &project_root,
@@ -1188,7 +1182,7 @@ mod tests {
         write_test_file(&current, "current");
         write_test_file(&build_dir.join("bt@new_pkg@counter.core"), "current");
 
-        clean_stale_artifacts(&build_dir, &[current.clone()], "new_pkg").unwrap();
+        clean_stale_artifacts(&build_dir, std::slice::from_ref(&current), "new_pkg").unwrap();
 
         // Stale files should be removed
         assert!(!build_dir.join("bt@old_pkg@counter.beam").exists());
