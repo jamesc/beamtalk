@@ -87,6 +87,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0058](0058-platform-security-model.md) | Platform Security Model | Accepted | 2026-03-07 |
 | [0059](0059-supervision-tree-syntax.md) | Supervision Tree Syntax | Accepted | 2026-03-07 |
 | [0060](0060-result-type-hybrid-error-handling.md) | Result Type — Hybrid Error Handling for Expected Failures | Accepted | 2026-03-08 |
+| [0062](0062-bundled-example-corpus-mcp-search-tool.md) | Bundled Example Corpus and Search Tool for MCP Server | Accepted | 2026-03-15 |
 
 ## Creating New ADRs
 
