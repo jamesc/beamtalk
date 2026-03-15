@@ -5,4 +5,4 @@ mod corpus;
 mod search;
 
 pub use corpus::{Corpus, CorpusEntry};
-pub use search::{SearchResult, search};
+pub use search::{SearchResult, search, search_in};

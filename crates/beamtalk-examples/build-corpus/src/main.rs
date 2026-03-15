@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -44,6 +44,16 @@ fn main() {
     for entry in &mut entries {
         entry.tags.sort();
         entry.tags.dedup();
+    }
+
+    // Verify no duplicate IDs
+    let mut seen_ids = HashSet::new();
+    for entry in &entries {
+        assert!(
+            seen_ids.insert(&entry.id),
+            "duplicate corpus entry ID: {}",
+            entry.id
+        );
     }
 
     let corpus = Corpus { entries };
@@ -119,9 +129,19 @@ fn extract_method_tags(class: &ClassDefinition, tags: &mut BTreeSet<String>) {
     }
 }
 
-/// Generate a slug-style ID from a path and optional suffix.
-fn make_id(category: &str, file_stem: &str, suffix: Option<&str>) -> String {
-    let base = format!("{category}-{file_stem}");
+/// Normalize a path string to use forward slashes (for cross-platform consistency).
+fn normalize_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+/// Generate a slug-style ID from the normalized relative path and optional suffix.
+///
+/// Uses the full relative path (not just the file stem) to prevent collisions
+/// between same-named files in different directories.
+fn make_id(rel_path: &str, suffix: Option<&str>) -> String {
+    // Strip extension from rel_path
+    let without_ext = rel_path.rsplit_once('.').map_or(rel_path, |(base, _)| base);
+    let base = without_ext.to_string();
     let id = match suffix {
         Some(s) => format!("{base}-{s}"),
         None => base,
@@ -219,6 +239,7 @@ fn walk_bt_files(dir: &Path) -> Vec<PathBuf> {
         return files;
     }
     let Ok(entries) = fs::read_dir(dir) else {
+        eprintln!("warning: cannot read directory {}", dir.display());
         return files;
     };
     for entry in entries.flatten() {
@@ -245,11 +266,7 @@ fn extract_bt_dir(
 ) {
     let dir = root.join(rel_dir);
     for path in walk_bt_files(&dir) {
-        let rel_path = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
+        let rel_path = normalize_path(&path.strip_prefix(root).unwrap_or(&path).to_string_lossy());
 
         if let Some(skip) = skip_containing {
             if rel_path.contains(skip) {
@@ -258,6 +275,7 @@ fn extract_bt_dir(
         }
 
         let Ok(source) = fs::read_to_string(&path) else {
+            eprintln!("warning: cannot read file {}", path.display());
             continue;
         };
         let stem = path.file_stem().unwrap_or_default().to_string_lossy();
@@ -280,7 +298,7 @@ fn extract_bt_dir(
         let explanation = explanation_from_comments(&source);
 
         entries.push(CorpusEntry {
-            id: make_id(&category, &stem, None),
+            id: make_id(&rel_path, None),
             title,
             category,
             tags,
@@ -312,13 +330,10 @@ fn extract_md_files(root: &Path, rel_dir: &str, entries: &mut Vec<CorpusEntry>) 
 /// Extract fenced beamtalk code blocks from a single markdown file.
 fn extract_md_code_blocks(root: &Path, path: &Path, entries: &mut Vec<CorpusEntry>) {
     let Ok(content) = fs::read_to_string(path) else {
+        eprintln!("warning: cannot read file {}", path.display());
         return;
     };
-    let rel_path = path
-        .strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string();
+    let rel_path = normalize_path(&path.strip_prefix(root).unwrap_or(path).to_string_lossy());
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let category = category_from_path(&rel_path);
 
@@ -366,7 +381,7 @@ fn extract_md_code_blocks(root: &Path, path: &Path, entries: &mut Vec<CorpusEntr
                         };
 
                         entries.push(CorpusEntry {
-                            id: make_id(&category, &stem, Some(&format!("block-{block_index}"))),
+                            id: make_id(&rel_path, Some(&format!("block-{block_index}"))),
                             title,
                             category: category.clone(),
                             tags,
