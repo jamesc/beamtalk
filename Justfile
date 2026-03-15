@@ -208,7 +208,7 @@ search-eval logfile:
     echo ""
 
     # Extract search_examples log lines (structured tracing format)
-    total=$(grep -c 'search_examples' "{{logfile}}" 2>/dev/null || echo 0)
+    total=$(grep -c 'search_examples' "{{logfile}}" 2>/dev/null || true)
     echo "Total searches: $total"
 
     if [ "$total" -eq 0 ]; then
@@ -217,7 +217,7 @@ search-eval logfile:
     fi
 
     # Zero-result queries
-    zero=$(grep 'search_examples' "{{logfile}}" | grep -c 'result_count=0' 2>/dev/null || echo 0)
+    zero=$(grep 'search_examples' "{{logfile}}" | grep -c 'result_count=0' 2>/dev/null || true)
     echo "Zero-result queries: $zero ($((zero * 100 / total))%)"
     echo ""
 
@@ -244,7 +244,7 @@ search-eval logfile:
 
     # Duration stats
     echo "── Duration (μs) ──"
-    grep 'search_examples' "{{logfile}}" | sed -n 's/.*duration_us=\([0-9]*\).*/\1/p' | awk '{sum+=$1; count++; if($1>max)max=$1; if(min==""||$1<min)min=$1} END {printf "min=%d avg=%d max=%d count=%d\n", min, sum/count, max, count}'
+    grep 'search_examples' "{{logfile}}" | sed -n 's/.*duration_us=\([0-9]*\).*/\1/p' | awk '{sum+=$1; count++; if($1>max)max=$1; if(min==""||$1<min)min=$1} END {if(count==0){print "min=n/a avg=n/a max=n/a count=0"; exit 0} printf "min=%d avg=%d max=%d count=%d\n", min, sum/count, max, count}'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format
