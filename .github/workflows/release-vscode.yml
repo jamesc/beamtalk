@@ -85,9 +85,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: >-
-      ((github.event_name == 'workflow_dispatch' && inputs.publish) ||
-       (github.event_name == 'workflow_call' && inputs.publish)) &&
-      secrets.VSCE_PAT != ''
+      (github.event_name == 'workflow_dispatch' && inputs.publish) ||
+      (github.event_name == 'workflow_call' && inputs.publish)
     steps:
       - name: Download VSIX
         uses: actions/download-artifact@v8
@@ -100,6 +99,7 @@ jobs:
           node-version: '20'
 
       - name: Publish to VS Code Marketplace
+        if: env.VSCE_PAT != ''
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: npx --yes @vscode/vsce publish --packagePath beamtalk.vsix
