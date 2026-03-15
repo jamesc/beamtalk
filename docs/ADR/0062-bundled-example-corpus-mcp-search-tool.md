@@ -286,9 +286,10 @@ A `just search-eval` task can parse structured logs and produce a summary report
 | Cohort | Strongest argument |
 |---|---|
 | **Operator** | "A 1-3MB corpus baked into the binary inflates every deploy, even when no agent ever calls `search_examples`. Ship it as `corpus.json` next to the binary — users who don't use MCP agents pay zero cost. Also lets users swap in a custom corpus without recompiling." |
-| **Language dev** | "Separate file means I can regenerate the corpus without a full `cargo build`. Run a script, get a new `corpus.json`, restart the server. Faster iteration on taxonomy and chunking." |
+| **Language dev** | "During corpus taxonomy development, I need dozens of regenerate→test→inspect cycles. Each cycle currently requires recompiling `beamtalk-examples` and relinking `beamtalk-mcp` — 30+ seconds of Rust compilation for a content change. A sidecar file means `just build-corpus && restart` with zero Rust compilation. That's the difference between a 2-second and a 30-second feedback loop during content curation." |
+| **Contributor** | "If the corpus is a separate JSON file, I can edit it by hand to add a quick example without learning the generator, without building the Rust workspace, without even having Rust installed. Lower contribution barrier for an open-source project." |
 
-**Counter:** Distribution complexity. `cargo-dist` ships a single binary today. A sidecar file means packaging changes, install instructions, and a runtime "file not found" failure mode. The 1MB cost is negligible for a dev tool binary that's already ~20MB.
+**Counter:** The operator argument is weaker than it appears: the corpus is embedded in `beamtalk-examples`, which is only a dependency of `beamtalk-mcp` — not the main `beamtalk` CLI or the runtime. Every user running `beamtalk-mcp` is, by definition, using MCP agents, so the "users who don't use agents pay zero cost" scenario doesn't apply. Beyond that, distribution complexity is a real cost: `cargo-dist` ships a single binary today. A sidecar file means packaging changes, install instructions, and a runtime "file not found" failure mode. The ~1MB cost is negligible for a dev tool binary that's already ~20MB.
 
 ### Alternative: Live REPL search (no static corpus)
 
@@ -296,6 +297,7 @@ A `just search-eval` task can parse structured logs and produce a summary report
 |---|---|
 | **Smalltalk purist** | "The system should be self-describing. If an agent wants examples, it should ask the running system — `ExamplesFinder search: 'blocks'`. This is live, always current, and the corpus is exactly what's loaded. You're building a dead snapshot of content that drifts from the real system. The freshness problem you're solving with CI checks simply doesn't exist with a live approach." |
 | **Pragmatist** | "The MCP server already has a running REPL connection. Once Beamtalk has modules, you emit an `ExamplesFinder` module as part of the dev-mode stdlib — opt-in for development, stripped from production builds. No Rust crate, no JSON file, no build step. The module hot-reloads with the stdlib, so the corpus is always current. The bloat argument doesn't apply — production binaries never see it." |
+| **BEAM developer** | "On the BEAM, introspection is a first-class capability — `module_info`, `beam_lib`, even decompilation. Building a static JSON index of what the runtime already knows is working against the platform. An Erlang dev would build a `gen_server` that walks loaded modules and exposes a search function over the running system. You're solving a BEAM problem with a non-BEAM tool." |
 
 **Counter:** The dev-only module approach is viable and addresses the bloat concern. The remaining arguments against it are operational:
 
@@ -311,14 +313,14 @@ Of these, (3) is the strongest near-term argument but weakest long-term. Once mo
 |---|---|
 | **AI tooling advocate** | "Agents don't always use the right keywords. 'How do I loop over elements' should find `do:` and `collect:`, but keyword search requires the agent to already know those names. Semantic search closes that vocabulary gap. The corpus is small enough that a lightweight model (e.g., ONNX MiniLM) adds ~30MB, not 200MB. You're building a search tool for AI agents — the one user who would most benefit from semantic understanding — and giving them grep." |
 
-**Counter:** The vocabulary gap is real but addressable without a model. Synonym tags (e.g., "loop" → `do:`, "lambda" → blocks, "for each" → `do:`) close the most common mismatches at negligible cost. The corpus is ~300 entries — small enough that well-chosen tags cover the search space. Adding an ONNX model introduces a new dependency category (native ML runtime), complicates cross-compilation, and increases binary size by 30MB+ for a marginal improvement over tags. Crucially, structured telemetry on every search call (`query_hash`, `result_count`, `top_score`) makes this a data-driven decision: if zero-result queries exceed ~15% or cluster around vocabulary mismatches that tags can't cover, that's concrete evidence to invest in semantic search. (Raw `query` is DEBUG-only opt-in.) The tool interface (`search_examples(query, limit)`) is deliberately stable — the backend can be swapped without changing the agent integration.
+**Counter:** The vocabulary gap is real but addressable without a model. Synonym tags (e.g., "loop" → `do:`, "lambda" → blocks, "for each" → `do:`) close the most common mismatches at negligible cost. The corpus is ~300 entries — small enough that well-chosen tags cover the search space. Adding an ONNX model introduces a new dependency category (native ML runtime) and complicates cross-compilation. Pure-Rust alternatives exist — Tantivy for BM25/stemming (~2MB), candle for embeddings (~22MB) — both cross-platform with zero native deps. Crucially, structured telemetry on every search call (`query_hash`, `result_count`, `top_score`) makes this a data-driven decision: if zero-result queries exceed ~15% or cluster around vocabulary mismatches that tags can't cover, that's concrete evidence to upgrade the search backend. (Raw `query` is DEBUG-only opt-in.) The tool interface (`search_examples(query, limit)`) is deliberately stable — the backend can be upgraded from keyword→Tantivy→candle without changing agent integration. See Phase 5 for the tiered upgrade path.
 
 ### Alternative: Context7-style two-tool pattern
 
 | Cohort | Strongest argument |
 |---|---|
 | **MCP protocol purist** | "A `list_categories` or `browse_examples(category)` tool lets agents discover the corpus structure before searching. Without it, the agent is shooting blind — it doesn't know whether to search 'actors', 'processes', 'concurrency', or 'message passing' for the same concept. Context7's resolve step isn't just disambiguation — it's discoverability." |
-| **Agent developer** | "Two tools let agents build a mental model of the corpus. First call lists topics, second call dives into one. With a single search tool, the agent has no way to know what topics exist. It can't ask 'what categories of examples do you have?' — it can only guess keywords." |
+| **Agent developer** | "Single-tool search has a cold start problem. The agent's first query is a guess. If it guesses wrong, it doesn't know why — was the query bad, or does the corpus not cover that topic? A `list_categories` tool gives the agent a table of contents on the first call. Every subsequent search is informed. This isn't about two tools — it's about giving agents a map before asking them to navigate." |
 
 **Counter:** The discoverability argument is real but doesn't justify a second tool. A single `search_examples` call with a broad query (e.g., "concurrency") already returns results with `category` fields that reveal the corpus structure. We could also add a `categories` field to the tool's schema description listing available categories. The two-tool pattern doubles the integration surface (agents must learn two tools, handle the round-trip, deal with empty resolve results) for a discoverability benefit achievable within one tool.
 
@@ -327,8 +329,9 @@ Of these, (3) is the strongest near-term argument but weakest long-term. Once mo
 | Cohort | Strongest argument |
 |---|---|
 | **IDE developer** | "The LSP already runs in every editor session. If the corpus lives there, VSCode completions and hover docs can show examples inline — not just MCP agents. One corpus, two consumers." |
+| **Newcomer** | "Docstrings show examples for the method you're already looking at. But the real problem is earlier: I don't know which class or method to use. When I type `Array` and see 20 completions, I need to know which collection method fits my use case. Hover docs on `do:` vs `collect:` vs `inject:into:` don't help if I don't know which one to hover on. Inline corpus search in the LSP — triggered by a command or completion prefix — bridges that gap." |
 
-**Counter:** The LSP has repo access (it runs in the workspace). It can already grep test files. The corpus solves a problem specific to MCP agents that lack repo access. Bundling into the LSP adds binary bloat for a capability the LSP doesn't need. That said, the `beamtalk-examples` crate architecture makes LSP integration trivial if desired later — just add the dependency.
+**Counter:** The LSP runs in the user's workspace, not the Beamtalk repo — it has no access to stdlib test files or example source code to grep. However, the LSP already serves key examples via docstrings in hover documentation, which covers the primary "show me how to use this" use case for IDE users. The corpus is designed for MCP agents that lack any repo access; LSP users already have a richer interaction model (completions, hover, go-to-definition) that docstring examples integrate into naturally. Bundling the full corpus into the LSP adds binary bloat for marginal benefit over existing docstrings. That said, the `beamtalk-examples` crate architecture makes LSP integration trivial if desired later — just add the dependency.
 
 ### Tension Points
 
@@ -432,7 +435,34 @@ Keep `CorpusEntry`, `Corpus`, and search logic as modules inside `beamtalk-mcp` 
 
 1. Add `just search-eval` task that parses structured logs and produces a summary: zero-result queries, low-score queries, score distribution, query frequency
 2. Use eval results to drive synonym tag additions and corpus expansion
-3. Establish a baseline for search quality — if zero-result rate exceeds a threshold (e.g., >15% of queries), escalate to semantic search evaluation
+3. Establish a baseline for search quality — if zero-result rate exceeds a threshold (e.g., >15% of queries), escalate to search backend upgrade (Phase 5)
+
+### Phase 5: Search Backend Upgrade (Future — post-0.1.0)
+
+**Affected components:** `beamtalk-examples` internals only — no API changes
+
+The `search_examples` tool interface is deliberately stable: `(query, limit) → results`. The search backend can be upgraded without changing the MCP tool contract, agent prompts, or corpus format. Three tiers, in order of increasing capability:
+
+**Tier 1: Tantivy + manual synonym tags (~2MB binary cost)**
+
+Replace the weighted keyword scorer with [Tantivy](https://github.com/quickwit-oss/tantivy), a pure-Rust full-text search engine. Adds BM25 scoring, stemming ("iterating" → "iterate"), and fuzzy matching. Pure Rust, no native dependencies, no cross-platform issues. Combined with the synonym tags from Phase 3, this closes the morphology gap without any ML. Lowest effort, highest confidence.
+
+**Tier 2: Tantivy + LLM-generated tag expansion (~2MB binary cost)**
+
+At build time (`just build-corpus`), use an LLM API to generate rich synonym/concept tags for each corpus entry — not just hand-curated synonyms but exhaustive expansions (e.g., "loop, iterate, for each, traverse, walk, map over, apply to each element" for `do:`). Store expanded tags in `corpus.json`. At runtime, Tantivy searches over these tags with stemming and fuzzy matching. This pushes the "smart" part to build time (where API calls are acceptable) and keeps runtime pure Rust with zero model overhead.
+
+**Tier 3: candle + MiniLM embeddings (~22MB binary cost)**
+
+Pre-compute embeddings for all corpus entries at build time and store vectors in `corpus.json`. At query time, embed the query using [candle](https://github.com/huggingface/candle) (Hugging Face's pure-Rust ML framework, no C++ deps, no ONNX runtime) with a MiniLM-L6 model (~22MB). Cosine similarity against stored vectors. Fully closes the vocabulary gap — "for loop" finds `do:` without any tag engineering. Cross-platform (compiles anywhere Rust compiles). Query embedding takes ~10-50ms on CPU.
+
+| Tier | Binary cost | Cross-platform | Vocab gap | Complexity |
+|------|------------|----------------|-----------|------------|
+| Current (keyword + manual tags) | 0 | Perfect | Partial | Low |
+| Tier 1 (Tantivy + manual tags) | ~2MB | Perfect | Better (stemming) | Low |
+| Tier 2 (Tantivy + LLM tags) | ~2MB | Perfect | Good | Low-medium |
+| Tier 3 (candle + MiniLM) | ~22MB | Perfect | Full | Medium |
+
+The decision of which tier to pursue should be data-driven, informed by Phase 4 eval results. If zero-result queries cluster around morphological mismatches ("iterating" vs "iterate"), Tier 1 suffices. If they cluster around vocabulary gaps ("for loop" → `do:`), Tier 2 is the sweet spot. If novel phrasings dominate, Tier 3 is warranted.
 
 ## References
 - Related issues: BT-1347
