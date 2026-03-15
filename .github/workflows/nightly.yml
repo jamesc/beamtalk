@@ -81,7 +81,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: nightly-${{ runner.os }}-arm64-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: nightly-${{ runner.os }}-arm64-cargo-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             nightly-${{ runner.os }}-arm64-cargo-
 
@@ -150,7 +150,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: nightly-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: nightly-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
             nightly-${{ runner.os }}-cargo-
 
