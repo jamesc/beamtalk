@@ -55,6 +55,9 @@ jobs:
   package-vscode:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      vsix_name: ${{ steps.version.outputs.vsix_name }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v6
 
@@ -63,20 +66,27 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Get extension version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./editors/vscode/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "vsix_name=beamtalk-vscode-$VERSION.vsix" >> "$GITHUB_OUTPUT"
+
       - name: Build extension
         run: |
           cd editors/vscode
           npm install --quiet
           npm run bundle
           ln -sf ../../LICENSE LICENSE
-          npx --yes @vscode/vsce package --out ../../beamtalk.vsix
+          npx --yes @vscode/vsce package --out "../../beamtalk-vscode-${{ steps.version.outputs.version }}.vsix"
           rm -f LICENSE
 
-      - name: Upload VSIX
+      - name: Upload VSIX artifact
         uses: actions/upload-artifact@v7
         with:
-          name: vsix
-          path: beamtalk.vsix
+          name: beamtalk-vscode-${{ steps.version.outputs.version }}
+          path: beamtalk-vscode-${{ steps.version.outputs.version }}.vsix
           retention-days: 7
 
   # ─── Publish VS Code extension to marketplace ─────────────────────────
@@ -84,6 +94,8 @@ jobs:
     needs: package-vscode
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.publish) ||
       (github.event_name == 'workflow_call' && inputs.publish)
@@ -91,7 +103,18 @@ jobs:
       - name: Download VSIX
         uses: actions/download-artifact@v8
         with:
-          name: vsix
+          name: beamtalk-vscode-${{ needs.package-vscode.outputs.version }}
+
+      - name: Upload VSIX to GitHub Release
+        if: github.event_name == 'workflow_call'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release upload "$TAG" \
+            "${{ needs.package-vscode.outputs.vsix_name }}" \
+            --repo "${{ github.repository }}" \
+            --clobber
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -102,4 +125,4 @@ jobs:
         if: env.VSCE_PAT != ''
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx --yes @vscode/vsce publish --packagePath beamtalk.vsix
+        run: npx --yes @vscode/vsce publish --packagePath "${{ needs.package-vscode.outputs.vsix_name }}"
