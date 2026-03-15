@@ -26,7 +26,6 @@ pub fn run() -> Result<()> {
     let checks = [
         check_erl(),
         check_erlc(),
-        check_rebar3(),
         check_runtime(runtime_info.as_ref()),
         check_stdlib(runtime_info.as_ref()),
         check_runtime_apps(runtime_info.as_ref()),
@@ -104,14 +103,6 @@ fn check_erlc() -> CheckResult {
     match which("erlc") {
         Some(p) => CheckResult::Pass(format!("erlc found ({p})")),
         None => CheckResult::Fail("erlc not found on PATH".into()),
-    }
-}
-
-/// Check that `rebar3` is on PATH (optional).
-fn check_rebar3() -> CheckResult {
-    match which("rebar3") {
-        Some(p) => CheckResult::Pass(format!("rebar3 found ({p})")),
-        None => CheckResult::Warn("rebar3 not found (only needed for building from source)".into()),
     }
 }
 
