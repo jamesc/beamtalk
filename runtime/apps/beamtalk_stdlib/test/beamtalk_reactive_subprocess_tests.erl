@@ -149,6 +149,29 @@ wait_for_exit(CollectorPid, Tries) ->
             wait_for_exit(CollectorPid, Tries - 1)
     end.
 
+%% @private Poll until a subprocessLine event with the expected text arrives.
+wait_for_line(CollectorPid, Expected) ->
+    wait_for_line(CollectorPid, Expected, 50).
+
+wait_for_line(CollectorPid, Expected, 0) ->
+    error({timeout_waiting_for_line, Expected, get_events(CollectorPid)});
+wait_for_line(CollectorPid, Expected, Tries) ->
+    Events = get_events(CollectorPid),
+    HasLine = lists:any(
+        fun
+            ({'subprocessLine:from:', [Line | _]}) -> Line =:= Expected;
+            (_) -> false
+        end,
+        Events
+    ),
+    case HasLine of
+        true ->
+            Events;
+        false ->
+            timer:sleep(100),
+            wait_for_line(CollectorPid, Expected, Tries - 1)
+    end.
+
 %%% ============================================================================
 %%% stdout lines pushed to notify actor
 %%% ============================================================================
@@ -255,9 +278,8 @@ writeLine_writes_and_returns_nil_test() ->
     }),
     Result = gen_server:call(Pid, {'writeLine:', [<<"ping">>]}),
     ?assertEqual(nil, Result),
-    %% cat echoes back; wait for the line to arrive
-    timer:sleep(200),
-    Events = get_events(Collector),
+    %% cat echoes back; poll until the line arrives
+    Events = wait_for_line(Collector, <<"ping">>),
     Collector ! stop,
     gen_server:call(Pid, {close, []}),
     gen_server:stop(Pid),

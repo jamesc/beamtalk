@@ -5,7 +5,7 @@
 // EOF, timeout, stderr, exitCode, close, stop, lines Stream, stderrLines Stream.
 //
 // Cross-platform: uses platform-appropriate commands on Unix and Windows.
-// Interactive stdin-echo tests use ConPTY on Windows for line-buffered output.
+// Interactive stdin-echo tests use beamtalk-exec --cat on Windows for line-buffered output.
 
 TestCase subclass: SubprocessTest
   state: isUnix = false

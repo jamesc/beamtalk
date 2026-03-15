@@ -5,7 +5,7 @@
 // delivery, exit notification, writeLine:, close, exitCode.
 //
 // Cross-platform: uses platform-appropriate commands on Unix and Windows.
-// Interactive stdin-echo tests use ConPTY on Windows for line-buffered output.
+// Interactive stdin-echo tests use beamtalk-exec --cat on Windows for line-buffered output.
 //
 // StubDelegate actor is defined in fixtures/stub_delegate_fixture.bt.
 
