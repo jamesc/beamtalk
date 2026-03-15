@@ -337,13 +337,94 @@ fn merge_method(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Request field extraction helpers
+// ---------------------------------------------------------------------------
+
+/// Extract an optional `String→String` map from a request field.
+///
+/// Returns an empty map when the key is absent, and an error response Term
+/// when the key is present but malformed.
+fn extract_optional_string_map(
+    request: &Map,
+    key: &str,
+) -> Result<std::collections::HashMap<String, String>, Term> {
+    match map_get(request, key) {
+        None => Ok(std::collections::HashMap::new()),
+        Some(term) => term_to_string_map(term).map_err(|e| error_response(&[e])),
+    }
+}
+
+/// Extract an optional `class_hierarchy` field, returning `Vec<ClassInfo>`.
+fn extract_class_hierarchy(
+    request: &Map,
+) -> Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> {
+    match map_get(request, "class_hierarchy") {
+        None => vec![],
+        Some(term) => parse_class_hierarchy_from_term(term),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic filtering helpers
+// ---------------------------------------------------------------------------
+
+/// Collect error-severity diagnostics as references for `diagnostic_error_response`.
+fn filter_error_diagnostics(
+    diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
+) -> Vec<&beamtalk_core::source_analysis::Diagnostic> {
+    diagnostics
+        .iter()
+        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
+        .collect()
+}
+
+/// Collect warning/hint/lint messages as `Vec<String>` for response construction.
+fn collect_warning_messages(
+    diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
+) -> Vec<String> {
+    diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.severity,
+                beamtalk_core::source_analysis::Severity::Warning
+                    | beamtalk_core::source_analysis::Severity::Hint
+                    | beamtalk_core::source_analysis::Severity::Lint
+            )
+        })
+        .map(|d| d.message.to_string())
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Response term construction helpers
+// ---------------------------------------------------------------------------
+
+/// Build ETF warning terms from string messages.
+fn build_warning_terms(warnings: &[String]) -> Vec<Term> {
+    warnings.iter().map(|w| binary(w)).collect()
+}
+
+/// Build ETF class terms from `(name, superclass)` pairs.
+fn build_class_terms(classes: &[(String, String)]) -> Vec<Term> {
+    classes
+        .iter()
+        .map(|(name, superclass)| {
+            Term::from(Map::from([
+                (atom("name"), binary(name)),
+                (atom("superclass"), binary(superclass)),
+            ]))
+        })
+        .collect()
+}
+
 /// Build a response map for a successful `compile_expression`.
 fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
-    let warning_terms: Vec<Term> = warnings.iter().map(|w| binary(w)).collect();
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("core_erlang"), binary(core_erlang)),
-        (atom("warnings"), Term::from(List::from(warning_terms))),
+        (atom("warnings"), Term::from(List::from(build_warning_terms(warnings)))),
     ]))
 }
 
@@ -356,23 +437,13 @@ fn class_definition_ok_response(
     trailing_core_erlang: Option<&str>,
     warnings: &[String],
 ) -> Term {
-    let warning_terms: Vec<Term> = warnings.iter().map(|w| binary(w)).collect();
-    let class_terms: Vec<Term> = classes
-        .iter()
-        .map(|(name, superclass)| {
-            Term::from(Map::from([
-                (atom("name"), binary(name)),
-                (atom("superclass"), binary(superclass)),
-            ]))
-        })
-        .collect();
     let mut map: std::collections::HashMap<Term, Term> = std::collections::HashMap::from([
         (atom("status"), atom("ok")),
         (atom("kind"), atom("class_definition")),
         (atom("core_erlang"), binary(core_erlang)),
         (atom("module_name"), binary(module_name)),
-        (atom("classes"), Term::from(List::from(class_terms))),
-        (atom("warnings"), Term::from(List::from(warning_terms))),
+        (atom("classes"), Term::from(List::from(build_class_terms(classes)))),
+        (atom("warnings"), Term::from(List::from(build_warning_terms(warnings)))),
     ]);
     if let Some(trailing) = trailing_core_erlang {
         map.insert(atom("trailing_core_erlang"), binary(trailing));
@@ -388,7 +459,6 @@ fn method_definition_ok_response(
     method_source: &str,
     warnings: &[String],
 ) -> Term {
-    let warning_terms: Vec<Term> = warnings.iter().map(|w| binary(w)).collect();
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("kind"), atom("method_definition")),
@@ -403,7 +473,7 @@ fn method_definition_ok_response(
             },
         ),
         (atom("method_source"), binary(method_source)),
-        (atom("warnings"), Term::from(List::from(warning_terms))),
+        (atom("warnings"), Term::from(List::from(build_warning_terms(warnings)))),
     ]))
 }
 
@@ -414,22 +484,12 @@ fn compile_ok_response(
     classes: &[(String, String)],
     warnings: &[String],
 ) -> Term {
-    let warning_terms: Vec<Term> = warnings.iter().map(|w| binary(w)).collect();
-    let class_terms: Vec<Term> = classes
-        .iter()
-        .map(|(name, superclass)| {
-            Term::from(Map::from([
-                (atom("name"), binary(name)),
-                (atom("superclass"), binary(superclass)),
-            ]))
-        })
-        .collect();
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("core_erlang"), binary(core_erlang)),
         (atom("module_name"), binary(module_name)),
-        (atom("classes"), Term::from(List::from(class_terms))),
-        (atom("warnings"), Term::from(List::from(warning_terms))),
+        (atom("classes"), Term::from(List::from(build_class_terms(classes)))),
+        (atom("warnings"), Term::from(List::from(build_warning_terms(warnings)))),
     ]))
 }
 
@@ -566,10 +626,6 @@ fn partition_diagnostics(
 }
 
 /// Handle a single `compile_expression` request.
-#[expect(
-    clippy::too_many_lines,
-    reason = "expression compilation handles class defs, method defs, and plain expressions with indexes"
-)]
 fn handle_compile_expression(request: &Map) -> Term {
     // Extract required fields
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
@@ -584,33 +640,15 @@ fn handle_compile_expression(request: &Map) -> Term {
         .and_then(term_to_string_list)
         .unwrap_or_default();
 
-    // BT-907: Extract optional class superclass index for cross-file value-object inheritance.
-    // When an inline class definition inherits from a class loaded via a file, the compiler
-    // needs the index to determine whether the parent is a value object or an actor.
-    let class_superclass_index = match map_get(request, "class_superclass_index") {
-        None => std::collections::HashMap::new(),
-        Some(term) => match term_to_string_map(term) {
-            Ok(map) => map,
-            Err(e) => return error_response(&[e]),
-        },
+    let class_superclass_index = match extract_optional_string_map(request, "class_superclass_index") {
+        Ok(map) => map,
+        Err(resp) => return resp,
     };
-
-    // Extract optional class module index for resolving package-qualified class references.
-    // Without this, `Counter spawn` in a workspace with package "getting_started" generates
-    // `call 'bt@counter':'spawn'()` instead of `call 'bt@getting_started@counter':'spawn'()`.
-    let class_module_index = match map_get(request, "class_module_index") {
-        None => std::collections::HashMap::new(),
-        Some(term) => match term_to_string_map(term) {
-            Ok(map) => map,
-            Err(e) => return error_response(&[e]),
-        },
+    let class_module_index = match extract_optional_string_map(request, "class_module_index") {
+        Ok(map) => map,
+        Err(resp) => return resp,
     };
-
-    // ADR 0050 Phase 4: Extract optional class_hierarchy for REPL session user classes.
-    let pre_class_hierarchy = match map_get(request, "class_hierarchy") {
-        None => vec![],
-        Some(term) => parse_class_hierarchy_from_term(term),
-    };
+    let pre_class_hierarchy = extract_class_hierarchy(request);
 
     // Parse the expression
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
@@ -635,24 +673,8 @@ fn handle_compile_expression(request: &Map) -> Term {
     all_diagnostics.extend(primitive_diags);
 
     // Separate errors and warnings
-    let error_diags: Vec<&beamtalk_core::source_analysis::Diagnostic> = all_diagnostics
-        .iter()
-        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
-        .collect();
-
-    let warnings: Vec<String> = all_diagnostics
-        .iter()
-        .filter(|d| {
-            matches!(
-                d.severity,
-                beamtalk_core::source_analysis::Severity::Warning
-                    | beamtalk_core::source_analysis::Severity::Hint
-                    // BT-979: Include lint warnings so REPL users see effect-free statement hints.
-                    | beamtalk_core::source_analysis::Severity::Lint
-            )
-        })
-        .map(|d| d.message.to_string())
-        .collect();
+    let error_diags = filter_error_diagnostics(&all_diagnostics);
+    let warnings = collect_warning_messages(&all_diagnostics);
 
     if !error_diags.is_empty() {
         return diagnostic_error_response(&error_diags, &source);
@@ -730,17 +752,11 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
     let known_vars = map_get(request, "known_vars")
         .and_then(term_to_string_list)
         .unwrap_or_default();
-    let class_module_index = match map_get(request, "class_module_index") {
-        None => std::collections::HashMap::new(),
-        Some(term) => match term_to_string_map(term) {
-            Ok(map) => map,
-            Err(e) => return error_response(&[e]),
-        },
+    let class_module_index = match extract_optional_string_map(request, "class_module_index") {
+        Ok(map) => map,
+        Err(resp) => return resp,
     };
-    let pre_class_hierarchy = match map_get(request, "class_hierarchy") {
-        None => vec![],
-        Some(term) => parse_class_hierarchy_from_term(term),
-    };
+    let pre_class_hierarchy = extract_class_hierarchy(request);
 
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
@@ -762,22 +778,8 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
         );
     all_diagnostics.extend(primitive_diags);
 
-    let error_diags: Vec<&beamtalk_core::source_analysis::Diagnostic> = all_diagnostics
-        .iter()
-        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
-        .collect();
-    let warnings: Vec<String> = all_diagnostics
-        .iter()
-        .filter(|d| {
-            matches!(
-                d.severity,
-                beamtalk_core::source_analysis::Severity::Warning
-                    | beamtalk_core::source_analysis::Severity::Hint
-                    | beamtalk_core::source_analysis::Severity::Lint
-            )
-        })
-        .map(|d| d.message.to_string())
-        .collect();
+    let error_diags = filter_error_diagnostics(&all_diagnostics);
+    let warnings = collect_warning_messages(&all_diagnostics);
 
     if !error_diags.is_empty() {
         return diagnostic_error_response(&error_diags, &source);
@@ -920,11 +922,7 @@ fn handle_compile(request: &Map) -> Term {
         .and_then(term_to_bool)
         .unwrap_or(true);
 
-    // ADR 0050 Phase 4: Extract optional class_hierarchy for REPL session user classes.
-    let pre_class_hierarchy = match map_get(request, "class_hierarchy") {
-        None => vec![],
-        Some(term) => parse_class_hierarchy_from_term(term),
-    };
+    let pre_class_hierarchy = extract_class_hierarchy(request);
 
     // Parse the source
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
@@ -963,10 +961,7 @@ fn handle_compile(request: &Map) -> Term {
         all_diagnostics.extend(stdlib_shadow_diags);
     }
 
-    let error_diags: Vec<&beamtalk_core::source_analysis::Diagnostic> = all_diagnostics
-        .iter()
-        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
-        .collect();
+    let error_diags = filter_error_diagnostics(&all_diagnostics);
     let (_, mut warnings) = partition_diagnostics(&all_diagnostics);
 
     if !error_diags.is_empty() {
@@ -1034,24 +1029,13 @@ fn handle_compile(request: &Map) -> Term {
         .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
         .collect();
 
-    // Extract optional class module index for resolving subdirectory class references.
-    let class_module_index = match map_get(request, "class_module_index") {
-        None => std::collections::HashMap::new(),
-        Some(term) => match term_to_string_map(term) {
-            Ok(map) => map,
-            Err(e) => return error_response(&[e]),
-        },
+    let class_module_index = match extract_optional_string_map(request, "class_module_index") {
+        Ok(map) => map,
+        Err(resp) => return resp,
     };
-
-    // BT-905: Extract optional class superclass index for resolving cross-file
-    // value-object inheritance. Without this, a child class whose parent is defined
-    // in another file defaults to Actor codegen.
-    let class_superclass_index = match map_get(request, "class_superclass_index") {
-        None => std::collections::HashMap::new(),
-        Some(term) => match term_to_string_map(term) {
-            Ok(map) => map,
-            Err(e) => return error_response(&[e]),
-        },
+    let class_superclass_index = match extract_optional_string_map(request, "class_superclass_index") {
+        Ok(map) => map,
+        Err(resp) => return resp,
     };
 
     // BT-845/BT-860: Extract optional source file path to embed as beamtalk_source attribute.
@@ -1136,10 +1120,7 @@ fn handle_resolve_completion_type(request: &Map) -> Term {
         return error_response(&["Missing or invalid 'expression' field".to_string()]);
     };
 
-    let pre_class_hierarchy = match map_get(request, "class_hierarchy") {
-        None => vec![],
-        Some(term) => parse_class_hierarchy_from_term(term),
-    };
+    let pre_class_hierarchy = extract_class_hierarchy(request);
 
     let mut hierarchy = beamtalk_core::semantic_analysis::ClassHierarchy::with_builtins();
     if !pre_class_hierarchy.is_empty() {
