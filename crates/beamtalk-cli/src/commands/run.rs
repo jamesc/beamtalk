@@ -180,12 +180,8 @@ fn run_script(
     let pid = std::process::id();
     let workspace_id = format!("run_{pid}");
 
-    let eval_cmd = build_script_eval_cmd(
-        &workspace_id,
-        &project_path_escaped,
-        class_name,
-        selector,
-    );
+    let eval_cmd =
+        build_script_eval_cmd(&workspace_id, &project_path_escaped, class_name, selector);
 
     let mut args = repl_startup::beam_pa_args(&paths);
 
@@ -691,10 +687,7 @@ mod tests {
             cmd.contains("halt(1)"),
             "Eval should halt(1) on class-not-found: {cmd}"
         );
-        assert!(
-            cmd.ends_with("end."),
-            "Eval should end with 'end.': {cmd}"
-        );
+        assert!(cmd.ends_with("end."), "Eval should end with 'end.': {cmd}");
     }
 
     #[test]
