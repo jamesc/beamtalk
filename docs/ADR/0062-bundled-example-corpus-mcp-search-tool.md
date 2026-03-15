@@ -1,7 +1,7 @@
 # ADR 0062: Bundled Example Corpus and Search Tool for MCP Server
 
 ## Status
-Proposed (2026-03-14)
+Accepted (2026-03-15)
 
 ## Context
 
