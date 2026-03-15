@@ -22,7 +22,7 @@ VERSION="${1:?Usage: package-release.sh <version> <platform>}"
 PLATFORM="${2:?Usage: package-release.sh <version> <platform>}"
 
 BINARIES=(beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp)
-OTP_APPS=(beamtalk_runtime beamtalk_workspace beamtalk_compiler jsx cowboy cowlib ranch)
+OTP_APPS=(beamtalk_runtime beamtalk_workspace beamtalk_compiler beamtalk_stdlib jsx cowboy cowlib ranch gun yamerl)
 
 if [ "${PLATFORM}" = "windows-x86_64" ]; then
     ARCHIVE="beamtalk-${VERSION}-${PLATFORM}.zip"
@@ -47,16 +47,6 @@ if [ "${PLATFORM}" = "windows-x86_64" ]; then
         cp "${SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/${app}/ebin/"
         cp "${SRC}"/*.app "${STAGING}/lib/beamtalk/lib/${app}/ebin/" 2>/dev/null || true
     done
-
-    # Stdlib
-    STDLIB_SRC="runtime/apps/beamtalk_stdlib/ebin"
-    if [ ! -d "${STDLIB_SRC}" ] || ! ls "${STDLIB_SRC}"/*.beam 1>/dev/null 2>&1; then
-        echo "❌ No stdlib .beam files found in ${STDLIB_SRC}. Stdlib build may have failed."
-        exit 1
-    fi
-    mkdir -p "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin"
-    cp "${STDLIB_SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
-    cp "${STDLIB_SRC}"/*.app "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin/" 2>/dev/null || true
 
     # Create zip
     (cd "beamtalk-staging" && 7z a "../${ARCHIVE}" "${TOPLEVEL}")

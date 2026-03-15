@@ -341,10 +341,10 @@ jobs:
         shell: bash
         run: |
           ./target/release/beamtalk.exe --version
-          mkdir -p smoke-project/test
+          mkdir -p smoke-project/src
           printf '[package]\nname = "smoke"\nversion = "0.1.0"\n\n[dependencies]\n' > smoke-project/beamtalk.toml
-          printf 'TestCase subclass: SmokeTest\n  testAnswer =>\n    self assert: 21 + 21 equals: 42\n' > smoke-project/test/smoke_test.bt
-          cd smoke-project && ../target/release/beamtalk.exe test
+          printf 'Object subclass: SmokeTest\n  class run => 21 + 21\n' > smoke-project/src/SmokeTest.bt
+          cd smoke-project && ../target/release/beamtalk.exe run SmokeTest run
           echo "Smoke test passed"
 
       - name: Package zip

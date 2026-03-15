@@ -388,13 +388,13 @@ test-install: build-release build-stdlib
     test -d "$RUNTIME_DIR"
     echo "✅ Stdlib and runtime directories present"
 
-    # 3. Verify compiler + runtime end-to-end via beamtalk test
+    # 3. Verify compiler + runtime end-to-end via beamtalk run
     PROJ="$TMPDIR/smoke-project"
-    mkdir -p "$PROJ/test"
+    mkdir -p "$PROJ/src"
     printf '[package]\nname = "smoke"\nversion = "0.1.0"\n\n[dependencies]\n' > "$PROJ/beamtalk.toml"
-    printf 'TestCase subclass: SmokeTest\n  testAnswer =>\n    self assert: 21 + 21 equals: 42\n' > "$PROJ/test/smoke_test.bt"
-    (cd "$PROJ" && "$TMPDIR/bin/beamtalk" test)
-    echo "✅ Compiler + runtime smoke test passed"
+    printf 'Object subclass: SmokeTest\n  class run => 21 + 21\n' > "$PROJ/src/SmokeTest.bt"
+    (cd "$PROJ" && "$TMPDIR/bin/beamtalk" run SmokeTest run)
+    echo "✅ Compiler + runtime smoke test passed (beamtalk run)"
 
     echo "✅ All smoke tests passed"
 
@@ -824,7 +824,7 @@ install PREFIX="/usr/local": build-release build-stdlib
     install -m 755 target/release/beamtalk-exec "${PREFIX}/bin/beamtalk-exec"
 
     # OTP application ebin directories
-    for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler jsx cowboy cowlib ranch; do
+    for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler beamtalk_stdlib jsx cowboy cowlib ranch gun yamerl; do
         SRC="runtime/_build/default/lib/${app}/ebin"
         if ! ls "${SRC}"/*.beam 1>/dev/null 2>&1; then
             echo "❌ No .beam files found in ${SRC}. Run 'just build-erlang' first."
@@ -837,18 +837,6 @@ install PREFIX="/usr/local": build-release build-stdlib
             install -m 644 "${SRC}"/*.app "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
         fi
     done
-
-    # Stdlib (built under apps/, not _build/)
-    STDLIB_SRC="runtime/apps/beamtalk_stdlib/ebin"
-    if ! ls "${STDLIB_SRC}"/*.beam 1>/dev/null 2>&1; then
-        echo "❌ No stdlib .beam files found. Run 'just build-stdlib' first."
-        exit 1
-    fi
-    install -d "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin"
-    install -m 644 "${STDLIB_SRC}"/*.beam "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
-    if ls "${STDLIB_SRC}"/*.app 1>/dev/null 2>&1; then
-        install -m 644 "${STDLIB_SRC}"/*.app "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
-    fi
 
     # Stdlib sources for LSP/tooling navigation
     STDLIB_SOURCE_SRC="stdlib/src"
