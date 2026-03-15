@@ -171,7 +171,7 @@ exitCode_integer_after_exit_test() ->
         {unix, _} ->
             %% /bin/true exits immediately with code 0, no stdout
             {ok, Pid} = beamtalk_subprocess:start(#{
-                executable => <<"/bin/true">>,
+                executable => <<"/usr/bin/true">>,
                 args => []
             }),
             %% readLine blocks until EOF (process exit), then returns nil
