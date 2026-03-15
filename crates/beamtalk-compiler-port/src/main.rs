@@ -380,6 +380,8 @@ fn filter_error_diagnostics(
 }
 
 /// Collect warning/hint/lint messages as `Vec<String>` for response construction.
+///
+/// Includes `Lint` severity so REPL users see effect-free statement hints (BT-979).
 fn collect_warning_messages(
     diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
 ) -> Vec<String> {
