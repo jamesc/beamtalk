@@ -65,15 +65,16 @@ impl ReplClient {
         resume: Option<&str>,
     ) -> Result<Self, String> {
         let url = format!("ws://127.0.0.1:{port}/ws");
-        let (mut ws, _response) = tokio::time::timeout(
-            CONNECT_TIMEOUT,
-            tokio_tungstenite::connect_async(&url),
-        )
-        .await
-        .map_err(|_| {
-            format!("Timed out connecting to REPL at {url} ({}s)", CONNECT_TIMEOUT.as_secs())
-        })?
-        .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
+        let (mut ws, _response) =
+            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&url))
+                .await
+                .map_err(|_| {
+                    format!(
+                        "Timed out connecting to REPL at {url} ({}s)",
+                        CONNECT_TIMEOUT.as_secs()
+                    )
+                })?
+                .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
 
         let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
 
@@ -98,18 +99,16 @@ impl ReplClient {
     pub async fn reconnect(&self) -> Result<bool, String> {
         let requested_session = { self.session.lock().await.clone() };
         let url = format!("ws://127.0.0.1:{}/ws", self.port);
-        let (mut ws, _response) = tokio::time::timeout(
-            CONNECT_TIMEOUT,
-            tokio_tungstenite::connect_async(&url),
-        )
-        .await
-        .map_err(|_| {
-            format!(
-                "Timed out reconnecting to REPL at {url} ({}s)",
-                CONNECT_TIMEOUT.as_secs()
-            )
-        })?
-        .map_err(|e| format!("Failed to reconnect to REPL at {url}: {e}"))?;
+        let (mut ws, _response) =
+            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&url))
+                .await
+                .map_err(|_| {
+                    format!(
+                        "Timed out reconnecting to REPL at {url} ({}s)",
+                        CONNECT_TIMEOUT.as_secs()
+                    )
+                })?
+                .map_err(|e| format!("Failed to reconnect to REPL at {url}: {e}"))?;
 
         let session_id =
             perform_auth_handshake(&mut ws, &self.cookie, requested_session.as_deref()).await?;
