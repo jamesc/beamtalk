@@ -91,7 +91,7 @@ open_shell_port(Cmd) ->
             ComSpec = os:getenv("COMSPEC", "cmd.exe"),
             open_port(
                 {spawn_executable, ComSpec},
-                [{args, ["/c", CmdStr]}, exit_status, binary]
+                [{args, ["/c", CmdStr]}, hide, exit_status, binary]
             );
         _ ->
             open_port({spawn, CmdStr}, [exit_status, binary])
