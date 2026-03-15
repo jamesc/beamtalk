@@ -341,7 +341,24 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
         let children = Arc::clone(children);
         thread::spawn(move || {
             let exit_code = match child.wait() {
-                Ok(status) => status.code().unwrap_or(-1),
+                Ok(status) => {
+                    if let Some(code) = status.code() {
+                        code
+                    } else {
+                        // On Unix, code() returns None when the process was
+                        // terminated by a signal. Use the standard convention
+                        // of 128 + signal_number.
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::process::ExitStatusExt;
+                            status.signal().map_or(-1, |sig| 128 + sig)
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            -1
+                        }
+                    }
+                }
                 Err(e) => {
                     error!("wait() failed for child {child_id}: {e}");
                     -1
