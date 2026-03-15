@@ -851,22 +851,71 @@ mod tests {
         // The workspace node remains alive as a detached BEAM process.
         // --timeout 300: short idle timeout (5 min) so the workspace dies quickly
         // after the test binary exits, rather than lingering for the default 4h.
-        let output = Command::new(&bin)
+        //
+        // We use spawn() and read stdout line-by-line instead of output() because
+        // on Windows the BEAM child process inherits the stdout pipe handle,
+        // causing output() to block forever even after the CLI process exits.
+        let mut child = Command::new(&bin)
             .args(["repl", "--port", "0", "--timeout", "300"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .output()
+            .spawn()
             .map_err(|e| format!("Failed to start REPL at {}: {e}", bin.display()))?;
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        // Read stdout line-by-line until we find the port and workspace ID.
+        //
+        // On Windows the BEAM node keeps inherited pipe handles open, so
+        // output()/wait_with_output() block forever. Instead, read lines in
+        // a background thread with a channel and stop once we have what we need.
+        let stdout_pipe = child.stdout.take().ok_or("no stdout pipe")?;
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(stdout_pipe);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => {
+                        if tx.send(l).is_err() {
+                            break; // receiver dropped
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
 
+        // Collect lines until we find both port and workspace ID, or timeout.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut stdout_lines = Vec::new();
+        let mut found_port = false;
+        let mut found_ws_id = false;
+        while std::time::Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(remaining) {
+                Ok(line) => {
+                    if line.contains("port") {
+                        found_port = true;
+                    }
+                    if line.contains("Workspace:") {
+                        found_ws_id = true;
+                    }
+                    stdout_lines.push(line);
+                    if found_port && found_ws_id {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        // Don't wait for the CLI process — the workspace BEAM node is
+        // independent. On Windows, dropping without wait() is fine.
+        drop(child);
+
+        let stdout = stdout_lines.join("\n");
         let port = workspace::parse_repl_port(&stdout).ok_or_else(|| {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            format!(
-                "REPL did not report port.\nstdout: {stdout}\nstderr: {stderr}\nexit: {:?}",
-                output.status
-            )
+            format!("REPL did not report port.\nstdout: {stdout}\nexit: unknown (detached)")
         })?;
 
         let workspace_id = workspace::parse_workspace_id(&stdout);
