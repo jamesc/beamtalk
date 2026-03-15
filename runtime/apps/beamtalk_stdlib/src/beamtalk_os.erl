@@ -35,7 +35,8 @@
 
 %% @doc Execute a shell command and return its trimmed stdout as a binary.
 %%
-%% Runs the command through `/bin/sh -c` via an Erlang port.
+%% Runs the command through the platform shell (`/bin/sh -c` on Unix,
+%% `cmd.exe /c` on Windows) via an Erlang port.
 %% Blocks until the command exits or the default 30-second timeout fires.
 %% Raises `#beamtalk_error{kind = timeout}` on timeout,
 %% `output_too_large` if stdout exceeds 10 MB.
@@ -71,11 +72,30 @@ run(Cmd, TimeoutMs) -> 'run:timeout:'(Cmd, TimeoutMs).
 %%% ============================================================================
 
 %% @private Open a shell port and collect all stdout until exit or timeout.
+%%
+%% On Unix, `{spawn, Cmd}` routes through `/bin/sh -c` automatically.
+%% On Windows we must explicitly route through `cmd.exe /c` so that shell
+%% builtins (e.g. `ver`) and chaining operators (`&`) work correctly.
 -spec run_cmd(binary(), pos_integer(), atom()) -> binary().
 run_cmd(Cmd, TimeoutMs, Selector) ->
-    Port = open_port({spawn, binary_to_list(Cmd)}, [exit_status, binary]),
+    Port = open_shell_port(Cmd),
     Timer = erlang:start_timer(TimeoutMs, self(), os_run_timeout),
     collect(Port, <<>>, Timer, Selector).
+
+%% @private Open a port through the platform shell.
+-spec open_shell_port(binary()) -> port().
+open_shell_port(Cmd) ->
+    CmdStr = binary_to_list(Cmd),
+    case os:type() of
+        {win32, _} ->
+            ComSpec = os:getenv("COMSPEC", "cmd.exe"),
+            open_port(
+                {spawn_executable, ComSpec},
+                [{args, ["/c", CmdStr]}, exit_status, binary]
+            );
+        _ ->
+            open_port({spawn, CmdStr}, [exit_status, binary])
+    end.
 
 %% @private Accumulate port output, then trim trailing whitespace on exit.
 -spec collect(port(), binary(), reference(), atom()) -> binary().
