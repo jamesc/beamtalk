@@ -17,14 +17,7 @@ use beamtalk_core::ast::Module;
 // Data structures
 // ──────────────────────────────────────────────────────────────────────────
 
-/// What a doc test assertion expects: a value or an error.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Expected {
-    /// Match formatted result string (`_` for wildcard).
-    Value(String),
-    /// Match `#beamtalk_error{kind = Kind}` on error.
-    Error { kind: String },
-}
+pub(crate) use crate::commands::util::Expected;
 
 /// A single expression + assertion pair from a doc comment.
 #[derive(Debug)]

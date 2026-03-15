@@ -22,6 +22,14 @@ use tracing::instrument;
 /// Default timeout for REPL I/O operations.
 const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Timeout for establishing a WebSocket connection.
+///
+/// On Linux, connecting to a closed port fails instantly ("connection refused").
+/// On Windows, TCP SYN to a closed port can block for ~21 s waiting for the
+/// OS-level retransmit timeout.  A 5 s cap keeps tests and MCP startup snappy
+/// on all platforms while still being generous for localhost connections.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Async WebSocket client for the beamtalk REPL protocol.
 pub struct ReplClient {
     inner: Mutex<ReplClientInner>,
@@ -57,9 +65,16 @@ impl ReplClient {
         resume: Option<&str>,
     ) -> Result<Self, String> {
         let url = format!("ws://127.0.0.1:{port}/ws");
-        let (mut ws, _response) = tokio_tungstenite::connect_async(&url)
-            .await
-            .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
+        let (mut ws, _response) =
+            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&url))
+                .await
+                .map_err(|_| {
+                    format!(
+                        "Timed out connecting to REPL at {url} ({}s)",
+                        CONNECT_TIMEOUT.as_secs()
+                    )
+                })?
+                .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
 
         let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
 
@@ -84,9 +99,16 @@ impl ReplClient {
     pub async fn reconnect(&self) -> Result<bool, String> {
         let requested_session = { self.session.lock().await.clone() };
         let url = format!("ws://127.0.0.1:{}/ws", self.port);
-        let (mut ws, _response) = tokio_tungstenite::connect_async(&url)
-            .await
-            .map_err(|e| format!("Failed to reconnect to REPL at {url}: {e}"))?;
+        let (mut ws, _response) =
+            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&url))
+                .await
+                .map_err(|_| {
+                    format!(
+                        "Timed out reconnecting to REPL at {url} ({}s)",
+                        CONNECT_TIMEOUT.as_secs()
+                    )
+                })?
+                .map_err(|e| format!("Failed to reconnect to REPL at {url}: {e}"))?;
 
         let session_id =
             perform_auth_handshake(&mut ws, &self.cookie, requested_session.as_deref()).await?;
@@ -260,49 +282,29 @@ impl ReplClient {
     /// the server. A retry after partial success would redefine already-loaded
     /// classes and produce duplicate errors.
     pub async fn load_file(&self, path: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "load-file",
-            "id": next_msg_id(),
-            "path": path
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request_with_param("load-file", "path", path))
+            .await
     }
 
     /// Send an inspect operation.
     pub async fn inspect(&self, actor: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "inspect",
-            "id": next_msg_id(),
-            "actor": actor
-        });
-        self.send(&request).await
+        self.send(&Self::request_with_param("inspect", "actor", actor))
+            .await
     }
 
     /// Send an actors operation.
     pub async fn actors(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "actors",
-            "id": next_msg_id()
-        });
-        self.send(&request).await
+        self.send(&Self::request("actors")).await
     }
 
     /// Send a modules operation.
     pub async fn modules(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "modules",
-            "id": next_msg_id()
-        });
-        self.send(&request).await
+        self.send(&Self::request("modules")).await
     }
 
     /// Send a bindings operation.
     pub async fn bindings(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "bindings",
-            "id": next_msg_id()
-        });
-        self.send(&request).await
+        self.send(&Self::request("bindings")).await
     }
 
     /// Send a reload operation.
@@ -310,12 +312,8 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — reloading a module is a mutating operation;
     /// a retry could reload an already-updated module with stale bytecode.
     pub async fn reload(&self, module: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "reload",
-            "id": next_msg_id(),
-            "module": module
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request_with_param("reload", "module", module))
+            .await
     }
 
     /// Send a clear operation to reset REPL bindings.
@@ -323,11 +321,7 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — clearing bindings is a mutating operation
     /// that could interleave badly with other operations on reconnect.
     pub async fn clear(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "clear",
-            "id": next_msg_id()
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request("clear")).await
     }
 
     /// Send an unload operation to remove a module from the workspace.
@@ -335,12 +329,8 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — a retry after the module was already
     /// unloaded would produce a not-found error.
     pub async fn unload(&self, module: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "unload",
-            "id": next_msg_id(),
-            "module": module
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request_with_param("unload", "module", module))
+            .await
     }
 
     /// Send an interrupt operation to cancel a running evaluation.
@@ -353,21 +343,13 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — a retry after reconnect could cancel
     /// a different evaluation that started after the session was resumed.
     pub async fn interrupt(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "interrupt",
-            "id": next_msg_id()
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request("interrupt")).await
     }
 
     /// Send a show-codegen operation to inspect generated Core Erlang.
     pub async fn show_codegen(&self, code: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "show-codegen",
-            "id": next_msg_id(),
-            "code": code
-        });
-        self.send(&request).await
+        self.send(&Self::request_with_param("show-codegen", "code", code))
+            .await
     }
 
     /// Send a show-codegen operation for a loaded class (BT-1236).
@@ -392,44 +374,28 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) — tests may have side effects; a retry
     /// could run the same test suite twice and produce misleading results.
     pub async fn test_class(&self, class: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "test",
-            "id": next_msg_id(),
-            "class": class
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request_with_param("test", "class", class))
+            .await
     }
 
     /// Send a test operation scoped to a specific source file path.
     ///
     /// Uses [`send_once`] (no retry) — see [`test_class`] for rationale.
     pub async fn test_file(&self, file: &str) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "test",
-            "id": next_msg_id(),
-            "file": file
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request_with_param("test", "file", file))
+            .await
     }
 
     /// Send a test-all operation to run all `BUnit` tests.
     ///
     /// Uses [`send_once`] (no retry) — see [`test_class`] for rationale.
     pub async fn test_all(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "test-all",
-            "id": next_msg_id()
-        });
-        self.send_once(&request).await
+        self.send_once(&Self::request("test-all")).await
     }
 
     /// Send a describe operation for capability discovery.
     pub async fn describe(&self) -> Result<ReplResponse, String> {
-        let request = serde_json::json!({
-            "op": "describe",
-            "id": next_msg_id()
-        });
-        self.send(&request).await
+        self.send(&Self::request("describe")).await
     }
 
     /// Send a load-project operation.
@@ -567,6 +533,20 @@ impl ReplClient {
         }
 
         unreachable!("send_once loop always returns on attempt 1")
+    }
+
+    // --- Request builder helpers ---
+
+    /// Build a no-param request for the given operation.
+    fn request(op: &str) -> serde_json::Value {
+        serde_json::json!({"op": op, "id": next_msg_id()})
+    }
+
+    /// Build a single-param request for the given operation.
+    fn request_with_param(op: &str, key: &str, value: &str) -> serde_json::Value {
+        let mut req = serde_json::json!({"op": op, "id": next_msg_id()});
+        req[key] = serde_json::Value::String(value.to_string());
+        req
     }
 
     /// Send a docs operation.
@@ -898,11 +878,14 @@ mod tests {
             None => return Err("REPL did not report workspace ID".to_string()),
         };
 
-        // Wait for TCP readiness (15s default, configurable)
+        // Wait for TCP readiness (configurable; default is higher on Windows
+        // because epmd + BEAM node startup is slower there, especially when
+        // epmd is not already running).
+        let default_timeout_ms: u64 = if cfg!(windows) { 30_000 } else { 15_000 };
         let timeout_ms: u64 = std::env::var("BEAMTALK_REPL_STARTUP_TIMEOUT_MS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(15_000);
+            .unwrap_or(default_timeout_ms);
         let max_attempts = timeout_ms.div_ceil(300);
 
         for _ in 0..max_attempts {

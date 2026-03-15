@@ -123,7 +123,12 @@ pub(crate) fn start_beam_node(
     // In dev mode, it lives in target/{debug,release}/.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(bin_dir) = exe.parent() {
-            let compiler_port = bin_dir.join("beamtalk-compiler-port");
+            let compiler_name = if cfg!(windows) {
+                "beamtalk-compiler-port.exe"
+            } else {
+                "beamtalk-compiler-port"
+            };
+            let compiler_port = bin_dir.join(compiler_name);
             if compiler_port.exists() {
                 cmd.env("BEAMTALK_COMPILER_PORT_BIN", &compiler_port);
             }

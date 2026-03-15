@@ -12,54 +12,35 @@ use super::super::document::Document;
 use super::{binary_bif, param};
 use crate::docvec;
 
-/// Pid primitive implementations (BT-681).
+/// Generates BIFs for opaque BEAM types (Pid, Port, Reference) (BT-681).
 ///
-/// Pids are opaque BEAM process identifiers. Most methods use direct BIFs;
-/// `asString` delegates to `beamtalk_opaque_ops` runtime module.
-pub(crate) fn generate_pid_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+/// These types share identical structure: equality, hash, and `asString`
+/// (which delegates to a type-specific function in `beamtalk_opaque_ops`).
+/// Extra selectors (e.g. `isAlive` for Pid) are handled via `extra_selector`.
+pub(crate) fn generate_opaque_bif(
+    selector: &str,
+    params: &[String],
+    to_string_fn: &'static str,
+    extra_selector: fn(&str) -> Option<Document<'static>>,
+) -> Option<Document<'static>> {
     match selector {
         "=:=" => binary_bif("=:=", params),
         "/=" => binary_bif("/=", params),
-        "asString" => Some(Document::Str(
-            "call 'beamtalk_opaque_ops':'pid_to_string'(Self)",
-        )),
+        "asString" => Some(Document::Str(to_string_fn)),
         "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
+        _ => extra_selector(selector),
+    }
+}
+
+pub(crate) fn pid_extra(selector: &str) -> Option<Document<'static>> {
+    match selector {
         "isAlive" => Some(Document::Str("call 'erlang':'is_process_alive'(Self)")),
         _ => None,
     }
 }
 
-/// Port primitive implementations (BT-681).
-///
-/// Ports are opaque BEAM port identifiers.
-pub(crate) fn generate_port_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    match selector {
-        "=:=" => binary_bif("=:=", params),
-        "/=" => binary_bif("/=", params),
-        "asString" => Some(Document::Str(
-            "call 'beamtalk_opaque_ops':'port_to_string'(Self)",
-        )),
-        "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
-        _ => None,
-    }
-}
-
-/// Reference primitive implementations (BT-681).
-///
-/// References are opaque BEAM unique identifiers.
-pub(crate) fn generate_reference_bif(
-    selector: &str,
-    params: &[String],
-) -> Option<Document<'static>> {
-    match selector {
-        "=:=" => binary_bif("=:=", params),
-        "/=" => binary_bif("/=", params),
-        "asString" => Some(Document::Str(
-            "call 'beamtalk_opaque_ops':'ref_to_string'(Self)",
-        )),
-        "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
-        _ => None,
-    }
+pub(crate) fn no_extra(_selector: &str) -> Option<Document<'static>> {
+    None
 }
 
 /// Future primitive implementations (BT-813).
@@ -91,9 +72,7 @@ pub(crate) fn generate_future_bif(selector: &str, params: &[String]) -> Option<D
             p0.to_string(),
             ")"
         ]),
-        "printString" => Some(Document::Str(
-            "call 'beamtalk_primitive':'print_string'(Self)",
-        )),
+        "printString" => Some(super::PRINT_STRING),
         _ => None,
     }
 }
@@ -108,9 +87,7 @@ pub(crate) fn generate_file_handle_bif(
 ) -> Option<Document<'static>> {
     match selector {
         "lines" => Some(Document::Str("call 'beamtalk_file':'handle_lines'(Self)")),
-        "printString" => Some(Document::Str(
-            "call 'beamtalk_primitive':'print_string'(Self)",
-        )),
+        "printString" => Some(super::PRINT_STRING),
         _ => None,
     }
 }

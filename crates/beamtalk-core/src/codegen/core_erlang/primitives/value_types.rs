@@ -195,13 +195,9 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
                 ")"
             ])
         }
-        "printString" => {
-            // BT-477: Delegate to beamtalk_primitive:print_string/1 which
-            // formats Sets as "Set(element1, element2, ...)"
-            Some(Document::Str(
-                "call 'beamtalk_primitive':'print_string'(Self)",
-            ))
-        }
+        // BT-477: Delegate to beamtalk_primitive:print_string/1 which
+        // formats Sets as "Set(element1, element2, ...)"
+        "printString" => Some(super::PRINT_STRING),
         // Streaming (BT-514)
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
         _ => None,

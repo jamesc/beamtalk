@@ -12,99 +12,63 @@
 use super::super::document::Document;
 use crate::docvec;
 
+/// Zero-arg Behaviour intrinsics: selector name equals the runtime function name.
+const BEHAVIOUR_ZERO_ARG: &[&str] = &[
+    "classSuperclass",
+    "classSubclasses",
+    "classAllSubclasses",
+    "classLocalMethods",
+    "classInstVarNames",
+    "classAllSuperclasses",
+    "classMethods",
+    "classAllInstVarNames",
+    "classRemoveFromSystem",
+    "classSourceFile",
+    "classReload",
+    "classDoc",
+];
+
+/// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self)` Document.
+fn intrinsic_self(func: &str) -> Document<'static> {
+    docvec![
+        "call 'beamtalk_behaviour_intrinsics':'",
+        func.to_owned(),
+        "'(Self)"
+    ]
+}
+
+/// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self, Arg)` Document.
+fn intrinsic_self_arg(func: &str, arg: &str) -> Document<'static> {
+    docvec![
+        "call 'beamtalk_behaviour_intrinsics':'",
+        func.to_owned(),
+        "'(Self, ",
+        arg.to_owned(),
+        ")"
+    ]
+}
+
 /// Generates Core Erlang for a Behaviour primitive.
 ///
 /// These back the `@primitive "classXxx"` method bodies in `lib/Behaviour.bt`.
 /// Each maps to a direct call to `beamtalk_behaviour_intrinsics:Func(Self)`.
-#[allow(clippy::too_many_lines)]
 pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    // Check zero-arg intrinsics table first
+    if BEHAVIOUR_ZERO_ARG.contains(&selector) {
+        return Some(intrinsic_self(selector));
+    }
+
+    // Parameterized intrinsics
     match selector {
-        "classSuperclass" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classSuperclass'(Self)"
-        ]),
-        "classSubclasses" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classSubclasses'(Self)"
-        ]),
-        "classAllSubclasses" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classAllSubclasses'(Self)"
-        ]),
-        "classLocalMethods" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classLocalMethods'(Self)"
-        ]),
-        "classIncludesSelector" => {
-            let sel = params.first()?;
-            Some(docvec![
-                "call 'beamtalk_behaviour_intrinsics':'classIncludesSelector'(Self, ",
-                sel.clone(),
-                ")",
-            ])
-        }
-        "classInstVarNames" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classInstVarNames'(Self)"
-        ]),
-        "classAllSuperclasses" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classAllSuperclasses'(Self)"
-        ]),
-        "classMethods" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classMethods'(Self)"
-        ]),
-        "classCanUnderstand" => {
-            let sel = params.first()?;
-            Some(docvec![
-                "call 'beamtalk_behaviour_intrinsics':'classCanUnderstand'(Self, ",
-                sel.clone(),
-                ")",
-            ])
-        }
-        "classInheritsFrom" => {
-            let cls = params.first()?;
-            Some(docvec![
-                "call 'beamtalk_behaviour_intrinsics':'classInheritsFrom'(Self, ",
-                cls.clone(),
-                ")",
-            ])
-        }
-        "classIncludesBehaviour" => {
-            let beh = params.first()?;
-            Some(docvec![
-                "call 'beamtalk_behaviour_intrinsics':'classIncludesBehaviour'(Self, ",
-                beh.clone(),
-                ")",
-            ])
-        }
-        "classWhichIncludesSelector" => {
-            let sel = params.first()?;
-            Some(docvec![
-                "call 'beamtalk_behaviour_intrinsics':'classWhichIncludesSelector'(Self, ",
-                sel.clone(),
-                ")",
-            ])
-        }
-        "classAllInstVarNames" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classAllInstVarNames'(Self)"
-        ]),
-        // BT-785: Class removal (removeFromSystem)
-        "classRemoveFromSystem" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classRemoveFromSystem'(Self)"
-        ]),
-        // BT-845 / ADR 0040 Phase 2: source file and reload
-        "classSourceFile" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classSourceFile'(Self)"
-        ]),
-        "classReload" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classReload'(Self)"
-        ]),
-        // ADR 0033: Runtime-embedded documentation
-        "classDoc" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classDoc'(Self)"
-        ]),
-        "classSetDoc" => {
-            let doc = params.first()?;
-            Some(docvec![
-                "call 'beamtalk_behaviour_intrinsics':'classSetDoc'(Self, ",
-                doc.clone(),
-                ")",
-            ])
+        "classIncludesSelector"
+        | "classCanUnderstand"
+        | "classWhichIncludesSelector"
+        | "classDocForMethod"
+        | "classInheritsFrom"
+        | "classIncludesBehaviour"
+        | "classSetDoc" => {
+            let arg = params.first()?;
+            Some(intrinsic_self_arg(selector, arg))
         }
         "classSetMethodDoc" => {
             let sel = params.first()?;
@@ -114,15 +78,7 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
                 sel.clone(),
                 ", ",
                 doc.clone(),
-                ")",
-            ])
-        }
-        "classDocForMethod" => {
-            let sel = params.first()?;
-            Some(docvec![
-                "call 'beamtalk_behaviour_intrinsics':'classDocForMethod'(Self, ",
-                sel.clone(),
-                ")",
+                ")"
             ])
         }
         _ => None,
@@ -134,23 +90,15 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
 /// These back the `@primitive "classXxx"` method bodies in `lib/Class.bt`.
 pub fn generate_class_bif(selector: &str, _params: &[String]) -> Option<Document<'static>> {
     match selector {
-        "className" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'className'(Self)"
-        ]),
-        "classClass" => Some(docvec![
-            "call 'beamtalk_behaviour_intrinsics':'classClass'(Self)"
-        ]),
+        "className" | "classClass" => Some(intrinsic_self(selector)),
         _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::doc_to_string;
     use super::*;
-
-    fn doc_to_string(doc: Option<Document<'_>>) -> Option<String> {
-        doc.map(|d| d.to_pretty_string())
-    }
 
     #[test]
     fn test_class_superclass() {
