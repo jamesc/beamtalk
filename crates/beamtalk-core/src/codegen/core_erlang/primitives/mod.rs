@@ -32,6 +32,11 @@ mod value_types;
 use super::document::Document;
 use crate::docvec;
 
+/// Core Erlang expression for `printString` — delegates to the runtime's
+/// `beamtalk_primitive:print_string/1` which formats any value for display.
+pub(crate) const PRINT_STRING: Document<'static> =
+    Document::Str("call 'beamtalk_primitive':'print_string'(Self)");
+
 /// Generates Core Erlang for a selector-based primitive implementation.
 ///
 /// Returns `Some(code)` if a direct implementation was emitted, `None` if
@@ -71,9 +76,24 @@ pub fn generate_primitive_bif(
         "Class" => behaviour::generate_class_bif(selector, params),
         "Metaclass" => metaclass::generate_metaclass_bif(selector, params),
         "StackFrame" => error_handling::generate_stack_frame_bif(selector, params),
-        "Pid" => actor_types::generate_pid_bif(selector, params),
-        "Port" => actor_types::generate_port_bif(selector, params),
-        "Reference" => actor_types::generate_reference_bif(selector, params),
+        "Pid" => actor_types::generate_opaque_bif(
+            selector,
+            params,
+            "call 'beamtalk_opaque_ops':'pid_to_string'(Self)",
+            actor_types::pid_extra,
+        ),
+        "Port" => actor_types::generate_opaque_bif(
+            selector,
+            params,
+            "call 'beamtalk_opaque_ops':'port_to_string'(Self)",
+            actor_types::no_extra,
+        ),
+        "Reference" => actor_types::generate_opaque_bif(
+            selector,
+            params,
+            "call 'beamtalk_opaque_ops':'ref_to_string'(Self)",
+            actor_types::no_extra,
+        ),
         "Future" => actor_types::generate_future_bif(selector, params),
         "FileHandle" => actor_types::generate_file_handle_bif(selector, params),
         _ => None,
@@ -135,6 +155,35 @@ pub(crate) fn power_bif(params: &[String]) -> Option<Document<'static>> {
     ])
 }
 
+/// Builds the 4-step `new → with_selector → with_hint → raise` DNU error Document.
+///
+/// Produces the Core Erlang let-chain:
+/// ```text
+/// let Error0 = call 'beamtalk_error':'new'('does_not_understand', '<class>') in
+/// let Error1 = call 'beamtalk_error':'with_selector'(Error0, '<selector>') in
+/// let Error2 = call 'beamtalk_error':'with_hint'(Error1, <hint_binary>) in
+/// call 'beamtalk_error':'raise'(Error2)
+/// ```
+pub(crate) fn build_dnu_error_doc(
+    class: &'static str,
+    selector: &'static str,
+    hint: &str,
+) -> Document<'static> {
+    let hint_bin = core_erlang_binary_string(hint);
+    docvec![
+        "let Error0 = call 'beamtalk_error':'new'('does_not_understand', '",
+        class,
+        "') in \
+         let Error1 = call 'beamtalk_error':'with_selector'(Error0, '",
+        selector,
+        "') in \
+         let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
+        hint_bin,
+        ") in \
+         call 'beamtalk_error':'raise'(Error2)",
+    ]
+}
+
 /// Encodes a string as a Core Erlang binary literal.
 ///
 /// Core Erlang represents binaries as: `#{#<byte>(8,1,'integer',['unsigned'|['big']]), ...}#`
@@ -149,13 +198,15 @@ pub(crate) fn core_erlang_binary_string(s: &str) -> Document<'static> {
     Document::String(format!("#{{{}}}#", segments.join(",")))
 }
 
+/// Converts an `Option<Document>` to an `Option<String>` for test assertions.
+#[cfg(test)]
+pub(crate) fn doc_to_string(doc: Option<Document<'_>>) -> Option<String> {
+    doc.map(|d| d.to_pretty_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn doc_to_string(doc: Option<Document<'_>>) -> Option<String> {
-        doc.map(|d| d.to_pretty_string())
-    }
 
     #[test]
     fn test_integer_plus() {

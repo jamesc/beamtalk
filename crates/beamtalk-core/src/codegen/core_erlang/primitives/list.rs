@@ -9,7 +9,7 @@
 //! Complex operations delegate to `beamtalk_list` helper module.
 
 use super::super::document::Document;
-use super::{core_erlang_binary_string, param};
+use super::{build_dnu_error_doc, param};
 use crate::docvec;
 
 /// List primitive implementations (BT-419).
@@ -32,17 +32,18 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
         "size" => Some(Document::Str("call 'erlang':'length'(Self)")),
         "isEmpty" => Some(Document::Str("call 'erlang':'=:='(Self, [])")),
         "first" => {
-            let hint = core_erlang_binary_string("Cannot get first element of empty list");
+            let error = build_dnu_error_doc(
+                "List",
+                "first",
+                "Cannot get first element of empty list",
+            );
             Some(docvec![
                 "case Self of \
                  <[H|_T]> when 'true' -> H \
                  <[]> when 'true' -> \
-                   let Error0 = call 'beamtalk_error':'new'('does_not_understand', 'List') in \
-                   let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'first') in \
-                   let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-                hint,
-                ") in \
-                   call 'beamtalk_error':'raise'(Error2) \
+                   ",
+                error,
+                " \
                  end",
             ])
         }
@@ -53,16 +54,17 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
              end",
         )),
         "last" => {
-            let hint = core_erlang_binary_string("Cannot get last element of empty list");
+            let error = build_dnu_error_doc(
+                "List",
+                "last",
+                "Cannot get last element of empty list",
+            );
             Some(docvec![
                 "case Self of \
                  <[]> when 'true' -> \
-                   let Error0 = call 'beamtalk_error':'new'('does_not_understand', 'List') in \
-                   let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'last') in \
-                   let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-                hint,
-                ") in \
-                   call 'beamtalk_error':'raise'(Error2) \
+                   ",
+                error,
+                " \
                  <_> when 'true' -> \
                    call 'lists':'last'(Self) \
                  end",
@@ -239,9 +241,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
                 ")",
             ])
         }
-        "printString" => Some(Document::Str(
-            "call 'beamtalk_primitive':'print_string'(Self)",
-        )),
+        "printString" => Some(super::PRINT_STRING),
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
         "atRandom" => Some(Document::Str("call 'beamtalk_random':'atRandom'(Self)")),
         "join" => Some(Document::Str("call 'erlang':'iolist_to_binary'(Self)")),
