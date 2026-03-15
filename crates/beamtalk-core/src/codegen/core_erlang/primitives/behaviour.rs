@@ -53,8 +53,12 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
 
     // Parameterized intrinsics
     match selector {
-        "classIncludesSelector" | "classCanUnderstand" | "classWhichIncludesSelector"
-        | "classDocForMethod" | "classInheritsFrom" | "classIncludesBehaviour"
+        "classIncludesSelector"
+        | "classCanUnderstand"
+        | "classWhichIncludesSelector"
+        | "classDocForMethod"
+        | "classInheritsFrom"
+        | "classIncludesBehaviour"
         | "classSetDoc" => {
             let arg = params.first()?;
             Some(intrinsic_self_arg(selector, arg))
@@ -82,8 +86,8 @@ pub fn generate_class_bif(selector: &str, _params: &[String]) -> Option<Document
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::doc_to_string;
+    use super::*;
 
     #[test]
     fn test_class_superclass() {

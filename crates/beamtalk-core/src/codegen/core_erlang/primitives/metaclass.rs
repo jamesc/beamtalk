@@ -50,8 +50,8 @@ pub fn generate_metaclass_bif(selector: &str, params: &[String]) -> Option<Docum
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::doc_to_string;
+    use super::*;
 
     #[test]
     fn test_metaclass_this_class() {

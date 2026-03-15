@@ -32,11 +32,8 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
         "size" => Some(Document::Str("call 'erlang':'length'(Self)")),
         "isEmpty" => Some(Document::Str("call 'erlang':'=:='(Self, [])")),
         "first" => {
-            let error = build_dnu_error_doc(
-                "List",
-                "first",
-                "Cannot get first element of empty list",
-            );
+            let error =
+                build_dnu_error_doc("List", "first", "Cannot get first element of empty list");
             Some(docvec![
                 "case Self of \
                  <[H|_T]> when 'true' -> H \
@@ -54,11 +51,8 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
              end",
         )),
         "last" => {
-            let error = build_dnu_error_doc(
-                "List",
-                "last",
-                "Cannot get last element of empty list",
-            );
+            let error =
+                build_dnu_error_doc("List", "last", "Cannot get last element of empty list");
             Some(docvec![
                 "case Self of \
                  <[]> when 'true' -> \
