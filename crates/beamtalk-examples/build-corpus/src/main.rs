@@ -15,21 +15,24 @@ fn main() {
     let mut entries = Vec::new();
 
     // .bt fixture files — whole-file entries
-    extract_bt_fixtures(&root, "stdlib/test/fixtures", "stdlib-test", &mut entries);
-    extract_bt_fixtures(&root, "tests/e2e/fixtures", "e2e-test", &mut entries);
-    extract_bt_fixtures(&root, "docs/learning/fixtures", "learning", &mut entries);
+    extract_bt_dir(&root, "stdlib/test/fixtures", None, &mut entries);
+    extract_bt_dir(&root, "tests/e2e/fixtures", None, &mut entries);
+    extract_bt_dir(&root, "docs/learning/fixtures", None, &mut entries);
 
     // .bt test files — whole-file entries (tests show how to *use* patterns)
-    extract_bt_test_files(&root, "stdlib/test", &mut entries);
+    extract_bt_dir(&root, "stdlib/test", Some("/fixtures/"), &mut entries);
 
     // .bt example files
-    extract_bt_examples(&root, &mut entries);
+    extract_bt_dir(&root, "examples", None, &mut entries);
 
     // .md learning docs — extract fenced beamtalk code blocks
     extract_md_files(&root, "docs/learning", &mut entries);
 
     // beamtalk-language-features.md
-    extract_language_features_md(&root, &mut entries);
+    let lang_features = root.join("docs/beamtalk-language-features.md");
+    if lang_features.exists() {
+        extract_md_code_blocks(&root, &lang_features, &mut entries);
+    }
 
     // Add synonym tags for common vocabulary mismatches
     add_synonym_tags(&mut entries);
@@ -104,7 +107,6 @@ fn extract_tags_from_module(module: &Module) -> Vec<String> {
 fn extract_method_tags(class: &ClassDefinition, tags: &mut BTreeSet<String>) {
     for method in &class.methods {
         let name = method.selector.name();
-        // Skip trivial accessors/mutators
         if !name.is_empty() {
             tags.insert(name.to_string());
         }
@@ -231,62 +233,28 @@ fn walk_bt_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Extract .bt fixture files as whole-file corpus entries.
-fn extract_bt_fixtures(root: &Path, rel_dir: &str, _prefix: &str, entries: &mut Vec<CorpusEntry>) {
+/// Extract .bt files from a directory as whole-file corpus entries.
+///
+/// If `skip_containing` is set, files whose relative path contains that
+/// substring are skipped (e.g. `"/fixtures/"` to avoid double-processing).
+fn extract_bt_dir(
+    root: &Path,
+    rel_dir: &str,
+    skip_containing: Option<&str>,
+    entries: &mut Vec<CorpusEntry>,
+) {
     let dir = root.join(rel_dir);
     for path in walk_bt_files(&dir) {
-        let Ok(source) = fs::read_to_string(&path) else {
-            continue;
-        };
         let rel_path = path
             .strip_prefix(root)
             .unwrap_or(&path)
             .to_string_lossy()
             .to_string();
-        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-        let category = category_from_path(&rel_path);
-        let module = parse_bt(&source);
-        let mut tags = extract_tags_from_module(&module);
 
-        // Add file-path-derived tags
-        tags.push(stem.to_string());
-
-        let title = if module.classes.is_empty() {
-            title_from_stem(&stem)
-        } else {
-            module
-                .classes
-                .iter()
-                .map(|c| c.name.name.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
-        let explanation = explanation_from_comments(&source);
-
-        entries.push(CorpusEntry {
-            id: make_id(&category, &stem, None),
-            title,
-            category,
-            tags,
-            source: strip_license_header(&source),
-            explanation,
-        });
-    }
-}
-
-/// Extract `BUnit` test files as whole-file corpus entries, skipping the fixtures subdirectory.
-fn extract_bt_test_files(root: &Path, rel_dir: &str, entries: &mut Vec<CorpusEntry>) {
-    let dir = root.join(rel_dir);
-    for path in walk_bt_files(&dir) {
-        // Skip fixtures directory (handled separately)
-        let rel_path = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
-        if rel_path.contains("/fixtures/") {
-            continue;
+        if let Some(skip) = skip_containing {
+            if rel_path.contains(skip) {
+                continue;
+            }
         }
 
         let Ok(source) = fs::read_to_string(&path) else {
@@ -322,49 +290,7 @@ fn extract_bt_test_files(root: &Path, rel_dir: &str, entries: &mut Vec<CorpusEnt
     }
 }
 
-/// Extract notable patterns from example project .bt files.
-fn extract_bt_examples(root: &Path, entries: &mut Vec<CorpusEntry>) {
-    let examples_dir = root.join("examples");
-    for path in walk_bt_files(&examples_dir) {
-        let Ok(source) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let rel_path = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
-        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-        let category = category_from_path(&rel_path);
-        let module = parse_bt(&source);
-        let mut tags = extract_tags_from_module(&module);
-        tags.push(stem.to_string());
-
-        let title = if module.classes.is_empty() {
-            title_from_stem(&stem)
-        } else {
-            module
-                .classes
-                .iter()
-                .map(|c| c.name.name.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
-        let explanation = explanation_from_comments(&source);
-
-        entries.push(CorpusEntry {
-            id: make_id(&category, &stem, None),
-            title,
-            category,
-            tags,
-            source: strip_license_header(&source),
-            explanation,
-        });
-    }
-}
-
-/// Extract fenced beamtalk code blocks from markdown files.
+/// Extract fenced beamtalk code blocks from markdown files in a directory.
 fn extract_md_files(root: &Path, rel_dir: &str, entries: &mut Vec<CorpusEntry>) {
     let dir = root.join(rel_dir);
     let mut md_files: Vec<PathBuf> = Vec::new();
@@ -379,14 +305,6 @@ fn extract_md_files(root: &Path, rel_dir: &str, entries: &mut Vec<CorpusEntry>) 
     md_files.sort();
 
     for path in md_files {
-        extract_md_code_blocks(root, &path, entries);
-    }
-}
-
-/// Extract beamtalk-language-features.md code blocks.
-fn extract_language_features_md(root: &Path, entries: &mut Vec<CorpusEntry>) {
-    let path = root.join("docs/beamtalk-language-features.md");
-    if path.exists() {
         extract_md_code_blocks(root, &path, entries);
     }
 }
@@ -466,22 +384,18 @@ fn extract_md_code_blocks(root: &Path, path: &Path, entries: &mut Vec<CorpusEntr
 
 /// Strip the license header (Copyright + SPDX lines) from source.
 fn strip_license_header(source: &str) -> String {
-    let mut lines: Vec<&str> = source.lines().collect();
-
-    // Remove leading license header lines
-    while let Some(first) = lines.first() {
-        let trimmed = first.trim();
-        if trimmed.starts_with("// Copyright")
-            || trimmed.starts_with("// SPDX")
-            || trimmed.is_empty()
-        {
-            lines.remove(0);
-        } else {
-            break;
-        }
-    }
-
-    lines.join("\n").trim().to_string()
+    source
+        .lines()
+        .skip_while(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("// Copyright")
+                || trimmed.starts_with("// SPDX")
+                || trimmed.is_empty()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
 }
 
 /// Synonym map: concepts that agents commonly search for mapped to Beamtalk terminology.
