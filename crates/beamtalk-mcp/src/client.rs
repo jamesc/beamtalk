@@ -878,11 +878,14 @@ mod tests {
             None => return Err("REPL did not report workspace ID".to_string()),
         };
 
-        // Wait for TCP readiness (15s default, configurable)
+        // Wait for TCP readiness (configurable; default is higher on Windows
+        // because epmd + BEAM node startup is slower there, especially when
+        // epmd is not already running).
+        let default_timeout_ms: u64 = if cfg!(windows) { 30_000 } else { 15_000 };
         let timeout_ms: u64 = std::env::var("BEAMTALK_REPL_STARTUP_TIMEOUT_MS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(15_000);
+            .unwrap_or(default_timeout_ms);
         let max_attempts = timeout_ms.div_ceil(300);
 
         for _ in 0..max_attempts {
