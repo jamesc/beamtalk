@@ -240,6 +240,13 @@ enum Command {
         warnings_as_errors: bool,
     },
 
+    /// Check environment setup (Erlang, runtime, stdlib)
+    Doctor {
+        /// Include developer toolchain checks (rebar3, just, rustc)
+        #[arg(long)]
+        dev: bool,
+    },
+
     /// Generate HTML API documentation from source files
     Doc {
         /// Source file or directory containing .bt files
@@ -437,6 +444,7 @@ fn run() -> Result<()> {
             path,
             warnings_as_errors,
         } => commands::test::run_tests(&path, warnings_as_errors),
+        Command::Doctor { dev } => commands::doctor::run(dev),
         Command::Doc {
             path,
             output,
