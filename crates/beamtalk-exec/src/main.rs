@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::process::{ChildStdin, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 #[cfg(unix)]
@@ -187,9 +187,10 @@ fn exit_event(child_id: u32, code: i32) -> Term {
 /// The `Child` handle is given to a reaper thread at spawn time; only
 /// `stdin` and the process-group ID remain here for lifecycle management.
 struct ChildEntry {
-    /// Stdin pipe — `None` while temporarily taken by `write_stdin` or after
-    /// `close_stdin`.  Use `stdin_closed` to distinguish the two cases.
-    stdin: Option<ChildStdin>,
+    /// Stdin writer — a `ChildStdin` pipe.
+    /// `None` while temporarily taken by `write_stdin` or after `close_stdin`.
+    /// Use `stdin_closed` to distinguish the two cases.
+    stdin: Option<Box<dyn Write + Send>>,
     /// Set to `true` by `close_stdin` so that a concurrent `write_stdin`
     /// (which takes stdin, releases the lock, does I/O, then restores) does
     /// not reopen the pipe after it has been intentionally closed.
@@ -227,10 +228,31 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
         .and_then(term_to_string)
         .filter(|s| !s.is_empty());
 
-    let mut cmd = Command::new(&executable);
-    cmd.args(&args);
-    cmd.envs(&env_vars);
-    if let Some(ref d) = dir {
+    handle_spawn_piped(
+        child_id,
+        &executable,
+        &args,
+        &env_vars,
+        dir.as_deref(),
+        writer,
+        children,
+    )
+}
+
+/// Spawn a child process using regular pipes (works on all platforms).
+fn handle_spawn_piped(
+    child_id: u32,
+    executable: &str,
+    args: &[String],
+    env_vars: &HashMap<String, String>,
+    dir: Option<&str>,
+    writer: &SharedWriter,
+    children: &ChildMap,
+) -> Result<(), String> {
+    let mut cmd = Command::new(executable);
+    cmd.args(args);
+    cmd.envs(env_vars);
+    if let Some(d) = dir {
         cmd.current_dir(d);
     }
     cmd.stdin(Stdio::piped());
@@ -252,7 +274,10 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
 
-    let child_stdin = child.stdin.take();
+    let child_stdin: Option<Box<dyn Write + Send>> = child
+        .stdin
+        .take()
+        .map(|s| Box::new(s) as Box<dyn Write + Send>);
     let child_stdout = child.stdout.take().ok_or("stdout not captured")?;
     let child_stderr = child.stderr.take().ok_or("stderr not captured")?;
 
@@ -269,7 +294,6 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
             .lock()
             .map_err(|e| format!("children lock poisoned: {e}"))?;
         if map.contains_key(&child_id) {
-            // Release lock before blocking on kill/wait.
             drop(map);
             let _ = child.kill();
             let _ = child.wait();
@@ -286,82 +310,105 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
         );
     }
 
-    // Spawn stdout reader thread — join handle passed to reaper for synchronisation.
-    let stdout_handle = {
-        let writer = Arc::clone(writer);
-        thread::spawn(move || {
-            let mut buf = [0u8; 4096];
-            let mut reader = child_stdout;
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        send_event(&writer, &stdout_event(child_id, &buf[..n]));
-                    }
-                    Err(e) => {
-                        debug!("stdout read error for child {child_id}: {e}");
-                        break;
-                    }
-                }
-            }
-        })
-    };
+    // Spawn stdout reader thread.
+    let stdout_handle = spawn_reader_thread(child_id, child_stdout, Arc::clone(writer), "stdout");
 
-    // Spawn stderr reader thread — join handle passed to reaper for synchronisation.
-    let stderr_handle = {
-        let writer = Arc::clone(writer);
-        thread::spawn(move || {
-            let mut buf = [0u8; 4096];
-            let mut reader = child_stderr;
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        send_event(&writer, &stderr_event(child_id, &buf[..n]));
-                    }
-                    Err(e) => {
-                        debug!("stderr read error for child {child_id}: {e}");
-                        break;
-                    }
-                }
-            }
-        })
-    };
+    // Spawn stderr reader thread.
+    let stderr_handle = spawn_reader_thread(child_id, child_stderr, Arc::clone(writer), "stderr");
 
-    // Spawn reaper thread: waits for the child, joins reader threads, then sends exit event.
-    //
-    // Joining the reader threads before sending exit guarantees that all buffered
-    // stdout/stderr data has already been written to the port before the BEAM
-    // gen_server receives the exit signal.  Without this, the reaper could send
-    // exit before the reader threads have flushed their final reads, causing the
-    // gen_server to close the port and discard in-flight data (the race fixed by
-    // the 10 ms drain timer in the previous workaround — see BT-1148).
-    {
-        let writer = Arc::clone(writer);
-        let children = Arc::clone(children);
-        thread::spawn(move || {
-            let exit_code = match child.wait() {
-                Ok(status) => status.code().unwrap_or(-1),
-                Err(e) => {
-                    error!("wait() failed for child {child_id}: {e}");
-                    -1
-                }
-            };
-            // Remove the entry — at this point stdin has already been closed
-            // (or was never opened) and the process is gone.
-            if let Ok(mut map) = children.lock() {
-                map.remove(&child_id);
-            }
-            // Join reader threads: blocks until both have finished sending all
-            // stdout/stderr events.  Errors from join (thread panicked) are
-            // ignored — we still send the exit event.
-            let _ = stdout_handle.join();
-            let _ = stderr_handle.join();
-            send_event(&writer, &exit_event(child_id, exit_code));
-        });
-    }
+    // Spawn reaper thread: waits for the child, joins reader threads, sends exit event.
+    spawn_reaper_thread(
+        child_id,
+        child,
+        stdout_handle,
+        Some(stderr_handle),
+        Arc::clone(writer),
+        Arc::clone(children),
+    );
 
     Ok(())
+}
+
+/// Spawn a reader thread that reads from a stream and sends events.
+fn spawn_reader_thread<R: Read + Send + 'static>(
+    child_id: u32,
+    reader: R,
+    writer: SharedWriter,
+    stream: &'static str,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        let mut reader = reader;
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let event = if stream == "stderr" {
+                        stderr_event(child_id, &buf[..n])
+                    } else {
+                        stdout_event(child_id, &buf[..n])
+                    };
+                    send_event(&writer, &event);
+                }
+                Err(e) => {
+                    debug!("{stream} read error for child {child_id}: {e}");
+                    break;
+                }
+            }
+        }
+    })
+}
+
+/// Run in cat mode: read stdin line by line and write to stdout with explicit
+/// flushing. This provides a Windows-compatible `cat` equivalent that works
+/// with pipes (bypasses the C runtime's full buffering on non-console stdout).
+fn run_cat_mode() -> ! {
+    use std::io::BufRead;
+
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+
+    for line in stdin.lock().lines() {
+        match line {
+            Ok(l) => {
+                if writeln!(stdout, "{l}").is_err() || stdout.flush().is_err() {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    std::process::exit(0);
+}
+
+/// Spawn a reaper thread that waits for a `std::process::Child` and sends exit.
+fn spawn_reaper_thread(
+    child_id: u32,
+    mut child: std::process::Child,
+    stdout_handle: thread::JoinHandle<()>,
+    stderr_handle: Option<thread::JoinHandle<()>>,
+    writer: SharedWriter,
+    children: ChildMap,
+) {
+    thread::spawn(move || {
+        let exit_code = match child.wait() {
+            Ok(status) => status.code().unwrap_or(-1),
+            Err(e) => {
+                error!("wait() failed for child {child_id}: {e}");
+                -1
+            }
+        };
+        if let Ok(mut map) = children.lock() {
+            map.remove(&child_id);
+        }
+        let _ = stdout_handle.join();
+        if let Some(h) = stderr_handle {
+            let _ = h.join();
+        }
+        send_event(&writer, &exit_event(child_id, exit_code));
+    });
 }
 
 /// Configure the child process to start in a new process group (Unix only).
@@ -509,6 +556,7 @@ fn handle_close_stdin(request: &Map, children: &ChildMap) -> Result<(), String> 
     // Mark closed first so a concurrent write_stdin restore does not reopen
     // the pipe (see handle_write_stdin restore logic).
     entry.stdin_closed = true;
+
     // Dropping closes the OS pipe, sending EOF to the child.
     entry.stdin = None;
     Ok(())
@@ -586,6 +634,12 @@ struct Cli {
     /// Increase logging verbosity (-v: debug, -vv+: trace)
     #[arg(short, long, action = ArgAction::Count)]
     verbose: u8,
+
+    /// Run as a cat replacement: read stdin line by line and echo to stdout
+    /// with explicit flushing. Used on Windows where pipe buffering prevents
+    /// interactive I/O with regular programs.
+    #[arg(long = "cat", hide = true)]
+    cat_mode: bool,
 }
 
 fn directive_for_verbosity(v: u8) -> &'static str {
@@ -598,6 +652,13 @@ fn directive_for_verbosity(v: u8) -> &'static str {
 
 fn main() {
     let cli = Cli::parse();
+
+    // Handle cat mode: line-by-line stdin→stdout echo with explicit flushing.
+    // Used on Windows as a cat replacement for interactive subprocess I/O,
+    // since Windows programs use full buffering on pipe stdout.
+    if cli.cat_mode {
+        run_cat_mode();
+    }
 
     // Only initialise tracing when explicitly requested — default must produce
     // no stderr output to avoid interfering with the OTP port protocol.

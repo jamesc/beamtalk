@@ -88,62 +88,65 @@ multiline_stderr_script() ->
         {win32, _} -> <<"(echo a& echo b& echo c)>&2">>
     end.
 
+%% @private Return {Executable, Args} for a process that echoes stdin to stdout.
+%% On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (a built-in cat
+%% mode that explicitly flushes stdout, bypassing pipe buffering).
+cat_cmd() ->
+    case os:type() of
+        {unix, _} -> {<<"/bin/cat">>, []};
+        {win32, _} ->
+            ExecBin = beamtalk_exec_port:find_exec_binary(),
+            {list_to_binary(ExecBin), [<<"--cat">>]}
+    end.
+
 %%% ============================================================================
 %%% writeLine — success
 %%% ============================================================================
 
 writeLine_writes_line_and_returns_nil_test() ->
-    case os:type() of
-        {unix, _} ->
-            {ok, Pid} = beamtalk_subprocess:start(#{
-                executable => <<"/bin/cat">>,
-                args => []
-            }),
-            %% writeLine should succeed and return nil
-            Result = gen_server:call(Pid, {'writeLine:', [<<"hello">>]}),
-            ?assertEqual(nil, Result),
-            %% Verify data reached the subprocess by reading it back
-            Line = gen_server:call(Pid, {readLine, []}, 5000),
-            ?assertEqual(<<"hello">>, Line),
-            gen_server:call(Pid, {close, []}),
-            gen_server:stop(Pid);
-        _ ->
-            {skip, "Unix-only: no unbuffered stdin echo on Windows"}
-    end.
+    {CatExe, CatArgs} = cat_cmd(),
+    {ok, Pid} = beamtalk_subprocess:start(#{
+        executable => CatExe,
+        args => CatArgs
+    }),
+    %% writeLine should succeed and return nil
+    Result = gen_server:call(Pid, {'writeLine:', [<<"hello">>]}),
+    ?assertEqual(nil, Result),
+    %% Verify data reached the subprocess by reading it back
+    Line = gen_server:call(Pid, {readLine, []}, 5000),
+    ?assertEqual(<<"hello">>, Line),
+    gen_server:call(Pid, {close, []}),
+    gen_server:stop(Pid).
 
 %%% ============================================================================
 %%% readLine — blocks until data arrives
 %%% ============================================================================
 
 readLine_blocks_until_data_arrives_test() ->
-    case os:type() of
-        {unix, _} ->
-            {ok, Pid} = beamtalk_subprocess:start(#{
-                executable => <<"/bin/cat">>,
-                args => []
-            }),
-            Self = self(),
-            %% Spawn a process that will block on readLine
-            _Caller = spawn(fun() ->
-                Result = gen_server:call(Pid, {readLine, []}, 5000),
-                Self ! {readLine_result, Result}
-            end),
-            %% Give the caller time to issue the gen_server:call
-            timer:sleep(50),
-            %% Write a line — the blocked readLine should now resolve
-            gen_server:call(Pid, {'writeLine:', [<<"world">>]}),
-            Line =
-                receive
-                    {readLine_result, V} -> V
-                after 5000 ->
-                    error(timeout_waiting_for_readline)
-                end,
-            ?assertEqual(<<"world">>, Line),
-            gen_server:call(Pid, {close, []}),
-            gen_server:stop(Pid);
-        _ ->
-            {skip, "Unix-only: no unbuffered stdin echo on Windows"}
-    end.
+    {CatExe, CatArgs} = cat_cmd(),
+    {ok, Pid} = beamtalk_subprocess:start(#{
+        executable => CatExe,
+        args => CatArgs
+    }),
+    Self = self(),
+    %% Spawn a process that will block on readLine
+    _Caller = spawn(fun() ->
+        Result = gen_server:call(Pid, {readLine, []}, 5000),
+        Self ! {readLine_result, Result}
+    end),
+    %% Give the caller time to issue the gen_server:call
+    timer:sleep(50),
+    %% Write a line — the blocked readLine should now resolve
+    gen_server:call(Pid, {'writeLine:', [<<"world">>]}),
+    Line =
+        receive
+            {readLine_result, V} -> V
+        after 5000 ->
+            error(timeout_waiting_for_readline)
+        end,
+    ?assertEqual(<<"world">>, Line),
+    gen_server:call(Pid, {close, []}),
+    gen_server:stop(Pid).
 
 %%% ============================================================================
 %%% readLine — returns nil at EOF
