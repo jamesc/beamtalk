@@ -7,6 +7,33 @@
 
 set -euo pipefail
 
+# --- Cloud environment bootstrap ---
+# Run setup-cloud.sh on first session (marker file prevents re-runs).
+# The setup script is idempotent so it's safe to run even if some tools exist.
+MARKER="${HOME}/.beamtalk-cloud-setup-done"
+if [[ ! -f "${MARKER}" ]]; then
+  SETUP_SCRIPT="${CLAUDE_PROJECT_DIR:-${PWD}}/scripts/setup-cloud.sh"
+  if [[ -f "${SETUP_SCRIPT}" ]]; then
+    echo "First session — running cloud environment setup..."
+    bash "${SETUP_SCRIPT}"
+    touch "${MARKER}"
+  else
+    # Fallback: download from GitHub pinned to a known commit, verify integrity,
+    # then execute. Trap ensures temp file is cleaned up even on failure.
+    echo "First session — fetching and running cloud environment setup..."
+    _SETUP_TMP="$(mktemp)"
+    trap 'rm -f "${_SETUP_TMP}"' EXIT
+    SETUP_URL="https://raw.githubusercontent.com/jamesc/beamtalk/5c22fc5f7116fbe3cf7c8d3c919e6682f68c83ab/scripts/setup-cloud.sh"
+    SETUP_SHA256="717b717108c25e310f4232158316ba2eddd2ba05ee530a5c0b6bb1b0c4b06312"
+    curl -fsSL "${SETUP_URL}" -o "${_SETUP_TMP}"
+    echo "${SETUP_SHA256}  ${_SETUP_TMP}" | sha256sum -c -
+    bash "${_SETUP_TMP}"
+    rm -f "${_SETUP_TMP}"
+    trap - EXIT
+    touch "${MARKER}"
+  fi
+fi
+
 # Ensure the pre-push lint hook is active (local config, needs setting per-clone/worktree)
 git config core.hooksPath .githooks 2>/dev/null || true
 
