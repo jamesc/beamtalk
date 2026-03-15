@@ -188,7 +188,7 @@ FAIL CounterTest >> testMultipleIncrements
 The existing `tests/e2e/` suite continues to test REPL-specific behavior:
 
 ```beamtalk
-// tests/e2e/cases/workspace_bindings.bt
+// tests/e2e/cases/workspace_bindings.btscript
 // These NEED the REPL because they test workspace state
 
 Transcript show: 'Hello from E2E'
@@ -447,8 +447,8 @@ test/                    # Compiled Beamtalk tests (Phase 1 + 2)
 
 tests/e2e/               # REPL integration tests (keep existing)
 ├── cases/
-│   ├── workspace_bindings.bt
-│   └── repl_commands.bt
+│   ├── workspace_bindings.btscript
+│   └── repl_commands.btscript
 └── fixtures/
     └── counter.bt
 ```

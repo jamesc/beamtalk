@@ -970,7 +970,7 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Literal character | `$a` | Exact character match |
 | Negative number | `-1` | Negative integer/float match |
 | Variable | `x` | Binds matched value to name |
-| Tuple | `{a, b}` | Destructure tuple (destructuring assignment and patterns) |
+| Tuple | `{a, b}` | Destructure tuple (destructuring assignment only; match arms not yet supported) |
 | Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported |
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |

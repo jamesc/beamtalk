@@ -92,7 +92,7 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: nightly-${{ runner.os }}-arm64-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}-otp-27.0
+          key: nightly-${{ runner.os }}-arm64-erlang-otp-27.0-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
             nightly-${{ runner.os }}-arm64-erlang-otp-27.0-
 
@@ -160,7 +160,7 @@ jobs:
           path: |
             ~/AppData/Local/rebar3
             runtime/_build
-          key: nightly-${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}-otp-27.0
+          key: nightly-${{ runner.os }}-erlang-otp-27.0-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
             nightly-${{ runner.os }}-erlang-otp-27.0-
 

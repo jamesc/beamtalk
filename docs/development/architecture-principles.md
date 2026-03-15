@@ -267,7 +267,7 @@ mod tests {
 
 **Example:**
 ```beamtalk
-// tests/e2e/cases/arithmetic.bt
+// tests/e2e/cases/arithmetic.btscript
 42 + 3
 // => 45
 
