@@ -202,6 +202,26 @@ struct ChildEntry {
 type ChildMap = Arc<Mutex<HashMap<u32, ChildEntry>>>;
 
 // ────────────────────────────────────────────────────────────────
+// Exit code helpers
+
+/// Extract an exit code from an `ExitStatus`.
+///
+/// On Unix, if the process was terminated by a signal (`code()` returns `None`),
+/// use the standard shell convention of 128 + signal number.
+#[cfg(unix)]
+fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
+    use std::os::unix::process::ExitStatusExt;
+    status
+        .code()
+        .unwrap_or_else(|| status.signal().map_or(-1, |sig| 128 + sig))
+}
+
+#[cfg(not(unix))]
+fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
+    status.code().unwrap_or(-1)
+}
+
+// ────────────────────────────────────────────────────────────────
 // Command handlers
 
 #[allow(clippy::too_many_lines)]
@@ -341,7 +361,7 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
         let children = Arc::clone(children);
         thread::spawn(move || {
             let exit_code = match child.wait() {
-                Ok(status) => status.code().unwrap_or(-1),
+                Ok(status) => exit_code_from_status(status),
                 Err(e) => {
                     error!("wait() failed for child {child_id}: {e}");
                     -1

@@ -30,9 +30,9 @@ TestCase subclass: SubprocessTest
       #("60")
     ] ifFalse: [#("/c", "ping -n 60 127.0.0.1 >nul")]
 
-  trueExe => self.isUnix ifTrue: ["/bin/true"] ifFalse: ["cmd"]
+  trueExe => self.isUnix ifTrue: ["/usr/bin/env"] ifFalse: ["cmd"]
 
-  trueArgs => self.isUnix ifTrue: [#()] ifFalse: [#("/c", "exit 0")]
+  trueArgs => self.isUnix ifTrue: [#("true")] ifFalse: [#("/c", "exit 0")]
 
   stderrScript => self.isUnix ifTrue: ["echo err >&2"] ifFalse: ["echo err>&2"]
 
