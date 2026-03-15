@@ -391,6 +391,7 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 
     let mut files = Vec::new();
     util::collect_files_recursive(&search_dir, &["bt"], &mut files)?;
+    files.sort();
     Ok(files)
 }
 
@@ -400,6 +401,7 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 pub fn collect_source_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     let mut files = Vec::new();
     util::collect_files_recursive(dir, &["bt"], &mut files)?;
+    files.sort();
     Ok(files)
 }
 
@@ -410,6 +412,7 @@ pub fn collect_source_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>>
 pub fn collect_formattable_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     let mut files = Vec::new();
     util::collect_files_recursive(dir, &["bt", "btscript"], &mut files)?;
+    files.sort();
     Ok(files)
 }
 
