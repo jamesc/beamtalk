@@ -231,7 +231,7 @@
         "beamtalk.server.path": {
           "type": "string",
           "default": "",
-          "description": "Override path to the beamtalk-lsp binary. Leave empty to use automatic discovery (bundled bin/, sysroot, then PATH)."
+          "description": "Override path to the beamtalk-lsp binary. Leave empty to use automatic discovery (sysroot, then PATH)."
         },
         "beamtalk.trace.server": {
           "type": "string",
