@@ -388,11 +388,13 @@ test-install: build-release build-stdlib
     test -d "$RUNTIME_DIR"
     echo "✅ Stdlib and runtime directories present"
 
-    # 3. Verify compilation works from installed layout
-    echo 'Object subclass: SmokeTest' > "$TMPDIR/smoke.bt"
-    echo '  answer => 42' >> "$TMPDIR/smoke.bt"
-    "$TMPDIR/bin/beamtalk" build "$TMPDIR/smoke.bt"
-    echo "✅ Compiler compiled a .bt file successfully"
+    # 3. Verify compiler + runtime end-to-end via beamtalk test
+    PROJ="$TMPDIR/smoke-project"
+    mkdir -p "$PROJ/test"
+    printf '[package]\nname = "smoke"\nversion = "0.1.0"\n\n[dependencies]\n' > "$PROJ/beamtalk.toml"
+    printf 'TestCase subclass: SmokeTest\n  testAnswer =>\n    self assert: 21 + 21 equals: 42\n' > "$PROJ/test/smoke_test.bt"
+    (cd "$PROJ" && "$TMPDIR/bin/beamtalk" test)
+    echo "✅ Compiler + runtime smoke test passed"
 
     echo "✅ All smoke tests passed"
 
