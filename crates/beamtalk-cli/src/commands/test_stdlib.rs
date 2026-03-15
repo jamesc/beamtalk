@@ -12,6 +12,7 @@
 //! Part of ADR 0014 (Beamtalk Test Framework), Phase 1.
 
 use crate::beam_compiler::BeamCompiler;
+use crate::commands::util;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fmt::Write as _;
@@ -22,14 +23,7 @@ use tracing::{debug, info, instrument};
 // Test file parsing (lifted from e2e.rs)
 // ──────────────────────────────────────────────────────────────────────────
 
-/// What a test assertion expects: a value or an error.
-#[derive(Debug, Clone, PartialEq)]
-enum Expected {
-    /// Match formatted result string (`_` for wildcard).
-    Value(String),
-    /// Match `#beamtalk_error{kind = Kind}` on error.
-    Error { kind: String },
-}
+use crate::commands::util::Expected;
 
 /// A single test assertion: expression + expected result.
 #[derive(Debug)]
@@ -995,31 +989,7 @@ fn parse_eunit_output(
 
 /// Find `.btscript` test files from a path (file or directory).
 fn find_test_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    // If a single file path is provided, require .btscript extension.
-    if path.is_file() {
-        if path.extension() == Some("btscript") {
-            return Ok(vec![path.to_owned()]);
-        }
-        miette::bail!("Expected a .btscript test file, got '{path}'");
-    }
-
-    let mut files = Vec::new();
-
-    for entry in fs::read_dir(path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read directory '{path}'"))?
-    {
-        let entry = entry.into_diagnostic()?;
-        let path = Utf8PathBuf::from_path_buf(entry.path())
-            .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", path))?;
-
-        if path.is_file() && path.extension() == Some("btscript") {
-            files.push(path);
-        }
-    }
-
-    files.sort();
-    Ok(files)
+    util::find_files(path, &["btscript"])
 }
 
 #[cfg(test)]
@@ -1328,7 +1298,7 @@ mod tests {
         let result = find_test_files(&utf8_path);
         let err = result.unwrap_err();
         assert!(
-            err.to_string().contains("Expected a .btscript test file"),
+            err.to_string().contains("Expected a .btscript file"),
             "should give clear error for .bt file, got: {err}"
         );
     }

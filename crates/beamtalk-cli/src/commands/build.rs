@@ -4,6 +4,7 @@
 //! Build beamtalk projects.
 
 use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
+use crate::commands::util;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::HashMap;
@@ -369,28 +370,27 @@ fn clean_stale_artifacts(
 /// If `path` is a directory, searches `src/` subdirectory first, falling back
 /// to the directory itself.
 fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let mut files = Vec::new();
-
     if path.is_file() {
         if path.extension() == Some("bt") {
-            files.push(path.to_path_buf());
-        } else {
-            miette::bail!("File '{}' is not a .bt source file", path);
+            return Ok(vec![path.to_path_buf()]);
         }
-    } else if path.is_dir() {
-        // Look for src directory or .bt files in current directory
-        let src_dir = path.join("src");
-        let search_dir = if src_dir.exists() {
-            src_dir
-        } else {
-            path.to_path_buf()
-        };
+        miette::bail!("File '{}' is not a .bt source file", path);
+    }
 
-        collect_files_recursive(&search_dir, &["bt"], &mut files)?;
-    } else {
+    if !path.exists() {
         miette::bail!("Path '{}' does not exist", path);
     }
 
+    // Look for src directory or .bt files in current directory
+    let src_dir = path.join("src");
+    let search_dir = if src_dir.exists() {
+        src_dir
+    } else {
+        path.to_path_buf()
+    };
+
+    let mut files = Vec::new();
+    util::collect_files_recursive(&search_dir, &["bt"], &mut files)?;
     Ok(files)
 }
 
@@ -399,7 +399,7 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 /// Returns an error if the directory does not exist or cannot be read.
 pub fn collect_source_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     let mut files = Vec::new();
-    collect_files_recursive(dir, &["bt"], &mut files)?;
+    util::collect_files_recursive(dir, &["bt"], &mut files)?;
     Ok(files)
 }
 
@@ -409,41 +409,8 @@ pub fn collect_source_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>>
 /// path. Returns an error if the directory does not exist or cannot be read.
 pub fn collect_formattable_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     let mut files = Vec::new();
-    collect_files_recursive(dir, &["bt", "btscript"], &mut files)?;
+    util::collect_files_recursive(dir, &["bt", "btscript"], &mut files)?;
     Ok(files)
-}
-
-/// Recursively collect all files with the given extensions from a directory tree.
-///
-/// Symlinks are skipped to avoid potential infinite recursion from circular links.
-fn collect_files_recursive(
-    dir: &Utf8Path,
-    extensions: &[&str],
-    files: &mut Vec<Utf8PathBuf>,
-) -> Result<()> {
-    for entry in fs::read_dir(dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read directory '{dir}'"))?
-    {
-        let entry = entry.into_diagnostic()?;
-        let file_type = entry.file_type().into_diagnostic()?;
-        if file_type.is_symlink() {
-            continue;
-        }
-        let entry_path = Utf8PathBuf::from_path_buf(entry.path())
-            .map_err(|_| miette::miette!("Non-UTF-8 path"))?;
-
-        if file_type.is_dir() {
-            collect_files_recursive(&entry_path, extensions, files)?;
-        } else if file_type.is_file()
-            && entry_path
-                .extension()
-                .is_some_and(|ext| extensions.contains(&ext))
-        {
-            files.push(entry_path);
-        }
-    }
-    Ok(())
 }
 
 /// Compute the relative module path from a source file.

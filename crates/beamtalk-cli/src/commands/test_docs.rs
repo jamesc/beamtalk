@@ -26,6 +26,7 @@ use super::test_stdlib::{
     CompiledTestFile, compile_erl_files, compile_single_test_file, report_results,
     run_all_eunit_tests,
 };
+use crate::commands::util;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fmt::Write;
@@ -195,30 +196,7 @@ fn has_bunit_tests(content: &str) -> bool {
 /// If `path` is a single `.md` file, returns just that file.
 /// If `path` is a directory, returns all `.md` files directly inside it (sorted).
 fn find_md_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    if path.is_file() {
-        if path.extension() == Some("md") {
-            return Ok(vec![path.to_owned()]);
-        }
-        miette::bail!("Expected a .md file, got '{path}'");
-    }
-
-    let mut files = Vec::new();
-
-    for entry in fs::read_dir(path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read directory '{path}'"))?
-    {
-        let entry = entry.into_diagnostic()?;
-        let entry_path = Utf8PathBuf::from_path_buf(entry.path())
-            .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", path))?;
-
-        if entry_path.is_file() && entry_path.extension() == Some("md") {
-            files.push(entry_path);
-        }
-    }
-
-    files.sort();
-    Ok(files)
+    util::find_files(path, &["md"])
 }
 
 // ──────────────────────────────────────────────────────────────────────────
