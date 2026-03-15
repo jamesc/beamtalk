@@ -26,8 +26,9 @@ OTP_APPS=(beamtalk_runtime beamtalk_workspace beamtalk_compiler jsx cowboy cowli
 
 if [ "${PLATFORM}" = "windows-x86_64" ]; then
     ARCHIVE="beamtalk-${VERSION}-${PLATFORM}.zip"
-    STAGING="beamtalk-staging"
-    rm -rf "${STAGING}"
+    TOPLEVEL="beamtalk-${VERSION}"
+    STAGING="beamtalk-staging/${TOPLEVEL}"
+    rm -rf "beamtalk-staging"
     mkdir -p "${STAGING}/bin" "${STAGING}/lib/beamtalk/lib"
 
     # Binaries
@@ -58,8 +59,8 @@ if [ "${PLATFORM}" = "windows-x86_64" ]; then
     cp "${STDLIB_SRC}"/*.app "${STAGING}/lib/beamtalk/lib/beamtalk_stdlib/ebin/" 2>/dev/null || true
 
     # Create zip
-    (cd "${STAGING}" && 7z a "../${ARCHIVE}" .)
-    rm -rf "${STAGING}"
+    (cd "beamtalk-staging" && 7z a "../${ARCHIVE}" "${TOPLEVEL}")
+    rm -rf "beamtalk-staging"
 else
     # Unix: expect dist/ from `just dist` or `just install dist`
     if [ ! -d dist ] || [ ! -f dist/bin/beamtalk ]; then
@@ -67,7 +68,11 @@ else
         exit 1
     fi
     ARCHIVE="beamtalk-${VERSION}-${PLATFORM}.tar.gz"
-    tar -czf "${ARCHIVE}" -C dist .
+    TOPLEVEL="beamtalk-${VERSION}"
+    rm -rf "${TOPLEVEL}"
+    cp -r dist "${TOPLEVEL}"
+    tar -czf "${ARCHIVE}" "${TOPLEVEL}"
+    rm -rf "${TOPLEVEL}"
 fi
 
 # Generate SHA-256 checksum (cross-platform: macOS uses shasum)
