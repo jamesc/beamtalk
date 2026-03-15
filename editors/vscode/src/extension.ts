@@ -111,11 +111,9 @@ function lspIsOnPath(): Promise<boolean> {
  *
  * Resolution order:
  * 1. User-configured override (`beamtalk.server.path`)
- * 2. Extension-bundled binary: `{extensionPath}/bin/beamtalk-lsp[.exe]`
- *    (populated by `just build-vscode` in dev, bundled in .vsix for release)
- * 3. Sysroot discovery via `beamtalk --print-sysroot` → `{sysroot}/bin/beamtalk-lsp`
+ * 2. Sysroot discovery via `beamtalk --print-sysroot` → `{sysroot}/bin/beamtalk-lsp`
  *    Uses `beamtalk.binary.path` if configured, otherwise bare `beamtalk`.
- * 4. Bare `beamtalk-lsp` command name (requires PATH)
+ * 3. Bare `beamtalk-lsp` command name (requires PATH)
  *
  * Returns null if Beamtalk is not installed and no override is configured.
  */
@@ -155,28 +153,18 @@ async function resolveServerPath(context: vscode.ExtensionContext): Promise<Reso
 
     warning =
       `Configured beamtalk.server.path does not exist: ${override}. ` +
-      "Falling back to automatic discovery (bundled bin/, sysroot, then PATH).";
+      "Falling back to automatic discovery (sysroot, then PATH).";
     // Path-like override was invalid: warn and fall through.
   }
 
-  // 2. Extension-bundled binary — present in dev (just build-vscode) and .vsix releases.
-  //    Checked before sysroot so both dev builds and standalone extension installs work
-  //    without requiring `beamtalk` on PATH.
-  const bundledLsp = withPlatformExecutable(
-    path.join(context.extensionPath, "bin", "beamtalk-lsp")
-  );
-  if (fileExists(bundledLsp)) {
-    return { serverPath: bundledLsp, warning };
-  }
-
-  // 3. Sysroot discovery via `beamtalk --print-sysroot` (or configured binary).
+  // 2. Sysroot discovery via `beamtalk --print-sysroot` (or configured binary).
   //    In dev mode, `beamtalk.binary.path` should point to `./target/debug/beamtalk`.
   const sysrootLsp = await findLspViaSysroot(beamtalkBin);
   if (sysrootLsp) {
     return { serverPath: sysrootLsp, warning };
   }
 
-  // 4. Fall back to bare PATH lookup — only if beamtalk-lsp is available
+  // 3. Fall back to bare PATH lookup — only if beamtalk-lsp is available
   if (await lspIsOnPath()) {
     return { serverPath: "beamtalk-lsp", warning };
   }
