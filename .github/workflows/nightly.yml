@@ -4,7 +4,7 @@
 # Nightly Cross-Platform Test Suite
 # ===================================
 # Runs the full test suite on macOS and Windows to catch platform-specific
-# issues that PR CI (Linux + Windows-minimal) would miss.
+# issues that PR CI (Linux + macOS/Windows-minimal) would miss.
 #
 # Linux is excluded — it already gets full coverage on every PR via ci.yml.
 # Linting (clippy, fmt, dialyzer) is skipped — platform-independent, Linux covers it.
