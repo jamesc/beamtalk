@@ -9,35 +9,30 @@ TestCase subclass: OSTest
   setUp => self.isUnix := System osFamily == "unix"
 
   testRunReturnsString =>
-    self.isUnix
-      ifTrue: [
-        result := OS run: "echo hello"
-        self assert: result class equals: String
-      ]
+    // echo is a shell builtin on both Unix and Windows
+    result := OS run: "echo hello"
+    self assert: result class equals: String
 
+  // => _
   testRunTrimsTrailingWhitespace =>
-    self.isUnix
-      ifTrue: [
-        result := OS run: "echo hello"
-        self assert: result equals: "hello"
-      ]
+    result := OS run: "echo hello"
+    self assert: result equals: "hello"
 
+  // => _
   testRunWithNonStringRaisesTypeError =>
     @expect type
     self should: [OS run: 42] raise: #type_error
 
   testRunTimeoutReturnsString =>
-    self.isUnix
-      ifTrue: [
-        result := OS run: "echo hello" timeout: 5000
-        self assert: result equals: "hello"
-      ]
+    result := OS run: "echo hello" timeout: 5000
+    self assert: result equals: "hello"
 
+  // => _
   testRunTimeoutWithNonStringRaisesTypeError =>
     @expect type
     self should: [OS run: 42 timeout: 5000] raise: #type_error
 
   testRunTimeoutExpiryRaisesTimeout =>
-    self.isUnix ifTrue: [
-      self should: [OS run: "sleep 60" timeout: 100] raise: #timeout
-    ]
+    cmd := self.isUnix ifTrue: ["sleep 60"] ifFalse: ["ping -n 100 127.0.0.1"]
+    self should: [OS run: cmd timeout: 100] raise: #timeout
+// => _

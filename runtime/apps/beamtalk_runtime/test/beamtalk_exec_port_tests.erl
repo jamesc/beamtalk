@@ -18,6 +18,31 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================
+%%% Cross-platform command helpers
+%%% ============================================================================
+
+%% @private Return {Executable, Args} for a process that exits immediately with 0.
+true_cmd() ->
+    case os:type() of
+        {unix, _} -> {<<"/bin/true">>, []};
+        {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"exit 0">>]}
+    end.
+
+%% @private Return {Executable, Args} for a process that exits with non-zero.
+false_cmd() ->
+    case os:type() of
+        {unix, _} -> {<<"/bin/false">>, []};
+        {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"exit 1">>]}
+    end.
+
+%% @private Return {Executable, Args} for a long-running process.
+sleep_cmd() ->
+    case os:type() of
+        {unix, _} -> {<<"/bin/sleep">>, [<<"60">>]};
+        {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"ping -n 60 127.0.0.1 >nul">>]}
+    end.
+
+%%% ============================================================================
 %%% find_project_root/0
 %%% ============================================================================
 
@@ -100,28 +125,20 @@ open_close_test() ->
 %%% ============================================================================
 
 spawn_child_true_exits_with_zero_test() ->
-    case os:type() of
-        {unix, _} ->
-            Port = beamtalk_exec_port:open(),
-            beamtalk_exec_port:spawn_child(Port, 1, <<"/usr/bin/true">>, []),
-            ExitCode = receive_exit(Port, 1, 5000),
-            beamtalk_exec_port:close(Port),
-            ?assertEqual(0, ExitCode);
-        _ ->
-            {skip, "Unix-only test"}
-    end.
+    {TrueExe, TrueArgs} = true_cmd(),
+    Port = beamtalk_exec_port:open(),
+    beamtalk_exec_port:spawn_child(Port, 1, TrueExe, TrueArgs),
+    ExitCode = receive_exit(Port, 1, 5000),
+    beamtalk_exec_port:close(Port),
+    ?assertEqual(0, ExitCode).
 
 spawn_child_false_exits_nonzero_test() ->
-    case os:type() of
-        {unix, _} ->
-            Port = beamtalk_exec_port:open(),
-            beamtalk_exec_port:spawn_child(Port, 2, <<"/bin/false">>, []),
-            ExitCode = receive_exit(Port, 2, 5000),
-            beamtalk_exec_port:close(Port),
-            ?assertNotEqual(0, ExitCode);
-        _ ->
-            {skip, "Unix-only test"}
-    end.
+    {FalseExe, FalseArgs} = false_cmd(),
+    Port = beamtalk_exec_port:open(),
+    beamtalk_exec_port:spawn_child(Port, 2, FalseExe, FalseArgs),
+    ExitCode = receive_exit(Port, 2, 5000),
+    beamtalk_exec_port:close(Port),
+    ?assertNotEqual(0, ExitCode).
 
 %%% ============================================================================
 %%% write_stdin — data flows through stdin
@@ -138,7 +155,7 @@ write_stdin_cat_test() ->
             beamtalk_exec_port:close(Port),
             ?assertEqual(<<"hello\n">>, Stdout);
         _ ->
-            {skip, "Unix-only test"}
+            {skip, "Unix-only: no unbuffered stdin echo on Windows"}
     end.
 
 %%% ============================================================================
@@ -147,17 +164,20 @@ write_stdin_cat_test() ->
 
 kill_child_sleep_test() ->
     case os:type() of
-        {unix, _} ->
+        {win32, _} ->
+            %% Windows kill semantics only close stdin (no SIGTERM equivalent).
+            %% Process group kill via Job Objects is pending (BT-1133).
+            {skip, "Windows kill semantics via Job Objects are pending (BT-1133)"};
+        _ ->
+            {SleepExe, SleepArgs} = sleep_cmd(),
             Port = beamtalk_exec_port:open(),
-            beamtalk_exec_port:spawn_child(Port, 4, <<"/bin/sleep">>, [<<"60">>]),
+            beamtalk_exec_port:spawn_child(Port, 4, SleepExe, SleepArgs),
             beamtalk_exec_port:kill_child(Port, 4),
             % Should receive exit event (SIGTERM -> exit)
             ExitCode = receive_exit(Port, 4, 5000),
             beamtalk_exec_port:close(Port),
             % SIGTERM exit codes are system-dependent; just assert we got an exit event.
-            ?assert(is_integer(ExitCode));
-        _ ->
-            {skip, "Unix-only test"}
+            ?assert(is_integer(ExitCode))
     end.
 
 %%% ============================================================================

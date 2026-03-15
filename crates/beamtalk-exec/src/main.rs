@@ -242,6 +242,14 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
     #[cfg(unix)]
     configure_process_group(&mut cmd);
 
+    // On Windows, prevent child processes from opening visible console windows.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
     let mut child = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
 
     let child_stdin = child.stdin.take();

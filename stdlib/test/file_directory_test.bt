@@ -211,10 +211,12 @@ TestCase subclass: FileDirectoryTest
     self assert: (cwd class name) equals: #String
 
   testCwdIsAbsolute =>
-    // Unix only: absolute paths always start with '/'
-    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
+    // Cross-platform: Unix starts with '/', Windows cwd from Erlang has ':' (e.g. c:/Users)
     cwd := File cwd
-    self assert: (cwd includesSubstring: "/")
+    isAbsolute := System osFamily == "unix" ifTrue: [
+      cwd includesSubstring: "/"
+    ] ifFalse: [cwd includesSubstring: ":"]
+    self assert: isAbsolute
 
   testTempDirectory =>
     tmp := File tempDirectory
