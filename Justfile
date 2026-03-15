@@ -223,28 +223,28 @@ search-eval logfile:
 
     if [ "$zero" -gt 0 ]; then
         echo "── Zero-result query hashes ──"
-        grep 'search_examples' "{{logfile}}" | grep 'result_count=0' | grep -oP 'query_hash=\K[a-f0-9]+' | sort | uniq -c | sort -rn | head -20
+        grep 'search_examples' "{{logfile}}" | grep 'result_count=0' | sed -n 's/.*query_hash=\([a-f0-9]*\).*/\1/p' | sort | uniq -c | sort -rn | head -20
         echo ""
     fi
 
     # Low-score queries (top_score < 5)
     echo "── Low-score queries (top_score < 5) ──"
-    grep 'search_examples' "{{logfile}}" | grep -oP 'top_score=\K[0-9]+' | awk '$1 > 0 && $1 < 5' | wc -l | xargs -I{} echo "Count: {}"
+    grep 'search_examples' "{{logfile}}" | sed -n 's/.*top_score=\([0-9]*\).*/\1/p' | awk '$1 > 0 && $1 < 5' | wc -l | xargs -I{} echo "Count: {}"
     echo ""
 
     # Score distribution
     echo "── Score distribution ──"
-    grep 'search_examples' "{{logfile}}" | grep -oP 'top_score=\K[0-9]+' | sort -n | uniq -c | sort -rn | head -20
+    grep 'search_examples' "{{logfile}}" | sed -n 's/.*top_score=\([0-9]*\).*/\1/p' | sort -n | uniq -c | sort -rn | head -20
     echo ""
 
     # Query frequency (by hash)
     echo "── Top query hashes (by frequency) ──"
-    grep 'search_examples' "{{logfile}}" | grep -oP 'query_hash=\K[a-f0-9]+' | sort | uniq -c | sort -rn | head -20
+    grep 'search_examples' "{{logfile}}" | sed -n 's/.*query_hash=\([a-f0-9]*\).*/\1/p' | sort | uniq -c | sort -rn | head -20
     echo ""
 
     # Duration stats
     echo "── Duration (μs) ──"
-    grep 'search_examples' "{{logfile}}" | grep -oP 'duration_us=\K[0-9]+' | awk '{sum+=$1; count++; if($1>max)max=$1; if(min==""||$1<min)min=$1} END {printf "min=%d avg=%d max=%d count=%d\n", min, sum/count, max, count}'
+    grep 'search_examples' "{{logfile}}" | sed -n 's/.*duration_us=\([0-9]*\).*/\1/p' | awk '{sum+=$1; count++; if($1>max)max=$1; if(min==""||$1<min)min=$1} END {printf "min=%d avg=%d max=%d count=%d\n", min, sum/count, max, count}'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format
