@@ -104,32 +104,68 @@ c increment  // now adds 10 instead of 1
 
 ## Getting Started
 
-### Prerequisites
+### Install from Release
 
-- **Rust** (latest stable)
-- **Erlang/OTP 26+** with `erlc` on PATH
-- **Node.js LTS** (optional) — for building the VS Code extension
-
-### Build & Run
-
-#### Using Just (Recommended)
-
-The project includes a [Justfile](Justfile) with common tasks:
+The quickest way to get started — downloads a prebuilt binary for your platform:
 
 ```bash
-# Clone and setup
+curl -fsSL https://jamesc.github.io/beamtalk/install.sh | sh
+```
+
+This installs to `~/.beamtalk/bin/`. You can customise the location:
+
+```bash
+curl -fsSL https://jamesc.github.io/beamtalk/install.sh | sh -s -- --prefix /usr/local
+```
+
+**Prerequisite:** [Erlang/OTP 27+](https://www.erlang.org/downloads) must be installed with `erl` on PATH.
+
+<details>
+<summary>Installing Erlang/OTP</summary>
+
+**macOS (Homebrew):**
+```bash
+brew install erlang
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt install erlang
+```
+
+**Windows:** Download the installer from [erlang.org](https://www.erlang.org/downloads).
+
+**Version manager (any platform):** [asdf](https://asdf-vm.com/) with [asdf-erlang](https://github.com/asdf-vm/asdf-erlang):
+```bash
+asdf plugin add erlang
+asdf install erlang 27.0
+asdf global erlang 27.0
+```
+</details>
+
+After installation, start the REPL:
+
+```bash
+beamtalk repl
+```
+
+### Build from Source
+
+<details>
+<summary>Prerequisites for building from source</summary>
+
+- **Rust** (latest stable) — [rustup.rs](https://rustup.rs/)
+- **Erlang/OTP 27+** with `erl` and `erlc` on PATH
+- **rebar3** — Erlang build tool ([rebar3.org](https://rebar3.org/))
+- **Just** — command runner (`cargo install just`)
+- **Node.js LTS** (optional) — only for building the VS Code extension
+</details>
+
+```bash
+# Clone and build
 git clone https://github.com/jamesc/beamtalk.git
 cd beamtalk
-
-# Install Just (if not already installed)
-cargo install just
-
-# See all available tasks
-just --list
-
-# Run local CI checks (build, lint, unit & E2E tests)
-# Note: runtime integration tests run only in GitHub Actions CI
-just ci
+just build
 
 # Start the REPL
 just repl
@@ -139,26 +175,11 @@ beamtalk test              # Run BUnit TestCase tests
 just test-stdlib           # Run compiled expression tests
 just test-e2e              # Run REPL integration tests
 
-# Clean build artifacts (works with Docker volumes)
-just clean
+# Run full CI checks
+just ci
 ```
 
-#### Using Cargo Directly
-
-```bash
-# Build
-cargo build
-
-# Start the REPL
-cargo run -p beamtalk-cli --bin beamtalk -- repl
-
-# Clean (note: fails in devcontainer due to volume mount)
-cargo clean  # Use `just clean` instead in devcontainer
-```
-
-### Installation
-
-You can install beamtalk to a system prefix for use outside the development checkout:
+#### Install from Source
 
 ```bash
 # Install to /usr/local (may need sudo)
@@ -166,9 +187,6 @@ just install
 
 # Install to a custom prefix
 just install PREFIX=$HOME/.local
-
-# Create a local distribution in dist/
-just dist
 
 # Uninstall
 just uninstall PREFIX=$HOME/.local
