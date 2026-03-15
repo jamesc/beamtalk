@@ -413,9 +413,9 @@ validate_config_non_binary_dir_test() ->
         beamtalk_subprocess:start(#{executable => EchoExe, args => [], dir => 42}).
 
 validate_config_beamtalk_array_coercion_test() ->
-    {EchoExe, _} = echo_cmd(<<"hello">>),
+    {EchoExe, EchoArgs} = echo_cmd(<<"hello">>),
     %% Beamtalk Array tagged map should be coerced to a plain list
-    BtArray = #{'$beamtalk_class' => 'Array', 'data' => array:from_list([<<"hello">>])},
+    BtArray = #{'$beamtalk_class' => 'Array', 'data' => array:from_list(EchoArgs)},
     {ok, Pid} = beamtalk_subprocess:start(#{
         executable => EchoExe,
         args => BtArray
