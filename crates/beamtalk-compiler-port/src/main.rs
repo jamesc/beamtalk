@@ -1195,7 +1195,24 @@ struct Cli {
     verbose: u8,
 }
 
+/// Match the CLI's 8 MB stack so deeply-nested source files don't overflow
+/// the default Windows 1 MB thread stack.
+const STACK_SIZE: usize = 8 * 1024 * 1024;
+
 fn main() {
+    // Spawn the real entry point on a thread with a larger stack.
+    // On Windows the default is 1 MB, which overflows on non-trivial
+    // Beamtalk source files. Linux defaults to 8 MB so it rarely hits
+    // this, but the explicit size makes behaviour consistent everywhere.
+    std::thread::Builder::new()
+        .stack_size(STACK_SIZE)
+        .spawn(run)
+        .expect("failed to spawn main thread")
+        .join()
+        .expect("main thread panicked");
+}
+
+fn run() {
     let cli = Cli::parse();
 
     // Only initialize tracing when explicitly requested.
