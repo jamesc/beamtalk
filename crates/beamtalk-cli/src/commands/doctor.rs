@@ -120,10 +120,7 @@ fn check_erlc() -> CheckResult {
 }
 
 /// Check that the Beamtalk runtime directory can be found.
-fn check_runtime(
-    info: Option<&RuntimeInfo>,
-    err: Option<&miette::Report>,
-) -> CheckResult {
+fn check_runtime(info: Option<&RuntimeInfo>, err: Option<&miette::Report>) -> CheckResult {
     let Some((path, layout)) = info else {
         let detail = err.map_or_else(
             || "run from the repo root or set BEAMTALK_RUNTIME_DIR".into(),
