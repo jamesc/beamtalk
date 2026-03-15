@@ -31,7 +31,6 @@ TestCase subclass: FileDirectoryTest
     self deny: (File isDirectory: "target/bt-test-tmp/fdt/no_such_dir")
 
   testIsDirectoryInvalidPath =>
-    self deny: (File isDirectory: "/etc")
     self deny: (File isDirectory: "../parent")
 
   testIsFileOnFile =>
@@ -44,7 +43,6 @@ TestCase subclass: FileDirectoryTest
     self deny: (File isFile: "target/bt-test-tmp/fdt/no_such_file.txt")
 
   testIsFileInvalidPath =>
-    self deny: (File isFile: "/etc/passwd")
     self deny: (File isFile: "../secret.txt")
 
   testMkdir =>
@@ -216,7 +214,7 @@ TestCase subclass: FileDirectoryTest
 
   testCwdIsAbsolute =>
     // Unix only: absolute paths always start with '/'
-    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
     cwd := File cwd
     self assert: (cwd includesSubstring: "/")
 

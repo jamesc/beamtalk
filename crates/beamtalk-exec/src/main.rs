@@ -789,18 +789,18 @@ mod tests {
         let writer: SharedWriter = Arc::new(Mutex::new(io::stdout()));
         let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
 
-        let args_term = Term::from(List::from(vec![] as Vec<Term>));
+        let args_term = Term::from(List::from(vec![binary_term(b"true")]));
         let env_term = Term::from(Map::from(HashMap::<Term, Term>::new()));
         let req = Term::from(Map::from([
             (atom("command"), atom("spawn")),
             (atom("child_id"), int_term(1)),
-            (atom("executable"), binary_term(b"/bin/true")),
+            (atom("executable"), binary_term(b"/usr/bin/env")),
             (atom("args"), args_term),
             (atom("env"), env_term),
         ]));
 
         let result = handle_command(&req, &writer, &children);
-        assert!(result.is_ok(), "spawn /bin/true should succeed: {result:?}");
+        assert!(result.is_ok(), "spawn `env true` should succeed: {result:?}");
 
         // Wait briefly for the reaper thread to clean up.
         let deadline = Instant::now() + Duration::from_secs(5);
