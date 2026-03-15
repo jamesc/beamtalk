@@ -5,9 +5,11 @@ plus a VS Code extension for the integrated development experience.
 
 ## Requirements
 
-- **Erlang/OTP 26+** — the BEAM runtime that Beamtalk compiles to.
-  - Linux/macOS: install via your system package manager or [kerl](https://github.com/kerl/kerl).
-  - Windows: download from [erlang.org/downloads](https://www.erlang.org/downloads).
+- **Erlang/OTP 27+** — the BEAM runtime that Beamtalk compiles to.
+  - macOS: `brew install erlang`
+  - Ubuntu/Debian: `sudo apt install erlang`
+  - Windows: download from [erlang.org/downloads](https://www.erlang.org/downloads)
+  - Any platform via [asdf](https://asdf-vm.com/): `asdf plugin add erlang && asdf install erlang 27.0`
 - **VS Code 1.85+** — required for the extension (optional for CLI-only use).
 
 ## Quick install (Linux and macOS)
@@ -21,6 +23,13 @@ curl -fsSL https://beamtalk.dev/install.sh | sh
 This downloads the latest release for your platform, extracts it to
 `~/.beamtalk`, and adds `~/.beamtalk/bin` to your shell's PATH.
 
+To install a specific version or custom location:
+
+```
+curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --prefix /usr/local
+```
+
 ## Manual install from release archive
 
 Download the latest release for your platform from the
@@ -29,37 +38,34 @@ Download the latest release for your platform from the
 ### Linux
 
 ```
-beamtalk-<version>-x86_64-unknown-linux-gnu.tar.gz   # x86-64
-beamtalk-<version>-aarch64-unknown-linux-gnu.tar.gz   # ARM64
+beamtalk-<version>-linux-x86_64.tar.gz
 ```
 
 Extract and add to your PATH:
 
 ```
-tar xzf beamtalk-<version>-<platform>.tar.gz
-echo 'export PATH="$HOME/beamtalk-<version>/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+tar xzf beamtalk-<version>-linux-x86_64.tar.gz
+export PATH="$HOME/beamtalk-<version>/bin:$PATH"
 ```
 
 ### macOS
 
 ```
-beamtalk-<version>-aarch64-apple-darwin.tar.gz   # Apple Silicon
-beamtalk-<version>-x86_64-apple-darwin.tar.gz    # Intel
+beamtalk-<version>-macos-arm64.tar.gz    # Apple Silicon
+beamtalk-<version>-macos-x86_64.tar.gz   # Intel
 ```
 
 Extract and add to your PATH:
 
 ```
-tar xzf beamtalk-<version>-<platform>.tar.gz
-echo 'export PATH="$HOME/beamtalk-<version>/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
+tar xzf beamtalk-<version>-macos-<arch>.tar.gz
+export PATH="$HOME/beamtalk-<version>/bin:$PATH"
 ```
 
 ### Windows
 
 ```
-beamtalk-<version>-x86_64-pc-windows-msvc.zip
+beamtalk-<version>-windows-x86_64.zip
 ```
 
 Extract the zip, then add the `bin\` directory to your `PATH` via
@@ -81,10 +87,11 @@ REPL, live workspace bindings panel, and inline documentation.
 2. Search for **Beamtalk** and click **Install**.
 3. Reload the window when prompted.
 
-Alternatively, install from the command line:
+Alternatively, install the `.vsix` from the
+[GitHub Releases](https://github.com/jamesc/beamtalk/releases) page:
 
 ```
-code --install-extension jamesc.beamtalk
+code --install-extension beamtalk-vscode-<version>.vsix
 ```
 
 Once installed, open any `.bt` file to activate the extension.
@@ -92,10 +99,10 @@ The status bar will show the Beamtalk workspace connection status.
 
 ## Quick start
 
-Create a new workspace:
+Create a new project:
 
 ```
-beamtalk workspace new my-project
+beamtalk new my-project
 cd my-project
 ```
 

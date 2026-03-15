@@ -378,3 +378,38 @@ TestCase subclass: PatternMatchingTest
         _ -> "no score"
       ])
       equals: "neg one"
+
+  testTuplePatternInMatchArm =>
+    // Tuple pattern arms — basic tagged tuple match
+    t := Erlang erlang list_to_tuple: #(#ok, 42)
+    self
+      assert: (t match: [
+        {#ok, v} -> v;
+        {#error, _} -> 0;
+        _ -> -1
+      ])
+      equals: 42
+    // Tuple arm fallthrough: tag doesn't match
+    t2 := Erlang erlang list_to_tuple: #(#error, "oops")
+    self
+      assert: (t2 match: [
+        {#ok, v} -> v;
+        {#error, msg} -> msg;
+        _ -> "unknown"
+      ])
+      equals: "oops"
+    // Tuple arm fallthrough: subject is not a tuple
+    self
+      assert: (42 match: [
+        {a, b} -> a + b;
+        _ -> 0
+      ])
+      equals: 0
+    // Tuple arm with variable binding
+    t3 := Erlang erlang list_to_tuple: #(10, 20)
+    self
+      assert: (t3 match: [
+        {a, b} -> a + b;
+        _ -> 0
+      ])
+      equals: 30

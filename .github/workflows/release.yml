@@ -338,8 +338,13 @@ jobs:
           ./target/release/beamtalk.exe build-stdlib
 
       - name: Smoke test
-        run: ./target/release/beamtalk.exe --version
         shell: bash
+        run: |
+          ./target/release/beamtalk.exe --version
+          ./target/release/beamtalk.exe new smoke_project
+          printf 'Object subclass: SmokeTest\n  class run => 21 + 21\n' > smoke_project/src/SmokeTest.bt
+          cd smoke_project && ../target/release/beamtalk.exe run SmokeTest run
+          echo "Smoke test passed"
 
       - name: Package zip
         id: package

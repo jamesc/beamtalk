@@ -1,8 +1,8 @@
 # Beamtalk Language Features
 
-Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy and [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) for syntax design decisions.
+Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy and [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) for syntax design decisions.
 
-**Status:** Active development — implemented features are stable; planned sections are marked inline.
+**Status:** v0.1.0 — implemented features are stable; planned sections are marked inline.
 
 **Syntax note:** Beamtalk uses a modernised Smalltalk syntax: `//` comments (not `"..."`), standard math precedence (not left-to-right), and optional statement terminators (newlines work).
 
@@ -116,7 +116,7 @@ Actor subclass: Counter
 
   increment => self.value := self.value + 1
   decrement => self.value := self.value - 1
-  getValue => ^self.value
+  getValue => self.value
   incrementBy: delta => self.value := self.value + delta
 ```
 
@@ -140,7 +140,7 @@ Actor subclass: Counter
 
   // Methods mutate state via message passing
   increment => self.count := self.count + 1
-  getCount => ^self.count
+  getCount => self.count
 ```
 
 `Object subclass:` also produces a value type (legacy form). Prefer `Value subclass:` for new code to make intent explicit.
@@ -172,6 +172,20 @@ ProtoObject (minimal - identity, DNU)
 - **Semantics**: Clear distinction between data and concurrent entities
 - **BEAM interop**: Maps naturally to Erlang records/maps vs gen_server processes
 - **Idiomatic code**: Use value types for data, actors for behavior
+
+### Class Modifiers
+
+Class definitions support optional modifier keywords before the superclass:
+
+| Modifier | Meaning | Example |
+|----------|---------|---------|
+| `sealed` | Cannot be subclassed by user code | `sealed Object subclass: Stream` |
+| `abstract` | Must be subclassed; cannot be instantiated directly | `abstract Object subclass: Supervisor` |
+| `typed` | All fields and methods require type annotations (ADR 0025) | `typed Actor subclass: TypedAccount` |
+
+Modifiers can be combined: `sealed typed Collection subclass: Array`.
+
+Most stdlib classes are `sealed` — this prevents user code from subclassing built-in types like `Integer`, `String`, `Array`, `Result`, and `Stream`. If you need custom behaviour, compose with these types rather than subclassing them.
 
 ### Value subclass: in Depth
 
@@ -956,7 +970,7 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Literal character | `$a` | Exact character match |
 | Negative number | `-1` | Negative integer/float match |
 | Variable | `x` | Binds matched value to name |
-| Tuple | `{a, b}` | Destructure tuple (patterns supported; tuple literals planned) |
+| Tuple | `{a, b}` | Destructure tuple in assignment and match arms |
 | Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported |
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
@@ -990,8 +1004,10 @@ Pattern matching can bind variables in match arms:
 10 match: [x when: [x > 100] -> "big"; x when: [x > 5] -> "medium"; _ -> "small"]
 // => "medium"
 
-// Tuple destructuring in match arms (parser supports; runtime planned)
-// {1, 2} match: [{a, b} -> a + b]
+// Tuple destructuring in match arms
+t := Erlang erlang list_to_tuple: #(#ok, 42)
+t match: [{#ok, v} -> v; {#error, _} -> 0]
+// => 42
 ```
 
 ### Rest Patterns in Destructuring (BT-1251)
@@ -1014,7 +1030,7 @@ The `...identifier` syntax in array destructuring captures remaining elements:
 
 The rest element must be the last in the pattern. Rest patterns are supported in destructuring assignment only — they are not yet supported in `match:` arms.
 
-> **Note:** Tuple destructuring (`{x, y} := expr`) and `collect:` with pattern blocks are planned but not yet implemented.
+> **Note:** Tuple destructuring works in both assignment (`{x, y} := expr`) and `match:` arms. `collect:` with pattern blocks is not yet supported.
 
 ---
 
@@ -1302,25 +1318,81 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 
 ## Standard Library
 
-Core classes implemented and tested:
+76 classes implemented and tested. For detailed API documentation, see [API Reference](https://www.beamtalk.dev/apidocs/).
+
+**Core types:**
+
+| Class | Description |
+|-------|-------------|
+| **Integer**, **Float**, **Number** | Arbitrary precision arithmetic |
+| **String**, **Symbol**, **Character** | UTF-8 text, interned symbols, Unicode characters |
+| **Boolean**, **True**, **False** | Boolean values with control flow |
+| **Nil** (UndefinedObject) | Null object pattern |
+| **Block** | First-class closures |
+
+**Collections:**
+
+| Class | Description |
+|-------|-------------|
+| **Array** | Fixed-size indexed collection |
+| **List** | Linked list with fast prepend (`#()` syntax) |
+| **Dictionary** | Key-value map |
+| **Set** | Unordered unique elements |
+| **Bag** | Multiset — allows duplicate elements, counts occurrences |
+| **Tuple** | Fixed-size heterogeneous container |
+| **Queue** | O(1) amortised FIFO queue |
+| **Interval** | Arithmetic sequence (`1 to: 10`, `1 to: 10 by: 2`) |
+| **Stream** | Lazy, closure-based sequences ([ADR 0021](ADR/0021-streams-and-io-design.md)) |
+| **Ets** | Shared in-memory tables (BEAM ETS wrapper) |
+
+**Actors and concurrency:**
 
 | Class | Description |
 |-------|-------------|
 | **Actor** | Base class for all actors (BEAM processes) |
-| **Block** | First-class closures |
-| **Boolean** | `True` and `False` with control flow |
-| **Integer** | Arbitrary precision arithmetic |
-| **String** | UTF-8 text with operations |
-| **List** | Linked list with fast prepend (`#()` syntax) |
-| **Dictionary** | Key-value map |
-| **Set** | Unordered unique elements |
-| **Interval** | Arithmetic sequence of integers (`1 to: 10`, `1 to: 10 by: 2`) |
-| **Bag** | Multiset — allows duplicate elements, counts occurrences |
-| **Stream** | Lazy, closure-based sequences ([ADR 0021](ADR/0021-streams-and-io-design.md)) |
-| **Nil** | Null object pattern |
-| **Result** | Typed success/error value for expected failures ([ADR 0060](ADR/0060-result-type-hybrid-error-handling.md)) |
+| **Supervisor**, **DynamicSupervisor** | OTP supervision trees ([ADR 0059](ADR/0059-supervision-tree-syntax.md)) |
+| **AtomicCounter** | Lock-free shared counter |
+| **Timer** | Periodic and one-shot timers |
+| **Pid**, **Reference**, **Port** | BEAM primitive types |
 
-For detailed API documentation, see [API Reference](https://jamesc.github.io/beamtalk/apidocs/).
+**Error handling:**
+
+| Class | Description |
+|-------|-------------|
+| **Result** | Typed success/error for expected failures ([ADR 0060](ADR/0060-result-type-hybrid-error-handling.md)) |
+| **Error**, **RuntimeError**, **TypeError** | Error hierarchy |
+| **BEAMError**, **ExitError**, **ThrowError** | BEAM exception wrappers |
+| **Exception** | Base exception type |
+
+**I/O and system:**
+
+| Class | Description |
+|-------|-------------|
+| **File**, **FileHandle** | File system operations |
+| **Subprocess**, **ReactiveSubprocess** | OS process execution ([ADR 0051](ADR/0051-subprocess-execution.md)) |
+| **OS**, **System** | Platform info and system operations |
+| **Json**, **Yaml** | Data serialisation |
+| **Regex** | Regular expression matching |
+| **DateTime**, **Time** | Date/time operations |
+| **Random** | Random number generation |
+
+**Networking:**
+
+| Class | Description |
+|-------|-------------|
+| **HTTPServer**, **HTTPClient** | HTTP server and client |
+| **HTTPRouter**, **HTTPRoute**, **HTTPRouteBuilder** | Declarative HTTP routing |
+| **HTTPRequest**, **HTTPResponse** | Request/response objects |
+
+**Reflection and meta:**
+
+| Class | Description |
+|-------|-------------|
+| **Class**, **Metaclass**, **ClassBuilder** | Class reflection and dynamic class creation |
+| **Behaviour** | Shared behaviour protocol |
+| **CompiledMethod** | Method introspection |
+| **StackFrame** | Stack trace inspection |
+| **TestCase**, **TestResult**, **TestRunner** | BUnit test framework ([ADR 0014](ADR/0014-beamtalk-test-framework.md)) |
 
 ### Interval — Arithmetic Sequences
 

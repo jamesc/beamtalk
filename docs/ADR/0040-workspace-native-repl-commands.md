@@ -559,7 +559,7 @@ Add BUnit tests for all new facade and Behaviour methods. Add e2e tests exercisi
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` — delegate to workspace_environment
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl` — delegate to beamtalk_interface
 - `stdlib/test/*.bt` — BUnit tests for new methods
-- `tests/e2e/cases/*.bt` — e2e tests for `:` aliases and message-send forms
+- `tests/e2e/cases/*.btscript` — e2e tests for `:` aliases and message-send forms
 - `docs/beamtalk-language-features.md` — update workspace section
 
 **Affected components summary:**

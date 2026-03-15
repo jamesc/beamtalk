@@ -1,0 +1,189 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nightly Cross-Platform Test Suite
+# ===================================
+# Runs the full test suite on macOS and Windows to catch platform-specific
+# issues that PR CI (Linux + Windows-minimal) would miss.
+#
+# Linux is excluded — it already gets full coverage on every PR via ci.yml.
+# Linting (clippy, fmt, dialyzer) is skipped — platform-independent, Linux covers it.
+#
+# Skips if no commits landed in the last 24 hours.
+
+name: Nightly
+
+on:
+  schedule:
+    # 6am UTC daily (10pm PT, 7am CET)
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ─── Skip if no recent commits ──────────────────────────────────────
+  check-activity:
+    runs-on: ubuntu-latest
+    outputs:
+      has_commits: ${{ steps.check.outputs.has_commits }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for commits in last 24h
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "has_commits=true" >> "$GITHUB_OUTPUT"
+          elif git log --since="24 hours ago" --oneline | head -1 | grep -q .; then
+            echo "has_commits=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_commits=false" >> "$GITHUB_OUTPUT"
+            echo "No commits in last 24h — skipping nightly run"
+          fi
+
+  # ─── macOS ARM64 (Apple Silicon) ────────────────────────────────────
+  macos:
+    needs: check-activity
+    if: needs.check-activity.outputs.has_commits == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: nightly-${{ runner.os }}-arm64-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            nightly-${{ runner.os }}-arm64-cargo-
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: nightly-${{ runner.os }}-arm64-erlang-otp-27.0-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          restore-keys: |
+            nightly-${{ runner.os }}-arm64-erlang-otp-27.0-
+
+      - name: Build
+        run: just build
+
+      - name: Test Rust
+        run: just test-rust
+
+      - name: Test stdlib
+        run: just test-stdlib
+
+      - name: Test BUnit
+        run: just test-bunit
+
+      - name: Test Erlang runtime
+        run: just test-runtime
+
+      - name: Test workspace integration
+        run: just test-integration
+
+      - name: Test MCP server
+        run: just test-mcp
+
+      - name: Test E2E
+        run: just test-e2e
+
+  # ─── Windows x86_64 (full suite) ───────────────────────────────────
+  windows:
+    needs: check-activity
+    if: needs.check-activity.outputs.has_commits == 'true'
+    # Pin to 2022: erlef/setup-beam@v1 doesn't support windows-2025 yet
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: nightly-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            nightly-${{ runner.os }}-cargo-
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/AppData/Local/rebar3
+            runtime/_build
+          key: nightly-${{ runner.os }}-erlang-otp-27.0-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          restore-keys: |
+            nightly-${{ runner.os }}-erlang-otp-27.0-
+
+      - name: Build
+        run: just build
+
+      - name: Test Rust
+        run: just test-rust
+
+      - name: Test stdlib
+        run: just test-stdlib
+
+      - name: Test BUnit
+        run: just test-bunit
+
+      - name: Test Erlang runtime
+        run: just test-runtime
+
+      - name: Test workspace integration
+        run: just test-integration
+
+      - name: Test MCP server
+        run: just test-mcp
+
+      - name: Test E2E
+        run: just test-e2e

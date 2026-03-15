@@ -28,7 +28,7 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
    - Provide usage examples in comments
 
 2. **Implement runtime support** (for primitive methods only)
-   - Add dispatch clause in the appropriate runtime module (e.g., `runtime/src/beamtalk_integer.erl`)
+   - Add dispatch clause in the appropriate runtime module (e.g., `runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl`)
    - Runtime modules provide type checking, structured errors, and extension registry fallback
    - Add intrinsic name mapping in the compiler's intrinsic registry (one line)
    - For pure Beamtalk methods, skip this step — the compiler handles them directly
@@ -48,10 +48,11 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
    - Explain what's happening under the hood
    - Document BEAM mapping and generated code
 
-6. **Run E2E tests after EVERY change**
+6. **Run tests after EVERY change**
    ```bash
-   just test-e2e
-   # Must show: "X/X tests passed" (all pass)
+   just test-stdlib     # Bootstrap expression tests (~14s)
+   just test-bunit      # BUnit TestCase tests
+   just test-e2e        # REPL integration tests (~50s)
    ```
 
 7. **Update `stdlib/src/README.md`**
@@ -60,13 +61,10 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
    - Update implementation status table
 
 **Example from BT-176 (ProtoObject):**
-- ✅ Class: `stdlib/src/ProtoObject.bt` --- pragma declarations + pure Beamtalk methods
-- ✅ Runtime: `runtime/src/beamtalk_primitive.erl` — dispatch for ProtoObject methods
-- ✅ Fixtures: `tests/e2e/fixtures/simple_proxy.bt`
-- ✅ E2E Tests: `tests/e2e/cases/protoobject.bt`, `protoobject_actors.bt`
-- ✅ Example: `examples/protoobject_proxy.bt` (194 lines with walkthrough)
+- ✅ Class: `stdlib/src/ProtoObject.bt` — pragma declarations + pure Beamtalk methods
+- ✅ Runtime: `runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl` — dispatch for ProtoObject methods
+- ✅ Tests: `stdlib/test/` BUnit tests for the class
 - ✅ Docs: Updated `stdlib/src/README.md` with class hierarchy
-- ✅ Result: All 224 E2E tests pass
 
 ## Debugging Compilation
 
@@ -166,9 +164,9 @@ E2E tests are best for:
 - ✅ Primitive operations (arithmetic, strings, booleans)  
 - ✅ Class loading and compilation
 - ✅ Message syntax and parsing
-- ⚠️ Limited for: Stateful actor interactions (use `runtime/test/*.erl` instead)
+- ⚠️ Limited for: Stateful actor interactions (use `runtime/apps/beamtalk_runtime/test/*.erl` instead)
 
-Example: `runtime/test/beamtalk_actor_tests.erl` has comprehensive tests for:
+Example: `runtime/apps/beamtalk_runtime/test/beamtalk_actor_tests.erl` has comprehensive tests for:
 - doesNotUnderstand with proxies
 - Concurrent message sends
 - State mutations

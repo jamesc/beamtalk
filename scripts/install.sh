@@ -174,15 +174,19 @@ install_beamtalk() {
     echo "Installing to ${PREFIX}..."
     mkdir -p "${PREFIX}"
 
+    # Archives contain a top-level beamtalk-{version}/ directory;
+    # strip it so contents go directly into PREFIX.
     case "${EXT}" in
         tar.gz)
-            tar -xzf "${TMPDIR}/${ARCHIVE_NAME}" -C "${PREFIX}"
+            tar -xzf "${TMPDIR}/${ARCHIVE_NAME}" -C "${PREFIX}" --strip-components=1
             ;;
         zip)
             if command -v unzip >/dev/null 2>&1; then
-                unzip -qo "${TMPDIR}/${ARCHIVE_NAME}" -d "${PREFIX}"
+                unzip -qo "${TMPDIR}/${ARCHIVE_NAME}" -d "${TMPDIR}/extract"
+                cp -r "${TMPDIR}/extract/beamtalk-${VERSION}/"* "${PREFIX}/"
             elif command -v 7z >/dev/null 2>&1; then
-                7z x -o"${PREFIX}" -y "${TMPDIR}/${ARCHIVE_NAME}" >/dev/null
+                7z x -o"${TMPDIR}/extract" -y "${TMPDIR}/${ARCHIVE_NAME}" >/dev/null
+                cp -r "${TMPDIR}/extract/beamtalk-${VERSION}/"* "${PREFIX}/"
             else
                 echo "Error: unzip or 7z required to extract .zip archives"
                 exit 1
