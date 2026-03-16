@@ -37,8 +37,7 @@
 use std::collections::HashSet;
 
 use crate::ast::{
-    Block, ClassDefinition, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module,
-    StringSegment,
+    Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
 use crate::lint::LintPass;
 use crate::source_analysis::Diagnostic;
@@ -58,7 +57,7 @@ impl LintPass for DeadBlockAssignmentPass {
                 continue;
             }
             for method in class.methods.iter().chain(class.class_methods.iter()) {
-                check_method(method, class, diagnostics);
+                check_method(method, diagnostics);
             }
         }
 
@@ -68,37 +67,10 @@ impl LintPass for DeadBlockAssignmentPass {
             if class_kind == ClassKind::Actor {
                 continue;
             }
-            check_method(&standalone.method, &DUMMY_OBJECT_CLASS, diagnostics);
+            check_method(&standalone.method, diagnostics);
         }
     }
 }
-
-/// Dummy class definition used for standalone methods where we can't find the class.
-/// Defaults to Object kind (non-Actor), which is the safe/conservative choice.
-static DUMMY_OBJECT_CLASS: std::sync::LazyLock<ClassDefinition> = std::sync::LazyLock::new(|| {
-    use crate::ast::{CommentAttachment, Identifier};
-    use crate::source_analysis::Span;
-    ClassDefinition {
-        name: Identifier {
-            name: "".into(),
-            span: Span::new(0, 0),
-        },
-        superclass: None,
-        class_kind: ClassKind::Object,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        supervisor_kind: None,
-        state: Vec::new(),
-        methods: Vec::new(),
-        class_methods: Vec::new(),
-        class_variables: Vec::new(),
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        span: Span::new(0, 0),
-    }
-});
 
 /// Find the `ClassKind` for a standalone method's class name.
 fn find_class_kind(module: &Module, class_name: &str) -> ClassKind {
@@ -163,11 +135,7 @@ impl LintScope {
 // ── Traversal helpers ─────────────────────────────────────────────────────────
 
 /// Check a method: push a new scope, define method parameters, traverse body.
-fn check_method(
-    method: &MethodDefinition,
-    _class: &ClassDefinition,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
     let mut scope = LintScope::new();
     scope.push();
     for param in &method.parameters {
@@ -246,7 +214,7 @@ fn walk_expr(
             ..
         } => {
             walk_expr(receiver, scope, safe_params, diagnostics);
-            walk_msg_args(&selector.name(), arguments, scope, diagnostics);
+            walk_msg_args(&selector.name(), arguments, scope, safe_params, diagnostics);
         }
 
         Cascade {
@@ -254,7 +222,7 @@ fn walk_expr(
         } => {
             walk_expr(receiver, scope, safe_params, diagnostics);
             for msg in messages {
-                walk_msg_args(&msg.selector.name(), &msg.arguments, scope, diagnostics);
+                walk_msg_args(&msg.selector.name(), &msg.arguments, scope, safe_params, diagnostics);
             }
         }
 
@@ -319,10 +287,15 @@ fn walk_expr(
 }
 
 /// Walk message arguments, entering blocks with appropriate context.
+///
+/// `safe_params` is forwarded to non-block arguments so that assignments inside
+/// parenthesised expressions (e.g. `foo bar: (x := 1)`) are still checked when
+/// the message send itself is inside a block.
 fn walk_msg_args(
     selector: &str,
     arguments: &[Expression],
     scope: &mut LintScope,
+    safe_params: Option<&HashSet<String>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (i, arg) in arguments.iter().enumerate() {
@@ -333,8 +306,7 @@ fn walk_msg_args(
             };
             enter_block(block, scope, Some(&ctx), diagnostics);
         } else {
-            // Non-block arguments: walk without block context
-            walk_expr(arg, scope, None, diagnostics);
+            walk_expr(arg, scope, safe_params, diagnostics);
         }
     }
 }
@@ -636,6 +608,18 @@ Object subclass: Foo
     true ifTrue: [x := 99]";
         let diags = lint(src);
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
+        assert!(diags[0].message.contains("`x`"));
+    }
+
+    /// Dead assignment inside a non-block message argument within a block.
+    #[test]
+    fn assignment_in_msg_arg_inside_block_warns() {
+        let diags = lint("x := 0.\ntrue ifTrue: [foo bar: (x := 1)]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "Expected 1 lint for assignment in msg arg inside block, got: {diags:?}"
+        );
         assert!(diags[0].message.contains("`x`"));
     }
 }
