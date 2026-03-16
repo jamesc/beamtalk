@@ -1547,7 +1547,7 @@ first_line(Bin) when is_binary(Bin) ->
 %%   <<"stdlib">>  → pass through
 %%   <<"user">>    → pass through
 %%   Other binary  → resolve to {superclass, Atom} or {error, FilterBin}
--spec validate_list_classes_filter(undefined | binary()) ->
+-spec validate_list_classes_filter(term()) ->
     undefined | binary() | {superclass, atom()} | {error, binary()}.
 validate_list_classes_filter(undefined) ->
     undefined;
@@ -1559,7 +1559,9 @@ validate_list_classes_filter(FilterBin) when is_binary(FilterBin) ->
     case beamtalk_repl_errors:safe_to_existing_atom(FilterBin) of
         {ok, Atom} -> {superclass, Atom};
         {error, badarg} -> {error, FilterBin}
-    end.
+    end;
+validate_list_classes_filter(Other) ->
+    {error, iolist_to_binary(io_lib:format("~p", [Other]))}.
 
 %% @private Filter predicate for list-classes op (BT-1404).
 %% Uses the pre-validated filter from validate_list_classes_filter/1.
