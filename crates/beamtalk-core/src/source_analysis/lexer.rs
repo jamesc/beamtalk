@@ -97,6 +97,18 @@ impl<'src> Lexer<'src> {
         Some(c)
     }
 
+    /// Saves the current lexer position (both byte offset and iterator state)
+    /// so it can be restored later with `restore_position`.
+    fn save_position(&self) -> (usize, Peekable<CharIndices<'src>>) {
+        (self.position, self.chars.clone())
+    }
+
+    /// Restores a previously saved lexer position.
+    fn restore_position(&mut self, saved: (usize, Peekable<CharIndices<'src>>)) {
+        self.position = saved.0;
+        self.chars = saved.1;
+    }
+
     /// Consumes characters while the predicate is true.
     fn advance_while(&mut self, predicate: impl Fn(char) -> bool) {
         while self.peek_char().is_some_and(&predicate) {
@@ -568,15 +580,40 @@ impl<'src> Lexer<'src> {
             return Ok((pos, pos)); // empty range signals error token
         }
 
+        // Check for doubled opening brace `{{` — likely meant as a literal `{`.
+        // In Beamtalk, `{` is not a valid expression start (only used in tuple
+        // destructuring patterns), so `{{...}}` inside a string is always a mistake.
+        if self.is_doubled_open_brace() {
+            self.skip_doubled_braces();
+            let pos = self.current_position();
+            return Ok((pos, pos)); // empty range signals error token
+        }
+
         let mut depth: u32 = 1;
         while depth > 0 {
             match self.peek_char() {
                 None => {
+                    // True EOF with no closing `"` — the input is genuinely
+                    // incomplete.  Return raw source text (starts with `"`)
+                    // so the REPL's `is_input_complete` heuristic treats it
+                    // as incomplete and shows a continuation prompt.
                     let text = self.text_for(self.span_from(string_start));
                     return Err(TokenKind::Error(EcoString::from(text)));
                 }
                 Some('"') => {
-                    self.skip_nested_string();
+                    let saved = self.save_position();
+                    if !self.skip_nested_string() {
+                        // skip_nested_string hit EOF — the `"` was likely the
+                        // outer string's closing quote, not a nested string start.
+                        // Rewind to just after the `"` so the outer lexer can
+                        // continue lexing from there.
+                        self.restore_position(saved);
+                        self.advance(); // consume the `"` (the outer string's closing quote)
+                        return Err(TokenKind::Error(EcoString::from(
+                            "unescaped { in string literal — \
+                             use \\{ for a literal brace, or close the interpolation with }",
+                        )));
+                    }
                 }
                 Some('{') => {
                     depth += 1;
@@ -595,6 +632,7 @@ impl<'src> Lexer<'src> {
                     loop {
                         match self.peek_char() {
                             None => {
+                                // True EOF — return raw text for incomplete-input detection
                                 let text = self.text_for(self.span_from(string_start));
                                 return Err(TokenKind::Error(EcoString::from(text)));
                             }
@@ -663,13 +701,19 @@ impl<'src> Lexer<'src> {
             }
 
             if interp.0 == interp.1 {
-                // Empty interpolation — span covers the `{}` delimiters.
+                // Empty or invalid interpolation — span covers the delimiters.
                 // segments[i].2 is the position of `{`, interp.0 is after `}`.
                 let brace_start = segments[i].2;
+                // Check the source to determine the specific error.
+                let brace_text = self.text_for(Span::new(brace_start, interp.0));
+                let message = if brace_text.starts_with("{{") {
+                    "doubled {{ }} in string literal is not interpolation — \
+                     use \\{ and \\} for literal braces"
+                } else {
+                    "empty interpolation {} is not allowed, use \\{ for literal brace"
+                };
                 tokens.push(Token::new(
-                    TokenKind::Error(EcoString::from(
-                        "empty interpolation {} is not allowed, use \\{ for literal brace",
-                    )),
+                    TokenKind::Error(EcoString::from(message)),
                     Span::new(brace_start, interp.0),
                 ));
             } else {
@@ -716,12 +760,43 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Checks if the current position starts with `{` (meaning `{{` in the
+    /// string since we've already consumed the first `{`).
+    /// Does not consume any characters.
+    fn is_doubled_open_brace(&self) -> bool {
+        self.source[self.position..].starts_with('{')
+    }
+
+    /// Consumes everything up to the matching depth-0 `}` for a doubled-brace
+    /// `{{...}}` inside a string interpolation.
+    fn skip_doubled_braces(&mut self) {
+        let mut depth: u32 = 1;
+        while depth > 0 {
+            match self.peek_char() {
+                None => break,
+                Some('{') => {
+                    depth += 1;
+                    self.advance();
+                }
+                Some('}') => {
+                    depth -= 1;
+                    self.advance();
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+    }
+
     /// Skips a nested string literal inside an interpolation expression.
-    fn skip_nested_string(&mut self) {
+    /// Returns `true` if the string was properly closed, `false` if EOF was hit
+    /// (which likely means the `"` was actually the outer string's closing quote).
+    fn skip_nested_string(&mut self) -> bool {
         self.advance(); // opening quote
         loop {
             match self.peek_char() {
-                None => break,
+                None => return false,
                 Some('"') if self.peek_char_n(1) == Some('"') => {
                     // Doubled delimiter — skip both quotes
                     self.advance(); // first "
@@ -729,7 +804,7 @@ impl<'src> Lexer<'src> {
                 }
                 Some('"') => {
                     self.advance(); // closing quote
-                    break;
+                    return true;
                 }
                 Some('\\') => {
                     self.advance();
@@ -2039,6 +2114,179 @@ mod tests {
         assert_eq!(
             lex_kinds("--"),
             vec![TokenKind::BinarySelector("--".into())]
+        );
+    }
+
+    // --- BT-1396: Unescaped brace error messages ---
+
+    #[test]
+    fn lex_unescaped_open_brace_produces_helpful_error() {
+        // `"hello { world"` — the `{` starts interpolation, the closing `"`
+        // is consumed by skip_nested_string which hits EOF, producing a
+        // clear error instead of a confusing unterminated-string message.
+        let kinds = lex_kinds(r#""hello { world""#);
+        assert_eq!(kinds.len(), 1);
+        match &kinds[0] {
+            TokenKind::Error(msg) => {
+                assert!(
+                    msg.contains("unescaped {"),
+                    "expected 'unescaped {{' in error, got: {msg}"
+                );
+                assert!(
+                    msg.contains("\\{"),
+                    "expected suggestion to use \\{{ in error, got: {msg}"
+                );
+            }
+            other => panic!("expected Error token, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lex_unterminated_interpolation_at_eof() {
+        // `"hello {x` — no closing `}` or `"`, just EOF.
+        // This is genuinely incomplete input, so the error contains the raw text
+        // (starts with `"`) rather than a diagnostic message. This ensures the
+        // REPL's `is_input_complete` heuristic shows a continuation prompt.
+        let kinds = lex_kinds("\"hello {x");
+        assert_eq!(kinds.len(), 1);
+        assert!(matches!(&kinds[0], TokenKind::Error(_)));
+    }
+
+    #[test]
+    fn lex_unescaped_brace_recovery_continues_lexing() {
+        // After the error for `"hello { world"`, the lexer should still
+        // be able to lex subsequent tokens.
+        let kinds = lex_kinds(r#""hello { world" x"#);
+        assert!(
+            kinds.len() >= 2,
+            "expected at least 2 tokens, got: {kinds:?}"
+        );
+        assert!(matches!(&kinds[0], TokenKind::Error(_)));
+        // The `x` after the string should be lexed as an identifier.
+        assert!(
+            kinds
+                .iter()
+                .any(|k| matches!(k, TokenKind::Identifier(s) if s.as_str() == "x")),
+            "expected identifier 'x' after error recovery, got: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn lex_unescaped_brace_error_is_diagnostic() {
+        // Error messages that start with a lowercase letter are treated as
+        // "diagnostic" errors (complete-but-invalid) rather than "incomplete
+        // input" errors. This ensures the REPL doesn't wait for more input.
+        let kinds = lex_kinds(r#""hello { world""#);
+        match &kinds[0] {
+            TokenKind::Error(msg) => {
+                assert!(
+                    msg.starts_with(|c: char| c.is_ascii_lowercase()),
+                    "error message should start with lowercase for diagnostic classification, got: {msg}"
+                );
+            }
+            other => panic!("expected Error token, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lex_unterminated_interpolation_is_incomplete() {
+        // `"hello {x` (EOF) — genuinely incomplete input.
+        // The error should start with `"` (the raw text), NOT lowercase,
+        // so the REPL treats it as incomplete and shows a continuation prompt.
+        let kinds = lex_kinds("\"hello {x");
+        match &kinds[0] {
+            TokenKind::Error(msg) => {
+                assert!(
+                    msg.starts_with('"'),
+                    "unterminated interpolation at EOF should produce raw-text error (starts with \"), got: {msg}"
+                );
+            }
+            other => panic!("expected Error token, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lex_unmatched_brace_with_newline_after() {
+        // `"before { after"\nx` — error for the string, then recovery
+        // allows lexing the identifier on the next line.
+        let kinds = lex_kinds("\"before { after\"\nx");
+        assert!(matches!(&kinds[0], TokenKind::Error(_)));
+        assert!(
+            kinds
+                .iter()
+                .any(|k| matches!(k, TokenKind::Identifier(s) if s.as_str() == "x")),
+            "expected identifier 'x' after recovery, got: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn lex_unterminated_block_comment_in_interpolation() {
+        // `"hello {x /* unclosed` — block comment never closes inside interpolation.
+        // This is genuinely incomplete (EOF), so it produces a raw-text error.
+        let kinds = lex_kinds("\"hello {x /* unclosed");
+        assert_eq!(kinds.len(), 1);
+        assert!(matches!(&kinds[0], TokenKind::Error(_)));
+    }
+
+    #[test]
+    fn lex_doubled_braces_produces_error() {
+        // `"Hello {{ world }}"` — doubled braces are not valid interpolation.
+        let tokens = lex(r#""Hello {{ world }}""#);
+        let kinds: Vec<_> = tokens.iter().map(|t| t.kind().clone()).collect();
+        // Should produce StringStart, Error (for {{...}}), StringEnd
+        assert!(
+            kinds
+                .iter()
+                .any(|k| matches!(k, TokenKind::Error(msg) if msg.contains("doubled {{"))),
+            "expected 'doubled {{{{' error, got: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn lex_doubled_braces_error_is_diagnostic() {
+        // The error message should start with lowercase so it's treated
+        // as a diagnostic (complete-but-invalid), not incomplete input.
+        let tokens = lex(r#""Hello {{ world }}""#);
+        for token in &tokens {
+            if let TokenKind::Error(msg) = token.kind() {
+                assert!(
+                    msg.starts_with(|c: char| c.is_ascii_lowercase()),
+                    "doubled-brace error should be diagnostic, got: {msg}"
+                );
+                return;
+            }
+        }
+        panic!("expected an Error token in the output");
+    }
+
+    #[test]
+    fn lex_doubled_braces_recovery_preserves_surrounding_text() {
+        // `"before {{ x }} after"` — the literal segments should be preserved.
+        let tokens = lex(r#""before {{ x }} after""#);
+        let kinds: Vec<_> = tokens.iter().map(|t| t.kind().clone()).collect();
+        assert!(
+            matches!(&kinds[0], TokenKind::StringStart(s) if s.as_str() == "before "),
+            "expected StringStart('before '), got: {:?}",
+            kinds[0]
+        );
+        assert!(
+            kinds
+                .last()
+                .is_some_and(|k| matches!(k, TokenKind::StringEnd(s) if s.as_str() == " after")),
+            "expected StringEnd(' after'), got: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn lex_empty_doubled_braces() {
+        // `"{{}}"` — doubled braces with nothing inside.
+        let tokens = lex(r#""{{}}""#);
+        let kinds: Vec<_> = tokens.iter().map(|t| t.kind().clone()).collect();
+        assert!(
+            kinds
+                .iter()
+                .any(|k| matches!(k, TokenKind::Error(msg) if msg.contains("doubled"))),
+            "expected 'doubled' error, got: {kinds:?}"
         );
     }
 }
