@@ -81,7 +81,27 @@ impl CoreErlangGenerator {
             false
         };
 
+        // BT-1417: Check if the class defines an initialize method.
+        // If so, dispatch it at the end of init/1 — but only when not called
+        // as a parent state-building helper. The __skip_initialize__ flag in
+        // InitArgs suppresses dispatch when a child's init calls us as a helper.
+        let has_initialize = current_class.is_some_and(|c| {
+            self.semantic_facts
+                .class_facts(&c.name.name)
+                .is_some_and(|cf| cf.has_instance_method("initialize"))
+        });
+
         let module_name = self.module_name.clone();
+
+        // BT-1417: Generate the init return — either plain {ok, State} or
+        // dispatch initialize first, then return {ok, NewState} / {stop, Error}.
+        // When has_initialize is true, we wrap the dispatch in a guard that
+        // checks __skip_initialize__ in InitArgs, so parent helpers skip it.
+        let init_return = if has_initialize {
+            Self::init_initialize_guarded_doc(&module_name)
+        } else {
+            Document::Str("in {'ok', FinalState}")
+        };
 
         if has_parent_init {
             // Call parent's init to get inherited state, then merge with our state
@@ -106,10 +126,14 @@ impl CoreErlangGenerator {
                         line(),
                         "%% Call parent init to get inherited state fields",
                         line(),
+                        // BT-1417: Pass __skip_initialize__ to parent so it
+                        // doesn't dispatch initialize — only the leaf should.
+                        "let _ParentArgs = call 'maps':'put'('__skip_initialize__', 'true', InitArgs) in",
+                        line(),
                         docvec![
                             "case call '",
                             Document::String(parent_module.clone()),
-                            "':'init'(InitArgs) of"
+                            "':'init'(_ParentArgs) of"
                         ],
                         nest(
                             INDENT,
@@ -144,7 +168,7 @@ impl CoreErlangGenerator {
                                         // Order: parent defaults → child defaults → user overrides
                                         "in let FinalState = call 'maps':'merge'(MergedState, InitArgs)",
                                         line(),
-                                        "in {'ok', FinalState}",
+                                        init_return.clone(),
                                     ]
                                 ),
                                 line(),
@@ -197,7 +221,7 @@ impl CoreErlangGenerator {
                         // Merge InitArgs into DefaultState - InitArgs values override defaults
                         "in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)",
                         line(),
-                        "in {'ok', FinalState}",
+                        init_return,
                     ]
                 ),
                 "\n",
@@ -205,6 +229,72 @@ impl CoreErlangGenerator {
             ];
             Ok(doc)
         }
+    }
+
+    /// BT-1417: Generate the guarded initialize dispatch block for init/1.
+    ///
+    /// Checks `__skip_initialize__` in `InitArgs` — when a child's init calls
+    /// us as a parent state helper, it sets this flag to prevent double dispatch.
+    /// When called as the outermost init (by OTP), the flag is absent and
+    /// initialize runs.
+    ///
+    /// After building `FinalState`, dispatches `initialize` via `safe_dispatch`.
+    /// Strips `__skip_initialize__` from the final state to keep it out of
+    /// the actor's visible state.
+    fn init_initialize_guarded_doc(module_name: &str) -> Document<'static> {
+        docvec![
+            "%% BT-1417: Dispatch initialize unless called as a parent helper",
+            line(),
+            "in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'true'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            // Strip the flag from state before returning
+                            "let CleanState = call 'maps':'remove'('__skip_initialize__', FinalState) in",
+                            line(),
+                            "{'ok', CleanState}",
+                        ]
+                    ),
+                    line(),
+                    "<'false'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            // Strip the flag from state before dispatch
+                            "let CleanState1 = call 'maps':'remove'('__skip_initialize__', FinalState) in",
+                            line(),
+                            docvec![
+                                "case call '",
+                                Document::String(module_name.to_string()),
+                                "':'safe_dispatch'('initialize', [], CleanState1) of",
+                            ],
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "<{'reply', _InitResult, InitNewState}> when 'true' ->",
+                                    nest(INDENT, docvec![line(), "{'ok', InitNewState}"]),
+                                    line(),
+                                    "<{'error', InitError, _InitErrState}> when 'true' ->",
+                                    nest(INDENT, docvec![line(), "{'stop', InitError}"]),
+                                ]
+                            ),
+                            line(),
+                            "end",
+                        ]
+                    ),
+                ]
+            ),
+            line(),
+            "end",
+        ]
     }
 
     /// Generates the `handle_cast/2` callback for async message sends.

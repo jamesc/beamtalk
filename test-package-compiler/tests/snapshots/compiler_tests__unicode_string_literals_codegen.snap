@@ -14,7 +14,10 @@ module 'unicode_string_literals' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
 
 
 'spawn'/0 = fun () ->
-    case call 'gen_server':'start_link'('unicode_string_literals', ~{}~, []) of
+    let _OldTrap = call 'erlang':'process_flag'('trap_exit', 'true') in
+    let _SpawnResult = call 'gen_server':'start_link'('unicode_string_literals', ~{}~, []) in
+    let _ = call 'erlang':'process_flag'('trap_exit', _OldTrap) in
+    case _SpawnResult of
         <{'ok', Pid}> when 'true' ->
             let _InstReg = try call 'beamtalk_object_instances':'register'('UnicodeStringLiterals', Pid)
                 of _RegOk -> _RegOk
@@ -36,7 +39,10 @@ module 'unicode_string_literals' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
             let TypeErr2 = call 'beamtalk_error':'with_hint'(TypeErr1, #{#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<68>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#) in
             call 'beamtalk_error':'raise'(TypeErr2)
         <'true'> when 'true' ->
-            case call 'gen_server':'start_link'('unicode_string_literals', InitArgs, []) of
+            let _OldTrap1 = call 'erlang':'process_flag'('trap_exit', 'true') in
+            let _SpawnResult1 = call 'gen_server':'start_link'('unicode_string_literals', InitArgs, []) in
+            let _ = call 'erlang':'process_flag'('trap_exit', _OldTrap1) in
+            case _SpawnResult1 of
                 <{'ok', Pid}> when 'true' ->
                     let _InstReg = try call 'beamtalk_object_instances':'register'('UnicodeStringLiterals', Pid)
                         of _RegOk -> _RegOk

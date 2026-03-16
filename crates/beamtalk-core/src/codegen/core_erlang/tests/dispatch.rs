@@ -279,8 +279,16 @@ fn test_generate_spawn_function() {
     assert!(code.contains("'spawn'/1 = fun (InitArgs) ->"));
     assert!(code.contains("call 'gen_server':'start_link'('counter', InitArgs, [])"));
 
-    // Check that it uses a case expression to extract the Pid and wrap it in #beamtalk_object{}
-    assert!(code.contains("case call 'gen_server':'start_link'"));
+    // BT-1417: spawn wraps start_link in trap_exit to handle initialize failures
+    assert!(
+        code.contains("call 'erlang':'process_flag'('trap_exit', 'true')"),
+        "spawn/0 must set trap_exit before start_link. Got: {code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'process_flag'('trap_exit', _OldTrap)"),
+        "spawn/0 must restore trap_exit after start_link. Got: {code}"
+    );
+    assert!(code.contains("case _SpawnResult of"));
     assert!(code.contains("<{'ok', Pid}> when 'true' ->"));
 
     // Check that it returns a #beamtalk_object{} record (class='Counter', class_mod='counter', pid=Pid)

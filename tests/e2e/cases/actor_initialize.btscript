@@ -45,3 +45,30 @@ c2 increment
 
 c2 getValue
 // => 1
+
+// ===========================================================================
+// SUPERVISED ACTOR INITIALIZE (BT-1417)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Actor with initialize runs initialize when started by a supervisor
+// ---------------------------------------------------------------------------
+
+// @load tests/e2e/fixtures/e2e_initialize_supervisor.bt
+
+initSup := E2EInitializeSupervisor supervise
+// => #Supervisor<E2EInitializeSupervisor,_>
+
+initSup count
+// => 1
+
+// The supervised InitCounter should have initialize called (value = 100, not 0)
+initChild := initSup which: InitCounter
+// => #Actor<InitCounter,_>
+
+initChild getValue
+// => 100
+
+// Clean up
+initSup stop
+// => nil
