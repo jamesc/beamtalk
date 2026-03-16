@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1414: Actor class with class method do: mutation (context=Actor).
+// Verifies that class method captured mutation threading works when
+// the module context is Actor (not just ValueType).
+
+Actor subclass: ActorClassMethodBlock
+
+  // Class method on an Actor subclass — context is Actor, not ValueType
+  class countItems: items =>
+    count := 0
+    items do: [:item | count := count + 1]
+    count

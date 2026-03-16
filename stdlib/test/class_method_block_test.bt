@@ -45,3 +45,8 @@ TestCase subclass: ClassMethodBlockTest
   testDoWithTwoCapturedMutations =>
     result := ClassMethodBlock sumAndCount: #(10, 20, 30)
     self assert: result equals: #(60, 3)
+
+  // BT-1414: do: with captured mutation on Actor class method (context=Actor)
+  testActorClassMethodDoWithMutation =>
+    result := ActorClassMethodBlock countItems: #(1, 2, 3, 4, 5)
+    self assert: result equals: 5

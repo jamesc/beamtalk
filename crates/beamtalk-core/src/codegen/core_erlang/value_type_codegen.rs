@@ -1169,7 +1169,9 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        if !matches!(self.context, CodeGenContext::ValueType) {
+        // BT-1414: Allow class methods regardless of module context (Actor classes
+        // have context=Actor but class methods still need local-map threading).
+        if !self.in_class_method && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
         if let Expression::MessageSend {
