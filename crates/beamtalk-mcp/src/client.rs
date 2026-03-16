@@ -9,7 +9,7 @@
 //! JSON messages over WebSocket with cookie authentication.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -43,9 +43,16 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 /// Async WebSocket client for the beamtalk REPL protocol.
 pub struct ReplClient {
     inner: Arc<Mutex<ReplClientInner>>,
-    port: u16,
-    cookie: String,
+    /// Current REPL port. Updated atomically when the workspace restarts on a
+    /// new port (BT-1416).
+    port: AtomicU16,
+    /// Current auth cookie. Updated when the workspace restarts with a new
+    /// cookie (BT-1416).
+    cookie: std::sync::Mutex<String>,
     session: tokio::sync::Mutex<Option<String>>,
+    /// Workspace ID for re-reading the port file on reconnect (BT-1416).
+    /// `None` when connected via explicit `--port` (no workspace discovery).
+    workspace_id: Option<String>,
     /// Abort handle for the background keepalive task. Uses `std::sync::Mutex`
     /// (not tokio) so it can be aborted in the synchronous `Drop` impl.
     keepalive_abort: std::sync::Mutex<tokio::task::AbortHandle>,
@@ -54,7 +61,7 @@ pub struct ReplClient {
 impl std::fmt::Debug for ReplClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReplClient")
-            .field("port", &self.port)
+            .field("port", &self.port.load(Ordering::Relaxed))
             .field("cookie", &"<redacted>")
             .field("session", &"<redacted>")
             .finish_non_exhaustive()
@@ -80,10 +87,15 @@ impl ReplClient {
     /// Connect to a REPL server at the given port on localhost with cookie auth.
     /// This variant supports optional session resume by including a `resume` field
     /// in the auth handshake which the server understands.
+    ///
+    /// `workspace_id` enables port re-discovery on reconnect (BT-1416): if the
+    /// cached port fails, the client re-reads the workspace port file and retries
+    /// with the new port.
     pub async fn connect_with_resume(
         port: u16,
         cookie: &str,
         resume: Option<&str>,
+        workspace_id: Option<String>,
     ) -> Result<Self, String> {
         let url = format!("ws://127.0.0.1:{port}/ws");
         let (mut ws, _response) =
@@ -104,16 +116,21 @@ impl ReplClient {
 
         Ok(Self {
             inner,
-            port,
-            cookie: cookie.to_string(),
+            port: AtomicU16::new(port),
+            cookie: std::sync::Mutex::new(cookie.to_string()),
             session: tokio::sync::Mutex::new(session_id),
+            workspace_id,
             keepalive_abort: std::sync::Mutex::new(keepalive_abort),
         })
     }
 
     /// Backwards-compatible connect that does not resume a previous session.
-    pub async fn connect(port: u16, cookie: &str) -> Result<Self, String> {
-        Self::connect_with_resume(port, cookie, None).await
+    pub async fn connect(
+        port: u16,
+        cookie: &str,
+        workspace_id: Option<String>,
+    ) -> Result<Self, String> {
+        Self::connect_with_resume(port, cookie, None, workspace_id).await
     }
 
     /// Gracefully close the WebSocket connection.
@@ -136,33 +153,67 @@ impl ReplClient {
     /// Reconnect the underlying WebSocket, attempting to resume the session
     /// using the last-known session id if available.
     ///
+    /// If the cached port fails and a `workspace_id` is available, re-reads the
+    /// workspace port file and retries with the new port (BT-1416). This handles
+    /// `beamtalk run .` restart cycles where the workspace comes back on a
+    /// different port.
+    ///
     /// Returns `true` if the previous session was successfully resumed,
     /// `false` if a fresh session was established instead.
     pub async fn reconnect(&self) -> Result<bool, String> {
         let requested_session = { self.session.lock().await.clone() };
-        let url = format!("ws://127.0.0.1:{}/ws", self.port);
-        let (mut ws, _response) =
-            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&url))
-                .await
-                .map_err(|_| {
-                    format!(
-                        "Timed out reconnecting to REPL at {url} ({}s)",
-                        CONNECT_TIMEOUT.as_secs()
-                    )
-                })?
-                .map_err(|e| format!("Failed to reconnect to REPL at {url}: {e}"))?;
 
+        // Try the cached port first.
+        let cached_port = self.port.load(Ordering::Relaxed);
+        let cached_url = format!("ws://127.0.0.1:{cached_port}/ws");
+        let connect_result = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            tokio_tungstenite::connect_async(&cached_url),
+        )
+        .await;
+
+        let (mut ws, connect_port) = match connect_result {
+            Ok(Ok((ws, _response))) => (ws, cached_port),
+            Ok(Err(cached_err)) => {
+                // Cached port failed — try re-reading the port file (BT-1416).
+                self.reconnect_with_new_port(&cached_err.to_string())
+                    .await?
+            }
+            Err(_timeout) => {
+                // Timed out on cached port — try re-reading the port file.
+                self.reconnect_with_new_port(&format!(
+                    "Timed out reconnecting to REPL at {cached_url} ({}s)",
+                    CONNECT_TIMEOUT.as_secs()
+                ))
+                .await?
+            }
+        };
+
+        let cookie = self
+            .cookie
+            .lock()
+            .map_err(|_| "Internal cookie state unavailable".to_string())?
+            .clone();
         let session_id =
-            perform_auth_handshake(&mut ws, &self.cookie, requested_session.as_deref()).await?;
+            perform_auth_handshake(&mut ws, &cookie, requested_session.as_deref()).await?;
 
         let resumed =
             requested_session.is_some() && requested_session.as_deref() == session_id.as_deref();
-        tracing::debug!(session_id = ?session_id, resumed, "MCP WebSocket reconnect successful");
+        tracing::debug!(
+            session_id = ?session_id,
+            resumed,
+            old_port = cached_port,
+            new_port = connect_port,
+            "MCP WebSocket reconnect successful"
+        );
 
-        // Swap in the new websocket and session
+        // Swap in the new websocket, port, and session
         {
             let mut inner = self.inner.lock().await;
             inner.ws = ws;
+        }
+        if connect_port != cached_port {
+            self.port.store(connect_port, Ordering::Relaxed);
         }
         {
             let mut s = self.session.lock().await;
@@ -180,6 +231,89 @@ impl ReplClient {
         }
 
         Ok(resumed)
+    }
+
+    /// Re-read the workspace port file and connect to the new port (BT-1416).
+    ///
+    /// Called when the cached port fails during reconnect. If no `workspace_id`
+    /// is available or the port file can't be read, falls back to the original
+    /// error. Also re-reads the cookie file since the workspace may have
+    /// generated a new cookie on restart.
+    async fn reconnect_with_new_port(
+        &self,
+        cached_error: &str,
+    ) -> Result<
+        (
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
+            u16,
+        ),
+        String,
+    > {
+        let workspace_id = self.workspace_id.as_deref().ok_or_else(|| {
+            format!(
+                "{cached_error}. \
+                 The server may have restarted; try restarting the MCP server."
+            )
+        })?;
+
+        let new_port = beamtalk_workspace::read_port_file(workspace_id)
+            .ok()
+            .flatten()
+            .map(|(port, _nonce)| port)
+            .ok_or_else(|| {
+                format!(
+                    "{cached_error}. \
+                     Could not read workspace port file for '{workspace_id}'; \
+                     try restarting the MCP server."
+                )
+            })?;
+
+        let current_port = self.port.load(Ordering::Relaxed);
+        if new_port == current_port {
+            return Err(format!(
+                "{cached_error}. \
+                 The server may have restarted; try restarting the MCP server."
+            ));
+        }
+
+        // Re-read the cookie — the workspace may have generated a new one on restart.
+        if let Some(new_cookie) = beamtalk_workspace::read_cookie_file(workspace_id)
+            .ok()
+            .flatten()
+        {
+            if let Ok(mut cookie) = self.cookie.lock() {
+                *cookie = new_cookie;
+            }
+        }
+
+        tracing::info!(
+            old_port = current_port,
+            new_port,
+            workspace_id,
+            "Workspace port changed — reconnecting to new port"
+        );
+
+        let new_url = format!("ws://127.0.0.1:{new_port}/ws");
+        let (ws, _response) =
+            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&new_url))
+                .await
+                .map_err(|_| {
+                    format!(
+                        "Timed out reconnecting to REPL at {new_url} ({}s). \
+                         The server may have restarted; try restarting the MCP server.",
+                        CONNECT_TIMEOUT.as_secs()
+                    )
+                })?
+                .map_err(|e| {
+                    format!(
+                        "Failed to reconnect to REPL at {new_url}: {e}. \
+                         The server may have restarted; try restarting the MCP server."
+                    )
+                })?;
+
+        Ok((ws, new_port))
     }
 
     /// Send a JSON request and receive a JSON response.
@@ -1125,7 +1259,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_eval_arithmetic() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         let resp = client.eval("2 + 3").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "5");
@@ -1137,7 +1271,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_eval_string() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         let resp = client.eval("\"hello\"").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "hello");
@@ -1149,7 +1283,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_eval_error() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         let resp = client.eval("42 nonexistentMethod").await.unwrap();
         assert!(resp.is_error(), "should be an error");
         assert!(resp.error_message().is_some(), "should have error message");
@@ -1161,7 +1295,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_bindings() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
 
         // Set a binding
         let resp = client.eval("testVar := 99").await.unwrap();
@@ -1183,7 +1317,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_actors_list() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         let resp = client.actors().await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.actors.is_some(), "should return actors list");
@@ -1195,7 +1329,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_modules_list() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         let resp = client.modules().await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.modules.is_some(), "should return modules list");
@@ -1207,7 +1341,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_complete() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         let code = "Integer ";
         let resp = client.complete(code, code.len()).await.unwrap();
         assert!(!resp.is_error());
@@ -1220,7 +1354,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_complete_chain() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         // Chain completion: "hello" size → should resolve to Integer methods
         let code = "\"hello\" size ";
         let resp = client.complete(code, code.len()).await.unwrap();
@@ -1238,7 +1372,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_load_file_and_spawn_actor() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
 
         // Load counter
         let resp = client
@@ -1286,7 +1420,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_docs() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         let resp = client.docs("Integer", None).await.unwrap();
         if resp.is_error() {
             // Some test environments may not have stdlib classes loaded; accept
@@ -1311,7 +1445,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_value_string_formats_correctly() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
 
         // Integer value
         let resp = client.eval("42").await.unwrap();
@@ -1331,7 +1465,7 @@ mod tests {
     #[tokio::test]
     async fn test_connection_failure() {
         // Port 1 should never have a REPL running
-        let result = ReplClient::connect(1, "dummy").await;
+        let result = ReplClient::connect(1, "dummy", None).await;
         assert!(result.is_err(), "connecting to port 1 should fail");
     }
 
@@ -1339,7 +1473,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_clear_bindings() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
 
         // Set a binding, then clear
         let _ = client.eval("clearTestVar := 42").await.unwrap();
@@ -1363,7 +1497,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_show_codegen() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         let resp = client.show_codegen("1 + 2").await.unwrap();
         assert!(
             !resp.is_error(),
@@ -1382,7 +1516,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_describe() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         let resp = client.describe().await.unwrap();
         assert!(
             !resp.is_error(),
@@ -1398,7 +1532,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_unload_module() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
 
         // BT-1239: unload op is restored — stdlib classes cannot be removed.
         // Integer is a stdlib class (bt@stdlib@Integer) and must be rejected.
@@ -1412,7 +1546,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_interrupt() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
         // Interrupt when nothing is running should still succeed
         let resp = client.interrupt().await.unwrap();
         // It's OK if this returns an error (nothing to interrupt) — we just verify it doesn't crash
@@ -1425,7 +1559,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_test_all() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
 
         // Load a test fixture first so there is at least one test class to run
         let load_resp = client
@@ -1462,7 +1596,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_test_class() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
 
         // Load BUnit test fixture first
         let load_resp = client
@@ -1494,7 +1628,7 @@ mod tests {
     #[ignore = "integration test"]
     async fn test_reconnect_resumes_session() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
 
         let result: Result<(), Box<dyn std::error::Error>> = async {
             // Establish a binding that should survive a reconnect
@@ -1539,7 +1673,7 @@ mod tests {
     async fn test_send_once_reconnects_on_stale_connection()
     -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie).await?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
 
         let result: Result<(), Box<dyn std::error::Error>> = async {
             // Establish a binding before the forced connection drop.
