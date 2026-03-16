@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// Message — immutable value type for chat messages (BT-568)
+/// Message — immutable value type for chat messages
 ///
 /// Demonstrates:
 /// 1. **Value types** — `Value subclass:` (not Actor), no process overhead

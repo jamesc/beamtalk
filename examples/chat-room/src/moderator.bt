@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// Moderator — Actor subclass of ChatMember (BT-568)
+/// Moderator — Actor subclass of ChatMember
 ///
 /// Demonstrates:
 /// 1. **Actor inheritance** — ChatMember subclass: Moderator

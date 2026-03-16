@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// Point — a 2D point value object (BT-926 example).
+/// Point — a 2D point value object.
 ///
 /// Demonstrates the `Value subclass:` pattern (ADR 0042):
 ///   - Three construction forms: new, new:, keyword constructor
