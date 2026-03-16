@@ -426,7 +426,6 @@ fn run_cat_mode() -> ! {
     std::process::exit(0);
 }
 
-
 /// Configure the child process to start in a new process group (Unix only).
 ///
 /// Called before `Command::spawn` so the child can be signal-killed as a group.
