@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1397: Tests that class methods can contain blocks that call other
+// class methods via `self` without producing Core Erlang parse errors.
+
+TestCase subclass: ClassMethodBlockTest
+
+  // sort: block calling class method via self
+  testSortWithClassMethodBlock =>
+    result := ClassMethodBlock sortItems: #(3, 1, 2)
+    self assert: result equals: #(1, 2, 3)
+
+  // collect: block calling class method via self
+  testCollectWithClassMethodBlock =>
+    result := ClassMethodBlock doubleAll: #(1, 2, 3)
+    self assert: result equals: #(2, 4, 6)
+
+  // do: block calling class method via self (discarded result)
+  testDoWithClassMethodBlock =>
+    result := ClassMethodBlock processAll: #(1, 2, 3)
+    self assert: result equals: #(1, 2, 3)
+
+  // inject:into: block calling class method via self
+  testInjectIntoWithClassMethodBlock =>
+    result := ClassMethodBlock sumAll: #(1, 2, 3)
+    self assert: result equals: 6
+
+  // Block with local assignments whose RHS is a class method self-send
+  testLocalAssignmentWithClassMethodSelfSend =>
+    result := ClassMethodBlock doubleAndSort: #(3, 1, 2)
+    self assert: result equals: #(1, 2, 3)
+
+  // Multiple class method self-sends in a block
+  testMultipleClassMethodSelfSends =>
+    result := ClassMethodBlock processWithMultipleSends: #(1, 2, 3)
+    self assert: result equals: #(4, 8, 12)
