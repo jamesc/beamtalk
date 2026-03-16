@@ -57,6 +57,7 @@ TestCase subclass: SubprocessTest
   // On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (built-in
   // cat mode with explicit flushing, bypassing pipe buffering).
   catExe => self.isUnix ifTrue: ["/bin/cat"] ifFalse: ["beamtalk-exec"]
+
   catArgs => self.isUnix ifTrue: [#()] ifFalse: [#("--cat")]
 
   // --- Tests ---
