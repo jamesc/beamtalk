@@ -2254,7 +2254,14 @@ impl CoreErlangGenerator {
         if let Some(auto) = auto {
             if let Some(kw_sel) = &auto.keyword_constructor {
                 let arity = class.state.len();
-                entries.push((kw_sel.clone(), arity, None, vec![None; arity], sealed));
+                // BT-1408: Hash long keyword constructor selectors to stay within
+                // Erlang's 255-char atom limit. The meta selector must match what
+                // class_send emits so runtime dispatch finds the method.
+                let safe_sel =
+                    crate::codegen::core_erlang::selector_mangler::safe_class_method_selector(
+                        kw_sel,
+                    );
+                entries.push((safe_sel, arity, None, vec![None; arity], sealed));
             }
         }
         // BT-1218: Register the synthesized supervisionSpec so class dispatch finds it locally

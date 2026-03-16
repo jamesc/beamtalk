@@ -722,11 +722,14 @@ impl CoreErlangGenerator {
             let cv = self.current_class_var();
             let args_doc = self.capture_argument_list_doc(arguments)?;
             let comma = if arguments.is_empty() { "" } else { ", " };
+            // BT-1408: Hash long keyword constructor atoms to stay within
+            // Erlang's 255-char atom limit.
+            let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
             let doc = docvec![
                 "call '",
                 Document::String(module),
-                "':'class_",
-                Document::String(selector_atom),
+                "':'",
+                Document::String(safe_fn),
                 "'(ClassSelf, ",
                 Document::String(cv),
                 comma,
@@ -1507,7 +1510,9 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
+        let selector_atom =
+            super::selector_mangler::safe_class_method_selector(&selector.to_erlang_atom());
         let class_pid_var = self.fresh_var("ClassPid");
         let binding_val_var = self.fresh_var("BindingVal");
         let state_var = self.current_state_var();
@@ -1548,7 +1553,9 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
+        let selector_atom =
+            super::selector_mangler::safe_class_method_selector(&selector.to_erlang_atom());
         let class_pid_var = self.fresh_var("ClassPid");
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
@@ -1586,7 +1593,10 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        // BT-1408: Hash long selector atoms (e.g. keyword constructors with many
+        // fields) to stay within Erlang's 255-char atom limit.
+        let selector_atom =
+            super::selector_mangler::safe_class_method_selector(&selector.to_erlang_atom());
         let class_pid_var = self.fresh_var("ClassPid");
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
