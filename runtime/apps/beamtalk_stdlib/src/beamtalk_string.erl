@@ -27,6 +27,7 @@
     each/2,
     collect/2,
     select/2,
+    reject/2,
     lines/1,
     words/1,
     take/2,
@@ -153,10 +154,11 @@ each(Str, Block) when is_binary(Str), is_function(Block, 1) ->
     lists:foreach(Block, as_list(Str)),
     nil.
 
-%% @doc Map over graphemes, applying block to each. Returns list of results.
--spec collect(binary(), function()) -> list().
+%% @doc Map over graphemes, applying block to each. Returns new string.
+-spec collect(binary(), function()) -> binary().
 collect(Str, Block) when is_binary(Str), is_function(Block, 1) ->
-    lists:map(Block, as_list(Str)).
+    Mapped = lists:map(Block, as_list(Str)),
+    iolist_to_binary(Mapped).
 
 %% @doc Filter graphemes by block predicate. Returns new string.
 -spec select(binary(), function()) -> binary().
@@ -164,6 +166,13 @@ select(Str, Block) when is_binary(Str), is_function(Block, 1) ->
     Graphemes = as_list(Str),
     Selected = lists:filter(Block, Graphemes),
     iolist_to_binary(Selected).
+
+%% @doc Reject graphemes for which block returns true. Returns new string.
+-spec reject(binary(), function()) -> binary().
+reject(Str, Block) when is_binary(Str), is_function(Block, 1) ->
+    Graphemes = as_list(Str),
+    Kept = lists:filter(fun(G) -> not Block(G) end, Graphemes),
+    iolist_to_binary(Kept).
 
 %% @doc Split string by newlines.
 -spec lines(binary()) -> [binary()].

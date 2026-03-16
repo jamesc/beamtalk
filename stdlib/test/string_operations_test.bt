@@ -43,14 +43,14 @@ TestCase subclass: StringOperationsTest
     self assert: ("hi" do: [:ch | nil]) equals: nil
 
   testCollect =>
-    // collect: - map over graphemes (returns list)
-    self assert: ("hi" collect: [:ch | ch uppercase]) equals: #("H", "I")
-    self assert: ("abc" collect: [:ch | ch uppercase]) equals: #("A", "B", "C")
+    // collect: - map over graphemes (returns string)
+    self assert: ("hi" collect: [:ch | ch uppercase]) equals: "HI"
+    self assert: ("abc" collect: [:ch | ch uppercase]) equals: "ABC"
     // on string variables (not just literals)
     s := "hello"
-    self assert: (s collect: [:ch |
-      ch uppercase
-    ]) equals: #("H", "E", "L", "L", "O")
+    self assert: (s collect: [:ch | ch uppercase]) equals: "HELLO"
+    // identity collect returns same string
+    self assert: ("abc" collect: [:ch | ch]) equals: "abc"
 
   testSelect =>
     // select: - filter graphemes (returns string)
@@ -59,3 +59,13 @@ TestCase subclass: StringOperationsTest
     // on string variables
     s := "hello"
     self assert: (s select: [:ch | ch > "h"]) equals: "llo"
+
+  testReject =>
+    // reject: - remove graphemes (returns string)
+    self assert: ("hello" reject: [:ch | ch =:= "l"]) equals: "heo"
+    self assert: ("a1b2c3" reject: [:ch | ch isDigit]) equals: "abc"
+    // on string variables
+    s := "hello"
+    self assert: (s reject: [:ch | ch < "l"]) equals: "llo"
+    // empty result
+    self assert: ("aaa" reject: [:ch | ch =:= "a"]) equals: ""

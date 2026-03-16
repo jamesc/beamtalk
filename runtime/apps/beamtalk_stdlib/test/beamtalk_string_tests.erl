@@ -257,15 +257,18 @@ each_calls_block_test() ->
 
 collect_uppercase_test() ->
     ?assertEqual(
-        [<<"H">>, <<"I">>],
+        <<"HI">>,
         beamtalk_string:collect(
             <<"hi">>,
             fun(G) -> unicode:characters_to_binary(string:uppercase(G)) end
         )
     ).
 
+collect_identity_test() ->
+    ?assertEqual(<<"abc">>, beamtalk_string:collect(<<"abc">>, fun(X) -> X end)).
+
 collect_empty_test() ->
-    ?assertEqual([], beamtalk_string:collect(<<>>, fun(X) -> X end)).
+    ?assertEqual(<<>>, beamtalk_string:collect(<<>>, fun(X) -> X end)).
 
 %%% ============================================================================
 %%% select/2
@@ -292,6 +295,35 @@ select_none_test() ->
         <<>>,
         beamtalk_string:select(<<"hi">>, fun(_) -> false end)
     ).
+
+%%% ============================================================================
+%%% reject/2
+%%% ============================================================================
+
+reject_vowels_test() ->
+    Vowels = [<<"a">>, <<"e">>, <<"i">>, <<"o">>, <<"u">>],
+    ?assertEqual(
+        <<"hll wrld">>,
+        beamtalk_string:reject(
+            <<"hello world">>,
+            fun(G) -> lists:member(G, Vowels) end
+        )
+    ).
+
+reject_none_test() ->
+    ?assertEqual(
+        <<"hi">>,
+        beamtalk_string:reject(<<"hi">>, fun(_) -> false end)
+    ).
+
+reject_all_test() ->
+    ?assertEqual(
+        <<>>,
+        beamtalk_string:reject(<<"hi">>, fun(_) -> true end)
+    ).
+
+reject_empty_test() ->
+    ?assertEqual(<<>>, beamtalk_string:reject(<<>>, fun(_) -> true end)).
 
 %%% ============================================================================
 %%% lines/1
