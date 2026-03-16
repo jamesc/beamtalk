@@ -541,6 +541,14 @@ sealed typed Collection subclass: String
   /// ```
   printString -> String => """" ++ (self replaceAll: """" with: """""") ++ """"
 
+  /// Return the string itself (identity conversion).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello" asString             // => "hello"
+  /// ```
+  asString -> String => self
+
   /// Return the string itself for user-facing display (no surrounding quotes).
   ///
   /// ## Examples
