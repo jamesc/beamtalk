@@ -776,8 +776,8 @@ dispatch_user_method(Selector, Args, Self, State) ->
                 error:#beamtalk_error{} = BtError:_Stacktrace ->
                     %% Preserve structured beamtalk errors from method implementations
                     {error, BtError, State};
-                Class:Reason:_Stacktrace ->
-                    wrap_method_error(Selector, State, Class, Reason)
+                Class:Reason:Stacktrace ->
+                    wrap_method_error(Selector, State, Class, Reason, Stacktrace)
             end;
         {ok, Fun} when is_function(Fun, 2) ->
             %% Old-style method: Fun(Args, State) - for backward compatibility
@@ -787,8 +787,8 @@ dispatch_user_method(Selector, Args, Self, State) ->
                 error:#beamtalk_error{} = BtError:_Stacktrace ->
                     %% Preserve structured beamtalk errors from method implementations
                     {error, BtError, State};
-                Class:Reason:_Stacktrace ->
-                    wrap_method_error(Selector, State, Class, Reason)
+                Class:Reason:Stacktrace ->
+                    wrap_method_error(Selector, State, Class, Reason, Stacktrace)
             end;
         {ok, _NotAFunction} ->
             %% Method value is not a function
@@ -825,15 +825,19 @@ call_dnu_handler(DnuFun, DnuArgs, Self, State, 3) ->
     try
         DnuFun(DnuArgs, Self, State)
     catch
-        error:#beamtalk_error{} = BtError:_ -> {error, BtError, State};
-        Class:Reason:_ -> wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason)
+        error:#beamtalk_error{} = BtError:_ ->
+            {error, BtError, State};
+        Class:Reason:Stacktrace ->
+            wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason, Stacktrace)
     end;
 call_dnu_handler(DnuFun, DnuArgs, _Self, State, 2) ->
     try
         DnuFun(DnuArgs, State)
     catch
-        error:#beamtalk_error{} = BtError:_ -> {error, BtError, State};
-        Class:Reason:_ -> wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason)
+        error:#beamtalk_error{} = BtError:_ ->
+            {error, BtError, State};
+        Class:Reason:Stacktrace ->
+            wrap_dnu_handler_error(hd(DnuArgs), State, Class, Reason, Stacktrace)
     end.
 
 %% @private
@@ -884,35 +888,98 @@ make_dnu_error(Selector, ClassName, State) ->
 
 %% @private
 %% @doc Wrap method dispatch exceptions as type_error with source exception details.
--spec wrap_method_error(atom(), map(), term(), term()) -> {error, term(), map()}.
-wrap_method_error(Selector, State, Class, Reason) ->
+-spec wrap_method_error(atom(), map(), term(), term(), list()) -> {error, term(), map()}.
+wrap_method_error(Selector, State, Class, Reason, Stacktrace) ->
+    ClassName = beamtalk_tagged_map:class_of(State, unknown),
+    Message = format_method_error_message(ClassName, Selector, Class, Reason, Stacktrace),
     ?LOG_ERROR("Error in method", #{
         selector => Selector,
         class => Class,
-        reason => Reason
+        reason => Reason,
+        stacktrace => Stacktrace
     }),
-    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-    Error0 = beamtalk_error:new(type_error, ClassName, Selector),
-    Error = beamtalk_error:with_details(Error0, #{
+    Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
+    Error1 = beamtalk_error:with_message(Error0, Message),
+    Error = beamtalk_error:with_details(Error1, #{
         original_class => Class,
-        original_reason => Reason
+        original_reason => Reason,
+        erlang_stacktrace => Stacktrace
     }),
     {error, Error, State}.
 
 %% @private
+%% @doc Format a human-readable error message from a method dispatch failure.
+-spec format_method_error_message(atom(), atom(), term(), term(), list()) -> binary().
+format_method_error_message(ClassName, Selector, error, function_clause, [{M, F, A, Loc} | _]) ->
+    iolist_to_binary(
+        io_lib:format(
+            "No matching clause in ~s>>~s (called ~s:~s/~s~s)",
+            [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
+        )
+    );
+format_method_error_message(ClassName, Selector, error, badarg, [{M, F, A, Loc} | _]) ->
+    iolist_to_binary(
+        io_lib:format(
+            "Bad argument in ~s>>~s (called ~s:~s/~s~s)",
+            [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
+        )
+    );
+format_method_error_message(ClassName, Selector, error, undef, [{M, F, A, Loc} | _]) ->
+    iolist_to_binary(
+        io_lib:format(
+            "Undefined function in ~s>>~s (called ~s:~s/~s~s)",
+            [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
+        )
+    );
+format_method_error_message(ClassName, Selector, error, badarith, [{M, F, A, Loc} | _]) ->
+    iolist_to_binary(
+        io_lib:format(
+            "Arithmetic error in ~s>>~s (called ~s:~s/~s~s)",
+            [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
+        )
+    );
+format_method_error_message(ClassName, Selector, Class, Reason, _Stacktrace) ->
+    iolist_to_binary(
+        io_lib:format(
+            "~p:~p in ~s>>~s",
+            [Class, Reason, ClassName, Selector]
+        )
+    ).
+
+%% @private
+format_arity(A) when is_list(A) -> integer_to_list(length(A));
+format_arity(A) when is_integer(A) -> integer_to_list(A).
+
+%% @private
+format_location(Loc) when is_list(Loc) ->
+    case proplists:get_value(line, Loc) of
+        undefined ->
+            "";
+        Line ->
+            case proplists:get_value(file, Loc) of
+                undefined -> io_lib:format(" at line ~B", [Line]);
+                File -> io_lib:format(" at ~s:~B", [File, Line])
+            end
+    end.
+
+%% @private
 %% @doc Wrap doesNotUnderstand handler exceptions consistently for both arities.
--spec wrap_dnu_handler_error(atom(), map(), term(), term()) -> {error, term(), map()}.
-wrap_dnu_handler_error(Selector, State, Class, Reason) ->
+-spec wrap_dnu_handler_error(atom(), map(), term(), term(), list()) -> {error, term(), map()}.
+wrap_dnu_handler_error(Selector, State, Class, Reason, Stacktrace) ->
+    ClassName = beamtalk_tagged_map:class_of(State, unknown),
+    Message = format_method_error_message(ClassName, Selector, Class, Reason, Stacktrace),
     ?LOG_ERROR("Error in doesNotUnderstand handler", #{
         selector => Selector,
         class => Class,
-        reason => Reason
+        reason => Reason,
+        stacktrace => Stacktrace
     }),
-    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-    Error0 = beamtalk_error:new(type_error, ClassName, 'doesNotUnderstand:args:'),
-    Error = beamtalk_error:with_details(Error0, #{
+    Error0 = beamtalk_error:new(runtime_error, ClassName, 'doesNotUnderstand:args:'),
+    Error1 = beamtalk_error:with_message(Error0, Message),
+    Error = beamtalk_error:with_details(Error1, #{
         original_class => Class,
-        original_reason => Reason
+        original_reason => Reason,
+        erlang_stacktrace => Stacktrace
     }),
     {error, Error, State}.
 
