@@ -962,26 +962,50 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Non-assignment expression
-                if !is_last {
-                    docs.push(Document::Str("let _ = "));
-                }
+                // BT-1397: Clear before generating to detect open-scope results from
+                // class method self-sends.
+                self.last_open_scope_result = None;
                 let doc = self.generate_expression(expr)?;
+                let open_scope = self.last_open_scope_result.take();
                 if is_last {
                     // Wrap result in {Result, StateAcc} tuple
-                    let result_var = self.fresh_temp_var("T2Res");
                     let state = self.current_state_var();
+                    // BT-1397: If the expression left an open scope, close it with
+                    // the result variable then wrap in the Tier 2 tuple.
+                    if let Some(result_var) = open_scope {
+                        docs.push(docvec![
+                            doc,
+                            "{",
+                            Document::String(result_var),
+                            ", ",
+                            Document::String(state),
+                            "}"
+                        ]);
+                    } else {
+                        let result_var = self.fresh_temp_var("T2Res");
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(result_var.clone()),
+                            " = ",
+                            doc,
+                            " in {",
+                            Document::String(result_var),
+                            ", ",
+                            Document::String(state),
+                            "}"
+                        ]);
+                    }
+                } else if let Some(result_var) = open_scope {
+                    // BT-1397: Open scope from class method self-send — emit chain
+                    // then discard the result.
                     docs.push(docvec![
-                        "let ",
-                        Document::String(result_var.clone()),
-                        " = ",
                         doc,
-                        " in {",
+                        "let _ = ",
                         Document::String(result_var),
-                        ", ",
-                        Document::String(state),
-                        "}"
+                        " in "
                     ]);
                 } else {
+                    docs.push(Document::Str("let _ = "));
                     docs.push(doc);
                     docs.push(Document::Str(" in "));
                 }
