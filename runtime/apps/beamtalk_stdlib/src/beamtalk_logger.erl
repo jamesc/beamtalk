@@ -58,7 +58,7 @@
 %% @doc Log a message at info level with metadata.
 -spec 'info:metadata:'(binary(), map()) -> 'nil'.
 'info:metadata:'(Msg, Meta) when is_binary(Msg), is_map(Meta) ->
-    ?LOG_INFO(Msg, Meta),
+    ?LOG_INFO(Meta#{msg => Msg}),
     nil;
 'info:metadata:'(Msg, _Meta) when not is_binary(Msg) ->
     raise_type_error('info:metadata:', <<"Message must be a String">>);
@@ -76,7 +76,7 @@
 %% @doc Log a message at warning level with metadata.
 -spec 'warn:metadata:'(binary(), map()) -> 'nil'.
 'warn:metadata:'(Msg, Meta) when is_binary(Msg), is_map(Meta) ->
-    ?LOG_WARNING(Msg, Meta),
+    ?LOG_WARNING(Meta#{msg => Msg}),
     nil;
 'warn:metadata:'(Msg, _Meta) when not is_binary(Msg) ->
     raise_type_error('warn:metadata:', <<"Message must be a String">>);
@@ -94,7 +94,7 @@
 %% @doc Log a message at error level with metadata.
 -spec 'error:metadata:'(binary(), map()) -> 'nil'.
 'error:metadata:'(Msg, Meta) when is_binary(Msg), is_map(Meta) ->
-    ?LOG_ERROR(Msg, Meta),
+    ?LOG_ERROR(Meta#{msg => Msg}),
     nil;
 'error:metadata:'(Msg, _Meta) when not is_binary(Msg) ->
     raise_type_error('error:metadata:', <<"Message must be a String">>);
@@ -112,7 +112,7 @@
 %% @doc Log a message at debug level with metadata.
 -spec 'debug:metadata:'(binary(), map()) -> 'nil'.
 'debug:metadata:'(Msg, Meta) when is_binary(Msg), is_map(Meta) ->
-    ?LOG_DEBUG(Msg, Meta),
+    ?LOG_DEBUG(Meta#{msg => Msg}),
     nil;
 'debug:metadata:'(Msg, _Meta) when not is_binary(Msg) ->
     raise_type_error('debug:metadata:', <<"Message must be a String">>);
