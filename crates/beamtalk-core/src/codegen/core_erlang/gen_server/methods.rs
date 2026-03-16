@@ -1798,6 +1798,12 @@ impl CoreErlangGenerator {
                 for d in binding_docs {
                     docs.push(d);
                 }
+            } else if self.is_do_with_vt_local_threading(expr) {
+                // BT-1414: Non-last `do:` loop that mutates captured outer locals
+                // in a class method. Generate foldl + extract locals as open let
+                // chains so the updated values are visible to subsequent expressions.
+                let doc = self.generate_value_type_do_open(expr)?;
+                docs.push(doc);
             } else {
                 let tmp_var = self.fresh_temp_var("seq");
                 let expr_str = self.expression_doc(expr)?;
