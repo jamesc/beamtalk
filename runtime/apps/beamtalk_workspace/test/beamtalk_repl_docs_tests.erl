@@ -105,6 +105,81 @@ group_by_class_sorted_output_test() ->
     ?assertEqual([{'A', [a]}, {'B', [m, z]}], Result).
 
 %%====================================================================
+%% extract_see_also tests
+%%====================================================================
+
+extract_see_also_none_test() ->
+    ?assertEqual([], beamtalk_repl_docs:extract_see_also(none)).
+
+extract_see_also_no_tags_test() ->
+    ?assertEqual([], beamtalk_repl_docs:extract_see_also(<<"Just a plain doc string.">>)).
+
+extract_see_also_single_tag_test() ->
+    Result = beamtalk_repl_docs:extract_see_also(<<"Some doc.\n@see Object">>),
+    ?assertEqual([{'Object', <<>>}], Result).
+
+extract_see_also_with_description_test() ->
+    Result = beamtalk_repl_docs:extract_see_also(<<"@see Object (the base class)">>),
+    ?assertEqual([{'Object', <<"the base class">>}], Result).
+
+extract_see_also_multiple_tags_test() ->
+    Doc = <<"Docs here.\n@see Value (immutable)\n@see Actor (concurrent)">>,
+    Result = beamtalk_repl_docs:extract_see_also(Doc),
+    ?assertEqual([{'Value', <<"immutable">>}, {'Actor', <<"concurrent">>}], Result).
+
+%%====================================================================
+%% alternative_classes tests
+%%====================================================================
+
+alternative_classes_object_test() ->
+    Result = beamtalk_repl_docs:alternative_classes('Object'),
+    ?assert(length(Result) > 0),
+    Names = [N || {N, _} <- Result],
+    ?assert(lists:member('Value', Names)),
+    ?assert(lists:member('Actor', Names)).
+
+alternative_classes_unknown_test() ->
+    ?assertEqual([], beamtalk_repl_docs:alternative_classes('SomeRandomClass')).
+
+%%====================================================================
+%% format_see_also tests
+%%====================================================================
+
+format_see_also_empty_test() ->
+    ?assertEqual(<<>>, beamtalk_repl_docs:format_see_also([])).
+
+format_see_also_single_no_desc_test() ->
+    Result = beamtalk_repl_docs:format_see_also([{'Object', <<>>}]),
+    ?assert(binary:match(Result, <<"See also:">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"Object">>) =/= nomatch).
+
+format_see_also_with_desc_test() ->
+    Result = beamtalk_repl_docs:format_see_also([{'Value', <<"immutable data">>}]),
+    ?assert(binary:match(Result, <<"See also:">>) =/= nomatch),
+    %% Should contain the em dash separator
+    ?assert(binary:match(Result, <<" — ">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"immutable data">>) =/= nomatch).
+
+%%====================================================================
+%% build_see_also tests
+%%====================================================================
+
+build_see_also_deduplicates_test() ->
+    %% Object has both alternatives and potentially @see tags — should deduplicate
+    Result = beamtalk_repl_docs:build_see_also('Object', none, <<"@see Value (from doc)">>),
+    Names = [N || {N, _} <- Result],
+    %% Value should appear only once
+    ?assertEqual(1, length([N || N <- Names, N =:= 'Value'])),
+    %% @see tag description takes priority (first wins)
+    {_, Desc} = lists:keyfind('Value', 1, Result),
+    ?assertEqual(<<"from doc">>, Desc).
+
+build_see_also_no_sources_test() ->
+    %% Random class with no doc, no superclass, no alternatives
+    Result = beamtalk_repl_docs:build_see_also('SomeRandomClass', none, none),
+    ?assertEqual([], Result).
+
+%%====================================================================
 %% format_class_output tests (pure formatting, no runtime needed)
 %%====================================================================
 
@@ -115,6 +190,7 @@ format_class_output_minimal_test() ->
         none,
         #{is_sealed => false, is_abstract => false},
         none,
+        [],
         [],
         []
     ),
@@ -130,6 +206,7 @@ format_class_output_with_superclass_test() ->
         #{is_sealed => false, is_abstract => false},
         none,
         [],
+        [],
         []
     ),
     ?assert(binary:match(Result, <<"== Counter < Actor ==">>) =/= nomatch).
@@ -140,6 +217,7 @@ format_class_output_with_module_doc_test() ->
         'Number',
         #{is_sealed => false, is_abstract => false},
         <<"Whole number arithmetic.">>,
+        [],
         [],
         []
     ),
@@ -157,6 +235,7 @@ format_class_output_with_own_methods_test() ->
         #{is_sealed => false, is_abstract => false},
         none,
         OwnDocs,
+        [],
         []
     ),
     ?assert(binary:match(Result, <<"Instance methods:">>) =/= nomatch),
@@ -171,7 +250,8 @@ format_class_output_with_inherited_methods_test() ->
         #{is_sealed => false, is_abstract => false},
         none,
         [],
-        InheritedGrouped
+        InheritedGrouped,
+        []
     ),
     ?assert(binary:match(Result, <<"Inherited from Object (2 methods)">>) =/= nomatch),
     ?assert(binary:match(Result, <<"class, respondsTo">>) =/= nomatch).
@@ -185,7 +265,8 @@ format_class_output_inherited_truncation_test() ->
         #{is_sealed => false, is_abstract => false},
         none,
         [],
-        InheritedGrouped
+        InheritedGrouped,
+        []
     ),
     ?assert(binary:match(Result, <<"7 methods">>) =/= nomatch),
     ?assert(binary:match(Result, <<"4 more)">>) =/= nomatch).
@@ -199,7 +280,8 @@ format_class_output_inherited_five_or_fewer_test() ->
         #{is_sealed => false, is_abstract => false},
         none,
         [],
-        InheritedGrouped
+        InheritedGrouped,
+        []
     ),
     ?assert(binary:match(Result, <<"5 methods">>) =/= nomatch),
     ?assert(binary:match(Result, <<"a, b, c, d, e">>) =/= nomatch),
@@ -212,6 +294,7 @@ format_class_output_sealed_class_test() ->
         #{is_sealed => true, is_abstract => false},
         none,
         [],
+        [],
         []
     ),
     ?assert(binary:match(Result, <<"[sealed]">>) =/= nomatch),
@@ -223,6 +306,7 @@ format_class_output_abstract_class_test() ->
         none,
         #{is_sealed => false, is_abstract => true},
         none,
+        [],
         [],
         []
     ),
@@ -240,11 +324,40 @@ format_class_output_sealed_method_test() ->
         #{is_sealed => false, is_abstract => false},
         none,
         OwnDocs,
+        [],
         []
     ),
     ?assert(binary:match(Result, <<"+ other [sealed]">>) =/= nomatch),
     %% Non-sealed method should not have [sealed]
     ?assertEqual(nomatch, binary:match(Result, <<"- other [sealed]">>)).
+
+format_class_output_with_see_also_test() ->
+    SeeAlso = [{'Value', <<"immutable data">>}, {'Actor', <<"concurrent processes">>}],
+    Result = beamtalk_repl_docs:format_class_output(
+        'Object',
+        none,
+        #{is_sealed => false, is_abstract => false},
+        none,
+        [],
+        [],
+        SeeAlso
+    ),
+    ?assert(binary:match(Result, <<"See also:">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"Value">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"Actor">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"immutable data">>) =/= nomatch).
+
+format_class_output_no_see_also_test() ->
+    Result = beamtalk_repl_docs:format_class_output(
+        'MyClass',
+        none,
+        #{is_sealed => false, is_abstract => false},
+        none,
+        [],
+        [],
+        []
+    ),
+    ?assertEqual(nomatch, binary:match(Result, <<"See also:">>)).
 
 %%====================================================================
 %% format_method_output tests (pure formatting)
