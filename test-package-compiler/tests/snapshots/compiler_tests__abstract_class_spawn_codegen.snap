@@ -70,7 +70,7 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'area'> when 'true' ->
-            let _Result = case call 'abstract_class_spawn':'safe_dispatch'('subclassResponsibility', [], State) of <{'reply', _SelfResult1, _SelfState2}> when 'true' -> _SelfResult1 <{'error', _SelfError3, _}> when 'true' -> call 'beamtalk_error':'raise'(_SelfError3) end in {'reply', _Result, State}
+            let _SD1 = case call 'abstract_class_spawn':'safe_dispatch'('subclassResponsibility', [], State) of <{'reply', _SDResult2, _SDState3}> when 'true' -> {_SDResult2, _SDState3} <{'error', _SDError4, _}> when 'true' -> call 'beamtalk_error':'raise'(_SDError4) end in let State1 = call 'erlang':'element'(2, _SD1) in {'reply', call 'erlang':'element'(1, _SD1), State1}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
             let ExtLookup = try call 'beamtalk_extensions':'lookup'('Shape', OtherSelector)

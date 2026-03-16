@@ -1141,6 +1141,26 @@ impl CoreErlangGenerator {
         false
     }
 
+    /// BT-1420: Checks if an expression is a self-send that goes through `safe_dispatch`
+    /// (or sealed dispatch) and returns `{reply, Result, NewState}`.
+    ///
+    /// Excludes intrinsic self-sends (`fieldAt:`, `fieldAt:put:`, `fieldNames`) which
+    /// have special handling via `beamtalk_primitive:send` and do NOT return a
+    /// `{reply, Result, NewState}` tuple.
+    pub(super) fn is_dispatching_actor_self_send(&self, expr: &Expression) -> bool {
+        if !self.is_actor_self_send(expr) {
+            return false;
+        }
+        if let Expression::MessageSend { selector, .. } = expr {
+            let name = selector.name();
+            // These selectors have intrinsic handling that bypasses safe_dispatch
+            if name == "fieldAt:" || name == "fieldAt:put:" || name == "fieldNames" {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Checks if an expression is an `error:` message send.
     ///
     /// Since `erlang:error/1` never returns (always throws an exception),

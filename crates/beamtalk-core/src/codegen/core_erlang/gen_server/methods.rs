@@ -366,6 +366,23 @@ impl CoreErlangGenerator {
                         Document::String(post_state),
                         "}",
                     ]);
+                } else if self.is_dispatching_actor_self_send(expr) {
+                    // BT-1420: Self-send as last expression — thread NewState into reply.
+                    let doc = self.generate_self_dispatch_open(expr)?;
+                    docs.push(doc);
+                    let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
+                        CodeGenError::Internal(
+                            "invariant violation: missing dispatch var after self-send".to_string(),
+                        )
+                    })?;
+                    let final_state = self.current_state_var();
+                    docs.push(docvec![
+                        "{'reply', call 'erlang':'element'(1, ",
+                        Document::String(dispatch_var),
+                        "), ",
+                        Document::String(final_state),
+                        "}",
+                    ]);
                 } else {
                     // Regular last expression: bind to Result and reply
                     // BT-851: Get state AFTER expression generation, since Tier 2
@@ -577,6 +594,11 @@ impl CoreErlangGenerator {
                     }
                 }
                 docs.push(Document::Vec(doc_parts));
+            } else if self.is_dispatching_actor_self_send(expr) {
+                // BT-1420: Self-send in non-last position — thread NewState from
+                // safe_dispatch so subsequent expressions see state mutations.
+                let doc = self.generate_self_dispatch_open(expr)?;
+                docs.push(doc);
             } else {
                 // Regular intermediate expression: wrap in let to discard value
                 let tmp_var = self.fresh_temp_var("seq");
@@ -753,6 +775,23 @@ impl CoreErlangGenerator {
                     docs.push(docvec![
                         "{'reply', 'nil', ",
                         Document::String(post_state),
+                        "}",
+                    ]);
+                } else if self.is_dispatching_actor_self_send(expr) {
+                    // BT-1420: Self-send as last expression — thread NewState into reply.
+                    let doc = self.generate_self_dispatch_open(expr)?;
+                    docs.push(doc);
+                    let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
+                        CodeGenError::Internal(
+                            "invariant violation: missing dispatch var after self-send".to_string(),
+                        )
+                    })?;
+                    let final_state = self.current_state_var();
+                    docs.push(docvec![
+                        "{'reply', call 'erlang':'element'(1, ",
+                        Document::String(dispatch_var),
+                        "), ",
+                        Document::String(final_state),
                         "}",
                     ]);
                 } else {
@@ -1053,6 +1092,11 @@ impl CoreErlangGenerator {
                 ];
                 docs.push(doc);
                 let _ = self.next_state_var();
+            } else if self.is_dispatching_actor_self_send(expr) {
+                // BT-1420: Self-send in non-last position — thread NewState from
+                // safe_dispatch so subsequent expressions see state mutations.
+                let doc = self.generate_self_dispatch_open(expr)?;
+                docs.push(doc);
             } else {
                 // Non-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");

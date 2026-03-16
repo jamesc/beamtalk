@@ -2598,3 +2598,62 @@ fn test_value_keyword_guard_field_assignment_arg_hoisted() {
 
     generator.pop_scope();
 }
+
+// --- BT-1420: Self-call state threading ---
+
+#[test]
+fn test_self_call_non_last_threads_state() {
+    // BT-1420: `self setup` followed by `self.value` — the self-send must
+    // thread NewState so the subsequent field read sees the mutation.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup =>\n",
+        "    self.value := 42\n\n",
+        "  doWork =>\n",
+        "    self setup\n",
+        "    self.value\n",
+    );
+    let code = codegen_source(src);
+    // The self-send must produce a state variable (SDState/State1) that is used
+    // by the subsequent maps:get for self.value
+    assert!(
+        code.contains("safe_dispatch") || code.contains("dispatch"),
+        "Self-call should use dispatch. Got:\n{code}"
+    );
+    // The state must be threaded: extract element(2, ...) into a new State var
+    assert!(
+        code.contains("'erlang':'element'(2,"),
+        "Self-call must extract NewState from dispatch result. Got:\n{code}"
+    );
+    // The field read (self.value) must reference the threaded state, not the original
+    assert!(
+        code.contains("'maps':'get'('value', State1)"),
+        "Field read after self-call must use threaded State1. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_self_call_as_last_expression_threads_state() {
+    // BT-1420: `self setup` as the last expression must thread NewState
+    // into the reply tuple so gen_server state is updated.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup =>\n",
+        "    self.value := 42\n\n",
+        "  doWork =>\n",
+        "    self setup\n",
+    );
+    let code = codegen_source(src);
+    // The reply tuple must use the threaded state
+    assert!(
+        code.contains("'erlang':'element'(2,"),
+        "Last self-call must extract NewState. Got:\n{code}"
+    );
+    // Reply should use element(1, ...) for the result
+    assert!(
+        code.contains("'erlang':'element'(1,"),
+        "Last self-call must extract result via element(1, ...). Got:\n{code}"
+    );
+}

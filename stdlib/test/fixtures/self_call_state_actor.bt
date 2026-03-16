@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1420: Fixture for testing that self-call state mutations are visible
+// to the caller after the self-call returns.
+
+Actor subclass: SelfCallStateActor
+  state: value = 0
+  state: count = 0
+
+  // Helper that mutates state — called via self-send
+  setupValue => self.value := 42
+
+  // Calls self helper, then reads the mutated state
+  callSetupThenRead =>
+    self setupValue
+    self.value
+
+  // Helper that increments count
+  incrementCount => self.count := self.count + 1
+
+  // Multiple self-calls that each mutate state
+  callThreeIncrements =>
+    self incrementCount
+    self incrementCount
+    self incrementCount
+    self.count
+
+  // Self-call as the last expression (result should be returned)
+  callSetupAsLast => self setupValue
+
+  // Read value to verify state after callSetupAsLast
+  getValue => self.value
+
+  // Self-call that mutates state, then a field assignment after
+  callSetupThenAssignField =>
+    self setupValue
+    self.count := 10
+    self.value + self.count
