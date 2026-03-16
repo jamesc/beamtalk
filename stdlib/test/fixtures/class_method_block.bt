@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1397: Test fixture for class method calls inside blocks in class methods.
+// Class methods that contain blocks calling other class methods via `self`.
+
+Object subclass: ClassMethodBlock
+
+  class compare: a with: b => a < b
+
+  class double: x => x * 2
+
+  class add: a to: b => a + b
+
+  // sort: block calling class method
+  class sortItems: items =>
+    items sort: [:a :b | self compare: a with: b]
+
+  // collect: block calling class method
+  class doubleAll: items =>
+    items collect: [:item | self double: item]
+
+  // do: block calling class method (non-last, discarded result)
+  class processAll: items =>
+    items do: [:item | self double: item]
+    items
+
+  // inject:into: block calling class method
+  class sumAll: items =>
+    items inject: 0 into: [:acc :item | self add: acc to: item]
+
+  // Multiple statements in block: self-send not last
+  class doubleAndSort: items =>
+    items sort: [:a :b |
+      da := self double: a
+      db := self double: b
+      self compare: da with: db
+    ]
+
+  // Multiple self-sends in block body
+  class processWithMultipleSends: items =>
+    items collect: [:item |
+      doubled := self double: item
+      self add: doubled to: doubled
+    ]

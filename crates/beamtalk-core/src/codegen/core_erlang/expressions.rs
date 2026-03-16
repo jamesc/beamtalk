@@ -1416,9 +1416,19 @@ impl CoreErlangGenerator {
                         });
                     }
                 }
+            } else if is_last && self.is_class_method_self_send(expr) {
+                // BT-1397: Class method self-send as last expression in a block body.
+                // The generated code leaves an open scope ending with `in ` — close it
+                // with the unwrapped result variable (same pattern as generate_class_method_body).
+                self.last_open_scope_result = None;
+                docs.push(self.generate_expression(expr)?);
+                if let Some(result_var) = self.last_open_scope_result.take() {
+                    docs.push(Document::String(result_var));
+                }
             } else if is_last {
                 // Last expression: generate directly (its value is the block's result)
                 docs.push(self.generate_expression(expr)?);
+
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 // This leaves the let bindings open for subsequent expressions
@@ -1440,16 +1450,32 @@ impl CoreErlangGenerator {
                         // Capture the value expression (preserves side effects)
                         // Important: capture BEFORE updating the mapping,
                         // so that any uses of the variable in the RHS see the previous binding.
+                        // BT-1397: Clear before RHS so we detect open-scope results from
+                        // class method self-sends in the value expression.
+                        self.last_open_scope_result = None;
                         let val_doc = self.expression_doc(value)?;
                         // Now update the mapping so subsequent expressions see this binding.
                         self.bind_var(var_name, &core_var);
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(core_var.clone()),
-                            " = ",
-                            val_doc,
-                            " in "
-                        ]);
+                        // BT-1397: If the RHS produced an open scope (class method self-send),
+                        // emit the open scope then bind the variable to its result.
+                        if let Some(open_scope_result) = self.last_open_scope_result.take() {
+                            docs.push(docvec![
+                                val_doc,
+                                "let ",
+                                Document::String(core_var),
+                                " = ",
+                                Document::String(open_scope_result),
+                                " in "
+                            ]);
+                        } else {
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(core_var.clone()),
+                                " = ",
+                                val_doc,
+                                " in "
+                            ]);
+                        }
                     }
                 }
             } else if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
@@ -1476,6 +1502,21 @@ impl CoreErlangGenerator {
                         feature: "Multiple threaded variables in control flow".to_string(),
                         location: "generate_block_body_slice".to_string(),
                     });
+                }
+            } else if self.is_class_method_self_send(expr) {
+                // BT-1397: Class method self-send as non-last expression in a block body.
+                // The generated code leaves an open scope — emit it and discard the result.
+                self.last_open_scope_result = None;
+                let expr_doc = self.expression_doc(expr)?;
+                if let Some(result_var) = self.last_open_scope_result.take() {
+                    docs.push(docvec![
+                        expr_doc,
+                        "let _Unit = ",
+                        Document::String(result_var),
+                        " in "
+                    ]);
+                } else {
+                    docs.push(docvec!["let _Unit = ", expr_doc, " in "]);
                 }
             } else {
                 // Not an assignment or loop - generate and discard result

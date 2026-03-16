@@ -3247,3 +3247,57 @@ fn test_native_facade_no_dispatch_for_beamtalk_body() {
         "Non-delegate method should NOT get a dispatch function. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_class_method_self_send_in_block() {
+    // BT-1397: Class method self-send inside a block should produce valid Core Erlang.
+    // Previously, the open-scope `let ... in ` from the self-send was not closed,
+    // resulting in `syntax error before: ']'` from the Core Erlang parser.
+    let src = r#"Object subclass: Foo
+  class compare: a with: b => a < b
+  class sortItems: items =>
+    items sort: [:a :b | self compare: a with: b]"#;
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@foo").with_workspace_mode(true),
+    );
+    assert!(
+        result.is_ok(),
+        "Class method with self-send in block should compile. Got: {:?}",
+        result.err()
+    );
+    let code = result.unwrap();
+    // The block should close with the unwrapped result variable, not leave an open scope
+    assert!(
+        code.contains("class_compare:with:"),
+        "Should call class_compare:with: directly. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_class_method_self_send_in_block_local_assignment() {
+    // BT-1397: Local assignment with class method self-send as RHS inside a block.
+    // The open-scope from the self-send must be emitted before the let binding.
+    let src = r#"Object subclass: Bar
+  class double: x => x * 2
+  class compare: a with: b => a < b
+  class doubleAndSort: items =>
+    items sort: [:a :b |
+      da := self double: a
+      db := self double: b
+      self compare: da with: db
+    ]"#;
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@bar").with_workspace_mode(true),
+    );
+    assert!(
+        result.is_ok(),
+        "Block with local := class-method-self-send should compile. Got: {:?}",
+        result.err()
+    );
+}
