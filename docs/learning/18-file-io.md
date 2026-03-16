@@ -163,12 +163,9 @@ TestCase subclass: Ch18Errors
 
 ## Security
 
-File paths are sandboxed — absolute paths and directory traversal are rejected:
-
-```beamtalk
-File exists: "/etc/passwd"    // => false
-File exists: "../secret.txt"  // => false
-```
+File operations rely on OS-level permissions — there are no path restrictions.
+Both absolute and relative paths are accepted (ADR 0063). Beamtalk is a trusted
+developer tool; production deployments should use OS sandboxing as needed.
 
 ## Summary
 

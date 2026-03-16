@@ -178,7 +178,8 @@ direct_call(Module, FunName, Args) ->
 -spec apply_with_coercion(atom(), atom(), list(), atom()) -> term().
 apply_with_coercion(Module, FunName, Args, OrigSelector) ->
     try
-        erlang:apply(Module, FunName, Args)
+        Result = erlang:apply(Module, FunName, Args),
+        coerce_charlist_result(Result)
     catch
         error:#{error := #beamtalk_error{}} = Wrapped:_ ->
             error(Wrapped);
@@ -190,13 +191,13 @@ apply_with_coercion(Module, FunName, Args, OrigSelector) ->
             case CoercedArgs =/= Args of
                 true ->
                     try
-                        Result = erlang:apply(Module, FunName, CoercedArgs),
-                        coerce_charlist_result(Result)
+                        RetryResult = erlang:apply(Module, FunName, CoercedArgs),
+                        coerce_charlist_result(RetryResult)
                     catch
                         error:badarg:Stack2 ->
                             raise_badarg_error(Module, FunName, OrigSelector, Stack2);
-                        error:#{error := #beamtalk_error{}} = Wrapped:_ ->
-                            error(Wrapped);
+                        error:#{error := #beamtalk_error{}} = Wrapped2:_ ->
+                            error(Wrapped2);
                         error:undef:_Stack2 ->
                             raise_undef_error(Module, FunName, length(CoercedArgs), OrigSelector)
                     end;
@@ -530,14 +531,20 @@ coerce_arg(Arg) when is_binary(Arg) ->
 coerce_arg(Arg) ->
     Arg.
 
-%% @doc Convert a charlist result to a binary (BT-1127).
+%% @doc Convert a charlist result to a binary (BT-1127, BT-1398).
 %%
-%% When we auto-coerce binary args to charlists, Erlang functions may return
-%% charlists as output (e.g., os:cmd/1 returns a charlist). Convert those
-%% back to binaries for consistent Beamtalk string representation.
+%% Erlang functions may return charlists (e.g., os:cmd/1, calendar:system_time_to_rfc3339/1).
+%% Convert those back to binaries for consistent Beamtalk string representation.
+%% Applied on both the direct success path and the badarg retry path.
+%%
+%% Uses `io_lib:printable_unicode_list/1` rather than `io_lib:char_list/1` to avoid
+%% false positives on lists of small integers (e.g., [1,2,3]) that are valid codepoints
+%% but not printable text (BT-1398).
 -spec coerce_charlist_result(term()) -> term().
+coerce_charlist_result([]) ->
+    [];
 coerce_charlist_result(Result) when is_list(Result) ->
-    case io_lib:char_list(Result) of
+    case io_lib:printable_unicode_list(Result) of
         true ->
             case unicode:characters_to_binary(Result, utf8) of
                 Bin when is_binary(Bin) -> Bin;

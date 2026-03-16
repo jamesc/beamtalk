@@ -47,6 +47,36 @@ sealed Object subclass: System
   class sealed getEnv: name :: String default: fallback :: String -> String =>
     (Erlang beamtalk_system) getEnv: name default: fallback
 
+  /// Set an environment variable. Both arguments must be Strings.
+  ///
+  /// Returns true on success. Raises #type_error for non-String arguments.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System setEnv: "BT_TEST_SET_ENV" value: "hello"
+  /// // => true
+  /// System getEnv: "BT_TEST_SET_ENV"
+  /// // => "hello"
+  /// ```
+  class sealed setEnv: name :: String value: val :: String -> Boolean =>
+    (Erlang beamtalk_system) setEnv: name value: val
+
+  /// Remove an environment variable. Argument must be a String.
+  ///
+  /// Returns true on success. Raises #type_error for non-String argument.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System setEnv: "BT_TEST_UNSET_ENV" value: "temp"
+  /// // => true
+  /// System unsetEnv: "BT_TEST_UNSET_ENV"
+  /// // => true
+  /// System getEnv: "BT_TEST_UNSET_ENV"
+  /// // => nil
+  /// ```
+  class sealed unsetEnv: name :: String -> Boolean =>
+    (Erlang beamtalk_system) unsetEnv: name
+
   /// Return the OS platform name: "linux", "darwin", or "win32".
   ///
   /// ## Examples
