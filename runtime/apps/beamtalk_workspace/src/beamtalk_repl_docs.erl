@@ -582,6 +582,10 @@ format_modifiers(_) ->
     <<>>.
 
 %% @doc Extract @see references from doc text.
+%%
+%% Matches `@see ClassName` and `@see ClassName (description)` patterns.
+%% Use one @see per line for multiple references.
+%%
 %% Returns a list of {ClassName, Description} tuples.
 -spec extract_see_also(binary() | none) -> [{atom(), binary()}].
 extract_see_also(none) ->
