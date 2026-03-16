@@ -14,6 +14,8 @@
 %%% |---------------------|------------------------------------------|
 %%% | `getEnv:`           | Read environment variable (nil if unset) |
 %%% | `getEnv:default:`   | Read env var with fallback               |
+%%% | `setEnv:value:`     | Set environment variable                 |
+%%% | `unsetEnv:`         | Remove environment variable              |
 %%% | `osPlatform`        | OS name: linux, darwin, win32            |
 %%% | `osFamily`          | OS family: unix or win32                 |
 %%% | `architecture`      | System architecture string               |
@@ -24,9 +26,11 @@
 -module(beamtalk_system).
 
 -export(['getEnv:'/1, 'getEnv:default:'/2]).
+-export(['setEnv:value:'/2, 'unsetEnv:'/1]).
 -export([osPlatform/0, osFamily/0, architecture/0, hostname/0]).
 -export([erlangVersion/0, pid/0]).
 -export([getEnv/1, getEnv/2]).
+-export([setEnv/2, unsetEnv/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -64,6 +68,33 @@
     Error0 = beamtalk_error:new(type_error, 'System'),
     Error1 = beamtalk_error:with_selector(Error0, 'getEnv:default:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Default argument must be a String">>),
+    beamtalk_error:raise(Error2).
+
+%% @doc Set an environment variable. Returns true.
+-spec 'setEnv:value:'(binary(), binary()) -> 'true'.
+'setEnv:value:'(Name, Value) when is_binary(Name), is_binary(Value) ->
+    os:putenv(binary_to_list(Name), binary_to_list(Value)),
+    true;
+'setEnv:value:'(Name, _Value) when not is_binary(Name) ->
+    Error0 = beamtalk_error:new(type_error, 'System'),
+    Error1 = beamtalk_error:with_selector(Error0, 'setEnv:value:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Name argument must be a String">>),
+    beamtalk_error:raise(Error2);
+'setEnv:value:'(_Name, _Value) ->
+    Error0 = beamtalk_error:new(type_error, 'System'),
+    Error1 = beamtalk_error:with_selector(Error0, 'setEnv:value:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Value argument must be a String">>),
+    beamtalk_error:raise(Error2).
+
+%% @doc Remove an environment variable. Returns true.
+-spec 'unsetEnv:'(binary()) -> 'true'.
+'unsetEnv:'(Name) when is_binary(Name) ->
+    os:unsetenv(binary_to_list(Name)),
+    true;
+'unsetEnv:'(_) ->
+    Error0 = beamtalk_error:new(type_error, 'System'),
+    Error1 = beamtalk_error:with_selector(Error0, 'unsetEnv:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a String">>),
     beamtalk_error:raise(Error2).
 
 %% @doc Return the OS platform name.
@@ -136,6 +167,12 @@ getEnv(Name) -> 'getEnv:'(Name).
 
 -spec getEnv(binary(), binary()) -> binary().
 getEnv(Name, Default) -> 'getEnv:default:'(Name, Default).
+
+-spec setEnv(binary(), binary()) -> 'true'.
+setEnv(Name, Value) -> 'setEnv:value:'(Name, Value).
+
+-spec unsetEnv(binary()) -> 'true'.
+unsetEnv(Name) -> 'unsetEnv:'(Name).
 
 %%% ============================================================================
 %%% Internal Functions
