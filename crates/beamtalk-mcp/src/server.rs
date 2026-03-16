@@ -208,6 +208,19 @@ pub struct SearchExamplesParams {
     pub limit: Option<usize>,
 }
 
+/// Parameters for the `search_classes` MCP tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SearchClassesParams {
+    /// Search query — keywords or concept to search for classes.
+    #[schemars(
+        description = "Keywords or natural language query to search for classes (e.g. 'environment variable', 'subprocess', 'immutable', 'http', 'collection')"
+    )]
+    pub query: String,
+    /// Maximum number of results (default 5, max 20).
+    #[schemars(description = "Maximum results to return. Default 5, max 20.")]
+    pub limit: Option<usize>,
+}
+
 // --- MCP Tool implementations ---
 
 #[tool_router]
@@ -805,6 +818,93 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
+    /// Search for Beamtalk classes by keyword or concept.
+    #[tool(
+        description = "Search for Beamtalk classes by keyword, concept, or method name. Returns matching classes with their superclass, description, and key methods. Use this to discover which class provides a capability before using 'docs' for full details. Works offline — no REPL connection needed."
+    )]
+    async fn search_classes(
+        &self,
+        Parameters(params): Parameters<SearchClassesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let start = std::time::Instant::now();
+        let results = beamtalk_examples::search_classes(&params.query, params.limit);
+        let duration_us = start.elapsed().as_micros();
+
+        let result_count = results.len();
+        let top_score = results.first().map_or(0, |r| r.score);
+
+        let hash_bytes = Sha256::digest(params.query.as_bytes());
+        let query_hash = hash_bytes
+            .iter()
+            .fold(String::with_capacity(64), |mut acc, b| {
+                use std::fmt::Write as _;
+                let _ = write!(acc, "{b:02x}");
+                acc
+            });
+
+        tracing::info!(
+            query_hash = %query_hash,
+            result_count = result_count,
+            top_score = top_score,
+            duration_us = duration_us,
+            "search_classes"
+        );
+        tracing::debug!(query = %params.query, "search_classes query");
+
+        if results.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No classes found for that query. Try different keywords — e.g. 'http', 'collection', 'file', 'actor', 'subprocess'.",
+            )]));
+        }
+
+        let text = results
+            .iter()
+            .map(|r| {
+                let sealed = if r.entry.is_sealed { " (sealed)" } else { "" };
+                let abstract_ = if r.entry.is_abstract {
+                    " (abstract)"
+                } else {
+                    ""
+                };
+                let doc = r
+                    .entry
+                    .doc
+                    .as_deref()
+                    .unwrap_or("No description available.");
+                let methods_display = if r.entry.methods.is_empty() {
+                    "  (no methods)".to_string()
+                } else {
+                    r.entry
+                        .methods
+                        .iter()
+                        .take(15)
+                        .map(|m| format!("  {m}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+                let more = if r.entry.methods.len() > 15 {
+                    format!("\n  ... and {} more", r.entry.methods.len() - 15)
+                } else {
+                    String::new()
+                };
+                format!(
+                    "## {}{}{} < {} (score: {})\n{}\n\n**Methods:**\n{}{}\n",
+                    r.entry.name,
+                    sealed,
+                    abstract_,
+                    r.entry.superclass,
+                    r.score,
+                    doc,
+                    methods_display,
+                    more,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n---\n\n");
+
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
     /// Discover supported REPL operations and protocol version.
     #[tool(
         description = "Discover supported REPL operations and protocol version. Returns the list of available ops with their parameters, and version information."
@@ -1021,6 +1121,7 @@ impl ServerHandler for BeamtalkMcp {
                  'list_actors' to see running actors, 'inspect' to examine actor state, \
                  'reload_module' for hot code reloading, 'test' to run BUnit tests, \
                  'lint' to run style/redundancy checks on .bt source files, \
+                 'search_classes' to discover Beamtalk classes by keyword or concept (works offline, no REPL needed), \
                  'search_examples' to find Beamtalk code examples by keyword (works offline, no REPL needed), \
                  'show_codegen' to inspect generated Core Erlang (use class+selector for loaded classes), 'info' for symbol details, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
@@ -1132,6 +1233,44 @@ mod tests {
         assert!(
             tool_names.contains(&"search_examples"),
             "search_examples should be in tool list, found: {tool_names:?}"
+        );
+    }
+
+    // --- search_classes ---
+
+    #[test]
+    fn search_classes_returns_results_for_known_query() {
+        let results = beamtalk_examples::search_classes("http", None);
+        assert!(
+            !results.is_empty(),
+            "searching 'http' should return results from the bundled class corpus"
+        );
+    }
+
+    #[test]
+    fn search_classes_respects_limit() {
+        let results = beamtalk_examples::search_classes("a", Some(2));
+        assert!(
+            results.len() <= 2,
+            "limit=2 should return at most 2 results, got {}",
+            results.len()
+        );
+    }
+
+    #[test]
+    fn search_classes_empty_query_returns_empty() {
+        let results = beamtalk_examples::search_classes("", None);
+        assert!(results.is_empty(), "empty query should return no results");
+    }
+
+    #[test]
+    fn search_classes_tool_registered() {
+        let router = BeamtalkMcp::tool_router();
+        let tools = router.list_all();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        assert!(
+            tool_names.contains(&"search_classes"),
+            "search_classes should be in tool list, found: {tool_names:?}"
         );
     }
 }

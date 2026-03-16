@@ -1,0 +1,1409 @@
+[
+  {
+    "name": "Actor",
+    "superclass": "Object",
+    "doc": "Base class for process-based objects.",
+    "methods": [
+      "spawn",
+      "spawnWith:",
+      "new",
+      "new:",
+      "supervisionPolicy",
+      "isSupervisor",
+      "supervisionSpec",
+      "delegate",
+      "stop",
+      "kill",
+      "isAlive"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Array",
+    "superclass": "Collection",
+    "doc": "Fixed-size indexed collection with O(log n) random access.",
+    "methods": [
+      "withAll:",
+      "new:",
+      "size",
+      "isEmpty",
+      "at:",
+      "at:put:",
+      "includes:",
+      "do:",
+      "collect:",
+      "select:",
+      "inject:into:",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "AtomicCounter",
+    "superclass": "Object",
+    "doc": "Named integer counter backed by ETS for lock-free increments.",
+    "methods": [
+      "new:",
+      "named:",
+      "increment",
+      "incrementBy:",
+      "decrement",
+      "decrementBy:",
+      "value",
+      "reset",
+      "delete"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "BEAMError",
+    "superclass": "Error",
+    "doc": "Foreign BEAM-specific exceptions.",
+    "methods": [],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Bag",
+    "superclass": "Collection",
+    "doc": "Immutable multiset (unordered collection allowing duplicate elements).",
+    "methods": [
+      "withAll:",
+      "size",
+      "occurrencesOf:",
+      "includes:",
+      "add:",
+      "add:withCount:",
+      "remove:",
+      "do:",
+      "printString"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "BeamtalkInterface",
+    "superclass": "Object",
+    "doc": "Workspace-level reflection and class registry.",
+    "methods": [
+      "current",
+      "current:",
+      "allClasses",
+      "classNamed:",
+      "globals",
+      "help:",
+      "help:selector:",
+      "version"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Behaviour",
+    "superclass": "Object",
+    "doc": "Abstract superclass of all class-describing objects.",
+    "methods": [
+      "superclass",
+      "allSuperclasses",
+      "subclasses",
+      "allSubclasses",
+      "inheritsFrom:",
+      "includesBehaviour:",
+      "methods",
+      "allMethods",
+      "canUnderstand:",
+      "includesSelector:",
+      "whichClassIncludesSelector:",
+      "fieldNames",
+      "allFieldNames",
+      "doc",
+      "doc:",
+      "setDocForMethod:to:",
+      "docForMethod:",
+      "isBehaviour",
+      "isMeta",
+      "isMetaclass",
+      "sourceFile",
+      "reload",
+      "removeFromSystem"
+    ],
+    "is_sealed": false,
+    "is_abstract": true
+  },
+  {
+    "name": "Block",
+    "superclass": "Object",
+    "doc": "First-class closures (anonymous functions).",
+    "methods": [
+      "value",
+      "value:",
+      "value:value:",
+      "value:value:value:",
+      "whileTrue:",
+      "whileFalse:",
+      "repeat",
+      "on:do:",
+      "ensure:",
+      "arity",
+      "valueWithArguments:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Boolean",
+    "superclass": "Value",
+    "doc": "Abstract superclass for True and False.",
+    "methods": [
+      "ifTrue:ifFalse:",
+      "ifTrue:",
+      "ifFalse:",
+      "not",
+      "isBoolean",
+      "and:",
+      "or:",
+      "xor:",
+      "inspect"
+    ],
+    "is_sealed": false,
+    "is_abstract": true
+  },
+  {
+    "name": "Character",
+    "superclass": "Integer",
+    "doc": "Unicode character (codepoint) wrapper.",
+    "methods": [
+      "value:",
+      "=:=",
+      "/=",
+      "<",
+      ">",
+      "<=",
+      ">=",
+      "asInteger",
+      "asString",
+      "printString",
+      "hash",
+      "isLetter",
+      "isDigit",
+      "isUppercase",
+      "isLowercase",
+      "isWhitespace",
+      "uppercase",
+      "lowercase"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Class",
+    "superclass": "Behaviour",
+    "doc": "A concrete class in the Beamtalk system.",
+    "methods": [
+      "name",
+      "printString",
+      "isClass",
+      "class",
+      "classBuilder"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "ClassBuilder",
+    "superclass": "Actor",
+    "doc": "Fluent builder for creating and registering Beamtalk classes.",
+    "methods": [
+      "name:",
+      "superclass:",
+      "fields:",
+      "methods:",
+      "addField:default:",
+      "modifier:",
+      "native:",
+      "register"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "CompiledMethod",
+    "superclass": "Value",
+    "doc": "Method introspection object.",
+    "methods": [
+      "selector",
+      "source",
+      "doc",
+      "argumentCount",
+      "printString",
+      "asString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "DateTime",
+    "superclass": "Value",
+    "doc": "UTC date and time via Erlang calendar/os modules.",
+    "methods": [
+      "new:",
+      "now",
+      "monotonicNow",
+      "year:month:day:",
+      "year:month:day:hour:minute:second:",
+      "fromTimestamp:",
+      "fromString:",
+      "year",
+      "month",
+      "day",
+      "hour",
+      "minute",
+      "second",
+      "asTimestamp",
+      "asString",
+      "printString",
+      "addSeconds:",
+      "addDays:",
+      "diffSeconds:",
+      "<",
+      ">",
+      "<=",
+      ">=",
+      "=:=",
+      "/="
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Dictionary",
+    "superclass": "Collection",
+    "doc": "Immutable key-value collection.",
+    "methods": [
+      "size",
+      "keys",
+      "values",
+      "at:",
+      "at:ifAbsent:",
+      "at:put:",
+      "includesKey:",
+      "removeKey:",
+      "merge:",
+      "includes:",
+      "do:",
+      "collect:",
+      "doWithKey:",
+      "keysAndValuesDo:",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "DynamicSupervisor",
+    "superclass": "Object",
+    "doc": "Abstract base class for dynamic OTP supervision trees.",
+    "methods": [
+      "maxRestarts",
+      "restartWindow",
+      "isSupervisor",
+      "childClass",
+      "supervise",
+      "current",
+      "startChild",
+      "startChild:",
+      "terminateChild:",
+      "count",
+      "stop"
+    ],
+    "is_sealed": false,
+    "is_abstract": true
+  },
+  {
+    "name": "Erlang",
+    "superclass": "ProtoObject",
+    "doc": "Gateway to the BEAM ecosystem.",
+    "methods": [
+      "doesNotUnderstand:args:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "ErlangModule",
+    "superclass": "ProtoObject",
+    "doc": "Proxy for calling functions on a specific Erlang module.",
+    "methods": [
+      "doesNotUnderstand:args:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Error",
+    "superclass": "Exception",
+    "doc": "Non-resumable exceptions.",
+    "methods": [],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Ets",
+    "superclass": "Object",
+    "doc": "Shared in-memory table for actor state sharing.",
+    "methods": [
+      "new:type:",
+      "named:",
+      "at:",
+      "at:put:",
+      "at:ifAbsent:",
+      "includesKey:",
+      "removeKey:",
+      "keys",
+      "size",
+      "delete"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Exception",
+    "superclass": "Object",
+    "doc": "Base class for all exceptions.",
+    "methods": [
+      "message",
+      "hint",
+      "kind",
+      "selector",
+      "errorClass",
+      "printString",
+      "stackTrace",
+      "signal",
+      "signal:"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "ExitError",
+    "superclass": "BEAMError",
+    "doc": "BEAM process exit signal.",
+    "methods": [],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "False",
+    "superclass": "Boolean",
+    "doc": "The false boolean value.",
+    "methods": [
+      "ifTrue:ifFalse:",
+      "ifTrue:",
+      "ifFalse:",
+      "not",
+      "isTrue",
+      "isFalse",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "File",
+    "superclass": "Object",
+    "doc": "File system operations.",
+    "methods": [
+      "exists:",
+      "readAll:",
+      "writeAll:contents:",
+      "lines:",
+      "open:do:",
+      "isDirectory:",
+      "isFile:",
+      "mkdir:",
+      "mkdirAll:",
+      "listDirectory:",
+      "delete:",
+      "deleteAll:",
+      "rename:to:",
+      "absolutePath:",
+      "cwd",
+      "tempDirectory"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "FileHandle",
+    "superclass": "Object",
+    "doc": "A handle to an open file.",
+    "methods": [
+      "lines"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Float",
+    "superclass": "Number",
+    "doc": "Floating-point arithmetic and operations.",
+    "methods": [
+      "pi",
+      "e",
+      "infinity",
+      "+",
+      "-",
+      "*",
+      "/",
+      "=:=",
+      "/=",
+      "<",
+      ">",
+      "<=",
+      ">=",
+      "negated",
+      "abs",
+      "min:",
+      "max:",
+      "rounded",
+      "ceiling",
+      "floor",
+      "truncated",
+      "isNaN",
+      "isInfinite",
+      "isZero",
+      "asInteger",
+      "asString",
+      "printString",
+      "sin",
+      "cos",
+      "tan",
+      "asin",
+      "acos",
+      "atan",
+      "atan2:",
+      "sqrt",
+      "log",
+      "ln",
+      "log2",
+      "log10",
+      "exp",
+      "raisedTo:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "HTTPClient",
+    "superclass": "Actor",
+    "doc": "Actor-based HTTP client for one-shot and persistent requests.",
+    "methods": [
+      "get:",
+      "post:body:",
+      "put:body:",
+      "delete:",
+      "request:url:options:",
+      "options:",
+      "opts",
+      "request:path:options:",
+      "defaults"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "HTTPRequest",
+    "superclass": "Value",
+    "doc": "Sealed value class for incoming HTTP requests.",
+    "methods": [
+      "param:",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "HTTPResponse",
+    "superclass": "Value",
+    "doc": "Sealed value class for HTTP response objects.",
+    "methods": [
+      "ok",
+      "bodyAsJson",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "HTTPRoute",
+    "superclass": "Value",
+    "doc": "Sealed value class representing a single HTTP route.",
+    "methods": [
+      "get:handler:",
+      "post:handler:",
+      "put:handler:",
+      "delete:handler:",
+      "patch:handler:",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "HTTPRouteBuilder",
+    "superclass": "Actor",
+    "doc": "Mutable builder for accumulating HTTP routes.",
+    "methods": [
+      "get:handler:",
+      "post:handler:",
+      "put:handler:",
+      "delete:handler:",
+      "patch:handler:",
+      "notFound:",
+      "routes",
+      "notFoundHandler"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "HTTPRouter",
+    "superclass": "Value",
+    "doc": "Compiled route dispatch for HTTPServer (BT-1344).",
+    "methods": [
+      "build:",
+      "routes:",
+      "compileRoutes:notFoundHandler:",
+      "#compiledRoutes",
+      "#notFoundHandler",
+      "#routeCount",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "HTTPServer",
+    "superclass": "Actor",
+    "doc": "Cowboy-backed HTTP server actor for Beamtalk.",
+    "methods": [
+      "start:handler:",
+      "start:handler:options:",
+      "port",
+      "printString"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "InstantiationError",
+    "superclass": "Error",
+    "doc": "Incorrect object creation errors.",
+    "methods": [],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Integer",
+    "superclass": "Number",
+    "doc": "Whole number arithmetic and operations.",
+    "methods": [
+      "+",
+      "-",
+      "*",
+      "/",
+      "div:",
+      "%",
+      "**",
+      "=:=",
+      "/=",
+      "<",
+      ">",
+      "<=",
+      ">=",
+      "negated",
+      "abs",
+      "isEven",
+      "isOdd",
+      "min:",
+      "max:",
+      "timesRepeat:",
+      "to:do:",
+      "to:by:do:",
+      "to:",
+      "Intervalnew:",
+      "to:by:",
+      "asFloat",
+      "asString",
+      "printString",
+      "bitAnd:",
+      "bitOr:",
+      "bitXor:",
+      "bitShift:",
+      "bitNot",
+      "factorial",
+      "gcd:",
+      "lcm:",
+      "isLetter",
+      "isDigit",
+      "isUppercase",
+      "isLowercase",
+      "isWhitespace",
+      "sqrt",
+      "log",
+      "ln",
+      "log2",
+      "log10",
+      "exp",
+      "raisedTo:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Interval",
+    "superclass": "Collection",
+    "doc": "An arithmetic sequence of integers.",
+    "methods": [
+      "size",
+      "do:",
+      "first",
+      "last",
+      "printString"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Json",
+    "superclass": "Object",
+    "doc": "JSON encoding and decoding.",
+    "methods": [
+      "parse:",
+      "generate:",
+      "prettyPrint:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "List",
+    "superclass": "Collection",
+    "doc": "Ordered collection of elements.",
+    "methods": [
+      "withAll:",
+      "new:",
+      "size",
+      "isEmpty",
+      "first",
+      "rest",
+      "last",
+      "at:",
+      "includes:",
+      "sort",
+      "sort:",
+      "reversed",
+      "unique",
+      "detect:",
+      "detect:ifNone:",
+      "do:",
+      "collect:",
+      "select:",
+      "reject:",
+      "inject:into:",
+      "take:",
+      "drop:",
+      "flatten",
+      "flatMap:",
+      "count:",
+      "anySatisfy:",
+      "allSatisfy:",
+      "++",
+      "printString",
+      "from:to:",
+      "indexOf:",
+      "eachWithIndex:",
+      "zip:",
+      "groupBy:",
+      "partition:",
+      "takeWhile:",
+      "dropWhile:",
+      "intersperse:",
+      "addFirst:",
+      "add:",
+      "stream",
+      "atRandom",
+      "join",
+      "join:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Metaclass",
+    "superclass": "Class",
+    "doc": "The class of all metaclass objects in the Beamtalk system.",
+    "methods": [
+      "new",
+      "isMeta",
+      "isClass",
+      "isMetaclass",
+      "thisClass",
+      "name",
+      "printString",
+      "superclass",
+      "allMethods",
+      "classMethods",
+      "localClassMethods",
+      "classIncludesSelector:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "OS",
+    "superclass": "Object",
+    "doc": "Shell command execution.",
+    "methods": [
+      "run:",
+      "run:timeout:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Object",
+    "superclass": "ProtoObject",
+    "doc": "Base class for all Beamtalk objects.",
+    "methods": [
+      "class",
+      "new",
+      "new:",
+      "isNil",
+      "notNil",
+      "ifNil:",
+      "ifNotNil:",
+      "ifNil:ifNotNil:",
+      "ifNotNil:ifNil:",
+      "printString",
+      "displayString",
+      "inspect",
+      "yourself",
+      "hash",
+      "respondsTo:",
+      "fieldNames",
+      "fieldAt:",
+      "fieldAt:put:",
+      "perform:",
+      "perform:withArguments:",
+      "subclassResponsibility",
+      "notImplemented",
+      "trace:",
+      "traceCr:",
+      "isKindOf:",
+      "error:"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Pid",
+    "superclass": "Object",
+    "doc": "BEAM process identifier.",
+    "methods": [
+      "asString",
+      "printString",
+      "=:=",
+      "/=",
+      "hash",
+      "isAlive"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Port",
+    "superclass": "Object",
+    "doc": "BEAM port identifier.",
+    "methods": [
+      "asString",
+      "printString",
+      "=:=",
+      "/=",
+      "hash"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "ProtoObject",
+    "superclass": "nil",
+    "doc": "Root of the Beamtalk class hierarchy.",
+    "methods": [
+      "==",
+      "/=",
+      "class",
+      "doesNotUnderstand:args:",
+      "perform:withArguments:"
+    ],
+    "is_sealed": false,
+    "is_abstract": true
+  },
+  {
+    "name": "Queue",
+    "superclass": "Object",
+    "doc": "O(1) amortised FIFO queue backed by Erlang's `:queue` module.",
+    "methods": [
+      "new",
+      "enqueue:",
+      "dequeue",
+      "peek",
+      "isEmpty",
+      "size"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Random",
+    "superclass": "Object",
+    "doc": "Random number generation.",
+    "methods": [
+      "new:",
+      "next",
+      "nextInteger:",
+      "new",
+      "seed:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "ReactiveSubprocess",
+    "superclass": "Actor",
+    "doc": "Actor for push-mode subprocess delivery (BT-1187).",
+    "methods": [
+      "open:args:notify:",
+      "open:args:env:dir:notify:",
+      "writeLine:",
+      "exitCode",
+      "close"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Reference",
+    "superclass": "Object",
+    "doc": "BEAM unique reference.",
+    "methods": [
+      "asString",
+      "printString",
+      "=:=",
+      "/=",
+      "hash"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Regex",
+    "superclass": "Value",
+    "doc": "Compiled regular expressions via Erlang re module (PCRE2).",
+    "methods": [
+      "new:",
+      "from:",
+      "from:options:",
+      "source",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Result",
+    "superclass": "Value",
+    "doc": "Value type for expected success/failure outcomes (ADR 0060).",
+    "methods": [
+      "ok:",
+      "error:",
+      "tryDo:",
+      "ok",
+      "isError",
+      "value",
+      "error",
+      "valueOr:",
+      "valueOrDo:",
+      "unwrap",
+      "map:",
+      "andThen:",
+      "mapError:",
+      "ifError:",
+      "ifOk:ifError:",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "RuntimeError",
+    "superclass": "Error",
+    "doc": "Message dispatch and mutation errors.",
+    "methods": [],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Set",
+    "superclass": "Collection",
+    "doc": "Unordered collection of unique elements.",
+    "methods": [
+      "withAll:",
+      "new:",
+      "size",
+      "isEmpty",
+      "includes:",
+      "add:",
+      "remove:",
+      "union:",
+      "intersection:",
+      "difference:",
+      "isSubsetOf:",
+      "asList",
+      "fromList:",
+      "do:",
+      "printString",
+      "stream"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "StackFrame",
+    "superclass": "Value",
+    "doc": "A single frame in an exception stack trace (BT-107).",
+    "methods": [
+      "method",
+      "receiverClass",
+      "arguments",
+      "sourceLocation",
+      "moduleName",
+      "line",
+      "file",
+      "printString"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Stream",
+    "superclass": "Object",
+    "doc": "Lazy, closure-based sequences.",
+    "methods": [
+      "new:",
+      "from:",
+      "from:by:",
+      "on:",
+      "select:",
+      "collect:",
+      "reject:",
+      "drop:",
+      "take:",
+      "do:",
+      "inject:into:",
+      "detect:",
+      "asList",
+      "anySatisfy:",
+      "allSatisfy:",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "String",
+    "superclass": "Collection",
+    "doc": "UTF-8 text operations.",
+    "methods": [
+      "withAll:",
+      "fromCodePoint:",
+      "fromCodePoints:",
+      "fromIolist:",
+      "=:=",
+      "/=",
+      "<",
+      ">",
+      "<=",
+      ">=",
+      "++",
+      ",",
+      "length",
+      "size",
+      "at:",
+      "uppercase",
+      "lowercase",
+      "capitalize",
+      "trim",
+      "trimLeft",
+      "trimRight",
+      "reverse",
+      "includesSubstring:",
+      "startsWith:",
+      "endsWith:",
+      "indexOf:",
+      "split:",
+      "splitOn:",
+      "repeat:",
+      "lines",
+      "words",
+      "replaceAll:with:",
+      "replaceFirst:with:",
+      "take:",
+      "drop:",
+      "padLeft:",
+      "padRight:",
+      "padLeft:with:",
+      "padRight:with:",
+      "isEmpty",
+      "isNotEmpty",
+      "isBlank",
+      "isDigit",
+      "isAlpha",
+      "asInteger",
+      "asFloat",
+      "asAtom",
+      "asList",
+      "do:",
+      "collect:",
+      "select:",
+      "stream",
+      "matchesRegex:",
+      "matchesRegex:options:",
+      "firstMatch:",
+      "allMatches:",
+      "replaceRegex:with:",
+      "replaceAllRegex:with:",
+      "splitRegex:",
+      "printString",
+      "displayString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Subprocess",
+    "superclass": "Actor",
+    "doc": "Actor for interactive bidirectional communication with OS processes.",
+    "methods": [
+      "open:args:",
+      "open:args:env:dir:",
+      "#executable",
+      "#args",
+      "#env",
+      "#dir",
+      "writeLine:",
+      "readLine",
+      "readLine:",
+      "readStderrLine",
+      "readStderrLine:",
+      "lines",
+      "stderrLines",
+      "exitCode",
+      "close"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "SupervisionSpec",
+    "superclass": "Value",
+    "doc": "Value type describing how to start an actor as a supervised child.",
+    "methods": [
+      "withId:withRestart:",
+      "withId:withArgs:",
+      "withId:withRestart:withArgs:",
+      "childSpec",
+      "#id",
+      "#start",
+      "#restart",
+      "#shutdown",
+      "#type"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Supervisor",
+    "superclass": "Object",
+    "doc": "Abstract base class for static OTP supervision trees.",
+    "methods": [
+      "strategy",
+      "maxRestarts",
+      "restartWindow",
+      "isSupervisor",
+      "children",
+      "supervise",
+      "current",
+      "which:",
+      "terminate:",
+      "count",
+      "stop"
+    ],
+    "is_sealed": false,
+    "is_abstract": true
+  },
+  {
+    "name": "Symbol",
+    "superclass": "Object",
+    "doc": "Atomic identifiers.",
+    "methods": [
+      "asString",
+      "asAtom",
+      "printString",
+      "=:=",
+      "/=",
+      "displayString",
+      "hash"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "System",
+    "superclass": "Object",
+    "doc": "OS environment, platform detection, and process info.",
+    "methods": [
+      "getEnv:",
+      "getEnv:default:",
+      "osPlatform",
+      "osFamily",
+      "architecture",
+      "hostname",
+      "erlangVersion",
+      "pid"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "TestCase",
+    "superclass": "Object",
+    "doc": "Base class for BUnit test cases.",
+    "methods": [
+      "runAll",
+      "run:",
+      "setUp",
+      "tearDown",
+      "assert:",
+      "deny:",
+      "assert:equals:",
+      "should:raise:",
+      "fail:",
+      "skip:",
+      "skip",
+      "assertOk:",
+      "assertError:equals:"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "TestResult",
+    "superclass": "Object",
+    "doc": "Structured result from running a test suite.",
+    "methods": [
+      "passed",
+      "failed",
+      "skipped",
+      "total",
+      "duration",
+      "failures",
+      "hasPassed",
+      "summary",
+      "printString"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "TestRunner",
+    "superclass": "Object",
+    "doc": "Programmatic test execution returning structured results.",
+    "methods": [
+      "runAll",
+      "run:",
+      "run:method:"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "ThrowError",
+    "superclass": "BEAMError",
+    "doc": "BEAM non-local return.",
+    "methods": [],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "Time",
+    "superclass": "Object",
+    "doc": "Current time accessors.",
+    "methods": [
+      "nowMs",
+      "nowUs"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Timer",
+    "superclass": "Object",
+    "doc": "Schedule delayed and repeating work via Erlang timer primitives.",
+    "methods": [
+      "after:do:",
+      "every:do:",
+      "sleep:",
+      "cancel",
+      "isActive",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "TranscriptStream",
+    "superclass": "Actor",
+    "doc": "Per-workspace shared log with pub/sub semantics.",
+    "methods": [
+      "current",
+      "current:",
+      "resetCurrent",
+      "show:",
+      "cr",
+      "subscribe",
+      "unsubscribe",
+      "recent",
+      "clear"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "True",
+    "superclass": "Boolean",
+    "doc": "The true boolean value.",
+    "methods": [
+      "ifTrue:ifFalse:",
+      "ifTrue:",
+      "ifFalse:",
+      "not",
+      "isTrue",
+      "isFalse",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Tuple",
+    "superclass": "Collection",
+    "doc": "Erlang interop type for fixed-size tagged results.",
+    "methods": [
+      "withAll:",
+      "new:",
+      "size",
+      "at:",
+      "isOk",
+      "isError",
+      "unwrap",
+      "unwrapOr:",
+      "unwrapOrElse:",
+      "asString",
+      "printString",
+      "do:",
+      "atRandom"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "TypeError",
+    "superclass": "Error",
+    "doc": "Type mismatch errors.",
+    "methods": [],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "UndefinedObject",
+    "superclass": "Object",
+    "doc": "The absence of a value.",
+    "methods": [
+      "isNil",
+      "notNil",
+      "ifNil:",
+      "ifNotNil:",
+      "ifNil:ifNotNil:",
+      "ifNotNil:ifNil:",
+      "copy",
+      "deepCopy",
+      "shallowCopy",
+      "printString"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Value",
+    "superclass": "Object",
+    "doc": "Base class for immutable value types.",
+    "methods": [
+      "inspect"
+    ],
+    "is_sealed": false,
+    "is_abstract": false
+  },
+  {
+    "name": "WorkspaceInterface",
+    "superclass": "Object",
+    "doc": "Per-workspace actor introspection and binding container.",
+    "methods": [
+      "current",
+      "current:",
+      "actors",
+      "actorAt:",
+      "actorsOf:",
+      "classes",
+      "testClasses",
+      "globals",
+      "load:",
+      "test",
+      "test:",
+      "bind:as:",
+      "unbind:",
+      "supervisor",
+      "startSupervisor:",
+      "stopSupervisor:",
+      "supervisors"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  },
+  {
+    "name": "Yaml",
+    "superclass": "Object",
+    "doc": "YAML parsing and generation.",
+    "methods": [
+      "parse:",
+      "parseAll:",
+      "generate:",
+      "parseFile:"
+    ],
+    "is_sealed": true,
+    "is_abstract": false
+  }
+]
