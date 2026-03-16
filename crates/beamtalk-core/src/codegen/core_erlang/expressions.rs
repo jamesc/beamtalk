@@ -1428,7 +1428,6 @@ impl CoreErlangGenerator {
             } else if is_last {
                 // Last expression: generate directly (its value is the block's result)
                 docs.push(self.generate_expression(expr)?);
-
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 // This leaves the let bindings open for subsequent expressions
