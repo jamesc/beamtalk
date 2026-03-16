@@ -13,12 +13,10 @@ Object subclass: ClassMethodBlock
   class add: a to: b => a + b
 
   // sort: block calling class method
-  class sortItems: items =>
-    items sort: [:a :b | self compare: a with: b]
+  class sortItems: items => items sort: [:a :b | self compare: a with: b]
 
   // collect: block calling class method
-  class doubleAll: items =>
-    items collect: [:item | self double: item]
+  class doubleAll: items => items collect: [:item | self double: item]
 
   // do: block calling class method (non-last, discarded result)
   class processAll: items =>
@@ -31,15 +29,17 @@ Object subclass: ClassMethodBlock
 
   // Multiple statements in block: self-send not last
   class doubleAndSort: items =>
-    items sort: [:a :b |
-      da := self double: a
-      db := self double: b
-      self compare: da with: db
-    ]
+    items
+      sort: [:a :b |
+        da := self double: a
+        db := self double: b
+        self compare: da with: db
+      ]
 
   // Multiple self-sends in block body
   class processWithMultipleSends: items =>
-    items collect: [:item |
-      doubled := self double: item
-      self add: doubled to: doubled
-    ]
+    items
+      collect: [:item |
+        doubled := self double: item
+        self add: doubled to: doubled
+      ]
