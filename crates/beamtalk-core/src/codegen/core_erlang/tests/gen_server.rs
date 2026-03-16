@@ -3269,10 +3269,19 @@ fn test_class_method_self_send_in_block() {
         result.err()
     );
     let code = result.unwrap();
-    // The block should close with the unwrapped result variable, not leave an open scope
+    // The block body should call class_compare:with: directly and close with the result var.
+    // Before BT-1397, the open-scope `let ... in` was left unclosed, producing a parse error.
     assert!(
-        code.contains("class_compare:with:"),
+        code.contains("'class_compare:with:'"),
         "Should call class_compare:with: directly. Got:\n{code}"
+    );
+    // Verify the block closes properly: the result var should appear before `])`
+    // (closing the argument list), not after it.
+    let fun_idx = code.find("fun (").expect("Should contain fun");
+    let block_code = &code[fun_idx..];
+    assert!(
+        !block_code.contains("in ])"),
+        "Block should not have unclosed scope before `])`. Got:\n{block_code}"
     );
 }
 
@@ -3299,5 +3308,12 @@ fn test_class_method_self_send_in_block_local_assignment() {
         result.is_ok(),
         "Block with local := class-method-self-send should compile. Got: {:?}",
         result.err()
+    );
+    let code = result.unwrap();
+    // Verify: local assignment `da := self double: a` should emit the open scope
+    // THEN bind Da, not wrap the open scope in `let Da = ... in  in`.
+    assert!(
+        !code.contains("in  in"),
+        "Should not have double `in` from unclosed open scope. Got:\n{code}"
     );
 }
