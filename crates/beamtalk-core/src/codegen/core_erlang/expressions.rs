@@ -879,6 +879,7 @@ impl CoreErlangGenerator {
     }
 
     /// BT-851: Generates the body of a Tier 2 stateful block with state threading.
+    #[allow(clippy::too_many_lines)]
     fn generate_block_stateful_body(
         &mut self,
         block: &Block,
