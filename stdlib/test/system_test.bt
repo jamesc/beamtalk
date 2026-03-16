@@ -6,6 +6,29 @@
 
 TestCase subclass: SystemTest
 
+  testSetEnvAndUnsetEnv =>
+    // setEnv:value: sets an environment variable and returns true
+    self assert: (System setEnv: "BT_TEST_SET_ENV_BT" value: "hello") equals: true
+    // getEnv: can read the value back
+    self assert: (System getEnv: "BT_TEST_SET_ENV_BT") equals: "hello"
+    // setEnv:value: overwrites existing values
+    self assert: (System setEnv: "BT_TEST_SET_ENV_BT" value: "updated") equals: true
+    self assert: (System getEnv: "BT_TEST_SET_ENV_BT") equals: "updated"
+    // unsetEnv: removes the variable and returns true
+    self assert: (System unsetEnv: "BT_TEST_SET_ENV_BT") equals: true
+    self assert: (System getEnv: "BT_TEST_SET_ENV_BT") equals: nil
+    // unsetEnv: on non-existent var still returns true
+    self assert: (System unsetEnv: "BT_TEST_NEVER_SET_XYZ") equals: true
+    // setEnv:value: raises #type_error for non-String name
+    @expect type
+    self should: [System setEnv: 42 value: "x"] raise: #type_error
+    // setEnv:value: raises #type_error for non-String value
+    @expect type
+    self should: [System setEnv: "x" value: 42] raise: #type_error
+    // unsetEnv: raises #type_error for non-String argument
+    @expect type
+    self should: [System unsetEnv: 42] raise: #type_error
+
   testSystemEnvironmentAndPlatform =>
     self assert: ((System getEnv: "PATH") class =:= String)
     // Reading a non-existent env var returns nil
