@@ -1,7 +1,7 @@
 # ADR 0063: Remove File Path Sandbox
 
 ## Status
-Proposed (2026-03-16)
+Accepted (2026-03-16)
 
 ## Context
 
