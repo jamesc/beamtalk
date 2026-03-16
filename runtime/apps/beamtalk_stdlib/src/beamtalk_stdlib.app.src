@@ -45,6 +45,7 @@
             {'bt@stdlib@interval', 'Interval', 'Collection'},
             {'bt@stdlib@json', 'Json', 'Object'},
             {'bt@stdlib@list', 'List', 'Collection'},
+            {'bt@stdlib@logger', 'Logger', 'Object'},
             {'bt@stdlib@metaclass', 'Metaclass', 'Class'},
             {'bt@stdlib@number', 'Number', 'Value'},
             {'bt@stdlib@os', 'OS', 'Object'},

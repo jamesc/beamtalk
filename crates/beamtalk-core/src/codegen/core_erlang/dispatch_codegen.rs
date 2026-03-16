@@ -722,11 +722,14 @@ impl CoreErlangGenerator {
             let cv = self.current_class_var();
             let args_doc = self.capture_argument_list_doc(arguments)?;
             let comma = if arguments.is_empty() { "" } else { ", " };
+            // BT-1408: Hash long keyword constructor atoms to stay within
+            // Erlang's 255-char atom limit.
+            let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
             let doc = docvec![
                 "call '",
                 Document::String(module),
-                "':'class_",
-                Document::String(selector_atom),
+                "':'",
+                Document::String(safe_fn),
                 "'(ClassSelf, ",
                 Document::String(cv),
                 comma,
@@ -1507,7 +1510,15 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        // BT-1408: The binding branch dispatches to instances via
+        // beamtalk_message_dispatch:send — use the raw selector (only hashed
+        // if the selector itself exceeds the atom limit) so instance method
+        // lookup works normally.  The class_send fallback uses the class-method
+        // mangled selector which triggers earlier (when "class_" + selector
+        // exceeds the limit).
+        let raw = selector.to_erlang_atom();
+        let instance_selector = super::selector_mangler::safe_atom_name(&raw);
+        let class_selector = super::selector_mangler::safe_class_method_selector(&raw);
         let class_pid_var = self.fresh_var("ClassPid");
         let binding_val_var = self.fresh_var("BindingVal");
         let state_var = self.current_state_var();
@@ -1519,7 +1530,7 @@ impl CoreErlangGenerator {
             )),
             Document::String(format!("<{{'ok', {binding_val_var}}}> when 'true' -> ")),
             Document::String(format!(
-                "call 'beamtalk_message_dispatch':'send'({binding_val_var}, '{selector_atom}', ["
+                "call 'beamtalk_message_dispatch':'send'({binding_val_var}, '{instance_selector}', ["
             )),
             args_doc.clone(),
             "]) ",
@@ -1528,7 +1539,7 @@ impl CoreErlangGenerator {
                 "let {class_pid_var} = call 'beamtalk_class_registry':'whereis_class'('{class_name}') in "
             )),
             Document::String(format!(
-                "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
+                "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{class_selector}', ["
             )),
             args_doc,
             "]) end"
@@ -1548,7 +1559,9 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
+        let selector_atom =
+            super::selector_mangler::safe_class_method_selector(&selector.to_erlang_atom());
         let class_pid_var = self.fresh_var("ClassPid");
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
@@ -1586,7 +1599,10 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        let selector_atom = selector.to_erlang_atom();
+        // BT-1408: Hash long selector atoms (e.g. keyword constructors with many
+        // fields) to stay within Erlang's 255-char atom limit.
+        let selector_atom =
+            super::selector_mangler::safe_class_method_selector(&selector.to_erlang_atom());
         let class_pid_var = self.fresh_var("ClassPid");
         let args_doc = self.capture_argument_list_doc(arguments)?;
 

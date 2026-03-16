@@ -509,12 +509,7 @@ fn run_eunit_tests(
     };
 
     let eval_cmd = format!(
-        "beamtalk_extensions:init(), \
-         pg:start_link(), \
-         beamtalk_bootstrap:start_link(), \
-         beamtalk_subprocess_sup:start_link(), \
-         beamtalk_reactive_subprocess_sup:start_link(), \
-         beamtalk_stdlib:init(), \
+        "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
          {package_load_cmd}\
          {fixture_load_cmd}\
          Modules = [{module_list}], \

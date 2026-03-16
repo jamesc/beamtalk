@@ -2529,6 +2529,9 @@ impl CoreErlangGenerator {
                 }
 
                 // Capture value expression (ADR 0018 bridge)
+                // BT-1397: Clear before generating to detect open-scope results from
+                // class method self-sends in the value expression.
+                self.last_open_scope_result = None;
                 let value_code = self.expression_doc(value)?;
 
                 // Increment state version for the new state
@@ -2538,6 +2541,28 @@ impl CoreErlangGenerator {
                 } else {
                     format!("State{}", self.state_version())
                 };
+
+                // BT-1397: If the RHS produced an open scope (class method self-send),
+                // emit the open scope first, then bind the variable to the result.
+                if let Some(open_scope_result) = self.last_open_scope_result.take() {
+                    self.last_open_scope_result = Some(val_var.clone());
+                    return Ok(docvec![
+                        value_code,
+                        "let ",
+                        Document::String(val_var.clone()),
+                        " = ",
+                        Document::String(open_scope_result),
+                        " in let ",
+                        Document::String(new_state),
+                        " = call 'maps':'put'('",
+                        state_key.to_string(),
+                        "', ",
+                        Document::String(val_var.clone()),
+                        ", ",
+                        current_state,
+                        ") in ",
+                    ]);
+                }
 
                 // BT-1053: Record val_var so callers (e.g. generate_conditional_branch_inline)
                 // can use it as the branch result via last_open_scope_result.

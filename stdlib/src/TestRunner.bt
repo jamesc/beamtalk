@@ -6,7 +6,7 @@
 /// TestRunner provides class-side methods for discovering and running tests.
 /// Unlike `TestCase runAll` (which prints a formatted string), TestRunner
 /// returns `TestResult` objects that agents and tools can introspect
-/// programmatically. See BT-762.
+/// programmatically.
 ///
 /// ## Examples
 /// ```beamtalk

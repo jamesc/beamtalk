@@ -68,6 +68,6 @@ abstract Value subclass: Boolean
   /// ```
   xor: other :: Boolean -> Boolean => self ifTrue: [other not] ifFalse: [other]
 
-  /// BT-1167: Override inspect to use printString rather than the field-based
+  /// Override inspect to use printString rather than the field-based
   /// format defined in Value. Booleans are primitives, not map-based value objects.
   inspect -> String => self printString
