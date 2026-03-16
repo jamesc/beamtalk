@@ -19,6 +19,10 @@
 /// app := WebApp supervise
 /// app count   // => 3
 /// ```
+///
+/// @see DynamicSupervisor (for runtime-added children)
+/// @see Actor (base class for supervised processes)
+/// @see SupervisionSpec (for per-child configuration)
 abstract Object subclass: Supervisor
 
   // === Class-side configuration (override in concrete subclasses) ===

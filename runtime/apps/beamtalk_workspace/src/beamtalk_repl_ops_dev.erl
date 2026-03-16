@@ -241,6 +241,104 @@ handle(<<"methods">>, Params, Msg, _SessionPid) ->
     jsx:encode(Base#{
         <<"methods">> => Methods, <<"state_vars">> => StateVars, <<"status">> => [<<"done">>]
     });
+handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
+    %% BT-1404: List all available classes with one-line descriptions.
+    RawFilter = maps:get(<<"filter">>, Params, undefined),
+    %% Validate filter upfront: resolve superclass name to atom if needed
+    Filter = validate_list_classes_filter(RawFilter),
+    case Filter of
+        {error, BadFilter} ->
+            Error = #beamtalk_error{
+                kind = argument_error,
+                class = 'Object',
+                selector = undefined,
+                message = iolist_to_binary([
+                    <<"Unknown filter: '">>,
+                    BadFilter,
+                    <<"'. Use 'stdlib', 'user', or a class name like 'Value' or 'Actor'.">>
+                ]),
+                hint = undefined,
+                details = #{}
+            },
+            beamtalk_repl_protocol:encode_error(
+                Error, Msg, fun beamtalk_repl_json:format_error_message/1
+            );
+        _ ->
+            case
+                try
+                    {ok, beamtalk_runtime_api:all_classes()}
+                catch
+                    _:AllClassesErr ->
+                        {error, #beamtalk_error{
+                            kind = runtime_error,
+                            class = 'Object',
+                            selector = undefined,
+                            message = iolist_to_binary(
+                                io_lib:format("Failed to list classes: ~p", [AllClassesErr])
+                            ),
+                            hint = <<"Is the runtime started?">>,
+                            details = #{}
+                        }}
+                end
+            of
+                {error, Error} ->
+                    beamtalk_repl_protocol:encode_error(
+                        Error, Msg, fun beamtalk_repl_json:format_error_message/1
+                    );
+                {ok, ClassPids} ->
+                    ClassInfos = lists:filtermap(
+                        fun(Pid) ->
+                            try
+                                Name = beamtalk_runtime_api:class_name(Pid),
+                                Super = beamtalk_runtime_api:superclass(Pid),
+                                Doc =
+                                    case gen_server:call(Pid, get_doc, 5000) of
+                                        none -> null;
+                                        D when is_binary(D) -> first_line(D);
+                                        _ -> null
+                                    end,
+                                IsSealed = beamtalk_runtime_api:is_sealed(Pid),
+                                IsAbstract = beamtalk_runtime_api:is_abstract(Pid),
+                                ModName = beamtalk_runtime_api:module_name(Pid),
+                                case should_include_class(Name, Super, ModName, Filter) of
+                                    true ->
+                                        {true, #{
+                                            <<"name">> => atom_to_binary(Name, utf8),
+                                            <<"superclass">> =>
+                                                case Super of
+                                                    none -> null;
+                                                    S -> atom_to_binary(S, utf8)
+                                                end,
+                                            <<"doc">> => Doc,
+                                            <<"sealed">> => IsSealed,
+                                            <<"abstract">> => IsAbstract
+                                        }};
+                                    false ->
+                                        false
+                                end
+                            catch
+                                exit:{noproc, _} ->
+                                    false;
+                                exit:{timeout, _} ->
+                                    false;
+                                Class:Reason ->
+                                    ?LOG_WARNING(
+                                        "list-classes: skipping class ~p: ~p:~p",
+                                        [Pid, Class, Reason]
+                                    ),
+                                    false
+                            end
+                        end,
+                        ClassPids
+                    ),
+                    Sorted = lists:sort(
+                        fun(A, B) -> maps:get(<<"name">>, A) =< maps:get(<<"name">>, B) end,
+                        ClassInfos
+                    ),
+                    Base = base_protocol_response(Msg),
+                    jsx:encode(Base#{<<"class_list">> => Sorted, <<"status">> => [<<"done">>]})
+            end
+    end;
 handle(<<"test">>, Params, Msg, _SessionPid) ->
     ClassName = maps:get(<<"class">>, Params, undefined),
     FilePath = maps:get(<<"file">>, Params, undefined),
@@ -1348,6 +1446,10 @@ describe_ops() ->
         <<"unload">> => #{<<"params">> => [<<"module">>]},
         <<"health">> => #{<<"params">> => []},
         <<"methods">> => #{<<"params">> => [<<"class">>]},
+        <<"list-classes">> => #{
+            <<"params">> => [],
+            <<"optional">> => [<<"filter">>]
+        },
         <<"show-codegen">> => #{
             <<"params">> => [],
             <<"optional">> => [<<"code">>, <<"class">>, <<"selector">>]
@@ -1429,3 +1531,51 @@ make_class_not_found_error(ClassName) ->
 -spec to_binary(atom() | binary()) -> binary().
 to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
 to_binary(B) when is_binary(B) -> B.
+
+%% @private Extract the first line of a binary string (up to the first newline).
+%% BT-1404: Used to produce one-line class descriptions from full doc strings.
+-spec first_line(binary()) -> binary().
+first_line(Bin) when is_binary(Bin) ->
+    case binary:split(Bin, <<"\n">>) of
+        [First | _] -> First;
+        _ -> Bin
+    end.
+
+%% @private Validate and normalize the list-classes filter parameter.
+%% Returns the filter in a form ready for should_include_class/4:
+%%   undefined     → pass through
+%%   <<"stdlib">>  → pass through
+%%   <<"user">>    → pass through
+%%   Other binary  → resolve to {superclass, Atom} or {error, FilterBin}
+-spec validate_list_classes_filter(term()) ->
+    undefined | binary() | {superclass, atom()} | {error, binary()}.
+validate_list_classes_filter(undefined) ->
+    undefined;
+validate_list_classes_filter(<<"stdlib">>) ->
+    <<"stdlib">>;
+validate_list_classes_filter(<<"user">>) ->
+    <<"user">>;
+validate_list_classes_filter(FilterBin) when is_binary(FilterBin) ->
+    case beamtalk_repl_errors:safe_to_existing_atom(FilterBin) of
+        {ok, Atom} -> {superclass, Atom};
+        {error, badarg} -> {error, FilterBin}
+    end;
+validate_list_classes_filter(Other) ->
+    {error, iolist_to_binary(io_lib:format("~p", [Other]))}.
+
+%% @private Filter predicate for list-classes op (BT-1404).
+%% Uses the pre-validated filter from validate_list_classes_filter/1.
+-spec should_include_class(
+    atom(),
+    atom() | none,
+    atom(),
+    undefined | binary() | {superclass, atom()}
+) -> boolean().
+should_include_class(_Name, _Super, _ModName, undefined) ->
+    true;
+should_include_class(_Name, _Super, ModName, <<"stdlib">>) ->
+    beamtalk_class_registry:is_stdlib_module(ModName);
+should_include_class(_Name, _Super, ModName, <<"user">>) ->
+    not beamtalk_class_registry:is_stdlib_module(ModName);
+should_include_class(Name, _Super, _ModName, {superclass, FilterAtom}) ->
+    beamtalk_class_registry:inherits_from(Name, FilterAtom).

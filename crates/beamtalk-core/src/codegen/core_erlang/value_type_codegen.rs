@@ -238,7 +238,10 @@ impl CoreErlangGenerator {
             if let Some(ref kw_sel) = auto.keyword_constructor {
                 let num_slots = class.state.len();
                 let arity = num_slots + 2; // ClassSelf + ClassVars + N slot args
-                exports.push(format!("'class_{kw_sel}'/{arity}"));
+                // BT-1408: Hash long keyword constructor atoms to stay within Erlang's
+                // 255-char atom limit.
+                let safe_fn = super::selector_mangler::safe_class_method_fn_name(kw_sel);
+                exports.push(format!("'{safe_fn}'/{arity}"));
             }
         }
 
@@ -666,9 +669,13 @@ impl CoreErlangGenerator {
             ]);
         }
 
+        // BT-1408: Hash long keyword constructor atoms to stay within Erlang's
+        // 255-char atom limit.
+        let safe_fn_name = super::selector_mangler::safe_class_method_fn_name(kw_selector);
+
         docvec![
-            "'class_",
-            Document::String(kw_selector.to_string()),
+            "'",
+            Document::String(safe_fn_name),
             "'/",
             Document::String(arity.to_string()),
             " = fun (_ClassSelf, _ClassVars",
@@ -1162,10 +1169,16 @@ impl CoreErlangGenerator {
     /// BT-1053: Returns `true` if `expr` is a `do:` message send with a literal
     /// block that, in `ValueType` context, captures and mutates outer local variables.
     ///
-    /// Used by `generate_value_type_method` to select the open-let-chain path for
-    /// non-last `do:` loops so the mutated locals are visible to subsequent exprs.
-    fn is_do_with_vt_local_threading(&self, expr: &Expression) -> bool {
-        if !matches!(self.context, CodeGenContext::ValueType) {
+    /// Used by `generate_value_type_method` and `generate_class_method_body` (BT-1414)
+    /// to select the open-let-chain path for non-last `do:` loops so the mutated
+    /// locals are visible to subsequent exprs.
+    pub(in crate::codegen::core_erlang) fn is_do_with_vt_local_threading(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        // BT-1414: Allow class methods regardless of module context (Actor classes
+        // have context=Actor but class methods still need local-map threading).
+        if !self.in_class_method && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
         if let Expression::MessageSend {
@@ -1184,14 +1197,17 @@ impl CoreErlangGenerator {
         false
     }
 
-    /// BT-1053: Generates a non-last `do:` loop (with value-type captured local threading)
-    /// as an **open let chain**.
+    /// BT-1053/BT-1414: Generates a non-last `do:` loop (with value-type/class-method
+    /// captured local threading) as an **open let chain**.
     ///
     /// Unlike the closed form (which buries the extracted locals inside `_seqN = (... 'nil')`)
     /// this form emits the foldl and the `let X = maps:get(...)` extractions directly in
     /// the method body, ending with `in ` so the caller's next `body_part` provides the
     /// continuation.  This makes the updated locals visible to all subsequent expressions.
-    fn generate_value_type_do_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
+    pub(in crate::codegen::core_erlang) fn generate_value_type_do_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
         let (receiver, block_expr, body) = match expr {
             Expression::MessageSend {
                 receiver,

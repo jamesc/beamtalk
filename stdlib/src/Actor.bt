@@ -14,6 +14,10 @@
 ///   increment => self.count := self.count + 1
 ///   count => self.count
 /// ```
+///
+/// @see Value (for immutable data without a process)
+/// @see Supervisor (for static supervision trees)
+/// @see DynamicSupervisor (for dynamic supervision trees)
 Object subclass: Actor
 
   /// Spawn a new actor process with default state.

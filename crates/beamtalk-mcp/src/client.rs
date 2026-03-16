@@ -8,6 +8,7 @@
 //! Connects to a running REPL server and sends/receives
 //! JSON messages over WebSocket with cookie authentication.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -30,12 +31,24 @@ const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 /// on all platforms while still being generous for localhost connections.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Interval between WebSocket keepalive pings.
+///
+/// Sends a Ping frame every 30 seconds to prevent idle disconnects. The Cowboy
+/// WebSocket handler now uses `idle_timeout => infinity`, but TCP intermediaries
+/// (proxies, OS connection tracking) can still close idle connections. The ping
+/// also acts as a health check — a failed ping causes the keepalive task to stop,
+/// and the next `send`/`send_once` call will trigger a reconnect.
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Async WebSocket client for the beamtalk REPL protocol.
 pub struct ReplClient {
-    inner: Mutex<ReplClientInner>,
+    inner: Arc<Mutex<ReplClientInner>>,
     port: u16,
     cookie: String,
     session: tokio::sync::Mutex<Option<String>>,
+    /// Abort handle for the background keepalive task. Uses `std::sync::Mutex`
+    /// (not tokio) so it can be aborted in the synchronous `Drop` impl.
+    keepalive_abort: std::sync::Mutex<tokio::task::AbortHandle>,
 }
 
 impl std::fmt::Debug for ReplClient {
@@ -45,6 +58,14 @@ impl std::fmt::Debug for ReplClient {
             .field("cookie", &"<redacted>")
             .field("session", &"<redacted>")
             .finish_non_exhaustive()
+    }
+}
+
+impl Drop for ReplClient {
+    fn drop(&mut self) {
+        if let Ok(abort) = self.keepalive_abort.lock() {
+            abort.abort();
+        }
     }
 }
 
@@ -78,17 +99,38 @@ impl ReplClient {
 
         let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
 
+        let inner = Arc::new(Mutex::new(ReplClientInner { ws }));
+        let keepalive_abort = spawn_keepalive(Arc::clone(&inner)).abort_handle();
+
         Ok(Self {
-            inner: Mutex::new(ReplClientInner { ws }),
+            inner,
             port,
             cookie: cookie.to_string(),
             session: tokio::sync::Mutex::new(session_id),
+            keepalive_abort: std::sync::Mutex::new(keepalive_abort),
         })
     }
 
     /// Backwards-compatible connect that does not resume a previous session.
     pub async fn connect(port: u16, cookie: &str) -> Result<Self, String> {
         Self::connect_with_resume(port, cookie, None).await
+    }
+
+    /// Gracefully close the WebSocket connection.
+    ///
+    /// Sends a close frame and waits up to 2 seconds for the server to
+    /// acknowledge.  If the handshake times out (e.g. because the BEAM node
+    /// holds the connection open), the socket is dropped without blocking.
+    ///
+    /// Call this before the tokio runtime shuts down to prevent the runtime
+    /// teardown from hanging on the close handshake (BT-1363).
+    // Used in integration tests (#[cfg(test)]) — suppress dead_code lint for binary crate.
+    #[allow(dead_code)]
+    pub async fn close(&self) {
+        let mut inner = self.inner.lock().await;
+        // Send the close frame and wait for the server's response, but
+        // give up after 2 seconds — the BEAM node may never reply.
+        let _ = tokio::time::timeout(Duration::from_secs(2), inner.ws.close(None)).await;
     }
 
     /// Reconnect the underlying WebSocket, attempting to resume the session
@@ -125,6 +167,16 @@ impl ReplClient {
         {
             let mut s = self.session.lock().await;
             *s = session_id;
+        }
+
+        // Restart the keepalive task for the new socket.
+        {
+            let mut abort = self
+                .keepalive_abort
+                .lock()
+                .map_err(|_| "Internal keepalive state unavailable".to_string())?;
+            abort.abort();
+            *abort = spawn_keepalive(Arc::clone(&self.inner)).abort_handle();
         }
 
         Ok(resumed)
@@ -192,11 +244,16 @@ impl ReplClient {
                         drop(inner); // release lock before reconnecting
                         tracing::warn!("Send failed, attempting reconnect: {e}");
                         if let Err(re) = self.reconnect().await {
-                            return Err(format!("Send failed: {e}; reconnect failed: {re}"));
+                            return Err(format!(
+                                "REPL connection lost. Attempted reconnect but failed: {re}. \
+                                 Try restarting the MCP server."
+                            ));
                         }
                         continue; // retry
                     }
-                    return Err(e);
+                    return Err(format!(
+                        "REPL connection was restored but the operation failed: {e}"
+                    ));
                 }
                 Err(_) => {
                     let timeout_err = format!(
@@ -207,7 +264,10 @@ impl ReplClient {
                         drop(inner);
                         tracing::warn!("{timeout_err} — attempting reconnect");
                         if let Err(re) = self.reconnect().await {
-                            return Err(format!("{timeout_err}; reconnect failed: {re}"));
+                            return Err(format!(
+                                "{timeout_err}. Attempted reconnect but failed: {re}. \
+                                 Try restarting the MCP server."
+                            ));
                         }
                         continue; // retry
                     }
@@ -479,7 +539,10 @@ impl ReplClient {
                     drop(inner); // release lock before reconnecting
                     tracing::warn!("send_once: connection closed ({e}), attempting reconnect");
                     if let Err(re) = self.reconnect().await {
-                        return Err(format!("Failed to send: {e}; reconnect failed: {re}"));
+                        return Err(format!(
+                            "REPL connection lost. Attempted reconnect but failed: {re}. \
+                             The server may have restarted; try restarting the MCP server."
+                        ));
                     }
                     continue; // retry with fresh connection
                 }
@@ -574,6 +637,22 @@ impl ReplClient {
         }
         self.send(&request).await
     }
+
+    /// Send a list-classes operation (BT-1404).
+    ///
+    /// Returns all available classes with one-line descriptions. The optional
+    /// `filter` narrows results: `"stdlib"` for built-in classes, `"user"` for
+    /// user-defined, or a superclass name like `"Value"` or `"Actor"`.
+    pub async fn list_classes(&self, filter: Option<&str>) -> Result<ReplResponse, String> {
+        let mut request = serde_json::json!({
+            "op": "list-classes",
+            "id": next_msg_id()
+        });
+        if let Some(f) = filter {
+            request["filter"] = serde_json::Value::String(f.to_string());
+        }
+        self.send(&request).await
+    }
 }
 
 /// JSON response from the REPL backend.
@@ -593,8 +672,10 @@ pub struct ReplResponse {
     pub error: Option<String>,
     /// Bindings map.
     pub bindings: Option<serde_json::Value>,
-    /// Loaded classes.
+    /// Loaded classes (string names, from eval/load responses).
     pub classes: Option<Vec<String>>,
+    /// Class info list with metadata (list-classes op, BT-1404).
+    pub class_list: Option<Vec<ClassInfo>>,
     /// Actor list.
     pub actors: Option<Vec<ActorInfo>>,
     /// Module list.
@@ -693,6 +774,70 @@ pub struct ModuleInfo {
     pub time_ago: String,
 }
 
+/// Spawn a background task that sends WebSocket Ping frames at [`KEEPALIVE_INTERVAL`].
+///
+/// The task uses `try_lock` so it never blocks an in-progress `send`/`send_once`.
+/// If the lock is held, the connection is actively being used and doesn't need a
+/// keepalive ping. The task exits silently when the ping fails (socket closed),
+/// allowing the next RPC call to trigger a reconnect.
+fn spawn_keepalive(inner: Arc<Mutex<ReplClientInner>>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(KEEPALIVE_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // Skip the first tick which fires immediately
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            match inner.try_lock() {
+                Ok(mut guard) => {
+                    match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        guard.ws.send(Message::Ping(vec![].into())),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => tracing::trace!("Keepalive ping sent"),
+                        Ok(Err(e)) => {
+                            tracing::debug!("Keepalive ping failed: {e}");
+                            let _ =
+                                tokio::time::timeout(Duration::from_secs(1), guard.ws.close(None))
+                                    .await;
+                            break;
+                        }
+                        Err(_) => {
+                            tracing::debug!("Keepalive ping timed out; closing socket");
+                            let _ =
+                                tokio::time::timeout(Duration::from_secs(1), guard.ws.close(None))
+                                    .await;
+                            break;
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Lock held — connection is actively being used, skip this ping
+                    tracing::trace!("Keepalive skipped: connection in use");
+                }
+            }
+        }
+    })
+}
+
+/// Class information from the list-classes op (BT-1404).
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ClassInfo {
+    /// Class name (e.g., `"String"`).
+    pub name: String,
+    /// Superclass name (e.g., `"Value"`) or `null` for root classes.
+    pub superclass: Option<String>,
+    /// One-line class description, or `null` if undocumented.
+    pub doc: Option<String>,
+    /// Whether the class is sealed (cannot be subclassed).
+    pub sealed: bool,
+    /// Whether the class is abstract (cannot be instantiated directly).
+    #[serde(rename = "abstract")]
+    pub is_abstract: bool,
+}
+
 /// Perform the ADR 0020 authentication handshake on a WebSocket connection.
 ///
 /// Reads `auth-required`, sends `auth` (with optional `resume`), reads `auth_ok`,
@@ -766,7 +911,9 @@ where
         match ws.next().await {
             Some(Ok(Message::Text(text))) => return Ok(text.to_string()),
             Some(Ok(Message::Close(_))) => {
-                return Err("WebSocket connection closed by server".to_string());
+                return Err("REPL WebSocket connection closed (the server may have \
+                     restarted or the connection timed out)"
+                    .to_string());
             }
             Some(Ok(_)) => {} // Skip ping/pong/binary
             Some(Err(e)) => return Err(format!("WebSocket read error: {e}")),
@@ -982,6 +1129,7 @@ mod tests {
         let resp = client.eval("2 + 3").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "5");
+        client.close().await;
         Ok(())
     }
 
@@ -993,6 +1141,7 @@ mod tests {
         let resp = client.eval("\"hello\"").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "hello");
+        client.close().await;
         Ok(())
     }
 
@@ -1004,6 +1153,7 @@ mod tests {
         let resp = client.eval("42 nonexistentMethod").await.unwrap();
         assert!(resp.is_error(), "should be an error");
         assert!(resp.error_message().is_some(), "should have error message");
+        client.close().await;
         Ok(())
     }
 
@@ -1025,6 +1175,7 @@ mod tests {
             bindings.get("testVar").is_some(),
             "testVar should be in bindings: {bindings}"
         );
+        client.close().await;
         Ok(())
     }
 
@@ -1036,6 +1187,7 @@ mod tests {
         let resp = client.actors().await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.actors.is_some(), "should return actors list");
+        client.close().await;
         Ok(())
     }
 
@@ -1047,6 +1199,7 @@ mod tests {
         let resp = client.modules().await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.modules.is_some(), "should return modules list");
+        client.close().await;
         Ok(())
     }
 
@@ -1059,6 +1212,7 @@ mod tests {
         let resp = client.complete(code, code.len()).await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.completions.is_some(), "should return completions list");
+        client.close().await;
         Ok(())
     }
 
@@ -1076,6 +1230,7 @@ mod tests {
             completions.iter().any(|c| c == "abs"),
             "chain completions should include Integer method 'abs': {completions:?}"
         );
+        client.close().await;
         Ok(())
     }
 
@@ -1123,6 +1278,7 @@ mod tests {
         let resp = client.inspect(&counter.pid).await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.state.is_some(), "inspect should return state");
+        client.close().await;
         Ok(())
     }
 
@@ -1138,6 +1294,7 @@ mod tests {
             if let Some(err) = resp.error_message() {
                 if err.contains("Unknown class") {
                     eprintln!("docs skipped: {err}");
+                    client.close().await;
                     return Ok(());
                 }
             }
@@ -1146,6 +1303,7 @@ mod tests {
         assert!(resp.docs.is_some(), "should return docs");
         let docs = resp.docs.unwrap();
         assert!(!docs.is_empty(), "docs should not be empty");
+        client.close().await;
         Ok(())
     }
 
@@ -1166,6 +1324,7 @@ mod tests {
         // Nil value
         let resp = client.eval("nil").await.unwrap();
         assert_eq!(resp.value_string(), "nil");
+        client.close().await;
         Ok(())
     }
 
@@ -1196,6 +1355,7 @@ mod tests {
             bindings.get("clearTestVar").is_none(),
             "clearTestVar should be cleared"
         );
+        client.close().await;
         Ok(())
     }
 
@@ -1214,6 +1374,7 @@ mod tests {
             resp.core_erlang.is_some(),
             "should return core_erlang output"
         );
+        client.close().await;
         Ok(())
     }
 
@@ -1229,6 +1390,7 @@ mod tests {
             resp.error
         );
         assert!(resp.ops.is_some(), "should return ops");
+        client.close().await;
         Ok(())
     }
 
@@ -1242,6 +1404,7 @@ mod tests {
         // Integer is a stdlib class (bt@stdlib@Integer) and must be rejected.
         let resp = client.unload("Integer").await.unwrap();
         assert!(resp.is_error(), "stdlib class cannot be unloaded");
+        client.close().await;
         Ok(())
     }
 
@@ -1254,6 +1417,7 @@ mod tests {
         let resp = client.interrupt().await.unwrap();
         // It's OK if this returns an error (nothing to interrupt) — we just verify it doesn't crash
         let _ = resp;
+        client.close().await;
         Ok(())
     }
 
@@ -1290,6 +1454,7 @@ mod tests {
             resp.status,
             resp.results
         );
+        client.close().await;
         Ok(())
     }
 
@@ -1321,6 +1486,7 @@ mod tests {
             resp.results,
             resp.error
         );
+        client.close().await;
         Ok(())
     }
 
@@ -1330,30 +1496,35 @@ mod tests {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
 
-        // Establish a binding that should survive a reconnect
-        let _ = client.eval("reconnectTest := 4242").await?;
+        let result: Result<(), Box<dyn std::error::Error>> = async {
+            // Establish a binding that should survive a reconnect
+            let _ = client.eval("reconnectTest := 4242").await?;
 
-        // Close the underlying websocket to simulate a network drop
-        {
-            let mut inner = client.inner.lock().await;
-            // Attempt a graceful close; ignore errors
-            let _ = inner.ws.close(None).await;
+            // Close the underlying websocket to simulate a network drop
+            {
+                let mut inner = client.inner.lock().await;
+                // Attempt a graceful close; ignore errors
+                let _ = inner.ws.close(None).await;
+            }
+
+            // Now perform an operation which should trigger reconnect and resume
+            let resp = client.bindings().await?;
+            assert!(
+                !resp.is_error(),
+                "bindings should be returned after reconnect"
+            );
+            let bindings = resp
+                .bindings
+                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+            assert!(
+                bindings.get("reconnectTest").is_some(),
+                "reconnectTest binding should persist after reconnect: {bindings:?}"
+            );
+            Ok(())
         }
-
-        // Now perform an operation which should trigger reconnect and resume
-        let resp = client.bindings().await?;
-        assert!(
-            !resp.is_error(),
-            "bindings should be returned after reconnect"
-        );
-        let bindings = resp
-            .bindings
-            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-        assert!(
-            bindings.get("reconnectTest").is_some(),
-            "reconnectTest binding should persist after reconnect: {bindings:?}"
-        );
-        Ok(())
+        .await;
+        client.close().await;
+        result
     }
 
     /// Verifies that `send_once` operations automatically reconnect when the WebSocket
@@ -1370,63 +1541,60 @@ mod tests {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
 
-        // Establish a binding before the forced connection drop.
-        let resp = client
-            .evaluate_with_options("staleOnce := 77", false)
-            .await?;
-        assert!(!resp.is_error(), "initial evaluate should succeed");
+        let result: Result<(), Box<dyn std::error::Error>> = async {
+            // Establish a binding before the forced connection drop.
+            let resp = client
+                .evaluate_with_options("staleOnce := 77", false)
+                .await?;
+            assert!(!resp.is_error(), "initial evaluate should succeed");
 
-        // Force-close the underlying WebSocket to simulate a stale connection
-        // (e.g. idle timeout, cowboy restart, or session process crash).
-        {
-            let mut inner = client.inner.lock().await;
-            let _ = inner.ws.close(None).await;
+            // Force-close the underlying WebSocket to simulate a stale connection
+            // (e.g. idle timeout, cowboy restart, or session process crash).
+            {
+                let mut inner = client.inner.lock().await;
+                let _ = inner.ws.close(None).await;
+            }
+
+            // evaluate_with_options goes through send_once.  It must reconnect
+            // transparently and return the correct result (BT-1289).
+            let resp = client.evaluate_with_options("staleOnce + 1", false).await?;
+            assert!(
+                !resp.is_error(),
+                "evaluate_with_options should succeed after reconnect on stale connection: {:?}",
+                resp.error
+            );
+            assert_eq!(
+                resp.value_string(),
+                "78",
+                "result should be correct after send_once reconnect"
+            );
+
+            // Confirm the session was resumed and the earlier binding is still visible.
+            let resp = client.bindings().await?;
+            assert!(!resp.is_error(), "bindings should work after reconnect");
+            let bindings = resp
+                .bindings
+                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+            assert!(
+                bindings.get("staleOnce").is_some(),
+                "staleOnce binding should persist across send_once reconnect: {bindings:?}"
+            );
+            Ok(())
         }
-
-        // evaluate_with_options goes through send_once.  It must reconnect
-        // transparently and return the correct result (BT-1289).
-        let resp = client.evaluate_with_options("staleOnce + 1", false).await?;
-        assert!(
-            !resp.is_error(),
-            "evaluate_with_options should succeed after reconnect on stale connection: {:?}",
-            resp.error
-        );
-        assert_eq!(
-            resp.value_string(),
-            "78",
-            "result should be correct after send_once reconnect"
-        );
-
-        // Confirm the session was resumed and the earlier binding is still visible.
-        let resp = client.bindings().await?;
-        assert!(!resp.is_error(), "bindings should work after reconnect");
-        let bindings = resp
-            .bindings
-            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-        assert!(
-            bindings.get("staleOnce").is_some(),
-            "staleOnce binding should persist across send_once reconnect: {bindings:?}"
-        );
-        Ok(())
+        .await;
+        client.close().await;
+        result
     }
 
     /// Cleanup test that runs last (alphabetically after all other `test_*` tests).
-    /// Stops the workspace and schedules a force-exit after a delay.
     ///
-    /// On Windows, the tokio runtime shutdown hangs indefinitely because open
-    /// WebSocket TCP connections to the workspace never complete their close
-    /// handshake (the BEAM node holds the connections open). Since `libtest`
-    /// doesn't call `process::exit()` on success, the process blocks in
-    /// runtime teardown.
-    ///
-    /// This test spawns a background thread that waits for libtest to print
-    /// the summary (1s grace period), then calls `process::exit(0)` to
-    /// force-terminate. The test itself returns normally so libtest counts
-    /// it as passed and prints the summary.
+    /// Stops the test workspace so the BEAM node doesn't linger for 5 minutes
+    /// after the test run. Unlike the previous version, this does NOT call
+    /// `process::exit()` — all WebSocket connections are properly closed via
+    /// `ReplClient::close()` in each test (BT-1363).
     #[tokio::test]
     #[ignore = "integration test"]
     async fn test_zzz_cleanup() {
-        // Stop the workspace so it doesn't linger for 5 minutes.
         if let Ok(repl) = REPL.as_ref() {
             if let Some(ref ws_id) = repl.workspace_id {
                 let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
@@ -1436,14 +1604,9 @@ mod tests {
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
-                        .spawn();
+                        .status();
                 }
             }
         }
-        // Schedule a force-exit after a delay so libtest can print the summary.
-        std::thread::spawn(|| {
-            std::thread::sleep(Duration::from_secs(1));
-            std::process::exit(0);
-        });
     }
 }
