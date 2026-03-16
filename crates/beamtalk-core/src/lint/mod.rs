@@ -20,6 +20,7 @@
 //! merge conflicts are minimal and trivially resolved.
 
 mod cascade_candidate;
+mod dead_block_assignment;
 mod effect_free_statement;
 mod shadowed_block_param;
 mod trailing_caret;
@@ -44,6 +45,7 @@ pub(crate) trait LintPass {
 fn all_passes() -> Vec<Box<dyn LintPass>> {
     vec![
         Box::new(cascade_candidate::CascadeCandidatePass),
+        Box::new(dead_block_assignment::DeadBlockAssignmentPass),
         Box::new(effect_free_statement::EffectFreeStatementPass),
         Box::new(shadowed_block_param::ShadowedBlockParamPass),
         Box::new(trailing_caret::TrailingCaretPass),
