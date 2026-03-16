@@ -344,6 +344,11 @@ For external Beamtalk code that catches `invalid_path` errors: remove those bran
 
 Relative-path code is unaffected — this is a pure relaxation of restrictions.
 
+## Implementation Tracking
+
+**Issue:** [BT-1409](https://linear.app/beamtalk/issue/BT-1409)
+**Status:** Planned
+
 ## References
 
 - [ADR 0058 — Platform Security Model](0058-platform-security-model.md) — establishes the Trusted Developer Tool stance; §2c documents the file sandbox as accepted risk mitigation
