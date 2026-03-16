@@ -32,9 +32,8 @@
 %%%
 %%% ## Security
 %%%
-%%% - File paths are validated to prevent directory traversal
-%%% - Paths must be relative or within the current working directory
-%%% - Absolute paths outside the project are rejected
+%%% File operations use OS-level permissions. No path restrictions are
+%%% enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
 
 -module(beamtalk_file).
 
@@ -90,12 +89,7 @@
 %% Does not raise errors (returns false for invalid paths).
 -spec 'exists:'(binary()) -> boolean().
 'exists:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            filelib:is_regular(ValidPath);
-        {error, _} ->
-            false
-    end;
+    filelib:is_regular(binary_to_list(Path));
 'exists:'(_) ->
     false.
 
@@ -105,31 +99,26 @@
 %% Result error map if the file cannot be read.
 -spec 'readAll:'(binary()) -> map().
 'readAll:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            case file:read_file(ValidPath) of
-                {ok, Contents} ->
-                    beamtalk_result:from_tagged_tuple({ok, Contents});
-                {error, enoent} ->
-                    Error0 = beamtalk_error:new(file_not_found, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, eacces} ->
-                    Error0 = beamtalk_error:new(permission_denied, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, Reason} ->
-                    Error0 = beamtalk_error:new(io_error, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-                    beamtalk_result:from_tagged_tuple({error, Error2})
-            end;
+    case file:read_file(binary_to_list(Path)) of
+        {ok, Contents} ->
+            beamtalk_result:from_tagged_tuple({ok, Contents});
+        {error, enoent} ->
+            Error0 = beamtalk_error:new(file_not_found, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {error, eacces} ->
+            Error0 = beamtalk_error:new(permission_denied, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
         {error, Reason} ->
-            result_invalid_path(Reason, Path, 'readAll:')
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+            beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'readAll:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
@@ -143,38 +132,34 @@
 %% Returns a Result ok map on success, Result error map on failure.
 -spec 'writeAll:contents:'(binary(), binary()) -> map().
 'writeAll:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            %% Ensure directory exists
-            Dir = filename:dirname(ValidPath),
-            case filelib:ensure_dir(filename:join(Dir, "dummy")) of
+    PathStr = binary_to_list(Path),
+    %% Ensure directory exists
+    Dir = filename:dirname(PathStr),
+    case filelib:ensure_dir(filename:join(Dir, "dummy")) of
+        ok ->
+            case file:write_file(PathStr, Contents) of
                 ok ->
-                    case file:write_file(ValidPath, Contents) of
-                        ok ->
-                            beamtalk_result:from_tagged_tuple({ok, nil});
-                        {error, eacces} ->
-                            Error0 = beamtalk_error:new(permission_denied, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                            Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
-                            beamtalk_result:from_tagged_tuple({error, Error3});
-                        {error, Reason} ->
-                            Error0 = beamtalk_error:new(io_error, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{
-                                path => Path, reason => Reason
-                            }),
-                            beamtalk_result:from_tagged_tuple({error, Error2})
-                    end;
+                    beamtalk_result:from_tagged_tuple({ok, nil});
+                {error, eacces} ->
+                    Error0 = beamtalk_error:new(permission_denied, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                    Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
+                    beamtalk_result:from_tagged_tuple({error, Error3});
                 {error, Reason} ->
                     Error0 = beamtalk_error:new(io_error, 'File'),
                     Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Could not create directory">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3})
+                    Error2 = beamtalk_error:with_details(Error1, #{
+                        path => Path, reason => Reason
+                    }),
+                    beamtalk_result:from_tagged_tuple({error, Error2})
             end;
         {error, Reason} ->
-            result_invalid_path(Reason, Path, 'writeAll:contents:')
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Could not create directory">>),
+            beamtalk_result:from_tagged_tuple({error, Error3})
     end;
 'writeAll:contents:'(Path, _) when is_binary(Path) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
@@ -207,31 +192,26 @@ handle_has_method(_) -> false.
 %% process that created them (BEAM file handles are process-local).
 -spec 'lines:'(binary()) -> map().
 'lines:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            case file:open(ValidPath, [read, binary]) of
-                {ok, Fd} ->
-                    beamtalk_result:from_tagged_tuple({ok, make_line_stream(Fd, Path)});
-                {error, enoent} ->
-                    Error0 = beamtalk_error:new(file_not_found, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'lines:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, eacces} ->
-                    Error0 = beamtalk_error:new(permission_denied, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'lines:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, Reason} ->
-                    Error0 = beamtalk_error:new(io_error, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'lines:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-                    beamtalk_result:from_tagged_tuple({error, Error2})
-            end;
+    case file:open(binary_to_list(Path), [read, binary]) of
+        {ok, Fd} ->
+            beamtalk_result:from_tagged_tuple({ok, make_line_stream(Fd, Path)});
+        {error, enoent} ->
+            Error0 = beamtalk_error:new(file_not_found, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'lines:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {error, eacces} ->
+            Error0 = beamtalk_error:new(permission_denied, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'lines:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
         {error, Reason} ->
-            result_invalid_path(Reason, Path, 'lines:')
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'lines:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+            beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'lines:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
@@ -246,37 +226,32 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map with the result of the block.
 -spec 'open:do:'(binary(), fun((map()) -> term())) -> map().
 'open:do:'(Path, Block) when is_binary(Path), is_function(Block, 1) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            case file:open(ValidPath, [read, binary]) of
-                {ok, Fd} ->
-                    Handle = #{'$beamtalk_class' => 'FileHandle', fd => Fd},
-                    try
-                        BlockResult = Block(Handle),
-                        beamtalk_result:from_tagged_tuple({ok, BlockResult})
-                    after
-                        file:close(Fd)
-                    end;
-                {error, enoent} ->
-                    Error0 = beamtalk_error:new(file_not_found, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'open:do:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, eacces} ->
-                    Error0 = beamtalk_error:new(permission_denied, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'open:do:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, Reason} ->
-                    Error0 = beamtalk_error:new(io_error, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'open:do:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-                    beamtalk_result:from_tagged_tuple({error, Error2})
+    case file:open(binary_to_list(Path), [read, binary]) of
+        {ok, Fd} ->
+            Handle = #{'$beamtalk_class' => 'FileHandle', fd => Fd},
+            try
+                BlockResult = Block(Handle),
+                beamtalk_result:from_tagged_tuple({ok, BlockResult})
+            after
+                file:close(Fd)
             end;
+        {error, enoent} ->
+            Error0 = beamtalk_error:new(file_not_found, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'open:do:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {error, eacces} ->
+            Error0 = beamtalk_error:new(permission_denied, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'open:do:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
         {error, Reason} ->
-            result_invalid_path(Reason, Path, 'open:do:')
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'open:do:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+            beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'open:do:'(Path, _) when is_binary(Path) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
@@ -299,12 +274,7 @@ handle_has_method(_) -> false.
 %% Does not raise errors (returns false for invalid paths).
 -spec 'isDirectory:'(binary()) -> boolean().
 'isDirectory:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            filelib:is_dir(ValidPath);
-        {error, _} ->
-            false
-    end;
+    filelib:is_dir(binary_to_list(Path));
 'isDirectory:'(_) ->
     false.
 
@@ -314,12 +284,7 @@ handle_has_method(_) -> false.
 %% Does not raise errors (returns false for invalid paths).
 -spec 'isFile:'(binary()) -> boolean().
 'isFile:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            filelib:is_regular(ValidPath);
-        {error, _} ->
-            false
-    end;
+    filelib:is_regular(binary_to_list(Path));
 'isFile:'(_) ->
     false.
 
@@ -328,39 +293,34 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map on success, Result error map on failure.
 -spec 'mkdir:'(binary()) -> map().
 'mkdir:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            case file:make_dir(ValidPath) of
-                ok ->
-                    beamtalk_result:from_tagged_tuple({ok, nil});
-                {error, enoent} ->
-                    Error0 = beamtalk_error:new(directory_not_found, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'mkdir:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(
-                        Error2, <<"Parent directory does not exist">>
-                    ),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, eexist} ->
-                    Error0 = beamtalk_error:new(already_exists, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'mkdir:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Directory already exists">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, eacces} ->
-                    Error0 = beamtalk_error:new(permission_denied, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'mkdir:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check directory permissions">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, Reason} ->
-                    Error0 = beamtalk_error:new(io_error, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'mkdir:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-                    beamtalk_result:from_tagged_tuple({error, Error2})
-            end;
+    case file:make_dir(binary_to_list(Path)) of
+        ok ->
+            beamtalk_result:from_tagged_tuple({ok, nil});
+        {error, enoent} ->
+            Error0 = beamtalk_error:new(directory_not_found, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'mkdir:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(
+                Error2, <<"Parent directory does not exist">>
+            ),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {error, eexist} ->
+            Error0 = beamtalk_error:new(already_exists, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'mkdir:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Directory already exists">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {error, eacces} ->
+            Error0 = beamtalk_error:new(permission_denied, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'mkdir:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check directory permissions">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
         {error, Reason} ->
-            result_invalid_path(Reason, Path, 'mkdir:')
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'mkdir:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+            beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'mkdir:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
@@ -373,26 +333,21 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map on success, Result error map on failure.
 -spec 'mkdirAll:'(binary()) -> map().
 'mkdirAll:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            %% filelib:ensure_path/1 creates the full path including the final component
-            case filelib:ensure_path(ValidPath) of
-                ok ->
-                    beamtalk_result:from_tagged_tuple({ok, nil});
-                {error, eacces} ->
-                    Error0 = beamtalk_error:new(permission_denied, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'mkdirAll:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check directory permissions">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, Reason} ->
-                    Error0 = beamtalk_error:new(io_error, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'mkdirAll:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-                    beamtalk_result:from_tagged_tuple({error, Error2})
-            end;
+    %% filelib:ensure_path/1 creates the full path including the final component
+    case filelib:ensure_path(binary_to_list(Path)) of
+        ok ->
+            beamtalk_result:from_tagged_tuple({ok, nil});
+        {error, eacces} ->
+            Error0 = beamtalk_error:new(permission_denied, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'mkdirAll:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check directory permissions">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
         {error, Reason} ->
-            result_invalid_path(Reason, Path, 'mkdirAll:')
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'mkdirAll:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+            beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'mkdirAll:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
@@ -406,60 +361,56 @@ handle_has_method(_) -> false.
 %% if the directory does not exist or cannot be read.
 -spec 'listDirectory:'(binary()) -> map().
 'listDirectory:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            %% Check for regular file first: file:list_dir/1 returns different
-            %% error codes on different OSes when given a file path. By checking
-            %% filelib:is_regular/1 upfront we get a consistent not_a_directory
-            %% error on all platforms.
-            case filelib:is_regular(ValidPath) of
-                true ->
+    PathStr = binary_to_list(Path),
+    %% Check for regular file first: file:list_dir/1 returns different
+    %% error codes on different OSes when given a file path. By checking
+    %% filelib:is_regular/1 upfront we get a consistent not_a_directory
+    %% error on all platforms.
+    case filelib:is_regular(PathStr) of
+        true ->
+            Error0 = beamtalk_error:new(not_a_directory, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Path is not a directory">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        false ->
+            case file:list_dir(PathStr) of
+                {ok, Entries} ->
+                    beamtalk_result:from_tagged_tuple(
+                        {ok, [unicode:characters_to_binary(E) || E <- Entries]}
+                    );
+                {error, enoent} ->
+                    Error0 = beamtalk_error:new(directory_not_found, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                    Error3 = beamtalk_error:with_hint(
+                        Error2, <<"Check that the directory exists">>
+                    ),
+                    beamtalk_result:from_tagged_tuple({error, Error3});
+                {error, enotdir} ->
                     Error0 = beamtalk_error:new(not_a_directory, 'File'),
                     Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
                     Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Path is not a directory">>),
+                    Error3 = beamtalk_error:with_hint(
+                        Error2, <<"Path is not a directory">>
+                    ),
                     beamtalk_result:from_tagged_tuple({error, Error3});
-                false ->
-                    case file:list_dir(ValidPath) of
-                        {ok, Entries} ->
-                            beamtalk_result:from_tagged_tuple(
-                                {ok, [unicode:characters_to_binary(E) || E <- Entries]}
-                            );
-                        {error, enoent} ->
-                            Error0 = beamtalk_error:new(directory_not_found, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                            Error3 = beamtalk_error:with_hint(
-                                Error2, <<"Check that the directory exists">>
-                            ),
-                            beamtalk_result:from_tagged_tuple({error, Error3});
-                        {error, enotdir} ->
-                            Error0 = beamtalk_error:new(not_a_directory, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                            Error3 = beamtalk_error:with_hint(
-                                Error2, <<"Path is not a directory">>
-                            ),
-                            beamtalk_result:from_tagged_tuple({error, Error3});
-                        {error, eacces} ->
-                            Error0 = beamtalk_error:new(permission_denied, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                            Error3 = beamtalk_error:with_hint(
-                                Error2, <<"Check directory permissions">>
-                            ),
-                            beamtalk_result:from_tagged_tuple({error, Error3});
-                        {error, Reason} ->
-                            Error0 = beamtalk_error:new(io_error, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{
-                                path => Path, reason => Reason
-                            }),
-                            beamtalk_result:from_tagged_tuple({error, Error2})
-                    end
-            end;
-        {error, Reason} ->
-            result_invalid_path(Reason, Path, 'listDirectory:')
+                {error, eacces} ->
+                    Error0 = beamtalk_error:new(permission_denied, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                    Error3 = beamtalk_error:with_hint(
+                        Error2, <<"Check directory permissions">>
+                    ),
+                    beamtalk_result:from_tagged_tuple({error, Error3});
+                {error, Reason} ->
+                    Error0 = beamtalk_error:new(io_error, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{
+                        path => Path, reason => Reason
+                    }),
+                    beamtalk_result:from_tagged_tuple({error, Error2})
+            end
     end;
 'listDirectory:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
@@ -475,69 +426,65 @@ handle_has_method(_) -> false.
 %% (not {error, eisdir} as documented in some OTP versions).
 -spec 'delete:'(binary()) -> map().
 'delete:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            case filelib:is_dir(ValidPath) of
-                true ->
-                    %% It's a directory — del_dir only succeeds if empty
-                    case file:del_dir(ValidPath) of
-                        ok ->
-                            beamtalk_result:from_tagged_tuple({ok, nil});
-                        {error, DirReason} when
-                            DirReason =:= enotempty; DirReason =:= eexist
-                        ->
-                            %% enotempty on POSIX, eexist on some OTP/Linux versions
-                            Error0 = beamtalk_error:new(not_empty, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                            Error3 = beamtalk_error:with_hint(
-                                Error2, <<"Directory is not empty; use deleteAll:">>
-                            ),
-                            beamtalk_result:from_tagged_tuple({error, Error3});
-                        {error, eacces} ->
-                            Error0 = beamtalk_error:new(permission_denied, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                            Error3 = beamtalk_error:with_hint(Error2, <<"Check permissions">>),
-                            beamtalk_result:from_tagged_tuple({error, Error3});
-                        {error, DirReason} ->
-                            Error0 = beamtalk_error:new(io_error, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{
-                                path => Path, reason => DirReason
-                            }),
-                            beamtalk_result:from_tagged_tuple({error, Error2})
-                    end;
-                false ->
-                    %% Treat as a file (or non-existent path)
-                    case file:delete(ValidPath) of
-                        ok ->
-                            beamtalk_result:from_tagged_tuple({ok, nil});
-                        {error, enoent} ->
-                            Error0 = beamtalk_error:new(file_not_found, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                            Error3 = beamtalk_error:with_hint(
-                                Error2, <<"File or directory does not exist">>
-                            ),
-                            beamtalk_result:from_tagged_tuple({error, Error3});
-                        {error, eacces} ->
-                            Error0 = beamtalk_error:new(permission_denied, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                            Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
-                            beamtalk_result:from_tagged_tuple({error, Error3});
-                        {error, Reason} ->
-                            Error0 = beamtalk_error:new(io_error, 'File'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
-                            Error2 = beamtalk_error:with_details(Error1, #{
-                                path => Path, reason => Reason
-                            }),
-                            beamtalk_result:from_tagged_tuple({error, Error2})
-                    end
+    PathStr = binary_to_list(Path),
+    case filelib:is_dir(PathStr) of
+        true ->
+            %% It's a directory — del_dir only succeeds if empty
+            case file:del_dir(PathStr) of
+                ok ->
+                    beamtalk_result:from_tagged_tuple({ok, nil});
+                {error, DirReason} when
+                    DirReason =:= enotempty; DirReason =:= eexist
+                ->
+                    %% enotempty on POSIX, eexist on some OTP/Linux versions
+                    Error0 = beamtalk_error:new(not_empty, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                    Error3 = beamtalk_error:with_hint(
+                        Error2, <<"Directory is not empty; use deleteAll:">>
+                    ),
+                    beamtalk_result:from_tagged_tuple({error, Error3});
+                {error, eacces} ->
+                    Error0 = beamtalk_error:new(permission_denied, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                    Error3 = beamtalk_error:with_hint(Error2, <<"Check permissions">>),
+                    beamtalk_result:from_tagged_tuple({error, Error3});
+                {error, DirReason} ->
+                    Error0 = beamtalk_error:new(io_error, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{
+                        path => Path, reason => DirReason
+                    }),
+                    beamtalk_result:from_tagged_tuple({error, Error2})
             end;
-        {error, Reason} ->
-            result_invalid_path(Reason, Path, 'delete:')
+        false ->
+            %% Treat as a file (or non-existent path)
+            case file:delete(PathStr) of
+                ok ->
+                    beamtalk_result:from_tagged_tuple({ok, nil});
+                {error, enoent} ->
+                    Error0 = beamtalk_error:new(file_not_found, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                    Error3 = beamtalk_error:with_hint(
+                        Error2, <<"File or directory does not exist">>
+                    ),
+                    beamtalk_result:from_tagged_tuple({error, Error3});
+                {error, eacces} ->
+                    Error0 = beamtalk_error:new(permission_denied, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                    Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
+                    beamtalk_result:from_tagged_tuple({error, Error3});
+                {error, Reason} ->
+                    Error0 = beamtalk_error:new(io_error, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{
+                        path => Path, reason => Reason
+                    }),
+                    beamtalk_result:from_tagged_tuple({error, Error2})
+            end
     end;
 'delete:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
@@ -550,31 +497,26 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map on success, Result error map on failure.
 -spec 'deleteAll:'(binary()) -> map().
 'deleteAll:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            case file:del_dir_r(ValidPath) of
-                ok ->
-                    beamtalk_result:from_tagged_tuple({ok, nil});
-                {error, enoent} ->
-                    Error0 = beamtalk_error:new(file_not_found, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'deleteAll:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Path does not exist">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, eacces} ->
-                    Error0 = beamtalk_error:new(permission_denied, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'deleteAll:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check permissions">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, Reason} ->
-                    Error0 = beamtalk_error:new(io_error, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'deleteAll:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-                    beamtalk_result:from_tagged_tuple({error, Error2})
-            end;
+    case file:del_dir_r(binary_to_list(Path)) of
+        ok ->
+            beamtalk_result:from_tagged_tuple({ok, nil});
+        {error, enoent} ->
+            Error0 = beamtalk_error:new(file_not_found, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'deleteAll:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Path does not exist">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {error, eacces} ->
+            Error0 = beamtalk_error:new(permission_denied, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'deleteAll:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check permissions">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
         {error, Reason} ->
-            result_invalid_path(Reason, Path, 'deleteAll:')
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'deleteAll:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+            beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'deleteAll:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
@@ -587,35 +529,28 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map on success, Result error map on failure.
 -spec 'rename:to:'(binary(), binary()) -> map().
 'rename:to:'(From, To) when is_binary(From), is_binary(To) ->
-    case {validate_path(From), validate_path(To)} of
-        {{ok, ValidFrom}, {ok, ValidTo}} ->
-            case file:rename(ValidFrom, ValidTo) of
-                ok ->
-                    beamtalk_result:from_tagged_tuple({ok, nil});
-                {error, enoent} ->
-                    Error0 = beamtalk_error:new(file_not_found, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'rename:to:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{from => From, to => To}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Source path does not exist">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, eacces} ->
-                    Error0 = beamtalk_error:new(permission_denied, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'rename:to:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{from => From, to => To}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check permissions">>),
-                    beamtalk_result:from_tagged_tuple({error, Error3});
-                {error, Reason} ->
-                    Error0 = beamtalk_error:new(io_error, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'rename:to:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{
-                        from => From, to => To, reason => Reason
-                    }),
-                    beamtalk_result:from_tagged_tuple({error, Error2})
-            end;
-        {{error, Reason}, _} ->
-            result_invalid_path(Reason, From, 'rename:to:');
-        {_, {error, Reason}} ->
-            result_invalid_path(Reason, To, 'rename:to:')
+    case file:rename(binary_to_list(From), binary_to_list(To)) of
+        ok ->
+            beamtalk_result:from_tagged_tuple({ok, nil});
+        {error, enoent} ->
+            Error0 = beamtalk_error:new(file_not_found, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'rename:to:'),
+            Error2 = beamtalk_error:with_details(Error1, #{from => From, to => To}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Source path does not exist">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {error, eacces} ->
+            Error0 = beamtalk_error:new(permission_denied, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'rename:to:'),
+            Error2 = beamtalk_error:with_details(Error1, #{from => From, to => To}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check permissions">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {error, Reason} ->
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'rename:to:'),
+            Error2 = beamtalk_error:with_details(Error1, #{
+                from => From, to => To, reason => Reason
+            }),
+            beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'rename:to:'(From, _) when is_binary(From) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
@@ -633,13 +568,8 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map with the absolute path as a String.
 -spec 'absolutePath:'(binary()) -> map().
 'absolutePath:'(Path) when is_binary(Path) ->
-    case validate_path(Path) of
-        {ok, ValidPath} ->
-            AbsPath = filename:absname(ValidPath),
-            beamtalk_result:from_tagged_tuple({ok, unicode:characters_to_binary(AbsPath)});
-        {error, Reason} ->
-            result_invalid_path(Reason, Path, 'absolutePath:')
-    end;
+    AbsPath = filename:absname(binary_to_list(Path)),
+    beamtalk_result:from_tagged_tuple({ok, unicode:characters_to_binary(AbsPath)});
 'absolutePath:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
     Error1 = beamtalk_error:with_selector(Error0, 'absolutePath:'),
@@ -739,21 +669,6 @@ handleLines(Handle) -> handle_lines(Handle).
 %%% Internal Helpers
 %%% ============================================================================
 
-%% @private
-%% @doc Return a structured invalid_path Result error for security violations.
--spec result_invalid_path(term(), binary(), atom()) -> map().
-result_invalid_path(Reason, Path, Selector) ->
-    Error0 = beamtalk_error:new(invalid_path, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-    Hint =
-        case Reason of
-            absolute_path -> <<"Use relative paths only">>;
-            directory_traversal -> <<"Use relative paths within the project">>
-        end,
-    Error3 = beamtalk_error:with_hint(Error2, Hint),
-    beamtalk_result:from_tagged_tuple({error, Error3}).
-
 %% @doc Return a lazy Stream of lines from a FileHandle.
 %%
 %% Used within File open:do: blocks. The Stream reads lines from the
@@ -766,45 +681,6 @@ handle_lines(_) ->
     Error1 = beamtalk_error:with_selector(Error0, 'lines'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected a FileHandle">>),
     beamtalk_error:raise(Error2).
-
-%%% ============================================================================
-%%% Internal Functions
-%%% ============================================================================
-
-%% @private
-%% @doc Validate and normalize a file path for security.
-%%
-%% Security checks:
-%% - Reject absolute paths (must be relative)
-%% - Reject paths with ".." (directory traversal)
-%% - Convert to string for file operations
-%%
-%% Note: This does not protect against symbolic links, which is
-%% acceptable for a development language. Production systems should
-%% use additional OS-level protections.
-%%
-%% Returns {ok, ValidPath} or {error, Reason}.
--spec validate_path(binary()) -> {ok, string()} | {error, term()}.
-validate_path(Path) when is_binary(Path) ->
-    PathStr = binary_to_list(Path),
-    %% Check for absolute paths (Unix or Windows style)
-    case PathStr of
-        [$/ | _] ->
-            {error, absolute_path};
-        [$\\ | _] ->
-            {error, absolute_path};
-        [Drive, $: | _] when Drive >= $A, Drive =< $Z; Drive >= $a, Drive =< $z ->
-            {error, absolute_path};
-        _ ->
-            %% Check for directory traversal attempts
-            Components = filename:split(PathStr),
-            case lists:member("..", Components) of
-                true ->
-                    {error, directory_traversal};
-                false ->
-                    {ok, PathStr}
-            end
-    end.
 
 %%% ============================================================================
 %%% Stream Generator Helpers (BT-513)

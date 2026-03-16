@@ -41,7 +41,7 @@
 %% - kind: Error category — one of:
 %%     does_not_understand | immutable_value | type_error | arity_mismatch |
 %%     future_not_awaited | timeout | instantiation_error | file_not_found |
-%%     permission_denied | invalid_path | io_error | class_not_found |
+%%     permission_denied | io_error | class_not_found |
 %%     no_superclass | class_already_exists | internal_error | dispatch_error |
 %%     callback_failed | assertion_failed | runtime_error | erlang_exit |
 %%     erlang_throw | missing_parameter | stdlib_shadowing

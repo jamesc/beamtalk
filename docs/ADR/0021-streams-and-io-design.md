@@ -49,7 +49,7 @@ Beamtalk's opportunity: implement this idea with modern (closure-based lazy) mec
 **File I/O** (`stdlib/src/File.bt`):
 - Three class methods: `exists:`, `readAll:`, `writeAll:contents:`
 - Synchronous, whole-file operations via Erlang's `file` module
-- Security: rejects absolute paths and directory traversal
+- Security: relies on OS-level permissions (ADR 0063)
 - Structured error handling via `#beamtalk_error{}`
 
 **TranscriptStream** (`stdlib/src/TranscriptStream.bt`):
