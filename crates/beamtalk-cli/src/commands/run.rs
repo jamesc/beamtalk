@@ -351,6 +351,23 @@ fn run_package_as_otp_application(
     Ok(())
 }
 
+/// Choose `-sname` or `-name` based on the node name's host part.
+///
+/// Short hostnames (e.g. `localhost`) require `-sname`; fully qualified
+/// hostnames (containing `.`) require `-name`. Using `-name` with `localhost`
+/// causes Erlang to reject it as "illegal" (BT-1418).
+fn node_name_flag(node_name: &str) -> &'static str {
+    if let Some((_local, host)) = node_name.split_once('@') {
+        if host.contains('.') {
+            "-name"
+        } else {
+            "-sname"
+        }
+    } else {
+        "-sname"
+    }
+}
+
 /// Probe whether the named OTP application is already running in the project's workspace.
 ///
 /// Returns `Some(port)` if the application is running, `None` otherwise.
@@ -383,7 +400,7 @@ fn probe_running_workspace_app(project_root: &std::path::Path, app_name: &str) -
     );
 
     let mut args = repl_startup::beam_pa_args(&paths);
-    args.push(OsString::from("-name"));
+    args.push(OsString::from(node_name_flag(&client_node)));
     args.push(OsString::from(&client_node));
     args.push(OsString::from("-setcookie"));
     args.push(OsString::from(&cookie));
@@ -452,7 +469,7 @@ fn ensure_otp_app_in_workspace(
     );
 
     let mut args = repl_startup::beam_pa_args(beam_paths);
-    args.push(OsString::from("-name"));
+    args.push(OsString::from(node_name_flag(&client_node)));
     args.push(OsString::from(&client_node));
     args.push(OsString::from("-setcookie"));
     args.push(OsString::from(cookie));
@@ -476,6 +493,7 @@ fn ensure_otp_app_in_workspace(
         miette::bail!(
             "Failed to start OTP application '{app_name}' in existing workspace.\n\
              The workspace may be in an incompatible state.\n\
+             Try stopping the workspace first with: beamtalk workspace stop\n\
              stdout: {}\n\
              stderr: {stderr}",
             stdout.trim()
@@ -687,6 +705,22 @@ mod tests {
             "Eval should halt(1) on class-not-found: {cmd}"
         );
         assert!(cmd.ends_with("end."), "Eval should end with 'end.': {cmd}");
+    }
+
+    #[test]
+    fn test_node_name_flag_short_hostname() {
+        assert_eq!(node_name_flag("beamtalk_run_probe_1@localhost"), "-sname");
+        assert_eq!(node_name_flag("beamtalk_workspace_abc@myhost"), "-sname");
+    }
+
+    #[test]
+    fn test_node_name_flag_fqdn() {
+        assert_eq!(node_name_flag("node@host.example.com"), "-name");
+    }
+
+    #[test]
+    fn test_node_name_flag_no_host() {
+        assert_eq!(node_name_flag("beamtalk_workspace_abc"), "-sname");
     }
 
     #[test]

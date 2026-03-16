@@ -73,8 +73,15 @@ pub(super) fn build_detached_node_command(
     eval_cmd: &str,
     project_root: &Path,
 ) -> Command {
-    let (node_flag, node_arg) = if node_name.contains('@') {
-        ("-name", node_name.to_string())
+    let (node_flag, node_arg) = if let Some((_local, host)) = node_name.split_once('@') {
+        if host.contains('.') {
+            // Fully qualified hostname (e.g. host.example.com) → long names
+            ("-name", node_name.to_string())
+        } else {
+            // Short hostname (e.g. localhost) → short names to avoid
+            // "Hostname localhost is illegal" errors (BT-1418)
+            ("-sname", node_name.to_string())
+        }
     } else {
         ("-sname", node_name.to_string())
     };

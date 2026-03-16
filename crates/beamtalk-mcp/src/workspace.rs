@@ -44,6 +44,12 @@ pub fn read_cookie_file(workspace_id: &str) -> Option<String> {
 /// 1. If a workspace ID is given, use it directly.
 /// 2. Otherwise, generate from the current directory.
 pub fn discover_port_and_cookie(workspace_id: Option<&str>) -> Option<(u16, String)> {
+    discover_port_cookie_and_id(workspace_id).map(|(port, cookie, _id)| (port, cookie))
+}
+
+/// Like [`discover_port_and_cookie`] but also returns the resolved workspace ID
+/// so callers can pass it to `ReplClient` for port re-discovery on reconnect (BT-1416).
+pub fn discover_port_cookie_and_id(workspace_id: Option<&str>) -> Option<(u16, String, String)> {
     let id = if let Some(id) = workspace_id {
         id.to_string()
     } else {
@@ -52,7 +58,7 @@ pub fn discover_port_and_cookie(workspace_id: Option<&str>) -> Option<(u16, Stri
     };
     let port = read_port_file(&id)?;
     let cookie = read_cookie_file(&id)?;
-    Some((port, cookie))
+    Some((port, cookie, id))
 }
 
 /// Discover the REPL port for the current directory.
@@ -85,10 +91,11 @@ pub fn parse_workspace_id(stdout: &str) -> Option<String> {
     })
 }
 
-/// Find any running workspace and return its port and cookie.
+/// Find any running workspace and return its port, cookie, and workspace ID.
 ///
 /// Scans `~/.beamtalk/workspaces/` for directories with port files.
-pub fn discover_any_port_and_cookie() -> Option<(u16, String)> {
+/// Returns the workspace ID for port re-discovery on reconnect (BT-1416).
+pub fn discover_any_port_cookie_and_id() -> Option<(u16, String, String)> {
     let dir = beamtalk_workspace::workspaces_base_dir().ok()?;
     let entries = std::fs::read_dir(dir).ok()?;
 
@@ -99,7 +106,7 @@ pub fn discover_any_port_and_cookie() -> Option<(u16, String)> {
             let workspace_id = workspace_id.to_string_lossy();
             if let Some(port) = read_port_file(&workspace_id) {
                 if let Some(cookie) = read_cookie_file(&workspace_id) {
-                    return Some((port, cookie));
+                    return Some((port, cookie, workspace_id.into_owned()));
                 }
             }
         }
@@ -307,5 +314,48 @@ mod tests {
         // "  Workspace: " present but no ID — must return None, not Some("")
         assert_eq!(parse_workspace_id("  Workspace: \n"), None);
         assert_eq!(parse_workspace_id("  Workspace: "), None);
+    }
+
+    #[test]
+    fn test_discover_port_cookie_and_id_returns_workspace_id() {
+        let workspace_id = format!("test_mcp_pcid_{}", std::process::id());
+        let dir = beamtalk_workspace::workspaces_base_dir()
+            .unwrap()
+            .join(&workspace_id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("port"), "7777\nnonce789").unwrap();
+        fs::write(dir.join("cookie"), "testcookie").unwrap();
+
+        let result = discover_port_cookie_and_id(Some(&workspace_id));
+        assert_eq!(
+            result,
+            Some((7777, "testcookie".to_string(), workspace_id.clone()))
+        );
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// BT-1416: Verify that re-reading a port file after the port changes
+    /// returns the new port. This is the mechanism that allows reconnect to
+    /// find the new port after a workspace restart.
+    #[test]
+    fn test_port_file_reread_after_change() {
+        let workspace_id = format!("test_mcp_reread_{}", std::process::id());
+        let dir = beamtalk_workspace::workspaces_base_dir()
+            .unwrap()
+            .join(&workspace_id);
+        fs::create_dir_all(&dir).unwrap();
+
+        // Write initial port
+        fs::write(dir.join("port"), "36109\nnonce1").unwrap();
+        assert_eq!(read_port_file(&workspace_id), Some(36109));
+
+        // Simulate workspace restart — port file updated with new port
+        fs::write(dir.join("port"), "38901\nnonce2").unwrap();
+        assert_eq!(read_port_file(&workspace_id), Some(38901));
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&dir);
     }
 }

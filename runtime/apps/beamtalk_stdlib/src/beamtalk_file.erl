@@ -568,8 +568,14 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map with the absolute path as a String.
 -spec 'absolutePath:'(binary()) -> map().
 'absolutePath:'(Path) when is_binary(Path) ->
-    AbsPath = filename:absname(unicode:characters_to_list(Path)),
-    beamtalk_result:from_tagged_tuple({ok, unicode:characters_to_binary(AbsPath)});
+    PathList = unicode:characters_to_list(Path),
+    case filename:pathtype(PathList) of
+        absolute ->
+            beamtalk_result:from_tagged_tuple({ok, Path});
+        _ ->
+            AbsPath = filename:absname(PathList),
+            beamtalk_result:from_tagged_tuple({ok, unicode:characters_to_binary(AbsPath)})
+    end;
 'absolutePath:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
     Error1 = beamtalk_error:with_selector(Error0, 'absolutePath:'),
