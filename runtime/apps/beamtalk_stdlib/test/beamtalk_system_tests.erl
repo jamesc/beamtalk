@@ -5,9 +5,9 @@
 %%%
 %%% **DDD Context:** Object System Context
 %%%
-%%% Tests getEnv:/1, getEnv:default:/2, osPlatform/0, osFamily/0,
-%%% architecture/0, hostname/0, erlangVersion/0, pid/0,
-%%% and type error paths.
+%%% Tests getEnv:/1, getEnv:default:/2, setEnv:value:/2, unsetEnv:/1,
+%%% osPlatform/0, osFamily/0, architecture/0, hostname/0, erlangVersion/0,
+%%% pid/0, and type error paths.
 
 -module(beamtalk_system_tests).
 
@@ -63,6 +63,66 @@ get_env_default_non_binary_default_test() ->
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
         beamtalk_system:'getEnv:default:'(<<"NAME">>, 42)
     ).
+
+%%% ============================================================================
+%%% setEnv:value:/2
+%%% ============================================================================
+
+set_env_value_sets_variable_test() ->
+    ?assertEqual(true, beamtalk_system:'setEnv:value:'(<<"BT_TEST_SET">>, <<"val1">>)),
+    ?assertEqual(<<"val1">>, beamtalk_system:'getEnv:'(<<"BT_TEST_SET">>)),
+    os:unsetenv("BT_TEST_SET").
+
+set_env_value_overwrites_existing_test() ->
+    os:putenv("BT_TEST_OVERWRITE", "old"),
+    ?assertEqual(true, beamtalk_system:'setEnv:value:'(<<"BT_TEST_OVERWRITE">>, <<"new">>)),
+    ?assertEqual(<<"new">>, beamtalk_system:'getEnv:'(<<"BT_TEST_OVERWRITE">>)),
+    os:unsetenv("BT_TEST_OVERWRITE").
+
+set_env_value_non_binary_name_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_system:'setEnv:value:'(42, <<"value">>)
+    ).
+
+set_env_value_non_binary_value_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_system:'setEnv:value:'(<<"name">>, 42)
+    ).
+
+%%% ============================================================================
+%%% unsetEnv:/1
+%%% ============================================================================
+
+unset_env_removes_variable_test() ->
+    os:putenv("BT_TEST_UNSET", "to_remove"),
+    ?assertEqual(true, beamtalk_system:'unsetEnv:'(<<"BT_TEST_UNSET">>)),
+    ?assertEqual(nil, beamtalk_system:'getEnv:'(<<"BT_TEST_UNSET">>)).
+
+unset_env_nonexistent_returns_true_test() ->
+    os:unsetenv("BT_TEST_NEVER_SET"),
+    ?assertEqual(true, beamtalk_system:'unsetEnv:'(<<"BT_TEST_NEVER_SET">>)).
+
+unset_env_non_binary_name_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_system:'unsetEnv:'(42)
+    ).
+
+%%% ============================================================================
+%%% setEnv/2 and unsetEnv/1 shims
+%%% ============================================================================
+
+set_env_shim_test() ->
+    ?assertEqual(true, beamtalk_system:setEnv(<<"BT_TEST_SHIM_SET">>, <<"val">>)),
+    ?assertEqual(<<"val">>, beamtalk_system:getEnv(<<"BT_TEST_SHIM_SET">>)),
+    os:unsetenv("BT_TEST_SHIM_SET").
+
+unset_env_shim_test() ->
+    os:putenv("BT_TEST_SHIM_UNSET", "bye"),
+    ?assertEqual(true, beamtalk_system:unsetEnv(<<"BT_TEST_SHIM_UNSET">>)),
+    ?assertEqual(nil, beamtalk_system:getEnv(<<"BT_TEST_SHIM_UNSET">>)).
 
 %%% ============================================================================
 %%% osPlatform/0
