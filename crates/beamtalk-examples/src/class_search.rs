@@ -38,7 +38,15 @@ pub fn search_classes_in<'a>(
 ) -> Vec<ClassSearchResult<'a>> {
     let limit = limit.unwrap_or(5).min(MAX_LIMIT);
 
-    let keywords: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    let keywords: Vec<String> = query
+        .split_whitespace()
+        .map(|token| {
+            token
+                .trim_matches(|c: char| c.is_ascii_punctuation() && c != ':')
+                .to_lowercase()
+        })
+        .filter(|token| !token.is_empty())
+        .collect();
 
     if keywords.is_empty() {
         return Vec::new();

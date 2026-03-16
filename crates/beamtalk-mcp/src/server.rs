@@ -912,7 +912,11 @@ impl BeamtalkMcp {
             duration_us = duration_us,
             "search_classes"
         );
-        tracing::debug!(query = %params.query, "search_classes query");
+        tracing::debug!(
+            query_hash = %query_hash,
+            query_len = params.query.len(),
+            "search_classes query"
+        );
 
         if results.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(

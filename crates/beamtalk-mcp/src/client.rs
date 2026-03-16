@@ -773,11 +773,28 @@ fn spawn_keepalive(inner: Arc<Mutex<ReplClientInner>>) -> tokio::task::JoinHandl
             interval.tick().await;
             match inner.try_lock() {
                 Ok(mut guard) => {
-                    if let Err(e) = guard.ws.send(Message::Ping(vec![].into())).await {
-                        tracing::debug!("Keepalive ping failed: {e}");
-                        break;
+                    match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        guard.ws.send(Message::Ping(vec![].into())),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => tracing::trace!("Keepalive ping sent"),
+                        Ok(Err(e)) => {
+                            tracing::debug!("Keepalive ping failed: {e}");
+                            let _ =
+                                tokio::time::timeout(Duration::from_secs(1), guard.ws.close(None))
+                                    .await;
+                            break;
+                        }
+                        Err(_) => {
+                            tracing::debug!("Keepalive ping timed out; closing socket");
+                            let _ =
+                                tokio::time::timeout(Duration::from_secs(1), guard.ws.close(None))
+                                    .await;
+                            break;
+                        }
                     }
-                    tracing::trace!("Keepalive ping sent");
                 }
                 Err(_) => {
                     // Lock held — connection is actively being used, skip this ping
