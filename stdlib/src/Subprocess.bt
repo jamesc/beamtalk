@@ -45,6 +45,17 @@ Actor subclass: Subprocess native: beamtalk_subprocess
       self spawnWith: #{#executable => command, #args => args}
     ]
 
+  /// Convenience factory — open a subprocess with command, args, and working directory.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// agent := (Subprocess open: "ls" args: #("-la") dir: #"/tmp") unwrap
+  /// ```
+  class open: command args: args dir: dir -> Result =>
+    (Erlang beamtalk_result) tryDo: [
+      self spawnWith: #{#executable => command, #args => args, #dir => dir}
+    ]
+
   /// Convenience factory — open a subprocess with command, args, environment, and working directory.
   ///
   /// ## Examples
