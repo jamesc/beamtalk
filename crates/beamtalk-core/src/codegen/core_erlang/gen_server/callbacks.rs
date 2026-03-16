@@ -82,23 +82,23 @@ impl CoreErlangGenerator {
         };
 
         // BT-1417: Check if the class defines an initialize method.
-        // Only dispatch initialize in the outermost init/1 — when there is no
-        // parent init. Parent init/1 functions are called as state-building
-        // helpers and must not dispatch initialize (which would cause double
-        // dispatch for inherited actors).
-        let has_initialize = !has_parent_init
-            && current_class.is_some_and(|c| {
-                self.semantic_facts
-                    .class_facts(&c.name.name)
-                    .is_some_and(|cf| cf.has_instance_method("initialize"))
-            });
+        // If so, dispatch it at the end of init/1 — but only when not called
+        // as a parent state-building helper. The __skip_initialize__ flag in
+        // InitArgs suppresses dispatch when a child's init calls us as a helper.
+        let has_initialize = current_class.is_some_and(|c| {
+            self.semantic_facts
+                .class_facts(&c.name.name)
+                .is_some_and(|cf| cf.has_instance_method("initialize"))
+        });
 
         let module_name = self.module_name.clone();
 
         // BT-1417: Generate the init return — either plain {ok, State} or
         // dispatch initialize first, then return {ok, NewState} / {stop, Error}.
+        // When has_initialize is true, we wrap the dispatch in a guard that
+        // checks __skip_initialize__ in InitArgs, so parent helpers skip it.
         let init_return = if has_initialize {
-            Self::init_initialize_dispatch_doc(&module_name)
+            Self::init_initialize_guarded_doc(&module_name)
         } else {
             Document::Str("in {'ok', FinalState}")
         };
@@ -126,10 +126,14 @@ impl CoreErlangGenerator {
                         line(),
                         "%% Call parent init to get inherited state fields",
                         line(),
+                        // BT-1417: Pass __skip_initialize__ to parent so it
+                        // doesn't dispatch initialize — only the leaf should.
+                        "let _ParentArgs = call 'maps':'put'('__skip_initialize__', 'true', InitArgs) in",
+                        line(),
                         docvec![
                             "case call '",
                             Document::String(parent_module.clone()),
-                            "':'init'(InitArgs) of"
+                            "':'init'(_ParentArgs) of"
                         ],
                         nest(
                             INDENT,
@@ -227,32 +231,65 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-1417: Generate the initialize dispatch block for init/1.
+    /// BT-1417: Generate the guarded initialize dispatch block for init/1.
     ///
-    /// After building `FinalState`, dispatches the `initialize` method directly
-    /// within the actor process. This ensures initialize runs for all spawn paths:
-    /// direct `spawn`, supervised `start_link`, and named `start_link`.
+    /// Checks `__skip_initialize__` in `InitArgs` — when a child's init calls
+    /// us as a parent state helper, it sets this flag to prevent double dispatch.
+    /// When called as the outermost init (by OTP), the flag is absent and
+    /// initialize runs.
     ///
-    /// If initialize succeeds, returns `{ok, NewState}`.
-    /// If initialize fails, returns `{stop, Error}` so the supervisor sees the failure.
-    fn init_initialize_dispatch_doc(module_name: &str) -> Document<'static> {
+    /// After building `FinalState`, dispatches `initialize` via `safe_dispatch`.
+    /// Strips `__skip_initialize__` from the final state to keep it out of
+    /// the actor's visible state.
+    fn init_initialize_guarded_doc(module_name: &str) -> Document<'static> {
         docvec![
-            "%% BT-1417: Call initialize within init/1 for all spawn paths",
+            "%% BT-1417: Dispatch initialize unless called as a parent helper",
             line(),
-            docvec![
-                "in case call '",
-                Document::String(module_name.to_string()),
-                "':'safe_dispatch'('initialize', [], FinalState) of",
-            ],
+            "in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
             nest(
                 INDENT,
                 docvec![
                     line(),
-                    "<{'reply', _InitResult, InitNewState}> when 'true' ->",
-                    nest(INDENT, docvec![line(), "{'ok', InitNewState}"]),
+                    "<'true'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            // Strip the flag from state before returning
+                            "let CleanState = call 'maps':'remove'('__skip_initialize__', FinalState) in",
+                            line(),
+                            "{'ok', CleanState}",
+                        ]
+                    ),
                     line(),
-                    "<{'error', InitError, _InitErrState}> when 'true' ->",
-                    nest(INDENT, docvec![line(), "{'stop', InitError}"]),
+                    "<'false'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            // Strip the flag from state before dispatch
+                            "let CleanState1 = call 'maps':'remove'('__skip_initialize__', FinalState) in",
+                            line(),
+                            docvec![
+                                "case call '",
+                                Document::String(module_name.to_string()),
+                                "':'safe_dispatch'('initialize', [], CleanState1) of",
+                            ],
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "<{'reply', _InitResult, InitNewState}> when 'true' ->",
+                                    nest(INDENT, docvec![line(), "{'ok', InitNewState}"]),
+                                    line(),
+                                    "<{'error', InitError, _InitErrState}> when 'true' ->",
+                                    nest(INDENT, docvec![line(), "{'stop', InitError}"]),
+                                ]
+                            ),
+                            line(),
+                            "end",
+                        ]
+                    ),
                 ]
             ),
             line(),
