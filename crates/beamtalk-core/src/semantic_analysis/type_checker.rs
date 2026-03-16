@@ -3088,14 +3088,14 @@ mod tests {
         let has_stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
             has_stale,
-            "@expect type on `42` (no diagnostic) must emit stale error, got: {diags:?}"
+            "@expect type on `42` (no diagnostic) must emit stale warning, got: {diags:?}"
         );
     }
 
     #[test]
     fn test_expect_does_not_suppress_next_next_expression() {
         // @expect dnu only suppresses the immediately following expression.
-        // Here @expect applies to `42` (no DNU) → stale error is emitted,
+        // Here @expect applies to `42` (no DNU) → stale warning is emitted,
         // and `42 unknownSelector` still produces its own DNU hint.
         let module = parse_source("@expect dnu\n42\n42 unknownSelector");
         let hierarchy = ClassHierarchy::with_builtins();
