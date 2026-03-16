@@ -24,14 +24,14 @@
 %% @private Return {Executable, Args} for a process that exits immediately with 0.
 true_cmd() ->
     case os:type() of
-        {unix, _} -> {<<"/bin/true">>, []};
+        {unix, _} -> {<<"/usr/bin/env">>, [<<"true">>]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"exit 0">>]}
     end.
 
 %% @private Return {Executable, Args} for a process that exits with non-zero.
 false_cmd() ->
     case os:type() of
-        {unix, _} -> {<<"/bin/false">>, []};
+        {unix, _} -> {<<"/usr/bin/env">>, [<<"false">>]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"exit 1">>]}
     end.
 

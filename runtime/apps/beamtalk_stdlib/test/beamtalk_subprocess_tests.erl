@@ -49,7 +49,7 @@ sleep_cmd() ->
 %% @private Return {Executable, Args} for a process that exits immediately with 0.
 true_cmd() ->
     case os:type() of
-        {unix, _} -> {<<"/bin/true">>, []};
+        {unix, _} -> {<<"/usr/bin/env">>, [<<"true">>]};
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"exit 0">>]}
     end.
 

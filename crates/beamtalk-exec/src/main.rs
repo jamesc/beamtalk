@@ -203,6 +203,26 @@ struct ChildEntry {
 type ChildMap = Arc<Mutex<HashMap<u32, ChildEntry>>>;
 
 // ────────────────────────────────────────────────────────────────
+// Exit code helpers
+
+/// Extract an exit code from an `ExitStatus`.
+///
+/// On Unix, if the process was terminated by a signal (`code()` returns `None`),
+/// use the standard shell convention of 128 + signal number.
+#[cfg(unix)]
+fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
+    use std::os::unix::process::ExitStatusExt;
+    status
+        .code()
+        .unwrap_or_else(|| status.signal().map_or(-1, |sig| 128 + sig))
+}
+
+#[cfg(not(unix))]
+fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
+    status.code().unwrap_or(-1)
+}
+
+// ────────────────────────────────────────────────────────────────
 // Command handlers
 
 #[allow(clippy::too_many_lines)]
@@ -316,15 +336,38 @@ fn handle_spawn_piped(
     // Spawn stderr reader thread.
     let stderr_handle = spawn_reader_thread(child_id, child_stderr, Arc::clone(writer), "stderr");
 
-    // Spawn reaper thread: waits for the child, joins reader threads, sends exit event.
-    spawn_reaper_thread(
-        child_id,
-        child,
-        stdout_handle,
-        Some(stderr_handle),
-        Arc::clone(writer),
-        Arc::clone(children),
-    );
+    // Spawn reaper thread: waits for the child, joins reader threads, then sends exit event.
+    //
+    // Joining the reader threads before sending exit guarantees that all buffered
+    // stdout/stderr data has already been written to the port before the BEAM
+    // gen_server receives the exit signal.  Without this, the reaper could send
+    // exit before the reader threads have flushed their final reads, causing the
+    // gen_server to close the port and discard in-flight data (the race fixed by
+    // the 10 ms drain timer in the previous workaround — see BT-1148).
+    {
+        let writer = Arc::clone(writer);
+        let children = Arc::clone(children);
+        thread::spawn(move || {
+            let exit_code = match child.wait() {
+                Ok(status) => exit_code_from_status(status),
+                Err(e) => {
+                    error!("wait() failed for child {child_id}: {e}");
+                    -1
+                }
+            };
+            // Remove the entry — at this point stdin has already been closed
+            // (or was never opened) and the process is gone.
+            if let Ok(mut map) = children.lock() {
+                map.remove(&child_id);
+            }
+            // Join reader threads: blocks until both have finished sending all
+            // stdout/stderr events.  Errors from join (thread panicked) are
+            // ignored — we still send the exit event.
+            let _ = stdout_handle.join();
+            let _ = stderr_handle.join();
+            send_event(&writer, &exit_event(child_id, exit_code));
+        });
+    }
 
     Ok(())
 }
@@ -383,33 +426,6 @@ fn run_cat_mode() -> ! {
     std::process::exit(0);
 }
 
-/// Spawn a reaper thread that waits for a `std::process::Child` and sends exit.
-fn spawn_reaper_thread(
-    child_id: u32,
-    mut child: std::process::Child,
-    stdout_handle: thread::JoinHandle<()>,
-    stderr_handle: Option<thread::JoinHandle<()>>,
-    writer: SharedWriter,
-    children: ChildMap,
-) {
-    thread::spawn(move || {
-        let exit_code = match child.wait() {
-            Ok(status) => status.code().unwrap_or(-1),
-            Err(e) => {
-                error!("wait() failed for child {child_id}: {e}");
-                -1
-            }
-        };
-        if let Ok(mut map) = children.lock() {
-            map.remove(&child_id);
-        }
-        let _ = stdout_handle.join();
-        if let Some(h) = stderr_handle {
-            let _ = h.join();
-        }
-        send_event(&writer, &exit_event(child_id, exit_code));
-    });
-}
 
 /// Configure the child process to start in a new process group (Unix only).
 ///
