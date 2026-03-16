@@ -595,16 +595,22 @@ extract_see_also(DocText) ->
         )
     of
         {match, Matches} ->
-            [
-                {
-                    binary_to_atom(hd(Match), utf8),
-                    case Match of
-                        [_, D] -> D;
-                        _ -> <<>>
+            lists:filtermap(
+                fun(Match) ->
+                    case safe_to_existing_atom(hd(Match)) of
+                        {ok, Atom} ->
+                            Desc = case Match of
+                                [_, D] -> D;
+                                _ -> <<>>
+                            end,
+                            {true, {Atom, Desc}};
+                        {error, badarg} ->
+                            %% Unknown atom — skip to avoid atom table exhaustion
+                            false
                     end
-                }
-             || Match <- Matches
-            ];
+                end,
+                Matches
+            );
         nomatch ->
             []
     end.
