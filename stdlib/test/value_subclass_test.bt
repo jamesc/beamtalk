@@ -87,3 +87,52 @@ TestCase subclass: ValueSubclassTest
   testClassMethodSlotSendClassIsCorrect =>
     v := TaggedValue fromTag: "world"
     self assert: v class equals: TaggedValue
+
+  // BT-1408: Value subclass with 20+ long camelCase fields — previously triggered
+  // core_scan_error because the keyword constructor atom exceeded 255 chars.
+  testManyFieldsNew =>
+    v := ValueManyFields new
+    self assert: v codexInputTokens equals: 0
+    self assert: v codexModelName equals: ""
+
+  testManyFieldsWithSetter =>
+    v := ValueManyFields new
+    v2 := v withCodexInputTokens: 42
+    self assert: v2 codexInputTokens equals: 42
+    // Original unchanged
+    self assert: v codexInputTokens equals: 0
+
+  testManyFieldsNewMap =>
+    v := ValueManyFields new: #{#codexInputTokens => 100, #errorCount => 5}
+    self assert: v codexInputTokens equals: 100
+    self assert: v errorCount equals: 5
+    // Unset fields use defaults
+    self assert: v codexOutputTokens equals: 0
+
+  // BT-1408: Keyword constructor with 20 long-named fields — exercises the
+  // class_send path which also generates a long selector atom.
+  testManyFieldsKeywordConstructor =>
+    v := ValueManyFields
+      codexInputTokens: 10
+      codexOutputTokens: 20
+      codexModelName: "gpt"
+      codexCachedTokens: 5
+      codexReasoning: "r"
+      codexReasoningEffort: "high"
+      codexMaxOutputTokens: 100
+      codexSystemFingerprint: "fp"
+      codexServiceTier: "t1"
+      operationTokens: 30
+      operationCost: 1
+      operationDuration: 50
+      apiCallCount: 3
+      errorCount: 0
+      retryCount: 1
+      totalLatency: 200
+      averageLatency: 67
+      peakMemoryUsage: 512
+      networkBandwidth: 1000
+      concurrentRequests: 8
+    self assert: v codexInputTokens equals: 10
+    self assert: v codexModelName equals: "gpt"
+    self assert: v concurrentRequests equals: 8
