@@ -57,6 +57,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Interval"
             | "Json"
             | "List"
+            | "Logger"
             | "Metaclass"
             | "Number"
             | "OS"
@@ -1308,6 +1309,34 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("List".into())], doc: Some("Create a List from a list (identity — a list is already a List).\n\nUsed by the species pattern on Collection so that `collect:` and\n`select:` on a List return a List.\n\n## Examples\n```beamtalk\nList class withAll: #(1, 2, 3)   // => #(1, 2, 3)\n```".into()) },
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("List".into())], doc: Some("Create a List from a list. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nList new: #(1, 2, 3)             // => #(1, 2, 3)\n```".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Logger".into(),
+        ClassInfo {
+            name: "Logger".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "info:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())], doc: Some("Log a message at info level.\n\n## Examples\n```beamtalk\nLogger info: \"request processed\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "info:metadata:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into()), Some("Dictionary".into())], doc: Some("Log a message at info level with structured metadata.\n\n## Examples\n```beamtalk\nLogger info: \"request processed\" metadata: #{\"path\" => \"/api\"}\n// => nil\n```".into()) },
+                MethodInfo { selector: "warn:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())], doc: Some("Log a message at warning level.\n\n## Examples\n```beamtalk\nLogger warn: \"retrying operation\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "warn:metadata:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into()), Some("Dictionary".into())], doc: Some("Log a message at warning level with structured metadata.\n\n## Examples\n```beamtalk\nLogger warn: \"retrying\" metadata: #{\"attempt\" => 2}\n// => nil\n```".into()) },
+                MethodInfo { selector: "error:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())], doc: Some("Log a message at error level.\n\n## Examples\n```beamtalk\nLogger error: \"connection lost\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "error:metadata:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into()), Some("Dictionary".into())], doc: Some("Log a message at error level with structured metadata.\n\n## Examples\n```beamtalk\nLogger error: \"failed\" metadata: #{\"reason\" => \"timeout\"}\n// => nil\n```".into()) },
+                MethodInfo { selector: "debug:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())], doc: Some("Log a message at debug level.\n\n## Examples\n```beamtalk\nLogger debug: \"entering loop\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "debug:metadata:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into()), Some("Dictionary".into())], doc: Some("Log a message at debug level with structured metadata.\n\n## Examples\n```beamtalk\nLogger debug: \"state\" metadata: #{\"count\" => 42}\n// => nil\n```".into()) },
+                MethodInfo { selector: "setLevel:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Symbol".into())], doc: Some("Set the primary log level at runtime.\n\nValid levels: #emergency, #alert, #critical, #error,\n#warning, #notice, #info, #debug\n\n## Examples\n```beamtalk\nLogger setLevel: #debug\n// => nil\nLogger setLevel: #warning\n// => nil\n```".into()) },
             ],
             class_variables: vec![],
         },

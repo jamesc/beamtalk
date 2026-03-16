@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests the Logger class — info:, warn:, error:, debug:, metadata variants,
+// setLevel:, and type-error validation
+
+TestCase subclass: LoggerTest
+
+  testInfoReturnsNil =>
+    // info: returns nil
+    self assert: (Logger info: "test info message") equals: nil
+
+  testInfoWithMetadata =>
+    // info:metadata: returns nil
+    self assert: (Logger info: "test info" metadata: #{
+      "key" => "value"
+    }) equals: nil
+
+  testWarnReturnsNil =>
+    // warn: returns nil
+    self assert: (Logger warn: "test warn message") equals: nil
+
+  testWarnWithMetadata =>
+    // warn:metadata: returns nil
+    self assert: (Logger warn: "test warn" metadata: #{
+      "attempt" => 2
+    }) equals: nil
+
+  testErrorReturnsNil =>
+    // error: returns nil
+    self assert: (Logger error: "test error message") equals: nil
+
+  testErrorWithMetadata =>
+    // error:metadata: returns nil
+    self assert: (Logger error: "test error" metadata: #{
+      "reason" => "timeout"
+    }) equals: nil
+
+  testDebugReturnsNil =>
+    // debug: returns nil
+    self assert: (Logger debug: "test debug message") equals: nil
+
+  testDebugWithMetadata =>
+    // debug:metadata: returns nil
+    self assert: (Logger debug: "test debug" metadata: #{
+      "count" => 42
+    }) equals: nil
+
+  testSetLevel =>
+    // setLevel: accepts valid log levels
+    self assert: (Logger setLevel: #debug) equals: nil
+    // Restore to a reasonable default
+    self assert: (Logger setLevel: #notice) equals: nil
+
+  testInfoTypeError =>
+    // info: requires String argument
+    @expect type
+    self should: [Logger info: 42] raise: #type_error
+
+  testWarnTypeError =>
+    // warn: requires String argument
+    @expect type
+    self should: [Logger warn: 42] raise: #type_error
+
+  testErrorTypeError =>
+    // error: requires String argument
+    @expect type
+    self should: [Logger error: 42] raise: #type_error
+
+  testDebugTypeError =>
+    // debug: requires String argument
+    @expect type
+    self should: [Logger debug: 42] raise: #type_error
+
+  testSetLevelTypeError =>
+    // setLevel: requires Symbol argument
+    @expect type
+    self should: [Logger setLevel: "debug"] raise: #type_error
+
+  testSetLevelInvalidLevel =>
+    // setLevel: with invalid symbol raises argument_error
+    self should: [Logger setLevel: #not_a_real_level] raise: #argument_error
