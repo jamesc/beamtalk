@@ -1144,17 +1144,46 @@ impl CoreErlangGenerator {
     /// BT-1420: Checks if an expression is a self-send that goes through `safe_dispatch`
     /// (or sealed dispatch) and returns `{reply, Result, NewState}`.
     ///
-    /// Excludes intrinsic self-sends (`fieldAt:`, `fieldAt:put:`, `fieldNames`) which
-    /// have special handling via `beamtalk_primitive:send` and do NOT return a
-    /// `{reply, Result, NewState}` tuple.
+    /// Excludes self-sends with selectors that are intercepted by handlers before
+    /// `try_handle_self_dispatch` in `generate_message_send`:
+    /// - Binary operators (`+`, `-`, `*`, etc.)
+    /// - `asType:` (compile-time erasure)
+    /// - `ProtoObject` messages (`class`, `perform:`, `perform:withArguments:`)
+    /// - Object reflection (`fieldAt:`, `fieldAt:put:`, `fieldNames`, `respondsTo:`)
+    /// - Nil protocol (`isNil`, `notNil`, `ifNil:`, etc.)
+    /// - Identity (`yourself`, `hash`)
+    /// - Error signaling (`error:`)
+    /// - Block evaluation (`value`, `value:`, `repeat`, `whileTrue:`, etc.)
     pub(super) fn is_dispatching_actor_self_send(&self, expr: &Expression) -> bool {
         if !self.is_actor_self_send(expr) {
             return false;
         }
         if let Expression::MessageSend { selector, .. } = expr {
+            // Binary operators are always intercepted by generate_binary_op
+            if matches!(selector, MessageSelector::Binary(_)) {
+                return false;
+            }
             let name = selector.name();
-            // These selectors have intrinsic handling that bypasses safe_dispatch
-            if name == "fieldAt:" || name == "fieldAt:put:" || name == "fieldNames" {
+            // Selectors intercepted before try_handle_self_dispatch
+            if matches!(
+                name.as_str(),
+                // asType: (compile-time erasure)
+                "asType:"
+                // ProtoObject
+                | "class" | "perform:" | "perform:withArguments:"
+                // Object reflection
+                | "fieldAt:" | "fieldAt:put:" | "fieldNames" | "respondsTo:"
+                // Nil protocol
+                | "isNil" | "notNil" | "ifNil:" | "ifNotNil:"
+                | "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
+                // Identity
+                | "yourself" | "hash"
+                // Error signaling
+                | "error:"
+                // Block evaluation
+                | "value" | "value:" | "value:value:" | "value:value:value:"
+                | "repeat" | "whileTrue:" | "whileFalse:"
+            ) {
                 return false;
             }
         }
