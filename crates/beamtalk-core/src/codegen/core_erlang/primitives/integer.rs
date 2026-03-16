@@ -77,10 +77,29 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
         )),
         "raisedTo:" => {
             let p0 = params.first()?;
+            // Return Integer when exponent is a non-negative integer, Float otherwise.
             Some(docvec![
-                "call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(",
+                "case call 'erlang':'is_integer'(",
                 p0.clone(),
-                "))",
+                ") of \
+                 'true' when 'true' -> \
+                   case call 'erlang':'>='(",
+                p0.clone(),
+                ", 0) of \
+                     'true' when 'true' -> \
+                       call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(",
+                p0.clone(),
+                "))) \
+                     'false' when 'true' -> \
+                       call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(",
+                p0.clone(),
+                ")) \
+                   end \
+                 'false' when 'true' -> \
+                   call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(",
+                p0.clone(),
+                ")) \
+               end",
             ])
         }
         _ => None,

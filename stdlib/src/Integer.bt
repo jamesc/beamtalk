@@ -463,10 +463,14 @@ sealed Number subclass: Integer
   /// ```
   exp -> Float => @primitive "exp"
 
-  /// Raise the receiver to the power of `exponent` (returns Float).
+  /// Raise the receiver to the power of `exponent`.
+  ///
+  /// Returns Integer when the exponent is a non-negative Integer,
+  /// Float otherwise (negative or Float exponent).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 2 raisedTo: 10    // => 1024.0
+  /// 2 raisedTo: 10    // => 1024
+  /// 2 raisedTo: -1    // => 0.5
   /// ```
-  raisedTo: exponent :: Number -> Float => @primitive "raisedTo:"
+  raisedTo: exponent :: Number -> Number => @primitive "raisedTo:"
