@@ -1164,6 +1164,7 @@ mod tests {
             if let Some(err) = resp.error_message() {
                 if err.contains("Unknown class") {
                     eprintln!("docs skipped: {err}");
+                    client.close().await;
                     return Ok(());
                 }
             }
@@ -1365,31 +1366,35 @@ mod tests {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
 
-        // Establish a binding that should survive a reconnect
-        let _ = client.eval("reconnectTest := 4242").await?;
+        let result: Result<(), Box<dyn std::error::Error>> = async {
+            // Establish a binding that should survive a reconnect
+            let _ = client.eval("reconnectTest := 4242").await?;
 
-        // Close the underlying websocket to simulate a network drop
-        {
-            let mut inner = client.inner.lock().await;
-            // Attempt a graceful close; ignore errors
-            let _ = inner.ws.close(None).await;
+            // Close the underlying websocket to simulate a network drop
+            {
+                let mut inner = client.inner.lock().await;
+                // Attempt a graceful close; ignore errors
+                let _ = inner.ws.close(None).await;
+            }
+
+            // Now perform an operation which should trigger reconnect and resume
+            let resp = client.bindings().await?;
+            assert!(
+                !resp.is_error(),
+                "bindings should be returned after reconnect"
+            );
+            let bindings = resp
+                .bindings
+                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+            assert!(
+                bindings.get("reconnectTest").is_some(),
+                "reconnectTest binding should persist after reconnect: {bindings:?}"
+            );
+            Ok(())
         }
-
-        // Now perform an operation which should trigger reconnect and resume
-        let resp = client.bindings().await?;
-        assert!(
-            !resp.is_error(),
-            "bindings should be returned after reconnect"
-        );
-        let bindings = resp
-            .bindings
-            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-        assert!(
-            bindings.get("reconnectTest").is_some(),
-            "reconnectTest binding should persist after reconnect: {bindings:?}"
-        );
+        .await;
         client.close().await;
-        Ok(())
+        result
     }
 
     /// Verifies that `send_once` operations automatically reconnect when the WebSocket
@@ -1406,45 +1411,49 @@ mod tests {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
 
-        // Establish a binding before the forced connection drop.
-        let resp = client
-            .evaluate_with_options("staleOnce := 77", false)
-            .await?;
-        assert!(!resp.is_error(), "initial evaluate should succeed");
+        let result: Result<(), Box<dyn std::error::Error>> = async {
+            // Establish a binding before the forced connection drop.
+            let resp = client
+                .evaluate_with_options("staleOnce := 77", false)
+                .await?;
+            assert!(!resp.is_error(), "initial evaluate should succeed");
 
-        // Force-close the underlying WebSocket to simulate a stale connection
-        // (e.g. idle timeout, cowboy restart, or session process crash).
-        {
-            let mut inner = client.inner.lock().await;
-            let _ = inner.ws.close(None).await;
+            // Force-close the underlying WebSocket to simulate a stale connection
+            // (e.g. idle timeout, cowboy restart, or session process crash).
+            {
+                let mut inner = client.inner.lock().await;
+                let _ = inner.ws.close(None).await;
+            }
+
+            // evaluate_with_options goes through send_once.  It must reconnect
+            // transparently and return the correct result (BT-1289).
+            let resp = client.evaluate_with_options("staleOnce + 1", false).await?;
+            assert!(
+                !resp.is_error(),
+                "evaluate_with_options should succeed after reconnect on stale connection: {:?}",
+                resp.error
+            );
+            assert_eq!(
+                resp.value_string(),
+                "78",
+                "result should be correct after send_once reconnect"
+            );
+
+            // Confirm the session was resumed and the earlier binding is still visible.
+            let resp = client.bindings().await?;
+            assert!(!resp.is_error(), "bindings should work after reconnect");
+            let bindings = resp
+                .bindings
+                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+            assert!(
+                bindings.get("staleOnce").is_some(),
+                "staleOnce binding should persist across send_once reconnect: {bindings:?}"
+            );
+            Ok(())
         }
-
-        // evaluate_with_options goes through send_once.  It must reconnect
-        // transparently and return the correct result (BT-1289).
-        let resp = client.evaluate_with_options("staleOnce + 1", false).await?;
-        assert!(
-            !resp.is_error(),
-            "evaluate_with_options should succeed after reconnect on stale connection: {:?}",
-            resp.error
-        );
-        assert_eq!(
-            resp.value_string(),
-            "78",
-            "result should be correct after send_once reconnect"
-        );
-
-        // Confirm the session was resumed and the earlier binding is still visible.
-        let resp = client.bindings().await?;
-        assert!(!resp.is_error(), "bindings should work after reconnect");
-        let bindings = resp
-            .bindings
-            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-        assert!(
-            bindings.get("staleOnce").is_some(),
-            "staleOnce binding should persist across send_once reconnect: {bindings:?}"
-        );
+        .await;
         client.close().await;
-        Ok(())
+        result
     }
 
     /// Cleanup test that runs last (alphabetically after all other `test_*` tests).
