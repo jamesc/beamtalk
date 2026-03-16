@@ -80,12 +80,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_ansi(false)
         .init();
 
-    // Resolve REPL port and cookie
-    let (port, cookie) = resolve_port_and_cookie(&args).await?;
-    tracing::info!(port, "Connecting to beamtalk REPL");
+    // Resolve REPL port, cookie, and workspace ID
+    let (port, cookie, workspace_id) = resolve_port_and_cookie(&args).await?;
+    tracing::info!(port, workspace_id = ?workspace_id, "Connecting to beamtalk REPL");
 
     // Connect to REPL
-    let repl_client = client::ReplClient::connect(port, &cookie)
+    let repl_client = client::ReplClient::connect(port, &cookie, workspace_id)
         .await
         .map_err(|e| {
             eprintln!("Error: {e}");
@@ -110,9 +110,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Resolve the REPL port and cookie from CLI args or workspace discovery.
-async fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn std::error::Error>> {
-    // Explicit port takes priority (cookie from env or default Erlang cookie)
+/// Resolve the REPL port, cookie, and workspace ID from CLI args or workspace discovery.
+///
+/// The workspace ID is returned so the MCP client can re-read the port file
+/// on reconnect when the workspace restarts on a different port (BT-1416).
+async fn resolve_port_and_cookie(
+    args: &Args,
+) -> Result<(u16, String, Option<String>), Box<dyn std::error::Error>> {
+    // Explicit port takes priority (cookie from env or default Erlang cookie).
+    // No workspace_id — port re-discovery is not possible with explicit ports.
     if let Some(port) = args.port {
         let cookie = std::env::var("BEAMTALK_COOKIE").unwrap_or_default();
         if cookie.trim().is_empty() {
@@ -120,11 +126,12 @@ async fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn s
                 "BEAMTALK_COOKIE is required when using --port (or use --workspace-id).".into(),
             );
         }
-        return Ok((port, cookie));
+        return Ok((port, cookie, None));
     }
 
     // Try project-specific workspace discovery
-    if let Some((port, cookie)) = workspace::discover_port_and_cookie(args.workspace_id.as_deref())
+    if let Some((port, cookie, ws_id)) =
+        workspace::discover_port_cookie_and_id(args.workspace_id.as_deref())
     {
         if cookie.trim().is_empty() {
             return Err(format!(
@@ -133,7 +140,7 @@ async fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn s
             )
             .into());
         }
-        return Ok((port, cookie));
+        return Ok((port, cookie, Some(ws_id)));
     }
 
     // If --start, auto-start the workspace for this directory rather than falling
@@ -143,14 +150,14 @@ async fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn s
     }
 
     // Try finding any running workspace
-    if let Some((port, cookie)) = workspace::discover_any_port_and_cookie() {
+    if let Some((port, cookie, ws_id)) = workspace::discover_any_port_cookie_and_id() {
         if cookie.trim().is_empty() {
             return Err(
                 "Auto-discovered workspace has empty cookie; restart with `beamtalk repl`".into(),
             );
         }
         tracing::info!(port, "Auto-discovered running REPL");
-        return Ok((port, cookie));
+        return Ok((port, cookie, Some(ws_id)));
     }
 
     Err("Could not find a running beamtalk REPL. \
@@ -166,7 +173,7 @@ async fn resolve_port_and_cookie(args: &Args) -> Result<(u16, String), Box<dyn s
 /// workspace storage.
 async fn start_workspace(
     workspace_id: Option<&str>,
-) -> Result<(u16, String), Box<dyn std::error::Error>> {
+) -> Result<(u16, String, Option<String>), Box<dyn std::error::Error>> {
     let idle_timeout = std::env::var("BEAMTALK_WORKSPACE_TIMEOUT")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
@@ -249,7 +256,7 @@ async fn start_workspace(
     tracing::info!(port, workspace_id = ws_id, "beamtalk workspace ready");
     eprintln!("Workspace ready on port {port}");
 
-    Ok((port, cookie))
+    Ok((port, cookie, Some(ws_id)))
 }
 
 /// Poll TCP until the server accepts connections or the timeout expires.
