@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E tests for automatic binary→charlist coercion at the Erlang FFI boundary
-// (BT-1127, ADR 0028 §3).
+// (BT-1127, BT-1398, ADR 0028 §3).
 //
 // Beamtalk strings are binaries (<<"hello">>). Many Erlang functions expect
 // charlists ([104,101,108,108,111]). The proxy and direct-call path both
 // auto-convert binary arguments to charlists on badarg, and convert charlist
-// results back to binaries.
+// results back to binaries — including on the direct success path (BT-1398).
 //
 // Note: os:cmd returns a string with a trailing newline. The `_` wildcard
 // suffix in the assertion matches the trailing newline character.
@@ -23,3 +23,15 @@ Erlang os cmd: "echo hello"
 // Multi-word command
 Erlang os cmd: "echo foo bar"
 // => foo bar_
+
+// ===========================================================================
+// calendar:system_time_to_rfc3339 — charlist result coerced without badarg retry (BT-1398)
+// ===========================================================================
+
+// Returns charlist in Erlang, but should be auto-coerced to String
+now := Erlang erlang system_time: #second
+// => _
+ts := Erlang calendar system_time_to_rfc3339: now
+// => _
+ts class name
+// => String

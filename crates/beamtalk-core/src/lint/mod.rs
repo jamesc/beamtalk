@@ -25,6 +25,7 @@ mod effect_free_statement;
 mod shadowed_block_param;
 mod trailing_caret;
 mod unnecessary_parens;
+mod value_like_object;
 // ── add new lint modules here (alphabetical) ──────────────────────────────
 
 use crate::ast::Module;
@@ -50,6 +51,7 @@ fn all_passes() -> Vec<Box<dyn LintPass>> {
         Box::new(shadowed_block_param::ShadowedBlockParamPass),
         Box::new(trailing_caret::TrailingCaretPass),
         Box::new(unnecessary_parens::UnnecessaryParensPass),
+        Box::new(value_like_object::ValueLikeObjectPass),
         // ── add new passes here (alphabetical) ────────────────────────────
     ]
 }

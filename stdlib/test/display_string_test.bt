@@ -7,6 +7,16 @@
 
 TestCase subclass: DisplayStringTest
 
+  testStringAsString =>
+    // asString returns the string itself (no quotes) — BT-1393
+    self assert: "hello" asString equals: "hello"
+
+  testEmptyStringAsString => self assert: "" asString equals: ""
+
+  testStringWithQuotesAsString =>
+    // "a""b" is the string a"b; asString returns it unchanged
+    self assert: "a""b" asString equals: "a""b"
+
   testStringPrintString =>
     // printString adds surrounding quotes for developer inspection
     self assert: "hello" printString equals: """hello"""
