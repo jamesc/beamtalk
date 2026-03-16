@@ -39,6 +39,24 @@ const MAX_ATOM_LEN: usize = 255;
 /// function names (see `beamtalk_class_dispatch:class_method_fun_name/1`).
 const CLASS_METHOD_PREFIX: &str = "class_";
 
+/// Returns an atom-safe version of `name`.
+///
+/// If `name` is ≤255 bytes it is returned unchanged.  Otherwise it is replaced
+/// with a deterministic FNV-1a 64-bit hash: `"kw_<16-hex-digits>"` (19 chars).
+///
+/// Use this for atoms that don't carry the `class_` prefix (e.g. instance
+/// dispatch selectors).  For class method atoms, prefer
+/// [`safe_class_method_selector`] instead.
+#[must_use]
+pub fn safe_atom_name(name: &str) -> String {
+    if name.len() <= MAX_ATOM_LEN {
+        name.to_string()
+    } else {
+        let hash = fnv1a_64(name.as_bytes());
+        format!("kw_{hash:016x}")
+    }
+}
+
 /// Returns a safe selector atom for use in `class_send` calls and meta entries.
 ///
 /// Hashes the selector when the corresponding `class_`-prefixed function name
