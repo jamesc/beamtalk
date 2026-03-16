@@ -60,7 +60,7 @@ Object subclass: Exception
   /// ```
   printString -> String => @primitive "printString"
 
-  /// Return the stack trace as a list of StackFrame objects (BT-107).
+  /// Return the stack trace as a list of StackFrame objects.
   ///
   /// Only available when the exception was caught via `on:do:`.
   /// Returns an empty list if no stacktrace was captured.

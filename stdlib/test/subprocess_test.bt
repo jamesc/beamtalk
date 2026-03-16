@@ -53,6 +53,15 @@ TestCase subclass: SubprocessTest
   partialLineScript =>
     self.isUnix ifTrue: ["printf hello"] ifFalse: ["<nul set /p =hello"]
 
+  pwdScript => self.isUnix ifTrue: ["pwd"] ifFalse: ["cd"]
+
+  envAndPwdScript =>
+    self.isUnix ifTrue: [
+      "echo $BT_TEST_SEED; pwd"
+    ] ifFalse: ["echo %BT_TEST_SEED%& cd"]
+
+  envDir => self.isUnix ifTrue: ["/tmp"] ifFalse: [System getEnv: "TEMP"]
+
   // cat executable: echoes stdin to stdout.
   // On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (built-in
   // cat mode with explicit flushing, bypassing pipe buffering).
@@ -197,5 +206,33 @@ TestCase subclass: SubprocessTest
     agent := (Subprocess open: self sleepExe args: self sleepArgs) unwrap
     @expect type
     self assert: (agent readStderrLine: 100) equals: nil
+    @expect type
+    self assert: agent stop equals: #ok
+
+  testOpenWithDir =>
+    // BT-1411: open:args:dir: sets the working directory
+    agent := (Subprocess
+      open: self shellExe
+      args: (self shellArgs: self pwdScript)
+      dir: self envDir) unwrap
+    @expect type
+    line := agent readLine
+    self assert: (line includesSubstring: self envDir)
+    @expect type
+    self assert: agent stop equals: #ok
+
+  testOpenWithEnvAndDir =>
+    // BT-1411: open:args:env:dir: sets both env and working directory
+    agent := (Subprocess
+      open: self shellExe
+      args: (self shellArgs: self envAndPwdScript)
+      env: #{"BT_TEST_SEED" => "hello1411"}
+      dir: self envDir) unwrap
+    @expect type
+    envLine := agent readLine
+    self assert: envLine equals: "hello1411"
+    @expect type
+    dirLine := agent readLine
+    self assert: (dirLine includesSubstring: self envDir)
     @expect type
     self assert: agent stop equals: #ok

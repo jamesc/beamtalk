@@ -238,7 +238,10 @@ impl CoreErlangGenerator {
             if let Some(ref kw_sel) = auto.keyword_constructor {
                 let num_slots = class.state.len();
                 let arity = num_slots + 2; // ClassSelf + ClassVars + N slot args
-                exports.push(format!("'class_{kw_sel}'/{arity}"));
+                // BT-1408: Hash long keyword constructor atoms to stay within Erlang's
+                // 255-char atom limit.
+                let safe_fn = super::selector_mangler::safe_class_method_fn_name(kw_sel);
+                exports.push(format!("'{safe_fn}'/{arity}"));
             }
         }
 
@@ -666,9 +669,13 @@ impl CoreErlangGenerator {
             ]);
         }
 
+        // BT-1408: Hash long keyword constructor atoms to stay within Erlang's
+        // 255-char atom limit.
+        let safe_fn_name = super::selector_mangler::safe_class_method_fn_name(kw_selector);
+
         docvec![
-            "'class_",
-            Document::String(kw_selector.to_string()),
+            "'",
+            Document::String(safe_fn_name),
             "'/",
             Document::String(arity.to_string()),
             " = fun (_ClassSelf, _ClassVars",

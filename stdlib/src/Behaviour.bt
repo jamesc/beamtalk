@@ -61,7 +61,7 @@ abstract Object subclass: Behaviour
 
   /// Test whether the receiver strictly inherits from aClass (self not included).
   ///
-  /// BT-753: Pure Beamtalk — delegates to allSuperclasses.
+  /// Pure Beamtalk — delegates to allSuperclasses.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -73,7 +73,7 @@ abstract Object subclass: Behaviour
 
   /// Test whether aBehaviour is the receiver or one of its ancestors.
   ///
-  /// BT-753: Pure Beamtalk — identity check plus inheritsFrom:.
+  /// Pure Beamtalk — identity check plus inheritsFrom:.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -107,7 +107,7 @@ abstract Object subclass: Behaviour
   /// Test whether instances of the receiver understand the given selector
   /// (checks full inheritance chain).
   ///
-  /// BT-753: Pure Beamtalk — checks local then walks hierarchy.
+  /// Pure Beamtalk — checks local then walks hierarchy.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -132,7 +132,7 @@ abstract Object subclass: Behaviour
   /// Walk the hierarchy and return the class that defines the given selector,
   /// or nil if no class defines it.
   ///
-  /// BT-753: Pure Beamtalk — walks self then allSuperclasses.
+  /// Pure Beamtalk — walks self then allSuperclasses.
   ///
   /// ## Examples
   /// ```beamtalk

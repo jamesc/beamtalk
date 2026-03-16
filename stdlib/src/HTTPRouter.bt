@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// HTTPRouter — Compiled route dispatch for HTTPServer (BT-1344).
+/// HTTPRouter — Compiled route dispatch for HTTPServer.
 ///
 /// HTTPRouter is a sealed Value that holds a compiled route table. It is
 /// created once (via `build:` or `routes:`) and then passed as the handler

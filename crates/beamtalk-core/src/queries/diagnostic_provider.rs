@@ -155,11 +155,12 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
         diagnostics.remove(i);
     }
 
-    // Emit errors for stale directives
+    // Emit warnings for stale directives (BT-1412: warning, not error, so
+    // compilation can proceed — the annotation is just unnecessary).
     for (cat, span) in stale_directives {
-        diagnostics.push(Diagnostic::error(
+        diagnostics.push(Diagnostic::warning(
             format!(
-                "stale @expect {}: no matching diagnostic found on the following expression",
+                "stale @expect {}: no matching diagnostic found on the following expression — consider removing it",
                 cat.as_str()
             ),
             span,
@@ -701,7 +702,7 @@ mod tests {
 
     #[test]
     fn expect_dnu_stale_when_no_dnu() {
-        // @expect dnu where there is no DNU diagnostic → stale error
+        // @expect dnu where there is no DNU diagnostic → stale warning
         let source = "@expect dnu\n42";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
@@ -790,7 +791,7 @@ mod tests {
             .any(|d| d.message.contains("stale @expect"));
         assert!(
             stale,
-            "@expect type on `42` (no diagnostic) must emit stale error, got: {diagnostics:?}"
+            "@expect type on `42` (no diagnostic) must emit stale warning, got: {diagnostics:?}"
         );
     }
 
@@ -822,7 +823,7 @@ mod tests {
 
     #[test]
     fn expect_self_capture_stale_when_no_self_capture() {
-        // @expect self_capture with no self-capture diagnostic → stale error
+        // @expect self_capture with no self-capture diagnostic → stale warning
         let source = "@expect self_capture\n42";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);

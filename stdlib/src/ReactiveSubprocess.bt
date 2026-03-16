@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// ReactiveSubprocess — Actor for push-mode subprocess delivery (BT-1187).
+/// ReactiveSubprocess — Actor for push-mode subprocess delivery.
 ///
 /// Unlike `Subprocess` (pull model), ReactiveSubprocess delivers each stdout and
 /// stderr line to a registered `notify` actor via async cast as data arrives.
