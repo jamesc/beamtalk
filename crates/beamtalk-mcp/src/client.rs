@@ -523,8 +523,8 @@ impl ReplClient {
                     tracing::warn!("send_once: connection closed ({e}), attempting reconnect");
                     if let Err(re) = self.reconnect().await {
                         return Err(format!(
-                            "REPL connection lost (idle timeout). Attempted reconnect but \
-                             failed: {re}. Try restarting the MCP server."
+                            "REPL connection lost. Attempted reconnect but failed: {re}. \
+                             The server may have restarted; try restarting the MCP server."
                         ));
                     }
                     continue; // retry with fresh connection
