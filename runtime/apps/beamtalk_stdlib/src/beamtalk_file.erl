@@ -86,7 +86,7 @@
 %% @doc Check if a file exists.
 %%
 %% Returns true if the file exists, false otherwise.
-%% Does not raise errors (returns false for invalid paths).
+%% Does not raise errors (returns false for non-existent paths or non-binary input).
 -spec 'exists:'(binary()) -> boolean().
 'exists:'(Path) when is_binary(Path) ->
     filelib:is_regular(binary_to_list(Path));
@@ -271,7 +271,7 @@ handle_has_method(_) -> false.
 %% @doc Test if a path refers to a directory.
 %%
 %% Returns true if path exists and is a directory, false otherwise.
-%% Does not raise errors (returns false for invalid paths).
+%% Does not raise errors (returns false for non-existent paths or non-binary input).
 -spec 'isDirectory:'(binary()) -> boolean().
 'isDirectory:'(Path) when is_binary(Path) ->
     filelib:is_dir(binary_to_list(Path));
@@ -281,7 +281,7 @@ handle_has_method(_) -> false.
 %% @doc Test if a path refers to a regular file.
 %%
 %% Returns true if path exists and is a regular file, false otherwise.
-%% Does not raise errors (returns false for invalid paths).
+%% Does not raise errors (returns false for non-existent paths or non-binary input).
 -spec 'isFile:'(binary()) -> boolean().
 'isFile:'(Path) when is_binary(Path) ->
     filelib:is_regular(binary_to_list(Path));
