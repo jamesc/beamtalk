@@ -31,6 +31,11 @@ const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 /// on all platforms while still being generous for localhost connections.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Maximum time to poll for a changed port file and retry connecting during
+/// workspace restart (BT-1416). Covers the race where the port file is updated
+/// but the new listener isn't accepting connections yet.
+const PORT_REDISCOVERY_WINDOW: Duration = Duration::from_secs(5);
+
 /// Interval between WebSocket keepalive pings.
 ///
 /// Sends a Ping frame every 30 seconds to prevent idle disconnects. The Cowboy
@@ -239,6 +244,10 @@ impl ReplClient {
     /// is available or the port file can't be read, falls back to the original
     /// error. Also re-reads the cookie file since the workspace may have
     /// generated a new cookie on restart.
+    ///
+    /// Polls the port/cookie files and retries the connection for up to
+    /// [`PORT_REDISCOVERY_WINDOW`] to handle the race where the port file has
+    /// been updated but the new listener isn't accepting connections yet.
     async fn reconnect_with_new_port(
         &self,
         cached_error: &str,
@@ -258,62 +267,78 @@ impl ReplClient {
             )
         })?;
 
-        let new_port = beamtalk_workspace::read_port_file(workspace_id)
-            .ok()
-            .flatten()
-            .map(|(port, _nonce)| port)
-            .ok_or_else(|| {
-                format!(
-                    "{cached_error}. \
-                     Could not read workspace port file for '{workspace_id}'; \
-                     try restarting the MCP server."
-                )
-            })?;
-
         let current_port = self.port.load(Ordering::Relaxed);
-        if new_port == current_port {
-            return Err(format!(
-                "{cached_error}. \
-                 The server may have restarted; try restarting the MCP server."
-            ));
-        }
+        let deadline = tokio::time::Instant::now() + PORT_REDISCOVERY_WINDOW;
+        let mut last_error = cached_error.to_string();
 
-        // Re-read the cookie — the workspace may have generated a new one on restart.
-        if let Some(new_cookie) = beamtalk_workspace::read_cookie_file(workspace_id)
-            .ok()
-            .flatten()
-        {
-            if let Ok(mut cookie) = self.cookie.lock() {
-                *cookie = new_cookie;
-            }
-        }
-
-        tracing::info!(
-            old_port = current_port,
-            new_port,
-            workspace_id,
-            "Workspace port changed — reconnecting to new port"
-        );
-
-        let new_url = format!("ws://127.0.0.1:{new_port}/ws");
-        let (ws, _response) =
-            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&new_url))
-                .await
-                .map_err(|_| {
+        loop {
+            let new_port = beamtalk_workspace::read_port_file(workspace_id)
+                .ok()
+                .flatten()
+                .map(|(port, _nonce)| port)
+                .ok_or_else(|| {
                     format!(
-                        "Timed out reconnecting to REPL at {new_url} ({}s). \
-                         The server may have restarted; try restarting the MCP server.",
-                        CONNECT_TIMEOUT.as_secs()
-                    )
-                })?
-                .map_err(|e| {
-                    format!(
-                        "Failed to reconnect to REPL at {new_url}: {e}. \
-                         The server may have restarted; try restarting the MCP server."
+                        "{cached_error}. \
+                         Could not read workspace port file for '{workspace_id}'; \
+                         try restarting the MCP server."
                     )
                 })?;
 
-        Ok((ws, new_port))
+            // Port unchanged and first iteration — the workspace hasn't restarted yet
+            // (or the file update is lagging). Keep polling until the deadline.
+            if new_port == current_port && tokio::time::Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                continue;
+            }
+            if new_port == current_port {
+                break; // Deadline expired with no port change
+            }
+
+            // Re-read the cookie — the workspace may have generated a new one on restart.
+            if let Some(new_cookie) = beamtalk_workspace::read_cookie_file(workspace_id)
+                .ok()
+                .flatten()
+                .filter(|c| !c.trim().is_empty())
+            {
+                if let Ok(mut cookie) = self.cookie.lock() {
+                    *cookie = new_cookie;
+                }
+            }
+
+            tracing::info!(
+                old_port = current_port,
+                new_port,
+                workspace_id,
+                "Workspace port changed — reconnecting to new port"
+            );
+
+            let new_url = format!("ws://127.0.0.1:{new_port}/ws");
+            match tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&new_url))
+                .await
+            {
+                Ok(Ok((ws, _response))) => return Ok((ws, new_port)),
+                Ok(Err(e)) => {
+                    last_error = format!("Failed to reconnect to REPL at {new_url}: {e}");
+                }
+                Err(_) => {
+                    last_error = format!(
+                        "Timed out reconnecting to REPL at {new_url} ({}s)",
+                        CONNECT_TIMEOUT.as_secs()
+                    );
+                }
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                break;
+            }
+
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+
+        Err(format!(
+            "{last_error}. \
+             The server may have restarted; try restarting the MCP server."
+        ))
     }
 
     /// Send a JSON request and receive a JSON response.
