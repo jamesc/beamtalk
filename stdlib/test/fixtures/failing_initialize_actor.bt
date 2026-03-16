@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for actor_initialize_test.bt — actor whose initialize raises an error
+
+Actor subclass: FailingInitializeActor
+  state: value = 0
+
+  initialize => Error new signal: "initialize failed on purpose"
+
+  getValue => self.value

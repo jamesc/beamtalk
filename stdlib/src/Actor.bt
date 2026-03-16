@@ -103,6 +103,25 @@ Object subclass: Actor
     spec := SupervisionSpec new withActorClass: self
     spec withRestart: policy
 
+  // === Lifecycle hooks ===
+
+  /// Optional lifecycle hook called automatically after spawn.
+  ///
+  /// Override in subclasses to perform setup that goes beyond `state:` defaults,
+  /// such as opening resources or computing derived state. Called synchronously
+  /// before the spawned object is returned to the caller.
+  ///
+  /// If `initialize` raises an error, the spawned process is stopped to prevent
+  /// leaked actors, and the error is re-raised to the caller.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Actor subclass: Stack
+  ///   state: items = nil
+  ///   initialize => self.items := #()
+  /// ```
+  initialize => nil
+
   /// Delegate message dispatch to the backing Erlang module.
   ///
   /// This method is a sentinel — non-native Actors do not have a backing

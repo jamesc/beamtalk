@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for actor_initialize_test.bt — actor with initialize hook
+
+Actor subclass: InitializeCounter
+  state: value = 0
+  state: initialized = false
+
+  initialize =>
+    self.value := 100
+    self.initialized := true
+
+  getValue => self.value
+
+  isInitialized => self.initialized
+
+  increment => self.value := self.value + 1

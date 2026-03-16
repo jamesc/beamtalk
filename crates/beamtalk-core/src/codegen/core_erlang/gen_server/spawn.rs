@@ -62,29 +62,20 @@ impl CoreErlangGenerator {
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_spawn_function(
         &mut self,
-        module: &Module,
+        _module: &Module,
     ) -> Result<Document<'static>> {
-        // BT-411: Check if class defines an initialize method
-        let has_initialize = module.classes.first().is_some_and(|c| {
-            self.semantic_facts
-                .class_facts(&c.name.name)
-                .is_some_and(|cf| cf.has_instance_method("initialize"))
-        });
-
+        // BT-1417: initialize is now called inside init/1, not here.
+        // This ensures all spawn paths (direct, supervised, named) run initialize.
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
 
-        let ok_body = if has_initialize {
-            Self::spawn_initialize_block_doc(&class_name, &module_name)
-        } else {
-            docvec![
-                "{'beamtalk_object', '",
-                Document::String(class_name.clone()),
-                "', '",
-                Document::String(module_name.clone()),
-                "', Pid}",
-            ]
-        };
+        let ok_body = docvec![
+            "{'beamtalk_object', '",
+            Document::String(class_name.clone()),
+            "', '",
+            Document::String(module_name.clone()),
+            "', Pid}",
+        ];
 
         let doc = docvec![
             "'spawn'/0 = fun () ->",
@@ -92,11 +83,19 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
+                    // BT-1417: Trap exits so that initialize failures in init/1
+                    // don't kill the caller. Restore after start_link returns.
+                    "let _OldTrap = call 'erlang':'process_flag'('trap_exit', 'true') in",
+                    line(),
                     docvec![
-                        "case call 'gen_server':'start_link'('",
+                        "let _SpawnResult = call 'gen_server':'start_link'('",
                         Document::String(module_name.clone()),
-                        "', ~{}~, []) of",
+                        "', ~{}~, []) in",
                     ],
+                    line(),
+                    "let _ = call 'erlang':'process_flag'('trap_exit', _OldTrap) in",
+                    line(),
+                    "case _SpawnResult of",
                     nest(
                         INDENT,
                         docvec![
@@ -141,40 +140,6 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Builds the Document for the initialize-with-cleanup block (BT-425).
-    ///
-    /// Wraps the `initialize` call in a try-catch. If initialize fails,
-    /// stops the spawned process before re-raising the error to prevent leaks.
-    fn spawn_initialize_block_doc(
-        class_name: &str,
-        module_name: &str,
-    ) -> crate::codegen::core_erlang::document::Document<'static> {
-        docvec![
-            docvec![
-                "let _Obj = {'beamtalk_object', '",
-                Document::String(class_name.to_string()),
-                "', '",
-                Document::String(module_name.to_string()),
-                "', Pid} in",
-            ],
-            line(),
-            "try call 'gen_server':'call'(Pid, {'initialize', []})",
-            line(),
-            "of _InitOk -> _Obj",
-            line(),
-            "catch <_InitClass, _InitErr, _InitStack> ->",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "let _Stop = call 'gen_server':'stop'(Pid) in",
-                    line(),
-                    "call 'erlang':'error'(_InitErr)",
-                ]
-            ),
-        ]
-    }
-
     /// Generates the `spawn/1` class method for creating actor instances with init args.
     ///
     /// This is a class-level method that instantiates a new actor process
@@ -202,33 +167,23 @@ impl CoreErlangGenerator {
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     #[expect(
         clippy::too_many_lines,
-        reason = "spawn-with-args codegen handles initialize, arg mapping, and instance registration"
+        reason = "spawn-with-args codegen handles arg mapping and instance registration"
     )]
     pub(in crate::codegen::core_erlang) fn generate_spawn_with_args_function(
         &mut self,
-        module: &Module,
+        _module: &Module,
     ) -> Result<Document<'static>> {
-        // BT-411: Check if class defines an initialize method
-        let has_initialize = module.classes.first().is_some_and(|c| {
-            self.semantic_facts
-                .class_facts(&c.name.name)
-                .is_some_and(|cf| cf.has_instance_method("initialize"))
-        });
-
+        // BT-1417: initialize is now called inside init/1, not here.
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
 
-        let ok_body = if has_initialize {
-            Self::spawn_initialize_block_doc(&class_name, &module_name)
-        } else {
-            docvec![
-                "{'beamtalk_object', '",
-                Document::String(class_name.clone()),
-                "', '",
-                Document::String(module_name.clone()),
-                "', Pid}",
-            ]
-        };
+        let ok_body = docvec![
+            "{'beamtalk_object', '",
+            Document::String(class_name.clone()),
+            "', '",
+            Document::String(module_name.clone()),
+            "', Pid}",
+        ];
 
         // BT-473: Validate InitArgs is a map before passing to gen_server
         // BT-476: This is the single source of truth for spawnWith: argument validation.
@@ -274,11 +229,19 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
+                                    // BT-1417: Trap exits so that initialize failures in init/1
+                                    // don't kill the caller. Restore after start_link returns.
+                                    "let _OldTrap1 = call 'erlang':'process_flag'('trap_exit', 'true') in",
+                                    line(),
                                     docvec![
-                                        "case call 'gen_server':'start_link'('",
+                                        "let _SpawnResult1 = call 'gen_server':'start_link'('",
                                         Document::String(module_name.clone()),
-                                        "', InitArgs, []) of",
+                                        "', InitArgs, []) in",
                                     ],
+                                    line(),
+                                    "let _ = call 'erlang':'process_flag'('trap_exit', _OldTrap1) in",
+                                    line(),
+                                    "case _SpawnResult1 of",
                                     nest(
                                         INDENT,
                                         docvec![

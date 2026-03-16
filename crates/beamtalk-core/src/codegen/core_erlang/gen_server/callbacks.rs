@@ -81,7 +81,24 @@ impl CoreErlangGenerator {
             false
         };
 
+        // BT-1417: Check if the class defines an initialize method.
+        // If so, dispatch it at the end of init/1 so that all spawn paths
+        // (direct spawn, supervised start_link, named start_link) run initialize.
+        let has_initialize = module.classes.first().is_some_and(|c| {
+            self.semantic_facts
+                .class_facts(&c.name.name)
+                .is_some_and(|cf| cf.has_instance_method("initialize"))
+        });
+
         let module_name = self.module_name.clone();
+
+        // BT-1417: Generate the init return — either plain {ok, State} or
+        // dispatch initialize first, then return {ok, NewState} / {stop, Error}.
+        let init_return = if has_initialize {
+            Self::init_initialize_dispatch_doc(&module_name)
+        } else {
+            Document::Str("in {'ok', FinalState}")
+        };
 
         if has_parent_init {
             // Call parent's init to get inherited state, then merge with our state
@@ -144,7 +161,7 @@ impl CoreErlangGenerator {
                                         // Order: parent defaults → child defaults → user overrides
                                         "in let FinalState = call 'maps':'merge'(MergedState, InitArgs)",
                                         line(),
-                                        "in {'ok', FinalState}",
+                                        init_return.clone(),
                                     ]
                                 ),
                                 line(),
@@ -197,7 +214,7 @@ impl CoreErlangGenerator {
                         // Merge InitArgs into DefaultState - InitArgs values override defaults
                         "in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)",
                         line(),
-                        "in {'ok', FinalState}",
+                        init_return,
                     ]
                 ),
                 "\n",
@@ -205,6 +222,39 @@ impl CoreErlangGenerator {
             ];
             Ok(doc)
         }
+    }
+
+    /// BT-1417: Generate the initialize dispatch block for init/1.
+    ///
+    /// After building `FinalState`, dispatches the `initialize` method directly
+    /// within the actor process. This ensures initialize runs for all spawn paths:
+    /// direct `spawn`, supervised `start_link`, and named `start_link`.
+    ///
+    /// If initialize succeeds, returns `{ok, NewState}`.
+    /// If initialize fails, returns `{stop, Error}` so the supervisor sees the failure.
+    fn init_initialize_dispatch_doc(module_name: &str) -> Document<'static> {
+        docvec![
+            "%% BT-1417: Call initialize within init/1 for all spawn paths",
+            line(),
+            docvec![
+                "in case call '",
+                Document::String(module_name.to_string()),
+                "':'safe_dispatch'('initialize', [], FinalState) of",
+            ],
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<{'reply', _InitResult, InitNewState}> when 'true' ->",
+                    nest(INDENT, docvec![line(), "{'ok', InitNewState}"]),
+                    line(),
+                    "<{'error', InitError, _InitErrState}> when 'true' ->",
+                    nest(INDENT, docvec![line(), "{'stop', InitError}"]),
+                ]
+            ),
+            line(),
+            "end",
+        ]
     }
 
     /// Generates the `handle_cast/2` callback for async message sends.

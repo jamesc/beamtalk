@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: Supervisor that starts an InitCounter (BT-1417).
+// Tests that initialize runs for supervised children.
+
+Supervisor subclass: E2EInitializeSupervisor
+
+  class children -> List => #(InitCounter)

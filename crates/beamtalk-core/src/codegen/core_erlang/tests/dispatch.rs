@@ -279,8 +279,8 @@ fn test_generate_spawn_function() {
     assert!(code.contains("'spawn'/1 = fun (InitArgs) ->"));
     assert!(code.contains("call 'gen_server':'start_link'('counter', InitArgs, [])"));
 
-    // Check that it uses a case expression to extract the Pid and wrap it in #beamtalk_object{}
-    assert!(code.contains("case call 'gen_server':'start_link'"));
+    // BT-1417: spawn wraps start_link result in a let + case for trap_exit handling
+    assert!(code.contains("case _SpawnResult of"));
     assert!(code.contains("<{'ok', Pid}> when 'true' ->"));
 
     // Check that it returns a #beamtalk_object{} record (class='Counter', class_mod='counter', pid=Pid)

@@ -75,22 +75,22 @@
 %%% - If not found, calls doesNotUnderstand handler if defined
 %%% - If no doesNotUnderstand handler, returns {error, {unknown_message, Selector}, State}
 %%%
-%%% ## Spawn Architecture (BT-411)
+%%% ## Spawn Architecture (BT-411, BT-1417)
 %%%
-%%% There are multiple paths that create actor processes. All user-facing
-%%% paths call `Module:spawn/0` or `Module:spawn/1`, which handles the
-%%% initialize protocol (calling the actor's `initialize` method after
-%%% gen_server:start_link succeeds).
+%%% There are multiple paths that create actor processes. The `initialize`
+%%% hook (if defined) is called inside the generated `init/1` callback,
+%%% so it runs for ALL spawn paths — direct, supervised, and named.
 %%%
 %%% | Path | Entry | Context | Initialize? |
 %%% |------|-------|---------|-------------|
-%%% | Module:spawn/0,1 | gen_server:start_link + gen_server:call(init) | Batch/tests | Yes |
+%%% | Module:spawn/0,1 | gen_server:start_link → init/1 | Batch/tests | Yes |
 %%% | REPL spawn | Module:spawn/0,1 + register_spawned/4 | REPL | Yes |
 %%% | class_send → spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
+%%% | Supervisor child | start_link/1 → gen_server:start_link → init/1 | Supervised | Yes |
 %%% | dynamic_object | gen_server:start_link(?MODULE, ...) | Internal | No (by design) |
 %%%
-%%% Key invariant: generated code MUST call Module:spawn(), never
-%%% gen_server:start_link directly, to ensure initialize runs.
+%%% Key invariant: `initialize` dispatch lives in generated `init/1`, not
+%%% in `spawn/0,1`. This ensures supervised children also run initialize.
 %%% The `register_spawned/4` function handles REPL actor registry
 %%% integration as a separate concern after spawn completes.
 %%%
@@ -201,9 +201,8 @@ start_link_supervised(Module, Function, Args) ->
 %% REPL tracking (handled here).
 %%
 %% Replaced the former spawn_with_registry/3,4 functions which both
-%% spawned and registered actors. That approach bypassed the module's
-%% initialize protocol, so we now let Module:spawn() handle the actor
-%% lifecycle and only register the resulting pid here.
+%% spawned and registered actors. BT-1417: initialize now runs inside
+%% init/1, so all spawn paths (including supervised) call it automatically.
 -spec register_spawned(pid(), pid(), atom(), module()) -> ok | {error, term()}.
 register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
     case application:get_env(beamtalk_runtime, actor_spawn_callback) of

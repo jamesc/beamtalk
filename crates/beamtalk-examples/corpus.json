@@ -8988,6 +8988,38 @@
       "explanation": ""
     },
     {
+      "id": "stdlib-test-actor-initialize-test",
+      "title": "ActorInitializeTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ActorInitializeTest",
+        "TestCase",
+        "actor_initialize_test",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "set",
+        "subclassing",
+        "testActorWithoutInitializeWorks",
+        "testInitializeCalledOnSpawn",
+        "testInitializeFailureRaisesError",
+        "testInitializeRunsBeforeFirstMessage",
+        "testInitializeSetsState"
+      ],
+      "source": "// Tests for Actor initialize lifecycle hook.\n//\n// Fixtures: stdlib/test/fixtures/initialize_counter.bt\n\nTestCase subclass: ActorInitializeTest\n\n  // === Basic initialize protocol ===\n  testInitializeCalledOnSpawn =>\n    c := InitializeCounter spawn\n    self assert: c isInitialized\n\n  testInitializeSetsState =>\n    c := InitializeCounter spawn\n    self assert: c getValue equals: 100\n\n  testInitializeRunsBeforeFirstMessage =>\n    // getValue is the first message — initialize must have already run\n    c := InitializeCounter spawn\n    self assert: c getValue equals: 100\n    self assert: c increment equals: 101\n\n  // === Actors without initialize ===\n  testActorWithoutInitializeWorks =>\n    // Counter has no initialize method — spawn works as before\n    c := Counter spawn\n    self assert: c getValue equals: 0\n    self assert: c increment equals: 1\n\n  // === Initialize failure ===\n  testInitializeFailureRaisesError =>\n    // If initialize throws, spawn should raise an instantiation_error\n    self should: [FailingInitializeActor spawn] raise: #instantiation_error",
+      "explanation": "Tests for Actor initialize lifecycle hook.  Fixtures: stdlib/test/fixtures/initialize_counter.bt"
+    },
+    {
       "id": "stdlib-test-actor-lifecycle-test",
       "title": "ActorLifecycleTest",
       "category": "stdlib-tests",
@@ -12904,6 +12936,37 @@
       "explanation": "BT-898: Fixture actor for actor-to-actor coordination tests EventBus forwards notifications to a subscribed EventCollector"
     },
     {
+      "id": "stdlib-test-fixtures-failing-initialize-actor",
+      "title": "FailingInitializeActor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "FailingInitializeActor",
+        "actor",
+        "async",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "failing_initialize_actor",
+        "field",
+        "gen_server",
+        "genserver",
+        "getValue",
+        "inherit",
+        "inheritance",
+        "initialize",
+        "instance variable",
+        "instantiate",
+        "member",
+        "process",
+        "property",
+        "subclassing"
+      ],
+      "source": "// Fixture for actor_initialize_test.bt — actor whose initialize raises an error\n\nActor subclass: FailingInitializeActor\n  state: value = 0\n\n  initialize => Error new signal: \"initialize failed on purpose\"\n\n  getValue => self.value",
+      "explanation": "Fixture for actor_initialize_test.bt — actor whose initialize raises an error"
+    },
+    {
       "id": "stdlib-test-fixtures-field-mutation-accumulator",
       "title": "FieldMutationAccumulator",
       "category": "stdlib-fixtures",
@@ -13207,6 +13270,41 @@
       ],
       "source": "// BT-1226: Actor fixture for ifNotNil: with state mutation threading.\n// Exercises the exact issue pattern: ifNotNil: [:v | self.field := ...] in actor method.\n\nActor subclass: IfNotNilMutActor\n  state: running = #{}\n\n  addEntry: key withValue: val => self.running := self.running at: key put: val\n\n  // Exact issue pattern: receiver reads state, block mutates state\n  update: id =>\n    (self.running at: id ifAbsent: [\n      nil\n    ]) ifNotNil: [:entry | self.running := self.running at: id put: (entry + 1)]\n    self.running\n\n  // 0-arg ifNotNil: block with state mutation\n  touch: id =>\n    (self.running at: id ifAbsent: [\n      nil\n    ]) ifNotNil: [self.running := self.running at: id put: 99]\n    self.running\n\n  // Returns the ifNotNil: expression result (entry + 1) as the branch value,\n  // AND mutates state. Tests that both {Result, State} elements are correct.\n  incrementAndReturnNewValue: id =>\n    (self.running at: id ifAbsent: [nil])\n      ifNotNil: [:entry |\n        self.running := self.running at: id put: (entry + 1)\n        entry + 1\n      ]",
       "explanation": "BT-1226: Actor fixture for ifNotNil: with state mutation threading. Exercises the exact issue pattern: ifNotNil: [:v | self.field := ...] in actor method."
+    },
+    {
+      "id": "stdlib-test-fixtures-initialize-counter",
+      "title": "InitializeCounter",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "InitializeCounter",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "getValue",
+        "increment",
+        "inherit",
+        "inheritance",
+        "initialize",
+        "initialize_counter",
+        "instance variable",
+        "isInitialized",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "// Fixture for actor_initialize_test.bt — actor with initialize hook\n\nActor subclass: InitializeCounter\n  state: value = 0\n  state: initialized = false\n\n  initialize =>\n    self.value := 100\n    self.initialized := true\n\n  getValue => self.value\n\n  isInitialized => self.initialized\n\n  increment => self.value := self.value + 1",
+      "explanation": "Fixture for actor_initialize_test.bt — actor with initialize hook"
     },
     {
       "id": "stdlib-test-fixtures-inspect-pair",
@@ -14700,6 +14798,27 @@
       "explanation": "Test fixture: Validator value type with error: usage"
     },
     {
+      "id": "stdlib-test-fixtures-value-many-fields",
+      "title": "ValueManyFields",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Value",
+        "ValueManyFields",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "property",
+        "subclassing",
+        "value",
+        "value_many_fields"
+      ],
+      "source": "// BT-1408: Regression test — Value subclass with 20+ long camelCase field names.\n// Previously failed with core_scan_error because the auto-generated keyword\n// constructor atom exceeded Erlang's 255-char atom limit.\n\nValue subclass: ValueManyFields\n  state: codexInputTokens = 0\n  state: codexOutputTokens = 0\n  state: codexModelName = \"\"\n  state: codexCachedTokens = 0\n  state: codexReasoning = \"\"\n  state: codexReasoningEffort = \"\"\n  state: codexMaxOutputTokens = 0\n  state: codexSystemFingerprint = \"\"\n  state: codexServiceTier = \"\"\n  state: operationTokens = 0\n  state: operationCost = 0\n  state: operationDuration = 0\n  state: apiCallCount = 0\n  state: errorCount = 0\n  state: retryCount = 0\n  state: totalLatency = 0\n  state: averageLatency = 0\n  state: peakMemoryUsage = 0\n  state: networkBandwidth = 0\n  state: concurrentRequests = 0",
+      "explanation": "BT-1408: Regression test — Value subclass with 20+ long camelCase field names. Previously failed with core_scan_error because the auto-generated keyword constructor atom exceeded Erlang's 255-char atom limit."
+    },
+    {
       "id": "stdlib-test-fixtures-value-point",
       "title": "ValuePoint",
       "category": "stdlib-fixtures",
@@ -15632,7 +15751,7 @@
         "testTrigonometricIdentities",
         "testTrigonometricMethodsFloatInstance"
       ],
-      "source": "// Stdlib tests for transcendental math methods (BT-712)\n\nTestCase subclass: MathTest\n\n  testFloatClassSideConstants =>\n    self assert: Float pi equals: 3.141592653589793\n    // Euler's number\n    self assert: Float e equals: 2.718281828459045\n\n  // All trig comparisons use 10-digit truncation to tolerate ULP differences\n  // between ARM64 and x86_64 math libraries.\n  testTrigonometricMethodsFloatInstance =>\n    // sin of pi/2\n    self assert: (Float pi / 2) sin equals: 1 asFloat\n    // cos of pi\n    self assert: (Float pi) cos equals: -1 asFloat\n    // tan of pi/4\n    self assert: ((Float pi / 4) tan * 10000000000.0) truncated equals: 9999999999\n    // asin of 0.5\n    self assert: (0.5 asin * 10000000000.0) truncated equals: 5235987755\n    // acos of 0.5\n    self assert: (0.5 acos * 10000000000.0) truncated equals: 10471975511\n    // atan of 0.5\n    self assert: (0.5 atan * 10000000000.0) truncated equals: 4636476090\n    // atan2\n    self assert: ((0.5 atan2: 0.5) * 10000000000.0) truncated equals: 7853981633\n    // atan2 with Integer argument\n    self assert: (((1 asFloat) atan2: 2) * 10000000000.0) truncated equals: 4636476090\n    // sin of small value\n    self assert: (0.5 sin * 10000000000.0) truncated equals: 4794255386\n    // cos of small value\n    self assert: (0.5 cos * 10000000000.0) truncated equals: 8775825618\n\n  testExponentialLogarithmicMethodsFloatInstance =>\n    // sqrt of 4.0\n    self assert: 4.0 sqrt equals: 2 asFloat\n    // sqrt of 2.0\n    self assert: (2.0 sqrt * 10000000000.0) truncated equals: 14142135623\n    // log of e (natural)\n    self assert: ((Float e) log * 10000000000.0) truncated equals: 10000000000\n    // ln of e (alias for log)\n    self assert: ((Float e) ln * 10000000000.0) truncated equals: 10000000000\n    // log2\n    self assert: 8.0 log2 equals: 3 asFloat\n    // log10\n    self assert: 100.0 log10 equals: 2 asFloat\n    // exp of 0.5\n    self assert: (0.5 exp * 10000000000.0) truncated equals: 16487212707\n    // raisedTo:\n    self assert: (2.0 raisedTo: 10) equals: 1024 asFloat\n    // raisedTo: with float exponent\n    self assert: (4.0 raisedTo: 0.5) equals: 2 asFloat\n\n  testExponentialLogarithmicMethodsIntegerInstance =>\n    // Integer sqrt\n    self assert: 16 sqrt equals: 4 asFloat\n    // Integer sqrt non-perfect\n    self assert: (2 sqrt * 10000000000.0) truncated equals: 14142135623\n    // Integer log2\n    self assert: 8 log2 equals: 3 asFloat\n    // Integer log10\n    self assert: 100 log10 equals: 2 asFloat\n    // Integer exp of 2\n    self assert: (2 exp * 10000000000.0) truncated equals: 73890560989\n    // Integer raisedTo:\n    self assert: (2 raisedTo: 10) equals: 1024 asFloat\n\n  testTrigonometricIdentities =>\n    // sin^2 + cos^2 = 1 (within float precision)\n    x := 0.5\n    result := ((x sin) * x sin) + ((x cos) * x cos)\n    self assert: (result * 10000000000.0) truncated equals: 10000000000\n\n  testDomainErrorHandling =>\n    // sqrt of negative number\n    self should: [(-1 asFloat) sqrt] raise: #badarith\n    // log of zero\n    self should: [(0 asFloat) log] raise: #badarith\n    // log of negative\n    self should: [(-1 asFloat) log] raise: #badarith\n    // ln of zero (alias for log)\n    self should: [(0 asFloat) ln] raise: #badarith\n    // log2 of zero\n    self should: [(0 asFloat) log2] raise: #badarith\n    // log10 of zero\n    self should: [(0 asFloat) log10] raise: #badarith\n    // asin outside [-1, 1] range\n    self should: [(2 asFloat) asin] raise: #badarith\n    // acos outside [-1, 1] range\n    self should: [(2 asFloat) acos] raise: #badarith",
+      "source": "// Stdlib tests for transcendental math methods (BT-712)\n\nTestCase subclass: MathTest\n\n  testFloatClassSideConstants =>\n    self assert: Float pi equals: 3.141592653589793\n    // Euler's number\n    self assert: Float e equals: 2.718281828459045\n\n  // All trig comparisons use 10-digit truncation to tolerate ULP differences\n  // between ARM64 and x86_64 math libraries.\n  testTrigonometricMethodsFloatInstance =>\n    // sin of pi/2\n    self assert: (Float pi / 2) sin equals: 1 asFloat\n    // cos of pi\n    self assert: (Float pi) cos equals: -1 asFloat\n    // tan of pi/4\n    self assert: ((Float pi / 4) tan * 10000000000.0) truncated equals: 9999999999\n    // asin of 0.5\n    self assert: (0.5 asin * 10000000000.0) truncated equals: 5235987755\n    // acos of 0.5\n    self assert: (0.5 acos * 10000000000.0) truncated equals: 10471975511\n    // atan of 0.5\n    self assert: (0.5 atan * 10000000000.0) truncated equals: 4636476090\n    // atan2\n    self assert: ((0.5 atan2: 0.5) * 10000000000.0) truncated equals: 7853981633\n    // atan2 with Integer argument\n    self assert: (((1 asFloat) atan2: 2) * 10000000000.0) truncated equals: 4636476090\n    // sin of small value\n    self assert: (0.5 sin * 10000000000.0) truncated equals: 4794255386\n    // cos of small value\n    self assert: (0.5 cos * 10000000000.0) truncated equals: 8775825618\n\n  testExponentialLogarithmicMethodsFloatInstance =>\n    // sqrt of 4.0\n    self assert: 4.0 sqrt equals: 2 asFloat\n    // sqrt of 2.0\n    self assert: (2.0 sqrt * 10000000000.0) truncated equals: 14142135623\n    // log of e (natural)\n    self assert: ((Float e) log * 10000000000.0) truncated equals: 10000000000\n    // ln of e (alias for log)\n    self assert: ((Float e) ln * 10000000000.0) truncated equals: 10000000000\n    // log2\n    self assert: 8.0 log2 equals: 3 asFloat\n    // log10\n    self assert: 100.0 log10 equals: 2 asFloat\n    // exp of 0.5\n    self assert: (0.5 exp * 10000000000.0) truncated equals: 16487212707\n    // raisedTo: (use asFloat to get a real Float receiver — 2.0 compiles to integer 2)\n    self assert: ((2 asFloat) raisedTo: 10) equals: 1024 asFloat\n    // raisedTo: with float exponent\n    self assert: ((4 asFloat) raisedTo: 0.5) equals: 2 asFloat\n\n  testExponentialLogarithmicMethodsIntegerInstance =>\n    // Integer sqrt\n    self assert: 16 sqrt equals: 4 asFloat\n    // Integer sqrt non-perfect\n    self assert: (2 sqrt * 10000000000.0) truncated equals: 14142135623\n    // Integer log2\n    self assert: 8 log2 equals: 3 asFloat\n    // Integer log10\n    self assert: 100 log10 equals: 2 asFloat\n    // Integer exp of 2\n    self assert: (2 exp * 10000000000.0) truncated equals: 73890560989\n    // Integer raisedTo: with non-negative integer exponent returns Integer\n    self assert: (2 raisedTo: 10) equals: 1024\n    self assert: (2 raisedTo: 0) equals: 1\n    self assert: (3 raisedTo: 3) equals: 27\n    // Integer raisedTo: with negative exponent returns Float\n    self assert: (2 raisedTo: -1) equals: 0.5\n    // Integer raisedTo: with float exponent returns Float\n    self assert: (4 raisedTo: 0.5) equals: 2 asFloat\n\n  testTrigonometricIdentities =>\n    // sin^2 + cos^2 = 1 (within float precision)\n    x := 0.5\n    result := ((x sin) * x sin) + ((x cos) * x cos)\n    self assert: (result * 10000000000.0) truncated equals: 10000000000\n\n  testDomainErrorHandling =>\n    // sqrt of negative number\n    self should: [(-1 asFloat) sqrt] raise: #badarith\n    // log of zero\n    self should: [(0 asFloat) log] raise: #badarith\n    // log of negative\n    self should: [(-1 asFloat) log] raise: #badarith\n    // ln of zero (alias for log)\n    self should: [(0 asFloat) ln] raise: #badarith\n    // log2 of zero\n    self should: [(0 asFloat) log2] raise: #badarith\n    // log10 of zero\n    self should: [(0 asFloat) log10] raise: #badarith\n    // asin outside [-1, 1] range\n    self should: [(2 asFloat) asin] raise: #badarith\n    // acos outside [-1, 1] range\n    self should: [(2 asFloat) acos] raise: #badarith",
       "explanation": "Stdlib tests for transcendental math methods (BT-712)"
     },
     {
@@ -17956,12 +18075,16 @@
         "testFieldAtReadsSlot",
         "testFieldNamesReturnsSlotCount",
         "testKeywordConstructor",
+        "testManyFieldsKeywordConstructor",
+        "testManyFieldsNew",
+        "testManyFieldsNewMap",
+        "testManyFieldsWithSetter",
         "testNewDefaultsAllZero",
         "testUserDefinedMethodCoexists",
         "testWithSetterPreservesClass",
         "value_subclass_test"
       ],
-      "source": "// BT-923: End-to-end tests for `Value subclass:` auto-generated slot methods\n// Exercises: getters, with*: functional setters, keyword constructor, new, new:\n// BT-924: Reflection tests — fieldAt: reads slots, fieldNames returns slot names,\n//         fieldAt:put: raises immutable_value\n// BT-996: Class method using ClassName slot: value routes to keyword constructor\n//\n// Fixtures: stdlib/test/fixtures/value_point.bt (ValuePoint)\n//           stdlib/test/fixtures/tagged_value.bt (TaggedValue — BT-996)\n\nTestCase subclass: ValueSubclassTest\n\n  testAutoGetter =>\n    p := ValuePoint new\n    // Auto-generated getter returns the default value\n    self assert: p x equals: 0\n    self assert: p y equals: 0\n\n  testAutoGetterAfterNew =>\n    p := ValuePoint new: #{#x => 3, #y => 4}\n    self assert: p x equals: 3\n    self assert: p y equals: 4\n\n  testAutoSetterReturnsNewInstance =>\n    p := ValuePoint new: #{#x => 1, #y => 2}\n    p2 := p withX: 10\n    // Original unchanged\n    self assert: p x equals: 1\n    // New instance has updated x, same y\n    self assert: p2 x equals: 10\n    self assert: p2 y equals: 2\n\n  testChainedWithSetters =>\n    p := ValuePoint new\n    p2 := (p withX: 5) withY: 7\n    self assert: p2 x equals: 5\n    self assert: p2 y equals: 7\n\n  testKeywordConstructor =>\n    p := ValuePoint x: 3 y: 4\n    self assert: p x equals: 3\n    self assert: p y equals: 4\n\n  testUserDefinedMethodCoexists =>\n    p := ValuePoint x: 3 y: 4\n    self assert: p distanceSquared equals: 25\n\n  testWithSetterPreservesClass =>\n    p := ValuePoint x: 1 y: 2\n    p2 := p withX: 99\n    self assert: p2 class equals: ValuePoint\n\n  testNewDefaultsAllZero =>\n    p := ValuePoint new\n    self assert: p x equals: 0\n    self assert: p y equals: 0\n\n  // BT-924: fieldAt: reads slot values from value objects\n  testFieldAtReadsSlot =>\n    p := ValuePoint x: 3 y: 4\n    self assert: (p fieldAt: #x) equals: 3\n    self assert: (p fieldAt: #y) equals: 4\n    // Non-existent field returns nil (Smalltalk-80 semantics)\n    self assert: (p fieldAt: #z) equals: nil\n\n  // BT-924: fieldNames returns the slot names of the value object\n  testFieldNamesReturnsSlotCount =>\n    p := ValuePoint x: 1 y: 2\n    names := p fieldNames\n    // ValuePoint has two slots: x and y\n    self assert: names size equals: 2\n\n  // BT-924: fieldAt:put: raises immutable_value at runtime — use with*: methods instead\n  // Compile-time rejection of direct slot mutation (self.slot :=) is a separate feature\n  testFieldAtPutRaisesImmutableValue =>\n    p := ValuePoint x: 1 y: 2\n    self should: [p fieldAt: #x put: 99] raise: #immutable_value\n\n  // BT-996: `ClassName slot: value` inside a class method must route to the class-side\n  // keyword constructor, not the instance getter. Without the fix this caused {badmap}.\n  testClassMethodSlotSendRoutesToConstructor =>\n    v := TaggedValue fromTag: \"hello\"\n    self assert: v tag equals: \"hello\"\n\n  testClassMethodSlotSendClassIsCorrect =>\n    v := TaggedValue fromTag: \"world\"\n    self assert: v class equals: TaggedValue",
+      "source": "// BT-923: End-to-end tests for `Value subclass:` auto-generated slot methods\n// Exercises: getters, with*: functional setters, keyword constructor, new, new:\n// BT-924: Reflection tests — fieldAt: reads slots, fieldNames returns slot names,\n//         fieldAt:put: raises immutable_value\n// BT-996: Class method using ClassName slot: value routes to keyword constructor\n//\n// Fixtures: stdlib/test/fixtures/value_point.bt (ValuePoint)\n//           stdlib/test/fixtures/tagged_value.bt (TaggedValue — BT-996)\n\nTestCase subclass: ValueSubclassTest\n\n  testAutoGetter =>\n    p := ValuePoint new\n    // Auto-generated getter returns the default value\n    self assert: p x equals: 0\n    self assert: p y equals: 0\n\n  testAutoGetterAfterNew =>\n    p := ValuePoint new: #{#x => 3, #y => 4}\n    self assert: p x equals: 3\n    self assert: p y equals: 4\n\n  testAutoSetterReturnsNewInstance =>\n    p := ValuePoint new: #{#x => 1, #y => 2}\n    p2 := p withX: 10\n    // Original unchanged\n    self assert: p x equals: 1\n    // New instance has updated x, same y\n    self assert: p2 x equals: 10\n    self assert: p2 y equals: 2\n\n  testChainedWithSetters =>\n    p := ValuePoint new\n    p2 := (p withX: 5) withY: 7\n    self assert: p2 x equals: 5\n    self assert: p2 y equals: 7\n\n  testKeywordConstructor =>\n    p := ValuePoint x: 3 y: 4\n    self assert: p x equals: 3\n    self assert: p y equals: 4\n\n  testUserDefinedMethodCoexists =>\n    p := ValuePoint x: 3 y: 4\n    self assert: p distanceSquared equals: 25\n\n  testWithSetterPreservesClass =>\n    p := ValuePoint x: 1 y: 2\n    p2 := p withX: 99\n    self assert: p2 class equals: ValuePoint\n\n  testNewDefaultsAllZero =>\n    p := ValuePoint new\n    self assert: p x equals: 0\n    self assert: p y equals: 0\n\n  // BT-924: fieldAt: reads slot values from value objects\n  testFieldAtReadsSlot =>\n    p := ValuePoint x: 3 y: 4\n    self assert: (p fieldAt: #x) equals: 3\n    self assert: (p fieldAt: #y) equals: 4\n    // Non-existent field returns nil (Smalltalk-80 semantics)\n    self assert: (p fieldAt: #z) equals: nil\n\n  // BT-924: fieldNames returns the slot names of the value object\n  testFieldNamesReturnsSlotCount =>\n    p := ValuePoint x: 1 y: 2\n    names := p fieldNames\n    // ValuePoint has two slots: x and y\n    self assert: names size equals: 2\n\n  // BT-924: fieldAt:put: raises immutable_value at runtime — use with*: methods instead\n  // Compile-time rejection of direct slot mutation (self.slot :=) is a separate feature\n  testFieldAtPutRaisesImmutableValue =>\n    p := ValuePoint x: 1 y: 2\n    self should: [p fieldAt: #x put: 99] raise: #immutable_value\n\n  // BT-996: `ClassName slot: value` inside a class method must route to the class-side\n  // keyword constructor, not the instance getter. Without the fix this caused {badmap}.\n  testClassMethodSlotSendRoutesToConstructor =>\n    v := TaggedValue fromTag: \"hello\"\n    self assert: v tag equals: \"hello\"\n\n  testClassMethodSlotSendClassIsCorrect =>\n    v := TaggedValue fromTag: \"world\"\n    self assert: v class equals: TaggedValue\n\n  // BT-1408: Value subclass with 20+ long camelCase fields — previously triggered\n  // core_scan_error because the keyword constructor atom exceeded 255 chars.\n  testManyFieldsNew =>\n    v := ValueManyFields new\n    self assert: v codexInputTokens equals: 0\n    self assert: v codexModelName equals: \"\"\n\n  testManyFieldsWithSetter =>\n    v := ValueManyFields new\n    v2 := v withCodexInputTokens: 42\n    self assert: v2 codexInputTokens equals: 42\n    // Original unchanged\n    self assert: v codexInputTokens equals: 0\n\n  testManyFieldsNewMap =>\n    v := ValueManyFields new: #{#codexInputTokens => 100, #errorCount => 5}\n    self assert: v codexInputTokens equals: 100\n    self assert: v errorCount equals: 5\n    // Unset fields use defaults\n    self assert: v codexOutputTokens equals: 0\n\n  // BT-1408: Keyword constructor with 20 long-named fields — exercises the\n  // class_send path which also generates a long selector atom.\n  testManyFieldsKeywordConstructor =>\n    v := ValueManyFields\n      codexInputTokens: 10\n      codexOutputTokens: 20\n      codexModelName: \"gpt\"\n      codexCachedTokens: 5\n      codexReasoning: \"r\"\n      codexReasoningEffort: \"high\"\n      codexMaxOutputTokens: 100\n      codexSystemFingerprint: \"fp\"\n      codexServiceTier: \"t1\"\n      operationTokens: 30\n      operationCost: 1\n      operationDuration: 50\n      apiCallCount: 3\n      errorCount: 0\n      retryCount: 1\n      totalLatency: 200\n      averageLatency: 67\n      peakMemoryUsage: 512\n      networkBandwidth: 1000\n      concurrentRequests: 8\n    self assert: v codexInputTokens equals: 10\n    self assert: v codexModelName equals: \"gpt\"\n    self assert: v concurrentRequests equals: 8",
       "explanation": "BT-923: End-to-end tests for `Value subclass:` auto-generated slot methods Exercises: getters, with*: functional setters, keyword constructor, new, new: BT-924: Reflection tests — fieldAt: reads slots, fieldNames returns slot names,         fieldAt:put: raises immutable_value BT-996: Class method using ClassName slot: value routes to keyword constructor  Fixtures: stdlib/test/fixtures/value_point.bt (ValuePoint)           stdlib/test/fixtures/tagged_value.bt (TaggedValue — BT-996)"
     },
     {
@@ -18823,6 +18946,27 @@
       ],
       "source": "// E2E fixture: static Supervisor subclass that starts a Counter with initial args.\n// Used to exercise the SupervisionSpec withArgs: / spawnWith: code path (BT-1223).\n\nSupervisor subclass: E2EArgsSupervisor\n\n  class children -> List =>\n    spec := Counter supervisionSpec withArgs: #{#value => 42}\n    #(spec)",
       "explanation": "E2E fixture: static Supervisor subclass that starts a Counter with initial args. Used to exercise the SupervisionSpec withArgs: / spawnWith: code path (BT-1223)."
+    },
+    {
+      "id": "tests-e2e-fixtures-e2e-initialize-supervisor",
+      "title": "E2EInitializeSupervisor",
+      "category": "e2e-fixtures",
+      "tags": [
+        "E2EInitializeSupervisor",
+        "Supervisor",
+        "children",
+        "e2e_initialize_supervisor",
+        "extends",
+        "fault tolerance",
+        "inherit",
+        "inheritance",
+        "object",
+        "restart",
+        "subclassing",
+        "supervision"
+      ],
+      "source": "// E2E fixture: Supervisor that starts an InitCounter (BT-1417).\n// Tests that initialize runs for supervised children.\n\nSupervisor subclass: E2EInitializeSupervisor\n\n  class children -> List => #(InitCounter)",
+      "explanation": "E2E fixture: Supervisor that starts an InitCounter (BT-1417). Tests that initialize runs for supervised children."
     },
     {
       "id": "tests-e2e-fixtures-e2e-inner-supervisor",

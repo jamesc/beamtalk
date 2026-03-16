@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Actor initialize lifecycle hook.
+//
+// Fixtures: stdlib/test/fixtures/initialize_counter.bt
+
+TestCase subclass: ActorInitializeTest
+
+  // === Basic initialize protocol ===
+  testInitializeCalledOnSpawn =>
+    c := InitializeCounter spawn
+    self assert: c isInitialized
+
+  testInitializeSetsState =>
+    c := InitializeCounter spawn
+    self assert: c getValue equals: 100
+
+  testInitializeRunsBeforeFirstMessage =>
+    // getValue is the first message — initialize must have already run
+    c := InitializeCounter spawn
+    self assert: c getValue equals: 100
+    self assert: c increment equals: 101
+
+  // === Actors without initialize ===
+  testActorWithoutInitializeWorks =>
+    // Counter has no initialize method — spawn works as before
+    c := Counter spawn
+    self assert: c getValue equals: 0
+    self assert: c increment equals: 1
+
+  // === Initialize failure ===
+  testInitializeFailureRaisesError =>
+    // If initialize throws, spawn should raise an instantiation_error
+    self should: [FailingInitializeActor spawn] raise: #instantiation_error
