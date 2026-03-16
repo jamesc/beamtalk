@@ -102,6 +102,17 @@ fn is_with_setter(method: &MethodDefinition, field_names: &HashSet<&str>) -> boo
         return false;
     }
 
+    // Selector must match the `withField:` naming convention (e.g. `withX:`, `withName:`)
+    let selector_name = method.selector.name();
+    if !selector_name.starts_with("with") {
+        return false;
+    }
+    // The character after "with" must be uppercase (e.g. `withX:`, not `withdraw:`)
+    let after_with = &selector_name[4..];
+    if after_with.is_empty() || !after_with.starts_with(|c: char| c.is_ascii_uppercase()) {
+        return false;
+    }
+
     let param_name = method.parameters[0].name.name.as_str();
 
     // First statement: self.field := param
@@ -244,6 +255,19 @@ mod tests {
         assert!(
             diags.is_empty(),
             "Object with side-effect method should not be flagged, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn non_with_setter_not_flagged() {
+        // A method like `reset: v => self.x := v. self` has setter-like body
+        // but doesn't follow the `withX:` naming convention
+        let diags = value_like_lints(
+            "Object subclass: Foo\n  state: x = 0\n  x => self.x\n  reset: v => self.x := v. self\n",
+        );
+        assert!(
+            diags.is_empty(),
+            "non-withX: setter should not be treated as a value setter, got: {diags:?}"
         );
     }
 
