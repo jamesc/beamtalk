@@ -518,4 +518,42 @@ mod tests {
             "Should NOT generate maps:get('y',...) — reads of 'y' should use temp var. Got:\n{code}"
         );
     }
+
+    #[test]
+    fn test_value_type_if_true_local_mutation_generates_inline_case() {
+        // BT-1392: Value type ifTrue: with captured local mutation should
+        // generate an inline case expression (not runtime dispatch).
+        let src = "Object subclass: Foo\n\n  test: flag =>\n    x := 1\n    flag ifTrue: [x := 2]\n    x\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("case "),
+            "Value type ifTrue: with local mutation should generate inline case. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("'beamtalk_message_dispatch':'send'"),
+            "Value type ifTrue: with mutation should NOT use runtime dispatch. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_if_false_local_mutation_generates_inline_case() {
+        // BT-1392: Value type ifFalse: with captured local mutation
+        let src = "Object subclass: Foo\n\n  test: flag =>\n    x := 1\n    flag ifFalse: [x := 2]\n    x\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("case "),
+            "Value type ifFalse: with local mutation should generate inline case. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_if_true_if_false_local_mutation() {
+        // BT-1392: Value type ifTrue:ifFalse: with captured local mutation
+        let src = "Object subclass: Foo\n\n  test: flag =>\n    x := 1\n    flag ifTrue: [x := 2] ifFalse: [x := 3]\n    x\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("case "),
+            "Value type ifTrue:ifFalse: with local mutation should generate inline case. Got:\n{code}"
+        );
+    }
 }

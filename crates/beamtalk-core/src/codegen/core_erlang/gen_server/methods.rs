@@ -1804,6 +1804,11 @@ impl CoreErlangGenerator {
                 // chains so the updated values are visible to subsequent expressions.
                 let doc = self.generate_value_type_do_open(expr)?;
                 docs.push(doc);
+            } else if self.is_conditional_with_vt_local_threading(expr) {
+                // BT-1392: Non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` that
+                // mutates captured outer locals. Inline case + rebind.
+                let doc = self.generate_vt_conditional_open(expr)?;
+                docs.push(doc);
             } else {
                 let tmp_var = self.fresh_temp_var("seq");
                 let expr_str = self.expression_doc(expr)?;

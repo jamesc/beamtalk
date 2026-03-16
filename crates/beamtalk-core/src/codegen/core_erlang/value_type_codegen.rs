@@ -945,6 +945,12 @@ impl CoreErlangGenerator {
                 // values are visible to all subsequent method body expressions.
                 let doc = self.generate_value_type_do_open(expr)?;
                 body_parts.push(doc);
+            } else if self.is_conditional_with_vt_local_threading(expr) {
+                // BT-1392: Non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` that
+                // mutates captured outer locals. Generate inline case + rebind
+                // so updated values are visible to subsequent expressions.
+                let doc = self.generate_vt_conditional_open(expr)?;
+                body_parts.push(doc);
             } else if let Some(mutations) = Self::inline_block_captured_mutations(expr) {
                 // BT-1213: Non-last block value with captured mutations.
                 // Emit the block body as open let-chains so mutations are visible
@@ -1302,6 +1308,287 @@ impl CoreErlangGenerator {
         }
         // Intentionally open — the caller's next body_part provides the continuation.
         docs.push(Document::String(post_code));
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-1392: Returns `true` if `expr` is an `ifTrue:`, `ifFalse:`, or `ifTrue:ifFalse:`
+    /// message send where at least one block argument writes to a local variable that is
+    /// already bound in the enclosing scope, in value-type or class-method context.
+    ///
+    /// Unlike `captured_mutations_for_block` (which requires `captured_reads ∩ local_writes`),
+    /// this also catches pure assignments like `[x := 2]` where `x` is only written, not
+    /// read, inside the block.
+    pub(in crate::codegen::core_erlang) fn is_conditional_with_vt_local_threading(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        if !self.in_class_method && !matches!(self.context, CodeGenContext::ValueType) {
+            return false;
+        }
+        if let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        {
+            let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+            match sel.as_str() {
+                "ifTrue:" | "ifFalse:" => {
+                    if let Some(Expression::Block(block)) = arguments.first() {
+                        return !self.outer_scope_mutations_in_block(block).is_empty();
+                    }
+                }
+                "ifTrue:ifFalse:" => {
+                    let has_mutations = arguments.iter().any(|a| {
+                        if let Expression::Block(b) = a {
+                            !self.outer_scope_mutations_in_block(b).is_empty()
+                        } else {
+                            false
+                        }
+                    });
+                    return has_mutations;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// BT-1392: Returns the list of local variables written in `block` that are already
+    /// bound in the enclosing scope. This is scope-aware — it checks `lookup_var` to
+    /// distinguish "reassigning outer x" from "defining new local y".
+    fn outer_scope_mutations_in_block(&self, block: &crate::ast::Block) -> Vec<String> {
+        use crate::codegen::core_erlang::block_analysis::analyze_block;
+        let analysis = analyze_block(block);
+        let mut result: Vec<String> = analysis
+            .local_writes
+            .iter()
+            .filter(|var| self.lookup_var(var).is_some())
+            .cloned()
+            .collect();
+        result.sort();
+        result
+    }
+
+    /// BT-1392: Generates a non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with captured
+    /// local mutations as an **open let chain** in value-type or class-method context.
+    ///
+    /// Generates an inline `case` expression where:
+    /// - Each branch inlines the block body as sequential let-bindings
+    /// - The case returns the updated values of captured variables (tuple for N>1)
+    /// - After the case, variables are rebound via `element/N` extraction
+    ///
+    /// This makes the updated locals visible to all subsequent method body expressions.
+    #[allow(clippy::too_many_lines)]
+    pub(in crate::codegen::core_erlang) fn generate_vt_conditional_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        let (receiver, selector_name, arguments) = match expr {
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } => {
+                let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+                (receiver.as_ref(), sel, arguments)
+            }
+            _ => return Ok(Document::Nil),
+        };
+
+        // Collect all outer-scope mutations across all block arguments.
+        let mut all_mutations: Vec<String> = Vec::new();
+        for arg in arguments {
+            if let Expression::Block(block) = arg {
+                for var in self.outer_scope_mutations_in_block(block) {
+                    if !all_mutations.contains(&var) {
+                        all_mutations.push(var);
+                    }
+                }
+            }
+        }
+        if all_mutations.is_empty() {
+            return Ok(Document::Nil);
+        }
+
+        let cond_var = self.fresh_temp_var("Cond");
+        let cond_doc = self.expression_doc(receiver)?;
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(docvec![
+            "let ",
+            Document::String(cond_var.clone()),
+            " = ",
+            cond_doc,
+            " in ",
+        ]);
+
+        // Helper: generate a branch body that inlines the block and returns
+        // the final values of all captured mutations as a tuple (or single value).
+        let generate_branch = |codegen: &mut Self,
+                               block: &crate::ast::Block|
+         -> Result<Document<'static>> {
+            codegen.push_scope();
+            let body: Vec<&Expression> = block
+                .body
+                .iter()
+                .map(|s| &s.expression)
+                .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+                .collect();
+
+            let mut parts: Vec<Document<'static>> = Vec::new();
+            for body_expr in &body {
+                if Self::is_local_var_assignment(body_expr) {
+                    if let Expression::Assignment { target, value, .. } = body_expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let core_var = codegen
+                                .lookup_var(&id.name)
+                                .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                            let val_doc = codegen.expression_doc(value)?;
+                            parts.push(docvec![
+                                "let ",
+                                Document::String(core_var.clone()),
+                                " = ",
+                                val_doc,
+                                " in ",
+                            ]);
+                            codegen.bind_var(&id.name, &core_var);
+                        }
+                    }
+                } else {
+                    let tmp = codegen.fresh_temp_var("seq");
+                    let doc = codegen.expression_doc(body_expr)?;
+                    parts.push(docvec!["let ", Document::String(tmp), " = ", doc, " in ",]);
+                }
+            }
+
+            // Return the final values of all captured mutations
+            let return_doc = if all_mutations.len() == 1 {
+                let var = &all_mutations[0];
+                let core_var = codegen
+                    .lookup_var(var)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var));
+                Document::String(core_var)
+            } else {
+                let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{")];
+                for (i, var) in all_mutations.iter().enumerate() {
+                    if i > 0 {
+                        tuple_parts.push(Document::Str(", "));
+                    }
+                    let core_var = codegen
+                        .lookup_var(var)
+                        .cloned()
+                        .unwrap_or_else(|| Self::to_core_erlang_var(var));
+                    tuple_parts.push(Document::String(core_var));
+                }
+                tuple_parts.push(Document::Str("}"));
+                Document::Vec(tuple_parts)
+            };
+            parts.push(return_doc);
+            codegen.pop_scope();
+            Ok(Document::Vec(parts))
+        };
+
+        // Helper: generate a pass-through branch that returns original values unchanged.
+        let generate_passthrough = |cg: &Self| -> Document<'static> {
+            if all_mutations.len() == 1 {
+                let var = &all_mutations[0];
+                let core_var = cg
+                    .lookup_var(var)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var));
+                Document::String(core_var)
+            } else {
+                let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{")];
+                for (i, var) in all_mutations.iter().enumerate() {
+                    if i > 0 {
+                        tuple_parts.push(Document::Str(", "));
+                    }
+                    let core_var = cg
+                        .lookup_var(var)
+                        .cloned()
+                        .unwrap_or_else(|| Self::to_core_erlang_var(var));
+                    tuple_parts.push(Document::String(core_var));
+                }
+                tuple_parts.push(Document::Str("}"));
+                Document::Vec(tuple_parts)
+            }
+        };
+
+        // Generate the true and false branch documents based on the selector.
+        let (true_branch, false_branch) = match selector_name.as_str() {
+            "ifTrue:" => {
+                let Expression::Block(block) = &arguments[0] else {
+                    return Ok(Document::Nil);
+                };
+                (generate_branch(self, block)?, generate_passthrough(self))
+            }
+            "ifFalse:" => {
+                let Expression::Block(block) = &arguments[0] else {
+                    return Ok(Document::Nil);
+                };
+                let passthrough = generate_passthrough(self);
+                (passthrough, generate_branch(self, block)?)
+            }
+            "ifTrue:ifFalse:" => {
+                let Expression::Block(true_block) = &arguments[0] else {
+                    return Ok(Document::Nil);
+                };
+                let Expression::Block(false_block) = &arguments[1] else {
+                    return Ok(Document::Nil);
+                };
+                (
+                    generate_branch(self, true_block)?,
+                    generate_branch(self, false_block)?,
+                )
+            }
+            _ => return Ok(Document::Vec(docs)),
+        };
+
+        // Generate the case expression and rebind variables after it.
+        let result_var = self.fresh_temp_var("CondResult");
+        docs.push(docvec![
+            "let ",
+            Document::String(result_var.clone()),
+            " = case ",
+            Document::String(cond_var),
+            " of <'true'> when 'true' -> ",
+            true_branch,
+            " <'false'> when 'true' -> ",
+            false_branch,
+            " end in ",
+        ]);
+
+        if all_mutations.len() == 1 {
+            // Single variable: case returns the value directly
+            let var = &all_mutations[0];
+            let core_var = Self::to_core_erlang_var(var);
+            self.bind_var(var, &core_var);
+            docs.push(docvec![
+                "let ",
+                Document::String(core_var),
+                " = ",
+                Document::String(result_var),
+                " in ",
+            ]);
+        } else {
+            // Multiple variables: case returns a tuple, extract with element/N
+            for (i, var) in all_mutations.iter().enumerate() {
+                let core_var = Self::to_core_erlang_var(var);
+                self.bind_var(var, &core_var);
+                docs.push(docvec![
+                    "let ",
+                    Document::String(core_var),
+                    " = call 'erlang':'element'(",
+                    Document::String((i + 1).to_string()),
+                    ", ",
+                    Document::String(result_var.clone()),
+                    ") in ",
+                ]);
+            }
+        }
 
         Ok(Document::Vec(docs))
     }

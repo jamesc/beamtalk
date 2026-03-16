@@ -1667,9 +1667,15 @@ impl CoreErlangGenerator {
         use super::CodeGenContext;
         use super::block_analysis;
 
-        // Only applies in actor context OR when inside a loop body (BT-1053: value-type
-        // methods may have inline conditionals mutating captured locals inside do: blocks).
-        if self.context != CodeGenContext::Actor && !self.in_loop_body {
+        // Only applies in actor context, REPL context, or when inside a loop body
+        // (BT-1053: value-type methods may have inline conditionals mutating captured
+        // locals inside do: blocks).
+        // BT-1392: Allow REPL context — the REPL State map threads bindings the same
+        // way as actor State, so inline case expressions work directly.
+        if self.context != CodeGenContext::Actor
+            && self.context != CodeGenContext::Repl
+            && !self.in_loop_body
+        {
             return Ok(None);
         }
 
@@ -1689,6 +1695,10 @@ impl CoreErlangGenerator {
                     let needs_threading = self.needs_mutation_threading(&analysis)
                         || (self.in_loop_body && !analysis.local_writes.is_empty());
                     if needs_threading {
+                        // BT-1392: Set repl_loop_mutated so the REPL unpacks {Result, State}
+                        if self.is_repl_mode {
+                            self.repl_loop_mutated = true;
+                        }
                         let doc = self.generate_if_true_with_mutations(receiver, block)?;
                         return Ok(Some(doc));
                     }
@@ -1700,6 +1710,9 @@ impl CoreErlangGenerator {
                     let needs_threading = self.needs_mutation_threading(&analysis)
                         || (self.in_loop_body && !analysis.local_writes.is_empty());
                     if needs_threading {
+                        if self.is_repl_mode {
+                            self.repl_loop_mutated = true;
+                        }
                         let doc = self.generate_if_false_with_mutations(receiver, block)?;
                         return Ok(Some(doc));
                     }
@@ -1717,6 +1730,9 @@ impl CoreErlangGenerator {
                             && (!true_analysis.local_writes.is_empty()
                                 || !false_analysis.local_writes.is_empty()));
                     if needs_threading {
+                        if self.is_repl_mode {
+                            self.repl_loop_mutated = true;
+                        }
                         let doc = self.generate_if_true_if_false_with_mutations(
                             receiver,
                             true_block,
