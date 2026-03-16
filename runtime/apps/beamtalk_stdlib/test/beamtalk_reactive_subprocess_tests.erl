@@ -72,6 +72,18 @@ partial_line_script() ->
         {win32, _} -> <<"<nul set /p =hello">>
     end.
 
+%% @private Return {Executable, Args} for a process that echoes stdin to stdout.
+%% On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (a built-in cat
+%% mode that explicitly flushes stdout, bypassing pipe buffering).
+cat_cmd() ->
+    case os:type() of
+        {unix, _} ->
+            {<<"/bin/cat">>, []};
+        {win32, _} ->
+            ExecBin = beamtalk_exec_port:find_exec_binary(),
+            {list_to_binary(ExecBin), [<<"--cat">>]}
+    end.
+
 %% @private Return platform-appropriate shell script for combined stdout+stderr.
 stdout_stderr_script() ->
     case os:type() of
@@ -136,6 +148,29 @@ wait_for_exit(CollectorPid, Tries) ->
         false ->
             timer:sleep(100),
             wait_for_exit(CollectorPid, Tries - 1)
+    end.
+
+%% @private Poll until a subprocessLine event with the expected text arrives.
+wait_for_line(CollectorPid, Expected) ->
+    wait_for_line(CollectorPid, Expected, 50).
+
+wait_for_line(CollectorPid, Expected, 0) ->
+    error({timeout_waiting_for_line, Expected, get_events(CollectorPid)});
+wait_for_line(CollectorPid, Expected, Tries) ->
+    Events = get_events(CollectorPid),
+    HasLine = lists:any(
+        fun
+            ({'subprocessLine:from:', [Line | _]}) -> Line =:= Expected;
+            (_) -> false
+        end,
+        Events
+    ),
+    case HasLine of
+        true ->
+            Events;
+        false ->
+            timer:sleep(100),
+            wait_for_line(CollectorPid, Expected, Tries - 1)
     end.
 
 %%% ============================================================================
@@ -235,28 +270,23 @@ partial_line_flushed_on_exit_test() ->
 %%% ============================================================================
 
 writeLine_writes_and_returns_nil_test() ->
-    case os:type() of
-        {unix, _} ->
-            {Notify, Collector} = make_collector(),
-            {ok, Pid} = beamtalk_reactive_subprocess:start(#{
-                executable => <<"/bin/cat">>,
-                args => [],
-                notify => Notify
-            }),
-            Result = gen_server:call(Pid, {'writeLine:', [<<"ping">>]}),
-            ?assertEqual(nil, Result),
-            %% cat echoes back; wait for the line to arrive
-            timer:sleep(200),
-            Events = get_events(Collector),
-            Collector ! stop,
-            gen_server:call(Pid, {close, []}),
-            gen_server:stop(Pid),
-            LineEvents = [E || {'subprocessLine:from:', _} = E <- Events],
-            Lines = [hd(Args) || {'subprocessLine:from:', Args} <- LineEvents],
-            ?assert(lists:member(<<"ping">>, Lines));
-        _ ->
-            {skip, "Unix-only: no unbuffered stdin echo on Windows"}
-    end.
+    {CatExe, CatArgs} = cat_cmd(),
+    {Notify, Collector} = make_collector(),
+    {ok, Pid} = beamtalk_reactive_subprocess:start(#{
+        executable => CatExe,
+        args => CatArgs,
+        notify => Notify
+    }),
+    Result = gen_server:call(Pid, {'writeLine:', [<<"ping">>]}),
+    ?assertEqual(nil, Result),
+    %% cat echoes back; poll until the line arrives
+    Events = wait_for_line(Collector, <<"ping">>),
+    Collector ! stop,
+    gen_server:call(Pid, {close, []}),
+    gen_server:stop(Pid),
+    LineEvents = [E || {'subprocessLine:from:', _} = E <- Events],
+    Lines = [hd(Args) || {'subprocessLine:from:', Args} <- LineEvents],
+    ?assert(lists:member(<<"ping">>, Lines)).
 
 %%% ============================================================================
 %%% writeLine: after close returns port_closed error

@@ -5,8 +5,7 @@
 // delivery, exit notification, writeLine:, close, exitCode.
 //
 // Cross-platform: uses platform-appropriate commands on Unix and Windows.
-// Interactive stdin-echo tests (writeLine→readLine) are Unix-only because
-// Windows programs buffer stdout on pipes (no cat equivalent flushes immediately).
+// Interactive stdin-echo tests use beamtalk-exec --cat on Windows for line-buffered output.
 //
 // StubDelegate actor is defined in fixtures/stub_delegate_fixture.bt.
 
@@ -55,6 +54,13 @@ TestCase subclass: ReactiveSubprocessTest
     ] ifFalse: ["echo %BT_TEST_SEED%& cd"]
 
   envDir => self.isUnix ifTrue: ["/tmp"] ifFalse: [System getEnv: "TEMP"]
+
+  // cat executable: echoes stdin to stdout.
+  // On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (built-in
+  // cat mode with explicit flushing, bypassing pipe buffering).
+  catExe => self.isUnix ifTrue: ["/bin/cat"] ifFalse: ["beamtalk-exec"]
+
+  catArgs => self.isUnix ifTrue: [#()] ifFalse: [#("--cat")]
 
   // --- Tests ---
   testStdoutLinesPushedToNotify =>
@@ -121,14 +127,10 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
 
   testWriteLineDeliversThroughCat =>
-    // Unix-only: Windows programs buffer stdout on pipes, no interactive cat equivalent
-    self.isUnix ifFalse: [
-      ^self skip: "Unix only: no unbuffered stdin echo on Windows"
-    ]
     delegate := StubDelegate spawn
     proc := (ReactiveSubprocess
-      open: "/bin/cat"
-      args: #()
+      open: self catExe
+      args: self catArgs
       notify: delegate) unwrap
     @expect type
     proc writeLine: "hello"

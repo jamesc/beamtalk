@@ -5,8 +5,7 @@
 // EOF, timeout, stderr, exitCode, close, stop, lines Stream, stderrLines Stream.
 //
 // Cross-platform: uses platform-appropriate commands on Unix and Windows.
-// Interactive stdin-echo tests (writeLine→readLine) are Unix-only because
-// Windows programs buffer stdout on pipes (no cat equivalent flushes immediately).
+// Interactive stdin-echo tests use beamtalk-exec --cat on Windows for line-buffered output.
 
 TestCase subclass: SubprocessTest
   state: isUnix = false
@@ -54,6 +53,13 @@ TestCase subclass: SubprocessTest
   partialLineScript =>
     self.isUnix ifTrue: ["printf hello"] ifFalse: ["<nul set /p =hello"]
 
+  // cat executable: echoes stdin to stdout.
+  // On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (built-in
+  // cat mode with explicit flushing, bypassing pipe buffering).
+  catExe => self.isUnix ifTrue: ["/bin/cat"] ifFalse: ["beamtalk-exec"]
+
+  catArgs => self.isUnix ifTrue: [#()] ifFalse: [#("--cat")]
+
   // --- Tests ---
   testSpawnAndReadLine =>
     // echo outputs one line then exits
@@ -69,12 +75,8 @@ TestCase subclass: SubprocessTest
     self assert: agent stop equals: #ok
 
   testWriteLineAndReadLine =>
-    // Unix-only: Windows programs buffer stdout on pipes, no interactive cat equivalent
-    self.isUnix ifFalse: [
-      ^self skip: "Unix only: no unbuffered stdin echo on Windows"
-    ]
     // cat echoes stdin lines back to stdout
-    agent := (Subprocess open: "/bin/cat" args: #()) unwrap
+    agent := (Subprocess open: self catExe args: self catArgs) unwrap
     @expect type
     agent writeLine: "hello world"
     @expect type

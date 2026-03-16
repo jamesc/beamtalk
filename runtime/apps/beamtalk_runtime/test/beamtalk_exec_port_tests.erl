@@ -42,6 +42,18 @@ sleep_cmd() ->
         {win32, _} -> {<<"cmd">>, [<<"/c">>, <<"ping -n 60 127.0.0.1 >nul">>]}
     end.
 
+%% @private Return {Executable, Args} for a process that echoes stdin to stdout.
+%% On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (a built-in cat
+%% mode that explicitly flushes stdout, bypassing pipe buffering).
+cat_cmd() ->
+    case os:type() of
+        {unix, _} ->
+            {<<"/bin/cat">>, []};
+        {win32, _} ->
+            ExecBin = beamtalk_exec_port:find_exec_binary(),
+            {list_to_binary(ExecBin), [<<"--cat">>]}
+    end.
+
 %%% ============================================================================
 %%% find_project_root/0
 %%% ============================================================================
@@ -145,18 +157,14 @@ spawn_child_false_exits_nonzero_test() ->
 %%% ============================================================================
 
 write_stdin_cat_test() ->
-    case os:type() of
-        {unix, _} ->
-            Port = beamtalk_exec_port:open(),
-            beamtalk_exec_port:spawn_child(Port, 3, <<"/bin/cat">>, []),
-            beamtalk_exec_port:write_stdin(Port, 3, <<"hello\n">>),
-            beamtalk_exec_port:close_stdin(Port, 3),
-            Stdout = receive_stdout(Port, 3, 5000),
-            beamtalk_exec_port:close(Port),
-            ?assertEqual(<<"hello\n">>, Stdout);
-        _ ->
-            {skip, "Unix-only: no unbuffered stdin echo on Windows"}
-    end.
+    {CatExe, CatArgs} = cat_cmd(),
+    Port = beamtalk_exec_port:open(),
+    beamtalk_exec_port:spawn_child(Port, 3, CatExe, CatArgs),
+    beamtalk_exec_port:write_stdin(Port, 3, <<"hello\n">>),
+    beamtalk_exec_port:close_stdin(Port, 3),
+    Stdout = receive_stdout(Port, 3, 5000),
+    beamtalk_exec_port:close(Port),
+    ?assertEqual(<<"hello\n">>, Stdout).
 
 %%% ============================================================================
 %%% kill_child — process is terminated
