@@ -35,3 +35,13 @@ TestCase subclass: ClassMethodBlockTest
   testMultipleClassMethodSelfSends =>
     result := ClassMethodBlock processWithMultipleSends: #(1, 2, 3)
     self assert: result equals: #(4, 8, 12)
+
+  // BT-1414: do: with captured local variable mutation in class method
+  testDoWithCapturedMutation =>
+    result := ClassMethodBlock countItems: #(1, 2, 3)
+    self assert: result equals: 3
+
+  // BT-1414: do: with two captured mutations simultaneously
+  testDoWithTwoCapturedMutations =>
+    result := ClassMethodBlock sumAndCount: #(10, 20, 30)
+    self assert: result equals: #(60, 3)
