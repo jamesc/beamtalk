@@ -171,6 +171,7 @@ fn walk_expr_seq(
 /// When `safe_params` is `Some`, we are inside a block and should check assignments
 /// for dead captured-variable mutations. When `None`, we are at method/script level
 /// and only need to track definitions + recurse into blocks.
+#[allow(clippy::too_many_lines)]
 fn walk_expr(
     expr: &Expression,
     scope: &mut LintScope,
@@ -236,8 +237,14 @@ fn walk_expr(
         Return { value, .. } => walk_expr(value, scope, safe_params, diagnostics),
         Parenthesized { expression, .. } => walk_expr(expression, scope, safe_params, diagnostics),
 
-        DestructureAssignment { pattern, value, .. } => {
+        DestructureAssignment {
+            pattern,
+            value,
+            span,
+            ..
+        } => {
             walk_expr(value, scope, safe_params, diagnostics);
+            check_destructure_for_dead_assignments(pattern, *span, scope, safe_params, diagnostics);
             define_pattern_vars_in_scope(pattern, scope);
         }
 
@@ -284,6 +291,26 @@ fn walk_expr(
         | Primitive { .. }
         | ExpectDirective { .. }
         | Spread { .. } => {}
+    }
+}
+
+/// Check destructure pattern names for dead assignments before defining them.
+fn check_destructure_for_dead_assignments(
+    pattern: &crate::ast::Pattern,
+    span: crate::source_analysis::Span,
+    scope: &LintScope,
+    safe_params: Option<&HashSet<String>>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(safe) = safe_params {
+        for name in collect_pattern_var_names(pattern) {
+            if scope.is_defined_in_outer_scope(&name)
+                && !scope.is_defined_in_current_scope(&name)
+                && !safe.contains(&name)
+            {
+                emit_dead_assignment_warning(&name, span, diagnostics);
+            }
+        }
     }
 }
 
@@ -382,6 +409,52 @@ fn emit_dead_assignment_warning(
                 .to_string(),
         ),
     );
+}
+
+/// Collect all variable names bound by a pattern.
+fn collect_pattern_var_names(pattern: &crate::ast::Pattern) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_pattern_var_names_inner(pattern, &mut names);
+    names
+}
+
+fn collect_pattern_var_names_inner(pattern: &crate::ast::Pattern, names: &mut Vec<String>) {
+    use crate::ast::Pattern;
+    match pattern {
+        Pattern::Variable(id) => names.push(id.name.to_string()),
+        Pattern::Tuple { elements, .. } => {
+            for elem in elements {
+                collect_pattern_var_names_inner(elem, names);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for elem in elements {
+                collect_pattern_var_names_inner(elem, names);
+            }
+            if let Some(rest_pat) = rest {
+                collect_pattern_var_names_inner(rest_pat, names);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for elem in elements {
+                collect_pattern_var_names_inner(elem, names);
+            }
+            if let Some(t) = tail {
+                collect_pattern_var_names_inner(t, names);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                collect_pattern_var_names_inner(&pair.value, names);
+            }
+        }
+        Pattern::Constructor { keywords, .. } => {
+            for (_, binding) in keywords {
+                collect_pattern_var_names_inner(binding, names);
+            }
+        }
+        Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+    }
 }
 
 /// Define pattern-bound variable names in the lint scope.
@@ -663,6 +736,27 @@ Object subclass: Foo
         assert!(
             diags.is_empty(),
             "Expected no lints for match arm pattern variable, got: {diags:?}"
+        );
+    }
+
+    /// Destructure assignment rebinding an outer variable inside a block — should warn.
+    #[test]
+    fn destructure_rebinds_outer_var_warns() {
+        let diags = lint("x := 0.\ny := 0.\ntrue ifTrue: [{x, y} := {1, 2}]");
+        assert_eq!(
+            diags.len(),
+            2,
+            "Expected 2 lints for destructure rebinding outer vars, got: {diags:?}"
+        );
+    }
+
+    /// Destructure assignment with only local variables — no warning.
+    #[test]
+    fn destructure_local_vars_no_warn() {
+        let diags = lint("true ifTrue: [{x, y} := {1, 2}]");
+        assert!(
+            diags.is_empty(),
+            "Expected no lints for destructure of local vars, got: {diags:?}"
         );
     }
 }
