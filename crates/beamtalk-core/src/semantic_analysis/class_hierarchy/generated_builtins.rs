@@ -57,6 +57,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Interval"
             | "Json"
             | "List"
+            | "Logger"
             | "Metaclass"
             | "Number"
             | "OS"
@@ -1314,6 +1315,34 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Logger".into(),
+        ClassInfo {
+            name: "Logger".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "info:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())], doc: Some("Log a message at info level.\n\n## Examples\n```beamtalk\nLogger info: \"request processed\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "info:metadata:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into()), Some("Dictionary".into())], doc: Some("Log a message at info level with structured metadata.\n\n## Examples\n```beamtalk\nLogger info: \"request processed\" metadata: #{\"path\" => \"/api\"}\n// => nil\n```".into()) },
+                MethodInfo { selector: "warn:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())], doc: Some("Log a message at warning level.\n\n## Examples\n```beamtalk\nLogger warn: \"retrying operation\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "warn:metadata:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into()), Some("Dictionary".into())], doc: Some("Log a message at warning level with structured metadata.\n\n## Examples\n```beamtalk\nLogger warn: \"retrying\" metadata: #{\"attempt\" => 2}\n// => nil\n```".into()) },
+                MethodInfo { selector: "error:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())], doc: Some("Log a message at error level.\n\n## Examples\n```beamtalk\nLogger error: \"connection lost\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "error:metadata:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into()), Some("Dictionary".into())], doc: Some("Log a message at error level with structured metadata.\n\n## Examples\n```beamtalk\nLogger error: \"failed\" metadata: #{\"reason\" => \"timeout\"}\n// => nil\n```".into()) },
+                MethodInfo { selector: "debug:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into())], doc: Some("Log a message at debug level.\n\n## Examples\n```beamtalk\nLogger debug: \"entering loop\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "debug:metadata:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("String".into()), Some("Dictionary".into())], doc: Some("Log a message at debug level with structured metadata.\n\n## Examples\n```beamtalk\nLogger debug: \"state\" metadata: #{\"count\" => 42}\n// => nil\n```".into()) },
+                MethodInfo { selector: "setLevel:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Symbol".into())], doc: Some("Set the primary log level at runtime.\n\nValid levels: #emergency, #alert, #critical, #error,\n#warning, #notice, #info, #debug\n\n## Examples\n```beamtalk\nLogger setLevel: #debug\n// => nil\nLogger setLevel: #warning\n// => nil\n```".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
         "Metaclass".into(),
         ClassInfo {
             name: "Metaclass".into(),
@@ -1908,6 +1937,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![
                 MethodInfo { selector: "open:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None, None], doc: Some("Convenience factory — open a subprocess with command and args.\n\nReturns a Result wrapping the Subprocess actor on success, or an error\nif the process could not be started (e.g. binary not found).\n\n## Examples\n```beamtalk\nagent := (Subprocess open: \"ls\" args: #(\"-la\")) unwrap\n```".into()) },
+                MethodInfo { selector: "open:args:dir:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None, None, None], doc: Some("Convenience factory — open a subprocess with command, args, and working directory.\n\n## Examples\n```beamtalk\nagent := (Subprocess open: \"ls\" args: #(\"-la\") dir: #\"/tmp\") unwrap\n```".into()) },
                 MethodInfo { selector: "open:args:env:dir:".into(), arity: 4, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None, None, None, None], doc: Some("Convenience factory — open a subprocess with command, args, environment, and working directory.\n\n## Examples\n```beamtalk\nagent := (Subprocess open: \"make\" args: #(\"test\") env: #{#\"CI\" => #\"true\"} dir: #\"/tmp\") unwrap\n```".into()) },
             ],
             class_variables: vec![],

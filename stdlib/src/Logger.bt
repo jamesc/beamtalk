@@ -1,0 +1,119 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Logger — structured logging via Erlang's logger.
+///
+/// Provides class methods for logging at standard severity levels,
+/// with optional structured metadata. All methods are class-side —
+/// Logger has no instances. Output formatting and routing are handled
+/// by Erlang's logger handlers.
+///
+/// ## Examples
+/// ```beamtalk
+/// Logger info: "service started"
+/// // => nil
+/// Logger warn: "retrying" metadata: #{"attempt" => 3}
+/// // => nil
+/// Logger error: "connection failed"
+/// // => nil
+/// Logger debug: "trace detail"
+/// // => nil
+/// Logger setLevel: #debug
+/// // => nil
+/// ```
+sealed Object subclass: Logger
+
+  /// Log a message at info level.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger info: "request processed"
+  /// // => nil
+  /// ```
+  class sealed info: message :: String -> Nil =>
+    (Erlang beamtalk_logger) info: message
+
+  /// Log a message at info level with structured metadata.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger info: "request processed" metadata: #{"path" => "/api"}
+  /// // => nil
+  /// ```
+  class sealed info: message :: String metadata: meta :: Dictionary -> Nil =>
+    (Erlang beamtalk_logger) info: message metadata: meta
+
+  /// Log a message at warning level.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger warn: "retrying operation"
+  /// // => nil
+  /// ```
+  class sealed warn: message :: String -> Nil =>
+    (Erlang beamtalk_logger) warn: message
+
+  /// Log a message at warning level with structured metadata.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger warn: "retrying" metadata: #{"attempt" => 2}
+  /// // => nil
+  /// ```
+  class sealed warn: message :: String metadata: meta :: Dictionary -> Nil =>
+    (Erlang beamtalk_logger) warn: message metadata: meta
+
+  /// Log a message at error level.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger error: "connection lost"
+  /// // => nil
+  /// ```
+  class sealed error: message :: String -> Nil =>
+    (Erlang beamtalk_logger) logError: message
+
+  /// Log a message at error level with structured metadata.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger error: "failed" metadata: #{"reason" => "timeout"}
+  /// // => nil
+  /// ```
+  class sealed error: message :: String metadata: meta :: Dictionary -> Nil =>
+    (Erlang beamtalk_logger) logError: message metadata: meta
+
+  /// Log a message at debug level.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger debug: "entering loop"
+  /// // => nil
+  /// ```
+  class sealed debug: message :: String -> Nil =>
+    (Erlang beamtalk_logger) debug: message
+
+  /// Log a message at debug level with structured metadata.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger debug: "state" metadata: #{"count" => 42}
+  /// // => nil
+  /// ```
+  class sealed debug: message :: String metadata: meta :: Dictionary -> Nil =>
+    (Erlang beamtalk_logger) debug: message metadata: meta
+
+  /// Set the primary log level at runtime.
+  ///
+  /// Valid levels: #emergency, #alert, #critical, #error,
+  /// #warning, #notice, #info, #debug
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger setLevel: #debug
+  /// // => nil
+  /// Logger setLevel: #warning
+  /// // => nil
+  /// ```
+  class sealed setLevel: level :: Symbol -> Nil =>
+    (Erlang beamtalk_logger) setLevel: level
