@@ -8,8 +8,8 @@
 //! Connects to a running REPL server and sends/receives
 //! JSON messages over WebSocket with cookie authentication.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -867,11 +867,9 @@ where
         match ws.next().await {
             Some(Ok(Message::Text(text))) => return Ok(text.to_string()),
             Some(Ok(Message::Close(_))) => {
-                return Err(
-                    "REPL WebSocket connection closed (the server may have \
+                return Err("REPL WebSocket connection closed (the server may have \
                      restarted or the connection timed out)"
-                        .to_string(),
-                );
+                    .to_string());
             }
             Some(Ok(_)) => {} // Skip ping/pong/binary
             Some(Err(e)) => return Err(format!("WebSocket read error: {e}")),

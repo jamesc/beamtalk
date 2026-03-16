@@ -492,7 +492,9 @@ group_by_class(Methods) ->
     [{atom(), [atom()]}],
     [{atom(), binary()}]
 ) -> binary().
-format_class_output(ClassName, Superclass, Modifiers, ModuleDoc, OwnDocs, InheritedGrouped, SeeAlso) ->
+format_class_output(
+    ClassName, Superclass, Modifiers, ModuleDoc, OwnDocs, InheritedGrouped, SeeAlso
+) ->
     Parts = [
         %% Header
         iolist_to_binary([
@@ -582,50 +584,76 @@ format_modifiers(_) ->
 %% @doc Extract @see references from doc text.
 %% Returns a list of {ClassName, Description} tuples.
 -spec extract_see_also(binary() | none) -> [{atom(), binary()}].
-extract_see_also(none) -> [];
+extract_see_also(none) ->
+    [];
 extract_see_also(DocText) ->
-    case re:run(DocText, <<"@see\\s+([A-Z][A-Za-z0-9_]*)(?:\\s+\\(([^)]+)\\))?">>,
-                [global, {capture, all_but_first, binary}]) of
+    case
+        re:run(
+            DocText,
+            <<"@see\\s+([A-Z][A-Za-z0-9_]*)(?:\\s+\\(([^)]+)\\))?">>,
+            [global, {capture, all_but_first, binary}]
+        )
+    of
         {match, Matches} ->
-            [{binary_to_atom(hd(Match), utf8),
-              case Match of [_, D] -> D; _ -> <<>> end}
-             || Match <- Matches];
-        nomatch -> []
+            [
+                {
+                    binary_to_atom(hd(Match), utf8),
+                    case Match of
+                        [_, D] -> D;
+                        _ -> <<>>
+                    end
+                }
+             || Match <- Matches
+            ];
+        nomatch ->
+            []
     end.
 
 %% @doc Well-known alternative base class suggestions.
 -spec alternative_classes(atom()) -> [{atom(), binary()}].
 alternative_classes('Object') ->
-    [{'Value', <<"immutable data (Value subclass)">>},
-     {'Actor', <<"concurrent processes (Actor subclass)">>}];
+    [
+        {'Value', <<"immutable data (Value subclass)">>},
+        {'Actor', <<"concurrent processes (Actor subclass)">>}
+    ];
 alternative_classes('Value') ->
-    [{'Object', <<"mutable reference types">>},
-     {'Actor', <<"concurrent processes">>}];
+    [
+        {'Object', <<"mutable reference types">>},
+        {'Actor', <<"concurrent processes">>}
+    ];
 alternative_classes('Actor') ->
-    [{'Object', <<"non-actor reference types">>},
-     {'Value', <<"immutable data">>}];
-alternative_classes(_) -> [].
+    [
+        {'Object', <<"non-actor reference types">>},
+        {'Value', <<"immutable data">>}
+    ];
+alternative_classes(_) ->
+    [].
 
 %% @doc Find sibling classes (other direct subclasses of the same parent).
 %% Limited to 5 entries to avoid overwhelming output.
 -spec sibling_classes(atom(), atom() | none) -> [{atom(), binary()}].
-sibling_classes(_ClassName, none) -> [];
+sibling_classes(_ClassName, none) ->
+    [];
 sibling_classes(ClassName, Superclass) ->
     case beamtalk_class_registry:direct_subclasses(Superclass) of
         Subs when is_list(Subs) ->
             Siblings = lists:sort([S || S <- Subs, S =/= ClassName]),
             case length(Siblings) of
-                0 -> [];
+                0 ->
+                    [];
                 N when N =< 5 ->
                     [{S, <<>>} || S <- Siblings];
                 N ->
                     {First5, _} = lists:split(5, Siblings),
                     Remaining = N - 5,
                     Entries = [{S, <<>>} || S <- First5],
-                    Suffix = iolist_to_binary([<<"(">>, integer_to_binary(Remaining), <<" more siblings)">>]),
+                    Suffix = iolist_to_binary([
+                        <<"(">>, integer_to_binary(Remaining), <<" more siblings)">>
+                    ]),
                     Entries ++ [{'...', Suffix}]
             end;
-        _ -> []
+        _ ->
+            []
     end.
 
 %% @doc Build the complete see-also list from all sources, deduplicated.
@@ -653,12 +681,16 @@ deduplicate_see_also([{Name, Desc} | Rest], Seen, Acc) ->
 
 %% @doc Format the see-also section for display.
 -spec format_see_also([{atom(), binary()}]) -> binary().
-format_see_also([]) -> <<>>;
+format_see_also([]) ->
+    <<>>;
 format_see_also(Entries) ->
-    Lines = [case Desc of
-        <<>> -> iolist_to_binary([<<"  ">>, atom_to_binary(Name, utf8)]);
-        _ -> iolist_to_binary([<<"  ">>, atom_to_binary(Name, utf8), <<" — ">>, Desc])
-    end || {Name, Desc} <- Entries],
+    Lines = [
+        case Desc of
+            <<>> -> iolist_to_binary([<<"  ">>, atom_to_binary(Name, utf8)]);
+            _ -> iolist_to_binary([<<"  ">>, atom_to_binary(Name, utf8), <<" — ">>, Desc])
+        end
+     || {Name, Desc} <- Entries
+    ],
     iolist_to_binary([<<"\nSee also:\n">>, lists:join(<<"\n">>, Lines)]).
 
 %% @private
