@@ -34,7 +34,8 @@
 /// | User input validation             | Result       |
 /// | Actor lifecycle errors            | Exception    |
 ///
-/// @see Exception, Error for exception-based error handling
+/// @see Exception (for exception-based error handling)
+/// @see Error (for exception subclass with reason codes)
 sealed Value subclass: Result
   state: okValue :: Object = nil
   state: errReason :: Object = nil

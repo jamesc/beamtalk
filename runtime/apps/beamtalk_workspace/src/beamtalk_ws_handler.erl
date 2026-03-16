@@ -45,7 +45,7 @@ init(Req, _Opts) ->
             io_capture_pid = undefined,
             stdin_ref = undefined
         },
-        #{idle_timeout => 300000, max_frame_size => 1048576}}.
+        #{idle_timeout => infinity, max_frame_size => 1048576}}.
 
 %% @doc WebSocket connection initialized — send auth challenge.
 %% Session is NOT created yet; deferred until after successful auth (security).
