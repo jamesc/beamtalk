@@ -47,7 +47,8 @@ sleep_cmd() ->
 %% mode that explicitly flushes stdout, bypassing pipe buffering).
 cat_cmd() ->
     case os:type() of
-        {unix, _} -> {<<"/bin/cat">>, []};
+        {unix, _} ->
+            {<<"/bin/cat">>, []};
         {win32, _} ->
             ExecBin = beamtalk_exec_port:find_exec_binary(),
             {list_to_binary(ExecBin), [<<"--cat">>]}
