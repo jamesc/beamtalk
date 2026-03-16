@@ -715,6 +715,25 @@ direct_call_coercion_retry_still_fails_test() ->
             ?assertEqual(type_error, Inner#beamtalk_error.kind)
     end.
 
+direct_call_charlist_result_without_badarg_test() ->
+    %% BT-1398: Functions that accept non-binary args but return charlists
+    %% should still have their results coerced to binaries.
+    %% calendar:system_time_to_rfc3339/1 accepts an integer and returns a charlist.
+    Now = erlang:system_time(second),
+    Result = beamtalk_erlang_proxy:direct_call(calendar, system_time_to_rfc3339, [Now]),
+    ?assert(is_binary(Result)).
+
+direct_call_integer_list_not_coerced_test() ->
+    %% Ensure lists of integers that aren't valid charlists are NOT coerced.
+    %% lists:seq/2 returns a plain integer list.
+    Result = beamtalk_erlang_proxy:direct_call(lists, seq, [1, 5]),
+    ?assertEqual([1, 2, 3, 4, 5], Result).
+
+direct_call_empty_list_not_coerced_test() ->
+    %% BT-1398: Empty list must stay as [], not be coerced to <<>> (empty binary).
+    Result = beamtalk_erlang_proxy:direct_call(maps, keys, [#{}]),
+    ?assertEqual([], Result).
+
 %%% ===================================================================
 %%% BT-1127: dispatch/3 charlist coercion via validate_and_apply
 %%% ===================================================================
