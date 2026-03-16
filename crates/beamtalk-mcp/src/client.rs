@@ -610,6 +610,22 @@ impl ReplClient {
         }
         self.send(&request).await
     }
+
+    /// Send a list-classes operation (BT-1404).
+    ///
+    /// Returns all available classes with one-line descriptions. The optional
+    /// `filter` narrows results: `"stdlib"` for built-in classes, `"user"` for
+    /// user-defined, or a superclass name like `"Value"` or `"Actor"`.
+    pub async fn list_classes(&self, filter: Option<&str>) -> Result<ReplResponse, String> {
+        let mut request = serde_json::json!({
+            "op": "list-classes",
+            "id": next_msg_id()
+        });
+        if let Some(f) = filter {
+            request["filter"] = serde_json::Value::String(f.to_string());
+        }
+        self.send(&request).await
+    }
 }
 
 /// JSON response from the REPL backend.
@@ -629,8 +645,10 @@ pub struct ReplResponse {
     pub error: Option<String>,
     /// Bindings map.
     pub bindings: Option<serde_json::Value>,
-    /// Loaded classes.
+    /// Loaded classes (string names, from eval/load responses).
     pub classes: Option<Vec<String>>,
+    /// Class info list with metadata (list-classes op, BT-1404).
+    pub class_list: Option<Vec<ClassInfo>>,
     /// Actor list.
     pub actors: Option<Vec<ActorInfo>>,
     /// Module list.
@@ -758,6 +776,22 @@ fn spawn_keepalive(inner: Arc<Mutex<ReplClientInner>>) -> tokio::task::JoinHandl
             }
         }
     })
+}
+
+/// Class information from the list-classes op (BT-1404).
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ClassInfo {
+    /// Class name (e.g., `"String"`).
+    pub name: String,
+    /// Superclass name (e.g., `"Value"`) or `null` for root classes.
+    pub superclass: Option<String>,
+    /// One-line class description, or `null` if undocumented.
+    pub doc: Option<String>,
+    /// Whether the class is sealed (cannot be subclassed).
+    pub sealed: bool,
+    /// Whether the class is abstract (cannot be instantiated directly).
+    #[serde(rename = "abstract")]
+    pub is_abstract: bool,
 }
 
 /// Perform the ADR 0020 authentication handshake on a WebSocket connection.

@@ -411,6 +411,7 @@ handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"complete">>;
     Op =:= <<"describe">>;
     Op =:= <<"methods">>;
+    Op =:= <<"list-classes">>;
     Op =:= <<"show-codegen">>;
     Op =:= <<"test">>;
     Op =:= <<"test-all">>

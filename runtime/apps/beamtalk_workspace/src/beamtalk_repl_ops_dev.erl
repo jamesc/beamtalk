@@ -241,6 +241,59 @@ handle(<<"methods">>, Params, Msg, _SessionPid) ->
     jsx:encode(Base#{
         <<"methods">> => Methods, <<"state_vars">> => StateVars, <<"status">> => [<<"done">>]
     });
+handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
+    %% BT-1404: List all available classes with one-line descriptions.
+    Filter = maps:get(<<"filter">>, Params, undefined),
+    ClassPids =
+        try
+            beamtalk_runtime_api:all_classes()
+        catch
+            _:_ -> []
+        end,
+    ClassInfos = lists:filtermap(
+        fun(Pid) ->
+            try
+                Name = beamtalk_runtime_api:class_name(Pid),
+                Super = beamtalk_runtime_api:superclass(Pid),
+                Doc =
+                    case gen_server:call(Pid, get_doc, 5000) of
+                        none -> null;
+                        D when is_binary(D) -> first_line(D);
+                        _ -> null
+                    end,
+                IsSealed = beamtalk_runtime_api:is_sealed(Pid),
+                IsAbstract = beamtalk_runtime_api:is_abstract(Pid),
+                ModName = beamtalk_runtime_api:module_name(Pid),
+                case should_include_class(Name, Super, ModName, Filter) of
+                    true ->
+                        {true, #{
+                            <<"name">> => atom_to_binary(Name, utf8),
+                            <<"superclass">> =>
+                                case Super of
+                                    none -> null;
+                                    S -> atom_to_binary(S, utf8)
+                                end,
+                            <<"doc">> => Doc,
+                            <<"sealed">> => IsSealed,
+                            <<"abstract">> => IsAbstract
+                        }};
+                    false ->
+                        false
+                end
+            catch
+                exit:{noproc, _} -> false;
+                exit:{timeout, _} -> false;
+                _:_ -> false
+            end
+        end,
+        ClassPids
+    ),
+    Sorted = lists:sort(
+        fun(A, B) -> maps:get(<<"name">>, A) =< maps:get(<<"name">>, B) end,
+        ClassInfos
+    ),
+    Base = base_protocol_response(Msg),
+    jsx:encode(Base#{<<"class_list">> => Sorted, <<"status">> => [<<"done">>]});
 handle(<<"test">>, Params, Msg, _SessionPid) ->
     ClassName = maps:get(<<"class">>, Params, undefined),
     FilePath = maps:get(<<"file">>, Params, undefined),
@@ -1348,6 +1401,10 @@ describe_ops() ->
         <<"unload">> => #{<<"params">> => [<<"module">>]},
         <<"health">> => #{<<"params">> => []},
         <<"methods">> => #{<<"params">> => [<<"class">>]},
+        <<"list-classes">> => #{
+            <<"params">> => [],
+            <<"optional">> => [<<"filter">>]
+        },
         <<"show-codegen">> => #{
             <<"params">> => [],
             <<"optional">> => [<<"code">>, <<"class">>, <<"selector">>]
@@ -1429,3 +1486,31 @@ make_class_not_found_error(ClassName) ->
 -spec to_binary(atom() | binary()) -> binary().
 to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
 to_binary(B) when is_binary(B) -> B.
+
+%% @private Extract the first line of a binary string (up to the first newline).
+%% BT-1404: Used to produce one-line class descriptions from full doc strings.
+-spec first_line(binary()) -> binary().
+first_line(Bin) when is_binary(Bin) ->
+    case binary:split(Bin, <<"\n">>) of
+        [First | _] -> First;
+        _ -> Bin
+    end.
+
+%% @private Filter predicate for list-classes op (BT-1404).
+%% Filter values:
+%%   undefined     → include all classes
+%%   <<"stdlib">>  → include only stdlib classes (module prefix bt@stdlib@)
+%%   <<"user">>    → include only user-defined classes (non-stdlib)
+%%   Other binary  → treat as superclass name, include only subclasses of that class
+-spec should_include_class(atom(), atom() | none, atom(), undefined | binary()) -> boolean().
+should_include_class(_Name, _Super, _ModName, undefined) ->
+    true;
+should_include_class(_Name, _Super, ModName, <<"stdlib">>) ->
+    beamtalk_class_registry:is_stdlib_module(ModName);
+should_include_class(_Name, _Super, ModName, <<"user">>) ->
+    not beamtalk_class_registry:is_stdlib_module(ModName);
+should_include_class(Name, _Super, _ModName, FilterBin) ->
+    case beamtalk_repl_errors:safe_to_existing_atom(FilterBin) of
+        {error, badarg} -> false;
+        {ok, FilterAtom} -> beamtalk_class_registry:inherits_from(Name, FilterAtom)
+    end.
