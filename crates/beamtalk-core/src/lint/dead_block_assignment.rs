@@ -222,7 +222,13 @@ fn walk_expr(
         } => {
             walk_expr(receiver, scope, safe_params, diagnostics);
             for msg in messages {
-                walk_msg_args(&msg.selector.name(), &msg.arguments, scope, safe_params, diagnostics);
+                walk_msg_args(
+                    &msg.selector.name(),
+                    &msg.arguments,
+                    scope,
+                    safe_params,
+                    diagnostics,
+                );
             }
         }
 
