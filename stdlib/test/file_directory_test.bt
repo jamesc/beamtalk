@@ -32,7 +32,8 @@ TestCase subclass: FileDirectoryTest
 
   testIsDirectoryAbsolutePath =>
     // Absolute paths now work (ADR 0063)
-    System osFamily == "unix" ifTrue: [self assert: (File isDirectory: "/tmp")]
+    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
+    self assert: (File isDirectory: "/tmp")
 
   testIsFileOnFile =>
     self assert: (File writeAll: "target/bt-test-tmp/fdt/isfile_check.txt" contents: "data") isOk
@@ -45,7 +46,8 @@ TestCase subclass: FileDirectoryTest
 
   testIsFileAbsolutePath =>
     // Absolute paths now work (ADR 0063) — /tmp is a directory, not a file
-    System osFamily == "unix" ifTrue: [self deny: (File isFile: "/tmp")]
+    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
+    self deny: (File isFile: "/tmp")
 
   testMkdir =>
     self assert: (File mkdir: "target/bt-test-tmp/fdt/mkdir_test") isOk
@@ -117,9 +119,8 @@ TestCase subclass: FileDirectoryTest
 
   testListDirectoryAbsolutePath =>
     // Absolute paths now accepted (ADR 0063)
-    System osFamily == "unix" ifTrue: [
-      self assert: (File listDirectory: "/tmp") isOk
-    ]
+    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
+    self assert: (File listDirectory: "/tmp") isOk
 
   testListDirectoryTypeErrorRaisesError =>
     @expect type
@@ -217,14 +218,17 @@ TestCase subclass: FileDirectoryTest
   testAbsolutePathIsAbsolute =>
     result := File absolutePath: "target/bt-test-tmp/fdt"
     self assert: result isOk
+    // Absolute path must contain the OS path separator
     System osFamily == "unix" ifTrue: [
       self assert: (result unwrap printString includesSubstring: "/")
-    ]
+    ] ifFalse: [self assert: (result unwrap printString includesSubstring: ":")]
 
   testAbsolutePathOnAbsoluteInput =>
     // absolutePath: on an already-absolute path returns it unchanged (ADR 0063)
-    self assert: (File absolutePath: "/etc/passwd") isOk
-    self assert: (File absolutePath: "/etc/passwd") unwrap equals: "/etc/passwd"
+    tmp := File tempDirectory
+    result := File absolutePath: tmp
+    self assert: result isOk
+    self assert: result unwrap equals: tmp
 
   testAbsolutePathTypeErrorRaisesError =>
     @expect type

@@ -27,12 +27,12 @@ TestCase subclass: FileIoTest
     self assert: (File exists: "target/bt-test-tmp/empty.txt")
 
   testAbsolutePathsAccepted =>
-    // ADR 0063: absolute paths are now allowed
-    // /etc/passwd is a regular file on Unix; exists: checks regular files
-    System osFamily == "unix"
-      ifTrue: [
-        self deny: (File exists: "/tmp")  // /tmp is a directory, not a regular file
-      ]
+    // ADR 0063: absolute paths are now allowed — round-trip via temp directory
+    tmp := File tempDirectory
+    path := tmp ++ "/_bt_test_abs_roundtrip.txt"
+    self assert: (File writeAll: path contents: "absolute") isOk
+    self assert: (File readAll: path) unwrap equals: "absolute"
+    (File delete: path) unwrap
 
   testErrorPathsReadall =>
     // readAll: nonexistent file returns file_not_found error

@@ -1090,10 +1090,9 @@ absolutePath_success_test() ->
 
 absolutePath_absolute_input_test() ->
     %% absolutePath: on an already-absolute path returns it unchanged
-    R = beamtalk_file:'absolutePath:'(<<"/etc/passwd">>),
-    ?assertMatch(
-        #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := <<"/etc/passwd">>}, R
-    ).
+    TmpDir = beamtalk_file:'tempDirectory'(),
+    R = beamtalk_file:'absolutePath:'(TmpDir),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := TmpDir}, R).
 
 absolutePath_type_error_test() ->
     ?assertError(

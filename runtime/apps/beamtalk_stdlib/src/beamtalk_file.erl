@@ -89,7 +89,7 @@
 %% Does not raise errors (returns false for non-existent paths or non-binary input).
 -spec 'exists:'(binary()) -> boolean().
 'exists:'(Path) when is_binary(Path) ->
-    filelib:is_regular(binary_to_list(Path));
+    filelib:is_regular(unicode:characters_to_list(Path));
 'exists:'(_) ->
     false.
 
@@ -99,7 +99,7 @@
 %% Result error map if the file cannot be read.
 -spec 'readAll:'(binary()) -> map().
 'readAll:'(Path) when is_binary(Path) ->
-    case file:read_file(binary_to_list(Path)) of
+    case file:read_file(unicode:characters_to_list(Path)) of
         {ok, Contents} ->
             beamtalk_result:from_tagged_tuple({ok, Contents});
         {error, enoent} ->
@@ -132,7 +132,7 @@
 %% Returns a Result ok map on success, Result error map on failure.
 -spec 'writeAll:contents:'(binary(), binary()) -> map().
 'writeAll:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
-    PathStr = binary_to_list(Path),
+    PathStr = unicode:characters_to_list(Path),
     %% Ensure directory exists
     Dir = filename:dirname(PathStr),
     case filelib:ensure_dir(filename:join(Dir, "dummy")) of
@@ -192,7 +192,7 @@ handle_has_method(_) -> false.
 %% process that created them (BEAM file handles are process-local).
 -spec 'lines:'(binary()) -> map().
 'lines:'(Path) when is_binary(Path) ->
-    case file:open(binary_to_list(Path), [read, binary]) of
+    case file:open(unicode:characters_to_list(Path), [read, binary]) of
         {ok, Fd} ->
             beamtalk_result:from_tagged_tuple({ok, make_line_stream(Fd, Path)});
         {error, enoent} ->
@@ -226,7 +226,7 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map with the result of the block.
 -spec 'open:do:'(binary(), fun((map()) -> term())) -> map().
 'open:do:'(Path, Block) when is_binary(Path), is_function(Block, 1) ->
-    case file:open(binary_to_list(Path), [read, binary]) of
+    case file:open(unicode:characters_to_list(Path), [read, binary]) of
         {ok, Fd} ->
             Handle = #{'$beamtalk_class' => 'FileHandle', fd => Fd},
             try
@@ -274,7 +274,7 @@ handle_has_method(_) -> false.
 %% Does not raise errors (returns false for non-existent paths or non-binary input).
 -spec 'isDirectory:'(binary()) -> boolean().
 'isDirectory:'(Path) when is_binary(Path) ->
-    filelib:is_dir(binary_to_list(Path));
+    filelib:is_dir(unicode:characters_to_list(Path));
 'isDirectory:'(_) ->
     false.
 
@@ -284,7 +284,7 @@ handle_has_method(_) -> false.
 %% Does not raise errors (returns false for non-existent paths or non-binary input).
 -spec 'isFile:'(binary()) -> boolean().
 'isFile:'(Path) when is_binary(Path) ->
-    filelib:is_regular(binary_to_list(Path));
+    filelib:is_regular(unicode:characters_to_list(Path));
 'isFile:'(_) ->
     false.
 
@@ -293,7 +293,7 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map on success, Result error map on failure.
 -spec 'mkdir:'(binary()) -> map().
 'mkdir:'(Path) when is_binary(Path) ->
-    case file:make_dir(binary_to_list(Path)) of
+    case file:make_dir(unicode:characters_to_list(Path)) of
         ok ->
             beamtalk_result:from_tagged_tuple({ok, nil});
         {error, enoent} ->
@@ -334,7 +334,7 @@ handle_has_method(_) -> false.
 -spec 'mkdirAll:'(binary()) -> map().
 'mkdirAll:'(Path) when is_binary(Path) ->
     %% filelib:ensure_path/1 creates the full path including the final component
-    case filelib:ensure_path(binary_to_list(Path)) of
+    case filelib:ensure_path(unicode:characters_to_list(Path)) of
         ok ->
             beamtalk_result:from_tagged_tuple({ok, nil});
         {error, eacces} ->
@@ -361,7 +361,7 @@ handle_has_method(_) -> false.
 %% if the directory does not exist or cannot be read.
 -spec 'listDirectory:'(binary()) -> map().
 'listDirectory:'(Path) when is_binary(Path) ->
-    PathStr = binary_to_list(Path),
+    PathStr = unicode:characters_to_list(Path),
     %% Check for regular file first: file:list_dir/1 returns different
     %% error codes on different OSes when given a file path. By checking
     %% filelib:is_regular/1 upfront we get a consistent not_a_directory
@@ -426,7 +426,7 @@ handle_has_method(_) -> false.
 %% (not {error, eisdir} as documented in some OTP versions).
 -spec 'delete:'(binary()) -> map().
 'delete:'(Path) when is_binary(Path) ->
-    PathStr = binary_to_list(Path),
+    PathStr = unicode:characters_to_list(Path),
     case filelib:is_dir(PathStr) of
         true ->
             %% It's a directory — del_dir only succeeds if empty
@@ -497,7 +497,7 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map on success, Result error map on failure.
 -spec 'deleteAll:'(binary()) -> map().
 'deleteAll:'(Path) when is_binary(Path) ->
-    case file:del_dir_r(binary_to_list(Path)) of
+    case file:del_dir_r(unicode:characters_to_list(Path)) of
         ok ->
             beamtalk_result:from_tagged_tuple({ok, nil});
         {error, enoent} ->
@@ -529,7 +529,7 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map on success, Result error map on failure.
 -spec 'rename:to:'(binary(), binary()) -> map().
 'rename:to:'(From, To) when is_binary(From), is_binary(To) ->
-    case file:rename(binary_to_list(From), binary_to_list(To)) of
+    case file:rename(unicode:characters_to_list(From), unicode:characters_to_list(To)) of
         ok ->
             beamtalk_result:from_tagged_tuple({ok, nil});
         {error, enoent} ->
@@ -568,7 +568,7 @@ handle_has_method(_) -> false.
 %% Returns a Result ok map with the absolute path as a String.
 -spec 'absolutePath:'(binary()) -> map().
 'absolutePath:'(Path) when is_binary(Path) ->
-    AbsPath = filename:absname(binary_to_list(Path)),
+    AbsPath = filename:absname(unicode:characters_to_list(Path)),
     beamtalk_result:from_tagged_tuple({ok, unicode:characters_to_binary(AbsPath)});
 'absolutePath:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
