@@ -10,4 +10,7 @@
 /// ```beamtalk
 /// [1 / 0] on: Error do: [:e | e message]
 /// ```
+///
+/// @see Exception (for resumable exceptions)
+/// @see Result (for expected success/failure without exceptions)
 Exception subclass: Error

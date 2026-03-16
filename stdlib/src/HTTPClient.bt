@@ -28,6 +28,9 @@
 /// resp := (client post: "/post" body: "{}") unwrap
 /// client stop
 /// ```
+///
+/// @see HTTPServer (for serving HTTP requests)
+/// @see HTTPResponse (for response objects returned by requests)
 Actor subclass: HTTPClient
   state: baseUrl = ""
   state: headers = #()
