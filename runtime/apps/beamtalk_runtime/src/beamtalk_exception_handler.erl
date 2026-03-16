@@ -80,7 +80,7 @@ kind_to_class(instantiation_error) -> 'InstantiationError';
 kind_to_class(erlang_exit) -> 'ExitError';
 kind_to_class(erlang_throw) -> 'ThrowError';
 %% signal (from signal_message/1) stays Error — user decides semantics.
-%% file_*/io_error/invalid_path/permission_denied stay Error — future IOError (ADR 0015 Phase 6).
+%% file_*/io_error/permission_denied stay Error — future IOError (ADR 0015 Phase 6).
 kind_to_class(signal) -> 'Error';
 kind_to_class(_) -> 'Error'.
 

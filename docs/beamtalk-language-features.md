@@ -1567,7 +1567,7 @@ File open: "data.csv" do: [:handle |
 
 #### File I/O and Directory Operations
 
-`File` provides class methods for reading, writing, and managing files and directories. All paths must be relative (absolute paths and `..` traversal are rejected for safety).
+`File` provides class methods for reading, writing, and managing files and directories. Both relative and absolute paths are accepted; security relies on OS-level permissions (ADR 0063).
 
 | Method | Returns | Description |
 |--------|---------|-------------|
@@ -1582,7 +1582,7 @@ File open: "data.csv" do: [:handle |
 | `File delete: path` | `nil` | Delete a file or empty directory |
 | `File deleteAll: path` | `nil` | Recursively delete a directory tree |
 | `File rename: from to: to` | `nil` | Rename/move a file or directory |
-| `File absolutePath: path` | `String` | Resolve relative path to absolute |
+| `File absolutePath: path` | `String` | Resolve path to absolute |
 | `File tempDirectory` | `String` | OS temporary directory path |
 
 ```beamtalk

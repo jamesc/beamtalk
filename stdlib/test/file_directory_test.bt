@@ -30,7 +30,10 @@ TestCase subclass: FileDirectoryTest
   testIsDirectoryOnMissingPath =>
     self deny: (File isDirectory: "target/bt-test-tmp/fdt/no_such_dir")
 
-  testIsDirectoryInvalidPath => self deny: (File isDirectory: "../parent")
+  testIsDirectoryAbsolutePath =>
+    // Absolute paths now work (ADR 0063)
+    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
+    self assert: (File isDirectory: "/tmp")
 
   testIsFileOnFile =>
     self assert: (File writeAll: "target/bt-test-tmp/fdt/isfile_check.txt" contents: "data") isOk
@@ -41,7 +44,10 @@ TestCase subclass: FileDirectoryTest
   testIsFileOnMissingPath =>
     self deny: (File isFile: "target/bt-test-tmp/fdt/no_such_file.txt")
 
-  testIsFileInvalidPath => self deny: (File isFile: "../secret.txt")
+  testIsFileAbsolutePath =>
+    // Absolute paths now work (ADR 0063) — /tmp is a directory, not a file
+    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
+    self deny: (File isFile: "/tmp")
 
   testMkdir =>
     self assert: (File mkdir: "target/bt-test-tmp/fdt/mkdir_test") isOk
@@ -54,9 +60,14 @@ TestCase subclass: FileDirectoryTest
   testMkdirMissingParentRaisesError =>
     self assert: (File mkdir: "target/bt-test-tmp/fdt/no_parent/child") isError
 
-  testMkdirInvalidPathRaisesError =>
-    self assert: (File mkdir: "/tmp/evil") isError
-    self assert: (File mkdir: "../escape") isError
+  testMkdirAbsolutePath =>
+    // Absolute paths now accepted (ADR 0063) — mkdir in temp dir
+    tmp := File tempDirectory
+    dir := tmp ++ "/_bt_test_mkdir_abs"
+    (File isDirectory: dir) ifTrue: [(File deleteAll: dir) unwrap]
+    self assert: (File mkdir: dir) isOk
+    self assert: (File isDirectory: dir)
+    (File delete: dir) unwrap
 
   testMkdirTypeErrorRaisesError =>
     @expect type
@@ -71,9 +82,13 @@ TestCase subclass: FileDirectoryTest
     self assert: (File mkdirAll: "target/bt-test-tmp/fdt/idem") isOk
     self assert: (File isDirectory: "target/bt-test-tmp/fdt/idem")
 
-  testMkdirAllInvalidPathRaisesError =>
-    self assert: (File mkdirAll: "/tmp/evil") isError
-    self assert: (File mkdirAll: "../escape") isError
+  testMkdirAllAbsolutePath =>
+    // Absolute paths now accepted (ADR 0063) — mkdirAll in temp dir
+    tmp := File tempDirectory
+    dir := tmp ++ "/_bt_test_mkdirall_abs/nested"
+    self assert: (File mkdirAll: dir) isOk
+    self assert: (File isDirectory: dir)
+    (File deleteAll: tmp ++ "/_bt_test_mkdirall_abs") unwrap
 
   testMkdirAllTypeErrorRaisesError =>
     @expect type
@@ -102,9 +117,10 @@ TestCase subclass: FileDirectoryTest
     self assert: (File writeAll: "target/bt-test-tmp/fdt/not_a_dir.txt" contents: "x") isOk
     self assert: (File listDirectory: "target/bt-test-tmp/fdt/not_a_dir.txt") isError
 
-  testListDirectoryInvalidPathRaisesError =>
-    self assert: (File listDirectory: "/etc") isError
-    self assert: (File listDirectory: "../parent") isError
+  testListDirectoryAbsolutePath =>
+    // Absolute paths now accepted (ADR 0063)
+    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
+    self assert: (File listDirectory: "/tmp") isOk
 
   testListDirectoryTypeErrorRaisesError =>
     @expect type
@@ -128,9 +144,13 @@ TestCase subclass: FileDirectoryTest
     self assert: (File writeAll: "target/bt-test-tmp/fdt/nonempty/child.txt" contents: "x") isOk
     self assert: (File delete: "target/bt-test-tmp/fdt/nonempty") isError
 
-  testDeleteInvalidPathRaisesError =>
-    self assert: (File delete: "/tmp/evil.txt") isError
-    self assert: (File delete: "../escape.txt") isError
+  testDeleteAbsolutePath =>
+    // Absolute paths now accepted (ADR 0063) — create and delete temp file
+    tmp := File tempDirectory
+    path := tmp ++ "/_bt_test_delete_abs.txt"
+    self assert: (File writeAll: path contents: "x") isOk
+    self assert: (File delete: path) isOk
+    self deny: (File exists: path)
 
   testDeleteTypeErrorRaisesError =>
     @expect type
@@ -145,9 +165,13 @@ TestCase subclass: FileDirectoryTest
   testDeleteAllNonExistentRaisesError =>
     self assert: (File deleteAll: "target/bt-test-tmp/fdt/no_such_dir") isError
 
-  testDeleteAllInvalidPathRaisesError =>
-    self assert: (File deleteAll: "/tmp/evil") isError
-    self assert: (File deleteAll: "../escape") isError
+  testDeleteAllAbsolutePath =>
+    // Absolute paths now accepted (ADR 0063) — create and deleteAll temp dir
+    tmp := File tempDirectory
+    dir := tmp ++ "/_bt_test_deleteall_abs"
+    self assert: (File mkdirAll: dir) isOk
+    self assert: (File deleteAll: dir) isOk
+    self deny: (File isDirectory: dir)
 
   testDeleteAllTypeErrorRaisesError =>
     @expect type
@@ -169,12 +193,16 @@ TestCase subclass: FileDirectoryTest
   testRenameNonExistentRaisesError =>
     self assert: (File rename: "target/bt-test-tmp/fdt/no_such_file.txt" to: "target/bt-test-tmp/fdt/dst.txt") isError
 
-  testRenameInvalidSourcePathRaisesError =>
-    self assert: (File rename: "/tmp/evil.txt" to: "target/bt-test-tmp/fdt/dst.txt") isError
-
-  testRenameInvalidDestPathRaisesError =>
-    self assert: (File writeAll: "target/bt-test-tmp/fdt/rename_src.txt" contents: "x") isOk
-    self assert: (File rename: "target/bt-test-tmp/fdt/rename_src.txt" to: "/tmp/evil.txt") isError
+  testRenameAbsolutePaths =>
+    // Absolute paths now accepted (ADR 0063) — rename to/from temp dir
+    tmp := File tempDirectory
+    src := tmp ++ "/_bt_test_rename_abs_src.txt"
+    dst := tmp ++ "/_bt_test_rename_abs_dst.txt"
+    self assert: (File writeAll: src contents: "x") isOk
+    self assert: (File rename: src to: dst) isOk
+    self deny: (File exists: src)
+    self assert: (File exists: dst)
+    (File delete: dst) unwrap
 
   testRenameTypeErrorRaisesError =>
     @expect type
@@ -190,13 +218,17 @@ TestCase subclass: FileDirectoryTest
   testAbsolutePathIsAbsolute =>
     result := File absolutePath: "target/bt-test-tmp/fdt"
     self assert: result isOk
+    // Absolute path must contain the OS path separator
     System osFamily == "unix" ifTrue: [
       self assert: (result unwrap printString includesSubstring: "/")
-    ]
+    ] ifFalse: [self assert: (result unwrap printString includesSubstring: ":")]
 
-  testAbsolutePathInvalidRaisesError =>
-    self assert: (File absolutePath: "/etc/passwd") isError
-    self assert: (File absolutePath: "../secret") isError
+  testAbsolutePathOnAbsoluteInput =>
+    // absolutePath: on an already-absolute path returns it unchanged (ADR 0063)
+    tmp := File tempDirectory
+    result := File absolutePath: tmp
+    self assert: result isOk
+    self assert: result unwrap equals: tmp
 
   testAbsolutePathTypeErrorRaisesError =>
     @expect type

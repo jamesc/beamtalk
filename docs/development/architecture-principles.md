@@ -315,7 +315,6 @@ mod tests {
 ### Rules
 
 **✅ ALWAYS:**
-- Validate file paths (no directory traversal)
 - Check buffer boundaries (no out-of-bounds access)
 - Handle parse errors gracefully (no panics)
 - Document unsafe code with safety invariants

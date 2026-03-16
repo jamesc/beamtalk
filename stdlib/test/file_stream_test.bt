@@ -107,14 +107,6 @@ TestCase subclass: FileStreamTest
     self should: [
       File open: "test/fixtures/stream_test.txt" do: "not a block"
     ] raise: #type_error
-    // lines: with absolute path (security)
-    self assert: (File lines: "/etc/passwd") isError
-    // lines: with directory traversal
-    self assert: (File lines: "../secret.txt") isError
-    // open:do: with absolute path
-    self assert: (File open: "/etc/passwd" do: [:h | h lines asList]) isError
-    // open:do: with directory traversal
-    self assert: (File open: "../secret.txt" do: [:h | h lines asList]) isError
 
   testWindowsStyleLineEndingsRN =>
     // Windows CRLF line endings are stripped correctly
