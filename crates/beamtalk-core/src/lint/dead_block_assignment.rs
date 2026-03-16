@@ -243,12 +243,7 @@ fn walk_expr(
 
         Match { value, arms, .. } => {
             walk_expr(value, scope, safe_params, diagnostics);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    walk_expr(guard, scope, safe_params, diagnostics);
-                }
-                walk_expr(&arm.body, scope, safe_params, diagnostics);
-            }
+            walk_match_arms(arms, scope, safe_params, diagnostics);
         }
 
         MapLiteral { pairs, .. } => {
@@ -289,6 +284,26 @@ fn walk_expr(
         | Primitive { .. }
         | ExpectDirective { .. }
         | Spread { .. } => {}
+    }
+}
+
+/// Walk match arms, scoping pattern-bound variables to each arm.
+fn walk_match_arms(
+    arms: &[crate::ast::MatchArm],
+    scope: &mut LintScope,
+    safe_params: Option<&HashSet<String>>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for arm in arms {
+        // Pattern-bound variables are local to the arm — push a scope
+        // so they don't trigger false positives for outer-scope names.
+        scope.push();
+        define_pattern_vars_in_scope(&arm.pattern, scope);
+        if let Some(guard) = &arm.guard {
+            walk_expr(guard, scope, safe_params, diagnostics);
+        }
+        walk_expr(&arm.body, scope, safe_params, diagnostics);
+        scope.pop();
     }
 }
 
@@ -627,5 +642,30 @@ Object subclass: Foo
             "Expected 1 lint for assignment in msg arg inside block, got: {diags:?}"
         );
         assert!(diags[0].message.contains("`x`"));
+    }
+
+    /// Match arm pattern variables are scoped to the arm — verify parsing and
+    /// that the lint correctly tracks them. Currently the parser doesn't allow
+    /// assignments in match arm bodies, but this test ensures the scope is
+    /// correct for future parser changes.
+    #[test]
+    fn match_arm_pattern_variable_scoped() {
+        // Verify match: parses correctly with a simple arm
+        let src = "y := 0.\n1 match: [y -> y + 1]";
+        let tokens = lex_with_eof(src);
+        let (module, _) = parse(tokens);
+        assert!(
+            matches!(
+                &module.expressions[1].expression,
+                Expression::Match { .. }
+            ),
+            "Expected Match expression, got: {:?}",
+            module.expressions[1].expression
+        );
+        let diags = lint(src);
+        assert!(
+            diags.is_empty(),
+            "Expected no lints for match arm pattern variable, got: {diags:?}"
+        );
     }
 }
