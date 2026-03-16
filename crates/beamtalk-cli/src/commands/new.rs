@@ -154,9 +154,41 @@ beamtalk repl
     Ok(())
 }
 
-/// Static MCP and pitfalls sections appended to every generated AGENTS.md.
-/// Kept as a constant to keep `write_agents_md` under the line-count limit.
-const AGENTS_MD_MCP_AND_PITFALLS: &str = r#"## Live Workspace (MCP)
+/// Static MCP, essential patterns, and pitfalls sections appended to every
+/// generated AGENTS.md. Kept as a constant to keep `write_agents_md` under
+/// the line-count limit.
+const AGENTS_MD_MCP_AND_PITFALLS: &str = r#"## Development Workflow
+
+The `.mcp.json` MCP server provides a persistent REPL session. Use it as
+your primary development environment — not CLI commands.
+
+**Session startup:**
+
+1. Call `describe` to discover available operations
+2. Call `load_project` with `include_tests: true` to load all source + tests
+3. On a new codebase, read the language guide at https://www.beamtalk.dev/docs/language-features
+
+**Edit → Reload → Test → Debug loop:**
+
+1. Edit a `.bt` source file
+2. `evaluate: 'Workspace load: "path"'` or `evaluate: "ClassName reload"`
+   — or `load_project` again after multi-file edits
+3. `test` with class name or file path — fast, no recompile
+4. `evaluate` to debug failures — bindings preserved from prior calls
+5. Only use CLI `beamtalk test` as a final full-suite check before committing
+
+**Useful eval commands:**
+- `Beamtalk help: ClassName` — class docs
+- `Workspace load: "path"` — load a file
+- `ClassName reload` — reload a changed class
+- `Workspace classes` — list loaded classes
+
+**Why MCP over CLI:**
+- Classes stay loaded — no fresh compile each time
+- Local bindings preserved — debug state carries across tool calls
+- Faster iteration — reload one class, not rebuild everything
+
+## Live Workspace (MCP)
 
 The `.mcp.json` in this project configures the `beamtalk` MCP server, which gives
 you live access to a running REPL. Claude Code starts it automatically via
@@ -167,32 +199,95 @@ whether code is correct, evaluate it directly rather than inferring from source.
 
 | Tool | When to use |
 |------|-------------|
-| `evaluate` | Test expressions, explore values, prototype code snippets |
-| `complete` | Get autocompletion suggestions for partial input |
-| `load_file` | Load a `.bt` file into the workspace before evaluating it |
-| `reload_module` | Hot-reload a module after editing — migrates live actors |
-| `unload` | Remove a module and its classes from the workspace |
-| `list_modules` | Check what's currently loaded |
-| `list_actors` | See running actors and their classes |
-| `inspect` | Examine a live actor's state by PID |
-| `test` | Run BUnit tests — pass a class name or omit to run all |
-| `docs` | Look up stdlib class or method docs — primary stdlib reference |
-| `show_codegen` | Inspect generated Core Erlang to debug compilation |
-| `get_bindings` | See current REPL variable bindings |
-| `clear` | Reset the REPL — clears all bindings |
-| `interrupt` | Cancel a stuck or long-running evaluation |
-| `describe` | List available MCP ops and protocol version |
+| `describe` | First call — discover operations and protocol version |
+| `load_project` | Session startup — load all source + test files |
+| `evaluate` | Test expressions, debug, call Workspace/Beamtalk APIs |
+| `test` | Run tests by class name or file path |
+| `complete` | Autocompletion suggestions |
+| `search_examples` | Find patterns and working code (offline) |
+| `show_codegen` | Inspect generated Core Erlang |
+| `inspect` | Examine a live actor's state |
 
-**Stdlib reference:** use `docs` instead of guessing. The stdlib source lives
-inside the beamtalk installation, not in this project. Ask the live workspace:
-- `docs: "Integer"` — all Integer methods with docs
-- `docs: "List" selector: "select:"` — specific method docs
+## Essential Patterns
 
-**Typical workflow:**
-1. Edit a `.bt` source file
-2. `load_file` (new module) or `reload_module` (existing) to apply changes
-3. `evaluate` to verify behaviour interactively
-4. `run_tests` to confirm correctness
+### Class Hierarchy
+
+```beamtalk
+// Immutable data — auto-generates getters, withX: setters, keyword constructor, equality
+Value subclass: Point
+  state: x = 0
+  state: y = 0
+
+// Mutable state — manual getters/setters, self.field := works
+Object subclass: Config
+  state: raw = nil
+
+// Concurrent process — gen_server backed, async casts with !
+Actor subclass: Server
+  state: count = 0
+
+// OTP supervision tree — for long-running services
+Supervisor subclass: MyApp
+  class strategy => #oneForOne
+  class children => #(DatabasePool, HttpServer, Worker)
+```
+
+Rules:
+- Pure data → `Value`
+- Mutable but not concurrent → `Object`
+- Concurrent process → `Actor`
+- Long-running service with child processes → `Supervisor` with `beamtalk run`
+
+### String Escaping
+
+| Syntax | Result |
+|--------|--------|
+| `"hello {name}"` | String interpolation |
+| `"literal \{ brace \}"` | Escaped braces |
+| `"She said ""hello"""` | Escaped double-quote |
+
+### Destructuring and match:
+
+```beamtalk
+// Tuple destructuring (critical for Erlang FFI)
+{#ok, content} := Erlang file read_file: "path"
+
+// Array destructuring
+#[a, b] := #[10, 20]
+
+// Map destructuring
+#{#x => x, #y => y} := someDict
+
+// match: with clauses
+value match: [
+  #ok -> "success";
+  #error -> "failure";
+  _ -> "unknown"
+]
+```
+
+### Key Stdlib Classes
+
+| Class | Purpose |
+|-------|---------|
+| `System` | `getEnv:`, `osPlatform`, `pid` |
+| `Subprocess` | Sync subprocess with stdin/stdout |
+| `ReactiveSubprocess` | Push-mode subprocess with delegate callbacks |
+| `Supervisor` | OTP supervision trees for service applications |
+| `HTTPClient` / `HTTPServer` | HTTP client and server |
+| `File` | Filesystem operations |
+| `Json` / `Yaml` | Serialization |
+
+### Critical Gotcha — Block Mutations
+
+```beamtalk
+// WRONG on Value/Object — assignment inside block doesn't propagate
+count := 0
+items do: [:x | count := count + 1]  // count is still 0!
+
+// CORRECT — use inject:into:
+count := items inject: 0 into: [:acc :x | acc + 1]
+```
 
 ## Not Smalltalk — Common Pitfalls
 
@@ -222,7 +317,7 @@ firstPositive: items =>
 
 **DNU raises a `does_not_understand` error.** Sending a message a class
 doesn't implement raises a structured error — not a silent `false`. Use
-`respondsTo:` or `docs` in the live workspace to confirm a method exists
+`respondsTo:` or `evaluate` in the live workspace to confirm a method exists
 before calling it.
 
 **Implicit return rule:** the last expression of a method body is always its
@@ -244,18 +339,10 @@ safeDiv: other =>
   self / other
 ```
 
-**Binary precedence:**
-
-```beamtalk
-2 + 3 * 4      // => 14  (standard: * before +)
-2 + (3 * 4)    // => 14  (same)
-(2 + 3) * 4    // => 20  (use parens to override)
-```
-
 ## Language Documentation
 
-- Language features: https://jamesc.github.io/beamtalk/docs/language-features.html
-- Syntax rationale: https://jamesc.github.io/beamtalk/docs/syntax-rationale.html
+- **Full language reference:** https://www.beamtalk.dev/docs/language-features — read this when starting work on a new Beamtalk codebase
+- Syntax rationale: https://www.beamtalk.dev/docs/syntax-rationale
 - Examples: see `src/` directory
 "#;
 
@@ -323,7 +410,7 @@ fn write_copilot_instructions(path: &Utf8Path, name: &str) -> Result<()> {
     let content = format!(
         r"# Copilot Instructions for {name}
 
-This is a [Beamtalk](https://jamesc.github.io/beamtalk) project that compiles to the BEAM virtual machine.
+This is a [Beamtalk](https://www.beamtalk.dev) project that compiles to the BEAM virtual machine.
 
 ## Key Conventions
 
@@ -352,9 +439,10 @@ beamtalk test     # Run tests
 ## MCP / Live Workspace
 
 `.mcp.json` configures the `beamtalk` MCP server. In Claude Code it starts
-automatically. Use the MCP tools (`evaluate`, `load_file`, `reload_module`,
-`run_tests`, `docs`, `inspect`) to interact with a live REPL rather than
-inferring behaviour from source. See `AGENTS.md` for the full tool list.
+automatically. Call `describe` first, then `load_project` to load all source.
+Use `evaluate`, `test`, `inspect`, and `show_codegen` to interact with a live
+REPL rather than inferring behaviour from source. See `AGENTS.md` for the
+full tool list and development workflow.
 "
     );
     fs::write(
