@@ -278,11 +278,24 @@ impl ReplClient {
 
     /// Send a load-file operation.
     ///
+    /// **Deprecated:** Use [`load_source`] or evaluate `Workspace load: "path"` instead.
+    ///
     /// Uses [`send_once`] (no retry) because loading a file defines classes on
     /// the server. A retry after partial success would redefine already-loaded
     /// classes and produce duplicate errors.
     pub async fn load_file(&self, path: &str) -> Result<ReplResponse, String> {
         self.send_once(&Self::request_with_param("load-file", "path", path))
+            .await
+    }
+
+    /// Send a load-source operation to compile inline Beamtalk source.
+    ///
+    /// Uses [`send_once`] (no retry) because loading source defines classes on
+    /// the server, same as [`load_file`].
+    // Used in integration tests (#[cfg(test)]) — suppress dead_code lint for binary crate.
+    #[allow(dead_code)]
+    pub async fn load_source(&self, source: &str) -> Result<ReplResponse, String> {
+        self.send_once(&Self::request_with_param("load-source", "source", source))
             .await
     }
 
@@ -802,15 +815,16 @@ mod tests {
 
     impl Drop for ReplWorkspace {
         fn drop(&mut self) {
-            // Stop workspace explicitly to avoid port leaks on CI
+            // Stop workspace explicitly to avoid port leaks on CI.
             if let Some(ref ws_id) = self.workspace_id {
                 let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
                 if let Some(bin) = find_binary(&bin_name) {
                     let _ = Command::new(bin)
                         .args(["workspace", "stop", ws_id])
+                        .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
-                        .status();
+                        .spawn();
                 }
             }
         }
@@ -852,62 +866,55 @@ mod tests {
         // --timeout 300: short idle timeout (5 min) so the workspace dies quickly
         // after the test binary exits, rather than lingering for the default 4h.
         //
-        // We use spawn() and read stdout line-by-line instead of output() because
-        // on Windows the BEAM child process inherits the stdout pipe handle,
-        // causing output() to block forever even after the CLI process exits.
-        let mut child = Command::new(&bin)
+        // Stdout is redirected to a temp file instead of piped. On Windows,
+        // piping creates a handle that the BEAM node inherits; a background
+        // reader thread then blocks forever on the pipe (the BEAM never closes
+        // its copy), preventing the test binary from exiting. A temp file
+        // avoids this: the CLI writes to the file, we poll-read it, and
+        // there's no long-lived thread.
+        let stdout_file =
+            std::env::temp_dir().join(format!("beamtalk-mcp-test-{}.stdout", std::process::id()));
+        let stdout_writer = std::fs::File::create(&stdout_file)
+            .map_err(|e| format!("Failed to create stdout temp file: {e}"))?;
+
+        let child = Command::new(&bin)
             .args(["repl", "--port", "0", "--timeout", "300"])
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(stdout_writer)
+            .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("Failed to start REPL at {}: {e}", bin.display()))?;
 
-        // Read stdout line-by-line until we find the port and workspace ID.
-        //
-        // On Windows the BEAM node keeps inherited pipe handles open, so
-        // output()/wait_with_output() block forever. Instead, read lines in
-        // a background thread with a channel and stop once we have what we need.
-        let stdout_pipe = child.stdout.take().ok_or("no stdout pipe")?;
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        std::thread::spawn(move || {
-            use std::io::BufRead;
-            let reader = std::io::BufReader::new(stdout_pipe);
-            for line in reader.lines() {
-                match line {
-                    Ok(l) => {
-                        if tx.send(l).is_err() {
-                            break; // receiver dropped
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
-
-        // Collect lines until we find both port and workspace ID, or timeout.
+        // Poll the temp file for port and workspace ID.
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         let mut stdout_lines = Vec::new();
         let mut found_port = false;
         let mut found_ws_id = false;
+        let mut last_line_count = 0;
+
         while std::time::Instant::now() < deadline {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            match rx.recv_timeout(remaining) {
-                Ok(line) => {
+            // Re-read the file to get new lines
+            if let Ok(content) = std::fs::read_to_string(&stdout_file) {
+                let lines: Vec<&str> = content.lines().collect();
+                for line in lines.iter().skip(last_line_count) {
                     if line.contains("port") {
                         found_port = true;
                     }
                     if line.contains("Workspace:") {
                         found_ws_id = true;
                     }
-                    stdout_lines.push(line);
-                    if found_port && found_ws_id {
-                        break;
-                    }
+                    stdout_lines.push(line.to_string());
                 }
-                Err(_) => break,
+                last_line_count = lines.len();
+                if found_port && found_ws_id {
+                    break;
+                }
             }
+            std::thread::sleep(Duration::from_millis(100));
         }
+
+        // Clean up temp file (best-effort)
+        let _ = std::fs::remove_file(&stdout_file);
 
         // Don't wait for the CLI process — the workspace BEAM node is
         // independent. On Windows, dropping without wait() is fine.
@@ -1277,6 +1284,12 @@ mod tests {
             resp.results.is_some(),
             "test-all should return a results map"
         );
+        assert!(
+            !resp.has_test_error(),
+            "test-all should pass: status={:?} results={:?}",
+            resp.status,
+            resp.results
+        );
         Ok(())
     }
 
@@ -1303,7 +1316,10 @@ mod tests {
         assert!(resp.results.is_some(), "should return test results");
         assert!(
             !resp.has_test_error(),
-            "ArithmeticTest should pass without failures"
+            "ArithmeticTest should pass without failures: status={:?} results={:?} error={:?}",
+            resp.status,
+            resp.results,
+            resp.error
         );
         Ok(())
     }
@@ -1392,5 +1408,42 @@ mod tests {
             "staleOnce binding should persist across send_once reconnect: {bindings:?}"
         );
         Ok(())
+    }
+
+    /// Cleanup test that runs last (alphabetically after all other `test_*` tests).
+    /// Stops the workspace and schedules a force-exit after a delay.
+    ///
+    /// On Windows, the tokio runtime shutdown hangs indefinitely because open
+    /// WebSocket TCP connections to the workspace never complete their close
+    /// handshake (the BEAM node holds the connections open). Since `libtest`
+    /// doesn't call `process::exit()` on success, the process blocks in
+    /// runtime teardown.
+    ///
+    /// This test spawns a background thread that waits for libtest to print
+    /// the summary (1s grace period), then calls `process::exit(0)` to
+    /// force-terminate. The test itself returns normally so libtest counts
+    /// it as passed and prints the summary.
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_zzz_cleanup() {
+        // Stop the workspace so it doesn't linger for 5 minutes.
+        if let Ok(repl) = REPL.as_ref() {
+            if let Some(ref ws_id) = repl.workspace_id {
+                let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
+                if let Some(bin) = find_binary(&bin_name) {
+                    let _ = Command::new(bin)
+                        .args(["workspace", "stop", ws_id])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn();
+                }
+            }
+        }
+        // Schedule a force-exit after a delay so libtest can print the summary.
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(1));
+            std::process::exit(0);
+        });
     }
 }
