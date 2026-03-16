@@ -10,6 +10,9 @@
 /// [1 / 0] on: Exception do: [:e | e message]
 /// Exception signal: "something went wrong"
 /// ```
+///
+/// @see Result (for expected success/failure outcomes without exceptions)
+/// @see Error (for non-resumable exceptions)
 Object subclass: Exception
 
   /// Return the error message string.

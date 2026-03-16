@@ -1289,8 +1289,9 @@ impl CoreErlangGenerator {
     /// mutations trigger threading. Local vars are threaded through the state accumulator
     /// map alongside fields.
     /// In value type module mode, only field writes trigger threading (no state map).
-    /// BT-1346: Class methods have no State variable to thread through, so mutation
-    /// threading must be disabled. The simple closure path is used instead.
+    /// BT-1346: Class methods have no State variable — field/self-send threading is disabled.
+    /// BT-1414: Captured local variable mutations in class method blocks are threaded
+    /// via a fresh local map (same as value types).
     pub(super) fn needs_mutation_threading(
         &self,
         analysis: &block_analysis::BlockMutationAnalysis,
@@ -1299,10 +1300,15 @@ impl CoreErlangGenerator {
             // REPL: both local vars and fields need threading
             analysis.has_mutations()
         } else if self.in_class_method {
-            // BT-1346: Class methods have no actor State variable. Mutation threading
-            // would generate `let StateAcc = State in` which is invalid Core Erlang.
-            // Use the simple closure-based path instead.
-            false
+            // BT-1346: Class methods have no actor State variable — field writes and
+            // self-sends must NOT trigger state threading.
+            // BT-1414: However, captured local variable mutations (outer vars both read
+            // and written in the block) DO need threading via a fresh local map, same as
+            // value types. Without this, `do:` blocks silently lose local mutations.
+            analysis
+                .captured_reads
+                .iter()
+                .any(|v| analysis.local_writes.contains(v))
         } else if self.context == CodeGenContext::Actor {
             // BT-598: Actor methods: field writes, self-sends,
             // OR local variable mutations all need threading

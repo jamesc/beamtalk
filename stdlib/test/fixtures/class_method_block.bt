@@ -43,3 +43,20 @@ Object subclass: ClassMethodBlock
         doubled := self double: item
         self add: doubled to: doubled
       ]
+
+  // BT-1414: Class method do: with captured local variable mutation
+  class countItems: items =>
+    count := 0
+    items do: [:item | count := count + 1]
+    count
+
+  // BT-1414: Class method do: with two captured mutations
+  class sumAndCount: items =>
+    sum := 0
+    count := 0
+    items
+      do: [:each |
+        sum := sum + each
+        count := count + 1
+      ]
+    #(sum, count)

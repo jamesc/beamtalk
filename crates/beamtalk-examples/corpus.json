@@ -6396,7 +6396,7 @@
         "string join",
         "subclassing"
       ],
-      "source": "/// Chat Member Actor — Part of Chat Room Demo (BT-431, BT-568)\n///\n/// ChatMember represents a chat participant with a name, inbox, and room ref\n/// It demonstrates:\n/// - Actor-to-actor references (room field)\n/// - Receiving formatted messages from other actors\n/// - State mutations (name, inbox, room)\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load examples/chat-room/message.bt\n///   > :load examples/chat-room/chat_room.bt\n///   > :load examples/chat-room/chat_member.bt\n///   > room := ChatRoom spawn\n///   > alice := ChatMember spawn\n///   > alice setName: \"Alice\"\n///   > alice setRoom: room\n///   > room join: alice\n///   > room say: \"Hello!\" from: \"Alice\"\n///\n/// See examples/chat-room/README.md for a full walkthrough\nActor subclass: ChatMember\n  state: name = \"Guest\"  // Member's display name\n  state: inbox = #()  // List of received messages\n  state: room = nil  // Reference to the ChatRoom actor\n\n  // Set the member's display name\n  setName: newName => self.name := newName\n\n  // Set the chat room reference\n  // Demonstrates: Storing an actor reference in a field\n  setRoom: newRoom => self.room := newRoom\n\n  // Receive a message (called by ChatRoom during broadcast)\n  // Demonstrates: List concatenation for inbox\n  receiveMessage: msg => self.inbox := self.inbox ++ #(msg)\n\n  // Send a message via the room, using own name as sender\n  // Demonstrates: Calling method on actor reference stored in field\n  say: message => self.room say: message from: self.name\n\n  // Return received messages\n  getInbox => self.inbox\n\n  // Return member's name\n  getName => self.name",
+      "source": "/// Chat Member Actor — Part of Chat Room Demo\n///\n/// ChatMember represents a chat participant with a name, inbox, and room ref\n/// It demonstrates:\n/// - Actor-to-actor references (room field)\n/// - Receiving formatted messages from other actors\n/// - State mutations (name, inbox, room)\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load examples/chat-room/message.bt\n///   > :load examples/chat-room/chat_room.bt\n///   > :load examples/chat-room/chat_member.bt\n///   > room := ChatRoom spawn\n///   > alice := ChatMember spawn\n///   > alice setName: \"Alice\"\n///   > alice setRoom: room\n///   > room join: alice\n///   > room say: \"Hello!\" from: \"Alice\"\n///\n/// See examples/chat-room/README.md for a full walkthrough\nActor subclass: ChatMember\n  state: name = \"Guest\"  // Member's display name\n  state: inbox = #()  // List of received messages\n  state: room = nil  // Reference to the ChatRoom actor\n\n  // Set the member's display name\n  setName: newName => self.name := newName\n\n  // Set the chat room reference\n  // Demonstrates: Storing an actor reference in a field\n  setRoom: newRoom => self.room := newRoom\n\n  // Receive a message (called by ChatRoom during broadcast)\n  // Demonstrates: List concatenation for inbox\n  receiveMessage: msg => self.inbox := self.inbox ++ #(msg)\n\n  // Send a message via the room, using own name as sender\n  // Demonstrates: Calling method on actor reference stored in field\n  say: message => self.room say: message from: self.name\n\n  // Return received messages\n  getInbox => self.inbox\n\n  // Return member's name\n  getName => self.name",
       "explanation": ""
     },
     {
@@ -6449,8 +6449,8 @@
         "string join",
         "subclassing"
       ],
-      "source": "// Chat Room Demo — Multi-Actor Showcase (BT-431, BT-568)\n//\n// This example demonstrates:\n// 1. **Actors** — ChatRoom and ChatMember as independent processes\n// 2. **Message passing** — sync-by-default messages between actors\n// 3. **Collections** — Set for member tracking, List for message history\n// 4. **Value types** — Message class (Object subclass) for structured data\n// 5. **Blocks** — iteration with do: for broadcasting\n// 6. **State management** — mutable actor state\n// 7. **Live interaction** — REPL as the chat interface\n//\n// Try it in the REPL:\n//   $ beamtalk repl\n//   > :load examples/chat-room/message.bt\n//   > :load examples/chat-room/chat_room.bt\n//   > :load examples/chat-room/chat_member.bt\n//   > room := ChatRoom spawn\n//   > alice := ChatMember spawn\n//   > alice setName: \"Alice\"\n//   > alice setRoom: room\n//   > room join: alice\n//   > room say: \"Hello!\" from: \"Alice\"\n//   > room getHistory\n//\n// See examples/chat-room/README.md for a full walkthrough\n\n// ===========================================================================\n// CHATROOM ACTOR\n// ===========================================================================\n\n/// ChatRoom manages a Set of member actors and a List of message strings\n/// It demonstrates:\n/// - Storing actor references (PIDs) in a Set\n/// - String concatenation for formatted messages\n/// - Broadcasting via do: iteration over actor Set\n/// - List concatenation for message history\nActor subclass: ChatRoom\n  state: members = Set new  // Set of ChatMember actor references\n  state: history = #()  // List of formatted message strings\n\n  // Add a member to the room\n  // Demonstrates: Set add: operation with actor references\n  join: member => self.members := self.members add: member\n\n  // Remove a member from the room\n  // Demonstrates: Set remove: operation\n  leave: member => self.members := self.members remove: member\n\n  // Broadcast a message to all members\n  // Demonstrates:\n  // - List concatenation (++) for history\n  // - Set do: iteration with blocks\n  // - Calling actor methods inside block (m receiveMessage:)\n  say: text from: senderName =>\n    self.history := self.history ++ #(senderName ++ \": \" ++ text)\n    self.members do: [:m | m receiveMessage: senderName ++ \": \" ++ text]\n\n  // Return current online members\n  // Demonstrates: Returning a Set of actor references\n  online => self.members\n\n  // Return message history\n  // Demonstrates: Returning a List of formatted strings\n  getHistory => self.history",
-      "explanation": "Chat Room Demo — Multi-Actor Showcase (BT-431, BT-568)  This example demonstrates: 1. **Actors** — ChatRoom and ChatMember as independent processes 2. **Message passing** — sync-by-default messages between actors 3. **Collections** — Set for member tracking, List for message history 4. **Value types** — Message class (Object subclass) for structured data 5. **Blocks** — iteration with do: for broadcasting 6. **State management** — mutable actor state 7. **Live interaction** — REPL as the chat interface  Try it in the REPL:   $ beamtalk repl   > :load examples/chat-room/message.bt   > :load examples/chat-room/chat_room.bt   > :load examples/chat-room/chat_member.bt   > room := ChatRoom spawn   > alice := ChatMember spawn   > alice setName: \"Alice\"   > alice setRoom: room   > room join: alice   > room say: \"Hello!\" from: \"Alice\"   > room getHistory  See examples/chat-room/README.md for a full walkthrough"
+      "source": "// Chat Room Demo — Multi-Actor Showcase\n//\n// This example demonstrates:\n// 1. **Actors** — ChatRoom and ChatMember as independent processes\n// 2. **Message passing** — sync-by-default messages between actors\n// 3. **Collections** — Set for member tracking, List for message history\n// 4. **Value types** — Message class (Object subclass) for structured data\n// 5. **Blocks** — iteration with do: for broadcasting\n// 6. **State management** — mutable actor state\n// 7. **Live interaction** — REPL as the chat interface\n//\n// Try it in the REPL:\n//   $ beamtalk repl\n//   > :load examples/chat-room/message.bt\n//   > :load examples/chat-room/chat_room.bt\n//   > :load examples/chat-room/chat_member.bt\n//   > room := ChatRoom spawn\n//   > alice := ChatMember spawn\n//   > alice setName: \"Alice\"\n//   > alice setRoom: room\n//   > room join: alice\n//   > room say: \"Hello!\" from: \"Alice\"\n//   > room getHistory\n//\n// See examples/chat-room/README.md for a full walkthrough\n\n// ===========================================================================\n// CHATROOM ACTOR\n// ===========================================================================\n\n/// ChatRoom manages a Set of member actors and a List of message strings\n/// It demonstrates:\n/// - Storing actor references (PIDs) in a Set\n/// - String concatenation for formatted messages\n/// - Broadcasting via do: iteration over actor Set\n/// - List concatenation for message history\nActor subclass: ChatRoom\n  state: members = Set new  // Set of ChatMember actor references\n  state: history = #()  // List of formatted message strings\n\n  // Add a member to the room\n  // Demonstrates: Set add: operation with actor references\n  join: member => self.members := self.members add: member\n\n  // Remove a member from the room\n  // Demonstrates: Set remove: operation\n  leave: member => self.members := self.members remove: member\n\n  // Broadcast a message to all members\n  // Demonstrates:\n  // - List concatenation (++) for history\n  // - Set do: iteration with blocks\n  // - Calling actor methods inside block (m receiveMessage:)\n  say: text from: senderName =>\n    self.history := self.history ++ #(senderName ++ \": \" ++ text)\n    self.members do: [:m | m receiveMessage: senderName ++ \": \" ++ text]\n\n  // Return current online members\n  // Demonstrates: Returning a Set of actor references\n  online => self.members\n\n  // Return message history\n  // Demonstrates: Returning a List of formatted strings\n  getHistory => self.history",
+      "explanation": "Chat Room Demo — Multi-Actor Showcase  This example demonstrates: 1. **Actors** — ChatRoom and ChatMember as independent processes 2. **Message passing** — sync-by-default messages between actors 3. **Collections** — Set for member tracking, List for message history 4. **Value types** — Message class (Object subclass) for structured data 5. **Blocks** — iteration with do: for broadcasting 6. **State management** — mutable actor state 7. **Live interaction** — REPL as the chat interface  Try it in the REPL:   $ beamtalk repl   > :load examples/chat-room/message.bt   > :load examples/chat-room/chat_room.bt   > :load examples/chat-room/chat_member.bt   > room := ChatRoom spawn   > alice := ChatMember spawn   > alice setName: \"Alice\"   > alice setRoom: room   > room join: alice   > room say: \"Hello!\" from: \"Alice\"   > room getHistory  See examples/chat-room/README.md for a full walkthrough"
     },
     {
       "id": "examples-chat-room-src-message",
@@ -6485,7 +6485,7 @@
         "subclassing",
         "value"
       ],
-      "source": "/// Message — immutable value type for chat messages (BT-568)\n///\n/// Demonstrates:\n/// 1. **Value types** — `Value subclass:` (not Actor), no process overhead\n/// 2. **State** — text and sender fields with defaults\n/// 3. **Immutability** — enforced by the compiler; mutations are errors\n/// 4. **Auto-generated getters** — `text` and `sender` provided by Value\n///\n/// Usage in REPL:\n///   > :load examples/chat-room/message.bt\n///   > msg := Message text: \"Hello!\" sender: \"Alice\"\n///   > msg text\n///   > msg describe\nValue subclass: Message\n  state: text = \"\"\n  state: sender = \"Anonymous\"\n\n  // Human-readable description\n  describe => self.sender ++ \": \" ++ self.text",
+      "source": "/// Message — immutable value type for chat messages\n///\n/// Demonstrates:\n/// 1. **Value types** — `Value subclass:` (not Actor), no process overhead\n/// 2. **State** — text and sender fields with defaults\n/// 3. **Immutability** — enforced by the compiler; mutations are errors\n/// 4. **Auto-generated getters** — `text` and `sender` provided by Value\n///\n/// Usage in REPL:\n///   > :load examples/chat-room/message.bt\n///   > msg := Message text: \"Hello!\" sender: \"Alice\"\n///   > msg text\n///   > msg describe\nValue subclass: Message\n  state: text = \"\"\n  state: sender = \"Anonymous\"\n\n  // Human-readable description\n  describe => self.sender ++ \": \" ++ self.text",
       "explanation": ""
     },
     {
@@ -6529,7 +6529,7 @@
         "subclassing",
         "unmute:"
       ],
-      "source": "/// Moderator — Actor subclass of ChatMember (BT-568)\n///\n/// Demonstrates:\n/// 1. **Actor inheritance** — ChatMember subclass: Moderator\n/// 2. **super calls** — Moderator overrides say: to add \"[MOD]\" prefix\n/// 3. **New methods** — kick: and mute: for moderation actions\n///\n/// Usage in REPL:\n///   > :load examples/chat-room/message.bt\n///   > :load examples/chat-room/chat_room.bt\n///   > :load examples/chat-room/chat_member.bt\n///   > :load examples/chat-room/moderator.bt\n///   > room := ChatRoom spawn\n///   > mod := Moderator spawn\n///   > mod setName: \"Admin\"\n///   > mod setRoom: room\n///   > room join: mod\n///   > mod say: \"Welcome!\"\nChatMember subclass: Moderator\n  state: muted = Set new  // Set of muted member names\n\n  // Override say to prefix messages with [MOD]\n  // Demonstrates: super call to parent method\n  say: message => super say: \"[MOD] \" ++ message\n\n  // Kick a member from the room\n  // Demonstrates: Actor-to-actor method calls\n  kick: member => self.room leave: member\n\n  // Mute a member by name\n  mute: memberName => self.muted := self.muted add: memberName\n\n  // Unmute a member by name\n  unmute: memberName => self.muted := self.muted remove: memberName\n\n  // Check if a member name is muted\n  isMuted: memberName => self.muted includes: memberName\n\n  // Return the set of muted member names\n  getMuted => self.muted",
+      "source": "/// Moderator — Actor subclass of ChatMember\n///\n/// Demonstrates:\n/// 1. **Actor inheritance** — ChatMember subclass: Moderator\n/// 2. **super calls** — Moderator overrides say: to add \"[MOD]\" prefix\n/// 3. **New methods** — kick: and mute: for moderation actions\n///\n/// Usage in REPL:\n///   > :load examples/chat-room/message.bt\n///   > :load examples/chat-room/chat_room.bt\n///   > :load examples/chat-room/chat_member.bt\n///   > :load examples/chat-room/moderator.bt\n///   > room := ChatRoom spawn\n///   > mod := Moderator spawn\n///   > mod setName: \"Admin\"\n///   > mod setRoom: room\n///   > room join: mod\n///   > mod say: \"Welcome!\"\nChatMember subclass: Moderator\n  state: muted = Set new  // Set of muted member names\n\n  // Override say to prefix messages with [MOD]\n  // Demonstrates: super call to parent method\n  say: message => super say: \"[MOD] \" ++ message\n\n  // Kick a member from the room\n  // Demonstrates: Actor-to-actor method calls\n  kick: member => self.room leave: member\n\n  // Mute a member by name\n  mute: memberName => self.muted := self.muted add: memberName\n\n  // Unmute a member by name\n  unmute: memberName => self.muted := self.muted remove: memberName\n\n  // Check if a member name is muted\n  isMuted: memberName => self.muted includes: memberName\n\n  // Return the set of muted member names\n  getMuted => self.muted",
       "explanation": ""
     },
     {
@@ -6758,7 +6758,7 @@
         "value",
         "where"
       ],
-      "source": "/// Point — a 2D point value object (BT-926 example).\n///\n/// Demonstrates the `Value subclass:` pattern (ADR 0042):\n///   - Three construction forms: new, new:, keyword constructor\n///   - Auto-generated getters and with*: functional setters\n///   - Immutability: originals are never modified\n///   - Value equality: two Points with the same coordinates are ==\n///   - User-defined methods on a value type\n///   - Usage in collections (collect:, select:, inject:into:)\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load src/point.bt\n///   > p := Point x: 3 y: 4\n///   > p distanceSquared          => 25\n///   > (p withX: 0) distanceSquared     => 16\n///   > (Point x: 3 y: 4) == (Point x: 3 y: 4)   => true\nValue subclass: Point\n  /// X coordinate (default 0)\n  state: x = 0\n  /// Y coordinate (default 0)\n  state: y = 0\n\n  // Euclidean distance squared from the origin (avoids a Float sqrt dependency)\n  distanceSquared => (self.x * self.x) + (self.y * self.y)\n\n  // Translate by a delta in each axis, returning a new Point\n  translateX: dx y: dy => Point x: self.x + dx y: self.y + dy\n\n  // Return a Point whose coordinates are negated\n  negated => Point x: self.x negated y: self.y negated\n\n  // Human-readable representation\n  printString => \"Point({self.x}, {self.y})\"",
+      "source": "/// Point — a 2D point value object.\n///\n/// Demonstrates the `Value subclass:` pattern (ADR 0042):\n///   - Three construction forms: new, new:, keyword constructor\n///   - Auto-generated getters and with*: functional setters\n///   - Immutability: originals are never modified\n///   - Value equality: two Points with the same coordinates are ==\n///   - User-defined methods on a value type\n///   - Usage in collections (collect:, select:, inject:into:)\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load src/point.bt\n///   > p := Point x: 3 y: 4\n///   > p distanceSquared          => 25\n///   > (p withX: 0) distanceSquared     => 16\n///   > (Point x: 3 y: 4) == (Point x: 3 y: 4)   => true\nValue subclass: Point\n  /// X coordinate (default 0)\n  state: x = 0\n  /// Y coordinate (default 0)\n  state: y = 0\n\n  // Euclidean distance squared from the origin (avoids a Float sqrt dependency)\n  distanceSquared => (self.x * self.x) + (self.y * self.y)\n\n  // Translate by a delta in each axis, returning a new Point\n  translateX: dx y: dy => Point x: self.x + dx y: self.y + dy\n\n  // Return a Point whose coordinates are negated\n  negated => Point x: self.x negated y: self.y negated\n\n  // Human-readable representation\n  printString => \"Point({self.x}, {self.y})\"",
       "explanation": ""
     },
     {
@@ -9902,14 +9902,18 @@
         "anonymous function",
         "assign",
         "assignment",
+        "async",
         "callback",
         "class_method_block_test",
         "closure",
+        "concurrent",
         "extends",
         "fold",
         "for each",
         "for-each",
         "forEach",
+        "gen_server",
+        "genserver",
         "inherit",
         "inheritance",
         "iterate",
@@ -9921,18 +9925,22 @@
         "mutate",
         "mutation",
         "object",
+        "process",
         "reduce",
         "set",
         "subclassing",
+        "testActorClassMethodDoWithMutation",
         "testCollectWithClassMethodBlock",
+        "testDoWithCapturedMutation",
         "testDoWithClassMethodBlock",
+        "testDoWithTwoCapturedMutations",
         "testInjectIntoWithClassMethodBlock",
         "testLocalAssignmentWithClassMethodSelfSend",
         "testMultipleClassMethodSelfSends",
         "testSortWithClassMethodBlock",
         "transform"
       ],
-      "source": "// BT-1397: Tests that class methods can contain blocks that call other\n// class methods via `self` without producing Core Erlang parse errors.\n\nTestCase subclass: ClassMethodBlockTest\n\n  // sort: block calling class method via self\n  testSortWithClassMethodBlock =>\n    result := ClassMethodBlock sortItems: #(3, 1, 2)\n    self assert: result equals: #(1, 2, 3)\n\n  // collect: block calling class method via self\n  testCollectWithClassMethodBlock =>\n    result := ClassMethodBlock doubleAll: #(1, 2, 3)\n    self assert: result equals: #(2, 4, 6)\n\n  // do: block calling class method via self (discarded result)\n  testDoWithClassMethodBlock =>\n    result := ClassMethodBlock processAll: #(1, 2, 3)\n    self assert: result equals: #(1, 2, 3)\n\n  // inject:into: block calling class method via self\n  testInjectIntoWithClassMethodBlock =>\n    result := ClassMethodBlock sumAll: #(1, 2, 3)\n    self assert: result equals: 6\n\n  // Block with local assignments whose RHS is a class method self-send\n  testLocalAssignmentWithClassMethodSelfSend =>\n    result := ClassMethodBlock doubleAndSort: #(3, 1, 2)\n    self assert: result equals: #(1, 2, 3)\n\n  // Multiple class method self-sends in a block\n  testMultipleClassMethodSelfSends =>\n    result := ClassMethodBlock processWithMultipleSends: #(1, 2, 3)\n    self assert: result equals: #(4, 8, 12)",
+      "source": "// BT-1397: Tests that class methods can contain blocks that call other\n// class methods via `self` without producing Core Erlang parse errors.\n\nTestCase subclass: ClassMethodBlockTest\n\n  // sort: block calling class method via self\n  testSortWithClassMethodBlock =>\n    result := ClassMethodBlock sortItems: #(3, 1, 2)\n    self assert: result equals: #(1, 2, 3)\n\n  // collect: block calling class method via self\n  testCollectWithClassMethodBlock =>\n    result := ClassMethodBlock doubleAll: #(1, 2, 3)\n    self assert: result equals: #(2, 4, 6)\n\n  // do: block calling class method via self (discarded result)\n  testDoWithClassMethodBlock =>\n    result := ClassMethodBlock processAll: #(1, 2, 3)\n    self assert: result equals: #(1, 2, 3)\n\n  // inject:into: block calling class method via self\n  testInjectIntoWithClassMethodBlock =>\n    result := ClassMethodBlock sumAll: #(1, 2, 3)\n    self assert: result equals: 6\n\n  // Block with local assignments whose RHS is a class method self-send\n  testLocalAssignmentWithClassMethodSelfSend =>\n    result := ClassMethodBlock doubleAndSort: #(3, 1, 2)\n    self assert: result equals: #(1, 2, 3)\n\n  // Multiple class method self-sends in a block\n  testMultipleClassMethodSelfSends =>\n    result := ClassMethodBlock processWithMultipleSends: #(1, 2, 3)\n    self assert: result equals: #(4, 8, 12)\n\n  // BT-1414: do: with captured local variable mutation in class method\n  testDoWithCapturedMutation =>\n    result := ClassMethodBlock countItems: #(1, 2, 3)\n    self assert: result equals: 3\n\n  // BT-1414: do: with two captured mutations simultaneously\n  testDoWithTwoCapturedMutations =>\n    result := ClassMethodBlock sumAndCount: #(10, 20, 30)\n    self assert: result equals: #(60, 3)\n\n  // BT-1414: do: with captured mutation on Actor class method (context=Actor)\n  testActorClassMethodDoWithMutation =>\n    result := ActorClassMethodBlock countItems: #(1, 2, 3, 4, 5)\n    self assert: result equals: 5",
       "explanation": "BT-1397: Tests that class methods can contain blocks that call other class methods via `self` without producing Core Erlang parse errors."
     },
     {
@@ -11521,6 +11529,40 @@
       "explanation": "BT-741: Test fixture for class methods on Actor subclasses with local variables Class methods must NOT inject the actor State parameter"
     },
     {
+      "id": "stdlib-test-fixtures-actor-class-method-block",
+      "title": "ActorClassMethodBlock",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "ActorClassMethodBlock",
+        "actor",
+        "actor_class_method_block",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "countItems:",
+        "extends",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "process",
+        "set",
+        "subclassing"
+      ],
+      "source": "// BT-1414: Actor class with class method do: mutation (context=Actor).\n// Verifies that class method captured mutation threading works when\n// the module context is Actor (not just ValueType).\n\nActor subclass: ActorClassMethodBlock\n\n  // Class method on an Actor subclass — context is Actor, not ValueType\n  class countItems: items =>\n    count := 0\n    items do: [:item | count := count + 1]\n    count",
+      "explanation": "BT-1414: Actor class with class method do: mutation (context=Actor). Verifies that class method captured mutation threading works when the module context is Actor (not just ValueType)."
+    },
+    {
       "id": "stdlib-test-fixtures-actor-collect-counter",
       "title": "ActorCollectCounter",
       "category": "stdlib-fixtures",
@@ -12045,6 +12087,7 @@
         "class_method_block",
         "closure",
         "compare:with:",
+        "countItems:",
         "double:",
         "doubleAll:",
         "doubleAndSort:",
@@ -12071,9 +12114,10 @@
         "sortItems:",
         "subclassing",
         "sumAll:",
+        "sumAndCount:",
         "transform"
       ],
-      "source": "// BT-1397: Test fixture for class method calls inside blocks in class methods.\n// Class methods that contain blocks calling other class methods via `self`.\n\nObject subclass: ClassMethodBlock\n\n  class compare: a with: b => a < b\n\n  class double: x => x * 2\n\n  class add: a to: b => a + b\n\n  // sort: block calling class method\n  class sortItems: items => items sort: [:a :b | self compare: a with: b]\n\n  // collect: block calling class method\n  class doubleAll: items => items collect: [:item | self double: item]\n\n  // do: block calling class method (non-last, discarded result)\n  class processAll: items =>\n    items do: [:item | self double: item]\n    items\n\n  // inject:into: block calling class method\n  class sumAll: items =>\n    items inject: 0 into: [:acc :item | self add: acc to: item]\n\n  // Multiple statements in block: self-send not last\n  class doubleAndSort: items =>\n    items\n      sort: [:a :b |\n        da := self double: a\n        db := self double: b\n        self compare: da with: db\n      ]\n\n  // Multiple self-sends in block body\n  class processWithMultipleSends: items =>\n    items\n      collect: [:item |\n        doubled := self double: item\n        self add: doubled to: doubled\n      ]",
+      "source": "// BT-1397: Test fixture for class method calls inside blocks in class methods.\n// Class methods that contain blocks calling other class methods via `self`.\n\nObject subclass: ClassMethodBlock\n\n  class compare: a with: b => a < b\n\n  class double: x => x * 2\n\n  class add: a to: b => a + b\n\n  // sort: block calling class method\n  class sortItems: items => items sort: [:a :b | self compare: a with: b]\n\n  // collect: block calling class method\n  class doubleAll: items => items collect: [:item | self double: item]\n\n  // do: block calling class method (non-last, discarded result)\n  class processAll: items =>\n    items do: [:item | self double: item]\n    items\n\n  // inject:into: block calling class method\n  class sumAll: items =>\n    items inject: 0 into: [:acc :item | self add: acc to: item]\n\n  // Multiple statements in block: self-send not last\n  class doubleAndSort: items =>\n    items\n      sort: [:a :b |\n        da := self double: a\n        db := self double: b\n        self compare: da with: db\n      ]\n\n  // Multiple self-sends in block body\n  class processWithMultipleSends: items =>\n    items\n      collect: [:item |\n        doubled := self double: item\n        self add: doubled to: doubled\n      ]\n\n  // BT-1414: Class method do: with captured local variable mutation\n  class countItems: items =>\n    count := 0\n    items do: [:item | count := count + 1]\n    count\n\n  // BT-1414: Class method do: with two captured mutations\n  class sumAndCount: items =>\n    sum := 0\n    count := 0\n    items\n      do: [:each |\n        sum := sum + each\n        count := count + 1\n      ]\n    #(sum, count)",
       "explanation": "BT-1397: Test fixture for class method calls inside blocks in class methods. Class methods that contain blocks calling other class methods via `self`."
     },
     {
