@@ -272,26 +272,32 @@ impl ReplClient {
         let mut last_error = cached_error.to_string();
 
         loop {
-            let new_port = beamtalk_workspace::read_port_file(workspace_id)
+            // Read the port file — it may be temporarily missing during a restart
+            // (old file deleted, new one not yet written). Keep polling on None.
+            let Some(new_port) = beamtalk_workspace::read_port_file(workspace_id)
                 .ok()
                 .flatten()
                 .map(|(port, _nonce)| port)
-                .ok_or_else(|| {
-                    format!(
-                        "{cached_error}. \
-                         Could not read workspace port file for '{workspace_id}'; \
-                         try restarting the MCP server."
-                    )
-                })?;
-
-            // Port unchanged and first iteration — the workspace hasn't restarted yet
-            // (or the file update is lagging). Keep polling until the deadline.
-            if new_port == current_port && tokio::time::Instant::now() < deadline {
+            else {
+                last_error = format!(
+                    "{cached_error}. \
+                     Could not read workspace port file for '{workspace_id}'"
+                );
+                if tokio::time::Instant::now() >= deadline {
+                    break;
+                }
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 continue;
-            }
+            };
+
+            // Port unchanged — the workspace hasn't restarted yet (or the file
+            // update is lagging). Keep polling until the deadline.
             if new_port == current_port {
-                break; // Deadline expired with no port change
+                if tokio::time::Instant::now() >= deadline {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                continue;
             }
 
             // Re-read the cookie — the workspace may have generated a new one on restart.
