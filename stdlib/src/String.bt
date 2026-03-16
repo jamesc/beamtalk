@@ -445,11 +445,13 @@ sealed typed Collection subclass: String
 
   /// Collect results of evaluating `block` on each grapheme cluster.
   ///
+  /// Returns a String built by concatenating the block results.
+  ///
   /// ## Examples
   /// ```beamtalk
-  /// "abc" collect: [:c | c uppercase]  // => #("A", "B", "C")
+  /// "abc" collect: [:c | c uppercase]  // => "ABC"
   /// ```
-  collect: block :: Block -> List => @primitive "collect:"
+  collect: block :: Block -> String => @primitive "collect:"
 
   /// Select grapheme clusters for which `block` returns true.
   ///
@@ -461,6 +463,16 @@ sealed typed Collection subclass: String
   /// "a1b2" select: [:c | c isAlpha]    // => "ab"
   /// ```
   select: block :: Block -> String => @primitive "select:"
+
+  /// Reject grapheme clusters for which `block` returns true.
+  ///
+  /// Returns a String of the grapheme clusters that were not rejected.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "a1b2" reject: [:c | c isAlpha]    // => "12"
+  /// ```
+  reject: block :: Block -> String => @primitive "reject:"
 
   /// Return a lazy Stream over the characters (grapheme clusters).
   ///

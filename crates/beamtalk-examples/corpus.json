@@ -17177,8 +17177,10 @@
         "TestCase",
         "assign",
         "assignment",
+        "exclude",
         "extends",
         "filter",
+        "filter out",
         "filtering",
         "for each",
         "for-each",
@@ -17204,6 +17206,7 @@
         "testEndsWith",
         "testIncludesSubstring",
         "testIndexOf",
+        "testReject",
         "testRepeat",
         "testReverse",
         "testSelect",
@@ -17212,7 +17215,7 @@
         "transform",
         "where"
       ],
-      "source": "// String operations tests - migrated from bootstrap/string_ops.bt (BT-827)\n\nTestCase subclass: StringOperationsTest\n\n  testAt =>\n    // 1-based grapheme access\n    self assert: (\"hello\" at: 1) equals: \"h\"\n    self assert: (\"hello\" at: 5) equals: \"o\"\n\n  testCapitalize =>\n    self assert: \"hello\" capitalize equals: \"Hello\"\n    self assert: \"HELLO\" capitalize equals: \"HELLO\"\n\n  testReverse => self assert: \"hello\" reverse equals: \"olleh\"\n\n  testIncludesSubstring =>\n    self assert: (\"hello world\" includesSubstring: \"world\")\n    self deny: (\"hello\" includesSubstring: \"xyz\")\n\n  testStartsWith =>\n    self assert: (\"hello\" startsWith: \"hel\")\n    self deny: (\"hello\" startsWith: \"xyz\")\n\n  testEndsWith =>\n    self assert: (\"hello\" endsWith: \"llo\")\n    self deny: (\"hello\" endsWith: \"xyz\")\n\n  testIndexOf =>\n    self assert: (\"hello\" indexOf: \"ell\") equals: 2\n    self assert: (\"hello\" indexOf: \"xyz\") equals: nil\n\n  testSplitOn => self assert: (\"a,b,c\" splitOn: \",\") equals: #(\"a\", \"b\", \"c\")\n\n  testRepeat => self assert: (\"ab\" repeat: 3) equals: \"ababab\"\n\n  testAsList => self assert: \"hi\" asList equals: #(\"h\", \"i\")\n\n  testDo =>\n    // do: returns nil\n    self assert: (\"hi\" do: [:ch | nil]) equals: nil\n\n  testCollect =>\n    // collect: - map over graphemes (returns list)\n    self assert: (\"hi\" collect: [:ch | ch uppercase]) equals: #(\"H\", \"I\")\n    self assert: (\"abc\" collect: [:ch | ch uppercase]) equals: #(\"A\", \"B\", \"C\")\n    // on string variables (not just literals)\n    s := \"hello\"\n    self assert: (s collect: [:ch |\n      ch uppercase\n    ]) equals: #(\"H\", \"E\", \"L\", \"L\", \"O\")\n\n  testSelect =>\n    // select: - filter graphemes (returns string)\n    self assert: (\"hello\" select: [:ch | ch /= \"l\"]) equals: \"heo\"\n    self assert: (\"abcd\" select: [:ch | ch < \"c\"]) equals: \"ab\"\n    // on string variables\n    s := \"hello\"\n    self assert: (s select: [:ch | ch > \"h\"]) equals: \"llo\"",
+      "source": "// String operations tests - migrated from bootstrap/string_ops.bt (BT-827)\n\nTestCase subclass: StringOperationsTest\n\n  testAt =>\n    // 1-based grapheme access\n    self assert: (\"hello\" at: 1) equals: \"h\"\n    self assert: (\"hello\" at: 5) equals: \"o\"\n\n  testCapitalize =>\n    self assert: \"hello\" capitalize equals: \"Hello\"\n    self assert: \"HELLO\" capitalize equals: \"HELLO\"\n\n  testReverse => self assert: \"hello\" reverse equals: \"olleh\"\n\n  testIncludesSubstring =>\n    self assert: (\"hello world\" includesSubstring: \"world\")\n    self deny: (\"hello\" includesSubstring: \"xyz\")\n\n  testStartsWith =>\n    self assert: (\"hello\" startsWith: \"hel\")\n    self deny: (\"hello\" startsWith: \"xyz\")\n\n  testEndsWith =>\n    self assert: (\"hello\" endsWith: \"llo\")\n    self deny: (\"hello\" endsWith: \"xyz\")\n\n  testIndexOf =>\n    self assert: (\"hello\" indexOf: \"ell\") equals: 2\n    self assert: (\"hello\" indexOf: \"xyz\") equals: nil\n\n  testSplitOn => self assert: (\"a,b,c\" splitOn: \",\") equals: #(\"a\", \"b\", \"c\")\n\n  testRepeat => self assert: (\"ab\" repeat: 3) equals: \"ababab\"\n\n  testAsList => self assert: \"hi\" asList equals: #(\"h\", \"i\")\n\n  testDo =>\n    // do: returns nil\n    self assert: (\"hi\" do: [:ch | nil]) equals: nil\n\n  testCollect =>\n    // collect: - map over graphemes (returns string)\n    self assert: (\"hi\" collect: [:ch | ch uppercase]) equals: \"HI\"\n    self assert: (\"abc\" collect: [:ch | ch uppercase]) equals: \"ABC\"\n    // on string variables (not just literals)\n    s := \"hello\"\n    self assert: (s collect: [:ch | ch uppercase]) equals: \"HELLO\"\n    // identity collect returns same string\n    self assert: (\"abc\" collect: [:ch | ch]) equals: \"abc\"\n\n  testSelect =>\n    // select: - filter graphemes (returns string)\n    self assert: (\"hello\" select: [:ch | ch /= \"l\"]) equals: \"heo\"\n    self assert: (\"abcd\" select: [:ch | ch < \"c\"]) equals: \"ab\"\n    // on string variables\n    s := \"hello\"\n    self assert: (s select: [:ch | ch > \"h\"]) equals: \"llo\"\n\n  testReject =>\n    // reject: - remove graphemes (returns string)\n    self assert: (\"hello\" reject: [:ch | ch =:= \"l\"]) equals: \"heo\"\n    self assert: (\"a1b2c3\" reject: [:ch | ch isDigit]) equals: \"abc\"\n    // on string variables\n    s := \"hello\"\n    self assert: (s reject: [:ch | ch < \"l\"]) equals: \"llo\"\n    // empty result\n    self assert: (\"aaa\" reject: [:ch | ch =:= \"a\"]) equals: \"\"",
       "explanation": "String operations tests - migrated from bootstrap/string_ops.bt (BT-827)"
     },
     {

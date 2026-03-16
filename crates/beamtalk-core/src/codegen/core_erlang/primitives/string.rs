@@ -199,6 +199,11 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
             p0.to_string(),
             ")"
         ]),
+        "reject:" => Some(docvec![
+            "call 'beamtalk_string':'reject'(Self, ",
+            p0.to_string(),
+            ")"
+        ]),
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
         // Class-side factory: String class withAll: list joins grapheme list into a String
         "withAll:" => Some(docvec![
