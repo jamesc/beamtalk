@@ -655,10 +655,7 @@ Object subclass: Foo
         let tokens = lex_with_eof(src);
         let (module, _) = parse(tokens);
         assert!(
-            matches!(
-                &module.expressions[1].expression,
-                Expression::Match { .. }
-            ),
+            matches!(&module.expressions[1].expression, Expression::Match { .. }),
             "Expected Match expression, got: {:?}",
             module.expressions[1].expression
         );
