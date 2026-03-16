@@ -196,7 +196,7 @@ dnu_handler_throws_test() ->
     %% Call unknown method - DNU handler will throw
     Result = gen_server:call(Actor, {unknownMethod, [arg1]}),
     ?assertMatch(
-        {error, #beamtalk_error{kind = type_error, selector = 'doesNotUnderstand:args:'}}, Result
+        {error, #beamtalk_error{kind = runtime_error, selector = 'doesNotUnderstand:args:'}}, Result
     ),
 
     gen_server:stop(Actor).
@@ -298,7 +298,7 @@ method_throws_exception_sync_test() ->
 
     %% Call method that throws - should return error tuple
     Result = gen_server:call(Actor, {throwError, []}),
-    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = throwError}}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = runtime_error, selector = throwError}}, Result),
 
     %% Verify actor still works after exception
     NormalResult = gen_server:call(Actor, {normalMethod, []}),
@@ -328,7 +328,7 @@ method_throws_exception_async_test() ->
 
     %% Future should be rejected with the error
     ?assertThrow(
-        {future_rejected, #beamtalk_error{kind = type_error, selector = throwError}},
+        {future_rejected, #beamtalk_error{kind = runtime_error, selector = throwError}},
         beamtalk_future:await(Future, 1000)
     ),
 
@@ -442,7 +442,7 @@ actor_crash_during_processing_test() ->
 
     %% Actor should handle exception without crashing
     Result = gen_server:call(Actor, {throwError, []}),
-    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = throwError}}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = runtime_error, selector = throwError}}, Result),
 
     %% Verify actor is still alive
     ?assert(is_process_alive(Actor)),
