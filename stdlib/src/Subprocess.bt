@@ -29,6 +29,9 @@
 /// ```beamtalk
 /// agent lines do: [:line | Transcript show: line]
 /// ```
+///
+/// @see ReactiveSubprocess (for push-mode async delivery)
+/// @see System (for simple one-shot commands via osCmd:)
 Actor subclass: Subprocess native: beamtalk_subprocess
 
   /// Convenience factory — open a subprocess with command and args.

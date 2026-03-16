@@ -41,6 +41,8 @@
 ///   dir: #"/path/to/project"
 ///   notify: delegate
 /// ```
+///
+/// @see Subprocess (for pull-mode synchronous I/O)
 Actor subclass: ReactiveSubprocess
 
   /// Open a subprocess in push mode, delivering lines to `notify`.

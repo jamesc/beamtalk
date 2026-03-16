@@ -18,6 +18,9 @@
 /// w := pool startChild
 /// pool count   // => 1
 /// ```
+///
+/// @see Supervisor (for static children declared at startup)
+/// @see Actor (base class for supervised processes)
 abstract Object subclass: DynamicSupervisor
 
   // === Class-side configuration (override in concrete subclasses) ===

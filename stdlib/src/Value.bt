@@ -29,7 +29,8 @@
 ///   withX: newX: Integer -> Point => @primitive "withX:"
 /// ```
 ///
-/// @see Object (for reference types / actors)
+/// @see Object (for reference types)
+/// @see Actor (for concurrent actor processes)
 Object subclass: Value
 
   /// Return a developer-readable string representation showing fields.

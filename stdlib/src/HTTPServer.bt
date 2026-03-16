@@ -34,6 +34,10 @@
 /// srv port   // => (dynamically assigned port)
 /// srv stop
 /// ```
+///
+/// @see HTTPClient (for making HTTP requests)
+/// @see HTTPRequest (for incoming request objects)
+/// @see HTTPResponse (for building response objects)
 Actor subclass: HTTPServer native: beamtalk_http_server
 
   /// Start an HTTP server on the given port with a handler block or actor.

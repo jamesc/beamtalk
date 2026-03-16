@@ -8,6 +8,7 @@
 //! Connects to a running REPL server and sends/receives
 //! JSON messages over WebSocket with cookie authentication.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -30,12 +31,24 @@ const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 /// on all platforms while still being generous for localhost connections.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Interval between WebSocket keepalive pings.
+///
+/// Sends a Ping frame every 30 seconds to prevent idle disconnects. The Cowboy
+/// WebSocket handler now uses `idle_timeout => infinity`, but TCP intermediaries
+/// (proxies, OS connection tracking) can still close idle connections. The ping
+/// also acts as a health check — a failed ping causes the keepalive task to stop,
+/// and the next `send`/`send_once` call will trigger a reconnect.
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Async WebSocket client for the beamtalk REPL protocol.
 pub struct ReplClient {
-    inner: Mutex<ReplClientInner>,
+    inner: Arc<Mutex<ReplClientInner>>,
     port: u16,
     cookie: String,
     session: tokio::sync::Mutex<Option<String>>,
+    /// Abort handle for the background keepalive task. Uses `std::sync::Mutex`
+    /// (not tokio) so it can be aborted in the synchronous `Drop` impl.
+    keepalive_abort: std::sync::Mutex<tokio::task::AbortHandle>,
 }
 
 impl std::fmt::Debug for ReplClient {
@@ -45,6 +58,14 @@ impl std::fmt::Debug for ReplClient {
             .field("cookie", &"<redacted>")
             .field("session", &"<redacted>")
             .finish_non_exhaustive()
+    }
+}
+
+impl Drop for ReplClient {
+    fn drop(&mut self) {
+        if let Ok(abort) = self.keepalive_abort.lock() {
+            abort.abort();
+        }
     }
 }
 
@@ -78,11 +99,15 @@ impl ReplClient {
 
         let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
 
+        let inner = Arc::new(Mutex::new(ReplClientInner { ws }));
+        let keepalive_abort = spawn_keepalive(Arc::clone(&inner)).abort_handle();
+
         Ok(Self {
-            inner: Mutex::new(ReplClientInner { ws }),
+            inner,
             port,
             cookie: cookie.to_string(),
             session: tokio::sync::Mutex::new(session_id),
+            keepalive_abort: std::sync::Mutex::new(keepalive_abort),
         })
     }
 
@@ -125,6 +150,16 @@ impl ReplClient {
         {
             let mut s = self.session.lock().await;
             *s = session_id;
+        }
+
+        // Restart the keepalive task for the new socket.
+        {
+            let mut abort = self
+                .keepalive_abort
+                .lock()
+                .map_err(|_| "Internal keepalive state unavailable".to_string())?;
+            abort.abort();
+            *abort = spawn_keepalive(Arc::clone(&self.inner)).abort_handle();
         }
 
         Ok(resumed)
@@ -192,11 +227,16 @@ impl ReplClient {
                         drop(inner); // release lock before reconnecting
                         tracing::warn!("Send failed, attempting reconnect: {e}");
                         if let Err(re) = self.reconnect().await {
-                            return Err(format!("Send failed: {e}; reconnect failed: {re}"));
+                            return Err(format!(
+                                "REPL connection lost. Attempted reconnect but failed: {re}. \
+                                 Try restarting the MCP server."
+                            ));
                         }
                         continue; // retry
                     }
-                    return Err(e);
+                    return Err(format!(
+                        "REPL connection was restored but the operation failed: {e}"
+                    ));
                 }
                 Err(_) => {
                     let timeout_err = format!(
@@ -207,7 +247,10 @@ impl ReplClient {
                         drop(inner);
                         tracing::warn!("{timeout_err} — attempting reconnect");
                         if let Err(re) = self.reconnect().await {
-                            return Err(format!("{timeout_err}; reconnect failed: {re}"));
+                            return Err(format!(
+                                "{timeout_err}. Attempted reconnect but failed: {re}. \
+                                 Try restarting the MCP server."
+                            ));
                         }
                         continue; // retry
                     }
@@ -479,7 +522,10 @@ impl ReplClient {
                     drop(inner); // release lock before reconnecting
                     tracing::warn!("send_once: connection closed ({e}), attempting reconnect");
                     if let Err(re) = self.reconnect().await {
-                        return Err(format!("Failed to send: {e}; reconnect failed: {re}"));
+                        return Err(format!(
+                            "REPL connection lost. Attempted reconnect but failed: {re}. \
+                             The server may have restarted; try restarting the MCP server."
+                        ));
                     }
                     continue; // retry with fresh connection
                 }
@@ -574,6 +620,22 @@ impl ReplClient {
         }
         self.send(&request).await
     }
+
+    /// Send a list-classes operation (BT-1404).
+    ///
+    /// Returns all available classes with one-line descriptions. The optional
+    /// `filter` narrows results: `"stdlib"` for built-in classes, `"user"` for
+    /// user-defined, or a superclass name like `"Value"` or `"Actor"`.
+    pub async fn list_classes(&self, filter: Option<&str>) -> Result<ReplResponse, String> {
+        let mut request = serde_json::json!({
+            "op": "list-classes",
+            "id": next_msg_id()
+        });
+        if let Some(f) = filter {
+            request["filter"] = serde_json::Value::String(f.to_string());
+        }
+        self.send(&request).await
+    }
 }
 
 /// JSON response from the REPL backend.
@@ -593,8 +655,10 @@ pub struct ReplResponse {
     pub error: Option<String>,
     /// Bindings map.
     pub bindings: Option<serde_json::Value>,
-    /// Loaded classes.
+    /// Loaded classes (string names, from eval/load responses).
     pub classes: Option<Vec<String>>,
+    /// Class info list with metadata (list-classes op, BT-1404).
+    pub class_list: Option<Vec<ClassInfo>>,
     /// Actor list.
     pub actors: Option<Vec<ActorInfo>>,
     /// Module list.
@@ -693,6 +757,70 @@ pub struct ModuleInfo {
     pub time_ago: String,
 }
 
+/// Spawn a background task that sends WebSocket Ping frames at [`KEEPALIVE_INTERVAL`].
+///
+/// The task uses `try_lock` so it never blocks an in-progress `send`/`send_once`.
+/// If the lock is held, the connection is actively being used and doesn't need a
+/// keepalive ping. The task exits silently when the ping fails (socket closed),
+/// allowing the next RPC call to trigger a reconnect.
+fn spawn_keepalive(inner: Arc<Mutex<ReplClientInner>>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(KEEPALIVE_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // Skip the first tick which fires immediately
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            match inner.try_lock() {
+                Ok(mut guard) => {
+                    match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        guard.ws.send(Message::Ping(vec![].into())),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => tracing::trace!("Keepalive ping sent"),
+                        Ok(Err(e)) => {
+                            tracing::debug!("Keepalive ping failed: {e}");
+                            let _ =
+                                tokio::time::timeout(Duration::from_secs(1), guard.ws.close(None))
+                                    .await;
+                            break;
+                        }
+                        Err(_) => {
+                            tracing::debug!("Keepalive ping timed out; closing socket");
+                            let _ =
+                                tokio::time::timeout(Duration::from_secs(1), guard.ws.close(None))
+                                    .await;
+                            break;
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Lock held — connection is actively being used, skip this ping
+                    tracing::trace!("Keepalive skipped: connection in use");
+                }
+            }
+        }
+    })
+}
+
+/// Class information from the list-classes op (BT-1404).
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ClassInfo {
+    /// Class name (e.g., `"String"`).
+    pub name: String,
+    /// Superclass name (e.g., `"Value"`) or `null` for root classes.
+    pub superclass: Option<String>,
+    /// One-line class description, or `null` if undocumented.
+    pub doc: Option<String>,
+    /// Whether the class is sealed (cannot be subclassed).
+    pub sealed: bool,
+    /// Whether the class is abstract (cannot be instantiated directly).
+    #[serde(rename = "abstract")]
+    pub is_abstract: bool,
+}
+
 /// Perform the ADR 0020 authentication handshake on a WebSocket connection.
 ///
 /// Reads `auth-required`, sends `auth` (with optional `resume`), reads `auth_ok`,
@@ -766,7 +894,9 @@ where
         match ws.next().await {
             Some(Ok(Message::Text(text))) => return Ok(text.to_string()),
             Some(Ok(Message::Close(_))) => {
-                return Err("WebSocket connection closed by server".to_string());
+                return Err("REPL WebSocket connection closed (the server may have \
+                     restarted or the connection timed out)"
+                    .to_string());
             }
             Some(Ok(_)) => {} // Skip ping/pong/binary
             Some(Err(e)) => return Err(format!("WebSocket read error: {e}")),
