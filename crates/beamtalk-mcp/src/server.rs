@@ -547,7 +547,14 @@ impl BeamtalkMcp {
                 .iter()
                 .map(|c| {
                     let super_str = c.superclass.as_deref().unwrap_or("(root)");
-                    let doc_str = c.doc.as_deref().unwrap_or("");
+                    let doc_str = c
+                        .doc
+                        .as_deref()
+                        .unwrap_or("")
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .trim();
                     let modifiers = {
                         let mut m = Vec::new();
                         if c.sealed {

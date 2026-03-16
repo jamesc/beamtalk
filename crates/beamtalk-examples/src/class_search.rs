@@ -42,7 +42,23 @@ pub fn search_classes_in<'a>(
         .split_whitespace()
         .map(|token| {
             token
-                .trim_matches(|c: char| c.is_ascii_punctuation() && c != ':')
+                .trim_matches(|c: char| {
+                    matches!(
+                        c,
+                        '.' | ','
+                            | '!'
+                            | '?'
+                            | ';'
+                            | '('
+                            | ')'
+                            | '['
+                            | ']'
+                            | '{'
+                            | '}'
+                            | '"'
+                            | '\''
+                    )
+                })
                 .to_lowercase()
         })
         .filter(|token| !token.is_empty())
@@ -257,6 +273,18 @@ mod tests {
         let results = search_classes_in(&corpus, "http", Some(20));
         assert!(!results.is_empty());
         assert_eq!(results[0].entry.name, "HTTPClient");
+    }
+
+    #[test]
+    fn operator_selector_search() {
+        let corpus = test_corpus();
+        // The ++ operator method on String should be searchable.
+        let results = search_classes_in(&corpus, "++", Some(20));
+        assert!(
+            !results.is_empty(),
+            "operator selectors should be searchable"
+        );
+        assert_eq!(results[0].entry.name, "String");
     }
 
     #[test]

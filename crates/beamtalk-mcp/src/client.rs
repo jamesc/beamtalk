@@ -157,7 +157,7 @@ impl ReplClient {
             let mut abort = self
                 .keepalive_abort
                 .lock()
-                .expect("keepalive_abort mutex poisoned");
+                .map_err(|_| "Internal keepalive state unavailable".to_string())?;
             abort.abort();
             *abort = spawn_keepalive(Arc::clone(&self.inner)).abort_handle();
         }
