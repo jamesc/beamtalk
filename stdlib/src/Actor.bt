@@ -111,8 +111,9 @@ Object subclass: Actor
   /// such as opening resources or computing derived state. Called synchronously
   /// before the spawned object is returned to the caller.
   ///
-  /// If `initialize` raises an error, the spawned process is stopped to prevent
-  /// leaked actors, and the error is re-raised to the caller.
+  /// If `initialize` raises an error, the spawn fails with a catchable
+  /// `InstantiationError`. Under a supervisor, the child start fails and the
+  /// supervisor applies its restart strategy.
   ///
   /// ## Examples
   /// ```beamtalk

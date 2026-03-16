@@ -82,13 +82,16 @@ impl CoreErlangGenerator {
         };
 
         // BT-1417: Check if the class defines an initialize method.
-        // If so, dispatch it at the end of init/1 so that all spawn paths
-        // (direct spawn, supervised start_link, named start_link) run initialize.
-        let has_initialize = module.classes.first().is_some_and(|c| {
-            self.semantic_facts
-                .class_facts(&c.name.name)
-                .is_some_and(|cf| cf.has_instance_method("initialize"))
-        });
+        // Only dispatch initialize in the outermost init/1 — when there is no
+        // parent init. Parent init/1 functions are called as state-building
+        // helpers and must not dispatch initialize (which would cause double
+        // dispatch for inherited actors).
+        let has_initialize = !has_parent_init
+            && current_class.is_some_and(|c| {
+                self.semantic_facts
+                    .class_facts(&c.name.name)
+                    .is_some_and(|cf| cf.has_instance_method("initialize"))
+            });
 
         let module_name = self.module_name.clone();
 

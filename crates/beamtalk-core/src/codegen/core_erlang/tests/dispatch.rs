@@ -279,7 +279,15 @@ fn test_generate_spawn_function() {
     assert!(code.contains("'spawn'/1 = fun (InitArgs) ->"));
     assert!(code.contains("call 'gen_server':'start_link'('counter', InitArgs, [])"));
 
-    // BT-1417: spawn wraps start_link result in a let + case for trap_exit handling
+    // BT-1417: spawn wraps start_link in trap_exit to handle initialize failures
+    assert!(
+        code.contains("call 'erlang':'process_flag'('trap_exit', 'true')"),
+        "spawn/0 must set trap_exit before start_link. Got: {code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'process_flag'('trap_exit', _OldTrap)"),
+        "spawn/0 must restore trap_exit after start_link. Got: {code}"
+    );
     assert!(code.contains("case _SpawnResult of"));
     assert!(code.contains("<{'ok', Pid}> when 'true' ->"));
 
