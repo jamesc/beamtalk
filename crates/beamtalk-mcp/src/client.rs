@@ -46,8 +46,9 @@ pub struct ReplClient {
     port: u16,
     cookie: String,
     session: tokio::sync::Mutex<Option<String>>,
-    /// Handle to the background keepalive task. Aborted on drop.
-    keepalive_handle: Mutex<tokio::task::JoinHandle<()>>,
+    /// Abort handle for the background keepalive task. Uses `std::sync::Mutex`
+    /// (not tokio) so it can be aborted in the synchronous `Drop` impl.
+    keepalive_abort: std::sync::Mutex<tokio::task::AbortHandle>,
 }
 
 impl std::fmt::Debug for ReplClient {
@@ -57,6 +58,14 @@ impl std::fmt::Debug for ReplClient {
             .field("cookie", &"<redacted>")
             .field("session", &"<redacted>")
             .finish_non_exhaustive()
+    }
+}
+
+impl Drop for ReplClient {
+    fn drop(&mut self) {
+        if let Ok(abort) = self.keepalive_abort.lock() {
+            abort.abort();
+        }
     }
 }
 
@@ -91,14 +100,14 @@ impl ReplClient {
         let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
 
         let inner = Arc::new(Mutex::new(ReplClientInner { ws }));
-        let keepalive_handle = spawn_keepalive(Arc::clone(&inner));
+        let keepalive_abort = spawn_keepalive(Arc::clone(&inner)).abort_handle();
 
         Ok(Self {
             inner,
             port,
             cookie: cookie.to_string(),
             session: tokio::sync::Mutex::new(session_id),
-            keepalive_handle: Mutex::new(keepalive_handle),
+            keepalive_abort: std::sync::Mutex::new(keepalive_abort),
         })
     }
 
@@ -144,12 +153,13 @@ impl ReplClient {
         }
 
         // Restart the keepalive task for the new socket.
-        // The old task will exit on its next failed ping or lock acquisition
-        // against the replaced socket, but we abort it explicitly to be tidy.
         {
-            let mut handle = self.keepalive_handle.lock().await;
-            handle.abort();
-            *handle = spawn_keepalive(Arc::clone(&self.inner));
+            let mut abort = self
+                .keepalive_abort
+                .lock()
+                .expect("keepalive_abort mutex poisoned");
+            abort.abort();
+            *abort = spawn_keepalive(Arc::clone(&self.inner)).abort_handle();
         }
 
         Ok(resumed)

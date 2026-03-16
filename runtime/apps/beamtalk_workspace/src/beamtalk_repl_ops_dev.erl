@@ -281,9 +281,16 @@ handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
                         false
                 end
             catch
-                exit:{noproc, _} -> false;
-                exit:{timeout, _} -> false;
-                _:_ -> false
+                exit:{noproc, _} ->
+                    false;
+                exit:{timeout, _} ->
+                    false;
+                Class:Reason ->
+                    ?LOG_WARNING(
+                        "list-classes: skipping class ~p: ~p:~p",
+                        [Pid, Class, Reason]
+                    ),
+                    false
             end
         end,
         ClassPids

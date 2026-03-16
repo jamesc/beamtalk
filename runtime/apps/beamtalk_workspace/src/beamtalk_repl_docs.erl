@@ -599,10 +599,11 @@ extract_see_also(DocText) ->
                 fun(Match) ->
                     case safe_to_existing_atom(hd(Match)) of
                         {ok, Atom} ->
-                            Desc = case Match of
-                                [_, D] -> D;
-                                _ -> <<>>
-                            end,
+                            Desc =
+                                case Match of
+                                    [_, D] -> D;
+                                    _ -> <<>>
+                                end,
                             {true, {Atom, Desc}};
                         {error, badarg} ->
                             %% Unknown atom — skip to avoid atom table exhaustion
@@ -641,25 +642,25 @@ alternative_classes(_) ->
 sibling_classes(_ClassName, none) ->
     [];
 sibling_classes(ClassName, Superclass) ->
-    case beamtalk_class_registry:direct_subclasses(Superclass) of
-        Subs when is_list(Subs) ->
-            Siblings = lists:sort([S || S <- Subs, S =/= ClassName]),
-            case length(Siblings) of
-                0 ->
-                    [];
-                N when N =< 5 ->
-                    [{S, <<>>} || S <- Siblings];
-                N ->
-                    {First5, _} = lists:split(5, Siblings),
-                    Remaining = N - 5,
-                    Entries = [{S, <<>>} || S <- First5],
-                    Suffix = iolist_to_binary([
-                        <<"(">>, integer_to_binary(Remaining), <<" more siblings)">>
-                    ]),
-                    Entries ++ [{'...', Suffix}]
-            end;
-        _ ->
-            []
+    try
+        Subs = beamtalk_class_registry:direct_subclasses(Superclass),
+        Siblings = lists:sort([S || S <- Subs, S =/= ClassName]),
+        case length(Siblings) of
+            0 ->
+                [];
+            N when N =< 5 ->
+                [{S, <<>>} || S <- Siblings];
+            N ->
+                {First5, _} = lists:split(5, Siblings),
+                Remaining = N - 5,
+                Entries = [{S, <<>>} || S <- First5],
+                Suffix = iolist_to_binary([
+                    <<"(">>, integer_to_binary(Remaining), <<" more siblings)">>
+                ]),
+                Entries ++ [{'...', Suffix}]
+        end
+    catch
+        _:_ -> []
     end.
 
 %% @doc Build the complete see-also list from all sources, deduplicated.
