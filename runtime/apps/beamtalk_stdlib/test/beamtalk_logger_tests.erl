@@ -204,3 +204,13 @@ set_level_shim_test() ->
     after
         logger:set_primary_config(level, OrigLevel)
     end.
+
+%%% ============================================================================
+%%% logError shims (Object#error: intrinsic workaround)
+%%% ============================================================================
+
+log_error_shim_test() ->
+    ?assertEqual(nil, beamtalk_logger:logError(<<"shim logError">>)).
+
+log_error_shim_metadata_test() ->
+    ?assertEqual(nil, beamtalk_logger:logError(<<"shim logError">>, #{k => v})).
