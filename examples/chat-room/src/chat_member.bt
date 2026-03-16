@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// Chat Member Actor — Part of Chat Room Demo (BT-431, BT-568)
+/// Chat Member Actor — Part of Chat Room Demo
 ///
 /// ChatMember represents a chat participant with a name, inbox, and room ref
 /// It demonstrates:

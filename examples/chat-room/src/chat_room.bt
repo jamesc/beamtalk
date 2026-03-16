@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Chat Room Demo — Multi-Actor Showcase (BT-431, BT-568)
+// Chat Room Demo — Multi-Actor Showcase
 //
 // This example demonstrates:
 // 1. **Actors** — ChatRoom and ChatMember as independent processes

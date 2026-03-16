@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// StackFrame — A single frame in an exception stack trace (BT-107).
+/// StackFrame — A single frame in an exception stack trace.
 ///
 /// StackFrame wraps Erlang stacktrace entries as first-class Beamtalk objects.
 /// Only available post-exception (via `Exception>>stackTrace`), not during

@@ -6,7 +6,6 @@
 /// TestResult wraps the structured map returned by `beamtalk_test_case`
 /// into a first-class Beamtalk object that agents and tools can introspect.
 /// Instances are created by TestRunner — not constructed directly by users.
-/// See BT-762.
 ///
 /// ## Examples
 /// ```beamtalk
