@@ -9,6 +9,7 @@
 //! JSON messages over WebSocket with cookie authentication.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -30,12 +31,23 @@ const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 /// on all platforms while still being generous for localhost connections.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Interval between WebSocket keepalive pings.
+///
+/// Sends a Ping frame every 30 seconds to prevent idle disconnects. The Cowboy
+/// WebSocket handler now uses `idle_timeout => infinity`, but TCP intermediaries
+/// (proxies, OS connection tracking) can still close idle connections. The ping
+/// also acts as a health check — a failed ping causes the keepalive task to stop,
+/// and the next `send`/`send_once` call will trigger a reconnect.
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Async WebSocket client for the beamtalk REPL protocol.
 pub struct ReplClient {
-    inner: Mutex<ReplClientInner>,
+    inner: Arc<Mutex<ReplClientInner>>,
     port: u16,
     cookie: String,
     session: tokio::sync::Mutex<Option<String>>,
+    /// Handle to the background keepalive task. Aborted on drop.
+    keepalive_handle: Mutex<tokio::task::JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for ReplClient {
@@ -78,11 +90,15 @@ impl ReplClient {
 
         let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
 
+        let inner = Arc::new(Mutex::new(ReplClientInner { ws }));
+        let keepalive_handle = spawn_keepalive(Arc::clone(&inner));
+
         Ok(Self {
-            inner: Mutex::new(ReplClientInner { ws }),
+            inner,
             port,
             cookie: cookie.to_string(),
             session: tokio::sync::Mutex::new(session_id),
+            keepalive_handle: Mutex::new(keepalive_handle),
         })
     }
 
@@ -125,6 +141,15 @@ impl ReplClient {
         {
             let mut s = self.session.lock().await;
             *s = session_id;
+        }
+
+        // Restart the keepalive task for the new socket.
+        // The old task will exit on its next failed ping or lock acquisition
+        // against the replaced socket, but we abort it explicitly to be tidy.
+        {
+            let mut handle = self.keepalive_handle.lock().await;
+            handle.abort();
+            *handle = spawn_keepalive(Arc::clone(&self.inner));
         }
 
         Ok(resumed)
@@ -192,11 +217,16 @@ impl ReplClient {
                         drop(inner); // release lock before reconnecting
                         tracing::warn!("Send failed, attempting reconnect: {e}");
                         if let Err(re) = self.reconnect().await {
-                            return Err(format!("Send failed: {e}; reconnect failed: {re}"));
+                            return Err(format!(
+                                "REPL connection lost. Attempted reconnect but failed: {re}. \
+                                 Try restarting the MCP server."
+                            ));
                         }
                         continue; // retry
                     }
-                    return Err(e);
+                    return Err(format!(
+                        "REPL connection was restored but the operation failed: {e}"
+                    ));
                 }
                 Err(_) => {
                     let timeout_err = format!(
@@ -207,7 +237,10 @@ impl ReplClient {
                         drop(inner);
                         tracing::warn!("{timeout_err} — attempting reconnect");
                         if let Err(re) = self.reconnect().await {
-                            return Err(format!("{timeout_err}; reconnect failed: {re}"));
+                            return Err(format!(
+                                "{timeout_err}. Attempted reconnect but failed: {re}. \
+                                 Try restarting the MCP server."
+                            ));
                         }
                         continue; // retry
                     }
@@ -479,7 +512,10 @@ impl ReplClient {
                     drop(inner); // release lock before reconnecting
                     tracing::warn!("send_once: connection closed ({e}), attempting reconnect");
                     if let Err(re) = self.reconnect().await {
-                        return Err(format!("Failed to send: {e}; reconnect failed: {re}"));
+                        return Err(format!(
+                            "REPL connection lost (idle timeout). Attempted reconnect but \
+                             failed: {re}. Try restarting the MCP server."
+                        ));
                     }
                     continue; // retry with fresh connection
                 }
@@ -693,6 +729,37 @@ pub struct ModuleInfo {
     pub time_ago: String,
 }
 
+/// Spawn a background task that sends WebSocket Ping frames at [`KEEPALIVE_INTERVAL`].
+///
+/// The task uses `try_lock` so it never blocks an in-progress `send`/`send_once`.
+/// If the lock is held, the connection is actively being used and doesn't need a
+/// keepalive ping. The task exits silently when the ping fails (socket closed),
+/// allowing the next RPC call to trigger a reconnect.
+fn spawn_keepalive(inner: Arc<Mutex<ReplClientInner>>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(KEEPALIVE_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // Skip the first tick which fires immediately
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            match inner.try_lock() {
+                Ok(mut guard) => {
+                    if let Err(e) = guard.ws.send(Message::Ping(vec![].into())).await {
+                        tracing::debug!("Keepalive ping failed: {e}");
+                        break;
+                    }
+                    tracing::trace!("Keepalive ping sent");
+                }
+                Err(_) => {
+                    // Lock held — connection is actively being used, skip this ping
+                    tracing::trace!("Keepalive skipped: connection in use");
+                }
+            }
+        }
+    })
+}
+
 /// Perform the ADR 0020 authentication handshake on a WebSocket connection.
 ///
 /// Reads `auth-required`, sends `auth` (with optional `resume`), reads `auth_ok`,
@@ -766,7 +833,11 @@ where
         match ws.next().await {
             Some(Ok(Message::Text(text))) => return Ok(text.to_string()),
             Some(Ok(Message::Close(_))) => {
-                return Err("WebSocket connection closed by server".to_string());
+                return Err(
+                    "REPL WebSocket connection closed (the server may have \
+                     restarted or the connection timed out)"
+                        .to_string(),
+                );
             }
             Some(Ok(_)) => {} // Skip ping/pong/binary
             Some(Err(e)) => return Err(format!("WebSocket read error: {e}")),
