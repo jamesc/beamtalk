@@ -34,18 +34,22 @@ This ADR evaluates five gaps and makes a disposition for each:
 
 ### Core design: Actor/Server class hierarchy
 
-Introduce `Server` as a subclass of `Actor` that exposes BEAM-level OTP primitives. The class hierarchy expresses the abstraction boundary:
+Introduce `Server` as an **abstract** subclass of `Actor` that exposes BEAM-level OTP primitives. The class hierarchy expresses the abstraction boundary:
 
 - **`Actor`** — Beamtalk-level: message-passing, state, Timer API, lifecycle (`initialize`, `terminate:`). Most users, most of the time.
-- **`Server`** — BEAM-level: raw message handling (`handleInfo:`), and the natural home for future OTP features (named registration, `trapExit`, `codeChange:from:`).
+- **`Server`** (abstract) — BEAM-level: raw message handling (`handleInfo:`), and the natural home for future OTP features (named registration, `trapExit`, `codeChange:from:`).
 
 ```
 Object
   └── Actor           # Beamtalk objects — messages, state, Timer
-        └── Server    # BEAM processes — handleInfo:, raw OTP interop
+        └── Server    # BEAM processes — handleInfo:, raw OTP interop (abstract)
 ```
 
 This uses OO's core strength: the class you extend communicates your relationship to the runtime. `Actor subclass: Counter` says "I'm a Beamtalk object." `Server subclass: PeriodicWorker` says "I'm a BEAM process that happens to be written in Beamtalk."
+
+Server is abstract — you subclass it, you don't spawn it directly. Defining `handleInfo:` on a Server subclass is optional; a Server without `handleInfo:` simply ignores raw messages (same as Actor). The value of extending Server is signaling intent and unlocking future OTP features.
+
+**Why introduce Server now, not later?** Server gates only `handleInfo:` today, but it prevents future OTP features (`trapExit`, named registration, `codeChange:from:`) from accumulating on Actor as optional methods. Adding Server later would require migrating existing code. Adding it now — when the API surface is minimal — is the cheapest time to establish the hierarchy.
 
 ### Actor — simple actors (no changes)
 
@@ -78,13 +82,13 @@ Server subclass: PeriodicWorker
   state: count = 0
 
   initialize =>
-    Erlang erlang send_after: 1000 dest: self pid msg: #tick
+    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
 
   handleInfo: msg =>
     msg match: [
       #tick -> [
         self.count := self.count + 1.
-        Erlang erlang send_after: 1000 dest: self pid msg: #tick
+        Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
       ];
       {#DOWN, _ref, #process, _pid, reason} -> [
         Logger info: "Monitored process exited: " ++ reason displayString
@@ -416,12 +420,13 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 ### Phase 1: Server class and handleInfo: (M)
 **Affected components:** Stdlib (Server.bt), Codegen (callbacks.rs, actor detection), Runtime (beamtalk_actor.erl)
 
-1. **Stdlib:** Add `Server.bt` — `Actor subclass: Server` with doc comments explaining its role as the BEAM-level OTP escape hatch. No new methods in the .bt file itself; the capabilities are unlocked by codegen detecting Server ancestry.
-2. **Codegen:** In `generate_handle_info()` (callbacks.rs ~445-472), check if the class extends Server. If yes, generate dispatch to `handleInfo:` with error logging; if no (plain Actor), generate the current ignore-all stub.
-3. **Validation:** Compile-time error with actionable hint if `handleInfo:` is defined on a non-Server class.
+1. **Stdlib:** Add `Server.bt` — `abstract Actor subclass: Server` with doc comments explaining its role as the BEAM-level OTP escape hatch. No new methods in the .bt file itself; the capabilities are unlocked by codegen detecting Server ancestry. Verify that `Server.bt` generates a correct `init/1` that passes `InitArgs` through the two-hop chain (`UserClass → server:init → Actor base`), including `spawnWith:` args.
+2. **Hierarchy resolution:** Add `is_server_subclass()` to `ClassHierarchy`, following the existing `is_supervisor_subclass` pattern. Enrich `class_superclass_index` in the package compiler so cross-file inheritance (`Server subclass: Foo` in one file, `Foo subclass: Bar` in another) resolves correctly — analogous to how `Actor` is handled today.
+3. **Codegen:** In `generate_handle_info()` (callbacks.rs ~445-472), check if the class is a Server subclass via `is_server_subclass()`. If yes, generate dispatch to `handleInfo:` with error logging; if no (plain Actor), generate the current ignore-all stub.
+4. **Validation:** Compile-time error with actionable hint if `handleInfo:` is defined on a non-Server class.
 4. **Timer: `spawn` → `spawn_link`:** Change `beamtalk_timer.erl` to use `spawn_link` instead of `spawn` for `after:do:` and `every:do:`. This links the Timer process to the calling process, ensuring automatic cleanup on caller death. The existing `catch Block()` in the timer loop prevents block errors from crashing the Timer process.
 5. **Lint — sync send in Timer block:** Warn when a `self method.` (sync call) appears inside a `Timer every:do:` or `Timer after:do:` block. Suggest `self method!` (async cast) instead.
-6. **Tests:** BUnit tests for Server + handleInfo: (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, error-in-handler recovery, and Actor-rejects-handleInfo: validation. EUnit tests for the dispatch path and Timer `spawn_link` behavior. Lint tests for sync-in-block warning.
+7. **Tests:** BUnit tests for Server + handleInfo: (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, error-in-handler recovery, and Actor-rejects-handleInfo: compile error. Integration tests for the two-hop init chain (`Server subclass: Foo` with `spawn` and `spawnWith:`). EUnit tests for the dispatch path and Timer `spawn_link` behavior. Lint tests for sync-in-block warning.
 
 ### Phase 2: Graceful Shutdown Verification (S) — BT-1451
 **Affected components:** Runtime (beamtalk_actor.erl, beamtalk_supervisor.erl), Stdlib (SupervisionSpec.bt)
