@@ -32,6 +32,20 @@ let outputChannel: vscode.LogOutputChannel | undefined;
 let traceOutputChannel: vscode.LogOutputChannel | undefined;
 /** Output channel for live runtime log streaming (BT-1433). */
 let logOutputChannel: vscode.OutputChannel | undefined;
+/** Status bar item showing / changing the active log level. */
+let logLevelStatusBarItem: vscode.StatusBarItem | undefined;
+
+const LOG_LEVELS = [
+  "debug",
+  "info",
+  "notice",
+  "warning",
+  "error",
+  "critical",
+  "alert",
+  "emergency",
+] as const;
+type LogLevel = (typeof LOG_LEVELS)[number];
 let workspaceTreeProvider: WorkspaceTreeDataProvider | undefined;
 let transcriptViewProvider: TranscriptViewProvider | undefined;
 
@@ -424,7 +438,7 @@ function connectWorkspace(workspaceId: string): void {
   newClient.onConnectionChange((state) => {
     if (state === "connected") {
       const config = vscode.workspace.getConfiguration("beamtalk");
-      const level = config.get<string>("logs.level", "info");
+      const level = config.get<string>("logs.level", "warning");
       newClient.subscribeLogs(level).catch((err) => {
         outputChannel?.warn(
           `Failed to subscribe to logs: ${err instanceof Error ? err.message : String(err)}`
@@ -765,9 +779,68 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
-  // ─── Beamtalk Logs output channel (BT-1433) ────────────────────────────────
+  // ─── Beamtalk Logs output channel + log level picker (BT-1433) ────────────
 
   logOutputChannel ??= vscode.window.createOutputChannel("Beamtalk Logs");
+
+  logLevelStatusBarItem?.dispose();
+  logLevelStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
+  logLevelStatusBarItem.command = "beamtalk.setLogLevel";
+  logLevelStatusBarItem.tooltip = "Beamtalk log level — click to change";
+  context.subscriptions.push(logLevelStatusBarItem);
+
+  const updateLogLevelStatusBar = (level: string): void => {
+    if (logLevelStatusBarItem) {
+      logLevelStatusBarItem.text = `$(filter) ${level}`;
+      logLevelStatusBarItem.show();
+    }
+  };
+
+  {
+    const config = vscode.workspace.getConfiguration("beamtalk");
+    updateLogLevelStatusBar(config.get<string>("logs.level", "warning"));
+  }
+
+  // Keep the status bar in sync when the setting is changed via Settings UI.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("beamtalk.logs.level")) {
+        const config = vscode.workspace.getConfiguration("beamtalk");
+        updateLogLevelStatusBar(config.get<string>("logs.level", "warning"));
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.setLogLevel", async () => {
+      const config = vscode.workspace.getConfiguration("beamtalk");
+      const current = config.get<string>("logs.level", "warning");
+      const picked = await vscode.window.showQuickPick(
+        LOG_LEVELS.map((l) => ({
+          label: l,
+          description: l === current ? "current" : undefined,
+        })),
+        { title: "Beamtalk: Set Log Level", placeHolder: "Select minimum log level" }
+      );
+      if (!picked) return;
+      const newLevel = picked.label as LogLevel;
+      await config.update("logs.level", newLevel, vscode.ConfigurationTarget.Global);
+      updateLogLevelStatusBar(newLevel);
+      if (workspaceWsClient) {
+        workspaceWsClient.subscribeLogs(newLevel).catch((err) => {
+          outputChannel?.warn(
+            `Failed to update log subscription: ${err instanceof Error ? err.message : String(err)}`
+          );
+        });
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.showLogs", () => {
+      logOutputChannel?.show();
+    })
+  );
 
   // ─── Workspace Explorer (BT-1023) ──────────────────────────────────────────
 
@@ -1064,6 +1137,8 @@ export function deactivate(): Thenable<void> | undefined {
   workspaceTreeProvider = undefined;
   transcriptViewProvider?.setClient(null);
   transcriptViewProvider = undefined;
+  logLevelStatusBarItem?.dispose();
+  logLevelStatusBarItem = undefined;
   logOutputChannel?.dispose();
   outputChannel?.dispose();
   traceOutputChannel?.dispose();

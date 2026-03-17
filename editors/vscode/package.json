@@ -105,6 +105,15 @@
         "command": "beamtalk.openClassSource",
         "title": "Open Source",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "beamtalk.setLogLevel",
+        "title": "Beamtalk: Set Log Level"
+      },
+      {
+        "command": "beamtalk.showLogs",
+        "title": "Show Logs",
+        "icon": "$(output)"
       }
     ],
     "menus": {
@@ -121,6 +130,11 @@
         },
         {
           "command": "beamtalk.refreshWorkspace",
+          "when": "view == beamtalk.workspaceExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "beamtalk.showLogs",
           "when": "view == beamtalk.workspaceExplorer",
           "group": "navigation"
         },
