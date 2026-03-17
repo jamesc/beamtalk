@@ -430,27 +430,31 @@ resolve_chain_type_single_token_test() ->
 %%====================================================================
 
 walk_chain_empty_selectors_test() ->
-    %% With no selectors, walk_chain returns {ok, ClassName} immediately
-    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_chain('Integer', [])).
+    %% With no selectors, walk_chain returns {ok, ClassName, instance} immediately
+    ?assertEqual({ok, 'Integer', instance}, beamtalk_repl_ops_dev:walk_chain('Integer', [])).
 
 walk_chain_unknown_selector_test() ->
     %% Non-existent registry -> not_found -> undefined
     Result = beamtalk_repl_ops_dev:walk_chain('Integer', [unknownSelector]),
     ?assertEqual(undefined, Result).
 
+walk_chain_class_transition_test() ->
+    %% `instance class` transitions to class side for completions
+    ?assertEqual({ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain('Integer', [class])).
+
 %%====================================================================
 %% walk_chain_class/2 -- without running registry
 %%====================================================================
 
 walk_chain_class_empty_selectors_test() ->
-    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [])).
+    ?assertEqual({ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [])).
 
 walk_chain_class_meta_selector_test() ->
     %% `class` selector on a class object stays on the class side
-    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [class])).
+    ?assertEqual({ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [class])).
 
 walk_chain_class_multi_class_selectors_test() ->
-    ?assertEqual({ok, 'Foo'}, beamtalk_repl_ops_dev:walk_chain_class('Foo', [class, class])).
+    ?assertEqual({ok, 'Foo', class}, beamtalk_repl_ops_dev:walk_chain_class('Foo', [class, class])).
 
 walk_chain_class_unknown_selector_test() ->
     Result = beamtalk_repl_ops_dev:walk_chain_class('Integer', [unknownMethod]),
@@ -534,39 +538,30 @@ tokenise_binary_chain_equality_selector_test() ->
 
 walk_mixed_chain_empty_hops_test() ->
     %% No hops — returns the starting class immediately
-    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [])).
+    ?assertEqual({ok, 'Integer', instance}, beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [])).
 
 walk_mixed_chain_unknown_unary_selector_test() ->
     %% No registry — get_method_return_type returns not_found → undefined
     Result = beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [{unary, unknownSel}]),
     ?assertEqual(undefined, Result).
 
-walk_mixed_chain_binary_selector_with_registry_test() ->
-    %% Integer `+` returns Integer (annotated in the stdlib builtins)
-    Result = beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [{binary, '+'}]),
-    ?assertEqual({ok, 'Integer'}, Result).
-
 walk_mixed_chain_unknown_binary_selector_test() ->
     %% Graceful fallback: a binary selector not in method_return_types → undefined
     Result = beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [{binary, 'noSuchBinOp'}]),
     ?assertEqual(undefined, Result).
-
-walk_mixed_chain_type_changing_binary_selector_test() ->
-    %% `<` on Integer returns Boolean — type changes mid-chain
-    Result = beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [{binary, '<'}]),
-    ?assertEqual({ok, 'Boolean'}, Result).
 
 %%====================================================================
 %% walk_mixed_chain_class/2 (BT-1071)
 %%====================================================================
 
 walk_mixed_chain_class_empty_hops_test() ->
-    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_mixed_chain_class('Integer', [])).
+    ?assertEqual({ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_mixed_chain_class('Integer', [])).
 
 walk_mixed_chain_class_meta_selector_test() ->
     %% `{unary, class}` on a class object stays on the class side
     ?assertEqual(
-        {ok, 'Integer'}, beamtalk_repl_ops_dev:walk_mixed_chain_class('Integer', [{unary, class}])
+        {ok, 'Integer', class},
+        beamtalk_repl_ops_dev:walk_mixed_chain_class('Integer', [{unary, class}])
     ).
 
 walk_mixed_chain_class_unknown_selector_test() ->
@@ -581,16 +576,6 @@ resolve_chain_type_binary_chain_no_registry_test() ->
     %% Binary chain parses OK but no registry → walk returns undefined
     Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"counter value + 1">>, #{}),
     ?assertEqual(undefined, Result).
-
-resolve_chain_type_binary_chain_integer_plus_resolves_test() ->
-    %% `42 + 1` — 42 is an Integer literal, `+` on Integer returns Integer
-    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"42 + 1">>, #{}),
-    ?assertEqual({ok, 'Integer'}, Result).
-
-resolve_chain_type_binary_chain_comparison_returns_boolean_test() ->
-    %% `42 < 1` — `<` on Integer returns Boolean (type changes)
-    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"42 < 1">>, #{}),
-    ?assertEqual({ok, 'Boolean'}, Result).
 
 %%====================================================================
 %% handle/4 -- docs with non-existing class (badarg path)
@@ -708,3 +693,70 @@ handle_complete_new_format_empty_prefix_test() ->
     Decoded = jsx:decode(Result, [return_maps]),
     ?assertEqual([], maps:get(<<"completions">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+%%====================================================================
+%% Chain walking with class registry (fixture-based)
+%%====================================================================
+
+chain_with_registry_test_() ->
+    {setup,
+        fun setup_chain_registry/0,
+        fun teardown_chain_registry/1,
+        [
+            fun walk_mixed_chain_binary_plus_returns_integer/0,
+            fun walk_mixed_chain_binary_lt_returns_boolean/0
+        ]}.
+
+setup_chain_registry() ->
+    %% Start pg if not running
+    case whereis(pg) of
+        undefined -> {ok, _} = pg:start_link();
+        _ -> ok
+    end,
+    %% Ensure hierarchy table exists
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    %% Register a minimal TestInteger class with return type annotations
+    {ok, IntPid} = beamtalk_object_class:start('TestChainInteger', #{
+        name => 'TestChainInteger',
+        module => 'bt@test@chain_integer',
+        superclass => none,
+        instance_methods => #{
+            '+' => #{block => fun(_, _) -> 0 end, arity => 1},
+            '<' => #{block => fun(_, _) -> false end, arity => 1}
+        },
+        method_return_types => #{
+            '+' => 'TestChainInteger',
+            '<' => 'TestChainBoolean'
+        }
+    }),
+    {ok, BoolPid} = beamtalk_object_class:start('TestChainBoolean', #{
+        name => 'TestChainBoolean',
+        module => 'bt@test@chain_boolean',
+        superclass => none,
+        instance_methods => #{}
+    }),
+    [IntPid, BoolPid].
+
+teardown_chain_registry(Pids) ->
+    lists:foreach(
+        fun(Pid) ->
+            case is_process_alive(Pid) of
+                true ->
+                    MRef = monitor(process, Pid),
+                    exit(Pid, kill),
+                    receive {'DOWN', MRef, process, Pid, _} -> ok
+                    after 1000 -> ok
+                    end;
+                false -> ok
+            end
+        end,
+        Pids
+    ).
+
+walk_mixed_chain_binary_plus_returns_integer() ->
+    Result = beamtalk_repl_ops_dev:walk_mixed_chain('TestChainInteger', [{binary, '+'}]),
+    ?assertEqual({ok, 'TestChainInteger', instance}, Result).
+
+walk_mixed_chain_binary_lt_returns_boolean() ->
+    Result = beamtalk_repl_ops_dev:walk_mixed_chain('TestChainInteger', [{binary, '<'}]),
+    ?assertEqual({ok, 'TestChainBoolean', instance}, Result).

@@ -23,7 +23,8 @@
     with_hint/2,
     with_details/2,
     format/1,
-    raise/1
+    raise/1,
+    generate_message/3
 ]).
 
 %% Type definition for error record
@@ -124,9 +125,17 @@ with_details(Error, Details) ->
 %%   beamtalk_error:format(Error)
 %%   % => <<"Integer does not understand 'foo'\nHint: Check spelling">>
 -spec format(#beamtalk_error{}) -> binary().
-format(#beamtalk_error{message = Message, hint = undefined}) ->
-    Message;
+format(#beamtalk_error{kind = does_not_understand} = Error) ->
+    Enriched = maybe_enrich_dnu_hint(Error),
+    format_parts(Enriched#beamtalk_error.message, Enriched#beamtalk_error.hint);
 format(#beamtalk_error{message = Message, hint = Hint}) ->
+    format_parts(Message, Hint).
+
+%% @private Format message with optional hint.
+-spec format_parts(binary(), binary() | undefined) -> binary().
+format_parts(Message, undefined) ->
+    Message;
+format_parts(Message, Hint) ->
     iolist_to_binary([Message, <<"\nHint: ">>, Hint]).
 
 %% @doc Wrap an error as an Exception object and raise it.
@@ -230,3 +239,28 @@ generate_message(Kind, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s error in ~s", [Kind, Class]));
 generate_message(Kind, Class, Selector) ->
     iolist_to_binary(io_lib:format("~s error in '~s' on ~s", [Kind, Selector, Class])).
+
+%% @private Enrich DNU hint when the selector is a class-side message.
+%%
+%% If the instance doesn't understand a selector but the class hierarchy does
+%% (e.g., `methods`, `allMethods`, `superclass`), suggest using `class` to
+%% access it. Degrades gracefully if the class registry is unavailable.
+-spec maybe_enrich_dnu_hint(#beamtalk_error{}) -> #beamtalk_error{}.
+maybe_enrich_dnu_hint(#beamtalk_error{class = Class, selector = Selector} = Error)
+  when is_atom(Class), is_atom(Selector), Selector =/= undefined ->
+    try beamtalk_dispatch:responds_to(Selector, 'Class') of
+        true ->
+            SelBin = atom_to_binary(Selector, utf8),
+            Hint = iolist_to_binary([
+                <<"'">>, SelBin,
+                <<"' is a class-side message — use 'class ">>,
+                SelBin, <<"' to send it to an instance's class">>
+            ]),
+            Error#beamtalk_error{hint = Hint};
+        false ->
+            Error
+    catch
+        _:_ -> Error
+    end;
+maybe_enrich_dnu_hint(Error) ->
+    Error.
