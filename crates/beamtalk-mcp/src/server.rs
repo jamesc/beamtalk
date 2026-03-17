@@ -23,10 +23,14 @@ use sha2::{Digest, Sha256};
 use crate::client::ReplClient;
 
 /// Drop guard that logs MCP tool completion with duration and result status.
+///
+/// Defaults to `error` — callers must explicitly call [`mark_ok`] on the success
+/// path so that early returns via `?`, `check_response!`, or `error_result()`
+/// are correctly reported as errors.
 struct ToolTimer {
     tool: &'static str,
     start: std::time::Instant,
-    is_error: bool,
+    is_ok: bool,
 }
 
 impl ToolTimer {
@@ -34,12 +38,12 @@ impl ToolTimer {
         Self {
             tool,
             start: std::time::Instant::now(),
-            is_error: false,
+            is_ok: false,
         }
     }
 
-    fn mark_error(&mut self) {
-        self.is_error = true;
+    fn mark_ok(&mut self) {
+        self.is_ok = true;
     }
 }
 
@@ -47,7 +51,7 @@ impl Drop for ToolTimer {
     #[allow(clippy::cast_possible_truncation)]
     fn drop(&mut self) {
         let elapsed_ms = self.start.elapsed().as_millis() as u64;
-        let status = if self.is_error { "error" } else { "ok" };
+        let status = if self.is_ok { "ok" } else { "error" };
         tracing::debug!(tool = self.tool, elapsed_ms, status, "tool completed");
     }
 }
@@ -306,7 +310,6 @@ impl BeamtalkMcp {
             if let Some(ref hint) = response.hint {
                 let _ = write!(error_text, "\nHint: {hint}");
             }
-            timer.mark_error();
             return Ok(error_result(error_text));
         }
 
@@ -347,6 +350,7 @@ impl BeamtalkMcp {
             parts.push(Content::text("nil"));
         }
 
+        timer.mark_ok();
         Ok(CallToolResult::success(parts))
     }
 
@@ -358,7 +362,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<CompleteParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("complete");
+        let mut timer = ToolTimer::new("complete");
         let code_len = params.code.len();
         tracing::debug!(tool = "complete", code_len, cursor = ?params.cursor, "tool invoked");
         let cursor = params.cursor.unwrap_or(code_len).min(code_len);
@@ -380,6 +384,7 @@ impl BeamtalkMcp {
             completions.join("\n")
         };
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -440,10 +445,10 @@ impl BeamtalkMcp {
         // Partial loads (some files succeeded, some failed) are still reported as
         // errors so MCP clients that inspect is_error see the failure.
         if !errors.is_empty() {
-            timer.mark_error();
             return Ok(CallToolResult::error(parts));
         }
 
+        timer.mark_ok();
         Ok(CallToolResult::success(parts))
     }
 
@@ -455,7 +460,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<LoadFileParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("load_file");
+        let mut timer = ToolTimer::new("load_file");
         tracing::debug!(tool = "load_file", path = %params.path, "tool invoked");
         let response = self
             .client
@@ -481,6 +486,7 @@ impl BeamtalkMcp {
             }
         }
 
+        timer.mark_ok();
         Ok(CallToolResult::success(parts))
     }
 
@@ -492,7 +498,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<InspectParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("inspect");
+        let mut timer = ToolTimer::new("inspect");
         tracing::debug!(tool = "inspect", actor = %params.actor, "tool invoked");
         let response = self
             .client
@@ -508,6 +514,7 @@ impl BeamtalkMcp {
             None => "No state available".to_string(),
         };
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -516,7 +523,7 @@ impl BeamtalkMcp {
         description = "List all running actors in the workspace. Returns each actor's PID, class, and module."
     )]
     async fn list_actors(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("list_actors");
+        let mut timer = ToolTimer::new("list_actors");
         tracing::debug!(tool = "list_actors", "tool invoked");
         let response = self
             .client
@@ -537,6 +544,7 @@ impl BeamtalkMcp {
                 .join("\n")
         };
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -545,7 +553,7 @@ impl BeamtalkMcp {
         description = "List all loaded modules in the workspace. Returns each module's name, source file, actor count, and when it was loaded."
     )]
     async fn list_modules(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("list_modules");
+        let mut timer = ToolTimer::new("list_modules");
         tracing::debug!(tool = "list_modules", "tool invoked");
         let response = self
             .client
@@ -571,6 +579,7 @@ impl BeamtalkMcp {
                 .join("\n")
         };
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -582,7 +591,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<ListClassesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("list_classes");
+        let mut timer = ToolTimer::new("list_classes");
         tracing::debug!(tool = "list_classes", filter = ?params.filter, "tool invoked");
         let response = self
             .client
@@ -632,6 +641,7 @@ impl BeamtalkMcp {
                 .join("\n")
         };
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -640,7 +650,7 @@ impl BeamtalkMcp {
         description = "Get current variable bindings in the REPL session. Shows all variables and their values."
     )]
     async fn get_bindings(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("get_bindings");
+        let mut timer = ToolTimer::new("get_bindings");
         tracing::debug!(tool = "get_bindings", "tool invoked");
         let response = self
             .client
@@ -655,6 +665,7 @@ impl BeamtalkMcp {
             None => "No bindings".to_string(),
         };
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -666,7 +677,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<ReloadModuleParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("reload_module");
+        let mut timer = ToolTimer::new("reload_module");
         tracing::debug!(tool = "reload_module", module = %params.module, "tool invoked");
         let response = self
             .client
@@ -687,6 +698,7 @@ impl BeamtalkMcp {
             }
         }
 
+        timer.mark_ok();
         Ok(CallToolResult::success(parts))
     }
 
@@ -698,7 +710,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<DocsParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("docs");
+        let mut timer = ToolTimer::new("docs");
         tracing::debug!(tool = "docs", class = %params.class, selector = ?params.selector, "tool invoked");
         let response = self
             .client
@@ -712,6 +724,7 @@ impl BeamtalkMcp {
             .docs
             .unwrap_or_else(|| "No documentation available".to_string());
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -720,7 +733,7 @@ impl BeamtalkMcp {
         description = "Clear all variable bindings in the REPL session. Resets the workspace to a clean state."
     )]
     async fn clear(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("clear");
+        let mut timer = ToolTimer::new("clear");
         tracing::debug!(tool = "clear", "tool invoked");
         let response = self
             .client
@@ -730,6 +743,7 @@ impl BeamtalkMcp {
 
         check_response!(response, "Failed to clear bindings");
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(
             "Bindings cleared",
         )]))
@@ -743,7 +757,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<UnloadParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("unload");
+        let mut timer = ToolTimer::new("unload");
         tracing::debug!(tool = "unload", module = %params.module, "tool invoked");
         let response = self
             .client
@@ -753,6 +767,7 @@ impl BeamtalkMcp {
 
         check_response!(response, "Failed to unload module");
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Module '{}' unloaded",
             params.module
@@ -764,7 +779,7 @@ impl BeamtalkMcp {
         description = "Interrupt a running evaluation in the REPL. Use this to cancel long-running or stuck evaluations."
     )]
     async fn interrupt(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("interrupt");
+        let mut timer = ToolTimer::new("interrupt");
         tracing::debug!(tool = "interrupt", "tool invoked");
         let response = self
             .client
@@ -774,6 +789,7 @@ impl BeamtalkMcp {
 
         check_response!(response, "Failed to send interrupt");
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(
             "Interrupt sent",
         )]))
@@ -787,7 +803,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<ShowCodegenParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("show_codegen");
+        let mut timer = ToolTimer::new("show_codegen");
         tracing::debug!(tool = "show_codegen", class = ?params.class, has_code = params.code.is_some(), selector = ?params.selector, "tool invoked");
         // Normalize empty strings to absent — Some("") is not a valid class or code.
         let class = params.class.filter(|s| !s.is_empty());
@@ -832,6 +848,7 @@ impl BeamtalkMcp {
             }
         }
 
+        timer.mark_ok();
         Ok(CallToolResult::success(parts))
     }
 
@@ -867,10 +884,10 @@ impl BeamtalkMcp {
         };
 
         if has_failures {
-            timer.mark_error();
             return Ok(error_result(format!("TEST FAILURES:\n{text}")));
         }
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -882,7 +899,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<LintParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("lint");
+        let mut timer = ToolTimer::new("lint");
         let path = params.path.unwrap_or_else(|| ".".to_string());
         tracing::debug!(tool = "lint", path = %path, "tool invoked");
         // Run blocking I/O and CPU-bound parsing off the Tokio worker thread.
@@ -897,6 +914,8 @@ impl BeamtalkMcp {
         call_result.structured_content = structured;
         if has_errors {
             call_result.is_error = Some(true);
+        } else {
+            timer.mark_ok();
         }
         Ok(call_result)
     }
@@ -909,7 +928,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<SearchExamplesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("search_examples");
+        let mut timer = ToolTimer::new("search_examples");
         tracing::debug!(tool = "search_examples", limit = ?params.limit, "tool invoked");
         let start = std::time::Instant::now();
         let results = beamtalk_examples::search(&params.query, params.limit);
@@ -938,6 +957,7 @@ impl BeamtalkMcp {
         tracing::debug!(query = %params.query, "search_examples query");
 
         if results.is_empty() {
+            timer.mark_ok();
             return Ok(CallToolResult::success(vec![Content::text(
                 "No examples found for that query. Try different keywords — e.g. 'closures', 'actor state', 'collections'.",
             )]));
@@ -959,6 +979,7 @@ impl BeamtalkMcp {
             .collect::<Vec<_>>()
             .join("\n---\n\n");
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -970,7 +991,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<SearchClassesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("search_classes");
+        let mut timer = ToolTimer::new("search_classes");
         tracing::debug!(tool = "search_classes", limit = ?params.limit, "tool invoked");
         let start = std::time::Instant::now();
         let results = beamtalk_examples::search_classes(&params.query, params.limit);
@@ -1002,6 +1023,7 @@ impl BeamtalkMcp {
         );
 
         if results.is_empty() {
+            timer.mark_ok();
             return Ok(CallToolResult::success(vec![Content::text(
                 "No classes found for that query. Try different keywords — e.g. 'http', 'collection', 'file', 'actor', 'subprocess'.",
             )]));
@@ -1052,6 +1074,7 @@ impl BeamtalkMcp {
             .collect::<Vec<_>>()
             .join("\n---\n\n");
 
+        timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
@@ -1060,7 +1083,7 @@ impl BeamtalkMcp {
         description = "Discover supported REPL operations and protocol version. Returns the list of available ops with their parameters, and version information."
     )]
     async fn describe(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _timer = ToolTimer::new("describe");
+        let mut timer = ToolTimer::new("describe");
         tracing::debug!(tool = "describe", "tool invoked");
         let response = self
             .client
@@ -1089,6 +1112,7 @@ impl BeamtalkMcp {
             parts.push(Content::text("No describe information available"));
         }
 
+        timer.mark_ok();
         Ok(CallToolResult::success(parts))
     }
 }
