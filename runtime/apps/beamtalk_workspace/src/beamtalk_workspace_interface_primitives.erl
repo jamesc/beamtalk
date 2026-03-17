@@ -662,7 +662,7 @@ maybe_warn_loaded_class(AtomName) ->
                 atom_to_binary(AtomName, utf8),
                 <<" is a loaded class. Use reload instead.">>
             ]),
-            ?LOG_WARNING("~s", [WarningMsg]);
+            ?LOG_WARNING("~s", [WarningMsg], #{domain => [beamtalk, runtime]});
         false ->
             ok
     end.
@@ -714,7 +714,8 @@ loaded_class_objects(ClassNames) ->
                             undefined ->
                                 ?LOG_WARNING(
                                     "loaded_class_objects: class ~p not found in registry after load",
-                                    [Name]
+                                    [Name],
+                                    #{domain => [beamtalk, runtime]}
                                 ),
                                 false;
                             ClassPid ->
@@ -727,12 +728,16 @@ loaded_class_objects(ClassNames) ->
                 catch
                     error:badarg ->
                         ?LOG_WARNING(
-                            "loaded_class_objects: class name ~p is not a known atom", [Name]
+                            "loaded_class_objects: class name ~p is not a known atom",
+                            [Name],
+                            #{domain => [beamtalk, runtime]}
                         ),
                         false
                 end;
             (Entry) ->
-                ?LOG_WARNING("loaded_class_objects: unexpected entry shape ~p", [Entry]),
+                ?LOG_WARNING("loaded_class_objects: unexpected entry shape ~p", [Entry], #{
+                    domain => [beamtalk, runtime]
+                }),
                 false
         end,
         ClassNames

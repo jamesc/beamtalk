@@ -395,7 +395,8 @@ find_defining_class(ClassPid, Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH
     ClassName = beamtalk_runtime_api:class_name(ClassPid),
     ?LOG_WARNING(
         "find_defining_class: max hierarchy depth ~p exceeded at ~p for selector ~p — possible cycle",
-        [?MAX_HIERARCHY_DEPTH, ClassName, Selector]
+        [?MAX_HIERARCHY_DEPTH, ClassName, Selector],
+        #{domain => [beamtalk, runtime]}
     ),
     ClassName;
 find_defining_class(ClassPid, Selector, Depth) ->
@@ -718,7 +719,8 @@ collect_flattened_methods(ClassName, ClassPid) ->
 collect_flattened_methods(ClassName, _ClassPid, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     ?LOG_WARNING(
         "collect_flattened_methods: max hierarchy depth ~p exceeded at ~p — possible cycle",
-        [?MAX_HIERARCHY_DEPTH, ClassName]
+        [?MAX_HIERARCHY_DEPTH, ClassName],
+        #{domain => [beamtalk, runtime]}
     ),
     #{};
 collect_flattened_methods(ClassName, ClassPid, Depth) ->

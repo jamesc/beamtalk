@@ -116,7 +116,7 @@ do_register(ClassName, ClassInfo) ->
     case beamtalk_object_class:start(ClassName, ClassInfo) of
         {ok, Pid} ->
             ?LOG_INFO("Registered class via ClassBuilder", #{
-                class => ClassName, module => ?MODULE
+                class => ClassName, module => ?MODULE, domain => [beamtalk, runtime]
             }),
             notify_class_loaded(ClassName),
             {ok, Pid};
@@ -125,13 +125,16 @@ do_register(ClassName, ClassInfo) ->
             case beamtalk_object_class:update_class(ClassName, ClassInfo) of
                 {ok, _IVars} ->
                     ?LOG_INFO("Updated class via ClassBuilder (hot reload)", #{
-                        class => ClassName, module => ?MODULE
+                        class => ClassName, module => ?MODULE, domain => [beamtalk, runtime]
                     }),
                     notify_class_loaded(ClassName),
                     {ok, beamtalk_class_registry:whereis_class(ClassName)};
                 {error, Reason} ->
                     ?LOG_WARNING("ClassBuilder update_class failed", #{
-                        class => ClassName, reason => Reason, module => ?MODULE
+                        class => ClassName,
+                        reason => Reason,
+                        module => ?MODULE,
+                        domain => [beamtalk, runtime]
                     }),
                     Error0 = beamtalk_error:new(internal_error, 'ClassBuilder'),
                     Error1 = beamtalk_error:with_selector(Error0, register),
@@ -444,7 +447,8 @@ notify_class_loaded(ClassName) ->
                     %% Callback module doesn't implement on_class_loaded/1
                     ?LOG_WARNING("Class load callback not implemented", #{
                         callback => Mod,
-                        class => ClassName
+                        class => ClassName,
+                        domain => [beamtalk, runtime]
                     });
                 Kind:Reason ->
                     %% Unexpected failure in callback — log but don't fail class load
@@ -452,7 +456,8 @@ notify_class_loaded(ClassName) ->
                         callback => Mod,
                         class => ClassName,
                         kind => Kind,
-                        reason => Reason
+                        reason => Reason,
+                        domain => [beamtalk, runtime]
                     })
             end;
         undefined ->

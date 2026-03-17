@@ -116,7 +116,8 @@ handle(<<"interrupt">>, _Params, Msg, SessionPid) ->
                         Pid;
                     error ->
                         ?LOG_WARNING("Interrupt target session not found", #{
-                            session => TargetSession
+                            session => TargetSession,
+                            domain => [beamtalk, runtime]
                         }),
                         SessionPid
                 end

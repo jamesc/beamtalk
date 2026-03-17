@@ -98,7 +98,9 @@ handle_info({rebootstrap, ClassName, RegName, Retries}, State) when Retries < 5 
     end;
 handle_info({rebootstrap, ClassName, RegName, _Retries}, State) ->
     ?LOG_ERROR("Bootstrap: failed to rewire singleton after retries", #{
-        class => ClassName, name => RegName
+        class => ClassName,
+        name => RegName,
+        domain => [beamtalk, runtime]
     }),
     {noreply, State};
 handle_info({rebootstrap_value, ClassName, Module, Retries}, State) when Retries < 5 ->
@@ -106,7 +108,8 @@ handle_info({rebootstrap_value, ClassName, Module, Retries}, State) when Retries
     {noreply, State};
 handle_info({rebootstrap_value, ClassName, _Module, _Retries}, State) ->
     ?LOG_ERROR("Bootstrap: failed to wire value singleton after retries", #{
-        class => ClassName
+        class => ClassName,
+        domain => [beamtalk, runtime]
     }),
     {noreply, State};
 handle_info(_Msg, State) ->
@@ -149,13 +152,17 @@ bootstrap_all(State) ->
 bootstrap_singleton(ClassName, RegName, State) ->
     case erlang:whereis(RegName) of
         undefined ->
-            ?LOG_WARNING("Bootstrap: singleton not registered yet", #{name => RegName}),
+            ?LOG_WARNING("Bootstrap: singleton not registered yet", #{
+                name => RegName, domain => [beamtalk, runtime]
+            }),
             State;
         Pid ->
             Obj = build_object_ref(ClassName, Pid),
             _ = set_class_variable(ClassName, Obj),
             MonRef = erlang:monitor(process, Pid),
-            ?LOG_DEBUG("Bootstrap: wired singleton", #{class => ClassName, pid => Pid}),
+            ?LOG_DEBUG("Bootstrap: wired singleton", #{
+                class => ClassName, pid => Pid, domain => [beamtalk, runtime]
+            }),
             Monitors = maps:put(MonRef, {ClassName, RegName}, State#state.monitors),
             State#state{monitors = Monitors}
     end.
@@ -170,20 +177,27 @@ bootstrap_value_singleton(ClassName, Module, Retries) ->
         Obj = Module:new(),
         case set_class_variable(ClassName, Obj) of
             ok ->
-                ?LOG_DEBUG("Bootstrap: wired value singleton", #{class => ClassName});
+                ?LOG_DEBUG("Bootstrap: wired value singleton", #{
+                    class => ClassName, domain => [beamtalk, runtime]
+                });
             {error, class_not_found} ->
                 ?LOG_WARNING("Bootstrap: value singleton class not loaded yet", #{
-                    class => ClassName
+                    class => ClassName,
+                    domain => [beamtalk, runtime]
                 }),
                 erlang:send_after(200, self(), {rebootstrap_value, ClassName, Module, Retries + 1})
         end
     catch
         error:#beamtalk_error{kind = class_not_found} ->
-            ?LOG_WARNING("Bootstrap: value singleton class not loaded yet", #{class => ClassName}),
+            ?LOG_WARNING("Bootstrap: value singleton class not loaded yet", #{
+                class => ClassName, domain => [beamtalk, runtime]
+            }),
             erlang:send_after(200, self(), {rebootstrap_value, ClassName, Module, Retries + 1});
         _:Reason ->
             ?LOG_WARNING("Bootstrap: failed to initialize value singleton", #{
-                class => ClassName, reason => Reason
+                class => ClassName,
+                reason => Reason,
+                domain => [beamtalk, runtime]
             }),
             erlang:send_after(200, self(), {rebootstrap_value, ClassName, Module, Retries + 1})
     end.
@@ -257,7 +271,12 @@ find_bt_modules_in_dir(Dir) ->
                     true ->
                         ?LOG_WARNING(
                             "Bootstrap: too many project modules, capping at limit",
-                            #{found => Count, limit => ?MAX_PROJECT_MODULES, dir => Dir}
+                            #{
+                                found => Count,
+                                limit => ?MAX_PROJECT_MODULES,
+                                dir => Dir,
+                                domain => [beamtalk, runtime]
+                            }
                         ),
                         lists:sublist(Eligible, ?MAX_PROJECT_MODULES);
                     false ->
@@ -305,7 +324,7 @@ beam_file_to_project_module(File) ->
                         false ->
                             ?LOG_WARNING(
                                 "Bootstrap: skipping module with invalid name",
-                                #{filename => File}
+                                #{filename => File, domain => [beamtalk, runtime]}
                             ),
                             false
                     end;
@@ -409,7 +428,7 @@ topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
         [] ->
             ?LOG_WARNING(
                 "Bootstrap topo_sort: unresolvable dependencies",
-                #{remaining => [C || {_, C, _} <- Deferred]}
+                #{remaining => [C || {_, C, _} <- Deferred], domain => [beamtalk, runtime]}
             ),
             lists:reverse(Acc) ++ Deferred;
         _ ->
@@ -428,11 +447,13 @@ activate_project_module(ModuleName) ->
             SourcePath = extract_source_path(ModuleName),
             beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
             store_bootstrap_class_source(ModuleName, SourcePath),
-            ?LOG_DEBUG("Bootstrap: activated project module", #{module => ModuleName});
+            ?LOG_DEBUG("Bootstrap: activated project module", #{
+                module => ModuleName, domain => [beamtalk, runtime]
+            });
         {error, Reason} ->
             ?LOG_WARNING(
                 "Bootstrap: failed to load project module",
-                #{module => ModuleName, reason => Reason}
+                #{module => ModuleName, reason => Reason, domain => [beamtalk, runtime]}
             )
     end.
 
@@ -457,7 +478,12 @@ store_bootstrap_class_source(ModuleName, SourcePath) ->
         {error, Reason} ->
             ?LOG_DEBUG(
                 "Bootstrap: could not read source file for class source storage",
-                #{module => ModuleName, path => SourcePath, reason => Reason}
+                #{
+                    module => ModuleName,
+                    path => SourcePath,
+                    reason => Reason,
+                    domain => [beamtalk, runtime]
+                }
             )
     end.
 
@@ -499,7 +525,7 @@ try_register_class(ModuleName) ->
                 _:Err ->
                     ?LOG_WARNING(
                         "Bootstrap: register_class/0 failed",
-                        #{module => ModuleName, error => Err}
+                        #{module => ModuleName, error => Err, domain => [beamtalk, runtime]}
                     )
             end;
         false ->

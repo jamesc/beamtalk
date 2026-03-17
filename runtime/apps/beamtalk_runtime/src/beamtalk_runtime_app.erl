@@ -73,7 +73,7 @@ verify_metaclass_self_grounding() ->
                 true ->
                     ?LOG_INFO(
                         "ADR 0036: Metaclass self-grounding OK (Metaclass class class == Metaclass class)",
-                        #{module => ?MODULE}
+                        #{module => ?MODULE, domain => [beamtalk, runtime]}
                     ),
                     ok;
                 false ->
@@ -82,7 +82,8 @@ verify_metaclass_self_grounding() ->
                         #{
                             module => ?MODULE,
                             metaclass_class => MetaclassClass,
-                            metaclass_class_class => MetaclassClassClass
+                            metaclass_class_class => MetaclassClassClass,
+                            domain => [beamtalk, runtime]
                         }
                     ),
                     ok

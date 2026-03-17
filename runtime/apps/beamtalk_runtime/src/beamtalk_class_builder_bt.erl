@@ -104,7 +104,9 @@ register_class() ->
     },
     case beamtalk_object_class:start('ClassBuilder', ClassInfo) of
         {ok, _Pid} ->
-            ?LOG_INFO("Registered ClassBuilder (ADR 0038 Phase 1 stub)", #{module => ?MODULE}),
+            ?LOG_INFO("Registered ClassBuilder (ADR 0038 Phase 1 stub)", #{
+                module => ?MODULE, domain => [beamtalk, runtime]
+            }),
             ok;
         {error, {already_started, _}} ->
             %% ClassBuilder was already registered (e.g., bootstrap ran twice or a prior
@@ -112,6 +114,8 @@ register_class() ->
             beamtalk_object_class:update_class('ClassBuilder', ClassInfo),
             ok;
         {error, Reason} ->
-            ?LOG_WARNING("Failed to register ClassBuilder", #{reason => Reason}),
+            ?LOG_WARNING("Failed to register ClassBuilder", #{
+                reason => Reason, domain => [beamtalk, runtime]
+            }),
             ok
     end.

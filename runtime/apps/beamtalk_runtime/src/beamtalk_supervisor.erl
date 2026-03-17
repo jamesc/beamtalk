@@ -77,13 +77,18 @@ startLink(Self) ->
     Module = beamtalk_object_class:module_name(ClassPid),
     case Module:start_link() of
         {ok, Pid} ->
-            ?LOG_INFO("Supervisor started", #{supervisor => ClassName, module => Module, pid => Pid}),
+            ?LOG_INFO("Supervisor started", #{
+                supervisor => ClassName, module => Module, pid => Pid, domain => [beamtalk, runtime]
+            }),
             {beamtalk_supervisor, ClassName, Module, Pid};
         {error, {already_started, Pid}} ->
             {beamtalk_supervisor, ClassName, Module, Pid};
         {error, Reason} ->
             ?LOG_ERROR("Supervisor start failed", #{
-                supervisor => ClassName, module => Module, reason => Reason
+                supervisor => ClassName,
+                module => Module,
+                reason => Reason,
+                domain => [beamtalk, runtime]
             }),
             Error = beamtalk_error:new(
                 runtime_error,
@@ -123,7 +128,8 @@ static_init(Module, ClassName) ->
         strategy => Strategy,
         max_restarts => MaxR,
         restart_window => MaxT,
-        children => ChildIds
+        children => ChildIds,
+        domain => [beamtalk, runtime]
     }),
     {ok, {SupFlags, Specs}}.
 
@@ -146,7 +152,8 @@ dynamic_init(Module, ClassName) ->
         supervisor => ClassName,
         strategy => simple_one_for_one,
         max_restarts => MaxR,
-        restart_window => MaxT
+        restart_window => MaxT,
+        domain => [beamtalk, runtime]
     }),
     {ok, {SupFlags, Specs}}.
 
@@ -238,7 +245,9 @@ terminateChild(Self, Arg) ->
                 case supervisor:terminate_child(SupPid, ChildId) of
                     ok ->
                         ?LOG_INFO("Supervisor child terminated", #{
-                            supervisor => SupClass, child => ChildId
+                            supervisor => SupClass,
+                            child => ChildId,
+                            domain => [beamtalk, runtime]
                         }),
                         nil;
                     {error, Reason} ->
@@ -256,7 +265,9 @@ terminateChild(Self, Arg) ->
                 case supervisor:terminate_child(SupPid, ChildPid) of
                     ok ->
                         ?LOG_INFO("DynamicSupervisor child terminated", #{
-                            supervisor => SupClass, child_pid => ChildPid
+                            supervisor => SupClass,
+                            child_pid => ChildPid,
+                            domain => [beamtalk, runtime]
                         }),
                         nil;
                     {error, not_found} ->
@@ -302,12 +313,16 @@ startChild(Self) ->
                     supervisor => SupClass,
                     child => ChildClass,
                     module => ChildModule,
-                    child_pid => ChildPid
+                    child_pid => ChildPid,
+                    domain => [beamtalk, runtime]
                 }),
                 wrap_child(ChildClass, ChildModule, ChildPid);
             {error, Reason} ->
                 ?LOG_ERROR("DynamicSupervisor child start failed", #{
-                    supervisor => SupClass, child => ChildClass, reason => Reason
+                    supervisor => SupClass,
+                    child => ChildClass,
+                    reason => Reason,
+                    domain => [beamtalk, runtime]
                 }),
                 Error = beamtalk_error:new(
                     runtime_error,
@@ -342,12 +357,16 @@ startChild(Self, Args) ->
                     supervisor => SupClass,
                     child => ChildClass,
                     module => ChildModule,
-                    child_pid => ChildPid
+                    child_pid => ChildPid,
+                    domain => [beamtalk, runtime]
                 }),
                 wrap_child(ChildClass, ChildModule, ChildPid);
             {error, Reason} ->
                 ?LOG_ERROR("DynamicSupervisor child start failed", #{
-                    supervisor => SupClass, child => ChildClass, reason => Reason
+                    supervisor => SupClass,
+                    child => ChildClass,
+                    reason => Reason,
+                    domain => [beamtalk, runtime]
                 }),
                 Error = beamtalk_error:new(
                     runtime_error,
@@ -383,7 +402,9 @@ stop(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
     with_live_supervisor(ClassName, stop, fun() ->
-        ?LOG_INFO("Supervisor stopping", #{supervisor => ClassName, pid => Pid}),
+        ?LOG_INFO("Supervisor stopping", #{
+            supervisor => ClassName, pid => Pid, domain => [beamtalk, runtime]
+        }),
         gen_server:stop(Pid),
         nil
     end).
@@ -656,7 +677,9 @@ with_live_supervisor(ClassName, Selector, Fun) ->
             %% supervisor:* calls use gen_server:call internally, which exits
             %% with {noproc, MFA} when the target process is dead.
             ?LOG_WARNING("Supervisor stale handle", #{
-                supervisor => ClassName, selector => Selector
+                supervisor => ClassName,
+                selector => Selector,
+                domain => [beamtalk, runtime]
             }),
             Error = beamtalk_error:new(
                 runtime_error,
@@ -668,7 +691,9 @@ with_live_supervisor(ClassName, Selector, Fun) ->
         exit:noproc ->
             %% gen_server:stop/1 exits with the bare atom noproc (no MFA wrapper).
             ?LOG_WARNING("Supervisor stale handle", #{
-                supervisor => ClassName, selector => Selector
+                supervisor => ClassName,
+                selector => Selector,
+                domain => [beamtalk, runtime]
             }),
             Error = beamtalk_error:new(
                 runtime_error,

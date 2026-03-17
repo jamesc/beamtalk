@@ -54,13 +54,15 @@ code_change(_OldVsn, State, {NewInstanceVars, Module}) when
 ->
     %% BT-572: Field migration during hot reload
     ?LOG_INFO("code_change: field migration", #{
-        module => Module, new_instance_vars => NewInstanceVars
+        module => Module,
+        new_instance_vars => NewInstanceVars,
+        domain => [beamtalk, runtime]
     }),
     MigratedState = maybe_migrate_class_key(State),
     NewState = migrate_fields(MigratedState, NewInstanceVars, Module),
     {ok, NewState};
 code_change(_OldVsn, State, _Extra) when is_map(State) ->
-    ?LOG_DEBUG("code_change: class key migration check", #{}),
+    ?LOG_DEBUG("code_change: class key migration check", #{domain => [beamtalk, runtime]}),
     {ok, maybe_migrate_class_key(State)};
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -87,7 +89,9 @@ trigger_code_change(Module, Pids) ->
     {ok, non_neg_integer(), [{pid(), term()}]}.
 trigger_code_change(Module, Pids, Extra) ->
     PidCount = length(Pids),
-    ?LOG_INFO("Triggering code_change", #{module => Module, actor_count => PidCount}),
+    ?LOG_INFO("Triggering code_change", #{
+        module => Module, actor_count => PidCount, domain => [beamtalk, runtime]
+    }),
     Result = lists:foldl(
         fun(Pid, {ok, Upgraded, Failures}) ->
             case try_change_code(Pid, Module, Extra) of
@@ -104,13 +108,16 @@ trigger_code_change(Module, Pids, Extra) ->
     case Failures of
         [] ->
             ?LOG_INFO("code_change complete", #{
-                module => Module, upgraded => Upgraded
+                module => Module,
+                upgraded => Upgraded,
+                domain => [beamtalk, runtime]
             });
         _ ->
             ?LOG_INFO("code_change complete with failures", #{
                 module => Module,
                 upgraded => Upgraded,
-                failure_count => length(Failures)
+                failure_count => length(Failures),
+                domain => [beamtalk, runtime]
             })
     end,
     Result.
@@ -198,7 +205,7 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
                     ClassName = beamtalk_tagged_map:class_of(OldState, unknown),
                     ?LOG_WARNING(
                         "Hot reload dropped fields",
-                        #{class => ClassName, fields => Dropped}
+                        #{class => ClassName, fields => Dropped, domain => [beamtalk, runtime]}
                     )
             end,
             Kept;

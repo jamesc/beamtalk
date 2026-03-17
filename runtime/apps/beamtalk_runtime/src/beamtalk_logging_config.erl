@@ -685,14 +685,16 @@ write_mcp_signal_file() ->
                         ok ->
                             ?LOG_INFO(#{
                                 msg => "MCP debug signal file written",
-                                path => Path
+                                path => Path,
+                                domain => [beamtalk, runtime]
                             }),
                             ok;
                         {error, Reason} ->
                             ?LOG_ERROR(#{
                                 msg => "Failed to write MCP debug signal file",
                                 path => Path,
-                                reason => Reason
+                                reason => Reason,
+                                domain => [beamtalk, runtime]
                             }),
                             {error, Reason}
                     end;
@@ -700,7 +702,8 @@ write_mcp_signal_file() ->
                     ?LOG_ERROR(#{
                         msg => "Failed to create directory for MCP debug signal file",
                         path => Path,
-                        reason => DirReason
+                        reason => DirReason,
+                        domain => [beamtalk, runtime]
                     }),
                     {error, DirReason}
             end;
@@ -717,7 +720,8 @@ remove_mcp_signal_file() ->
                 ok ->
                     ?LOG_INFO(#{
                         msg => "MCP debug signal file removed",
-                        path => Path
+                        path => Path,
+                        domain => [beamtalk, runtime]
                     }),
                     ok;
                 {error, enoent} ->
@@ -726,7 +730,8 @@ remove_mcp_signal_file() ->
                     ?LOG_WARNING(#{
                         msg => "Failed to remove MCP debug signal file",
                         path => Path,
-                        reason => Reason
+                        reason => Reason,
+                        domain => [beamtalk, runtime]
                     }),
                     ok
             end;

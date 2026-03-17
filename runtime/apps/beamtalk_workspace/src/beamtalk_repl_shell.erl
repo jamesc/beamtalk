@@ -149,7 +149,9 @@ init(SessionId) ->
     RegistryPid =
         case whereis(beamtalk_actor_registry) of
             undefined ->
-                ?LOG_WARNING("Actor registry not found for session ~p", [SessionId]),
+                ?LOG_WARNING("Actor registry not found for session ~p", [SessionId], #{
+                    domain => [beamtalk, runtime]
+                }),
                 undefined;
             Pid ->
                 Pid
@@ -379,13 +381,17 @@ terminate(Reason, {SessionId, _State, {WorkerPid, MonRef, _From}}) ->
     %% BT-666: Kill any running worker to avoid zombie evaluations
     erlang:demonitor(MonRef, [flush]),
     exit(WorkerPid, kill),
-    ?LOG_INFO("REPL session terminated", #{session => SessionId, reason => Reason}),
+    ?LOG_INFO("REPL session terminated", #{
+        session => SessionId, reason => Reason, domain => [beamtalk, runtime]
+    }),
     ok;
 terminate(Reason, {SessionId, _State, _Worker}) ->
-    ?LOG_INFO("REPL session terminated", #{session => SessionId, reason => Reason}),
+    ?LOG_INFO("REPL session terminated", #{
+        session => SessionId, reason => Reason, domain => [beamtalk, runtime]
+    }),
     ok;
 terminate(Reason, _State) ->
-    ?LOG_INFO("REPL session terminated", #{reason => Reason}),
+    ?LOG_INFO("REPL session terminated", #{reason => Reason, domain => [beamtalk, runtime]}),
     ok.
 
 %% @private

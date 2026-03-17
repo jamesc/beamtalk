@@ -112,7 +112,9 @@ register_class() ->
     },
     case beamtalk_object_class:start('Metaclass', ClassInfo) of
         {ok, _Pid} ->
-            ?LOG_INFO("Registered Metaclass (ADR 0036 Phase 1 stub)", #{module => ?MODULE}),
+            ?LOG_INFO("Registered Metaclass (ADR 0036 Phase 1 stub)", #{
+                module => ?MODULE, domain => [beamtalk, runtime]
+            }),
             ok;
         {error, {already_started, _}} ->
             %% Metaclass was already registered (e.g., bootstrap ran twice or a prior
@@ -120,6 +122,8 @@ register_class() ->
             beamtalk_object_class:update_class('Metaclass', ClassInfo),
             ok;
         {error, Reason} ->
-            ?LOG_WARNING("Failed to register Metaclass", #{reason => Reason}),
+            ?LOG_WARNING("Failed to register Metaclass", #{
+                reason => Reason, domain => [beamtalk, runtime]
+            }),
             ok
     end.

@@ -40,7 +40,7 @@ open() ->
 %% @doc Open a port to the compiler binary at the given path.
 -spec open(file:filename_all()) -> port().
 open(BinaryPath) ->
-    ?LOG_INFO("Opening compiler port", #{binary => BinaryPath}),
+    ?LOG_INFO("Opening compiler port", #{domain => [beamtalk, runtime], binary => BinaryPath}),
     open_port({spawn_executable, BinaryPath}, [
         {packet, 4},
         binary,
@@ -117,21 +117,25 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
                             handle_response(Response)
                     catch
                         error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error", #{port => Port}),
+                            ?LOG_ERROR("Compiler port decode error", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
                             {error, [#{message => <<"Compiler port response is malformed">>}]}
                     end;
                 {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited", #{status => Status}),
+                    ?LOG_ERROR("Compiler port exited", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
                     {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
             after 30000 ->
-                ?LOG_ERROR("Compiler port timeout", #{port => Port}),
+                ?LOG_ERROR("Compiler port timeout", #{domain => [beamtalk, runtime], port => Port}),
                 %% Close the port so any late response cannot poison the next request.
                 catch port_close(Port),
                 {error, [#{message => <<"Compiler port timed out">>}]}
             end
     catch
         error:badarg ->
-            ?LOG_ERROR("Compiler port not available", #{port => Port}),
+            ?LOG_ERROR("Compiler port not available", #{domain => [beamtalk, runtime], port => Port}),
             {error, [#{message => <<"Compiler port is not available">>}]}
     end.
 
@@ -183,20 +187,28 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
                         Response -> handle_response(Response)
                     catch
                         error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (trace)", #{port => Port}),
+                            ?LOG_ERROR("Compiler port decode error (trace)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
                             {error, [#{message => <<"Compiler port response is malformed">>}]}
                     end;
                 {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during trace compile", #{status => Status}),
+                    ?LOG_ERROR("Compiler port exited during trace compile", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
                     {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
             after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (trace)", #{port => Port}),
+                ?LOG_ERROR("Compiler port timeout (trace)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
                 catch port_close(Port),
                 {error, [#{message => <<"Compiler port timed out">>}]}
             end
     catch
         error:badarg ->
-            ?LOG_ERROR("Compiler port not available (trace)", #{port => Port}),
+            ?LOG_ERROR("Compiler port not available (trace)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
             {error, [#{message => <<"Compiler port is not available">>}]}
     end.
 
@@ -234,12 +246,14 @@ resolve_completion_type(Port, Expression, ClassHierarchy) ->
                     end;
                 {Port, {exit_status, Status}} ->
                     ?LOG_ERROR("Compiler port exited during completion type resolution", #{
+                        domain => [beamtalk, runtime],
                         status => Status
                     }),
                     {error, type_unknown}
             after 5000 ->
                 %% Use a shorter timeout for completion — latency budget per ADR 0045.
                 ?LOG_ERROR("Compiler port timeout during completion type resolution", #{
+                    domain => [beamtalk, runtime],
                     port => Port
                 }),
                 %% Close the port so any late response cannot poison the next request.
@@ -314,7 +328,7 @@ handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings}
 handle_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_response(Other) ->
-    ?LOG_ERROR("Unexpected compiler response", #{response => Other}),
+    ?LOG_ERROR("Unexpected compiler response", #{domain => [beamtalk, runtime], response => Other}),
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 %% @private Handle ETF response from a resolve_completion_type request.

@@ -218,7 +218,8 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
                         callback => CallbackMod,
                         registry_pid => RegistryPid,
                         actor_pid => ActorPid,
-                        class => ClassName
+                        class => ClassName,
+                        domain => [beamtalk, runtime]
                     }),
                     {error, {callback_undef, CallbackMod}};
                 error:#beamtalk_error{} = BtError ->
@@ -228,7 +229,8 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
                         error => BtError,
                         registry_pid => RegistryPid,
                         actor_pid => ActorPid,
-                        class => ClassName
+                        class => ClassName,
+                        domain => [beamtalk, runtime]
                     }),
                     {error, {beamtalk_error, BtError}};
                 Kind:Reason ->
@@ -239,7 +241,8 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
                         reason => Reason,
                         registry_pid => RegistryPid,
                         actor_pid => ActorPid,
-                        class => ClassName
+                        class => ClassName,
+                        domain => [beamtalk, runtime]
                     }),
                     {error, {Kind, Reason}}
             end;
@@ -649,6 +652,7 @@ spawn_future_watcher(ActorPid, FuturePid, Selector) ->
 %% State must be a map containing '$beamtalk_class' and '__methods__' keys.
 -spec init(map()) -> {ok, map()} | {stop, term()}.
 init(State) when is_map(State) ->
+    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
     %% Validate required keys
     ClassKey = beamtalk_tagged_map:class_key(),
     case maps:find(ClassKey, State) of
@@ -665,7 +669,8 @@ init(State) when is_map(State) ->
                     ?LOG_INFO("Actor started", #{
                         class => Class,
                         pid => self(),
-                        state_keys => StateKeys
+                        state_keys => StateKeys,
+                        domain => [beamtalk, runtime]
                     }),
                     {ok, State};
                 false ->
@@ -691,7 +696,8 @@ handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args)
     ?LOG_DEBUG("Actor dispatch (cast fire-and-forget)", #{
         class => beamtalk_tagged_map:class_of(State, unknown),
         selector => Selector,
-        mode => cast
+        mode => cast,
+        domain => [beamtalk, runtime]
     }),
     T0 = erlang:monotonic_time(microsecond),
     case dispatch(Selector, Args, Self, State) of
@@ -706,7 +712,10 @@ handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args)
             %% Log error but don't crash — caller expects no reply
             T1 = erlang:monotonic_time(microsecond),
             ?LOG_WARNING("Fire-and-forget dispatch error", #{
-                selector => Selector, reason => Reason, duration_us => T1 - T0
+                selector => Selector,
+                reason => Reason,
+                duration_us => T1 - T0,
+                domain => [beamtalk, runtime]
             }),
             {noreply, NewState}
     end;
@@ -716,7 +725,8 @@ handle_cast({Selector, Args, FuturePid}, State) ->
         class => beamtalk_tagged_map:class_of(State, unknown),
         selector => Selector,
         caller_pid => FuturePid,
-        mode => async
+        mode => async,
+        domain => [beamtalk, runtime]
     }),
     T0 = erlang:monotonic_time(microsecond),
     case dispatch(Selector, Args, Self, State) of
@@ -738,7 +748,7 @@ handle_cast({Selector, Args, FuturePid}, State) ->
     end;
 handle_cast(Msg, State) ->
     %% Unknown cast message format - log and ignore
-    ?LOG_WARNING("Unknown cast message", #{message => Msg}),
+    ?LOG_WARNING("Unknown cast message", #{message => Msg, domain => [beamtalk, runtime]}),
     {noreply, State}.
 
 %% @doc Handle synchronous messages (call).
@@ -751,7 +761,8 @@ handle_call({Selector, Args}, From, State) ->
         class => beamtalk_tagged_map:class_of(State, unknown),
         selector => Selector,
         caller_pid => element(1, From),
-        mode => sync
+        mode => sync,
+        domain => [beamtalk, runtime]
     }),
     T0 = erlang:monotonic_time(microsecond),
     case dispatch(Selector, Args, Self, State) of
@@ -799,7 +810,8 @@ terminate(Reason, State) ->
     ?LOG_INFO("Actor stopped", #{
         class => Class,
         pid => self(),
-        reason => Reason
+        reason => Reason,
+        domain => [beamtalk, runtime]
     }),
     ok.
 
@@ -817,14 +829,16 @@ log_dispatch_complete(OldState, NewState, Selector, Mode, T0) ->
             ?LOG_DEBUG("Actor dispatch complete", #{
                 selector => Selector,
                 mode => Mode,
-                duration_us => Duration
+                duration_us => Duration,
+                domain => [beamtalk, runtime]
             });
         _ ->
             ?LOG_DEBUG("Actor dispatch complete", #{
                 selector => Selector,
                 mode => Mode,
                 duration_us => Duration,
-                changed_keys => ChangedKeys
+                changed_keys => ChangedKeys,
+                domain => [beamtalk, runtime]
             })
     end,
     ok.
@@ -962,7 +976,8 @@ dispatch_user_method(Selector, Args, Self, State) ->
         initialize ->
             ?LOG_DEBUG("Initialize hook invoked", #{
                 class => beamtalk_tagged_map:class_of(State, unknown),
-                pid => self()
+                pid => self(),
+                domain => [beamtalk, runtime]
             });
         _ ->
             ok
@@ -1065,12 +1080,17 @@ dispatch_via_hierarchy(Selector, Args, Self, State) ->
             object_fallback(Selector, Args, Self, State, ClassName);
         exit:{timeout, _} ->
             ?LOG_WARNING("Class dispatch lookup timed out", #{
-                selector => Selector, class => ClassName
+                selector => Selector,
+                class => ClassName,
+                domain => [beamtalk, runtime]
             }),
             object_fallback(Selector, Args, Self, State, ClassName);
         exit:{Reason, _} ->
             ?LOG_WARNING("Class dispatch lookup failed", #{
-                selector => Selector, class => ClassName, reason => Reason
+                selector => Selector,
+                class => ClassName,
+                reason => Reason,
+                domain => [beamtalk, runtime]
             }),
             object_fallback(Selector, Args, Self, State, ClassName)
     end.
@@ -1082,7 +1102,8 @@ make_dnu_error(Selector, ClassName, State) ->
     ?LOG_WARNING("doesNotUnderstand", #{
         class => ClassName,
         selector => Selector,
-        pid => self()
+        pid => self(),
+        domain => [beamtalk, runtime]
     }),
     Error = beamtalk_error:new(
         does_not_understand,
@@ -1102,7 +1123,8 @@ wrap_method_error(Selector, State, Class, Reason, Stacktrace) ->
         selector => Selector,
         class => Class,
         reason => Reason,
-        stacktrace => Stacktrace
+        stacktrace => Stacktrace,
+        domain => [beamtalk, runtime]
     }),
     Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
     Error1 = beamtalk_error:with_message(Error0, Message),
@@ -1178,7 +1200,8 @@ wrap_dnu_handler_error(Selector, State, Class, Reason, Stacktrace) ->
         selector => Selector,
         class => Class,
         reason => Reason,
-        stacktrace => Stacktrace
+        stacktrace => Stacktrace,
+        domain => [beamtalk, runtime]
     }),
     Error0 = beamtalk_error:new(runtime_error, ClassName, 'doesNotUnderstand:args:'),
     Error1 = beamtalk_error:with_message(Error0, Message),
