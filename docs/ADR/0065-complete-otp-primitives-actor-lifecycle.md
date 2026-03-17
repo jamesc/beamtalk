@@ -39,7 +39,7 @@ Introduce `Server` as an **abstract** subclass of `Actor` that exposes BEAM-leve
 - **`Actor`** — Beamtalk-level: message-passing, state, Timer API, lifecycle (`initialize`, `terminate:`). Most users, most of the time.
 - **`Server`** (abstract) — BEAM-level: raw message handling (`handleInfo:`), and the natural home for future OTP features (named registration, `trapExit`, `codeChange:from:`).
 
-```
+```text
 Object
   └── Actor           # Beamtalk objects — messages, state, Timer
         └── Server    # BEAM processes — handleInfo:, raw OTP interop (abstract)
@@ -162,7 +162,7 @@ This eliminates the entire class of "forgot to cancel timer in terminate:" bugs.
 
 **Compiler lint — sync send in Timer block:** A `self method.` (sync call) inside a `Timer every:do:` or `Timer after:do:` block emits a warning:
 
-```
+```text
 warning: Sync send 'self tick.' inside Timer block will deadlock.
   --> src/Ticker.bt:5:40
    |
