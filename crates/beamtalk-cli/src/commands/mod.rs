@@ -12,6 +12,7 @@ pub(crate) mod doc_tests;
 pub mod doctor;
 pub mod fmt;
 pub mod lint;
+pub mod logs;
 pub mod manifest;
 pub mod new;
 pub mod protocol;
