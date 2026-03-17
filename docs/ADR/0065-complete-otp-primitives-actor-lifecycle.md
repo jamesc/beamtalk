@@ -90,46 +90,21 @@ Object subclass: NotAnActor
 
 **Return value:** The return value of `handleInfo:` is always discarded. The method is called for its side effects (state mutation, logging, spawning work). The codegen extracts the updated state from the dispatch result and returns `{noreply, NewState}` to OTP.
 
-**Error handling:** If `handleInfo:` raises a Beamtalk error (DNU, match failure, etc.), the generated `handle_info/2` logs a warning (including error details) via `?LOG_WARNING` and returns `{noreply, State}` with the **pre-call state**. The actor does **not** crash. All state mutations from the partially-executed method are rolled back.
+**Error handling — log and continue (not crash):** If `handleInfo:` raises a Beamtalk error (DNU, match failure, etc.), the generated `handle_info/2` logs a warning (including error details) via `?LOG_WARNING` and returns `{noreply, State}` with the **pre-call state**. The actor does **not** crash. Any state mutations from the partially-executed method are rolled back to the pre-call state.
 
-This is a **deliberate divergence from OTP**: Erlang's gen_server crashes the process on an unmatched `handle_info` clause, triggering supervisor restart. Beamtalk swallows the error because:
-- `handle_info` messages come from external sources — crashing on an unexpected message format punishes the receiver for the sender's mistake
-- Supervised actors would enter crash loops from persistent unexpected messages (e.g., stale timer ticks after hot reload)
-- The "let it crash" philosophy applies to *business logic* failures, not message format surprises
+This is a **deliberate divergence from OTP's default**, but it matches what the Elixir ecosystem converged on in practice. In OTP, an unmatched `handle_info` clause crashes the gen_server. This is annoying enough that virtually every production Elixir GenServer includes the same boilerplate catch-all:
 
-**State rollback on error — debugging implications:** Because errors are swallowed rather than crashing the actor, users can observe the rolled-back state. This can be confusing:
-
-```beamtalk
-handleInfo: msg =>
-  self.count := self.count + 1.      // mutation succeeds
-  self.name := msg unknownMethod.    // raises DNU — entire method's state changes roll back
-  // count is NOT incremented — the actor continues with pre-call state
+```elixir
+# Every production Elixir GenServer writes this:
+def handle_info(unexpected, state) do
+  Logger.warning("Unexpected message: #{inspect(unexpected)}")
+  {:noreply, state}
+end
 ```
 
-The warning log shows the error occurred, but the state appears unchanged. This is the same transactional semantics all Beamtalk actor methods use (Core Erlang state threading + try/catch), but it's only observable here because `handleInfo:` swallows errors instead of crashing.
+This pattern is so universal it has been debated repeatedly in the Elixir community (see [References](#references)). The consensus: `handle_info` receives external messages you don't fully control — stale timers after hot reload, library internals, monitoring messages from code you didn't write. Crashing on these punishes the receiver for the sender's mistake.
 
-**Best practice:** Keep `handleInfo:` bodies simple — match the message and delegate to a named method. Do fallible operations *before* state mutations where possible:
-
-```beamtalk
-handleInfo: msg =>
-  msg match: [
-    #tick -> [self doWork];
-    _ -> nil   // ignore unknown messages
-  ]
-
-// Named method — if this crashes, the actor crashes (normal OTP semantics)
-doWork => self.count := self.count + 1
-```
-
-If the user wants crash-on-error semantics, they can re-raise explicitly:
-
-```beamtalk
-handleInfo: msg =>
-  msg match: [
-    #tick -> [self doWork];
-    _ -> Error signal: "Unexpected info message: " ++ msg displayString
-  ]
-```
+Beamtalk bakes this best practice in: errors in `handleInfo:` are logged and the actor continues. This means one fewer thing for developers to remember, at the cost of a semantic difference from raw OTP that BEAM veterans should be aware of.
 
 **Deadlock rules (ADR 0043 applies):** `handleInfo:` executes inside the actor's gen_server process. The same sync-call deadlock rules from ADR 0043 apply: if your handler calls another actor via `.` (sync) that may call back into `self`, it will deadlock. Use `!` (async cast) for outbound sends from `handleInfo:` when re-entrant calls are possible.
 
@@ -237,7 +212,9 @@ The current `code_change/3` handles basic field migration (adding/removing field
 ### Elixir GenServer — `handle_info`
 Elixir's `handle_info/2` is the direct model. All messages not sent via `call`/`cast` flow through `handle_info` — timer ticks, monitor DOWN notifications, linked process exits. The canonical timer pattern uses `Process.send_after(self(), :tick, interval)` in both `init/1` and `handle_info/2`. This is simple and well-understood but requires manual timer cancellation in `terminate/2`.
 
-**What we adopt:** The `handleInfo:` method mirrors `handle_info/2` semantics exactly — same OTP callback, Beamtalk syntax.
+A well-known pain point: an unmatched `handle_info` clause crashes the GenServer. The Elixir community consensus is that every production GenServer needs a catch-all `handle_info` that logs and ignores unexpected messages. This is effectively universal boilerplate.
+
+**What we adopt:** The `handleInfo:` method mirrors `handle_info/2` semantics — same OTP callback, Beamtalk syntax. We bake in the community's log-and-continue best practice as the default error contract, eliminating the boilerplate catch-all.
 
 **What we adapt:** Beamtalk recommends the `Timer` API as the default, with `handleInfo:` as an explicit escape hatch. Elixir has no such layering — all timer patterns require `handle_info`.
 
@@ -348,7 +325,7 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 - Rejecting links has no practical impact — no known use case requires them beyond what monitors + supervisors provide
 - Deferring hot code reload is low-risk — the current field migration handles development workflows
 - `handleInfo:` is opt-in — actors that don't define it behave exactly as before
-- `handleInfo:` errors are logged-and-swallowed (not crash-the-actor) — a deliberate divergence from OTP's default, justified by the external-message origin but surprising to Erlang veterans who expect crash semantics
+- `handleInfo:` errors are logged-and-continued (not crash-the-actor) — matches what the Elixir community does manually in every production GenServer, but may surprise BEAM veterans who expect OTP's crash-by-default
 - `handleInfo:` return values are always discarded — the method is called for side effects only
 
 ## Implementation
@@ -378,3 +355,6 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 - Related ADRs: ADR 0005 (BEAM Object Model), ADR 0013 (Class Methods/Instantiation), ADR 0043 (Sync-by-Default Messaging), ADR 0059 (Supervision Tree Syntax)
 - Code: `callbacks.rs:445-472` (handle_info codegen), `beamtalk_actor.erl:778-784` (handle_info runtime), `Timer.bt` (Timer class)
 - Documentation: `docs/beamtalk-language-features.md` (actors, supervision, pattern matching)
+- Elixir community precedent for log-and-continue in handle_info:
+  - [Should we catch stray messages in a GenServer?](https://elixirforum.com/t/should-we-catch-stray-messages-in-a-genserver/2656)
+  - [Ignoring in handle_info/2 is OK. Really?](https://elixirforum.com/t/ignoring-in-handle-info-2-is-ok-really/2064)
