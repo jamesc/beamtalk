@@ -265,8 +265,8 @@
             "alert",
             "emergency"
           ],
-          "default": "info",
-          "description": "Minimum log level for the Beamtalk Logs output channel. Only events at or above this level are streamed from the workspace."
+          "default": "warning",
+          "description": "Minimum log level for the Beamtalk Logs output channel. Only events at or above this level are streamed from the workspace. Set to 'info' or 'debug' when actively debugging."
         }
       }
     },
