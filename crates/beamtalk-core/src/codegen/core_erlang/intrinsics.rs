@@ -1797,14 +1797,14 @@ impl CoreErlangGenerator {
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
                 match selector_name.as_str() {
-                    "debug:" => ("debug", false),
-                    "info:" => ("info", false),
-                    "warn:" => ("warning", false),
-                    "error:" => ("error", false),
-                    "debug:metadata:" => ("debug", true),
-                    "info:metadata:" => ("info", true),
-                    "warn:metadata:" => ("warning", true),
-                    "error:metadata:" => ("error", true),
+                    "debug:" if arguments.len() == 1 => ("debug", false),
+                    "info:" if arguments.len() == 1 => ("info", false),
+                    "warn:" if arguments.len() == 1 => ("warning", false),
+                    "error:" if arguments.len() == 1 => ("error", false),
+                    "debug:metadata:" if arguments.len() == 2 => ("debug", true),
+                    "info:metadata:" if arguments.len() == 2 => ("info", true),
+                    "warn:metadata:" if arguments.len() == 2 => ("warning", true),
+                    "error:metadata:" if arguments.len() == 2 => ("error", true),
                     // setLevel: and any other selector — fall through to normal dispatch
                     _ => return Ok(None),
                 }
