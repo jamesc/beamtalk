@@ -2,6 +2,8 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%! -kernel logger '[{handler, default, logger_std_h, #{config => #{type => standard_error}}}]'
+
 %%% Beamtalk Core Erlang batch compiler
 %%%
 %%% This escript compiles .core files to .beam bytecode using erlc.
