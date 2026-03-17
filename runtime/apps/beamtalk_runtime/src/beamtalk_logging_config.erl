@@ -590,12 +590,17 @@ disable_supervisor_progress() ->
     ),
     ok.
 
-%% @doc Try to find the current log file path from the default handler config.
+%% @doc Try to find the current log file path from the file log handler.
 -spec find_log_file() -> binary().
 find_log_file() ->
-    case logger:get_handler_config(default) of
+    case logger:get_handler_config(beamtalk_file_log) of
         {ok, #{config := #{file := File}}} ->
             iolist_to_binary(File);
         _ ->
-            <<"(standard_io)">>
+            case logger:get_handler_config(default) of
+                {ok, #{config := #{file := File}}} ->
+                    iolist_to_binary(File);
+                _ ->
+                    <<"(standard_io)">>
+            end
     end.
