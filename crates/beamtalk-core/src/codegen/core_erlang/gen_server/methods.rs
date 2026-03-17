@@ -19,8 +19,9 @@ use crate::unparse::unparse_method_display_signature;
 
 /// Classification of how a method body expression should be handled for
 /// state threading.  Produced by [`CoreErlangGenerator::classify_body_expr`]
-/// and consumed by the unified [`CoreErlangGenerator::generate_body_exprs_with_reply`].
-enum BodyExprKind {
+/// and consumed by the unified [`CoreErlangGenerator::generate_body_exprs_with_reply`]
+/// and [`CoreErlangGenerator::generate_conditional_branch_inline`].
+pub(in crate::codegen::core_erlang) enum BodyExprKind {
     /// `^ value` — early return from method.
     EarlyReturn,
     /// `self fieldAt: name put: val` — reflective field mutation.
@@ -234,7 +235,10 @@ impl CoreErlangGenerator {
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment)
     /// must come before general ones (e.g. pure expression).
-    fn classify_body_expr(&self, expr: &Expression) -> BodyExprKind {
+    pub(in crate::codegen::core_erlang) fn classify_body_expr(
+        &self,
+        expr: &Expression,
+    ) -> BodyExprKind {
         // Early return — `^ value`
         if matches!(expr, Expression::Return { .. }) {
             return BodyExprKind::EarlyReturn;
