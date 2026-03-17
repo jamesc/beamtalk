@@ -296,24 +296,41 @@ Pharo uses cooperative green threads sharing a heap — no actor isolation, no m
 
 ## Steelman Analysis
 
-### Timer-Only (rejected alternative)
-- **Newcomer**: "I never need to think about OTP internals — `Timer every:` just works"
-- **Smalltalk purist**: "Clean — no Erlang tuples leak into my Smalltalk world"
-- **Language designer**: "Having two timer mechanisms is genuinely confusing. Documentation must explain both, beginners will find both, and we'll forever answer 'why not just use handleInfo:?'. The Timer API saves 3 lines of boilerplate over send_after — is that worth a second mechanism with its own orphan-leak footgun? One mechanism, well-understood, is strictly simpler."
-- **Operator**: "Fewer moving parts. Timer processes are visible but unexplained in observer — 'what's that extra process?' One mechanism means one thing to debug."
+### Timer-Only — no handleInfo: at all (rejected)
 
-### Raw `handleInfo:` Only (rejected alternative)
-- **BEAM veteran**: "I can use standard OTP patterns — `send_after`, DOWN handling, `trap_exit` — nothing hidden. Every Erlang dev knows handle_info. No orphaned timer processes, no cleanup in terminate:, no deadlock footgun from sync calls in Timer blocks."
-- **Operator**: "Standard OTP — I know exactly what's happening at the BEAM level. No extra processes to trace."
+| Cohort | Best argument for Timer-Only |
+|--------|------------------------------|
+| **Newcomer** | "One API to learn. `Timer every:` and `onExit:` cover every pattern I'll hit in my first year. I never need to know what a tuple is." |
+| **Smalltalk purist** | "Clean separation. No Erlang terms leak into my object world — everything is message-passing. The BEAM is an implementation detail, not something my code should know about." |
+| **BEAM veteran** | "Timer + `onExit:` covers 90% of use cases. For the other 10%, I can use Erlang FFI directly. A half-baked handleInfo: that swallows errors differently from OTP is worse than no handleInfo: — it's a trap for anyone who thinks they know handle_info semantics." |
+| **Language designer** | "Two timer mechanisms means two things to document, two things beginners find in search results, and an eternal FAQ: 'when do I use Timer vs handleInfo:?'. Every abstraction layer you add is a layer someone has to learn. One mechanism is strictly simpler — and Timer is the better one." |
+| **Operator** | "Every Timer is a visible process in observer. With handleInfo:, timer ticks are invisible — they're just messages in a mailbox. Visible processes are easier to debug than invisible messages." |
 
-### Both — Timer API + `handleInfo:` escape hatch (decided)
-- **Newcomer**: "Timer works out of the box; I can go deeper when I'm ready"
-- **BEAM veteran**: "Best of both worlds — Timer for quick work, handleInfo for real OTP"
-- **Language designer**: "Progressive disclosure — complexity is available but not required"
+### Raw handleInfo: Only — no Timer API (rejected)
+
+| Cohort | Best argument for handleInfo: Only |
+|--------|--------------------------------------|
+| **Newcomer** | "Every Erlang/Elixir tutorial teaches handle_info. If I Google 'Beamtalk timer', I want to find the same pattern. A custom Timer class with different semantics means I can't use any existing BEAM learning resources." |
+| **BEAM veteran** | "Standard OTP. I can use `send_after`, DOWN handlers, `trap_exit`, `sys:trace` — all the tools I already know. No extra processes to trace, no deadlock from sync calls in Timer blocks, no behavioral changes from spawn→spawn_link. The handle_info pattern has been production-proven for 30 years." |
+| **Language designer** | "One mechanism, zero magic. The user writes a method, the codegen wires it to a callback. No hidden Timer processes, no implicit linking, no lint rules to explain. Simplicity is a feature." |
+| **Operator** | "I can trace every message in the system with `sys:trace`. Timer processes are opaque — I can't see what block they're running, when they'll fire next, or what actor they're connected to. handleInfo: ticks are standard OTP messages in a standard mailbox." |
+
+### Both — Timer API + handleInfo: escape hatch (decided)
+
+| Cohort | Best argument for Both |
+|--------|------------------------|
+| **Newcomer** | "`Timer every: 1000 do: [self tick!]` — I wrote a periodic actor in one line and I didn't need to understand OTP callbacks, raw tuples, or Erlang FFI. When I'm ready, handleInfo: is there." |
+| **Smalltalk purist** | "Timer preserves message-passing purity for 90% of code. handleInfo: is explicitly an escape hatch — like Smalltalk's FFI. The boundary is clear: normal code uses messages, interop code uses handleInfo:." |
+| **BEAM veteran** | "I get full OTP when I need it, and I don't have to explain `erlang:send_after` to a teammate who just wants a polling loop. Timer + handleInfo: maps cleanly to Elixir's community pattern: use a library for common cases, drop to GenServer when needed." |
+| **Language designer** | "The key insight is that Timer and handleInfo: serve different audiences and different use cases — Timer is Beamtalk-native (message sends between objects), handleInfo: is BEAM-native (raw messages between processes). These aren't redundant mechanisms; they're different abstraction levels. Languages that try to have only one level (Pony: typed only, Erlang: raw only) pay a tax at the boundary they don't cover." |
+| **Operator** | "Timer processes are linked — they die with the actor, visible in supervision trees. handleInfo: messages are standard OTP — visible in sys:trace. Both mechanisms are observable through different tools. I'd rather have two observable mechanisms than one mechanism that's invisible to half my tooling." |
 
 ### Tension Points
-- **Newcomers vs BEAM veterans** on handle_info: newcomers prefer Timer-only simplicity; BEAM veterans need raw handle_info for real OTP interop. Resolution: layered approach satisfies both.
-- **Smalltalk purists vs BEAM veterans** on named registration: purists want reference-passing only; BEAM vets want atom registration. Resolution: defer — reference-passing (`Supervisor which:`) is sufficient for v0.1.
+
+- **Timer-Only vs Both:** The language designer's "two mechanisms is confusing" argument is genuine. The counter is that Timer and handleInfo: serve different abstraction levels (Beamtalk objects vs BEAM processes), not the same level twice. The FAQ "when do I use which?" has a clear answer: Timer by default, handleInfo: only for raw BEAM interop.
+- **handleInfo: Only vs Both:** The BEAM veteran's "30 years of production-proven patterns" argument is strong. The counter is that Beamtalk's value proposition is making BEAM accessible to non-BEAM developers — forcing everyone through handle_info contradicts that goal.
+- **Error contract tension:** BEAM veterans expect crash-on-error in handle_info (OTP default). Beamtalk swallows errors (Elixir community best practice). Both positions are defensible. We chose swallowing because it eliminates boilerplate, at the cost of surprising BEAM veterans.
+- **Named registration:** Smalltalk purists want reference-passing only; BEAM vets want atom registration. Resolution: defer — `Supervisor which:` is sufficient for v0.1.
 - **All cohorts agree** on rejecting links and deferring hot code reload.
 
 ## Alternatives Considered
