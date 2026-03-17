@@ -313,6 +313,17 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Supervisor")
     }
 
+    /// Returns true if the named class is Server or a subclass of Server (ADR 0065).
+    #[must_use]
+    pub fn is_server_subclass(&self, class_name: &str) -> bool {
+        if class_name == "Server" {
+            return true;
+        }
+        self.superclass_chain(class_name)
+            .iter()
+            .any(|s| s.as_str() == "Server")
+    }
+
     /// Returns true if the named class is `DynamicSupervisor` or a subclass (BT-1218).
     #[must_use]
     pub fn is_dynamic_supervisor_subclass(&self, class_name: &str) -> bool {

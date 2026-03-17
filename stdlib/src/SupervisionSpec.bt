@@ -9,9 +9,9 @@
 /// you need per-child overrides for id, restart policy, or startup args.
 ///
 /// The auto-generated API (from `state:` declarations) includes:
-/// - Getters: `id`, `actorClass`, `restart`, `args`
-/// - Single-field fluent: `withId:`, `withActorClass:`, `withRestart:`, `withArgs:`
-/// - Keyword constructor: `id:actorClass:restart:args:`
+/// - Getters: `id`, `actorClass`, `restart`, `args`, `shutdown`
+/// - Single-field fluent: `withId:`, `withActorClass:`, `withRestart:`, `withArgs:`, `withShutdown:`
+/// - Keyword constructor: `id:actorClass:restart:args:shutdown:`
 ///
 /// See ADR 0059 for the full design.
 ///
@@ -44,6 +44,11 @@ Value subclass: SupervisionSpec
   ///
   /// nil means no args (use `spawn`); any non-nil value is passed to `spawnWith:`.
   state: args = nil
+  /// Custom shutdown timeout in milliseconds, or nil to use the computed default.
+  ///
+  /// When nil, workers use 5000ms and supervisors use `#infinity`.
+  /// Set via `withShutdown:` to override the default for graceful drain/cleanup.
+  state: shutdown = nil
 
   // === Multi-keyword fluent overrides ===
   // (Single-field variants withId:, withRestart:, withArgs: are auto-generated.)
@@ -103,7 +108,9 @@ Value subclass: SupervisionSpec
     childId := self id isNil ifTrue: [self actorClass name] ifFalse: [self id]
     startFn := self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]
     startArgs := self args isNil ifTrue: [#()] ifFalse: [#(self args)]
-    shutdown := self actorClass isSupervisor ifTrue: [#infinity] ifFalse: [5000]
+    shutdown := self shutdown isNil
+      ifTrue: [self actorClass isSupervisor ifTrue: [#infinity] ifFalse: [5000]]
+      ifFalse: [self shutdown]
     childType := self actorClass isSupervisor ifTrue: [
       #supervisor
     ] ifFalse: [#worker]

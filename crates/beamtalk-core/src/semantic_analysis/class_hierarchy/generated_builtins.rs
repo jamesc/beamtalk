@@ -72,6 +72,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Regex"
             | "Result"
             | "RuntimeError"
+            | "Server"
             | "Set"
             | "StackFrame"
             | "Stream"
@@ -1748,6 +1749,26 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Server".into(),
+        ClassInfo {
+            name: "Server".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: true,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "handleInfo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Server".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Handle a raw Erlang message delivered to this server's process.\n\nOverride in subclasses to process raw messages (timer events, DOWN\ntuples, system messages). The return value is always discarded.\nIf this method raises an error, the server logs a warning and\ncontinues with its pre-call state (does not crash).\n\n## Examples\n```beamtalk\nhandleInfo: msg =>\n  msg match: [\n    #tick -> [self doWork];\n    _ -> nil\n  ]\n```".into()) },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
         "Set".into(),
         ClassInfo {
             name: "Set".into(),
@@ -1971,7 +1992,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_typed: false,
             is_value: true,
             is_native: false,
-            state: vec!["id".into(), "actorClass".into(), "restart".into(), "args".into()],
+            state: vec!["id".into(), "actorClass".into(), "restart".into(), "args".into(), "shutdown".into()],
             state_types: HashMap::from([("restart".into(), "Symbol".into())]),
             methods: vec![
                 MethodInfo { selector: "withId:withRestart:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol".into()), Some("Symbol".into())], doc: Some("Return a new spec with id and restart overridden.".into()) },
@@ -1987,9 +2008,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "withRestart:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol".into())], doc: Some("Returns a new `SupervisionSpec` with `restart` set to the given value.\n\n*(compiler-generated)*".into()) },
                 MethodInfo { selector: "args".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Returns the `args` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
                 MethodInfo { selector: "withArgs:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None], doc: Some("Returns a new `SupervisionSpec` with `args` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "shutdown".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Returns the `shutdown` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withShutdown:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None], doc: Some("Returns a new `SupervisionSpec` with `shutdown` set to the given value.\n\n*(compiler-generated)*".into()) },
             ],
             class_methods: vec![
-                MethodInfo { selector: "id:actorClass:restart:args:".into(), arity: 4, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None, None, Some("Symbol".into()), None], doc: Some("Creates a new `SupervisionSpec`. Args: id (default: nil), actorClass (default: nil), restart (default: #temporary), args (default: nil).\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "id:actorClass:restart:args:shutdown:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None, None, Some("Symbol".into()), None, None], doc: Some("Creates a new `SupervisionSpec`. Args: id (default: nil), actorClass (default: nil), restart (default: #temporary), args (default: nil), shutdown (default: nil).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
         },

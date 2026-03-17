@@ -54,7 +54,7 @@
 %% @doc Evaluate `Block` once after `Ms` milliseconds. Returns a Timer.
 -spec 'after:do:'(integer(), function()) -> map().
 'after:do:'(Ms, Block) when is_integer(Ms), Ms >= 0, is_function(Block, 0) ->
-    Pid = spawn(fun() ->
+    Pid = spawn_link(fun() ->
         receive
             {cancel, From, Ref} ->
                 From ! {Ref, canceled},
@@ -74,7 +74,7 @@
 %% @doc Evaluate `Block` every `Ms` milliseconds. Returns a Timer.
 -spec 'every:do:'(integer(), function()) -> map().
 'every:do:'(Ms, Block) when is_integer(Ms), Ms > 0, is_function(Block, 0) ->
-    Pid = spawn(fun() -> repeat_loop(Ms, Block) end),
+    Pid = spawn_link(fun() -> repeat_loop(Ms, Block) end),
     make_timer(Pid);
 'every:do:'(Ms, _Block) when is_integer(Ms) ->
     raise_error('every:do:', <<"Duration must be a positive Integer">>);

@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Server — Abstract Actor subclass for BEAM-level OTP interop.
+///
+/// Server extends Actor with access to raw OTP primitives. Subclass Server
+/// when you need `handleInfo:` to receive raw Erlang messages (timer ticks,
+/// DOWN tuples, system messages). Most users should use Actor instead.
+///
+/// Server is abstract — you must subclass it.
+///
+/// ## Examples
+/// ```beamtalk
+/// Server subclass: PeriodicWorker
+///   state: count = 0
+///   handleInfo: msg =>
+///     msg match: [
+///       #tick -> [self.count := self.count + 1];
+///       _ -> nil
+///     ]
+/// ```
+///
+/// @see Actor (for simple message-passing actors)
+/// @see Supervisor (for supervision trees)
+abstract Actor subclass: Server
+
+  /// Handle a raw Erlang message delivered to this server's process.
+  ///
+  /// Override in subclasses to process raw messages (timer events, DOWN
+  /// tuples, system messages). The return value is always discarded.
+  /// If this method raises an error, the server logs a warning and
+  /// continues with its pre-call state (does not crash).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// handleInfo: msg =>
+  ///   msg match: [
+  ///     #tick -> [self doWork];
+  ///     _ -> nil
+  ///   ]
+  /// ```
+  handleInfo: _msg => nil

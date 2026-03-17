@@ -223,3 +223,35 @@ ffi_shim_sleep_error_propagates_test() ->
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
         beamtalk_timer:sleep(-1)
     ).
+
+%%% ============================================================================
+%%% spawn_link — automatic cleanup on caller death (BT-1455)
+%%% ============================================================================
+
+after_timer_dies_when_caller_dies_test() ->
+    %% Spawn a wrapper process that creates a timer, then exits.
+    %% The timer should die because it's linked to the wrapper.
+    Parent = self(),
+    Wrapper = spawn(fun() ->
+        T = beamtalk_timer:'after:do:'(10000, fun() -> ok end),
+        Parent ! {timer, T},
+        %% Exit abnormally — the link propagates this to the timer
+        exit(shutdown)
+    end),
+    T = receive {timer, Timer} -> Timer after 1000 -> error(timeout) end,
+    wait_for_exit(Wrapper, 1000),
+    %% Give the linked timer a moment to process the EXIT
+    timer:sleep(50),
+    ?assertNot(erlang:is_process_alive(maps:get(pid, T))).
+
+every_timer_dies_when_caller_dies_test() ->
+    Parent = self(),
+    Wrapper = spawn(fun() ->
+        T = beamtalk_timer:'every:do:'(10000, fun() -> ok end),
+        Parent ! {timer, T},
+        exit(shutdown)
+    end),
+    T = receive {timer, Timer} -> Timer after 1000 -> error(timeout) end,
+    wait_for_exit(Wrapper, 1000),
+    timer:sleep(50),
+    ?assertNot(erlang:is_process_alive(maps:get(pid, T))).
