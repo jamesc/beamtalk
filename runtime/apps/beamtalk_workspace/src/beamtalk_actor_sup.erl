@@ -17,18 +17,34 @@
 -export([start_link/0, start_actor/3]).
 -export([init/1]).
 
+-include_lib("kernel/include/logger.hrl").
+
 %%% Public API
 
 %% @doc Start the actor supervisor.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    Result = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
+    case Result of
+        {ok, Pid} ->
+            ?LOG_INFO("Actor supervisor started", #{pid => Pid});
+        _ ->
+            ok
+    end,
+    Result.
 
 %% @doc Start a new actor under supervision.
 %% Module:spawn/0 should start the actor gen_server.
 -spec start_actor(module(), atom(), list()) -> {ok, pid()} | {error, term()}.
 start_actor(Module, Function, Args) ->
-    supervisor:start_child(?MODULE, [Module, Function, Args]).
+    Result = supervisor:start_child(?MODULE, [Module, Function, Args]),
+    case Result of
+        {ok, Pid} ->
+            ?LOG_INFO("Actor child started", #{module => Module, child_pid => Pid});
+        {error, Reason} ->
+            ?LOG_ERROR("Actor child start failed", #{module => Module, reason => Reason})
+    end,
+    Result.
 
 %%% supervisor callbacks
 
