@@ -1467,7 +1467,6 @@ impl CoreErlangGenerator {
     /// They simply evaluate expressions and return the last value.
     /// BT-412: If class variables were mutated, wraps the final result
     /// in `{class_var_result, Result, ClassVarsN}`.
-    #[allow(clippy::too_many_lines)]
     fn generate_class_method_body(
         &mut self,
         method: &MethodDefinition,
@@ -1483,208 +1482,237 @@ impl CoreErlangGenerator {
             let is_last = i == body.len() - 1;
 
             if let Expression::Return { value, .. } = expr {
-                if has_class_vars {
-                    let result_var = self.fresh_temp_var("Ret");
-                    let value_str = self.expression_doc(value)?;
-                    if self.class_var_mutated {
-                        let final_cv = self.current_class_var();
-                        let doc = docvec![
-                            "let ",
-                            Document::String(result_var.clone()),
-                            " = ",
-                            value_str,
-                            " in {'class_var_result', ",
-                            Document::String(result_var),
-                            ", ",
-                            Document::String(final_cv),
-                            "}",
-                        ];
-                        docs.push(doc);
-                    } else {
-                        let doc = docvec![
-                            "let ",
-                            Document::String(result_var.clone()),
-                            " = ",
-                            value_str,
-                            " in ",
-                            Document::String(result_var),
-                        ];
-                        docs.push(doc);
-                    }
-                } else {
-                    let value_str = self.expression_doc(value)?;
-                    docs.push(docvec![value_str]);
-                }
+                let doc = self.generate_class_method_return(value, has_class_vars)?;
+                docs.push(doc);
                 return Ok(Document::Vec(docs));
             }
 
             if is_last {
-                if has_class_vars {
-                    if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
-                        // Open-scope expression: generate it and close with class_var_result.
-                        let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                        let final_cv = self.current_class_var();
-                        if let Some(result_var) = open_scope {
-                            let doc = docvec![
-                                expr_str,
-                                "{'class_var_result', ",
-                                Document::String(result_var),
-                                ", ",
-                                Document::String(final_cv),
-                                "}",
-                            ];
-                            docs.push(doc);
-                        } else {
-                            // Fallback: shouldn't happen
-                            let doc = docvec![
-                                expr_str,
-                                "{'class_var_result', 'nil', ",
-                                Document::String(final_cv),
-                                "}",
-                            ];
-                            docs.push(doc);
-                        }
-                    } else {
-                        let result_var = self.fresh_temp_var("Ret");
-                        // BT-1201: Use expression_doc_with_open_scope to detect open-scope results
-                        // produced by THIS expression, not by a previous field assignment.
-                        let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                        // BT-1201: If expression produced an open scope (e.g. `x := self classMethod`),
-                        // close it with the open-scope result variable, then wrap.
-                        if let Some(open_scope_result) = open_scope {
-                            if self.class_var_mutated {
-                                let final_cv = self.current_class_var();
-                                let doc = docvec![
-                                    expr_str,
-                                    "let ",
-                                    Document::String(result_var.clone()),
-                                    " = ",
-                                    Document::String(open_scope_result),
-                                    " in {'class_var_result', ",
-                                    Document::String(result_var),
-                                    ", ",
-                                    Document::String(final_cv),
-                                    "}",
-                                ];
-                                docs.push(doc);
-                            } else {
-                                docs.push(docvec![expr_str, Document::String(open_scope_result),]);
-                            }
-                        } else if self.class_var_mutated {
-                            let final_cv = self.current_class_var();
-                            let doc = docvec![
-                                "let ",
-                                Document::String(result_var.clone()),
-                                " = ",
-                                expr_str,
-                                " in {'class_var_result', ",
-                                Document::String(result_var),
-                                ", ",
-                                Document::String(final_cv),
-                                "}",
-                            ];
-                            docs.push(doc);
-                        } else {
-                            let doc = docvec![
-                                "let ",
-                                Document::String(result_var.clone()),
-                                " = ",
-                                expr_str,
-                                " in ",
-                                Document::String(result_var),
-                            ];
-                            docs.push(doc);
-                        }
-                    }
-                } else if self.is_class_method_self_send(expr) {
-                    // BT-891: Class method self-send as last expression with no class vars.
-                    // The generated code leaves an open scope ending with `in ` — we must
-                    // close it with the unwrapped result variable.
-                    let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                    if let Some(result_var) = open_scope {
-                        docs.push(docvec![expr_str, Document::String(result_var),]);
-                    } else {
-                        docs.push(docvec![expr_str]);
-                    }
-                } else {
-                    // BT-1201: Use expression_doc_with_open_scope to detect open-scope results
-                    // produced by THIS expression, not by a previous field assignment.
-                    let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
-                    // BT-1201: If expression produced an open scope, close it with the result.
-                    if let Some(open_scope_result) = open_scope {
-                        docs.push(docvec![expr_str, Document::String(open_scope_result)]);
-                    } else {
-                        docs.push(docvec![expr_str]);
-                    }
-                }
-            } else if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
-                // Class var assignment or class method self-send: the generated code
-                // ends with `in ` (open scope) so ClassVarsN stays visible for the
-                // remaining body expressions.
-                docs.push(self.generate_expression(expr)?);
-            } else if Self::is_local_var_assignment(expr) {
-                // BT-741: Local variable assignment — create a proper `let` binding so
-                // subsequent expressions can reference the variable by name.
-                // Without this, the variable is unbound in scope and falls through to
-                // `generate_identifier`, which generates `call 'maps':'get'('d', State)`.
-                // Class methods have no State parameter, causing {unbound_var, 'State', ...}.
-                if let Expression::Assignment { target, value, .. } = expr {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        let var_name = &id.name;
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        // BT-1201: Use expression_doc_with_open_scope to detect open-scope results
-                        // produced by THIS expression, not by a previous field assignment.
-                        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
-                        self.bind_var(var_name, &core_var);
-                        // BT-1201: If the RHS produced an open scope (e.g., `x := self classMethod`),
-                        // the doc ends with `in ` and the actual result is in the open_scope return.
-                        // Emit the open scope first, then bind the variable to the result.
-                        if let Some(open_scope_result) = open_scope {
-                            docs.push(docvec![
-                                val_doc,
-                                "let ",
-                                Document::String(core_var),
-                                " = ",
-                                Document::String(open_scope_result),
-                                " in "
-                            ]);
-                        } else {
-                            docs.push(docvec![
-                                "let ",
-                                Document::String(core_var),
-                                " = ",
-                                val_doc,
-                                " in "
-                            ]);
-                        }
-                    }
-                }
-            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                for d in binding_docs {
-                    docs.push(d);
-                }
-            } else if self.is_do_with_vt_local_threading(expr) {
-                // BT-1414: Non-last `do:` loop that mutates captured outer locals
-                // in a class method. Generate foldl + extract locals as open let
-                // chains so the updated values are visible to subsequent expressions.
-                let doc = self.generate_value_type_do_open(expr)?;
-                docs.push(doc);
-            } else if self.is_conditional_with_vt_local_threading(expr) {
-                // BT-1392: Non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` that
-                // mutates captured outer locals. Inline case + rebind.
-                let doc = self.generate_vt_conditional_open(expr)?;
+                let doc = self.generate_class_method_last_expr(expr, has_class_vars)?;
                 docs.push(doc);
             } else {
-                let tmp_var = self.fresh_temp_var("seq");
-                let expr_str = self.expression_doc(expr)?;
-                let doc = docvec!["let ", Document::String(tmp_var), " = ", expr_str, " in ",];
+                let doc = self.generate_class_method_non_last_expr(expr)?;
                 docs.push(doc);
             }
         }
         Ok(Document::Vec(docs))
+    }
+
+    /// Generates code for an explicit `^` return in a class method.
+    fn generate_class_method_return(
+        &mut self,
+        value: &Expression,
+        has_class_vars: bool,
+    ) -> Result<Document<'static>> {
+        if has_class_vars {
+            let result_var = self.fresh_temp_var("Ret");
+            let value_str = self.expression_doc(value)?;
+            if self.class_var_mutated {
+                let final_cv = self.current_class_var();
+                Ok(docvec![
+                    "let ",
+                    Document::String(result_var.clone()),
+                    " = ",
+                    value_str,
+                    " in {'class_var_result', ",
+                    Document::String(result_var),
+                    ", ",
+                    Document::String(final_cv),
+                    "}",
+                ])
+            } else {
+                Ok(docvec![
+                    "let ",
+                    Document::String(result_var.clone()),
+                    " = ",
+                    value_str,
+                    " in ",
+                    Document::String(result_var),
+                ])
+            }
+        } else {
+            self.expression_doc(value)
+        }
+    }
+
+    /// Generates code for the last expression in a class method body.
+    fn generate_class_method_last_expr(
+        &mut self,
+        expr: &Expression,
+        has_class_vars: bool,
+    ) -> Result<Document<'static>> {
+        if has_class_vars {
+            self.generate_class_method_last_expr_with_class_vars(expr)
+        } else {
+            self.generate_class_method_last_expr_no_class_vars(expr)
+        }
+    }
+
+    /// Last expression with class vars: may need `{class_var_result, ...}` wrapping.
+    fn generate_class_method_last_expr_with_class_vars(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
+            let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
+            let final_cv = self.current_class_var();
+            if let Some(result_var) = open_scope {
+                Ok(docvec![
+                    expr_str,
+                    "{'class_var_result', ",
+                    Document::String(result_var),
+                    ", ",
+                    Document::String(final_cv),
+                    "}",
+                ])
+            } else {
+                Ok(docvec![
+                    expr_str,
+                    "{'class_var_result', 'nil', ",
+                    Document::String(final_cv),
+                    "}",
+                ])
+            }
+        } else {
+            let result_var = self.fresh_temp_var("Ret");
+            // BT-1201: Use expression_doc_with_open_scope to detect open-scope results
+            // produced by THIS expression, not by a previous field assignment.
+            let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
+            if let Some(open_scope_result) = open_scope {
+                if self.class_var_mutated {
+                    let final_cv = self.current_class_var();
+                    Ok(docvec![
+                        expr_str,
+                        "let ",
+                        Document::String(result_var.clone()),
+                        " = ",
+                        Document::String(open_scope_result),
+                        " in {'class_var_result', ",
+                        Document::String(result_var),
+                        ", ",
+                        Document::String(final_cv),
+                        "}",
+                    ])
+                } else {
+                    Ok(docvec![expr_str, Document::String(open_scope_result)])
+                }
+            } else if self.class_var_mutated {
+                let final_cv = self.current_class_var();
+                Ok(docvec![
+                    "let ",
+                    Document::String(result_var.clone()),
+                    " = ",
+                    expr_str,
+                    " in {'class_var_result', ",
+                    Document::String(result_var),
+                    ", ",
+                    Document::String(final_cv),
+                    "}",
+                ])
+            } else {
+                Ok(docvec![
+                    "let ",
+                    Document::String(result_var.clone()),
+                    " = ",
+                    expr_str,
+                    " in ",
+                    Document::String(result_var),
+                ])
+            }
+        }
+    }
+
+    /// Last expression without class vars: simpler wrapping.
+    fn generate_class_method_last_expr_no_class_vars(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        if self.is_class_method_self_send(expr) {
+            // BT-891: Class method self-send as last expression with no class vars.
+            let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
+            if let Some(result_var) = open_scope {
+                Ok(docvec![expr_str, Document::String(result_var)])
+            } else {
+                Ok(expr_str)
+            }
+        } else {
+            // BT-1201: Use expression_doc_with_open_scope to detect open-scope results.
+            let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
+            if let Some(open_scope_result) = open_scope {
+                Ok(docvec![expr_str, Document::String(open_scope_result)])
+            } else {
+                Ok(expr_str)
+            }
+        }
+    }
+
+    /// Generates code for a non-last expression in a class method body.
+    fn generate_class_method_non_last_expr(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
+            // Class var assignment or class method self-send: the generated code
+            // ends with `in ` (open scope) so ClassVarsN stays visible.
+            self.generate_expression(expr)
+        } else if Self::is_local_var_assignment(expr) {
+            self.generate_class_method_local_var_binding(expr)
+        } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+            let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+            Ok(Document::Vec(binding_docs))
+        } else if self.is_do_with_vt_local_threading(expr) {
+            // BT-1414: Non-last `do:` loop that mutates captured outer locals.
+            self.generate_value_type_do_open(expr)
+        } else if self.is_conditional_with_vt_local_threading(expr) {
+            // BT-1392: Non-last conditional that mutates captured outer locals.
+            self.generate_vt_conditional_open(expr)
+        } else {
+            let tmp_var = self.fresh_temp_var("seq");
+            let expr_str = self.expression_doc(expr)?;
+            Ok(docvec![
+                "let ",
+                Document::String(tmp_var),
+                " = ",
+                expr_str,
+                " in "
+            ])
+        }
+    }
+
+    /// BT-741: Local variable assignment in class method — create a proper `let` binding.
+    fn generate_class_method_local_var_binding(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        if let Expression::Assignment { target, value, .. } = expr {
+            if let Expression::Identifier(id) = target.as_ref() {
+                let var_name = &id.name;
+                let core_var = self
+                    .lookup_var(var_name)
+                    .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                // BT-1201: Use expression_doc_with_open_scope to detect open-scope results.
+                let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
+                self.bind_var(var_name, &core_var);
+                if let Some(open_scope_result) = open_scope {
+                    return Ok(docvec![
+                        val_doc,
+                        "let ",
+                        Document::String(core_var),
+                        " = ",
+                        Document::String(open_scope_result),
+                        " in "
+                    ]);
+                }
+                return Ok(docvec![
+                    "let ",
+                    Document::String(core_var),
+                    " = ",
+                    val_doc,
+                    " in "
+                ]);
+            }
+        }
+        Ok(Document::Nil)
     }
 
     /// Extracts source text for a method using the AST unparser (BT-977).
