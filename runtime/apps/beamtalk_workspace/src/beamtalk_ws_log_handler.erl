@@ -178,7 +178,9 @@ ensure_table() ->
         undefined ->
             try
                 ets:new(?SUB_TABLE, [
-                    named_table, public, set,
+                    named_table,
+                    public,
+                    set,
                     {read_concurrency, true}
                 ]),
                 ok

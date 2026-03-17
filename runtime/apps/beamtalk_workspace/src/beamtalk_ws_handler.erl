@@ -186,7 +186,9 @@ websocket_info({class_loaded, ClassName}, State = #ws_state{authenticated = true
     }),
     {[{text, Push}], State};
 %% BT-1433: Log event push from beamtalk_ws_log_handler
-websocket_info({log_event, EventData}, State = #ws_state{authenticated = true, log_subscribed = true}) ->
+websocket_info(
+    {log_event, EventData}, State = #ws_state{authenticated = true, log_subscribed = true}
+) ->
     Push = jsx:encode(#{
         <<"type">> => <<"push">>,
         <<"channel">> => <<"logs">>,
@@ -713,8 +715,9 @@ parse_log_level(_) -> debug.
 -spec encode_log_event(map()) -> map().
 encode_log_event(EventData) ->
     maps:fold(
-        fun(_K, undefined, Acc) -> Acc;
-           (K, V, Acc) -> maps:put(atom_to_binary(K, utf8), V, Acc)
+        fun
+            (_K, undefined, Acc) -> Acc;
+            (K, V, Acc) -> maps:put(atom_to_binary(K, utf8), V, Acc)
         end,
         #{},
         EventData

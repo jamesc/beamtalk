@@ -87,9 +87,13 @@ subscriber_cleanup_on_death() ->
     Pid = spawn(fun() ->
         beamtalk_ws_log_handler:subscribe(debug),
         Parent ! subscribed,
-        receive stop -> ok end
+        receive
+            stop -> ok
+        end
     end),
-    receive subscribed -> ok end,
+    receive
+        subscribed -> ok
+    end,
     %% Verify it's subscribed
     ?assertNotEqual([], ets:lookup(beamtalk_ws_log_subscribers, Pid)),
     %% Kill the subscriber
@@ -111,8 +115,12 @@ multiple_subscribers() ->
         Parent ! {subscribed, 2},
         forward_log_events(Parent, 2)
     end),
-    receive {subscribed, 1} -> ok end,
-    receive {subscribed, 2} -> ok end,
+    receive
+        {subscribed, 1} -> ok
+    end,
+    receive
+        {subscribed, 2} -> ok
+    end,
     %% Send info event — only Pid1 (debug) should get it
     ?LOG_INFO("info event", #{domain => [beamtalk, runtime]}),
     ?assertMatch({1, #{level := <<"info">>}}, receive_tagged_event(500)),

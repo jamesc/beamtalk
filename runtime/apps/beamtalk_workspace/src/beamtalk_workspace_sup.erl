@@ -350,9 +350,11 @@ do_setup_file_logger(WorkspaceId) ->
 %% The handler forwards log events to subscribed WebSocket sessions.
 -spec setup_ws_log_handler() -> ok.
 setup_ws_log_handler() ->
-    case logger:add_handler(beamtalk_ws_log, beamtalk_ws_log_handler, #{
-        level => debug
-    }) of
+    case
+        logger:add_handler(beamtalk_ws_log, beamtalk_ws_log_handler, #{
+            level => debug
+        })
+    of
         ok ->
             ok;
         {error, {already_exist, _}} ->
