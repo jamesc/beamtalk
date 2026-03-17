@@ -816,22 +816,13 @@ impl CoreErlangGenerator {
         // Actor/REPL context: use StateAcc-based inlining (generate_conditional_branch_inline)
         let outer_state = self.current_state_var();
 
-        // Save state threading context
-        let saved_version = self.state_version();
-        let saved_in_loop = self.in_loop_body;
-        self.set_state_version(0);
-        self.in_loop_body = true;
-
-        // Set repl_loop_mutated so the REPL module unpacks the {Result, State} tuple
-        if self.is_repl_mode {
-            self.repl_loop_mutated = true;
-        }
-
-        let (branch_doc, _) = self.generate_conditional_branch_inline(block)?;
-
-        // Restore state threading context
-        self.in_loop_body = saved_in_loop;
-        self.set_state_version(saved_version);
+        let (branch_doc, _) = self.with_branch_context(|this| {
+            // Set repl_loop_mutated so the REPL module unpacks the {Result, State} tuple
+            if this.is_repl_mode {
+                this.repl_loop_mutated = true;
+            }
+            this.generate_conditional_branch_inline(block)
+        })?;
 
         let mut parts: Vec<Document<'static>> = Vec::new();
         parts.extend(arg_bindings);

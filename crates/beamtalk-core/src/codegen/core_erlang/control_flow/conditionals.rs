@@ -62,15 +62,8 @@ impl CoreErlangGenerator {
         let cond_doc = self.expression_doc(receiver)?;
         let outer_state = self.current_state_var();
 
-        let saved_version = self.state_version();
-        let saved_in_loop = self.in_loop_body;
-        self.set_state_version(0);
-        self.in_loop_body = true;
-
-        let (branch_doc, _) = self.generate_conditional_branch_inline(block)?;
-
-        self.in_loop_body = saved_in_loop;
-        self.set_state_version(saved_version);
+        let (branch_doc, _) =
+            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
 
         Ok(docvec![
             "let ",
@@ -104,15 +97,8 @@ impl CoreErlangGenerator {
         let cond_doc = self.expression_doc(receiver)?;
         let outer_state = self.current_state_var();
 
-        let saved_version = self.state_version();
-        let saved_in_loop = self.in_loop_body;
-        self.set_state_version(0);
-        self.in_loop_body = true;
-
-        let (branch_doc, _) = self.generate_conditional_branch_inline(block)?;
-
-        self.in_loop_body = saved_in_loop;
-        self.set_state_version(saved_version);
+        let (branch_doc, _) =
+            self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
 
         Ok(docvec![
             "let ",
@@ -146,20 +132,12 @@ impl CoreErlangGenerator {
         let outer_state = self.current_state_var();
 
         // True branch
-        let saved_version = self.state_version();
-        let saved_in_loop = self.in_loop_body;
-        self.set_state_version(0);
-        self.in_loop_body = true;
-        let (true_branch_doc, _) = self.generate_conditional_branch_inline(true_block)?;
-        self.in_loop_body = saved_in_loop;
-        self.set_state_version(saved_version);
+        let (true_branch_doc, _) =
+            self.with_branch_context(|this| this.generate_conditional_branch_inline(true_block))?;
 
         // False branch (reset to same initial state)
-        self.set_state_version(0);
-        self.in_loop_body = true;
-        let (false_branch_doc, _) = self.generate_conditional_branch_inline(false_block)?;
-        self.in_loop_body = saved_in_loop;
-        self.set_state_version(saved_version);
+        let (false_branch_doc, _) =
+            self.with_branch_context(|this| this.generate_conditional_branch_inline(false_block))?;
 
         Ok(docvec![
             "let ",
@@ -198,22 +176,17 @@ impl CoreErlangGenerator {
         let recv_code = self.expression_doc(receiver)?;
         let outer_state = self.current_state_var();
 
-        let saved_version = self.state_version();
-        let saved_in_loop = self.in_loop_body;
-        self.set_state_version(0);
-        self.in_loop_body = true;
-
-        // Push a scope so the block-parameter binding is cleaned up after generation
-        self.push_scope();
-        if let Some(param) = block.parameters.first() {
-            // Bind the block parameter to the receiver value (already bound to obj_var)
-            self.bind_var(&param.name, &obj_var);
-        }
-        let (branch_doc, _) = self.generate_conditional_branch_inline(block)?;
-        self.pop_scope();
-
-        self.in_loop_body = saved_in_loop;
-        self.set_state_version(saved_version);
+        let (branch_doc, _) = self.with_branch_context(|this| {
+            // Push a scope so the block-parameter binding is cleaned up after generation
+            this.push_scope();
+            if let Some(param) = block.parameters.first() {
+                // Bind the block parameter to the receiver value (already bound to obj_var)
+                this.bind_var(&param.name, &obj_var);
+            }
+            let result = this.generate_conditional_branch_inline(block);
+            this.pop_scope();
+            result
+        })?;
 
         Ok(docvec![
             "let ",

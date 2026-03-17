@@ -1102,18 +1102,24 @@ impl CoreErlangGenerator {
     ///
     /// `(body_doc, final_state_version)` — body document and the `StateAcc` version
     /// number in effect at the end of the body.
-    #[allow(clippy::too_many_lines)]
     pub(super) fn generate_threaded_loop_body(
         &mut self,
         body: &crate::ast::Block,
         plan: &ThreadingPlan,
         kind: &BodyKind,
     ) -> Result<(Document<'static>, usize)> {
-        let saved_state_version = self.state_version();
-        self.set_state_version(0);
-        let previous_in_loop_body = self.in_loop_body;
-        self.in_loop_body = true;
+        self.with_branch_context(|this| this.generate_threaded_loop_body_inner(body, plan, kind))
+    }
 
+    /// Inner implementation of `generate_threaded_loop_body`, called inside
+    /// `with_branch_context` so that `in_loop_body = true` and `state_version = 0`.
+    #[allow(clippy::too_many_lines)]
+    fn generate_threaded_loop_body_inner(
+        &mut self,
+        body: &crate::ast::Block,
+        plan: &ThreadingPlan,
+        kind: &BodyKind,
+    ) -> Result<(Document<'static>, usize)> {
         // Needed for Letrec: detect whether body has direct field assignments.
         let has_direct_field_assignments = body
             .body
@@ -1296,8 +1302,6 @@ impl CoreErlangGenerator {
         }
 
         let final_state_version = self.state_version();
-        self.in_loop_body = previous_in_loop_body;
-        self.set_state_version(saved_state_version);
         Ok((Document::Vec(docs), final_state_version))
     }
 

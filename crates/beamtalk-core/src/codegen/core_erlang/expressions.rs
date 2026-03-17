@@ -658,53 +658,47 @@ impl CoreErlangGenerator {
         let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
 
         // Set up loop body context for StateAcc-based threading
-        let saved_state_version = self.state_version();
-        self.set_state_version(0);
-        let previous_in_loop_body = self.in_loop_body;
-        self.in_loop_body = true;
+        let docs = self.with_branch_context(|this| {
+            let mut docs: Vec<Document<'static>> = Vec::new();
 
-        let mut docs: Vec<Document<'static>> = Vec::new();
-
-        // Unpack captured-mutated vars from StateAcc.
-        // BT-909: Use maps:get/3 with the current outer value as fallback so the block
-        // remains callable even when StateAcc was not pre-seeded with the local state keys
-        // (e.g. when called through the runtime arity normalization wrapper).
-        for var_name in captured_vars {
-            let core_var = Self::to_core_erlang_var(var_name);
-            let key = Self::local_state_key(var_name);
-            // Look up the outer binding BEFORE rebinding so the fallback refers to the
-            // value at block-definition time (not the newly introduced inner binding).
-            // If no outer binding exists (e.g. REPL mode where vars come from state dict),
-            // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
-            let outer_binding = self.lookup_var(var_name).cloned();
-            self.bind_var(var_name, &core_var);
-            if let Some(outer_var) = outer_binding {
-                docs.push(docvec![
-                    "let ",
-                    Document::String(core_var),
-                    " = call 'maps':'get'('",
-                    Document::String(key),
-                    "', StateAcc, ",
-                    Document::String(outer_var),
-                    ") in "
-                ]);
-            } else {
-                docs.push(docvec![
-                    "let ",
-                    Document::String(core_var),
-                    " = call 'maps':'get'('",
-                    Document::String(key),
-                    "', StateAcc) in "
-                ]);
+            // Unpack captured-mutated vars from StateAcc.
+            // BT-909: Use maps:get/3 with the current outer value as fallback so the block
+            // remains callable even when StateAcc was not pre-seeded with the local state keys
+            // (e.g. when called through the runtime arity normalization wrapper).
+            for var_name in captured_vars {
+                let core_var = Self::to_core_erlang_var(var_name);
+                let key = Self::local_state_key(var_name);
+                // Look up the outer binding BEFORE rebinding so the fallback refers to the
+                // value at block-definition time (not the newly introduced inner binding).
+                // If no outer binding exists (e.g. REPL mode where vars come from state dict),
+                // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
+                let outer_binding = this.lookup_var(var_name).cloned();
+                this.bind_var(var_name, &core_var);
+                if let Some(outer_var) = outer_binding {
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(core_var),
+                        " = call 'maps':'get'('",
+                        Document::String(key),
+                        "', StateAcc, ",
+                        Document::String(outer_var),
+                        ") in "
+                    ]);
+                } else {
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(core_var),
+                        " = call 'maps':'get'('",
+                        Document::String(key),
+                        "', StateAcc) in "
+                    ]);
+                }
             }
-        }
 
-        // Generate body expressions with state threading
-        self.generate_block_stateful_body(block, &mut docs)?;
-
-        // Restore state
-        self.set_state_version(saved_state_version);
-        self.in_loop_body = previous_in_loop_body;
+            // Generate body expressions with state threading
+            this.generate_block_stateful_body(block, &mut docs)?;
+            Ok::<_, crate::codegen::core_erlang::CodeGenError>(docs)
+        })?;
         self.pop_scope();
 
         Ok(docvec![header, Document::Vec(docs)])
