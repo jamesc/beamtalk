@@ -166,6 +166,7 @@ impl ReplClient {
     /// Returns `true` if the previous session was successfully resumed,
     /// `false` if a fresh session was established instead.
     pub async fn reconnect(&self) -> Result<bool, String> {
+        tracing::info!("MCP WebSocket reconnect initiated");
         let requested_session = { self.session.lock().await.clone() };
 
         // Try the cached port first.
@@ -472,6 +473,7 @@ impl ReplClient {
         code: &str,
         trace: bool,
     ) -> Result<ReplResponse, String> {
+        tracing::debug!(op = "eval", code_len = code.len(), trace, "REPL request");
         let mut request = serde_json::json!({
             "op": "eval",
             "id": next_msg_id(),
@@ -480,7 +482,9 @@ impl ReplClient {
         if trace {
             request["trace"] = serde_json::Value::Bool(true);
         }
-        self.send_once(&request).await
+        let result = self.send_once(&request).await;
+        tracing::debug!(op = "eval", ok = result.is_ok(), "REPL response");
+        result
     }
 
     /// Send a complete operation.

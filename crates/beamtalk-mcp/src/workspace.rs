@@ -44,6 +44,7 @@ pub fn read_cookie_file(workspace_id: &str) -> Option<String> {
 /// 1. If a workspace ID is given, use it directly.
 /// 2. Otherwise, generate from the current directory.
 pub fn discover_port_and_cookie(workspace_id: Option<&str>) -> Option<(u16, String)> {
+    tracing::debug!(workspace_id = ?workspace_id, "discovering REPL port and cookie");
     discover_port_cookie_and_id(workspace_id).map(|(port, cookie, _id)| (port, cookie))
 }
 
@@ -58,6 +59,7 @@ pub fn discover_port_cookie_and_id(workspace_id: Option<&str>) -> Option<(u16, S
     };
     let port = read_port_file(&id)?;
     let cookie = read_cookie_file(&id)?;
+    tracing::info!(port, workspace_id = %id, "discovered REPL port and cookie");
     Some((port, cookie, id))
 }
 
@@ -96,6 +98,7 @@ pub fn parse_workspace_id(stdout: &str) -> Option<String> {
 /// Scans `~/.beamtalk/workspaces/` for directories with port files.
 /// Returns the workspace ID for port re-discovery on reconnect (BT-1416).
 pub fn discover_any_port_cookie_and_id() -> Option<(u16, String, String)> {
+    tracing::debug!("scanning for any running workspace");
     let dir = beamtalk_workspace::workspaces_base_dir().ok()?;
     let entries = std::fs::read_dir(dir).ok()?;
 
@@ -106,11 +109,13 @@ pub fn discover_any_port_cookie_and_id() -> Option<(u16, String, String)> {
             let workspace_id = workspace_id.to_string_lossy();
             if let Some(port) = read_port_file(&workspace_id) {
                 if let Some(cookie) = read_cookie_file(&workspace_id) {
+                    tracing::info!(port, workspace_id = %workspace_id, "discovered running workspace");
                     return Some((port, cookie, workspace_id.into_owned()));
                 }
             }
         }
     }
+    tracing::debug!("no running workspace found");
     None
 }
 
