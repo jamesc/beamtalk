@@ -162,8 +162,9 @@ format_gen_server_terminate_report_test() ->
     ?assert(maps:is_key(<<"reason">>, Decoded)),
     %% Should infer domain as "otp"
     ?assertEqual(<<"otp">>, maps:get(<<"domain">>, Decoded)),
-    %% Should infer mfa from server name
-    ?assertEqual(<<"my_server">>, maps:get(<<"mfa">>, Decoded)).
+    %% Server name goes in "name" field, not "mfa"
+    ?assertEqual(<<"my_server">>, maps:get(<<"name">>, Decoded)),
+    ?assertNot(maps:is_key(<<"mfa">>, Decoded)).
 
 format_supervisor_progress_report_test() ->
     Report = #{
@@ -180,7 +181,9 @@ format_supervisor_progress_report_test() ->
     ?assert(binary:match(maps:get(<<"msg">>, Decoded), <<"supervisor">>) =/= nomatch),
     ?assertEqual(<<"supervisor_progress">>, maps:get(<<"report_type">>, Decoded)),
     ?assertEqual(<<"otp">>, maps:get(<<"domain">>, Decoded)),
-    ?assertEqual(<<"my_sup">>, maps:get(<<"mfa">>, Decoded)).
+    %% Supervisor name goes in "name" field, not "mfa"
+    ?assertEqual(<<"{local,my_sup}">>, maps:get(<<"name">>, Decoded)),
+    ?assertNot(maps:is_key(<<"mfa">>, Decoded)).
 
 format_supervisor_child_terminated_report_test() ->
     Report = #{

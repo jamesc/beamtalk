@@ -96,6 +96,7 @@ extract_report_fields(#{label := {gen_server, terminate}, name := Name, reason :
     Msg = iolist_to_binary(io_lib:format("gen_server ~tp terminated", [Name])),
     Fields = [
         {<<"report_type">>, <<"gen_server_terminate">>},
+        {<<"name">>, iolist_to_binary(io_lib:format("~tp", [Name]))},
         {<<"reason">>, iolist_to_binary(io_lib:format("~tp", [Reason]))}
     ],
     {Msg, Fields};
@@ -109,7 +110,8 @@ extract_report_fields(
         end,
     Msg = iolist_to_binary(io_lib:format("supervisor ~tp started child ~tp", [Sup, ChildId])),
     Fields = [
-        {<<"report_type">>, <<"supervisor_progress">>}
+        {<<"report_type">>, <<"supervisor_progress">>},
+        {<<"name">>, iolist_to_binary(io_lib:format("~tp", [Sup]))}
     ],
     {Msg, Fields};
 extract_report_fields(
@@ -118,6 +120,7 @@ extract_report_fields(
     Msg = iolist_to_binary(io_lib:format("supervisor ~tp child terminated: ~tp", [Sup, Reason])),
     Fields = [
         {<<"report_type">>, <<"supervisor_child_terminated">>},
+        {<<"name">>, iolist_to_binary(io_lib:format("~tp", [Sup]))},
         {<<"reason">>, iolist_to_binary(io_lib:format("~tp", [Reason]))}
     ],
     {Msg, Fields};
@@ -172,25 +175,12 @@ infer_domain_from_report(_) -> undefined.
 
 %% @doc Format the MFA metadata as a binary.
 %%
-%% Uses explicit mfa from metadata if present. For OTP reports, extracts
-%% mfa from the report's initial_call or registered name when available.
+%% Uses explicit mfa from log event metadata. Does not infer mfa from OTP
+%% report fields — registered names belong in the "name" field, not "mfa".
 -spec format_mfa(term(), map()) -> binary() | undefined.
 format_mfa(_Msg, #{mfa := {M, F, A}}) ->
     iolist_to_binary(io_lib:format("~s:~s/~B", [M, F, A]));
-format_mfa({report, Report}, _Meta) when is_map(Report) ->
-    infer_mfa_from_report(Report);
 format_mfa(_Msg, _Meta) ->
-    undefined.
-
-%% @doc Extract MFA from OTP report fields.
--spec infer_mfa_from_report(map()) -> binary() | undefined.
-infer_mfa_from_report(#{label := {gen_server, terminate}, name := Name}) when is_atom(Name) ->
-    iolist_to_binary(io_lib:format("~s", [Name]));
-infer_mfa_from_report(#{label := {supervisor, _}, supervisor := {_, Name}}) when is_atom(Name) ->
-    iolist_to_binary(io_lib:format("~s", [Name]));
-infer_mfa_from_report(#{label := {supervisor, _}, supervisor := Name}) when is_atom(Name) ->
-    iolist_to_binary(io_lib:format("~s", [Name]));
-infer_mfa_from_report(_) ->
     undefined.
 
 %% @doc Format the PID metadata as a binary.
