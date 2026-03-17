@@ -94,6 +94,24 @@ sealed Object subclass: BeamtalkInterface
   logLevel: level :: Symbol -> Nil =>
     (Erlang beamtalk_logging_config) logLevel: level
 
+  /// Return the current log format as a symbol (#text or #json).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk logFormat
+  /// ```
+  logFormat -> Symbol => (Erlang beamtalk_logging_config) logFormat
+
+  /// Switch the log format on the file handler.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk logFormat: #json
+  /// Beamtalk logFormat: #text
+  /// ```
+  logFormat: format :: Symbol -> Nil =>
+    (Erlang beamtalk_logging_config) logFormat: format
+
   /// Return the list of available debug target symbols.
   ///
   /// ## Examples
