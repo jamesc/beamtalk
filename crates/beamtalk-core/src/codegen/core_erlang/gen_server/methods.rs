@@ -371,11 +371,11 @@ impl CoreErlangGenerator {
                 }
             }
 
-            if is_last {
-                match kind {
-                    BodyExprKind::SelfFieldAtPut => {
-                        let doc = self.generate_self_field_at_put_open(expr)?;
-                        docs.push(doc);
+            match kind {
+                BodyExprKind::SelfFieldAtPut => {
+                    let doc = self.generate_self_field_at_put_open(expr)?;
+                    docs.push(doc);
+                    if is_last {
                         let val_var = self
                             .last_open_scope_result
                             .clone()
@@ -389,7 +389,9 @@ impl CoreErlangGenerator {
                             "}",
                         ]);
                     }
-                    BodyExprKind::FieldAssignment => {
+                }
+                BodyExprKind::FieldAssignment => {
+                    if is_last {
                         if let Expression::Assignment { target, value, .. } = expr {
                             if let Expression::FieldAccess { field, .. } = target.as_ref() {
                                 let val_var = self.fresh_temp_var("Val");
@@ -417,8 +419,136 @@ impl CoreErlangGenerator {
                                 ]);
                             }
                         }
+                    } else {
+                        let doc = self.generate_field_assignment_open(expr)?;
+                        docs.push(doc);
                     }
-                    BodyExprKind::SuperSend => {
+                }
+                BodyExprKind::LocalAssignTier2 => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            let tuple_var = self.fresh_temp_var("T2Tuple");
+                            let value_str = self.expression_doc(value)?;
+                            self.bind_var(var_name, &core_var);
+                            let new_state = self.next_state_var();
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(tuple_var.clone()),
+                                " = ",
+                                value_str,
+                                " in let ",
+                                Document::String(core_var),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(tuple_var.clone()),
+                                ")\n in let ",
+                                Document::String(new_state),
+                                " = call 'erlang':'element'(2, ",
+                                Document::String(tuple_var),
+                                ") in ",
+                            ]);
+                        }
+                    }
+                    if is_last {
+                        self.emit_pure_reply(&mut docs);
+                    }
+                }
+                BodyExprKind::LocalAssignControlFlow => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            let tuple_var = self.fresh_temp_var("Tuple");
+                            let new_state = self.peek_next_state_var();
+                            let value_str = self.expression_doc(value)?;
+                            let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+                                "let ",
+                                Document::String(tuple_var.clone()),
+                                " = ",
+                                value_str,
+                                " in let ",
+                                Document::String(core_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(tuple_var.clone()),
+                                ") in let ",
+                                Document::String(new_state.clone()),
+                                " = call 'erlang':'element'(2, ",
+                                Document::String(tuple_var),
+                                ") in ",
+                            ]];
+                            let _ = self.next_state_var();
+                            self.bind_var(var_name, &core_var);
+
+                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
+                            {
+                                for var in &threaded_vars {
+                                    let tv_core = self.lookup_var(var).map_or_else(
+                                        || Self::to_core_erlang_var(var),
+                                        String::clone,
+                                    );
+                                    doc_parts.push(docvec![
+                                        "let ",
+                                        Document::String(tv_core),
+                                        " = call 'maps':'get'('",
+                                        Document::String(Self::local_state_key(var)),
+                                        "', ",
+                                        Document::String(new_state.clone()),
+                                        ") in ",
+                                    ]);
+                                }
+                            }
+                            docs.push(Document::Vec(doc_parts));
+                        }
+                    }
+                    if is_last {
+                        self.emit_pure_reply(&mut docs);
+                    }
+                }
+                BodyExprKind::LocalAssignPure => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            let value_str = self.expression_doc(value)?;
+                            self.bind_var(var_name, &core_var);
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(core_var),
+                                " = ",
+                                value_str,
+                                " in ",
+                            ]);
+                        }
+                    }
+                    if is_last {
+                        self.emit_pure_reply(&mut docs);
+                    }
+                }
+                BodyExprKind::DestructureAssignment => {
+                    if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                        let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                        for d in binding_docs {
+                            docs.push(d);
+                        }
+                    }
+                    if is_last {
+                        let post_state = self.current_state_var();
+                        docs.push(docvec![
+                            "{'reply', 'nil', ",
+                            Document::String(post_state),
+                            "}",
+                        ]);
+                    }
+                }
+                BodyExprKind::SuperSend => {
+                    if is_last {
                         let expr_str = self.expression_doc(expr)?;
                         docs.push(docvec![
                             "let _SuperTuple = ",
@@ -427,193 +557,32 @@ impl CoreErlangGenerator {
                             " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
                             " in {'reply', _Result, _NewState}",
                         ]);
+                    } else {
+                        self.emit_super_send_open(expr, &mut docs)?;
                     }
-                    BodyExprKind::ErrorSend => {
+                }
+                BodyExprKind::ErrorSend => {
+                    if is_last {
+                        // Error send never returns — no reply tuple needed.
                         let expr_str = self.expression_doc(expr)?;
                         docs.push(docvec![expr_str]);
-                    }
-                    BodyExprKind::Tier2ValueCall => {
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
                         let expr_str = self.expression_doc(expr)?;
-                        docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
-                    }
-                    BodyExprKind::ControlFlowWithMutations => {
-                        let expr_str = self.expression_doc(expr)?;
-                        docs.push(self.emit_tuple_unpack_reply("Tuple", expr_str));
-                    }
-                    BodyExprKind::Tier2SelfSend(ref tier2_args) => {
-                        let doc = self.generate_tier2_self_send_open(expr, tier2_args)?;
-                        docs.push(doc);
-                        self.emit_dispatch_reply(
-                            &mut docs,
-                            "missing dispatch var after Tier 2 self-send",
-                        )?;
-                    }
-                    BodyExprKind::DestructureAssignment => {
-                        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                            let binding_docs =
-                                self.generate_destructure_bindings(pattern, value)?;
-                            for d in binding_docs {
-                                docs.push(d);
-                            }
-                            let post_state = self.current_state_var();
-                            docs.push(docvec![
-                                "{'reply', 'nil', ",
-                                Document::String(post_state),
-                                "}",
-                            ]);
-                        }
-                    }
-                    BodyExprKind::DispatchingSelfSend => {
-                        let doc = self.generate_self_dispatch_open(expr)?;
-                        docs.push(doc);
-                        self.emit_dispatch_reply(
-                            &mut docs,
-                            "missing dispatch var after self-send",
-                        )?;
-                    }
-                    BodyExprKind::EarlyReturn => {
-                        // Already handled above with early return from loop.
-                        unreachable!("EarlyReturn handled above");
-                    }
-                    // Last position: local assignments, pure — bind to Result and reply
-                    _ => {
-                        let expr_str = self.expression_doc(expr)?;
-                        let post_state = self.current_state_var();
                         docs.push(docvec![
-                            "let _Result = ",
+                            "let ",
+                            Document::String(tmp_var),
+                            " = ",
                             expr_str,
-                            " in {'reply', _Result, ",
-                            Document::String(post_state),
-                            "}",
+                            " in ",
                         ]);
                     }
                 }
-            } else {
-                // Non-last position: open let chain for state threading
-                match kind {
-                    BodyExprKind::SelfFieldAtPut => {
-                        let doc = self.generate_self_field_at_put_open(expr)?;
-                        docs.push(doc);
-                    }
-                    BodyExprKind::FieldAssignment => {
-                        let doc = self.generate_field_assignment_open(expr)?;
-                        docs.push(doc);
-                    }
-                    BodyExprKind::LocalAssignTier2 => {
-                        if let Expression::Assignment { target, value, .. } = expr {
-                            if let Expression::Identifier(id) = target.as_ref() {
-                                let var_name = &id.name;
-                                let core_var = self.lookup_var(var_name).map_or_else(
-                                    || Self::to_core_erlang_var(var_name),
-                                    String::clone,
-                                );
-                                let tuple_var = self.fresh_temp_var("T2Tuple");
-                                let value_str = self.expression_doc(value)?;
-                                self.bind_var(var_name, &core_var);
-                                let new_state = self.next_state_var();
-                                docs.push(docvec![
-                                    "let ",
-                                    Document::String(tuple_var.clone()),
-                                    " = ",
-                                    value_str,
-                                    " in let ",
-                                    Document::String(core_var),
-                                    " = call 'erlang':'element'(1, ",
-                                    Document::String(tuple_var.clone()),
-                                    ")\n in let ",
-                                    Document::String(new_state),
-                                    " = call 'erlang':'element'(2, ",
-                                    Document::String(tuple_var),
-                                    ") in ",
-                                ]);
-                            }
-                        }
-                    }
-                    BodyExprKind::LocalAssignControlFlow => {
-                        if let Expression::Assignment { target, value, .. } = expr {
-                            if let Expression::Identifier(id) = target.as_ref() {
-                                let var_name = &id.name;
-                                let core_var = self.lookup_var(var_name).map_or_else(
-                                    || Self::to_core_erlang_var(var_name),
-                                    String::clone,
-                                );
-                                let tuple_var = self.fresh_temp_var("Tuple");
-                                let new_state = self.peek_next_state_var();
-                                let value_str = self.expression_doc(value)?;
-                                let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                                    "let ",
-                                    Document::String(tuple_var.clone()),
-                                    " = ",
-                                    value_str,
-                                    " in let ",
-                                    Document::String(core_var.clone()),
-                                    " = call 'erlang':'element'(1, ",
-                                    Document::String(tuple_var.clone()),
-                                    ") in let ",
-                                    Document::String(new_state.clone()),
-                                    " = call 'erlang':'element'(2, ",
-                                    Document::String(tuple_var),
-                                    ") in ",
-                                ]];
-                                let _ = self.next_state_var();
-                                self.bind_var(var_name, &core_var);
-
-                                if let Some(threaded_vars) =
-                                    self.get_control_flow_threaded_vars(value)
-                                {
-                                    for var in &threaded_vars {
-                                        let tv_core = self.lookup_var(var).map_or_else(
-                                            || Self::to_core_erlang_var(var),
-                                            String::clone,
-                                        );
-                                        doc_parts.push(docvec![
-                                            "let ",
-                                            Document::String(tv_core),
-                                            " = call 'maps':'get'('",
-                                            Document::String(Self::local_state_key(var)),
-                                            "', ",
-                                            Document::String(new_state.clone()),
-                                            ") in ",
-                                        ]);
-                                    }
-                                }
-                                docs.push(Document::Vec(doc_parts));
-                            }
-                        }
-                    }
-                    BodyExprKind::LocalAssignPure => {
-                        if let Expression::Assignment { target, value, .. } = expr {
-                            if let Expression::Identifier(id) = target.as_ref() {
-                                let var_name = &id.name;
-                                let core_var = self.lookup_var(var_name).map_or_else(
-                                    || Self::to_core_erlang_var(var_name),
-                                    String::clone,
-                                );
-                                let value_str = self.expression_doc(value)?;
-                                self.bind_var(var_name, &core_var);
-                                docs.push(docvec![
-                                    "let ",
-                                    Document::String(core_var),
-                                    " = ",
-                                    value_str,
-                                    " in ",
-                                ]);
-                            }
-                        }
-                    }
-                    BodyExprKind::DestructureAssignment => {
-                        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                            let binding_docs =
-                                self.generate_destructure_bindings(pattern, value)?;
-                            for d in binding_docs {
-                                docs.push(d);
-                            }
-                        }
-                    }
-                    BodyExprKind::SuperSend => {
-                        self.emit_super_send_open(expr, &mut docs)?;
-                    }
-                    BodyExprKind::Tier2ValueCall => {
+                BodyExprKind::Tier2ValueCall => {
+                    if is_last {
+                        let expr_str = self.expression_doc(expr)?;
+                        docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
+                    } else {
                         let tuple_var = self.fresh_temp_var("T2Tuple");
                         let discard_var = self.fresh_temp_var("T2Discard");
                         let expr_str = self.expression_doc(expr)?;
@@ -653,11 +622,22 @@ impl CoreErlangGenerator {
                         }
                         docs.push(Document::Vec(doc_parts));
                     }
-                    BodyExprKind::Tier2SelfSend(ref tier2_args) => {
-                        let doc = self.generate_tier2_self_send_open(expr, tier2_args)?;
-                        docs.push(doc);
+                }
+                BodyExprKind::Tier2SelfSend(ref tier2_args) => {
+                    let doc = self.generate_tier2_self_send_open(expr, tier2_args)?;
+                    docs.push(doc);
+                    if is_last {
+                        self.emit_dispatch_reply(
+                            &mut docs,
+                            "missing dispatch var after Tier 2 self-send",
+                        )?;
                     }
-                    BodyExprKind::ControlFlowWithMutations => {
+                }
+                BodyExprKind::ControlFlowWithMutations => {
+                    if is_last {
+                        let expr_str = self.expression_doc(expr)?;
+                        docs.push(self.emit_tuple_unpack_reply("Tuple", expr_str));
+                    } else {
                         let tuple_var = self.fresh_temp_var("Tuple");
                         let new_state = self.peek_next_state_var();
                         let expr_str = self.expression_doc(expr)?;
@@ -693,14 +673,32 @@ impl CoreErlangGenerator {
                         }
                         docs.push(Document::Vec(doc_parts));
                     }
-                    BodyExprKind::DispatchingSelfSend => {
-                        let doc = self.generate_self_dispatch_open(expr)?;
-                        docs.push(doc);
+                }
+                BodyExprKind::DispatchingSelfSend => {
+                    let doc = self.generate_self_dispatch_open(expr)?;
+                    docs.push(doc);
+                    if is_last {
+                        self.emit_dispatch_reply(
+                            &mut docs,
+                            "missing dispatch var after self-send",
+                        )?;
                     }
-                    BodyExprKind::EarlyReturn => {
-                        unreachable!("EarlyReturn handled above");
-                    }
-                    BodyExprKind::ErrorSend | BodyExprKind::Pure => {
+                }
+                BodyExprKind::EarlyReturn => {
+                    unreachable!("EarlyReturn handled above");
+                }
+                BodyExprKind::Pure => {
+                    if is_last {
+                        let expr_str = self.expression_doc(expr)?;
+                        let post_state = self.current_state_var();
+                        docs.push(docvec![
+                            "let _Result = ",
+                            expr_str,
+                            " in {'reply', _Result, ",
+                            Document::String(post_state),
+                            "}",
+                        ]);
+                    } else {
                         let tmp_var = self.fresh_temp_var("seq");
                         let expr_str = self.expression_doc(expr)?;
                         docs.push(docvec![
@@ -716,6 +714,18 @@ impl CoreErlangGenerator {
         }
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Emit a generic `{'reply', _Result, State}` close for the last expression
+    /// when the expression itself has already been emitted as an open let chain.
+    /// Used by local assignments and other open-chain handlers in last position.
+    fn emit_pure_reply(&mut self, docs: &mut Vec<Document<'static>>) {
+        let post_state = self.current_state_var();
+        docs.push(docvec![
+            "{'reply', 'nil', ",
+            Document::String(post_state),
+            "}",
+        ]);
     }
 
     /// Emit the last-position reply for a dispatch open call (Tier 2 self-send
