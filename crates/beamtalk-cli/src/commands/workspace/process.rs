@@ -126,7 +126,8 @@ pub fn start_detached_node(
     let project_path = get_workspace_metadata(workspace_id)?.project_path;
     let project_path_str = project_path
         .to_str()
-        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?;
+        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?
+        .to_owned();
 
     // On Windows, escape backslashes in the project path for Erlang string syntax (BT-661)
     #[cfg(windows)]
