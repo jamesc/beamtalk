@@ -11,8 +11,10 @@
 %%% ## Actor Lifecycle
 %%%
 %%% Actors support lifecycle methods:
+%%% - `pid` - Returns the raw Erlang PID backing the actor
 %%% - `isAlive` - Returns true/false depending on whether the actor process is running
 %%% - `monitor` - Creates an Erlang monitor on the actor process
+%%% - `onExit:` - Monitors the actor and calls a block with the exit reason when it dies
 %%% - `stop` - Gracefully stops the actor process
 %%%
 %%% These methods are handled at the SEND site (via async_send/4 and sync_send/3)
@@ -334,10 +336,63 @@ async_send(_ActorPid, delegate, [], FuturePid) ->
     },
     beamtalk_future:reject(FuturePid, Error1),
     ok;
+async_send(ActorPid, pid, [], FuturePid) ->
+    %% BT-1442: pid returns the raw Erlang PID backing the actor
+    beamtalk_future:resolve(FuturePid, ActorPid),
+    ok;
 async_send(ActorPid, monitor, [], FuturePid) ->
     %% monitor is handled locally - creates an Erlang monitor
     Ref = erlang:monitor(process, ActorPid),
     beamtalk_future:resolve(FuturePid, Ref),
+    ok;
+async_send(ActorPid, 'onExit:', [Block], FuturePid) ->
+    %% BT-1442: onExit: monitors the actor and calls block with reason on exit.
+    %% Synchronize with the watcher to ensure the monitor is set up before resolving.
+    %% Use a unique ref token to correlate the ready message (prevents stale/parallel confusion).
+    Caller = self(),
+    Token = make_ref(),
+    WatcherPid = spawn(fun() ->
+        Ref = erlang:monitor(process, ActorPid),
+        Caller ! {onExit_ready, Token},
+        receive
+            {'DOWN', Ref, process, ActorPid, Reason} ->
+                try
+                    Block(Reason)
+                catch
+                    Class:Err ->
+                        ?LOG_WARNING("Error in onExit: callback", #{
+                            actor_pid => ActorPid,
+                            exit_reason => Reason,
+                            error_class => Class,
+                            error => Err
+                        })
+                end
+        end
+    end),
+    case
+        receive
+            {onExit_ready, Token} -> ok
+        after 5000 ->
+            %% Kill the watcher to prevent ghost callbacks and flush stale token.
+            exit(WatcherPid, kill),
+            receive
+                {onExit_ready, Token} -> ok
+            after 0 -> ok
+            end,
+            timeout
+        end
+    of
+        ok ->
+            beamtalk_future:resolve(FuturePid, ok);
+        timeout ->
+            Error = beamtalk_error:new(
+                timeout,
+                unknown,
+                'onExit:',
+                <<"onExit: watcher did not start within 5000ms">>
+            ),
+            beamtalk_future:reject(FuturePid, Error)
+    end,
     ok;
 async_send(ActorPid, Selector, Args, FuturePid) ->
     %% BT-886: Check liveness before sending, and spawn a watcher to detect
@@ -375,8 +430,10 @@ cast_send(ActorPid, Selector, Args) ->
 %% @doc Send a synchronous message to an actor, with lifecycle handling.
 %%
 %% Handles lifecycle methods locally without involving the actor process:
+%% - `pid` - returns the raw Erlang PID backing the actor
 %% - `isAlive` - checks if process is alive, returns boolean
 %% - `monitor` - creates a monitor reference, returns ref
+%% - `onExit:` - monitors actor and calls block on exit
 %% - `stop` - gracefully stops the actor process, returns ok
 %%
 %% For all other messages, checks if the actor is alive first:
@@ -426,8 +483,51 @@ sync_send(_ActorPid, delegate, []) ->
         message = <<"delegate called on a non-native Actor">>
     },
     error(beamtalk_exception_handler:ensure_wrapped(Error1));
+sync_send(ActorPid, pid, []) ->
+    %% BT-1442: pid returns the raw Erlang PID backing the actor
+    ActorPid;
 sync_send(ActorPid, monitor, []) ->
     erlang:monitor(process, ActorPid);
+sync_send(ActorPid, 'onExit:', [Block]) ->
+    %% BT-1442: onExit: monitors the actor and calls block with reason on exit.
+    %% Synchronize with the watcher to ensure the monitor is set up before returning.
+    %% Use a unique ref token to correlate the ready message.
+    Caller = self(),
+    Token = make_ref(),
+    WatcherPid = spawn(fun() ->
+        Ref = erlang:monitor(process, ActorPid),
+        Caller ! {onExit_ready, Token},
+        receive
+            {'DOWN', Ref, process, ActorPid, Reason} ->
+                try
+                    Block(Reason)
+                catch
+                    Class:Err ->
+                        ?LOG_WARNING("Error in onExit: callback", #{
+                            actor_pid => ActorPid,
+                            exit_reason => Reason,
+                            error_class => Class,
+                            error => Err
+                        })
+                end
+        end
+    end),
+    case
+        receive
+            {onExit_ready, Token} -> ok
+        after 5000 ->
+            %% Kill the watcher to prevent ghost callbacks and flush stale token.
+            exit(WatcherPid, kill),
+            receive
+                {onExit_ready, Token} -> ok
+            after 0 -> ok
+            end,
+            timeout
+        end
+    of
+        ok -> ok;
+        timeout -> raise_timeout('onExit:')
+    end;
 sync_send(ActorPid, Selector, Args) ->
     case is_process_alive(ActorPid) of
         true ->
@@ -799,8 +899,14 @@ dispatch(Selector, Args, Self, State) ->
                 false when CheckSelector =:= stop ->
                     %% stop is handled at send site, not in __methods__
                     {reply, true, State};
+                false when CheckSelector =:= pid ->
+                    %% BT-1442: pid is handled at send site, not in __methods__
+                    {reply, true, State};
                 false when CheckSelector =:= monitor ->
                     %% monitor is handled by actor lifecycle machinery, not in __methods__
+                    {reply, true, State};
+                false when CheckSelector =:= 'onExit:' ->
+                    %% BT-1442: onExit: is handled at send site, not in __methods__
                     {reply, true, State};
                 false when CheckSelector =:= delegate ->
                     %% delegate is handled by actor dispatch, not in __methods__

@@ -528,6 +528,10 @@ coerce_arg(Arg) when is_binary(Arg) ->
         Charlist when is_list(Charlist) -> Charlist;
         _ -> Arg
     end;
+coerce_arg(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
+    %% BT-1442: Auto-coerce Actor proxy objects to raw PIDs for Erlang FFI.
+    %% This enables `Erlang erlang monitor: #process arg: actor` without badarg.
+    Pid;
 coerce_arg(Arg) ->
     Arg.
 

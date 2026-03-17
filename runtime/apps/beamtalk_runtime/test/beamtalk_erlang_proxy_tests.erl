@@ -766,3 +766,26 @@ dispatch_preserves_beamtalk_errors_test() ->
             ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
             ?assertEqual('TestClass', Inner#beamtalk_error.class)
     end.
+
+%%% ===================================================================
+%%% BT-1442: Actor proxy → Pid coercion for Erlang FFI
+%%% ===================================================================
+
+direct_call_actor_to_pid_coercion_test() ->
+    %% Passing a #beamtalk_object{pid=Pid} to an Erlang function that
+    %% expects a raw pid should auto-coerce on badarg retry.
+    {ok, Counter} = test_counter:start_link(0),
+    ActorObj = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Counter},
+    %% erlang:is_process_alive/1 expects a pid — actor object should be coerced
+    Result = beamtalk_erlang_proxy:direct_call(erlang, is_process_alive, [ActorObj]),
+    ?assertEqual(true, Result),
+    gen_server:stop(Counter).
+
+direct_call_actor_monitor_coercion_test() ->
+    %% erlang:monitor(process, ActorObj) should coerce actor to pid
+    {ok, Counter} = test_counter:start_link(0),
+    ActorObj = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Counter},
+    Ref = beamtalk_erlang_proxy:direct_call(erlang, monitor, [process, ActorObj]),
+    ?assert(is_reference(Ref)),
+    erlang:demonitor(Ref, [flush]),
+    gen_server:stop(Counter).

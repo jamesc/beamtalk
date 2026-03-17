@@ -136,6 +136,45 @@ Object subclass: Actor
   /// ```
   sealed delegate => @primitive "actorDelegate"
 
+  /// Return the raw Erlang PID backing this actor.
+  ///
+  /// Useful for FFI interop where an Erlang function expects a raw pid.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// rawPid := counter pid
+  /// rawPid class           // => Pid
+  /// ```
+  sealed pid -> Pid => @primitive "actorPid"
+
+  /// Create an Erlang monitor on this actor's process.
+  ///
+  /// Returns a Reference that can be used to cancel the monitor via
+  /// `demonitor`. The caller will receive a `DOWN` message if the
+  /// actor exits.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ref := counter monitor
+  /// ref class              // => Reference
+  /// ref demonitor          // cancel the monitor
+  /// ```
+  sealed monitor -> Reference => @primitive "actorMonitor"
+
+  /// Register a callback to be invoked when this actor exits.
+  ///
+  /// Monitors the actor and calls `block value: reason` when the actor
+  /// process terminates. Returns `#ok` immediately. The block is called
+  /// asynchronously from a lightweight watcher process.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// worker onExit: [:reason |
+  ///   Logger info: "worker exited" metadata: #{"reason" => reason displayString}
+  /// ]
+  /// ```
+  sealed onExit: block -> Symbol => @primitive "actorOnExit"
+
   /// Gracefully stop this actor (gen_server:stop).
   ///
   /// Idempotent: stopping an already-stopped actor succeeds silently.
