@@ -10,7 +10,7 @@
 
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
-use crate::ast::{Expression, MethodKind, Module};
+use crate::ast::{Block, Expression, MethodKind, Module};
 use crate::docvec;
 
 impl CoreErlangGenerator {
@@ -236,10 +236,6 @@ impl CoreErlangGenerator {
     ///
     /// This function is complex because it handles both legacy expression-based modules
     /// and class definitions, including the `doesNotUnderstand:args:` fallback per BT-29.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "dispatch codegen is inherently complex"
-    )]
     pub(in crate::codegen::core_erlang) fn generate_dispatch(
         &mut self,
         module: &Module,
@@ -259,101 +255,18 @@ impl CoreErlangGenerator {
 
         // Generate case clause for each method in the module (legacy expression-based)
         for stmt in &module.expressions {
-            if let Expression::Assignment { target, value, .. } = &stmt.expression {
-                if let (Expression::Identifier(id), Expression::Block(block)) =
-                    (target.as_ref(), value.as_ref())
-                {
-                    // Reset state version at the start of each method
-                    self.reset_state_version();
+            let Expression::Assignment { target, value, .. } = &stmt.expression else {
+                continue;
+            };
+            let (Expression::Identifier(id), Expression::Block(block)) =
+                (target.as_ref(), value.as_ref())
+            else {
+                continue;
+            };
 
-                    // Push a new scope for this method's parameter bindings
-                    self.push_scope();
-
-                    // BT-470: Register parameters BEFORE generating body so field
-                    // references resolve to parameter variables (not maps:get)
-                    let param_vars: Vec<String> = block
-                        .parameters
-                        .iter()
-                        .map(|p| self.fresh_var(&p.name))
-                        .collect();
-
-                    // BT-761: Detect whether any block in this method body contains ^.
-                    let needs_nlr = self
-                        .semantic_facts
-                        .has_block_nlr_or_walk(&block.span, &block.body);
-
-                    let nlr_token_var = if needs_nlr {
-                        let token_var = self.fresh_temp_var("NlrToken");
-                        self.current_nlr_token = Some(token_var.clone());
-                        Some(token_var)
-                    } else {
-                        None
-                    };
-
-                    // Generate body as Document
-                    let body_doc = self.generate_method_body_with_reply(block)?;
-
-                    self.current_nlr_token = None;
-
-                    // BT-761/BT-764: Wrap body in letrec function with try/catch
-                    // via the shared helper.
-                    // BT-774: Compose at Document level without intermediate string rendering.
-                    let body_doc = if let Some(ref token_var) = nlr_token_var {
-                        self.wrap_actor_body_with_nlr_catch(body_doc, token_var, true)
-                    } else {
-                        body_doc
-                    };
-
-                    // Build method clause as Document tree
-                    let clause_doc = if param_vars.is_empty() {
-                        docvec![
-                            "<'",
-                            Document::String(id.name.to_string()),
-                            "'> when 'true' ->",
-                            nest(INDENT, docvec![line(), body_doc,]),
-                            "\n",
-                        ]
-                    } else {
-                        let params_str = param_vars.join(", ");
-
-                        docvec![
-                            "<'",
-                            Document::String(id.name.to_string()),
-                            "'> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "case Args of",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "<[",
-                                            Document::String(params_str),
-                                            "]> when 'true' ->",
-                                            nest(INDENT, docvec![line(), body_doc,]),
-                                            line(),
-                                            "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
-                                        ]
-                                    ),
-                                    line(),
-                                    "end",
-                                ]
-                            ),
-                            "\n",
-                        ]
-                    };
-
-                    let indent_spaces = case_clause_indent * INDENT;
-                    #[allow(clippy::cast_sign_loss)] // indent_spaces is always non-negative
-                    let indent_str = " ".repeat(indent_spaces as usize);
-                    docs.push(docvec![indent_str, nest(indent_spaces, clause_doc)]);
-
-                    // Pop the scope when done with this method
-                    self.pop_scope();
-                }
-            }
+            let clause_doc =
+                self.generate_legacy_method_clause(&id.name, block, case_clause_indent)?;
+            docs.push(clause_doc);
         }
 
         // Generate case clauses for methods in class definitions
@@ -367,163 +280,7 @@ impl CoreErlangGenerator {
         // walking, no longer generated per-class.
 
         // Default case: extension check, hierarchy walk, then DNU fallback
-        let class_name = self.class_name();
-        let module_name = self.module_name.clone();
-        let hint = "Check spelling or use 'respondsTo:' to verify method exists";
-        let hint_binary = Self::binary_string_literal(hint);
-
-        let default_body = docvec![
-            "<OtherSelector> when 'true' ->",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
-                    line(),
-                    docvec![
-                        "let ExtLookup = try call 'beamtalk_extensions':'lookup'('",
-                        Document::String(class_name.clone()),
-                        "', OtherSelector)"
-                    ],
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "of ExtLookupResult -> ExtLookupResult",
-                            line(),
-                            "catch <_EType, _EReason, _EStack> -> 'not_found'",
-                        ]
-                    ),
-                    line(),
-                    "in",
-                    line(),
-                    "case ExtLookup of",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "<{'ok', ExtFun, _ExtOwner}> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "let ExtResult = apply ExtFun(Args, Self) in",
-                                    line(),
-                                    "{'reply', ExtResult, State}",
-                                ]
-                            ),
-                            line(),
-                            "<'not_found'> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "%% ADR 0006: Try hierarchy walk before DNU",
-                                    line(),
-                                    docvec![
-                                        "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, '",
-                                        Document::String(class_name.clone()),
-                                        "') of"
-                                    ],
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "<{'reply', InheritedResult, InheritedState}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    "{'reply', InheritedResult, InheritedState}",
-                                                ]
-                                            ),
-                                            line(),
-                                            "<{'error', _DispatchError}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    "%% Not in hierarchy - try doesNotUnderstand:args: (BT-29)",
-                                                    line(),
-                                                    "let DnuSelector = 'doesNotUnderstand:args:' in",
-                                                    line(),
-                                                    docvec![
-                                                        "let Methods = call '",
-                                                        Document::String(module_name.clone()),
-                                                        "':'method_table'() in",
-                                                    ],
-                                                    line(),
-                                                    "case call 'maps':'is_key'(DnuSelector, Methods) of",
-                                                    nest(
-                                                        INDENT,
-                                                        docvec![
-                                                            line(),
-                                                            "<'true'> when 'true' ->",
-                                                            nest(
-                                                                INDENT,
-                                                                docvec![
-                                                                    line(),
-                                                                    docvec![
-                                                                        "call '",
-                                                                        Document::String(
-                                                                            module_name.clone()
-                                                                        ),
-                                                                        "':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)"
-                                                                    ],
-                                                                ]
-                                                            ),
-                                                            line(),
-                                                            "<'false'> when 'true' ->",
-                                                            nest(
-                                                                INDENT,
-                                                                docvec![
-                                                                    line(),
-                                                                    "%% No DNU handler - return #beamtalk_error{} record",
-                                                                    line(),
-                                                                    docvec![
-                                                                        "let ClassName = '",
-                                                                        Document::String(
-                                                                            class_name.clone()
-                                                                        ),
-                                                                        "' in",
-                                                                    ],
-                                                                    line(),
-                                                                    "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in",
-                                                                    line(),
-                                                                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in",
-                                                                    line(),
-                                                                    docvec![
-                                                                        "let HintMsg = ",
-                                                                        Document::String(
-                                                                            hint_binary
-                                                                        ),
-                                                                        " in"
-                                                                    ],
-                                                                    line(),
-                                                                    "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in",
-                                                                    line(),
-                                                                    "{'error', Error, State}",
-                                                                ]
-                                                            ),
-                                                        ]
-                                                    ),
-                                                    line(),
-                                                    "end",
-                                                ]
-                                            ),
-                                        ]
-                                    ),
-                                    line(),
-                                    "end",
-                                ]
-                            ),
-                        ]
-                    ),
-                    line(),
-                    "end",
-                ]
-            ),
-        ];
+        let default_body = self.generate_dispatch_default_case();
         let indent_spaces = case_clause_indent * INDENT;
         #[allow(clippy::cast_sign_loss)] // indent_spaces is always non-negative
         let indent_str = " ".repeat(indent_spaces as usize);
@@ -534,5 +291,266 @@ impl CoreErlangGenerator {
         docs.push(footer_doc);
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Generates a dispatch case clause for a legacy expression-based method.
+    ///
+    /// Handles scope setup, NLR detection, body generation, and the Args
+    /// destructuring case when the method has parameters.
+    fn generate_legacy_method_clause(
+        &mut self,
+        name: &str,
+        block: &Block,
+        case_clause_indent: isize,
+    ) -> Result<Document<'static>> {
+        // Reset state version at the start of each method
+        self.reset_state_version();
+        self.push_scope();
+
+        // BT-470: Register parameters BEFORE generating body so field
+        // references resolve to parameter variables (not maps:get)
+        let param_vars: Vec<String> = block
+            .parameters
+            .iter()
+            .map(|p| self.fresh_var(&p.name))
+            .collect();
+
+        // BT-761: Detect whether any block in this method body contains ^.
+        let needs_nlr = self
+            .semantic_facts
+            .has_block_nlr_or_walk(&block.span, &block.body);
+
+        let nlr_token_var = if needs_nlr {
+            let token_var = self.fresh_temp_var("NlrToken");
+            self.current_nlr_token = Some(token_var.clone());
+            Some(token_var)
+        } else {
+            None
+        };
+
+        let body_doc = self.generate_method_body_with_reply(block)?;
+        self.current_nlr_token = None;
+
+        // BT-761/BT-764: Wrap body in letrec function with try/catch via shared helper.
+        // BT-774: Compose at Document level without intermediate string rendering.
+        let body_doc = if let Some(ref token_var) = nlr_token_var {
+            self.wrap_actor_body_with_nlr_catch(body_doc, token_var, true)
+        } else {
+            body_doc
+        };
+
+        let clause_doc = Self::build_dispatch_clause(name, &param_vars, body_doc);
+
+        let indent_spaces = case_clause_indent * INDENT;
+        #[allow(clippy::cast_sign_loss)] // indent_spaces is always non-negative
+        let indent_str = " ".repeat(indent_spaces as usize);
+        let result = docvec![indent_str, nest(indent_spaces, clause_doc)];
+
+        self.pop_scope();
+        Ok(result)
+    }
+
+    /// Builds a dispatch case clause Document for a method with optional parameters.
+    fn build_dispatch_clause(
+        name: &str,
+        param_vars: &[String],
+        body_doc: Document<'static>,
+    ) -> Document<'static> {
+        let header = docvec![
+            "<'",
+            Document::String(name.to_string()),
+            "'> when 'true' ->",
+        ];
+
+        if param_vars.is_empty() {
+            return docvec![header, nest(INDENT, docvec![line(), body_doc,]), "\n",];
+        }
+
+        let params_str = param_vars.join(", ");
+        let args_case = docvec![
+            "case Args of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<[",
+                    Document::String(params_str),
+                    "]> when 'true' ->",
+                    nest(INDENT, docvec![line(), body_doc,]),
+                    line(),
+                    "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
+                ]
+            ),
+            line(),
+            "end",
+        ];
+
+        docvec![header, nest(INDENT, docvec![line(), args_case,]), "\n",]
+    }
+
+    /// Generates the default case arm for `dispatch/4`.
+    ///
+    /// Handles unrecognized selectors by checking (in order):
+    /// 1. Extension registry (`beamtalk_extensions:lookup`)
+    /// 2. Class hierarchy walk (`beamtalk_dispatch:super`)
+    /// 3. `doesNotUnderstand:args:` handler
+    /// 4. `#beamtalk_error{}` fallback
+    fn generate_dispatch_default_case(&self) -> Document<'static> {
+        let class_name = self.class_name();
+        let ext_lookup = self.generate_extension_lookup(&class_name);
+        let ext_case = self.generate_extension_case(&class_name);
+
+        docvec![
+            "<OtherSelector> when 'true' ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
+                    line(),
+                    ext_lookup,
+                    line(),
+                    "in",
+                    line(),
+                    ext_case,
+                ]
+            ),
+        ]
+    }
+
+    /// Generates the `try call beamtalk_extensions:lookup(...)` expression.
+    #[allow(clippy::unused_self)] // method on impl for API consistency
+    fn generate_extension_lookup(&self, class_name: &str) -> Document<'static> {
+        docvec![
+            "let ExtLookup = try call 'beamtalk_extensions':'lookup'('",
+            Document::String(class_name.to_string()),
+            "', OtherSelector)",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "of ExtLookupResult -> ExtLookupResult",
+                    line(),
+                    "catch <_EType, _EReason, _EStack> -> 'not_found'",
+                ]
+            ),
+        ]
+    }
+
+    /// Generates the `case ExtLookup of` with extension hit and hierarchy fallback arms.
+    fn generate_extension_case(&self, class_name: &str) -> Document<'static> {
+        let hierarchy_walk = self.generate_hierarchy_walk(class_name);
+
+        docvec![
+            "case ExtLookup of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<{'ok', ExtFun, _ExtOwner}> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "let ExtResult = apply ExtFun(Args, Self) in",
+                            line(),
+                            "{'reply', ExtResult, State}",
+                        ]
+                    ),
+                    line(),
+                    "<'not_found'> when 'true' ->",
+                    nest(INDENT, docvec![line(), hierarchy_walk,]),
+                ]
+            ),
+            line(),
+            "end",
+        ]
+    }
+
+    /// Generates the hierarchy walk via `beamtalk_dispatch:super`, falling back to DNU.
+    fn generate_hierarchy_walk(&self, class_name: &str) -> Document<'static> {
+        let dnu_fallback = self.generate_dnu_fallback(class_name);
+
+        docvec![
+            "%% ADR 0006: Try hierarchy walk before DNU",
+            line(),
+            "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, '",
+            Document::String(class_name.to_string()),
+            "') of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<{'reply', InheritedResult, InheritedState}> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![line(), "{'reply', InheritedResult, InheritedState}",]
+                    ),
+                    line(),
+                    "<{'error', _DispatchError}> when 'true' ->",
+                    nest(INDENT, docvec![line(), dnu_fallback,]),
+                ]
+            ),
+            line(),
+            "end",
+        ]
+    }
+
+    /// Generates the `doesNotUnderstand:args:` check and `#beamtalk_error{}` fallback.
+    fn generate_dnu_fallback(&self, class_name: &str) -> Document<'static> {
+        let module_name = &self.module_name;
+        let hint = "Check spelling or use 'respondsTo:' to verify method exists";
+        let hint_binary = Self::binary_string_literal(hint);
+
+        let dnu_dispatch = docvec![
+            "call '",
+            Document::String(module_name.clone()),
+            "':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)"
+        ];
+
+        let dnu_error = docvec![
+            "%% No DNU handler - return #beamtalk_error{} record",
+            line(),
+            "let ClassName = '",
+            Document::String(class_name.to_string()),
+            "' in",
+            line(),
+            "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in",
+            line(),
+            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in",
+            line(),
+            "let HintMsg = ",
+            Document::String(hint_binary),
+            " in",
+            line(),
+            "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in",
+            line(),
+            "{'error', Error, State}",
+        ];
+
+        docvec![
+            "%% Not in hierarchy - try doesNotUnderstand:args: (BT-29)",
+            line(),
+            "let DnuSelector = 'doesNotUnderstand:args:' in",
+            line(),
+            "let Methods = call '",
+            Document::String(module_name.clone()),
+            "':'method_table'() in",
+            line(),
+            "case call 'maps':'is_key'(DnuSelector, Methods) of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'true'> when 'true' ->",
+                    nest(INDENT, docvec![line(), dnu_dispatch,]),
+                    line(),
+                    "<'false'> when 'true' ->",
+                    nest(INDENT, docvec![line(), dnu_error,]),
+                ]
+            ),
+            line(),
+            "end",
+        ]
     }
 }
