@@ -23,8 +23,8 @@ mod cascade_candidate;
 mod dead_block_assignment;
 mod effect_free_statement;
 mod shadowed_block_param;
-mod trailing_caret;
 mod sync_send_in_timer_block;
+mod trailing_caret;
 mod unnecessary_parens;
 mod value_like_object;
 // ── add new lint modules here (alphabetical) ──────────────────────────────

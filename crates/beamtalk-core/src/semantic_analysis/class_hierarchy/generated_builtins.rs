@@ -1761,7 +1761,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
-                MethodInfo { selector: "handleInfo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Server".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Handle a raw Erlang message delivered to this server's process.\n\nOverride in subclasses to process raw messages (timer events, DOWN\ntuples, system messages). The return value is always discarded.\nIf this method raises an error, the server logs a warning and\ncontinues with its pre-call state (does not crash).\n\n## Examples\n```beamtalk\nhandleInfo: msg =>\n  msg match: [\n    #tick -> [self doWork];\n    _ -> nil\n  ]\n```".into()) },
+                MethodInfo { selector: "handleInfo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Server".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Handle a raw Erlang message delivered to this server's process.\n\nOverride in subclasses to process raw messages (timer events, DOWN\ntuples). The return value is always discarded.\nIf this method raises an error, the server logs a warning and\ncontinues with its pre-call state (does not crash).\n\n## Examples\n```beamtalk\nhandleInfo: msg =>\n  msg match: [\n    #tick -> [self doWork];\n    _ -> nil\n  ]\n```".into()) },
             ],
             class_methods: vec![],
             class_variables: vec![],

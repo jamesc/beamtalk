@@ -8,7 +8,10 @@ Server subclass: HandleInfoCounter
   state: lastMsg = nil
 
   handleInfo: msg =>
-    msg == #tick ifTrue: [self.count := self.count + 1] ifFalse: [self.lastMsg := msg]
+    msg == #tick ifTrue: [
+      self.count := self.count + 1
+    ] ifFalse: [self.lastMsg := msg]
 
   getCount => self.count
+
   getLastMsg => self.lastMsg

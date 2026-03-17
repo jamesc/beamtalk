@@ -238,7 +238,11 @@ after_timer_dies_when_caller_dies_test() ->
         %% Exit abnormally — the link propagates this to the timer
         exit(shutdown)
     end),
-    T = receive {timer, Timer} -> Timer after 1000 -> error(timeout) end,
+    T =
+        receive
+            {timer, Timer} -> Timer
+        after 1000 -> error(timeout)
+        end,
     wait_for_exit(Wrapper, 1000),
     %% Give the linked timer a moment to process the EXIT
     timer:sleep(50),
@@ -251,7 +255,11 @@ every_timer_dies_when_caller_dies_test() ->
         Parent ! {timer, T},
         exit(shutdown)
     end),
-    T = receive {timer, Timer} -> Timer after 1000 -> error(timeout) end,
+    T =
+        receive
+            {timer, Timer} -> Timer
+        after 1000 -> error(timeout)
+        end,
     wait_for_exit(Wrapper, 1000),
     timer:sleep(50),
     ?assertNot(erlang:is_process_alive(maps:get(pid, T))).

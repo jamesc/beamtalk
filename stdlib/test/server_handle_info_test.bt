@@ -10,7 +10,6 @@
 TestCase subclass: ServerHandleInfoTest
 
   // === Basic handleInfo: dispatch ===
-
   testServerReceivesTickMessage =>
     server := HandleInfoCounter spawn
     Erlang erlang send: server pid msg: #tick
@@ -35,7 +34,6 @@ TestCase subclass: ServerHandleInfoTest
     server stop
 
   // === Plain Actor ignores raw messages ===
-
   testPlainActorIgnoresRawMessages =>
     actor := PlainActorForInfoTest spawn
     actor increment
@@ -54,7 +52,6 @@ TestCase subclass: ServerHandleInfoTest
     server stop
 
   // === Error recovery (log-and-continue) ===
-
   testHandleInfoErrorDoesNotCrashServer =>
     server := FailingHandleInfoServer spawn
     Erlang erlang send: server pid msg: #crash

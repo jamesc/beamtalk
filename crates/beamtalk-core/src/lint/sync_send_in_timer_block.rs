@@ -298,11 +298,7 @@ mod tests {
         );
         assert!(diags[0].hint.is_some(), "expected a hint");
         assert!(
-            diags[0]
-                .hint
-                .as_ref()
-                .unwrap()
-                .contains("self refresh!"),
+            diags[0].hint.as_ref().unwrap().contains("self refresh!"),
             "hint should suggest async cast: {:?}",
             diags[0].hint
         );
@@ -341,9 +337,7 @@ mod tests {
 
     #[test]
     fn self_send_outside_timer_block_not_flagged() {
-        let diags = timer_lints(
-            "Actor subclass: Foo\n  start =>\n    self refresh\n",
-        );
+        let diags = timer_lints("Actor subclass: Foo\n  start =>\n    self refresh\n");
         assert!(
             diags.is_empty(),
             "self send outside timer block should not be flagged, got: {diags:?}"
@@ -355,11 +349,7 @@ mod tests {
         let diags = timer_lints(
             "Actor subclass: Foo\n  start =>\n    Timer every: 1000 do: [self refresh. self save]\n",
         );
-        assert_eq!(
-            diags.len(),
-            2,
-            "expected two lints, got: {diags:?}"
-        );
+        assert_eq!(diags.len(), 2, "expected two lints, got: {diags:?}");
     }
 
     #[test]
@@ -367,7 +357,11 @@ mod tests {
         let diags = timer_lints(
             "Actor subclass: Foo\n  start =>\n    Timer every: 1000 do: [items do: [:i | self process: i]]\n",
         );
-        assert_eq!(diags.len(), 1, "expected one lint for nested block, got: {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected one lint for nested block, got: {diags:?}"
+        );
     }
 
     #[test]

@@ -5,7 +5,7 @@
 ///
 /// Server extends Actor with access to raw OTP primitives. Subclass Server
 /// when you need `handleInfo:` to receive raw Erlang messages (timer ticks,
-/// DOWN tuples, system messages). Most users should use Actor instead.
+/// DOWN tuples). Most users should use Actor instead.
 ///
 /// Server is abstract — you must subclass it.
 ///
@@ -27,7 +27,7 @@ abstract Actor subclass: Server
   /// Handle a raw Erlang message delivered to this server's process.
   ///
   /// Override in subclasses to process raw messages (timer events, DOWN
-  /// tuples, system messages). The return value is always discarded.
+  /// tuples). The return value is always discarded.
   /// If this method raises an error, the server logs a warning and
   /// continues with its pre-call state (does not crash).
   ///

@@ -108,9 +108,9 @@ Value subclass: SupervisionSpec
     childId := self id isNil ifTrue: [self actorClass name] ifFalse: [self id]
     startFn := self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]
     startArgs := self args isNil ifTrue: [#()] ifFalse: [#(self args)]
-    shutdown := self shutdown isNil
-      ifTrue: [self actorClass isSupervisor ifTrue: [#infinity] ifFalse: [5000]]
-      ifFalse: [self shutdown]
+    shutdown := self shutdown isNil ifTrue: [
+      self actorClass isSupervisor ifTrue: [#infinity] ifFalse: [5000]
+    ] ifFalse: [self shutdown]
     childType := self actorClass isSupervisor ifTrue: [
       #supervisor
     ] ifFalse: [#worker]
