@@ -940,7 +940,6 @@ dist-vscode:
 dist-vscode:
     just dist-vscode-platform win32-x64
 
-# Unix-only: uses chmod, du, case statements
 # Usage: just dist-vscode-platform linux-x64
 # Build VS Code extension for a specific platform target
 [unix]
@@ -952,40 +951,9 @@ dist-vscode-platform target:
         echo "❌ npm not found (needed for VS Code extension)"
         exit 1
     fi
-    # Determine binary name
-    case "{{target}}" in
-        win32-*) BIN_NAME="beamtalk-lsp.exe" ;;
-        *)       BIN_NAME="beamtalk-lsp" ;;
-    esac
-    # Map vsce target to Rust target triple
-    case "{{target}}" in
-        linux-x64)    RUST_TARGET="x86_64-unknown-linux-gnu" ;;
-        linux-arm64)  RUST_TARGET="aarch64-unknown-linux-gnu" ;;
-        darwin-x64)   RUST_TARGET="x86_64-apple-darwin" ;;
-        darwin-arm64) RUST_TARGET="aarch64-apple-darwin" ;;
-        win32-x64)    RUST_TARGET="x86_64-pc-windows-msvc" ;;
-        *) echo "❌ Unknown target: {{target}}"; exit 1 ;;
-    esac
-    LSP_BIN="target/${RUST_TARGET}/release/${BIN_NAME}"
-    if [ ! -f "${LSP_BIN}" ]; then
-        # Fall back to default target path (when built without --target flag)
-        LSP_BIN="target/release/${BIN_NAME}"
-    fi
-    if [ ! -f "${LSP_BIN}" ]; then
-        echo "❌ Binary not found at target/${RUST_TARGET}/release/${BIN_NAME} or target/release/${BIN_NAME}"
-        echo "   Build first: cargo build --release --bin beamtalk-lsp"
-        exit 1
-    fi
-    mkdir -p editors/vscode/bin
-    TMP_BIN="editors/vscode/bin/.${BIN_NAME}.tmp.$$"
-    cp "${LSP_BIN}" "${TMP_BIN}"
-    chmod +x "${TMP_BIN}"
-    mv -f "${TMP_BIN}" "editors/vscode/bin/${BIN_NAME}"
-    echo "   Bundled ${BIN_NAME} ($(du -h editors/vscode/bin/${BIN_NAME} | cut -f1))"
     cd editors/vscode
     npm ci --quiet
     npx --yes @vscode/vsce package --target "{{target}}" --out "../../beamtalk-{{target}}.vsix"
-    rm -rf bin
     echo "✅ VS Code extension: beamtalk-{{target}}.vsix"
 
 # Usage: just dist-vscode-platform win32-x64
@@ -994,10 +962,8 @@ dist-vscode-platform target:
 dist-vscode-platform target:
     @echo "📦 Building VS Code extension for {{target}}..."
     if (!(Get-Command npm -ErrorAction SilentlyContinue)) { Write-Error "npm not found"; exit 1 }
-    $binName = if ("{{target}}" -like "win32-*") { "beamtalk-lsp.exe" } else { "beamtalk-lsp" }; $lspBin = "target\release\$binName"; if (!(Test-Path $lspBin)) { $lspBin = "target\x86_64-pc-windows-msvc\release\$binName" }; if (!(Test-Path $lspBin)) { Write-Error "LSP binary not found — run: cargo build --release --bin beamtalk-lsp"; exit 1 }; New-Item -ItemType Directory -Force -Path editors\vscode\bin | Out-Null; Copy-Item $lspBin "editors\vscode\bin\$binName"; Write-Host "   Bundled $binName"
     Push-Location editors\vscode; try { npm ci --quiet; if ($LASTEXITCODE -ne 0) { throw "npm ci failed" } } finally { Pop-Location }
     Push-Location editors\vscode; try { npx --yes @vscode/vsce package --target "{{target}}" --out "..\..\beamtalk-{{target}}.vsix"; if ($LASTEXITCODE -ne 0) { throw "vsce package failed" } } finally { Pop-Location }
-    Remove-Item -Recurse -Force editors\vscode\bin -ErrorAction SilentlyContinue
     @echo "✅ VS Code extension: beamtalk-{{target}}.vsix"
 
 # Unix-only: depends on Unix-only install and dist-vscode recipes
