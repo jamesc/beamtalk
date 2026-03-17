@@ -123,6 +123,7 @@ fn check_message_send(
 /// Recursively walks an expression tree. When `in_timer_block` is true, we are
 /// inside a `Timer every:do:` or `Timer after:do:` block and should flag sync
 /// self-sends.
+#[allow(clippy::too_many_lines)]
 fn walk_for_timer_sends(
     expr: &Expression,
     in_timer_block: bool,
@@ -173,9 +174,31 @@ fn walk_for_timer_sends(
         }
 
         Expression::Cascade {
-            receiver, messages, ..
+            receiver,
+            messages,
+            span,
         } => {
             walk_for_timer_sends(receiver, in_timer_block, diagnostics);
+            // Cascades send all messages to the same receiver. If the receiver
+            // is `self` and we're in a timer block, each cascade message is an
+            // inherently synchronous send that will deadlock.
+            if in_timer_block && is_self(receiver) {
+                for msg in messages {
+                    let selector_name = msg.selector.name();
+                    diagnostics.push(
+                        Diagnostic::lint(
+                            format!(
+                                "synchronous send `self {selector_name}` inside a Timer block will deadlock"
+                            ),
+                            *span,
+                        )
+                        .with_hint(format!(
+                            "Timer blocks run in a separate process; \
+                             use `self {selector_name}!` (async cast) instead"
+                        )),
+                    );
+                }
+            }
             for msg in messages {
                 for arg in &msg.arguments {
                     walk_for_timer_sends(arg, in_timer_block, diagnostics);
