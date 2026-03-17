@@ -70,13 +70,18 @@ Value subclass: SupervisionSpec
   ///   // printString => "SupervisionSpec(Counter, id: #primary, restart: #permanent)"
   /// ```
   printString -> String =>
-    cls := self actorClass isNil
-      ifTrue: ["nil"]
-      ifFalse: [self actorClass name asString]
-    idPart := self id isNil
-      ifTrue: [""]
-      ifFalse: [", id: " ++ self id displayString]
-    "SupervisionSpec(" ++ cls ++ idPart ++ ", restart: " ++ self restart displayString ++ ")"
+    cls := self actorClass isNil ifTrue: [
+      "nil"
+    ] ifFalse: [self actorClass name asString]
+    idPart := self id isNil ifTrue: [
+      ""
+    ] ifFalse: [", id: " ++ self id displayString]
+    "SupervisionSpec("
+      ++ cls
+      ++ idPart
+      ++ ", restart: "
+      ++ self restart displayString
+      ++ ")"
 
   // === OTP child spec construction ===
 
