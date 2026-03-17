@@ -388,10 +388,10 @@ Beamtalk loggerInfo                   // full config dump
 View logs from outside the REPL:
 
 ```bash
-beamtalk logs                         // last 50 lines
-beamtalk logs --follow                // tail -f style
-beamtalk logs --level error           // filter by severity
-beamtalk logs --format json           // parse JSON for level filtering
+beamtalk workspace logs                         // last 50 lines
+beamtalk workspace logs --follow                // tail -f style
+beamtalk workspace logs --level error           // filter by severity
+beamtalk workspace logs --format json           // parse JSON for level filtering
 ```
 
 For direct Erlang FFI access (power users):

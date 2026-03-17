@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Workspace Management
 //!
-//! Provides `beamtalk workspace {list,stop,status,attach,transcript,create}` subcommands.
+//! Provides `beamtalk workspace {list,stop,status,attach,transcript,logs,create}` subcommands.
 
 use clap::Subcommand;
 use miette::Result;
@@ -14,7 +14,7 @@ use super::{
     create_workspace, discovery, get_or_start_workspace, list_workspaces, stop_workspace,
     workspace_status,
 };
-use crate::commands::{attach, transcript};
+use crate::commands::{attach, logs, transcript};
 
 /// Workspace management subcommands.
 #[derive(Debug, Subcommand)]
@@ -70,6 +70,33 @@ pub enum WorkspaceCommand {
         recent: Option<usize>,
     },
 
+    /// View workspace log files
+    ///
+    /// Shows the most recent workspace's log file. Defaults to the last 50 lines.
+    /// Use `--follow` to stream new lines, `--level` to filter by severity,
+    /// or `--path` to print the log file path.
+    Logs {
+        /// Select a specific workspace by name or ID
+        #[arg(long)]
+        workspace: Option<String>,
+
+        /// Stream new log lines as they appear (like `tail -f`)
+        #[arg(long, short)]
+        follow: bool,
+
+        /// Filter by minimum severity level (debug, info, notice, warning, error)
+        #[arg(long)]
+        level: Option<String>,
+
+        /// Expected log format for level filtering (text, json)
+        #[arg(long)]
+        format: Option<String>,
+
+        /// Print the log file path and exit
+        #[arg(long)]
+        path: bool,
+    },
+
     /// Create a new named workspace
     Create {
         /// Name for the workspace
@@ -118,6 +145,19 @@ pub fn run(command: WorkspaceCommand) -> Result<()> {
             no_color,
         } => attach::run(name.as_deref(), port, cookie.as_deref(), no_color),
         WorkspaceCommand::Transcript { name, recent } => transcript::run(name.as_deref(), recent),
+        WorkspaceCommand::Logs {
+            workspace,
+            follow,
+            level,
+            format,
+            path,
+        } => logs::run(
+            workspace.as_deref(),
+            follow,
+            level.as_deref(),
+            format.as_deref(),
+            path,
+        ),
         WorkspaceCommand::Create {
             name,
             background,

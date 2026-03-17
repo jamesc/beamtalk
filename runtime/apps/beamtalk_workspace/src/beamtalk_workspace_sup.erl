@@ -304,8 +304,8 @@ do_setup_file_logger(WorkspaceId) ->
                     HandlerConfig = #{
                         config => #{
                             file => LogFile,
-                            % 1 MB per file
-                            max_no_bytes => 1048576,
+                            % 10 MB per file
+                            max_no_bytes => 10485760,
                             max_no_files => 5
                         },
                         level => debug,
