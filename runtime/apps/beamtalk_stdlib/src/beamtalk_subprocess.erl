@@ -120,7 +120,9 @@ init(Config) ->
             Port = beamtalk_exec_port:open(),
             ChildId = 0,
             beamtalk_exec_port:spawn_child(Port, ChildId, Executable, Args, Options),
-            ?LOG_INFO("Subprocess spawned", #{executable => Executable, child_id => ChildId}),
+            ?LOG_INFO("Subprocess spawned", #{
+                executable => Executable, child_id => ChildId, domain => [beamtalk, stdlib]
+            }),
             State = #{
                 port => Port,
                 child_id => ChildId,
@@ -165,7 +167,7 @@ handle_call({exitCode, []}, _From, State) ->
 handle_call({close, []}, _From, State) ->
     handle_close(State);
 handle_call(Msg, _From, State) ->
-    ?LOG_WARNING("Unknown call", #{message => Msg}),
+    ?LOG_WARNING("Unknown call", #{message => Msg, domain => [beamtalk, stdlib]}),
     {reply, {error, unknown_call}, State}.
 
 %% @doc Ignore casts.
@@ -182,7 +184,7 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
         {stderr, _ChildId, Data} ->
             buffer_and_maybe_reply(stderr, Data, State);
         {exit, _ChildId, Code} ->
-            ?LOG_INFO("Subprocess exited", #{exit_code => Code}),
+            ?LOG_INFO("Subprocess exited", #{exit_code => Code, domain => [beamtalk, stdlib]}),
             %% The beamtalk-exec binary joins its reader threads before sending
             %% this exit event (BT-1148), so all stdout/stderr data is guaranteed
             %% to have arrived.  Flush any partial line and close the port now.
@@ -203,7 +205,7 @@ handle_info({Port, {exit_status, _N}}, #{port := Port, port_closed := true} = St
     {noreply, State};
 handle_info({Port, {exit_status, _N}}, #{port := Port} = State) ->
     %% beamtalk_exec binary itself exited unexpectedly — treat all channels as EOF.
-    ?LOG_WARNING("Exec port exited unexpectedly"),
+    ?LOG_WARNING("Exec port exited unexpectedly", #{domain => [beamtalk, stdlib]}),
     S0 = flush_pending(stdout, State),
     S1 = flush_pending(stderr, S0),
     NewState = S1#{port_closed => true},
