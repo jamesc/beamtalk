@@ -335,14 +335,15 @@ impl CoreErlangGenerator {
 
             // Reclassify EarlyReturn as Pure when not supported (block bodies
             // handle ^ via NLR throw/catch, so expression_doc does the work).
-            let kind = if matches!(kind, BodyExprKind::EarlyReturn) && !supports_early_return {
+            let is_early_return = matches!(&kind, BodyExprKind::EarlyReturn);
+            let kind = if is_early_return && !supports_early_return {
                 BodyExprKind::Pure
             } else {
                 kind
             };
 
             // Early return — always terminates generation regardless of position.
-            if let BodyExprKind::EarlyReturn = kind {
+            if is_early_return && supports_early_return {
                 if let Expression::Return { value, .. } = expr {
                     if self.control_flow_has_mutations(value) {
                         let tuple_var = self.fresh_temp_var("Tuple");
@@ -582,12 +583,7 @@ impl CoreErlangGenerator {
                                     String::clone,
                                 );
                                 let tuple_var = self.fresh_temp_var("Tuple");
-                                let next_version = self.state_version() + 1;
-                                let new_state = if next_version == 1 {
-                                    "State1".to_string()
-                                } else {
-                                    format!("State{next_version}")
-                                };
+                                let new_state = self.peek_next_state_var();
                                 let value_str = self.expression_doc(value)?;
                                 let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                                     "let ",
@@ -708,12 +704,7 @@ impl CoreErlangGenerator {
                     }
                     BodyExprKind::ControlFlowWithMutations => {
                         let tuple_var = self.fresh_temp_var("Tuple");
-                        let next_version = self.state_version() + 1;
-                        let new_state = if next_version == 1 {
-                            "State1".to_string()
-                        } else {
-                            format!("State{next_version}")
-                        };
+                        let new_state = self.peek_next_state_var();
                         let expr_str = self.expression_doc(expr)?;
                         let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",

@@ -1137,6 +1137,12 @@ impl CoreErlangGenerator {
         self.state_threading.version()
     }
 
+    /// Returns the name of the next state variable without advancing the
+    /// version counter.
+    pub(super) fn peek_next_state_var(&self) -> String {
+        self.state_threading.peek_next_var()
+    }
+
     /// Sets the state version.
     pub(super) fn set_state_version(&mut self, version: usize) {
         self.state_threading.set_version(version);
