@@ -106,7 +106,7 @@ send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
 send(Receiver, Selector, Args) ->
     case is_actor(Receiver) of
         true ->
-            ?LOG_DEBUG("Message send (sync)", #{
+            ?LOG_DEBUG("Message send", #{
                 class => element(2, Receiver),
                 selector => Selector,
                 caller_pid => self()

@@ -604,8 +604,9 @@ handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args)
             {noreply, NewState};
         {error, Reason, NewState} ->
             %% Log error but don't crash — caller expects no reply
+            T1 = erlang:monotonic_time(microsecond),
             ?LOG_WARNING("Fire-and-forget dispatch error", #{
-                selector => Selector, reason => Reason
+                selector => Selector, reason => Reason, duration_us => T1 - T0
             }),
             {noreply, NewState}
     end;
@@ -631,6 +632,7 @@ handle_cast({Selector, Args, FuturePid}, State) ->
             {noreply, NewState};
         {error, Reason, NewState} ->
             %% Method failed, reject the future
+            log_dispatch_complete(State, NewState, Selector, async, T0),
             beamtalk_future:reject(FuturePid, Reason),
             {noreply, NewState}
     end;
@@ -662,6 +664,7 @@ handle_call({Selector, Args}, From, State) ->
             {reply, nil, NewState};
         {error, Reason, NewState} ->
             %% Method failed, return error tuple
+            log_dispatch_complete(State, NewState, Selector, sync, T0),
             {reply, {error, Reason}, NewState}
     end;
 handle_call(Msg, _From, State) ->
@@ -899,12 +902,6 @@ dispatch_user_method(Selector, Args, Self, State) ->
 -spec handle_dnu(atom(), list(), #beamtalk_object{}, map()) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
 handle_dnu(Selector, Args, Self, State) ->
-    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-    ?LOG_WARNING("doesNotUnderstand", #{
-        class => ClassName,
-        selector => Selector,
-        pid => self()
-    }),
     Methods = maps:get('__methods__', State),
     case maps:find('doesNotUnderstand:args:', Methods) of
         {ok, DnuFun} when is_function(DnuFun, 3) ->
@@ -976,6 +973,11 @@ dispatch_via_hierarchy(Selector, Args, Self, State) ->
 %% @doc Create a does_not_understand error result.
 -spec make_dnu_error(atom(), atom(), map()) -> {error, term(), map()}.
 make_dnu_error(Selector, ClassName, State) ->
+    ?LOG_WARNING("doesNotUnderstand", #{
+        class => ClassName,
+        selector => Selector,
+        pid => self()
+    }),
     Error = beamtalk_error:new(
         does_not_understand,
         ClassName,
