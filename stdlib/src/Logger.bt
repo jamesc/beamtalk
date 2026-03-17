@@ -30,8 +30,7 @@ sealed Object subclass: Logger
   /// Logger info: "request processed"
   /// // => nil
   /// ```
-  class sealed info: message :: String -> Nil =>
-    (Erlang beamtalk_logger) info: message
+  class sealed info: message :: String -> Nil => @intrinsic loggerInfo
 
   /// Log a message at info level with structured metadata.
   ///
@@ -41,7 +40,7 @@ sealed Object subclass: Logger
   /// // => nil
   /// ```
   class sealed info: message :: String metadata: meta :: Dictionary -> Nil =>
-    (Erlang beamtalk_logger) info: message metadata: meta
+    @intrinsic loggerInfoMeta
 
   /// Log a message at warning level.
   ///
@@ -50,8 +49,7 @@ sealed Object subclass: Logger
   /// Logger warn: "retrying operation"
   /// // => nil
   /// ```
-  class sealed warn: message :: String -> Nil =>
-    (Erlang beamtalk_logger) warn: message
+  class sealed warn: message :: String -> Nil => @intrinsic loggerWarn
 
   /// Log a message at warning level with structured metadata.
   ///
@@ -61,7 +59,7 @@ sealed Object subclass: Logger
   /// // => nil
   /// ```
   class sealed warn: message :: String metadata: meta :: Dictionary -> Nil =>
-    (Erlang beamtalk_logger) warn: message metadata: meta
+    @intrinsic loggerWarnMeta
 
   /// Log a message at error level.
   ///
@@ -70,8 +68,7 @@ sealed Object subclass: Logger
   /// Logger error: "connection lost"
   /// // => nil
   /// ```
-  class sealed error: message :: String -> Nil =>
-    (Erlang beamtalk_logger) logError: message
+  class sealed error: message :: String -> Nil => @intrinsic loggerError
 
   /// Log a message at error level with structured metadata.
   ///
@@ -81,7 +78,7 @@ sealed Object subclass: Logger
   /// // => nil
   /// ```
   class sealed error: message :: String metadata: meta :: Dictionary -> Nil =>
-    (Erlang beamtalk_logger) logError: message metadata: meta
+    @intrinsic loggerErrorMeta
 
   /// Log a message at debug level.
   ///
@@ -90,8 +87,7 @@ sealed Object subclass: Logger
   /// Logger debug: "entering loop"
   /// // => nil
   /// ```
-  class sealed debug: message :: String -> Nil =>
-    (Erlang beamtalk_logger) debug: message
+  class sealed debug: message :: String -> Nil => @intrinsic loggerDebug
 
   /// Log a message at debug level with structured metadata.
   ///
@@ -101,7 +97,7 @@ sealed Object subclass: Logger
   /// // => nil
   /// ```
   class sealed debug: message :: String metadata: meta :: Dictionary -> Nil =>
-    (Erlang beamtalk_logger) debug: message metadata: meta
+    @intrinsic loggerDebugMeta
 
   /// Set the primary log level at runtime.
   ///
