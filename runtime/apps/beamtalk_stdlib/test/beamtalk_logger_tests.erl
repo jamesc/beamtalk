@@ -276,7 +276,7 @@ set_level_emits_deprecation_warning_test() ->
                     Msg
                 )
         after 1000 ->
-            ?assert(false, "Expected deprecation warning not received")
+            error("Expected deprecation warning not received")
         end
     after
         remove_capture_handler(HandlerId),
@@ -294,13 +294,13 @@ set_level_deprecation_warning_only_once_test() ->
         receive
             {captured_log, #{level := warning}} -> ok
         after 1000 ->
-            ?assert(false, "Expected first deprecation warning not received")
+            error("Expected first deprecation warning not received")
         end,
         %% Second call — should NOT emit warning
         ?assertEqual(nil, beamtalk_logger:'setLevel:'(debug)),
         receive
             {captured_log, #{level := warning}} ->
-                ?assert(false, "Deprecation warning should only be emitted once")
+                error("Deprecation warning should only be emitted once")
         after 200 ->
             ok
         end
