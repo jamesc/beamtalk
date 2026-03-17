@@ -937,7 +937,6 @@ impl CoreErlangGenerator {
     ///     catch <CatchType, CatchError, CatchStack> ->
     ///         primop 'raw_raise'(CatchType, CatchError, CatchStack)
     /// ```
-    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_register_class(
         &mut self,
         module: &Module,
@@ -959,80 +958,30 @@ impl CoreErlangGenerator {
                 .collect();
 
             // BT-101: Method source
-            let mut method_source_docs: Vec<Document<'static>> = Vec::new();
-            for (method_idx, method) in instance_methods.iter().enumerate() {
-                if method_idx > 0 {
-                    method_source_docs.push(Document::Str(", "));
-                }
-                let source_str = self.extract_method_source(method);
-                let binary = Self::binary_string_literal(&source_str);
-                method_source_docs.push(docvec![
-                    "'",
-                    Document::String(method.selector.name().to_string()),
-                    "' => ",
-                    Document::String(binary),
-                ]);
-            }
-            let method_source_doc = Document::Vec(method_source_docs);
+            let method_source_doc = Self::build_selector_map(&instance_methods, |m| {
+                let source_str = self.extract_method_source(m);
+                Document::String(Self::binary_string_literal(&source_str))
+            });
 
             // BT-988: Method display signatures for :help command
-            let mut method_sig_docs: Vec<Document<'static>> = Vec::new();
-            for (method_idx, method) in instance_methods.iter().enumerate() {
-                if method_idx > 0 {
-                    method_sig_docs.push(Document::Str(", "));
-                }
-                let sig_str = unparse_method_display_signature(method);
-                let binary = Self::binary_string_literal(&sig_str);
-                method_sig_docs.push(docvec![
-                    "'",
-                    Document::String(method.selector.name().to_string()),
-                    "' => ",
-                    Document::String(binary),
-                ]);
-            }
-            let method_sigs_doc = Document::Vec(method_sig_docs);
+            let method_sigs_doc = Self::build_selector_map(&instance_methods, |m| {
+                let sig_str = unparse_method_display_signature(m);
+                Document::String(Self::binary_string_literal(&sig_str))
+            });
 
             // BT-990: Class-side method display signatures for :help command
-            let mut class_method_sig_docs: Vec<Document<'static>> = Vec::new();
-            for (method_idx, method) in class
+            let class_methods_primary: Vec<_> = class
                 .class_methods
                 .iter()
                 .filter(|m| m.kind == MethodKind::Primary)
-                .enumerate()
-            {
-                if method_idx > 0 {
-                    class_method_sig_docs.push(Document::Str(", "));
-                }
-                let sig_str = unparse_method_display_signature(method);
-                let binary = Self::binary_string_literal(&sig_str);
-                class_method_sig_docs.push(docvec![
-                    "'",
-                    Document::String(method.selector.name().to_string()),
-                    "' => ",
-                    Document::String(binary),
-                ]);
-            }
-            let class_method_sigs_doc = Document::Vec(class_method_sig_docs);
+                .collect();
+            let class_method_sigs_doc = Self::build_selector_map(&class_methods_primary, |m| {
+                let sig_str = unparse_method_display_signature(m);
+                Document::String(Self::binary_string_literal(&sig_str))
+            });
 
             // BT-412: Class variable initial values
-            let mut class_var_parts: Vec<Document<'static>> = Vec::new();
-            for (cv_idx, cv) in class.class_variables.iter().enumerate() {
-                if cv_idx > 0 {
-                    class_var_parts.push(Document::Str(", "));
-                }
-                let val = if let Some(ref default_value) = cv.default_value {
-                    self.expression_doc(default_value)?
-                } else {
-                    Document::Str("'nil'")
-                };
-                class_var_parts.push(docvec![
-                    "'",
-                    Document::String(cv.name.name.to_string()),
-                    "' => ",
-                    val,
-                ]);
-            }
-            let class_vars_doc = Document::Vec(class_var_parts);
+            let class_vars_doc = self.build_class_var_map(&class.class_variables)?;
 
             // BT-771: Class-level doc comment
             let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
@@ -1042,22 +991,11 @@ impl CoreErlangGenerator {
             };
 
             // BT-771: Method-level doc comments
-            let mut method_docs_parts: Vec<Document<'static>> = Vec::new();
-            for method in &instance_methods {
-                if let Some(ref doc) = method.doc_comment {
-                    if !method_docs_parts.is_empty() {
-                        method_docs_parts.push(Document::Str(", "));
-                    }
-                    let binary = Self::binary_string_literal(doc);
-                    method_docs_parts.push(docvec![
-                        "'",
-                        Document::String(method.selector.name().to_string()),
-                        "' => ",
-                        Document::String(binary),
-                    ]);
-                }
-            }
-            let method_docs_doc = Document::Vec(method_docs_parts);
+            let method_docs_doc = Self::build_selector_map_filtered(&instance_methods, |m| {
+                m.doc_comment
+                    .as_ref()
+                    .map(|doc| Document::String(Self::binary_string_literal(doc)))
+            });
 
             // BT-877: Detect non-constructible classes at compile time.
             // Emit `isConstructible = false` for: abstract classes, actors, and
@@ -1072,152 +1010,30 @@ impl CoreErlangGenerator {
             // ADR 0050 Phase 5: BuilderState carries only module/source/signature/doc metadata.
             // Static fields (flags, fields, method signatures) are read from __beamtalk_meta/0
             // by beamtalk_object_class:init/1.
-            let class_doc = docvec![
-                line(),
-                "let _BuilderState",
+            let meta_doc =
+                Self::build_meta_map_doc(class, module, true, synthesize_supervision_spec);
+            let class_doc = Self::build_builder_state_doc(
                 i,
-                " = ~{",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        docvec![
-                            "'className' => '",
-                            Document::String(class.name.name.to_string()),
-                            "',"
-                        ],
-                        line(),
-                        docvec![
-                            "'superclassRef' => '",
-                            Document::String(class.superclass_name().to_string()),
-                            "',"
-                        ],
-                        line(),
-                        docvec![
-                            "'moduleName' => '",
-                            Document::String(self.module_name.clone()),
-                            "',"
-                        ],
-                        line(),
-                        "'methodSource' => ~{",
-                        method_source_doc,
-                        "}~,",
-                        line(),
-                        "'methodSignatures' => ~{",
-                        method_sigs_doc,
-                        "}~,",
-                        line(),
-                        "'classMethodSignatures' => ~{",
-                        class_method_sigs_doc,
-                        "}~,",
-                        line(),
-                        "'classState' => ~{",
-                        class_vars_doc,
-                        "}~,",
-                        line(),
-                        "'classDoc' => ",
-                        class_doc_value,
-                        ",",
-                        line(),
-                        "'methodDocs' => ~{",
-                        method_docs_doc,
-                        "}~,",
-                        // ADR 0050 Phase 5: Include meta map in BuilderState so that
-                        // beamtalk_object_class:init/1 can access it during on_load.
-                        // erlang:function_exported/3 returns false during on_load execution,
-                        // making Module:'__beamtalk_meta'() unavailable at registration time.
-                        line(),
-                        "'meta' => ",
-                        // include_standalone: true — standalone methods included in BuilderState.meta
-                        // so that init/1 can register their return types during on_load.
-                        Self::build_meta_map_doc(class, module, true, synthesize_supervision_spec),
-                        if is_non_constructible {
-                            docvec![",", line(), "'isConstructible' => 'false'"]
-                        } else {
-                            Document::Nil
-                        },
-                        // BT-791: Emit stdlibMode flag for stdlib compilations so the
-                        // runtime can bypass the sealed-superclass check in register/1.
-                        // Character (extends sealed Integer) needs this to load correctly.
-                        if self.stdlib_mode {
-                            docvec![",", line(), "'stdlibMode' => 'true'"]
-                        } else {
-                            Document::Nil
-                        },
-                    ]
-                ),
-                line(),
-                "}~",
-                line(),
-                "in let _Reg",
-                i,
-                " = case call 'beamtalk_class_builder':'register'(_BuilderState",
-                i,
-                ") of",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "<{'ok', _Pid",
-                        i,
-                        "}> when 'true' -> 'ok'",
-                        line(),
-                        "<{'error', _Err",
-                        i,
-                        "}> when 'true' -> {'error', _Err",
-                        i,
-                        "}",
-                    ]
-                ),
-                line(),
-                "end",
-            ];
+                &class.name.name,
+                class.superclass_name(),
+                &self.module_name,
+                method_source_doc,
+                method_sigs_doc,
+                class_method_sigs_doc,
+                class_vars_doc,
+                class_doc_value,
+                method_docs_doc,
+                meta_doc,
+                is_non_constructible,
+                self.stdlib_mode,
+            );
             class_docs.push(class_doc);
         }
 
         // BT-738 / BT-749: Build a short-circuit chain so that the first
         // {error, ...} from register/1 propagates out of on_load, regardless
         // of which class position caused it.
-        //
-        // For N classes, generates:
-        //   let _BuilderState0 = ... in let _Reg0 = case ... end
-        //   in case _Reg0 of
-        //     <{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}
-        //     <_> when 'true' ->
-        //       let _BuilderState1 = ... in let _Reg1 = case ... end
-        //       in _Reg1   % (or nested case if more classes follow)
-        //   end
-        let last_i = class_docs.len() - 1;
-        // Start from innermost: just last class + final result
-        let mut try_body: Document<'static> =
-            docvec![class_docs[last_i].clone(), "\n", line(), "in _Reg", last_i,];
-        // Wrap from second-to-last down to first, adding short-circuit cases
-        for i in (0..last_i).rev() {
-            try_body = docvec![
-                class_docs[i].clone(),
-                "\n",
-                line(),
-                "in case _Reg",
-                i,
-                " of",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "<{'error', _RegErr",
-                        i,
-                        "}> when 'true' -> {'error', _RegErr",
-                        i,
-                        "}",
-                        line(),
-                        "<_> when 'true' ->",
-                        nest(INDENT, docvec![line(), try_body]),
-                    ]
-                ),
-                line(),
-                "end",
-            ];
-        }
+        let try_body = Self::build_short_circuit_chain(&class_docs);
         let doc = docvec![
             "'register_class'/0 = fun () ->",
             nest(
@@ -1237,6 +1053,264 @@ impl CoreErlangGenerator {
         ];
 
         Ok(doc)
+    }
+
+    /// Builds a Core Erlang map document from methods, mapping each method's
+    /// selector to a value produced by `value_fn`.
+    ///
+    /// Generates comma-separated `'selector' => value` entries suitable for
+    /// embedding inside `~{ ... }~`.
+    fn build_selector_map(
+        methods: &[&MethodDefinition],
+        mut value_fn: impl FnMut(&MethodDefinition) -> Document<'static>,
+    ) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for (idx, method) in methods.iter().enumerate() {
+            if idx > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(docvec![
+                "'",
+                Document::String(method.selector.name().to_string()),
+                "' => ",
+                value_fn(method),
+            ]);
+        }
+        Document::Vec(parts)
+    }
+
+    /// Like [`Self::build_selector_map`], but only includes methods for which
+    /// `value_fn` returns `Some(doc)`. Used for optional metadata like doc
+    /// comments where not every method has an entry.
+    fn build_selector_map_filtered(
+        methods: &[&MethodDefinition],
+        mut value_fn: impl FnMut(&MethodDefinition) -> Option<Document<'static>>,
+    ) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for method in methods {
+            if let Some(val) = value_fn(method) {
+                if !parts.is_empty() {
+                    parts.push(Document::Str(", "));
+                }
+                parts.push(docvec![
+                    "'",
+                    Document::String(method.selector.name().to_string()),
+                    "' => ",
+                    val,
+                ]);
+            }
+        }
+        Document::Vec(parts)
+    }
+
+    /// Builds a Core Erlang map document for class variable initial values.
+    ///
+    /// Each variable maps `'name' => expression`, defaulting to `'nil'` when
+    /// no default value is declared. Returns `Result` because evaluating
+    /// default-value expressions is fallible.
+    fn build_class_var_map(
+        &mut self,
+        class_variables: &[StateDeclaration],
+    ) -> Result<Document<'static>> {
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for (idx, cv) in class_variables.iter().enumerate() {
+            if idx > 0 {
+                parts.push(Document::Str(", "));
+            }
+            let val = if let Some(ref default_value) = cv.default_value {
+                self.expression_doc(default_value)?
+            } else {
+                Document::Str("'nil'")
+            };
+            parts.push(docvec![
+                "'",
+                Document::String(cv.name.name.to_string()),
+                "' => ",
+                val,
+            ]);
+        }
+        Ok(Document::Vec(parts))
+    }
+
+    /// Builds the `_BuilderState` map and register call block for a single class
+    /// at position `idx` in the module.
+    ///
+    /// Generates the `let _BuilderStateN = ~{ ... }~ in let _RegN = case ... end`
+    /// fragment that is later composed into the short-circuit chain by
+    /// [`Self::build_short_circuit_chain`].
+    ///
+    /// # Parameters
+    ///
+    /// * `idx` — zero-based position of this class in the module (drives variable suffixes).
+    /// * `class_name`, `superclass_name`, `module_name` — string identifiers for the class.
+    /// * `method_source_doc` … `meta_doc` — pre-built map / value documents for each field.
+    /// * `is_non_constructible` — emits `'isConstructible' => 'false'` when true.
+    /// * `stdlib_mode` — emits `'stdlibMode' => 'true'` for stdlib compilations (BT-791).
+    #[allow(clippy::too_many_arguments)]
+    fn build_builder_state_doc(
+        idx: usize,
+        class_name: &str,
+        superclass_name: &str,
+        module_name: &str,
+        method_source_doc: Document<'static>,
+        method_sigs_doc: Document<'static>,
+        class_method_sigs_doc: Document<'static>,
+        class_vars_doc: Document<'static>,
+        class_doc_value: Document<'static>,
+        method_docs_doc: Document<'static>,
+        meta_doc: Document<'static>,
+        is_non_constructible: bool,
+        stdlib_mode: bool,
+    ) -> Document<'static> {
+        docvec![
+            line(),
+            "let _BuilderState",
+            idx,
+            " = ~{",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    docvec![
+                        "'className' => '",
+                        Document::String(class_name.to_string()),
+                        "',"
+                    ],
+                    line(),
+                    docvec![
+                        "'superclassRef' => '",
+                        Document::String(superclass_name.to_string()),
+                        "',"
+                    ],
+                    line(),
+                    docvec![
+                        "'moduleName' => '",
+                        Document::String(module_name.to_string()),
+                        "',"
+                    ],
+                    line(),
+                    "'methodSource' => ~{",
+                    method_source_doc,
+                    "}~,",
+                    line(),
+                    "'methodSignatures' => ~{",
+                    method_sigs_doc,
+                    "}~,",
+                    line(),
+                    "'classMethodSignatures' => ~{",
+                    class_method_sigs_doc,
+                    "}~,",
+                    line(),
+                    "'classState' => ~{",
+                    class_vars_doc,
+                    "}~,",
+                    line(),
+                    "'classDoc' => ",
+                    class_doc_value,
+                    ",",
+                    line(),
+                    "'methodDocs' => ~{",
+                    method_docs_doc,
+                    "}~,",
+                    // ADR 0050 Phase 5: Include meta map in BuilderState so that
+                    // beamtalk_object_class:init/1 can access it during on_load.
+                    // erlang:function_exported/3 returns false during on_load execution,
+                    // making Module:'__beamtalk_meta'() unavailable at registration time.
+                    line(),
+                    "'meta' => ",
+                    // include_standalone: true — standalone methods included in BuilderState.meta
+                    // so that init/1 can register their return types during on_load.
+                    meta_doc,
+                    if is_non_constructible {
+                        docvec![",", line(), "'isConstructible' => 'false'"]
+                    } else {
+                        Document::Nil
+                    },
+                    // BT-791: Emit stdlibMode flag for stdlib compilations so the
+                    // runtime can bypass the sealed-superclass check in register/1.
+                    // Character (extends sealed Integer) needs this to load correctly.
+                    if stdlib_mode {
+                        docvec![",", line(), "'stdlibMode' => 'true'"]
+                    } else {
+                        Document::Nil
+                    },
+                ]
+            ),
+            line(),
+            "}~",
+            line(),
+            "in let _Reg",
+            idx,
+            " = case call 'beamtalk_class_builder':'register'(_BuilderState",
+            idx,
+            ") of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<{'ok', _Pid",
+                    idx,
+                    "}> when 'true' -> 'ok'",
+                    line(),
+                    "<{'error', _Err",
+                    idx,
+                    "}> when 'true' -> {'error', _Err",
+                    idx,
+                    "}",
+                ]
+            ),
+            line(),
+            "end",
+        ]
+    }
+
+    /// Builds a short-circuit chain from per-class builder state blocks.
+    ///
+    /// For N classes, generates a nested let/case expression so that the first
+    /// `{error, ...}` from `register/1` propagates out of `on_load` without
+    /// processing remaining classes (BT-738 / BT-749).
+    ///
+    /// ```text
+    ///   let _BuilderState0 = ... in let _Reg0 = case ... end
+    ///   in case _Reg0 of
+    ///     <{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}
+    ///     <_> when 'true' ->
+    ///       let _BuilderState1 = ... in _Reg1
+    ///   end
+    /// ```
+    fn build_short_circuit_chain(class_docs: &[Document<'static>]) -> Document<'static> {
+        let last_i = class_docs.len() - 1;
+        // Innermost: last class doc + final result variable
+        let mut chain: Document<'static> =
+            docvec![class_docs[last_i].clone(), "\n", line(), "in _Reg", last_i,];
+        // Wrap from second-to-last down to first, adding short-circuit cases
+        for i in (0..last_i).rev() {
+            chain = docvec![
+                class_docs[i].clone(),
+                "\n",
+                line(),
+                "in case _Reg",
+                i,
+                " of",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "<{'error', _RegErr",
+                        i,
+                        "}> when 'true' -> {'error', _RegErr",
+                        i,
+                        "}",
+                        line(),
+                        "<_> when 'true' ->",
+                        nest(INDENT, docvec![line(), chain]),
+                    ]
+                ),
+                line(),
+                "end",
+            ];
+        }
+        chain
     }
 
     /// Generates standalone function bodies for class-side methods.
