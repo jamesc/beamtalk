@@ -1225,9 +1225,7 @@ impl CoreErlangGenerator {
                 has_mutations = true;
                 let tuple_var = self.fresh_temp_var("CondResult");
                 let doc = self.generate_expression(expr)?;
-                let new_version = self.state_version() + 1;
-                self.set_state_version(new_version);
-                let new_state = self.current_state_var();
+                let new_state = self.next_state_var();
                 docs.push(docvec![
                     "let ",
                     Document::String(tuple_var.clone()),
@@ -1575,11 +1573,10 @@ impl CoreErlangGenerator {
                 } else if is_last && !has_direct_field_assignments {
                     // BT-478/BT-483: Mutations come from nested constructs.
                     // Extract updated state via element(2).
-                    let next_version = self.state_version() + 1;
-                    let next_var = format!("StateAcc{next_version}");
-                    let tuple_var = format!("_NestTuple{next_version}");
+                    let next_var = self.peek_next_state_var();
+                    let tuple_var = format!("_NestTuple{}", self.state_version() + 1);
                     let expr_code = self.expression_doc(expr)?;
-                    self.set_state_version(next_version);
+                    let _ = self.next_state_var();
                     docs.push(docvec![
                         "let ",
                         Document::String(tuple_var.clone()),

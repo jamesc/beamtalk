@@ -327,38 +327,35 @@ impl CoreErlangGenerator {
             return Ok(docvec!["{'reply', Self, ", state, "}"]);
         }
 
+        // Phase 1: classify every expression upfront.  Classification is
+        // stateless w.r.t. codegen state (state_version, variable bindings),
+        // so pre-computing is safe and separates "what" from "how".
+        let plan: Vec<BodyExprKind> = body
+            .iter()
+            .map(|expr| {
+                let kind = self.classify_body_expr(expr);
+                if matches!(&kind, BodyExprKind::EarlyReturn) && !supports_early_return {
+                    BodyExprKind::Pure
+                } else {
+                    kind
+                }
+            })
+            .collect();
+
+        // Phase 2: emit code for each (expression, kind) pair.
         let mut docs: Vec<Document<'static>> = Vec::new();
+        let body_len = body.len();
 
-        for (i, expr) in body.iter().enumerate() {
-            let is_last = i == body.len() - 1;
-            let kind = self.classify_body_expr(expr);
-
-            // Reclassify EarlyReturn as Pure when not supported (block bodies
-            // handle ^ via NLR throw/catch, so expression_doc does the work).
+        for (i, (expr, kind)) in body.iter().zip(plan.into_iter()).enumerate() {
+            let is_last = i == body_len - 1;
             let is_early_return = matches!(&kind, BodyExprKind::EarlyReturn);
-            let kind = if is_early_return && !supports_early_return {
-                BodyExprKind::Pure
-            } else {
-                kind
-            };
 
             // Early return — always terminates generation regardless of position.
             if is_early_return && supports_early_return {
                 if let Expression::Return { value, .. } = expr {
                     if self.control_flow_has_mutations(value) {
-                        let tuple_var = self.fresh_temp_var("Tuple");
                         let value_str = self.expression_doc(value)?;
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(tuple_var.clone()),
-                            " = ",
-                            value_str,
-                            " in let _Result = call 'erlang':'element'(1, ",
-                            Document::String(tuple_var.clone()),
-                            ") in let _NewState = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
-                            ") in {'reply', _Result, _NewState}",
-                        ]);
+                        docs.push(self.emit_tuple_unpack_reply("Tuple", value_str));
                     } else {
                         let final_state = self.current_state_var();
                         let value_str = self.expression_doc(value)?;
@@ -436,52 +433,20 @@ impl CoreErlangGenerator {
                         docs.push(docvec![expr_str]);
                     }
                     BodyExprKind::Tier2ValueCall => {
-                        let tuple_var = self.fresh_temp_var("T2Tuple");
                         let expr_str = self.expression_doc(expr)?;
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(tuple_var.clone()),
-                            " = ",
-                            expr_str,
-                            " in let _Result = call 'erlang':'element'(1, ",
-                            Document::String(tuple_var.clone()),
-                            ") in let _NewState = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
-                            ") in {'reply', _Result, _NewState}",
-                        ]);
+                        docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
                     }
                     BodyExprKind::ControlFlowWithMutations => {
-                        let tuple_var = self.fresh_temp_var("Tuple");
                         let expr_str = self.expression_doc(expr)?;
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(tuple_var.clone()),
-                            " = ",
-                            expr_str,
-                            " in let _Result = call 'erlang':'element'(1, ",
-                            Document::String(tuple_var.clone()),
-                            ") in let _NewState = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
-                            ") in {'reply', _Result, _NewState}",
-                        ]);
+                        docs.push(self.emit_tuple_unpack_reply("Tuple", expr_str));
                     }
                     BodyExprKind::Tier2SelfSend(ref tier2_args) => {
                         let doc = self.generate_tier2_self_send_open(expr, tier2_args)?;
                         docs.push(doc);
-                        let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
-                            CodeGenError::Internal(
-                                "invariant violation: missing dispatch var after Tier 2 self-send"
-                                    .to_string(),
-                            )
-                        })?;
-                        let final_state = self.current_state_var();
-                        docs.push(docvec![
-                            "{'reply', call 'erlang':'element'(1, ",
-                            Document::String(dispatch_var),
-                            "), ",
-                            Document::String(final_state),
-                            "}",
-                        ]);
+                        self.emit_dispatch_reply(
+                            &mut docs,
+                            "missing dispatch var after Tier 2 self-send",
+                        )?;
                     }
                     BodyExprKind::DestructureAssignment => {
                         if let Expression::DestructureAssignment { pattern, value, .. } = expr {
@@ -501,20 +466,10 @@ impl CoreErlangGenerator {
                     BodyExprKind::DispatchingSelfSend => {
                         let doc = self.generate_self_dispatch_open(expr)?;
                         docs.push(doc);
-                        let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
-                            CodeGenError::Internal(
-                                "invariant violation: missing dispatch var after self-send"
-                                    .to_string(),
-                            )
-                        })?;
-                        let final_state = self.current_state_var();
-                        docs.push(docvec![
-                            "{'reply', call 'erlang':'element'(1, ",
-                            Document::String(dispatch_var),
-                            "), ",
-                            Document::String(final_state),
-                            "}",
-                        ]);
+                        self.emit_dispatch_reply(
+                            &mut docs,
+                            "missing dispatch var after self-send",
+                        )?;
                     }
                     BodyExprKind::EarlyReturn => {
                         // Already handled above with early return from loop.
@@ -761,6 +716,49 @@ impl CoreErlangGenerator {
         }
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Emit the last-position reply for a dispatch open call (Tier 2 self-send
+    /// or dispatching self-send).  Reads `last_dispatch_var` and `current_state_var`.
+    fn emit_dispatch_reply(
+        &mut self,
+        docs: &mut Vec<Document<'static>>,
+        invariant_msg: &str,
+    ) -> Result<()> {
+        let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
+            CodeGenError::Internal(format!("invariant violation: {invariant_msg}"))
+        })?;
+        let final_state = self.current_state_var();
+        docs.push(docvec![
+            "{'reply', call 'erlang':'element'(1, ",
+            Document::String(dispatch_var),
+            "), ",
+            Document::String(final_state),
+            "}",
+        ]);
+        Ok(())
+    }
+
+    /// Emit the last-position reply for an expression that returns a
+    /// `{Result, State}` tuple (Tier 2 value calls, control flow with
+    /// mutations, early returns with mutations).
+    fn emit_tuple_unpack_reply(
+        &mut self,
+        tuple_label: &str,
+        expr_doc: Document<'static>,
+    ) -> Document<'static> {
+        let tuple_var = self.fresh_temp_var(tuple_label);
+        docvec![
+            "let ",
+            Document::String(tuple_var.clone()),
+            " = ",
+            expr_doc,
+            " in let _Result = call 'erlang':'element'(1, ",
+            Document::String(tuple_var.clone()),
+            ") in let _NewState = call 'erlang':'element'(2, ",
+            Document::String(tuple_var),
+            ") in {'reply', _Result, _NewState}",
+        ]
     }
 
     /// Emit a super message send in non-last position, threading state.
