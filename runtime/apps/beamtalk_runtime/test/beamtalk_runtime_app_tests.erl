@@ -80,6 +80,17 @@ exports_required_callbacks_test() ->
     ?assert(lists:member({start, 2}, Exports)),
     ?assert(lists:member({stop, 1}, Exports)).
 
+%%% SASL configuration tests (BT-1424)
+
+sasl_error_logger_configured_after_start_test() ->
+    %% After runtime start, sasl_error_logger should be set to false
+    %% to suppress the legacy SASL console logger.
+    Result = start_runtime(),
+
+    ?assertEqual(false, application:get_env(sasl, sasl_error_logger, undefined)),
+
+    stop_runtime(Result).
+
 %%% Stdlib auto-loading tests
 
 system_dictionary_loaded_after_start_test() ->

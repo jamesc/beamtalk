@@ -16,6 +16,11 @@
 %% @doc Start the Beamtalk runtime application, initializing ETS tables and supervisor tree.
 -spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
+    %% BT-1424: Configure SASL before it starts (started as a beamtalk_workspace dep).
+    %% Suppress the legacy SASL error logger — reports flow through the standard
+    %% logger framework (OTP 21+) and are captured by the workspace file handler.
+    application:set_env(sasl, sasl_error_logger, false),
+
     %% Initialize extension registry ETS tables
     beamtalk_extensions:init(),
 
