@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1420: Tests that state mutations in self-called methods are visible
+// to the caller after the self-call returns.
+//
+// Fixtures: stdlib/test/fixtures/self_call_state_actor.bt
+
+TestCase subclass: ActorSelfCallStateTest
+
+  // Core regression test: self-call mutates state, caller reads it
+  testSelfCallStateMutationVisible =>
+    a := SelfCallStateActor spawn
+    self assert: a callSetupThenRead equals: 42
+
+  // Multiple sequential self-calls each mutate state
+  testMultipleSelfCallsMutateState =>
+    a := SelfCallStateActor spawn
+    self assert: a callThreeIncrements equals: 3
+
+  // Self-call as last expression threads state back to gen_server
+  testSelfCallAsLastExpressionThreadsState =>
+    a := SelfCallStateActor spawn
+    a callSetupAsLast
+    self assert: a getValue equals: 42
+
+  // Self-call mutation followed by field assignment
+  testSelfCallThenFieldAssignment =>
+    a := SelfCallStateActor spawn
+    self assert: a callSetupThenAssignField equals: 52
