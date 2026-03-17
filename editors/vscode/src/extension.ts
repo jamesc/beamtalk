@@ -783,12 +783,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   logOutputChannel ??= vscode.window.createOutputChannel("Beamtalk Logs");
 
-  if (!logLevelStatusBarItem) {
-    logLevelStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
-    logLevelStatusBarItem.command = "beamtalk.setLogLevel";
-    logLevelStatusBarItem.tooltip = "Beamtalk log level — click to change";
-    context.subscriptions.push(logLevelStatusBarItem);
-  }
+  logLevelStatusBarItem?.dispose();
+  logLevelStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
+  logLevelStatusBarItem.command = "beamtalk.setLogLevel";
+  logLevelStatusBarItem.tooltip = "Beamtalk log level — click to change";
+  context.subscriptions.push(logLevelStatusBarItem);
 
   const updateLogLevelStatusBar = (level: string): void => {
     if (logLevelStatusBarItem) {
@@ -1138,6 +1137,8 @@ export function deactivate(): Thenable<void> | undefined {
   workspaceTreeProvider = undefined;
   transcriptViewProvider?.setClient(null);
   transcriptViewProvider = undefined;
+  logLevelStatusBarItem?.dispose();
+  logLevelStatusBarItem = undefined;
   logOutputChannel?.dispose();
   outputChannel?.dispose();
   traceOutputChannel?.dispose();
