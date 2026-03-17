@@ -883,7 +883,7 @@ impl CoreErlangGenerator {
     pub(super) fn generate_self_dispatch_open(
         &mut self,
         expr: &Expression,
-    ) -> Result<Document<'static>> {
+    ) -> Result<(Document<'static>, String)> {
         if let Expression::MessageSend {
             selector,
             arguments,
@@ -961,11 +961,11 @@ impl CoreErlangGenerator {
                 ))
             ];
 
-            self.last_dispatch_var = Some(dispatch_var);
-            return Ok(doc);
+            return Ok((doc, dispatch_var));
         }
-        // Fallback
-        self.generate_expression(expr)
+        Err(CodeGenError::Internal(
+            "generate_self_dispatch_open called on non-MessageSend expression".to_string(),
+        ))
     }
     ///
     /// Two levels of optimization:
@@ -1223,7 +1223,7 @@ impl CoreErlangGenerator {
     pub(super) fn generate_field_assignment_open(
         &mut self,
         expr: &Expression,
-    ) -> Result<Document<'static>> {
+    ) -> Result<(Document<'static>, String)> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::FieldAccess { field, .. } = target.as_ref() {
                 // BT-1342: Full-extract mode — rebind field param instead of maps:put.
@@ -1243,18 +1243,20 @@ impl CoreErlangGenerator {
                     // Update the param map so subsequent reads use the new var.
                     self.hybrid_readonly_field_params
                         .insert(field.name.to_string(), new_field_var.clone());
-                    self.last_open_scope_result = Some(val_var.clone());
-                    return Ok(docvec![
-                        "let ",
-                        Document::String(val_var.clone()),
-                        " = ",
-                        val_doc,
-                        " in let ",
-                        Document::String(new_field_var),
-                        " = ",
-                        Document::String(val_var),
-                        " in ",
-                    ]);
+                    return Ok((
+                        docvec![
+                            "let ",
+                            Document::String(val_var.clone()),
+                            " = ",
+                            val_doc,
+                            " in let ",
+                            Document::String(new_field_var),
+                            " = ",
+                            Document::String(val_var.clone()),
+                            " in ",
+                        ],
+                        val_var,
+                    ));
                 }
 
                 let val_var = self.fresh_temp_var("Val");
@@ -1272,15 +1274,14 @@ impl CoreErlangGenerator {
                     ))
                 ];
 
-                // BT-884: Store the val var so callers (e.g. cascade codegen) can
+                // BT-884: Return the val var so callers (e.g. cascade codegen) can
                 // reference the assigned value after hoisting the binding.
-                self.last_open_scope_result = Some(val_var);
-
-                return Ok(doc);
+                return Ok((doc, val_var));
             }
         }
-        // Fallback: should not reach here if is_field_assignment check was correct
-        self.generate_expression(expr)
+        Err(CodeGenError::Internal(
+            "generate_field_assignment_open called on non-field-assignment expression".to_string(),
+        ))
     }
 
     /// BT-1324: Checks if an expression is `self fieldAt: <name> put: <value>` in actor context.
@@ -1325,7 +1326,7 @@ impl CoreErlangGenerator {
     pub(super) fn generate_self_field_at_put_open(
         &mut self,
         expr: &Expression,
-    ) -> Result<Document<'static>> {
+    ) -> Result<(Document<'static>, String)> {
         if let Expression::MessageSend { arguments, .. } = expr {
             let name_var = self.fresh_var("Name");
             let val_var = self.fresh_temp_var("Val");
@@ -1358,11 +1359,11 @@ impl CoreErlangGenerator {
                 ") in ",
             ];
 
-            self.last_open_scope_result = Some(val_var);
-
-            return Ok(doc);
+            return Ok((doc, val_var));
         }
-        self.generate_expression(expr)
+        Err(CodeGenError::Internal(
+            "generate_self_field_at_put_open called on non-fieldAt:put: expression".to_string(),
+        ))
     }
 
     /// Generates code for a super message send.
@@ -1903,7 +1904,7 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
         tier2_args: &[(usize, Vec<String>)],
-    ) -> Result<Document<'static>> {
+    ) -> Result<(Document<'static>, String)> {
         if let Expression::MessageSend {
             selector,
             arguments,
@@ -2001,10 +2002,11 @@ impl CoreErlangGenerator {
                 }
             }
 
-            self.last_dispatch_var = Some(dispatch_var);
-            return Ok(Document::Vec(docs));
+            return Ok((Document::Vec(docs), dispatch_var));
         }
-        self.generate_expression(expr)
+        Err(CodeGenError::Internal(
+            "generate_tier2_self_send_open called on non-MessageSend expression".to_string(),
+        ))
     }
 
     /// BT-851: Builds argument list for a Tier 2 self-send, using stateful block

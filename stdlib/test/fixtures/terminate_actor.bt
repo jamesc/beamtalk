@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for actor_terminate_test.bt — actor with terminate: hook
+
+Actor subclass: TerminateActor
+  state: tableName = nil
+  state: value = 0
+
+  setValue: v => self.value := v
+
+  getValue => self.value
+
+  terminate: reason =>
+    self.tableName isNil
+      ifFalse: [
+        table := Ets named: self.tableName
+        table at: #called put: true
+        table at: #reason put: reason
+        table at: #value put: self.value
+      ]

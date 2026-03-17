@@ -21,6 +21,28 @@ use crate::ast::{
 };
 use crate::docvec;
 
+/// Classification of how a value-type method body expression should be handled
+/// for Self-threading.  Produced by [`CoreErlangGenerator::classify_vt_body_expr`]
+/// and consumed by the unified body loop in [`CoreErlangGenerator::generate_value_type_method`].
+enum VtBodyExprKind {
+    /// `^ value` — early return from method.
+    EarlyReturn,
+    /// `self.field := value` — direct field assignment (Self-threading).
+    FieldAssignment,
+    /// `var := expr` — local variable assignment.
+    LocalAssignment,
+    /// `{a, b} := expr` — destructure assignment.
+    DestructureAssignment,
+    /// Non-last `do:` loop that mutates captured outer locals (BT-1053).
+    DoWithLocalThreading,
+    /// Non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with local mutations (BT-1392).
+    ConditionalWithLocalThreading,
+    /// Non-last block value with captured mutations (BT-1213).
+    BlockWithCapturedMutations(Vec<String>),
+    /// Regular expression with no special Self-threading needs.
+    Pure,
+}
+
 /// Auto-generated slot methods for `Value subclass:` classes (ADR 0042).
 ///
 /// Only populated when `class_kind == ClassKind::Value`.
@@ -734,11 +756,274 @@ impl CoreErlangGenerator {
         arms
     }
 
+    // ── BT-1445: Unified value-type method body classification ─────────
+
+    /// Classify a value-type body expression for Self-threading dispatch.
+    ///
+    /// The order of checks matters: more specific patterns (e.g. field assignment,
+    /// `do:` with local threading) must come before general ones (e.g. pure).
+    fn classify_vt_body_expr(&self, expr: &Expression) -> VtBodyExprKind {
+        if matches!(expr, Expression::Return { .. }) {
+            return VtBodyExprKind::EarlyReturn;
+        }
+        if Self::is_field_assignment(expr) {
+            return VtBodyExprKind::FieldAssignment;
+        }
+        if Self::is_local_var_assignment(expr) {
+            return VtBodyExprKind::LocalAssignment;
+        }
+        if matches!(expr, Expression::DestructureAssignment { .. }) {
+            return VtBodyExprKind::DestructureAssignment;
+        }
+        if self.is_do_with_vt_local_threading(expr) {
+            return VtBodyExprKind::DoWithLocalThreading;
+        }
+        if self.is_conditional_with_vt_local_threading(expr) {
+            return VtBodyExprKind::ConditionalWithLocalThreading;
+        }
+        if let Some(mutations) = Self::inline_block_captured_mutations(expr) {
+            return VtBodyExprKind::BlockWithCapturedMutations(mutations);
+        }
+        VtBodyExprKind::Pure
+    }
+
+    /// Emit a "last expression" in a value-type method body.
+    ///
+    /// When NLR is active, wraps the expression in a `{Result, Self{N}}` tuple.
+    /// Otherwise, emits the expression value directly (with proper indentation).
+    fn emit_vt_last_expr(
+        &mut self,
+        expr: &Expression,
+        index: usize,
+        has_nlr: bool,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<()> {
+        if has_nlr {
+            // BT-854: NLR methods return {Result, Self{N}} tuple so
+            // the normal and NLR catch paths produce the same shape.
+            let tmp = self.fresh_temp_var("BodyResult");
+            let val_doc = self.expression_doc(expr)?;
+            let final_self = self.current_self_var();
+            body_parts.push(docvec![
+                "    let ",
+                tmp.clone(),
+                " = ",
+                val_doc,
+                " in\n    {",
+                tmp,
+                ", ",
+                Document::String(final_self),
+                "}\n",
+            ]);
+        } else {
+            let expr_code = self.capture_expression(expr)?;
+            if index > 0 {
+                body_parts.push(Document::Str("    "));
+            }
+            body_parts.push(Document::String(expr_code));
+        }
+        Ok(())
+    }
+
+    /// Generate a fallback body for an empty value-type method.
+    ///
+    /// Returns `{nil, Self}` when NLR is active, `nil` otherwise.
+    fn generate_vt_empty_body(&self, has_nlr: bool) -> Vec<Document<'static>> {
+        if has_nlr {
+            let final_self = self.current_self_var();
+            vec![docvec!["    {'nil', ", Document::String(final_self), "}\n",]]
+        } else {
+            vec![docvec!["    nil\n"]]
+        }
+    }
+
+    /// Generate classified body expressions for a value-type method.
+    ///
+    /// Classifies each expression via [`Self::classify_vt_body_expr`] and dispatches
+    /// to the appropriate handler. Classification happens inline (not upfront) because
+    /// some checks (e.g. `is_conditional_with_vt_local_threading`) depend on scope
+    /// bindings established by earlier expressions.
+    fn generate_vt_body_exprs(
+        &mut self,
+        body: &[&Expression],
+        has_nlr: bool,
+    ) -> Result<Vec<Document<'static>>> {
+        let mut body_parts: Vec<Document<'static>> = Vec::new();
+        let body_len = body.len();
+
+        for (i, expr) in body.iter().enumerate() {
+            let kind = self.classify_vt_body_expr(expr);
+            let is_last = i == body_len - 1;
+
+            // Early return (^) at the method body level — emit value and stop generating.
+            // Note: ^ inside a block is handled via the NLR throw mechanism (BT-754).
+            if matches!(kind, VtBodyExprKind::EarlyReturn) {
+                if let Expression::Return { value, .. } = expr {
+                    if has_nlr {
+                        // BT-854: NLR methods return {Result, Self{N}} tuple so
+                        // the normal and NLR catch paths produce the same shape.
+                        let tmp = self.fresh_temp_var("EarlyResult");
+                        let val_doc = self.expression_doc(value)?;
+                        let final_self = self.current_self_var();
+                        body_parts.push(docvec![
+                            "    let ",
+                            tmp.clone(),
+                            " = ",
+                            val_doc,
+                            " in\n    {",
+                            tmp,
+                            ", ",
+                            Document::String(final_self),
+                            "}\n",
+                        ]);
+                    } else {
+                        let expr_code = self.capture_expression(value)?;
+                        if i > 0 {
+                            body_parts.push(Document::Str("    "));
+                        }
+                        body_parts.push(Document::String(expr_code));
+                    }
+                }
+                break;
+            }
+
+            self.emit_vt_body_expr(expr, &kind, i, is_last, has_nlr, &mut body_parts)?;
+        }
+
+        Ok(body_parts)
+    }
+
+    /// Emit code for a single classified value-type body expression.
+    ///
+    /// Dispatches on the [`VtBodyExprKind`] to generate the appropriate
+    /// Self-threading code for each expression kind.
+    ///
+    /// `EarlyReturn` is handled by the caller (`generate_vt_body_exprs`)
+    /// before calling this method, so it is not matched here.
+    fn emit_vt_body_expr(
+        &mut self,
+        expr: &Expression,
+        kind: &VtBodyExprKind,
+        index: usize,
+        is_last: bool,
+        has_nlr: bool,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<()> {
+        match kind {
+            VtBodyExprKind::EarlyReturn => unreachable!("handled before dispatch"),
+            VtBodyExprKind::FieldAssignment => {
+                // BT-833/BT-900: Value type field assignment.
+                // Non-last: open Self-threading let chain so Self{N} stays in scope.
+                // Last: return the updated Self (not the assigned value).
+                let doc = self.generate_vt_field_assignment_open(expr)?;
+                body_parts.push(doc);
+                if is_last {
+                    let final_self = self.current_self_var();
+                    if has_nlr {
+                        // BT-854: NLR methods return {Self{N}, Self{N}} tuple.
+                        body_parts.push(docvec![
+                            "    {",
+                            final_self.clone(),
+                            ", ",
+                            Document::String(final_self),
+                            "}\n",
+                        ]);
+                    } else {
+                        body_parts.push(docvec!["    ", Document::String(final_self), "\n"]);
+                    }
+                }
+            }
+            VtBodyExprKind::LocalAssignment => {
+                if is_last {
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                } else {
+                    // BT-744: Local variable assignment — create a proper Core Erlang
+                    // let binding so the variable is accessible in subsequent expressions.
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            let val_doc = self.expression_doc(value)?;
+                            self.bind_var(var_name, &core_var);
+                            body_parts.push(docvec!["    let ", core_var, " = ", val_doc, " in\n"]);
+                        }
+                    }
+                }
+            }
+            VtBodyExprKind::DestructureAssignment => {
+                if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                    let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                    if is_last {
+                        // Destructuring as last expression: emit bindings then return Self
+                        for d in binding_docs {
+                            body_parts.push(docvec!["    ", d]);
+                        }
+                        let final_self = self.current_self_var();
+                        if has_nlr {
+                            body_parts.push(docvec![
+                                "    {'nil', ",
+                                Document::String(final_self),
+                                "}\n",
+                            ]);
+                        } else {
+                            body_parts.push(docvec!["    ", Document::String(final_self), "\n"]);
+                        }
+                    } else {
+                        for d in binding_docs {
+                            body_parts.push(d);
+                        }
+                    }
+                }
+            }
+            VtBodyExprKind::DoWithLocalThreading => {
+                // BT-1053: Non-last `do:` loop that mutates captured outer locals.
+                if is_last {
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                } else {
+                    let doc = self.generate_value_type_do_open(expr)?;
+                    body_parts.push(doc);
+                }
+            }
+            VtBodyExprKind::ConditionalWithLocalThreading => {
+                // BT-1392: Non-last conditional with captured local mutations.
+                if is_last {
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                } else {
+                    let doc = self.generate_vt_conditional_open(expr)?;
+                    body_parts.push(doc);
+                }
+            }
+            VtBodyExprKind::BlockWithCapturedMutations(mutations) => {
+                // BT-1213: Non-last block value with captured mutations.
+                if is_last {
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                } else {
+                    let doc = self.generate_vt_block_value_open(expr, mutations)?;
+                    body_parts.push(doc);
+                }
+            }
+            VtBodyExprKind::Pure => {
+                if is_last {
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                } else {
+                    // Non-last expressions: wrap in let to sequence side effects
+                    let tmp_var = self.fresh_temp_var("seq");
+                    let expr_code = self.capture_expression(expr)?;
+                    body_parts.push(Document::String(format!(
+                        "    let {tmp_var} = {expr_code} in\n"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Generates an instance method for a value type.
     ///
     /// Value type methods are pure functions that take Self as first parameter
     /// and return a new instance (immutable semantics).
-    #[allow(clippy::too_many_lines)]
     fn generate_value_type_method(
         &mut self,
         method: &MethodDefinition,
@@ -779,9 +1064,6 @@ impl CoreErlangGenerator {
             None
         };
 
-        // Build method body parts
-        let mut body_parts: Vec<Document<'static>> = Vec::new();
-
         // Generate method body expressions.
         // BT-833: Value types now support Self-threading for field assignments.
         // Each `:=` produces a new Self{N} snapshot via maps:put (see generate_field_assignment).
@@ -789,181 +1071,16 @@ impl CoreErlangGenerator {
         // Filter out @expect directives — they are compile-time only and generate no code.
         let body = super::util::collect_body_exprs(&method.body);
 
+        let has_nlr = nlr_token_var.is_some();
+
         // If filtering leaves no executable expressions, emit a safe fallback to
         // avoid generating an empty Core Erlang function body which would be
         // syntactically invalid (e.g., `fun (...) ->\n\n`).
-        if body.is_empty() {
-            self.pop_scope();
-            self.current_method_selector = None;
-            self.current_nlr_token = None;
-            if let Some(token_var) = nlr_token_var {
-                let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
-                // BT-854: NLR methods return {Result, Self} so the catch path
-                // (which also returns {NlrVal, NlrState}) produces a consistent shape.
-                let final_self = self.current_self_var();
-                let body_doc = docvec!["    {'nil', ", Document::String(final_self), "}\n",];
-                return Ok(docvec![
-                    format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
-                    catch_vars.format_try_prefix(),
-                    body_doc,
-                    catch_vars.format_catch_suffix(),
-                ]);
-            }
-            return Ok(docvec![
-                format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
-                docvec!["    nil\n"],
-                "\n",
-            ]);
-        }
-
-        for (i, expr) in body.iter().enumerate() {
-            let is_last = i == body.len() - 1;
-
-            // Early return (^) at the method body level — emit value and stop generating.
-            // Note: ^ inside a block is handled via the NLR throw mechanism (BT-754).
-            if let Expression::Return { value, .. } = expr {
-                if nlr_token_var.is_some() {
-                    // BT-854: NLR methods return {Result, Self{N}} tuple so
-                    // the normal and NLR catch paths produce the same shape.
-                    let tmp = self.fresh_temp_var("EarlyResult");
-                    let val_doc = self.expression_doc(value)?;
-                    let final_self = self.current_self_var();
-                    body_parts.push(docvec![
-                        "    let ",
-                        tmp.clone(),
-                        " = ",
-                        val_doc,
-                        " in\n    {",
-                        tmp,
-                        ", ",
-                        Document::String(final_self),
-                        "}\n",
-                    ]);
-                } else {
-                    let expr_code = self.capture_expression(value)?;
-                    if i > 0 {
-                        body_parts.push(Document::Str("    "));
-                    }
-                    body_parts.push(Document::String(expr_code));
-                }
-                break;
-            }
-
-            if is_last {
-                // BT-900: When the last expression is a field assignment, the method
-                // should return the updated Self (not the assigned value). This allows
-                // setUp to return the modified instance. The field assignment expression
-                // itself still evaluates to the assigned value (preserving `(self.x := 5) + 1`
-                // semantics), but we generate it as a non-last open let chain and then
-                // close with Self{N} as the method return value.
-                if Self::is_field_assignment(expr) {
-                    let doc = self.generate_vt_field_assignment_open(expr)?;
-                    body_parts.push(doc);
-                    let final_self = self.current_self_var();
-                    if nlr_token_var.is_some() {
-                        // BT-854: NLR methods return {Self{N}, Self{N}} tuple.
-                        // The result IS the updated Self, and the state IS the updated Self.
-                        body_parts.push(docvec![
-                            "    {",
-                            final_self.clone(),
-                            ", ",
-                            Document::String(final_self),
-                            "}\n",
-                        ]);
-                    } else {
-                        body_parts.push(docvec!["    ", Document::String(final_self), "\n"]);
-                    }
-                } else if nlr_token_var.is_some() {
-                    // BT-854: NLR methods return {Result, Self{N}} tuple so
-                    // the normal and NLR catch paths produce the same shape.
-                    let tmp = self.fresh_temp_var("BodyResult");
-                    let val_doc = self.expression_doc(expr)?;
-                    let final_self = self.current_self_var();
-                    body_parts.push(docvec![
-                        "    let ",
-                        tmp.clone(),
-                        " = ",
-                        val_doc,
-                        " in\n    {",
-                        tmp,
-                        ", ",
-                        Document::String(final_self),
-                        "}\n",
-                    ]);
-                } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                    // Destructuring as last expression: emit bindings then return Self
-                    let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                    for d in binding_docs {
-                        body_parts.push(docvec!["    ", d]);
-                    }
-                    let final_self = self.current_self_var();
-                    if nlr_token_var.is_some() {
-                        body_parts.push(docvec![
-                            "    {'nil', ",
-                            Document::String(final_self),
-                            "}\n",
-                        ]);
-                    } else {
-                        body_parts.push(docvec!["    ", Document::String(final_self), "\n"]);
-                    }
-                } else {
-                    let expr_code = self.capture_expression(expr)?;
-                    if i > 0 {
-                        body_parts.push(Document::Str("    "));
-                    }
-                    body_parts.push(Document::String(expr_code));
-                }
-            } else if Self::is_field_assignment(expr) {
-                // BT-833: Value type field assignment (non-last) — generate an open
-                // Self-threading let chain so Self{N} stays in scope for subsequent exprs.
-                let doc = self.generate_vt_field_assignment_open(expr)?;
-                body_parts.push(doc);
-            } else if Self::is_local_var_assignment(expr) {
-                // BT-744: Local variable assignment — create a proper Core Erlang
-                // let binding so the variable is accessible in subsequent expressions.
-                if let Expression::Assignment { target, value, .. } = expr {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        let var_name = &id.name;
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        let val_doc = self.expression_doc(value)?;
-                        self.bind_var(var_name, &core_var);
-                        body_parts.push(docvec!["    let ", core_var, " = ", val_doc, " in\n",]);
-                    }
-                }
-            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                for d in binding_docs {
-                    body_parts.push(d);
-                }
-            } else if self.is_do_with_vt_local_threading(expr) {
-                // BT-1053: Non-last `do:` loop that mutates captured outer locals.
-                // Generate foldl + extract locals as open let chains so the updated
-                // values are visible to all subsequent method body expressions.
-                let doc = self.generate_value_type_do_open(expr)?;
-                body_parts.push(doc);
-            } else if self.is_conditional_with_vt_local_threading(expr) {
-                // BT-1392: Non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` that
-                // mutates captured outer locals. Generate inline case + rebind
-                // so updated values are visible to subsequent expressions.
-                let doc = self.generate_vt_conditional_open(expr)?;
-                body_parts.push(doc);
-            } else if let Some(mutations) = Self::inline_block_captured_mutations(expr) {
-                // BT-1213: Non-last block value with captured mutations.
-                // Emit the block body as open let-chains so mutations are visible
-                // to subsequent expressions (not scoped inside `let _seq = (...) in`).
-                let doc = self.generate_vt_block_value_open(expr, &mutations)?;
-                body_parts.push(doc);
-            } else {
-                // Non-last expressions: wrap in let to sequence side effects
-                let tmp_var = self.fresh_temp_var("seq");
-                let expr_code = self.capture_expression(expr)?;
-                body_parts.push(Document::String(format!(
-                    "    let {tmp_var} = {expr_code} in\n"
-                )));
-            }
-        }
+        let body_parts = if body.is_empty() {
+            self.generate_vt_empty_body(has_nlr)
+        } else {
+            self.generate_vt_body_exprs(&body, has_nlr)?
+        };
 
         self.pop_scope();
         self.current_method_selector = None;
@@ -974,42 +1091,30 @@ impl CoreErlangGenerator {
         // is itself a single annotated MessageSend expression: `( ( e -| [...] ) -| [...] )`.
         let line_annotation = self.span_to_line(method.span);
 
-        if let Some(token_var) = nlr_token_var {
-            // BT-754/BT-764: Wrap the method body in try/catch to catch non-local returns
-            // thrown by ^ inside block closures. Uses the shared value type NLR helper.
+        // BT-754/BT-764: Wrap the method body in try/catch to catch non-local
+        // returns thrown by ^ inside block closures.
+        let body_doc = Document::Vec(body_parts);
+        let fun_doc = if let Some(token_var) = nlr_token_var {
             let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
-
-            let body_doc = Document::Vec(body_parts);
-            let fun_doc = docvec![
+            docvec![
                 format!("fun ({}) ->\n", params.join(", ")),
                 catch_vars.format_try_prefix(),
                 body_doc,
                 catch_vars.format_catch_suffix(),
-            ];
-            let fun_doc = if let Some(line_num) = line_annotation {
-                Self::annotate_with_line(fun_doc, line_num)
-            } else {
-                fun_doc
-            };
-            Ok(docvec![
-                format!("'{}'/{} = ", mangled, arity),
-                fun_doc,
-                "\n",
-            ])
+            ]
         } else {
-            let body_doc = Document::Vec(body_parts);
-            let fun_doc = docvec![format!("fun ({}) ->\n", params.join(", ")), body_doc];
-            let fun_doc = if let Some(line_num) = line_annotation {
-                Self::annotate_with_line(fun_doc, line_num)
-            } else {
-                fun_doc
-            };
-            Ok(docvec![
-                format!("'{}'/{} = ", mangled, arity),
-                fun_doc,
-                "\n",
-            ])
-        }
+            docvec![format!("fun ({}) ->\n", params.join(", ")), body_doc]
+        };
+        let fun_doc = if let Some(line_num) = line_annotation {
+            Self::annotate_with_line(fun_doc, line_num)
+        } else {
+            fun_doc
+        };
+        Ok(docvec![
+            format!("'{}'/{} = ", mangled, arity),
+            fun_doc,
+            "\n",
+        ])
     }
 
     /// BT-833: Generates an open Self-threading let chain for a non-last field assignment.

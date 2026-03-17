@@ -120,6 +120,37 @@ Actor subclass: Counter
   incrementBy: delta => self.value := self.value + delta
 ```
 
+### Actor Lifecycle Hooks
+
+Actors support two optional lifecycle hooks:
+
+- **`initialize`** — called automatically after `spawn`, before the actor is returned to the caller. Use it to set up resources or compute derived state.
+- **`terminate: reason`** — called automatically during graceful shutdown (`stop`). Use it to clean up resources. The `reason` parameter indicates why the actor is stopping (e.g., `#normal`).
+
+```beamtalk
+Actor subclass: ResourceActor
+  state: handle = nil
+
+  initialize =>
+    self.handle := Resource open
+
+  terminate: reason =>
+    self.handle isNil ifFalse: [self.handle close]
+
+  doWork => self.handle process
+```
+
+**Key behaviour:**
+
+| Aspect | `initialize` | `terminate:` |
+|--------|--------------|--------------|
+| Called on | `spawn` / `spawnWith:` | `stop` (graceful shutdown) |
+| Error effect | Spawn fails with `InstantiationError` | Shutdown proceeds anyway |
+| Called on `kill`? | N/A | No — `kill` bypasses `terminate:` |
+| Actor state | Accessible via `self.field` | Accessible via `self.field` |
+
+Both hooks are optional — actors without them work normally.
+
 ### Value Types vs Actors
 
 Beamtalk distinguishes between **value types** (immutable data) and **actors** (concurrent processes):

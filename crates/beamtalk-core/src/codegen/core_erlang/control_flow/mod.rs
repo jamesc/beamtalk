@@ -31,7 +31,7 @@ mod while_loops;
 use std::fmt::Write as FmtWrite;
 
 use super::document::{Document, join};
-use super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::Expression;
 use crate::docvec;
 use crate::source_analysis::Span;
@@ -1149,7 +1149,7 @@ impl CoreErlangGenerator {
 
             if Self::is_field_assignment(expr) {
                 has_mutations = true;
-                let doc = self.generate_field_assignment_open(expr)?;
+                let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
                 docs.push(doc);
                 if is_last {
                     self.emit_field_assign_last_expr(&mut docs, kind, pred_var.as_ref());
@@ -1158,10 +1158,15 @@ impl CoreErlangGenerator {
                 has_mutations = true;
                 // BT-1343: Emit diagnostic for synchronous self-send in loop body.
                 self.emit_self_send_in_loop_diagnostic(expr, expr.span());
-                let doc = self.generate_self_dispatch_open(expr)?;
+                let (doc, dispatch_var) = self.generate_self_dispatch_open(expr)?;
                 docs.push(doc);
                 if is_last {
-                    self.emit_self_send_last_expr(&mut docs, kind, pred_var.as_ref());
+                    self.emit_self_send_last_expr(
+                        &mut docs,
+                        kind,
+                        pred_var.as_ref(),
+                        &dispatch_var,
+                    );
                 }
             } else if Self::is_local_var_assignment(expr) {
                 if let Some(doc) =
@@ -1187,7 +1192,8 @@ impl CoreErlangGenerator {
                     }
                 } else {
                     has_mutations = true;
-                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                    let (assign_doc, _val_var) =
+                        self.generate_local_var_assignment_in_loop(expr)?;
                     docs.push(assign_doc);
                     if is_last {
                         self.emit_local_assign_last_expr(
@@ -1347,6 +1353,7 @@ impl CoreErlangGenerator {
         docs: &mut Vec<Document<'static>>,
         kind: &BodyKind,
         pred_var: Option<&String>,
+        dispatch_var: &str,
     ) {
         match kind {
             BodyKind::Letrec => {
@@ -1357,60 +1364,44 @@ impl CoreErlangGenerator {
             }
             BodyKind::FoldlCollect => {
                 let fs = self.current_state_var();
-                if let Some(dv) = self.last_dispatch_var.clone() {
-                    let ir = self.fresh_temp_var("ItemResult");
-                    docs.push(docvec![
-                        "let ",
-                        Document::String(ir.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        Document::String(dv),
-                        ") in {[",
-                        Document::String(ir),
-                        " | AccList], ",
-                        Document::String(fs),
-                        "}",
-                    ]);
-                } else {
-                    docs.push(docvec!["{['nil' | AccList], ", Document::String(fs), "}",]);
-                }
+                let ir = self.fresh_temp_var("ItemResult");
+                docs.push(docvec![
+                    "let ",
+                    Document::String(ir.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    Document::String(dispatch_var.to_string()),
+                    ") in {[",
+                    Document::String(ir),
+                    " | AccList], ",
+                    Document::String(fs),
+                    "}",
+                ]);
             }
             BodyKind::FoldlFilter { .. } => {
                 if let Some(pv) = pred_var {
-                    if let Some(dv) = self.last_dispatch_var.clone() {
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(pv.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            Document::String(dv),
-                            ") in ",
-                        ]);
-                    } else {
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(pv.clone()),
-                            " = 'nil' in ",
-                        ]);
-                    }
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(pv.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        Document::String(dispatch_var.to_string()),
+                        ") in ",
+                    ]);
                 }
             }
             BodyKind::FoldlInject => {
                 let fs = self.current_state_var();
-                if let Some(dv) = self.last_dispatch_var.clone() {
-                    let ar = self.fresh_temp_var("AccResult");
-                    docs.push(docvec![
-                        "let ",
-                        Document::String(ar.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        Document::String(dv),
-                        ") in {",
-                        Document::String(ar),
-                        ", ",
-                        Document::String(fs),
-                        "}",
-                    ]);
-                } else {
-                    docs.push(docvec!["{'nil', ", Document::String(fs), "}",]);
-                }
+                let ar = self.fresh_temp_var("AccResult");
+                docs.push(docvec![
+                    "let ",
+                    Document::String(ar.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    Document::String(dispatch_var.to_string()),
+                    ") in {",
+                    Document::String(ar),
+                    ", ",
+                    Document::String(fs),
+                    "}",
+                ]);
             }
         }
     }
@@ -2454,10 +2445,11 @@ impl CoreErlangGenerator {
     /// unpacks the tuple and uses `NewStateAcc` for `maps:put` so that mutations made
     /// by the called block (e.g. captured variable updates) are preserved in the
     /// threading state rather than discarded.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn generate_local_var_assignment_in_loop(
         &mut self,
         expr: &Expression,
-    ) -> Result<Document<'static>> {
+    ) -> Result<(Document<'static>, String)> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let val_var = self.fresh_temp_var("Val");
@@ -2495,40 +2487,40 @@ impl CoreErlangGenerator {
                         format!("State{}", self.state_version())
                     };
 
-                    // BT-1053: Record val_var so callers (e.g. generate_conditional_branch_inline)
-                    // can use it as the branch result via last_open_scope_result.
-                    self.last_open_scope_result = Some(val_var.clone());
-
-                    return Ok(docvec![
-                        "let ",
-                        Document::String(t2_tuple.clone()),
-                        " = ",
-                        value_code,
-                        " in let ",
-                        Document::String(val_var.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        Document::String(t2_tuple.clone()),
-                        ") in let ",
-                        Document::String(t2_state.clone()),
-                        " = call 'erlang':'element'(2, ",
-                        Document::String(t2_tuple),
-                        ") in let ",
-                        Document::String(new_state),
-                        " = call 'maps':'put'('",
-                        state_key.to_string(),
-                        "', ",
-                        Document::String(val_var.clone()),
-                        ", ",
-                        Document::String(t2_state),
-                        ") in ",
-                    ]);
+                    // BT-1053: Return val_var so callers (e.g. generate_conditional_branch_inline)
+                    // can use it as the branch result.
+                    return Ok((
+                        docvec![
+                            "let ",
+                            Document::String(t2_tuple.clone()),
+                            " = ",
+                            value_code,
+                            " in let ",
+                            Document::String(val_var.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            Document::String(t2_tuple.clone()),
+                            ") in let ",
+                            Document::String(t2_state.clone()),
+                            " = call 'erlang':'element'(2, ",
+                            Document::String(t2_tuple),
+                            ") in let ",
+                            Document::String(new_state),
+                            " = call 'maps':'put'('",
+                            state_key.to_string(),
+                            "', ",
+                            Document::String(val_var.clone()),
+                            ", ",
+                            Document::String(t2_state),
+                            ") in ",
+                        ],
+                        val_var,
+                    ));
                 }
 
                 // Capture value expression (ADR 0018 bridge)
-                // BT-1397: Clear before generating to detect open-scope results from
-                // class method self-sends in the value expression.
-                self.last_open_scope_result = None;
-                let value_code = self.expression_doc(value)?;
+                // BT-1397: Detect open-scope results from class method self-sends
+                // in the value expression.
+                let (value_code, open_scope) = self.expression_doc_with_open_scope(value)?;
 
                 // Increment state version for the new state
                 let _ = self.next_state_var();
@@ -2540,48 +2532,53 @@ impl CoreErlangGenerator {
 
                 // BT-1397: If the RHS produced an open scope (class method self-send),
                 // emit the open scope first, then bind the variable to the result.
-                if let Some(open_scope_result) = self.last_open_scope_result.take() {
-                    self.last_open_scope_result = Some(val_var.clone());
-                    return Ok(docvec![
-                        value_code,
+                if let Some(open_scope_result) = open_scope {
+                    return Ok((
+                        docvec![
+                            value_code,
+                            "let ",
+                            Document::String(val_var.clone()),
+                            " = ",
+                            Document::String(open_scope_result),
+                            " in let ",
+                            Document::String(new_state),
+                            " = call 'maps':'put'('",
+                            state_key.to_string(),
+                            "', ",
+                            Document::String(val_var.clone()),
+                            ", ",
+                            current_state,
+                            ") in ",
+                        ],
+                        val_var,
+                    ));
+                }
+
+                // BT-1053: Return val_var so callers (e.g. generate_conditional_branch_inline)
+                // can use it as the branch result.
+                return Ok((
+                    docvec![
                         "let ",
-                        Document::String(val_var.clone()),
+                        val_var.clone(),
                         " = ",
-                        Document::String(open_scope_result),
+                        value_code,
                         " in let ",
-                        Document::String(new_state),
+                        new_state,
                         " = call 'maps':'put'('",
                         state_key.to_string(),
                         "', ",
-                        Document::String(val_var.clone()),
+                        val_var.clone(),
                         ", ",
                         current_state,
                         ") in ",
-                    ]);
-                }
-
-                // BT-1053: Record val_var so callers (e.g. generate_conditional_branch_inline)
-                // can use it as the branch result via last_open_scope_result.
-                self.last_open_scope_result = Some(val_var.clone());
-
-                return Ok(docvec![
-                    "let ",
-                    val_var.clone(),
-                    " = ",
-                    value_code,
-                    " in let ",
-                    new_state,
-                    " = call 'maps':'put'('",
-                    state_key.to_string(),
-                    "', ",
-                    val_var.clone(),
-                    ", ",
-                    current_state,
-                    ") in ",
-                ]);
+                    ],
+                    val_var,
+                ));
             }
         }
-        Ok(Document::Nil)
+        Err(CodeGenError::Internal(
+            "generate_local_var_assignment_in_loop called on non-assignment expression".to_string(),
+        ))
     }
 
     /// Returns `true` if `expr` is an inline conditional (`ifTrue:` / `ifFalse:` /

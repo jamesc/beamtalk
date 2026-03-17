@@ -29,6 +29,30 @@ use crate::ast::{
 };
 use crate::docvec;
 
+/// Classification of how a block body expression should be handled.
+/// Produced by [`CoreErlangGenerator::classify_block_expr`] and consumed
+/// by [`CoreErlangGenerator::generate_block_expr`].
+enum BlockExprKind {
+    /// `{a, b} := expr` or `#[a, b] := expr` — destructure assignment.
+    /// Carries `is_last` so the handler can append `'nil'` when the destructure
+    /// is the final expression in the block.
+    Destructure { is_last: bool },
+    /// Last expression that is a class method self-send (BT-1397).
+    LastClassMethodSelfSend,
+    /// Last expression (general case) — its value is the block's result.
+    LastExpr,
+    /// `self.field := value` — direct field assignment (non-last).
+    FieldAssignment,
+    /// `var := expr` — local variable assignment (non-last).
+    LocalAssignment,
+    /// `whileTrue:` / `whileFalse:` / `timesRepeat:` with threaded vars (non-last).
+    ControlFlowWithThreadedVars,
+    /// Class method self-send as non-last expression (BT-1397).
+    ClassMethodSelfSend,
+    /// Expression evaluated for side effects only — result discarded.
+    SideEffect,
+}
+
 impl CoreErlangGenerator {
     /// Generates code for a literal value.
     ///
@@ -885,7 +909,7 @@ impl CoreErlangGenerator {
             let is_last = i == filtered_body.len() - 1;
 
             if Self::is_field_assignment(expr) {
-                let doc = self.generate_field_assignment_open(expr)?;
+                let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
                 docs.push(doc);
                 if is_last {
                     // Return the assigned value and updated state.
@@ -906,7 +930,7 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if Self::is_local_var_assignment(expr) {
-                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                let (assign_doc, _val_var) = self.generate_local_var_assignment_in_loop(expr)?;
                 docs.push(assign_doc);
                 if let Expression::Assignment { target, .. } = expr {
                     if let Expression::Identifier(id) = target.as_ref() {
@@ -952,11 +976,8 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Non-assignment expression
-                // BT-1397: Clear before generating to detect open-scope results from
-                // class method self-sends.
-                self.last_open_scope_result = None;
-                let doc = self.generate_expression(expr)?;
-                let open_scope = self.last_open_scope_result.take();
+                // BT-1397: Detect open-scope results from class method self-sends.
+                let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
                 if is_last {
                     // Wrap result in {Result, StateAcc} tuple
                     let state = self.current_state_var();
@@ -1218,7 +1239,6 @@ impl CoreErlangGenerator {
     /// For local variable assignments like: `[count := 0. count + 1]`
     /// We need:
     ///   `let Count = 0 in Count + 1`
-    #[allow(clippy::too_many_lines)]
     pub(super) fn generate_block_body_slice(
         &mut self,
         body: &[&Expression],
@@ -1228,266 +1248,328 @@ impl CoreErlangGenerator {
         }
 
         let mut docs: Vec<Document<'static>> = Vec::new();
-        let mut i = 0;
 
-        while i < body.len() {
-            let expr = body[i];
+        for (i, expr) in body.iter().enumerate() {
             let is_last = i == body.len() - 1;
-            let is_field_assignment = Self::is_field_assignment(expr);
-            let is_local_assignment = Self::is_local_var_assignment(expr);
+            let kind = Self::classify_block_expr(self, expr, is_last);
+            let doc = self.generate_block_expr(expr, &kind)?;
+            docs.push(doc);
+        }
 
-            if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                // Destructuring: handle for both last and non-last positions.
-                // The match below checks is_last internally for Array; Tuple wraps remaining body.
-                match pattern {
-                    Pattern::Array { elements, rest, .. } => {
-                        // Array destructuring: generate sequential `let` bindings using `at:`.
-                        // Example: `#[a, b] := expr` →
-                        //   let _Arr1 = <expr> in
-                        //   let A = send(_Arr1, 'at:', [1]) in
-                        //   let B = send(_Arr1, 'at:', [2]) in
-                        // With rest: `#[a, ...rest] := expr` →
-                        //   let _Arr1 = <expr> in
-                        //   let A = send(_Arr1, 'at:', [1]) in
-                        //   let Rest = beamtalk_array:slice_from(_Arr1, 2) in
-                        let arr_var = self.fresh_temp_var("Arr");
-                        let val_doc = self.expression_doc(value)?;
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(arr_var.clone()),
-                            " = ",
-                            val_doc,
-                            " in "
-                        ]);
-                        for (idx, elem) in elements.iter().enumerate() {
-                            let one_based = Document::String((idx + 1).to_string());
-                            match elem {
-                                Pattern::Variable(id) => {
-                                    let core_var = Self::to_core_erlang_var(&id.name);
-                                    self.bind_var(&id.name, &core_var);
-                                    docs.push(docvec![
-                                        "let ",
-                                        Document::String(core_var),
-                                        " = call 'beamtalk_message_dispatch':'send'(",
-                                        Document::String(arr_var.clone()),
-                                        ", 'at:', [",
-                                        one_based,
-                                        "]) in "
-                                    ]);
-                                }
-                                Pattern::Literal(lit, _span) => {
-                                    // Guard-check: extract element and assert it equals the
-                                    // literal.  Raises `{badmatch, Array}` on mismatch.
-                                    let elem_var = self.fresh_temp_var("Elem");
-                                    let guard_ok_var = self.fresh_temp_var("GuardOk");
-                                    let mismatch_var = self.fresh_temp_var("Mismatch");
-                                    let lit_doc = self.generate_literal(lit)?;
-                                    docs.push(docvec![
-                                        "let ",
-                                        Document::String(elem_var.clone()),
-                                        " = call 'beamtalk_message_dispatch':'send'(",
-                                        Document::String(arr_var.clone()),
-                                        ", 'at:', [",
-                                        one_based,
-                                        "]) in "
-                                    ]);
-                                    docs.push(docvec![
-                                        "let ",
-                                        Document::String(guard_ok_var),
-                                        " = case ",
-                                        Document::String(elem_var),
-                                        " of <",
-                                        lit_doc,
-                                        "> when 'true' -> 'ok' <",
-                                        Document::String(mismatch_var),
-                                        "> when 'true' -> call 'erlang':'error'({'badmatch', ",
-                                        Document::String(arr_var.clone()),
-                                        "}) end in "
-                                    ]);
-                                }
-                                Pattern::Wildcard(_) => {} // no binding needed
-                                _ => {
-                                    return Err(CodeGenError::UnsupportedFeature {
-                                        feature: "Nested patterns in array destructuring"
-                                            .to_string(),
-                                        location: format!("{:?}", elem.span()),
-                                    });
-                                }
-                            }
-                        }
-                        // Rest pattern: `...rest` binds remaining elements as a sub-array
-                        if let Some(rest_pat) = rest {
-                            if let Pattern::Variable(id) = rest_pat.as_ref() {
-                                let core_var = Self::to_core_erlang_var(&id.name);
-                                self.bind_var(&id.name, &core_var);
-                                let from_idx = Document::String((elements.len() + 1).to_string());
-                                docs.push(docvec![
-                                    "let ",
-                                    Document::String(core_var),
-                                    " = call 'beamtalk_array':'slice_from'(",
-                                    Document::String(arr_var.clone()),
-                                    ", ",
-                                    from_idx,
-                                    ") in "
-                                ]);
-                            }
-                            // Pattern::Wildcard — no binding needed
-                        }
-                        if is_last {
-                            docs.push(Document::Str("'nil'"));
-                        }
-                    }
-                    Pattern::Tuple { .. } => {
-                        // Tuple destructuring in a block body: use the flat element/2 approach
-                        // (same strategy as array destructuring above). This avoids generating a
-                        // `case` expression inside a `fun` body, which triggers core_lint
-                        // `illegal_expr` due to the invalid `<<"...">>` binary literal in the
-                        // catch-all arm.
-                        //
-                        // Example: `{a, b} := expr` →
-                        //   let _Tup1 = <expr> in
-                        //   let A = call 'erlang':'element'(1, _Tup1) in
-                        //   let B = call 'erlang':'element'(2, _Tup1) in
-                        let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                        for d in binding_docs {
-                            docs.push(d);
-                        }
-                        if is_last {
-                            docs.push(Document::Str("'nil'"));
-                        }
-                    }
-                    Pattern::Map { .. } => {
-                        // Map destructuring: generate flat `let` bindings using erlang:map_get/2.
-                        //
-                        // Example: `#{#sid => sid} := expr` →
-                        //   let _Map1 = <expr> in
-                        //   let Sid = call 'erlang':'map_get'('sid', _Map1) in
-                        let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                        for d in binding_docs {
-                            docs.push(d);
-                        }
-                        if is_last {
-                            docs.push(Document::Str("'nil'"));
-                        }
-                    }
-                    _ => {
-                        return Err(CodeGenError::UnsupportedFeature {
-                            feature: "Unsupported destructuring pattern kind".to_string(),
-                            location: "generate_block_body_slice".to_string(),
-                        });
-                    }
-                }
-            } else if is_last && self.is_class_method_self_send(expr) {
+        Ok(Document::Vec(docs))
+    }
+
+    /// Classify a block body expression for dispatch.
+    ///
+    /// The order of checks matters: more specific patterns (e.g. destructuring,
+    /// field assignment) must come before general ones (e.g. pure expression).
+    fn classify_block_expr(&self, expr: &Expression, is_last: bool) -> BlockExprKind {
+        if matches!(expr, Expression::DestructureAssignment { .. }) {
+            return BlockExprKind::Destructure { is_last };
+        }
+
+        if is_last && self.is_class_method_self_send(expr) {
+            return BlockExprKind::LastClassMethodSelfSend;
+        }
+
+        if is_last {
+            return BlockExprKind::LastExpr;
+        }
+
+        if Self::is_field_assignment(expr) {
+            return BlockExprKind::FieldAssignment;
+        }
+
+        if Self::is_local_var_assignment(expr) {
+            return BlockExprKind::LocalAssignment;
+        }
+
+        if self.get_control_flow_threaded_vars(expr).is_some() {
+            return BlockExprKind::ControlFlowWithThreadedVars;
+        }
+
+        if self.is_class_method_self_send(expr) {
+            return BlockExprKind::ClassMethodSelfSend;
+        }
+
+        BlockExprKind::SideEffect
+    }
+
+    /// Generate code for a single block body expression, dispatching by kind.
+    fn generate_block_expr(
+        &mut self,
+        expr: &Expression,
+        kind: &BlockExprKind,
+    ) -> Result<Document<'static>> {
+        match *kind {
+            BlockExprKind::Destructure { is_last } => {
+                self.generate_block_destructure(expr, is_last)
+            }
+            BlockExprKind::LastClassMethodSelfSend => {
                 // BT-1397: Class method self-send as last expression in a block body.
                 // The generated code leaves an open scope ending with `in ` — close it
                 // with the unwrapped result variable (same pattern as generate_class_method_body).
-                self.last_open_scope_result = None;
-                docs.push(self.generate_expression(expr)?);
-                if let Some(result_var) = self.last_open_scope_result.take() {
-                    docs.push(Document::String(result_var));
-                }
-            } else if is_last {
-                // Last expression: generate directly (its value is the block's result)
-                docs.push(self.generate_expression(expr)?);
-            } else if is_field_assignment {
-                // Field assignment not at end: generate WITHOUT closing the value
-                // This leaves the let bindings open for subsequent expressions
-                docs.push(self.generate_field_assignment_open(expr)?);
-            } else if is_local_assignment {
-                // Local variable assignment: generate with proper binding
-                if let Expression::Assignment { target, value, .. } = expr {
-                    // BT-852: Stored blocks with mutations are now supported via Tier 2.
-                    // generate_block() handles stateful emission; no validation needed here.
-
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        let var_name = &id.name;
-                        // Determine the Core Erlang variable name:
-                        // - If the variable is already bound (e.g. block parameter), reuse that Core var.
-                        // - Otherwise, create a new Core Erlang variable name.
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        // Capture the value expression (preserves side effects)
-                        // Important: capture BEFORE updating the mapping,
-                        // so that any uses of the variable in the RHS see the previous binding.
-                        // BT-1397: Clear before RHS so we detect open-scope results from
-                        // class method self-sends in the value expression.
-                        self.last_open_scope_result = None;
-                        let val_doc = self.expression_doc(value)?;
-                        // Now update the mapping so subsequent expressions see this binding.
-                        self.bind_var(var_name, &core_var);
-                        // BT-1397: If the RHS produced an open scope (class method self-send),
-                        // emit the open scope then bind the variable to its result.
-                        if let Some(open_scope_result) = self.last_open_scope_result.take() {
-                            docs.push(docvec![
-                                val_doc,
-                                "let ",
-                                Document::String(core_var),
-                                " = ",
-                                Document::String(open_scope_result),
-                                " in "
-                            ]);
-                        } else {
-                            docs.push(docvec![
-                                "let ",
-                                Document::String(core_var.clone()),
-                                " = ",
-                                val_doc,
-                                " in "
-                            ]);
-                        }
-                    }
-                }
-            } else if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
-                // whileTrue:/whileFalse:/timesRepeat: with mutations - need to rebind threaded vars after loop
-                // For single var, the loop returns its final value directly
-                // For multiple vars, we'd need a tuple (not yet supported)
-                if threaded_vars.len() == 1 {
-                    let var = &threaded_vars[0];
-                    // Get the Core Erlang variable name for this var
-                    let core_var = self
-                        .lookup_var(var)
-                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    let expr_doc = self.expression_doc(expr)?;
-                    docs.push(docvec![
-                        "let ",
-                        Document::String(core_var.clone()),
-                        " = ",
-                        expr_doc,
-                        " in "
-                    ]);
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                if let Some(result_var) = open_scope {
+                    Ok(docvec![expr_doc, Document::String(result_var)])
                 } else {
-                    // Multi-var case not supported yet
-                    return Err(CodeGenError::UnsupportedFeature {
-                        feature: "Multiple threaded variables in control flow".to_string(),
-                        location: "generate_block_body_slice".to_string(),
-                    });
+                    Ok(expr_doc)
                 }
-            } else if self.is_class_method_self_send(expr) {
+            }
+            BlockExprKind::LastExpr => {
+                // Last expression: generate directly (its value is the block's result)
+                self.generate_expression(expr)
+            }
+            BlockExprKind::FieldAssignment => {
+                // Field assignment not at end: generate WITHOUT closing the value.
+                // This leaves the let bindings open for subsequent expressions.
+                let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
+                Ok(doc)
+            }
+            BlockExprKind::LocalAssignment => self.generate_block_local_assignment(expr),
+            BlockExprKind::ControlFlowWithThreadedVars => {
+                self.generate_block_control_flow_threaded(expr)
+            }
+            BlockExprKind::ClassMethodSelfSend => {
                 // BT-1397: Class method self-send as non-last expression in a block body.
                 // The generated code leaves an open scope — emit it and discard the result.
-                self.last_open_scope_result = None;
-                let expr_doc = self.expression_doc(expr)?;
-                if let Some(result_var) = self.last_open_scope_result.take() {
-                    docs.push(docvec![
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                if let Some(result_var) = open_scope {
+                    Ok(docvec![
                         expr_doc,
                         "let _Unit = ",
                         Document::String(result_var),
                         " in "
-                    ]);
+                    ])
                 } else {
-                    docs.push(docvec!["let _Unit = ", expr_doc, " in "]);
+                    Ok(docvec!["let _Unit = ", expr_doc, " in "])
                 }
-            } else {
+            }
+            BlockExprKind::SideEffect => {
                 // Not an assignment or loop - generate and discard result
                 let expr_doc = self.expression_doc(expr)?;
-                docs.push(docvec!["let _Unit = ", expr_doc, " in "]);
+                Ok(docvec!["let _Unit = ", expr_doc, " in "])
             }
+        }
+    }
 
-            i += 1;
+    /// Handle destructure assignment expressions in block bodies.
+    ///
+    /// Dispatches to sub-helpers by pattern kind: array, tuple, map.
+    /// When `is_last` is true, appends `'nil'` as the block result value since
+    /// destructuring only creates bindings and does not produce a value itself.
+    fn generate_block_destructure(
+        &mut self,
+        expr: &Expression,
+        is_last: bool,
+    ) -> Result<Document<'static>> {
+        let Expression::DestructureAssignment { pattern, value, .. } = expr else {
+            unreachable!("caller guarantees DestructureAssignment");
+        };
+
+        match pattern {
+            Pattern::Array { elements, rest, .. } => {
+                let mut doc =
+                    self.generate_block_array_destructure(elements, rest.as_deref(), value)?;
+                if is_last {
+                    doc = docvec![doc, "'nil'"];
+                }
+                Ok(doc)
+            }
+            Pattern::Tuple { .. } | Pattern::Map { .. } => {
+                let mut docs = self.generate_destructure_bindings(pattern, value)?;
+                if is_last {
+                    docs.push(Document::Str("'nil'"));
+                }
+                Ok(Document::Vec(docs))
+            }
+            _ => Err(CodeGenError::UnsupportedFeature {
+                feature: "Unsupported destructuring pattern kind".to_string(),
+                location: "generate_block_body_slice".to_string(),
+            }),
+        }
+    }
+
+    /// Generate array destructure bindings in a block body.
+    ///
+    /// Example: `#[a, b] := expr` generates:
+    ///   `let _Arr1 = <expr> in let A = send(_Arr1, 'at:', [1]) in let B = send(...) in`
+    /// With rest: `#[a, ...rest] := expr` additionally generates:
+    ///   `let Rest = beamtalk_array:slice_from(_Arr1, 2) in`
+    fn generate_block_array_destructure(
+        &mut self,
+        elements: &[Pattern],
+        rest: Option<&Pattern>,
+        value: &Expression,
+    ) -> Result<Document<'static>> {
+        let arr_var = self.fresh_temp_var("Arr");
+        let val_doc = self.expression_doc(value)?;
+        let mut docs = vec![docvec![
+            "let ",
+            Document::String(arr_var.clone()),
+            " = ",
+            val_doc,
+            " in "
+        ]];
+
+        for (idx, elem) in elements.iter().enumerate() {
+            let one_based = Document::String((idx + 1).to_string());
+            match elem {
+                Pattern::Variable(id) => {
+                    let core_var = Self::to_core_erlang_var(&id.name);
+                    self.bind_var(&id.name, &core_var);
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(core_var),
+                        " = call 'beamtalk_message_dispatch':'send'(",
+                        Document::String(arr_var.clone()),
+                        ", 'at:', [",
+                        one_based,
+                        "]) in "
+                    ]);
+                }
+                Pattern::Literal(lit, _span) => {
+                    // Guard-check: extract element and assert it equals the
+                    // literal.  Raises `{badmatch, Array}` on mismatch.
+                    let elem_var = self.fresh_temp_var("Elem");
+                    let guard_ok_var = self.fresh_temp_var("GuardOk");
+                    let mismatch_var = self.fresh_temp_var("Mismatch");
+                    let lit_doc = self.generate_literal(lit)?;
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(elem_var.clone()),
+                        " = call 'beamtalk_message_dispatch':'send'(",
+                        Document::String(arr_var.clone()),
+                        ", 'at:', [",
+                        one_based,
+                        "]) in "
+                    ]);
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(guard_ok_var),
+                        " = case ",
+                        Document::String(elem_var),
+                        " of <",
+                        lit_doc,
+                        "> when 'true' -> 'ok' <",
+                        Document::String(mismatch_var),
+                        "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                        Document::String(arr_var.clone()),
+                        "}) end in "
+                    ]);
+                }
+                Pattern::Wildcard(_) => {} // no binding needed
+                _ => {
+                    return Err(CodeGenError::UnsupportedFeature {
+                        feature: "Nested patterns in array destructuring".to_string(),
+                        location: format!("{:?}", elem.span()),
+                    });
+                }
+            }
+        }
+
+        // Rest pattern: `...rest` binds remaining elements as a sub-array
+        // Pattern::Wildcard — no binding needed, only Variable generates code.
+        if let Some(Pattern::Variable(id)) = rest {
+            let core_var = Self::to_core_erlang_var(&id.name);
+            self.bind_var(&id.name, &core_var);
+            let from_idx = Document::String((elements.len() + 1).to_string());
+            docs.push(docvec![
+                "let ",
+                Document::String(core_var),
+                " = call 'beamtalk_array':'slice_from'(",
+                Document::String(arr_var.clone()),
+                ", ",
+                from_idx,
+                ") in "
+            ]);
         }
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Handle local variable assignment in a block body (non-last position).
+    fn generate_block_local_assignment(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        let Expression::Assignment { target, value, .. } = expr else {
+            return Ok(Document::Nil);
+        };
+        let Expression::Identifier(id) = target.as_ref() else {
+            return Ok(Document::Nil);
+        };
+
+        // BT-852: Stored blocks with mutations are now supported via Tier 2.
+        // generate_block() handles stateful emission; no validation needed here.
+
+        let var_name = &id.name;
+        // Determine the Core Erlang variable name:
+        // - If the variable is already bound (e.g. block parameter), reuse that Core var.
+        // - Otherwise, create a new Core Erlang variable name.
+        let core_var = self
+            .lookup_var(var_name)
+            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        // Capture the value expression (preserves side effects)
+        // Important: capture BEFORE updating the mapping,
+        // so that any uses of the variable in the RHS see the previous binding.
+        // BT-1397: Detect open-scope results from class method self-sends
+        // in the value expression.
+        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
+        // Now update the mapping so subsequent expressions see this binding.
+        self.bind_var(var_name, &core_var);
+        // BT-1397: If the RHS produced an open scope (class method self-send),
+        // emit the open scope then bind the variable to its result.
+        if let Some(open_scope_result) = open_scope {
+            Ok(docvec![
+                val_doc,
+                "let ",
+                Document::String(core_var),
+                " = ",
+                Document::String(open_scope_result),
+                " in "
+            ])
+        } else {
+            Ok(docvec![
+                "let ",
+                Document::String(core_var.clone()),
+                " = ",
+                val_doc,
+                " in "
+            ])
+        }
+    }
+
+    /// Handle control flow with threaded variables (`whileTrue:`/`whileFalse:`/`timesRepeat:`).
+    ///
+    /// For single var, the loop returns its final value directly.
+    /// For multiple vars, we'd need a tuple (not yet supported).
+    fn generate_block_control_flow_threaded(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        let threaded_vars = self
+            .get_control_flow_threaded_vars(expr)
+            .expect("caller guarantees control flow with threaded vars");
+
+        if threaded_vars.len() == 1 {
+            let var = &threaded_vars[0];
+            // Get the Core Erlang variable name for this var
+            let core_var = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            let expr_doc = self.expression_doc(expr)?;
+            Ok(docvec![
+                "let ",
+                Document::String(core_var.clone()),
+                " = ",
+                expr_doc,
+                " in "
+            ])
+        } else {
+            // Multi-var case not supported yet
+            Err(CodeGenError::UnsupportedFeature {
+                feature: "Multiple threaded variables in control flow".to_string(),
+                location: "generate_block_body_slice".to_string(),
+            })
+        }
     }
 
     /// Generates flat `let` bindings for a destructuring assignment.
@@ -1816,13 +1898,8 @@ impl CoreErlangGenerator {
         for arg in arguments {
             if Self::is_field_assignment(arg) {
                 // Push hoisted binding directly to docs (preserves source order).
-                docs.push(self.generate_field_assignment_open(arg)?);
-                let val_var = self.last_open_scope_result.take().ok_or_else(|| {
-                    CodeGenError::Internal(
-                        "generate_field_assignment_open did not set last_open_scope_result"
-                            .to_string(),
-                    )
-                })?;
+                let (doc, val_var) = self.generate_field_assignment_open(arg)?;
+                docs.push(doc);
                 arg_docs.push(Document::String(val_var));
             } else {
                 arg_docs.push(self.expression_doc(arg)?);

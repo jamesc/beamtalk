@@ -122,13 +122,12 @@ module 'comment_handling' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cas
 
 
 'terminate'/2 = fun (Reason, State) ->
-    %% Call terminate method if defined
+    %% Call terminate: method if defined — exceptions must not prevent shutdown
     let Self = call 'beamtalk_actor':'make_self'(State) in
-    case call 'comment_handling':'dispatch'('terminate', [Reason], Self, State) of
-        <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
-        <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
-        <_TermOther> when 'true' -> 'ok'
-    end
+    let _TermDisp = try call 'comment_handling':'dispatch'('terminate:', [Reason], Self, State)
+        of _TermOk -> 'ok'
+        catch <_TermT, _TermE, _TermS> -> 'ok'
+    in 'ok'
 
 
 'safe_dispatch'/3 = fun (Selector, Args, State) ->

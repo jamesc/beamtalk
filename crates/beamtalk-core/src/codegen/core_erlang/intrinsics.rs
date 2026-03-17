@@ -592,13 +592,8 @@ impl CoreErlangGenerator {
         for arg in arguments {
             let arg_var = self.fresh_temp_var("ValArg");
             if Self::is_field_assignment(arg) {
-                parts.push(self.generate_field_assignment_open(arg)?);
-                let val_var = self.last_open_scope_result.take().ok_or_else(|| {
-                    CodeGenError::Internal(
-                        "generate_field_assignment_open did not set last_open_scope_result"
-                            .to_string(),
-                    )
-                })?;
+                let (doc, val_var) = self.generate_field_assignment_open(arg)?;
+                parts.push(doc);
                 parts.push(docvec![
                     "let ",
                     Document::String(arg_var.clone()),
