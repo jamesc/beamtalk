@@ -123,6 +123,26 @@ Object subclass: Actor
   /// ```
   initialize => nil
 
+  /// Optional lifecycle hook called when the actor is shutting down.
+  ///
+  /// Override in subclasses to perform cleanup such as closing resources,
+  /// flushing buffers, or notifying dependents. Called synchronously during
+  /// graceful shutdown (`stop`). The `reason` parameter is a Symbol indicating
+  /// why the actor is stopping (e.g., `#normal` for graceful stop).
+  ///
+  /// Not called when the actor is forcefully killed (`kill`).
+  /// If `terminate:` raises an error, shutdown proceeds anyway.
+  /// Actor state (`self.field`) is accessible during `terminate:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Actor subclass: Logger
+  ///   state: logFile = nil
+  ///   terminate: reason =>
+  ///     self.logFile isNil ifFalse: [self.logFile close]
+  /// ```
+  terminate: _reason => nil
+
   /// Delegate message dispatch to the backing Erlang module.
   ///
   /// This method is a sentinel — non-native Actors do not have a backing
