@@ -15,6 +15,7 @@ TestCase subclass: SupervisionSpecValueTest
     self assert: spec actorClass equals: nil
     self assert: spec restart equals: #temporary
     self assert: spec args equals: nil
+    self assert: spec shutdown equals: nil
 
   testKeywordConstructor =>
     spec := SupervisionSpec
@@ -22,10 +23,12 @@ TestCase subclass: SupervisionSpecValueTest
       actorClass: Counter
       restart: #permanent
       args: nil
+      shutdown: nil
     self assert: spec id equals: #db
     self assert: spec actorClass equals: Counter
     self assert: spec restart equals: #permanent
     self assert: spec args equals: nil
+    self assert: spec shutdown equals: nil
 
   testWithSetterReturnsFreshCopy =>
     spec := SupervisionSpec new
@@ -127,3 +130,36 @@ TestCase subclass: SupervisionSpecValueTest
     self assert: spec class equals: SupervisionSpec
     self assert: spec actorClass name equals: #Counter
     self assert: spec restart equals: #temporary
+
+  // === withShutdown: fluent override (BT-1456) ===
+  testWithShutdownSetterReturnsFreshCopy =>
+    spec := SupervisionSpec new withActorClass: Counter
+    spec2 := spec withShutdown: 30000
+    // Original unchanged
+    self assert: spec shutdown equals: nil
+    // New instance updated
+    self assert: spec2 shutdown equals: 30000
+
+  testChildSpecWorkerDefaultShutdown =>
+    // Without withShutdown:, workers default to 5000
+    spec := SupervisionSpec new withActorClass: Counter
+    child := spec childSpec
+    self assert: (child at: #shutdown) equals: 5000
+
+  testChildSpecCustomShutdown =>
+    // withShutdown: overrides the default for workers
+    spec := (SupervisionSpec new withActorClass: Counter) withShutdown: 30000
+    child := spec childSpec
+    self assert: (child at: #shutdown) equals: 30000
+
+  testChildSpecSupervisorDefaultShutdown =>
+    // Without withShutdown:, supervisors default to #infinity
+    spec := SupervisionSpec new withActorClass: Supervisor
+    child := spec childSpec
+    self assert: (child at: #shutdown) equals: #infinity
+
+  testChildSpecSupervisorCustomShutdown =>
+    // withShutdown: can override even supervisor shutdown
+    spec := (SupervisionSpec new withActorClass: Supervisor) withShutdown: 10000
+    child := spec childSpec
+    self assert: (child at: #shutdown) equals: 10000

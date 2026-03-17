@@ -442,33 +442,92 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates the `handle_info/2` callback for out-of-band messages (BT-936).
+    /// Generates the `handle_info/2` callback (BT-936, ADR 0065 / BT-1457).
     ///
-    /// Delegates to `beamtalk_actor:handle_info/2`, which currently ignores
-    /// all info messages. This satisfies the `gen_server` behaviour contract
-    /// and provides a hook point for future OTP message handling (e.g. DOWN).
+    /// For **Server subclasses**, dispatches to the user-defined `handleInfo:` method
+    /// with log-and-continue error semantics: if `handleInfo:` raises an error, the
+    /// server logs a warning and continues with the pre-call state.
     ///
-    /// # Generated Code
+    /// For **plain Actor subclasses**, generates the default ignore-all stub that
+    /// delegates to `beamtalk_actor:handle_info/2`.
+    ///
+    /// # Generated Code (Server subclass)
+    ///
+    /// ```erlang
+    /// 'handle_info'/2 = fun (Msg, State) ->
+    ///     case call 'Module':'safe_dispatch'('handleInfo:', [Msg], State) of
+    ///         <{'reply', _Result, NewState}> when 'true' -> {'noreply', NewState}
+    ///         <{'error', Error, _ErrState}> when 'true' ->
+    ///             let _Log = call 'logger':'warning'(~{'handleInfo_error' => Error}~)
+    ///             in {'noreply', State}
+    ///         <_Other> when 'true' -> {'noreply', State}
+    ///     end
+    /// ```
+    ///
+    /// # Generated Code (plain Actor)
     ///
     /// ```erlang
     /// 'handle_info'/2 = fun (Msg, State) ->
     ///     call 'beamtalk_actor':'handle_info'(Msg, State)
     /// ```
-    #[allow(clippy::unused_self)] // method on impl for API consistency
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_handle_info(
         &self,
     ) -> Result<Document<'static>> {
-        let doc = docvec![
-            "'handle_info'/2 = fun (Msg, State) ->",
-            nest(
-                INDENT,
-                docvec![line(), "call 'beamtalk_actor':'handle_info'(Msg, State)",]
-            ),
-            "\n",
-            "\n",
-        ];
-        Ok(doc)
+        if self.is_server_subclass {
+            let module_name = self.module_name.clone();
+            let doc = docvec![
+                "'handle_info'/2 = fun (Msg, State) ->",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        docvec![
+                            "case call '",
+                            Document::String(module_name),
+                            "':'safe_dispatch'('handleInfo:', [Msg], State) of",
+                        ],
+                        nest(
+                            INDENT,
+                            docvec![
+                                line(),
+                                "<{'reply', _Result, NewState}> when 'true' ->",
+                                nest(INDENT, docvec![line(), "{'noreply', NewState}",]),
+                                line(),
+                                "<{'error', Error, _ErrState}> when 'true' ->",
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        "let _Log = call 'logger':'warning'(~{'handleInfo_error' => Error}~)",
+                                        line(),
+                                        "in {'noreply', State}",
+                                    ]
+                                ),
+                                line(),
+                                "<_Other> when 'true' -> {'noreply', State}",
+                            ]
+                        ),
+                        line(),
+                        "end",
+                    ]
+                ),
+                "\n",
+                "\n",
+            ];
+            Ok(doc)
+        } else {
+            let doc = docvec![
+                "'handle_info'/2 = fun (Msg, State) ->",
+                nest(
+                    INDENT,
+                    docvec![line(), "call 'beamtalk_actor':'handle_info'(Msg, State)",]
+                ),
+                "\n",
+                "\n",
+            ];
+            Ok(doc)
+        }
     }
 
     /// Generates the `code_change/3` callback for hot code reload.
