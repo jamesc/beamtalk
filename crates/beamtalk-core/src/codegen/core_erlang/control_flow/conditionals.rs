@@ -42,6 +42,7 @@
 //! `State{N}` chain managed by the method body generator.
 
 use super::super::document::Document;
+use super::super::gen_server::BodyExprKind;
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -235,116 +236,140 @@ impl CoreErlangGenerator {
             ));
         }
 
+        // Classify every expression upfront using the shared classifier (BT-1447).
+        let plan: Vec<BodyExprKind> = body.iter().map(|e| self.classify_body_expr(e)).collect();
+
         let mut last_result: Option<String> = None;
 
-        for (i, expr) in body.iter().enumerate() {
+        for (i, (expr, kind)) in body.iter().zip(plan.into_iter()).enumerate() {
             let is_last = i == body.len() - 1;
 
-            if Self::is_field_assignment(expr) {
-                // generate_field_assignment_open emits open let chain:
-                // "let _Val = <value> in let StateAccN = maps:put(...) in "
-                let (doc, val_var) = self.generate_field_assignment_open(expr)?;
-                docs.push(doc);
-                if is_last {
-                    // BT-884: val_var holds the assigned value variable
-                    last_result = Some(val_var);
+            match kind {
+                BodyExprKind::FieldAssignment => {
+                    // generate_field_assignment_open emits open let chain:
+                    // "let _Val = <value> in let StateAccN = maps:put(...) in "
+                    let (doc, val_var) = self.generate_field_assignment_open(expr)?;
+                    docs.push(doc);
+                    if is_last {
+                        // BT-884: val_var holds the assigned value variable
+                        last_result = Some(val_var);
+                    }
+                    // If not last, the let chain stays open for the next expression
                 }
-                // If not last, the let chain stays open for the next expression
-            } else if Self::is_local_var_assignment(expr) {
-                // BT-1053/BT-1225: Local variable mutation inside conditional branch.
-                // generate_local_var_assignment_in_loop emits open let chain:
-                // "let _Val = <value> in let StateAccN = maps:put('__local__key', _Val, StateAccM) in "
-                let (doc, val_var) = self.generate_local_var_assignment_in_loop(expr)?;
-                docs.push(doc);
-                if is_last {
-                    // val_var is the _Val bound by generate_local_var_assignment_in_loop
-                    last_result = Some(val_var);
-                } else {
-                    // BT-1225: Bind the variable name to the temp var so subsequent reads
-                    // within this block resolve directly to the temp var (e.g. `_Val1`)
-                    // rather than falling through to maps:get without the __local__ prefix,
-                    // which would cause a {badkey,VarName} crash at runtime.
-                    //
-                    // is_local_var_assignment(expr) guarantees expr is Assignment { target: Identifier }.
-                    // If either invariant breaks, fail loudly rather than silently skipping bind_var.
-                    let Expression::Assignment { target, .. } = expr else {
-                        unreachable!("is_local_var_assignment must ensure expr is an Assignment");
-                    };
-                    let Expression::Identifier(id) = target.as_ref() else {
-                        unreachable!(
-                            "is_local_var_assignment must ensure assignment target is an Identifier"
-                        );
-                    };
-                    self.bind_var(&id.name, &val_var);
+                BodyExprKind::LocalAssignPure
+                | BodyExprKind::LocalAssignTier2
+                | BodyExprKind::LocalAssignControlFlow
+                | BodyExprKind::LocalAssignSelfSend => {
+                    // BT-1053/BT-1225: Local variable mutation inside conditional branch.
+                    // generate_local_var_assignment_in_loop emits open let chain:
+                    // "let _Val = <value> in let StateAccN = maps:put('__local__key', _Val, StateAccM) in "
+                    let (doc, val_var) = self.generate_local_var_assignment_in_loop(expr)?;
+                    docs.push(doc);
+                    if is_last {
+                        // val_var is the _Val bound by generate_local_var_assignment_in_loop
+                        last_result = Some(val_var);
+                    } else {
+                        // BT-1225: Bind the variable name to the temp var so subsequent reads
+                        // within this block resolve directly to the temp var (e.g. `_Val1`)
+                        // rather than falling through to maps:get without the __local__ prefix,
+                        // which would cause a {badkey,VarName} crash at runtime.
+                        //
+                        // classify_body_expr guarantees expr is Assignment { target: Identifier }.
+                        // If either invariant breaks, fail loudly rather than silently skipping bind_var.
+                        let Expression::Assignment { target, .. } = expr else {
+                            unreachable!("LocalAssign* kinds must ensure expr is an Assignment");
+                        };
+                        let Expression::Identifier(id) = target.as_ref() else {
+                            unreachable!(
+                                "LocalAssign* kinds must ensure assignment target is an Identifier"
+                            );
+                        };
+                        self.bind_var(&id.name, &val_var);
+                    }
                 }
-            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                for d in binding_docs {
-                    docs.push(d);
+                BodyExprKind::DestructureAssignment => {
+                    if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                        let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                        for d in binding_docs {
+                            docs.push(d);
+                        }
+                    }
                 }
-            } else if is_last && self.control_flow_has_mutations(expr) {
-                // Last expression is nested control flow with mutations.
-                // It returns {Result, State} — unpack both.
-                let tuple_var = self.fresh_temp_var("Tuple");
-                let result_var = self.fresh_temp_var("BranchResult");
-                let expr_doc = self.expression_doc(expr)?;
-                let next_state = self.next_state_var();
-                docs.push(docvec![
-                    "let ",
-                    Document::String(tuple_var.clone()),
-                    " = ",
-                    expr_doc,
-                    " in let ",
-                    Document::String(result_var.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    Document::String(tuple_var.clone()),
-                    ") in let ",
-                    Document::String(next_state),
-                    " = call 'erlang':'element'(2, ",
-                    Document::String(tuple_var),
-                    ") in ",
-                ]);
-                last_result = Some(result_var);
-            } else if !is_last && self.control_flow_has_mutations(expr) {
-                // Non-last expression is nested control flow with mutations.
-                // Unpack {Result, State} and thread the state forward.
-                let tuple_var = self.fresh_temp_var("Tuple");
-                let expr_doc = self.expression_doc(expr)?;
-                let next_state = self.next_state_var();
-                docs.push(docvec![
-                    "let ",
-                    Document::String(tuple_var.clone()),
-                    " = ",
-                    expr_doc,
-                    " in let ",
-                    Document::String(next_state),
-                    " = call 'erlang':'element'(2, ",
-                    Document::String(tuple_var),
-                    ") in ",
-                ]);
-            } else if is_last {
-                // Last non-assignment: bind to result variable
-                let result_var = self.fresh_temp_var("BranchResult");
-                let expr_doc = self.expression_doc(expr)?;
-                docs.push(docvec![
-                    "let ",
-                    Document::String(result_var.clone()),
-                    " = ",
-                    expr_doc,
-                    " in ",
-                ]);
-                last_result = Some(result_var);
-            } else {
-                // Non-last, non-assignment: discard result
-                let seq_var = self.fresh_temp_var("seq");
-                let expr_doc = self.expression_doc(expr)?;
-                docs.push(docvec![
-                    "let ",
-                    Document::String(seq_var),
-                    " = ",
-                    expr_doc,
-                    " in ",
-                ]);
+                BodyExprKind::ControlFlowWithMutations => {
+                    if is_last {
+                        // Last expression is nested control flow with mutations.
+                        // It returns {Result, State} — unpack both.
+                        let tuple_var = self.fresh_temp_var("Tuple");
+                        let result_var = self.fresh_temp_var("BranchResult");
+                        let expr_doc = self.expression_doc(expr)?;
+                        let next_state = self.next_state_var();
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(tuple_var.clone()),
+                            " = ",
+                            expr_doc,
+                            " in let ",
+                            Document::String(result_var.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            Document::String(tuple_var.clone()),
+                            ") in let ",
+                            Document::String(next_state),
+                            " = call 'erlang':'element'(2, ",
+                            Document::String(tuple_var),
+                            ") in ",
+                        ]);
+                        last_result = Some(result_var);
+                    } else {
+                        // Non-last expression is nested control flow with mutations.
+                        // Unpack {Result, State} and thread the state forward.
+                        let tuple_var = self.fresh_temp_var("Tuple");
+                        let expr_doc = self.expression_doc(expr)?;
+                        let next_state = self.next_state_var();
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(tuple_var.clone()),
+                            " = ",
+                            expr_doc,
+                            " in let ",
+                            Document::String(next_state),
+                            " = call 'erlang':'element'(2, ",
+                            Document::String(tuple_var),
+                            ") in ",
+                        ]);
+                    }
+                }
+                // All other kinds (SelfFieldAtPut, EarlyReturn, SuperSend, ErrorSend,
+                // Tier2ValueCall, Tier2SelfSend, DispatchingSelfSend, Pure) are treated
+                // as pure expressions in the conditional branch context.
+                // Note: SelfFieldAtPut falls through here (matching pre-refactor behavior)
+                // since generate_field_assignment_open expects Assignment{FieldAccess},
+                // not the MessageSend form used by fieldAt:put:.
+                _ => {
+                    if is_last {
+                        // Last non-assignment: bind to result variable
+                        let result_var = self.fresh_temp_var("BranchResult");
+                        let expr_doc = self.expression_doc(expr)?;
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(result_var.clone()),
+                            " = ",
+                            expr_doc,
+                            " in ",
+                        ]);
+                        last_result = Some(result_var);
+                    } else {
+                        // Non-last, non-assignment: discard result
+                        let seq_var = self.fresh_temp_var("seq");
+                        let expr_doc = self.expression_doc(expr)?;
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(seq_var),
+                            " = ",
+                            expr_doc,
+                            " in ",
+                        ]);
+                    }
+                }
             }
         }
 
