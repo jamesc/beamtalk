@@ -202,20 +202,15 @@ impl CoreErlangGenerator {
 
         docs.push(docvec![format!("let {cond_var} = fun (StateAcc) -> "),]);
 
-        // Save and override loop/body context while generating the condition
-        let prev_in_loop_body = self.in_loop_body;
-        let prev_state_version = self.state_version();
-        self.in_loop_body = true;
-        self.set_state_version(0);
-
-        if let Expression::Block(cond_block) = condition {
-            docs.push(self.generate_block_body(cond_block)?);
-        } else {
-            docs.push(self.generate_expression(condition)?);
-        }
-
-        self.in_loop_body = prev_in_loop_body;
-        self.set_state_version(prev_state_version);
+        // Generate condition inside branch context
+        let cond_doc = self.with_branch_context(|this| {
+            if let Expression::Block(cond_block) = condition {
+                this.generate_block_body(cond_block)
+            } else {
+                this.generate_expression(condition)
+            }
+        })?;
+        docs.push(cond_doc);
 
         // Condition application and true/false arm headers
         if negate {
@@ -317,19 +312,14 @@ impl CoreErlangGenerator {
             ") -> ",
         ]);
 
-        let prev_in_loop_body = self.in_loop_body;
-        let prev_state_version = self.state_version();
-        self.in_loop_body = true;
-        self.set_state_version(0);
-
-        if let Expression::Block(cond_block) = condition {
-            docs.push(self.generate_block_body(cond_block)?);
-        } else {
-            docs.push(self.generate_expression(condition)?);
-        }
-
-        self.in_loop_body = prev_in_loop_body;
-        self.set_state_version(prev_state_version);
+        let cond_doc = self.with_branch_context(|this| {
+            if let Expression::Block(cond_block) = condition {
+                this.generate_block_body(cond_block)
+            } else {
+                this.generate_expression(condition)
+            }
+        })?;
+        docs.push(cond_doc);
 
         // Apply condition with current params.
         let case_arm = if negate {
@@ -533,9 +523,6 @@ impl CoreErlangGenerator {
             ") -> ",
         ]);
 
-        let prev_in_loop_body = self.in_loop_body;
-        let prev_hybrid = self.in_hybrid_loop;
-        let prev_state_version = self.state_version();
         let prev_readonly_field_params = std::mem::replace(
             &mut self.hybrid_readonly_field_params,
             all_field_params.clone(),
@@ -544,19 +531,17 @@ impl CoreErlangGenerator {
             &mut self.hybrid_mutated_fields,
             plan.mutated_fields.iter().cloned().collect(),
         );
-        self.in_loop_body = true;
-        self.in_hybrid_loop = true;
-        self.set_state_version(0);
-
-        let cond_result = if let Expression::Block(cond_block) = condition {
-            self.generate_block_body(cond_block)
-        } else {
-            self.generate_expression(condition)
-        };
-
-        self.in_loop_body = prev_in_loop_body;
-        self.in_hybrid_loop = prev_hybrid;
-        self.set_state_version(prev_state_version);
+        let cond_result = self.with_branch_context(|this| {
+            let prev_hybrid = this.in_hybrid_loop;
+            this.in_hybrid_loop = true;
+            let result = if let Expression::Block(cond_block) = condition {
+                this.generate_block_body(cond_block)
+            } else {
+                this.generate_expression(condition)
+            };
+            this.in_hybrid_loop = prev_hybrid;
+            result
+        });
 
         let cond_doc = match cond_result {
             Ok(doc) => doc,
@@ -582,6 +567,7 @@ impl CoreErlangGenerator {
             case_arm,
         ]);
 
+        let prev_hybrid = self.in_hybrid_loop;
         self.in_hybrid_loop = true;
         let prev_direct_params_loop = self.in_direct_params_loop;
         self.in_direct_params_loop = true;

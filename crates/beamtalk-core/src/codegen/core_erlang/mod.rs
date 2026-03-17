@@ -1158,6 +1158,25 @@ impl CoreErlangGenerator {
         self.state_threading.set_version(version);
     }
 
+    /// BT-1449: Executes `f` inside a branch context where `in_loop_body` is
+    /// `true` and `state_version` is reset to 0.  The previous values of both
+    /// fields are unconditionally restored after `f` returns (even on `Err`).
+    pub(super) fn with_branch_context<T>(
+        &mut self,
+        f: impl FnOnce(&mut CoreErlangGenerator) -> T,
+    ) -> T {
+        let saved_state_version = self.state_version();
+        let saved_in_loop = self.in_loop_body;
+        self.set_state_version(0);
+        self.in_loop_body = true;
+
+        let result = f(self);
+
+        self.in_loop_body = saved_in_loop;
+        self.set_state_version(saved_state_version);
+        result
+    }
+
     /// BT-412: Returns the current class variable state variable name.
     fn current_class_var(&self) -> String {
         if self.class_var_version == 0 {

@@ -496,12 +496,14 @@ impl CoreErlangGenerator {
         &mut self,
         body: &Block,
     ) -> Result<(Document<'static>, String, usize)> {
-        let saved_state_version = self.state_version();
-        self.set_state_version(0);
+        self.with_branch_context(|this| this.generate_exception_body_with_threading_inner(body))
+    }
 
-        let previous_in_loop_body = self.in_loop_body;
-        self.in_loop_body = true;
-
+    /// Inner implementation called inside `with_branch_context`.
+    fn generate_exception_body_with_threading_inner(
+        &mut self,
+        body: &Block,
+    ) -> Result<(Document<'static>, String, usize)> {
         let has_direct_field_assignments = body
             .body
             .iter()
@@ -602,8 +604,6 @@ impl CoreErlangGenerator {
         }
 
         let final_state_version = self.state_version();
-        self.in_loop_body = previous_in_loop_body;
-        self.set_state_version(saved_state_version);
         Ok((Document::Vec(docs), result_var, final_state_version))
     }
 }
