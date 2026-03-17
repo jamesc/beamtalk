@@ -88,6 +88,14 @@ impl StateThreading {
         self.current_var()
     }
 
+    /// Returns the name of the *next* state variable without advancing the
+    /// version counter.  Used when the caller needs to know the name before
+    /// calling `expression_doc` (which may itself advance state).
+    pub(super) fn peek_next_var(&self) -> String {
+        let next = self.version + 1;
+        format!("State{next}")
+    }
+
     /// Resets the state version to 0.
     ///
     /// Call this at the start of each method body, or when entering a

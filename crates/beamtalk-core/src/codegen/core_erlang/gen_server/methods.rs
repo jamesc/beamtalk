@@ -17,6 +17,40 @@ use crate::ast::{
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
 
+/// Classification of how a method body expression should be handled for
+/// state threading.  Produced by [`CoreErlangGenerator::classify_body_expr`]
+/// and consumed by the unified [`CoreErlangGenerator::generate_body_exprs_with_reply`].
+enum BodyExprKind {
+    /// `^ value` — early return from method.
+    EarlyReturn,
+    /// `self fieldAt: name put: val` — reflective field mutation.
+    SelfFieldAtPut,
+    /// `self.field := value` — direct field assignment.
+    FieldAssignment,
+    /// `var := expr` where the RHS is a Tier 2 `value:` call.
+    LocalAssignTier2,
+    /// `var := expr` where the RHS is control flow with field mutations.
+    LocalAssignControlFlow,
+    /// `var := expr` — simple local assignment.
+    LocalAssignPure,
+    /// `{a, b} := expr` — destructure assignment.
+    DestructureAssignment,
+    /// `super method` — super message send.
+    SuperSend,
+    /// `self error: "..."` — never returns.
+    ErrorSend,
+    /// Tier 2 `value:` call — returns `{Result, NewState}`.
+    Tier2ValueCall,
+    /// Tier 2 self-send with stateful block arguments.
+    Tier2SelfSend(Vec<(usize, Vec<String>)>),
+    /// Control flow with field mutations — returns `{Result, State}`.
+    ControlFlowWithMutations,
+    /// `self userMethod` — dispatching self-send via `safe_dispatch` (BT-1420).
+    DispatchingSelfSend,
+    /// Regular expression with no special state-threading needs.
+    Pure,
+}
+
 /// Tuple representing a method entry for `method_info` / `class_method_info` meta maps.
 ///
 /// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`, `is_sealed`)
@@ -168,667 +202,235 @@ impl CoreErlangGenerator {
     /// Generates a method definition body wrapped in a reply tuple.
     ///
     /// For `MethodDefinition` nodes with explicit body expressions.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "method body generation handles many expression types and state threading"
-    )]
+    /// Delegates to [`Self::generate_body_exprs_with_reply`].
     pub(in crate::codegen::core_erlang) fn generate_method_definition_body_with_reply(
         &mut self,
         method: &MethodDefinition,
     ) -> Result<Document<'static>> {
-        if method.body.is_empty() {
-            // Empty method body returns self (the actor object reference)
-            let state = self.current_state_var();
-            return Ok(docvec!["{'reply', Self, ", state, "}"]);
-        }
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-
-        // Generate all expressions except the last with state threading
-        // Filter out @expect directives — they are compile-time only and generate no code.
         let body: Vec<&Expression> = method
             .body
             .iter()
             .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
-        for (i, expr) in body.iter().enumerate() {
-            let is_last = i == body.len() - 1;
-            let is_field_assignment = Self::is_field_assignment(expr);
-            let is_local_assignment = Self::is_local_var_assignment(expr);
-            let is_self_field_at_put = self.is_self_field_at_put(expr);
-
-            // Check for early return
-            if let Expression::Return { value, .. } = expr {
-                // BT-904: If the returned value is a state-threading control flow
-                // (e.g., collect: with self-sends), it returns {Result, State} tuple.
-                // Unpack it instead of wrapping it again.
-                if self.control_flow_has_mutations(value) {
-                    let tuple_var = self.fresh_temp_var("Tuple");
-                    let value_str = self.expression_doc(value)?;
-                    let doc = docvec![
-                        "let ",
-                        Document::String(tuple_var.clone()),
-                        " = ",
-                        value_str,
-                        " in let _Result = call 'erlang':'element'(1, ",
-                        Document::String(tuple_var.clone()),
-                        ") in let _NewState = call 'erlang':'element'(2, ",
-                        Document::String(tuple_var),
-                        ") in {'reply', _Result, _NewState}",
-                    ];
-                    docs.push(doc);
-                } else {
-                    let final_state = self.current_state_var();
-                    let value_str = self.expression_doc(value)?;
-                    let doc = docvec![
-                        "let _ReturnValue = ",
-                        value_str,
-                        " in {'reply', _ReturnValue, ",
-                        Document::String(final_state),
-                        "}",
-                    ];
-                    docs.push(doc);
-                }
-                return Ok(Document::Vec(docs));
-            }
-
-            if is_last {
-                // Last expression: bind to Result and generate reply tuple
-                // BT-1324: self fieldAt:put: with state threading
-                if is_self_field_at_put {
-                    let doc = self.generate_self_field_at_put_open(expr)?;
-                    docs.push(doc);
-                    let val_var = self
-                        .last_open_scope_result
-                        .clone()
-                        .unwrap_or_else(|| "_".to_string());
-                    let final_state = self.current_state_var();
-                    docs.push(docvec![
-                        "{'reply', ",
-                        Document::String(val_var),
-                        ", ",
-                        Document::String(final_state),
-                        "}",
-                    ]);
-                // If the last expression is a field assignment, handle specially
-                } else if is_field_assignment {
-                    // Generate the assignment (leaves state binding open)
-                    if let Expression::Assignment { target, value, .. } = expr {
-                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
-                            let val_var = self.fresh_temp_var("Val");
-                            let current_state = self.current_state_var();
-
-                            let value_str = self.expression_doc(value)?;
-
-                            let new_state = self.next_state_var();
-                            let doc = docvec![
-                                "let ",
-                                Document::String(val_var.clone()),
-                                " = ",
-                                value_str,
-                                " in let ",
-                                Document::String(new_state.clone()),
-                                " = call 'maps':'put'('",
-                                Document::String(field.name.to_string()),
-                                "', ",
-                                Document::String(val_var.clone()),
-                                ", ",
-                                Document::String(current_state),
-                                ") in {'reply', ",
-                                Document::String(val_var),
-                                ", ",
-                                Document::String(new_state),
-                                "}",
-                            ];
-                            docs.push(doc);
-                        }
-                    }
-                } else if Self::is_super_message_send(expr) {
-                    // Super message send as last expression: unpack {reply, Result, NewState}
-                    let expr_str = self.expression_doc(expr)?;
-                    let doc = docvec![
-                        "let _SuperTuple = ",
-                        expr_str,
-                        " in let _Result = call 'erlang':'element'(2, _SuperTuple)",
-                        " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
-                        " in {'reply', _Result, _NewState}",
-                    ];
-                    docs.push(doc);
-                } else if Self::is_error_message_send(expr) {
-                    // Error message send: never returns, so just emit the call directly
-                    // without wrapping in a reply tuple (would be unreachable code)
-                    let expr_str = self.expression_doc(expr)?;
-                    docs.push(docvec![expr_str]);
-                } else if self.is_tier2_value_call(expr) {
-                    // BT-851: Last expression is a Tier 2 value: call.
-                    // Returns {Result, NewState} tuple — unpack for reply.
-                    let tuple_var = self.fresh_temp_var("T2Tuple");
-                    let expr_str = self.expression_doc(expr)?;
-                    let doc = docvec![
-                        "let ",
-                        Document::String(tuple_var.clone()),
-                        " = ",
-                        expr_str,
-                        " in let _Result = call 'erlang':'element'(1, ",
-                        Document::String(tuple_var.clone()),
-                        ") in let _NewState = call 'erlang':'element'(2, ",
-                        Document::String(tuple_var),
-                        ") in {'reply', _Result, _NewState}",
-                    ];
-                    docs.push(doc);
-                } else if self.control_flow_has_mutations(expr) {
-                    // BT-483: Last expression is control flow with field mutations.
-                    // The mutation variant returns {Result, State} tuple.
-                    let tuple_var = self.fresh_temp_var("Tuple");
-                    let expr_str = self.expression_doc(expr)?;
-                    let doc = docvec![
-                        "let ",
-                        Document::String(tuple_var.clone()),
-                        " = ",
-                        expr_str,
-                        " in let _Result = call 'erlang':'element'(1, ",
-                        Document::String(tuple_var.clone()),
-                        ") in let _NewState = call 'erlang':'element'(2, ",
-                        Document::String(tuple_var),
-                        ") in {'reply', _Result, _NewState}",
-                    ];
-                    docs.push(doc);
-                } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
-                    // BT-870: Last expression is a Tier 2 self-send (or promoted Tier 1 at
-                    // a known Tier 2 HOM position). generate_tier2_self_send_open emits the
-                    // dispatch + state extraction as an open let chain; close with reply tuple.
-                    let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
-                    docs.push(doc);
-                    let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
-                        CodeGenError::Internal(
-                            "invariant violation: missing dispatch var after Tier 2 self-send"
-                                .to_string(),
-                        )
-                    })?;
-                    let final_state = self.current_state_var();
-                    docs.push(docvec![
-                        "{'reply', call 'erlang':'element'(1, ",
-                        Document::String(dispatch_var),
-                        "), ",
-                        Document::String(final_state),
-                        "}",
-                    ]);
-                } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                    // Destructuring as last expression: emit bindings then reply with nil
-                    let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                    for d in binding_docs {
-                        docs.push(d);
-                    }
-                    let post_state = self.current_state_var();
-                    docs.push(docvec![
-                        "{'reply', 'nil', ",
-                        Document::String(post_state),
-                        "}",
-                    ]);
-                } else if self.is_dispatching_actor_self_send(expr) {
-                    // BT-1420: Self-send as last expression — thread NewState into reply.
-                    let doc = self.generate_self_dispatch_open(expr)?;
-                    docs.push(doc);
-                    let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
-                        CodeGenError::Internal(
-                            "invariant violation: missing dispatch var after self-send".to_string(),
-                        )
-                    })?;
-                    let final_state = self.current_state_var();
-                    docs.push(docvec![
-                        "{'reply', call 'erlang':'element'(1, ",
-                        Document::String(dispatch_var),
-                        "), ",
-                        Document::String(final_state),
-                        "}",
-                    ]);
-                } else {
-                    // Regular last expression: bind to Result and reply
-                    // BT-851: Get state AFTER expression generation, since Tier 2
-                    // value: calls advance state version inside expression_doc.
-                    let expr_str = self.expression_doc(expr)?;
-                    let post_state = self.current_state_var();
-                    let doc = docvec![
-                        "let _Result = ",
-                        expr_str,
-                        " in {'reply', _Result, ",
-                        Document::String(post_state),
-                        "}",
-                    ];
-                    docs.push(doc);
-                }
-            } else if is_self_field_at_put {
-                // BT-1324: self fieldAt:put: not at end: open let chain for state threading
-                let doc = self.generate_self_field_at_put_open(expr)?;
-                docs.push(doc);
-            } else if is_field_assignment {
-                // Field assignment not at end: generate WITHOUT closing the value
-                let doc = self.generate_field_assignment_open(expr)?;
-                docs.push(doc);
-            } else if is_local_assignment {
-                // BT-598: Local variable assignment in method body
-                if let Expression::Assignment { target, value, .. } = expr {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        let var_name = &id.name;
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-
-                        // BT-853: If RHS is a Tier 2 value: call, it returns
-                        // {Result, NewState} — unpack result and thread NewState.
-                        if self.is_tier2_value_call(value) {
-                            let tuple_var = self.fresh_temp_var("T2Tuple");
-                            let value_str = self.expression_doc(value)?;
-                            self.bind_var(var_name, &core_var);
-                            let new_state = self.next_state_var();
-                            docs.push(docvec![
-                                "let ",
-                                Document::String(tuple_var.clone()),
-                                " = ",
-                                value_str,
-                                " in let ",
-                                Document::String(core_var),
-                                " = call 'erlang':'element'(1, ",
-                                Document::String(tuple_var.clone()),
-                                ")\n in let ",
-                                Document::String(new_state),
-                                " = call 'erlang':'element'(2, ",
-                                Document::String(tuple_var),
-                                ") in ",
-                            ]);
-                        // BT-598: If RHS is control flow with mutations, it returns
-                        // {Result, State} — unpack and update state variable.
-                        } else if self.control_flow_has_mutations(value) {
-                            let tuple_var = self.fresh_temp_var("Tuple");
-                            let next_version = self.state_version() + 1;
-                            let new_state = if next_version == 1 {
-                                "State1".to_string()
-                            } else {
-                                format!("State{next_version}")
-                            };
-                            let value_str = self.expression_doc(value)?;
-                            let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                                "let ",
-                                Document::String(tuple_var.clone()),
-                                " = ",
-                                value_str,
-                                " in let ",
-                                Document::String(core_var.clone()),
-                                " = call 'erlang':'element'(1, ",
-                                Document::String(tuple_var.clone()),
-                                ") in let ",
-                                Document::String(new_state.clone()),
-                                " = call 'erlang':'element'(2, ",
-                                Document::String(tuple_var),
-                                ") in ",
-                            ]];
-                            let _ = self.next_state_var();
-                            self.bind_var(var_name, &core_var);
-
-                            // Extract threaded locals from updated state
-                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
-                            {
-                                for var in &threaded_vars {
-                                    let tv_core = self.lookup_var(var).map_or_else(
-                                        || Self::to_core_erlang_var(var),
-                                        String::clone,
-                                    );
-                                    doc_parts.push(docvec![
-                                        "let ",
-                                        Document::String(tv_core),
-                                        " = call 'maps':'get'('",
-                                        Document::String(Self::local_state_key(var)),
-                                        "', ",
-                                        Document::String(new_state.clone()),
-                                        ") in ",
-                                    ]);
-                                }
-                            }
-                            docs.push(Document::Vec(doc_parts));
-                        } else {
-                            let value_str = self.expression_doc(value)?;
-                            self.bind_var(var_name, &core_var);
-                            let doc = docvec![
-                                "let ",
-                                Document::String(core_var),
-                                " = ",
-                                value_str,
-                                " in ",
-                            ];
-                            docs.push(doc);
-                        }
-                    }
-                }
-            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                for d in binding_docs {
-                    docs.push(d);
-                }
-            } else if self.is_tier2_value_call(expr) {
-                // BT-853: Tier 2 value: call in non-last position.
-                // Returns {Result, NewState} — discard Result, thread NewState.
-                let tuple_var = self.fresh_temp_var("T2Tuple");
-                let discard_var = self.fresh_temp_var("T2Discard");
-                let expr_str = self.expression_doc(expr)?;
-                let new_state = self.next_state_var();
-                let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                    "let ",
-                    Document::String(tuple_var.clone()),
-                    " = ",
-                    expr_str,
-                    " in let ",
-                    Document::String(discard_var),
-                    " = call 'erlang':'element'(1, ",
-                    Document::String(tuple_var.clone()),
-                    ")\n in let ",
-                    Document::String(new_state.clone()),
-                    " = call 'erlang':'element'(2, ",
-                    Document::String(tuple_var),
-                    ") in ",
-                ]];
-
-                // BT-1213: Extract captured local mutations from NewState so
-                // subsequent reads resolve the updated values (not stale bindings).
-                if let Some(mutations) = Self::get_inline_block_captured_mutations(expr) {
-                    for var in &mutations {
-                        let core_var = self
-                            .lookup_var(var)
-                            .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                        doc_parts.push(docvec![
-                            "let ",
-                            Document::String(core_var),
-                            " = call 'maps':'get'('",
-                            Document::String(Self::local_state_key(var)),
-                            "', ",
-                            Document::String(new_state.clone()),
-                            ") in ",
-                        ]);
-                    }
-                }
-                docs.push(Document::Vec(doc_parts));
-            } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
-                // BT-851: Tier 2 self-send with stateful block arguments.
-                // Pack captured locals into State, send, extract locals from returned State.
-                let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
-                docs.push(doc);
-            } else if self.control_flow_has_mutations(expr) {
-                // BT-483: Control flow that threads state returns {Result, State} tuple.
-                // Extract State for subsequent expressions.
-                let tuple_var = self.fresh_temp_var("Tuple");
-                let next_version = self.state_version() + 1;
-                let new_state = if next_version == 1 {
-                    "State1".to_string()
-                } else {
-                    format!("State{next_version}")
-                };
-                let expr_str = self.expression_doc(expr)?;
-                let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                    "let ",
-                    Document::String(tuple_var.clone()),
-                    " = ",
-                    expr_str,
-                    " in let ",
-                    Document::String(new_state.clone()),
-                    " = call 'erlang':'element'(2, ",
-                    Document::String(tuple_var),
-                    ") in ",
-                ]];
-                let _ = self.next_state_var();
-
-                // BT-598: Extract threaded locals from the updated state
-                if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
-                    for var in &threaded_vars {
-                        let core_var = self
-                            .lookup_var(var)
-                            .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                        doc_parts.push(docvec![
-                            "let ",
-                            Document::String(core_var),
-                            " = call 'maps':'get'('",
-                            Document::String(Self::local_state_key(var)),
-                            "', ",
-                            Document::String(new_state.clone()),
-                            ") in ",
-                        ]);
-                    }
-                }
-                docs.push(Document::Vec(doc_parts));
-            } else if self.is_dispatching_actor_self_send(expr) {
-                // BT-1420: Self-send in non-last position — thread NewState from
-                // safe_dispatch so subsequent expressions see state mutations.
-                let doc = self.generate_self_dispatch_open(expr)?;
-                docs.push(doc);
-            } else {
-                // Regular intermediate expression: wrap in let to discard value
-                let tmp_var = self.fresh_temp_var("seq");
-                let expr_str = self.expression_doc(expr)?;
-                let doc = docvec!["let ", Document::String(tmp_var), " = ", expr_str, " in ",];
-                docs.push(doc);
-            }
-        }
-
-        Ok(Document::Vec(docs))
+        self.generate_body_exprs_with_reply(&body, true)
     }
 
     /// Generates a block-based method body with state threading and reply tuple.
     ///
     /// For methods using block syntax with implicit returns.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "method body generation handles many expression types and state threading"
-    )]
+    /// Delegates to [`Self::generate_body_exprs_with_reply`].
     pub(in crate::codegen::core_erlang) fn generate_method_body_with_reply(
         &mut self,
         block: &Block,
     ) -> Result<Document<'static>> {
-        if block.body.is_empty() {
-            // Empty method body returns self (the actor object reference)
-            let final_state = self.current_state_var();
-            return Ok(docvec!["{'reply', Self, ", final_state, "}"]);
-        }
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-
-        // Generate all expressions except the last with state threading
-        // Filter out @expect directives — they are compile-time only and generate no code.
         let body: Vec<&Expression> = block
             .body
             .iter()
             .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
-        for (i, expr) in body.iter().enumerate() {
-            let is_last = i == body.len() - 1;
-            let is_field_assignment = Self::is_field_assignment(expr);
-            let is_local_assignment = Self::is_local_var_assignment(expr);
-            let is_self_field_at_put = self.is_self_field_at_put(expr);
+        self.generate_body_exprs_with_reply(&body, false)
+    }
 
-            if is_last {
-                // Last expression: bind to Result and generate reply tuple
-                // BT-1324: self fieldAt:put: with state threading
-                if is_self_field_at_put {
+    // ── BT-1422: Unified method body state-threading ──────────────────
+
+    /// Classify a body expression for state-threading dispatch.
+    ///
+    /// The order of checks matters: more specific patterns (e.g. field assignment)
+    /// must come before general ones (e.g. pure expression).
+    fn classify_body_expr(&self, expr: &Expression) -> BodyExprKind {
+        // Early return — `^ value`
+        if matches!(expr, Expression::Return { .. }) {
+            return BodyExprKind::EarlyReturn;
+        }
+
+        // self fieldAt: name put: val
+        if self.is_self_field_at_put(expr) {
+            return BodyExprKind::SelfFieldAtPut;
+        }
+
+        // self.field := value
+        if Self::is_field_assignment(expr) {
+            return BodyExprKind::FieldAssignment;
+        }
+
+        // var := expr — sub-classify by RHS
+        if Self::is_local_var_assignment(expr) {
+            if let Expression::Assignment { value, .. } = expr {
+                if self.is_tier2_value_call(value) {
+                    return BodyExprKind::LocalAssignTier2;
+                }
+                if self.control_flow_has_mutations(value) {
+                    return BodyExprKind::LocalAssignControlFlow;
+                }
+            }
+            return BodyExprKind::LocalAssignPure;
+        }
+
+        // {a, b} := expr
+        if matches!(expr, Expression::DestructureAssignment { .. }) {
+            return BodyExprKind::DestructureAssignment;
+        }
+
+        // super send
+        if Self::is_super_message_send(expr) {
+            return BodyExprKind::SuperSend;
+        }
+
+        // self error: "..." — never returns
+        if Self::is_error_message_send(expr) {
+            return BodyExprKind::ErrorSend;
+        }
+
+        // Tier 2 value: call
+        if self.is_tier2_value_call(expr) {
+            return BodyExprKind::Tier2ValueCall;
+        }
+
+        // Tier 2 self-send with block args
+        if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
+            return BodyExprKind::Tier2SelfSend(tier2_args);
+        }
+
+        // Control flow with field mutations
+        if self.control_flow_has_mutations(expr) {
+            return BodyExprKind::ControlFlowWithMutations;
+        }
+
+        // Dispatching self-send (BT-1420)
+        if self.is_dispatching_actor_self_send(expr) {
+            return BodyExprKind::DispatchingSelfSend;
+        }
+
+        BodyExprKind::Pure
+    }
+
+    /// Unified method body code generation with state threading and reply tuple.
+    ///
+    /// Both `generate_method_definition_body_with_reply` (for `MethodDefinition`)
+    /// and `generate_method_body_with_reply` (for `Block`) delegate here.
+    ///
+    /// `supports_early_return` controls whether `^ value` expressions are handled.
+    /// Method definitions support it; block bodies do not (NLR uses throw/catch).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "unified handler for all method body expression types with state threading"
+    )]
+    fn generate_body_exprs_with_reply(
+        &mut self,
+        body: &[&Expression],
+        supports_early_return: bool,
+    ) -> Result<Document<'static>> {
+        if body.is_empty() {
+            let state = self.current_state_var();
+            return Ok(docvec!["{'reply', Self, ", state, "}"]);
+        }
+
+        // Phase 1: classify every expression upfront.  Classification is
+        // stateless w.r.t. codegen state (state_version, variable bindings),
+        // so pre-computing is safe and separates "what" from "how".
+        let plan: Vec<BodyExprKind> = body
+            .iter()
+            .map(|expr| {
+                let kind = self.classify_body_expr(expr);
+                if matches!(&kind, BodyExprKind::EarlyReturn) && !supports_early_return {
+                    BodyExprKind::Pure
+                } else {
+                    kind
+                }
+            })
+            .collect();
+
+        // Phase 2: emit code for each (expression, kind) pair.
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        let body_len = body.len();
+
+        for (i, (expr, kind)) in body.iter().zip(plan.into_iter()).enumerate() {
+            let is_last = i == body_len - 1;
+            let is_early_return = matches!(&kind, BodyExprKind::EarlyReturn);
+
+            // Early return — always terminates generation regardless of position.
+            if is_early_return && supports_early_return {
+                if let Expression::Return { value, .. } = expr {
+                    if self.control_flow_has_mutations(value) {
+                        let value_str = self.expression_doc(value)?;
+                        docs.push(self.emit_tuple_unpack_reply("Tuple", value_str));
+                    } else {
+                        let final_state = self.current_state_var();
+                        let value_str = self.expression_doc(value)?;
+                        docs.push(docvec![
+                            "let _ReturnValue = ",
+                            value_str,
+                            " in {'reply', _ReturnValue, ",
+                            Document::String(final_state),
+                            "}",
+                        ]);
+                    }
+                    return Ok(Document::Vec(docs));
+                }
+            }
+
+            match kind {
+                BodyExprKind::SelfFieldAtPut => {
                     let doc = self.generate_self_field_at_put_open(expr)?;
                     docs.push(doc);
-                    let val_var = self
-                        .last_open_scope_result
-                        .clone()
-                        .unwrap_or_else(|| "_".to_string());
-                    let final_state = self.current_state_var();
-                    docs.push(docvec![
-                        "{'reply', ",
-                        Document::String(val_var),
-                        ", ",
-                        Document::String(final_state),
-                        "}",
-                    ]);
-                // If the last expression is a field assignment, handle specially
-                } else if is_field_assignment {
-                    // Generate the assignment (leaves state binding open)
-                    if let Expression::Assignment { target, value, .. } = expr {
-                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
-                            let val_var = self.fresh_temp_var("Val");
-                            let current_state = self.current_state_var();
-
-                            let value_str = self.expression_doc(value)?;
-
-                            let new_state = self.next_state_var();
-                            let doc = docvec![
-                                "let ",
-                                Document::String(val_var.clone()),
-                                " = ",
-                                value_str,
-                                " in let ",
-                                Document::String(new_state.clone()),
-                                " = call 'maps':'put'('",
-                                Document::String(field.name.to_string()),
-                                "', ",
-                                Document::String(val_var.clone()),
-                                ", ",
-                                Document::String(current_state),
-                                ") in {'reply', ",
-                                Document::String(val_var),
-                                ", ",
-                                Document::String(new_state),
-                                "}",
-                            ];
-                            docs.push(doc);
-                        }
+                    if is_last {
+                        let val_var = self
+                            .last_open_scope_result
+                            .clone()
+                            .unwrap_or_else(|| "_".to_string());
+                        let final_state = self.current_state_var();
+                        docs.push(docvec![
+                            "{'reply', ",
+                            Document::String(val_var),
+                            ", ",
+                            Document::String(final_state),
+                            "}",
+                        ]);
                     }
-                } else if Self::is_super_message_send(expr) {
-                    // Super message send as last expression: unpack {reply, Result, NewState}
-                    let expr_str = self.expression_doc(expr)?;
-                    let doc = docvec![
-                        "let _SuperTuple = ",
-                        expr_str,
-                        " in let _Result = call 'erlang':'element'(2, _SuperTuple)",
-                        " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
-                        " in {'reply', _Result, _NewState}",
-                    ];
-                    docs.push(doc);
-                } else if Self::is_error_message_send(expr) {
-                    // Error message send: never returns, so just emit the call directly
-                    // without wrapping in a reply tuple (would be unreachable code)
-                    let expr_str = self.expression_doc(expr)?;
-                    docs.push(docvec![expr_str]);
-                } else if self.is_tier2_value_call(expr) {
-                    // BT-851: Last expression is a Tier 2 value: call.
-                    // Returns {Result, NewState} tuple — unpack for reply.
-                    let tuple_var = self.fresh_temp_var("T2Tuple");
-                    let expr_str = self.expression_doc(expr)?;
-                    let doc = docvec![
-                        "let ",
-                        Document::String(tuple_var.clone()),
-                        " = ",
-                        expr_str,
-                        " in let _Result = call 'erlang':'element'(1, ",
-                        Document::String(tuple_var.clone()),
-                        ") in let _NewState = call 'erlang':'element'(2, ",
-                        Document::String(tuple_var),
-                        ") in {'reply', _Result, _NewState}",
-                    ];
-                    docs.push(doc);
-                } else if self.control_flow_has_mutations(expr) {
-                    // BT-483: Last expression is control flow with field mutations.
-                    // The mutation variant returns {Result, State} tuple.
-                    let tuple_var = self.fresh_temp_var("Tuple");
-                    let expr_str = self.expression_doc(expr)?;
-                    let doc = docvec![
-                        "let ",
-                        Document::String(tuple_var.clone()),
-                        " = ",
-                        expr_str,
-                        " in let _Result = call 'erlang':'element'(1, ",
-                        Document::String(tuple_var.clone()),
-                        ") in let _NewState = call 'erlang':'element'(2, ",
-                        Document::String(tuple_var),
-                        ") in {'reply', _Result, _NewState}",
-                    ];
-                    docs.push(doc);
-                } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
-                    // BT-870: Last expression is a Tier 2 self-send (or promoted Tier 1 at
-                    // a known Tier 2 HOM position). generate_tier2_self_send_open emits the
-                    // dispatch + state extraction as an open let chain; close with reply tuple.
-                    let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
-                    docs.push(doc);
-                    let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
-                        CodeGenError::Internal(
-                            "invariant violation: missing dispatch var after Tier 2 self-send"
-                                .to_string(),
-                        )
-                    })?;
-                    let final_state = self.current_state_var();
-                    docs.push(docvec![
-                        "{'reply', call 'erlang':'element'(1, ",
-                        Document::String(dispatch_var),
-                        "), ",
-                        Document::String(final_state),
-                        "}",
-                    ]);
-                } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                    // Destructuring as last expression: emit bindings then reply with nil
-                    let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                    for d in binding_docs {
-                        docs.push(d);
-                    }
-                    let post_state = self.current_state_var();
-                    docs.push(docvec![
-                        "{'reply', 'nil', ",
-                        Document::String(post_state),
-                        "}",
-                    ]);
-                } else if self.is_dispatching_actor_self_send(expr) {
-                    // BT-1420: Self-send as last expression — thread NewState into reply.
-                    let doc = self.generate_self_dispatch_open(expr)?;
-                    docs.push(doc);
-                    let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
-                        CodeGenError::Internal(
-                            "invariant violation: missing dispatch var after self-send".to_string(),
-                        )
-                    })?;
-                    let final_state = self.current_state_var();
-                    docs.push(docvec![
-                        "{'reply', call 'erlang':'element'(1, ",
-                        Document::String(dispatch_var),
-                        "), ",
-                        Document::String(final_state),
-                        "}",
-                    ]);
-                } else {
-                    // Regular last expression: bind to Result and reply
-                    // BT-851: Get state AFTER expression generation, since Tier 2
-                    // value: calls advance state version inside expression_doc.
-                    let expr_str = self.expression_doc(expr)?;
-                    let post_state = self.current_state_var();
-                    let doc = docvec![
-                        "let _Result = ",
-                        expr_str,
-                        " in {'reply', _Result, ",
-                        Document::String(post_state),
-                        "}",
-                    ];
-                    docs.push(doc);
                 }
-            } else if is_self_field_at_put {
-                // BT-1324: self fieldAt:put: not at end: open let chain for state threading
-                let doc = self.generate_self_field_at_put_open(expr)?;
-                docs.push(doc);
-            } else if is_field_assignment {
-                // Field assignment not at end: generate WITHOUT closing the value
-                let doc = self.generate_field_assignment_open(expr)?;
-                docs.push(doc);
-            } else if is_local_assignment {
-                // Local variable assignment: generate with proper binding
-                if let Expression::Assignment { target, value, .. } = expr {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        let var_name = &id.name;
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-
-                        // BT-853: If RHS is a Tier 2 value: call, it returns
-                        // {Result, NewState} — unpack result and thread NewState.
-                        if self.is_tier2_value_call(value) {
+                BodyExprKind::FieldAssignment => {
+                    if is_last {
+                        if let Expression::Assignment { target, value, .. } = expr {
+                            if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                                let val_var = self.fresh_temp_var("Val");
+                                let current_state = self.current_state_var();
+                                let value_str = self.expression_doc(value)?;
+                                let new_state = self.next_state_var();
+                                docs.push(docvec![
+                                    "let ",
+                                    Document::String(val_var.clone()),
+                                    " = ",
+                                    value_str,
+                                    " in let ",
+                                    Document::String(new_state.clone()),
+                                    " = call 'maps':'put'('",
+                                    Document::String(field.name.to_string()),
+                                    "', ",
+                                    Document::String(val_var.clone()),
+                                    ", ",
+                                    Document::String(current_state),
+                                    ") in {'reply', ",
+                                    Document::String(val_var),
+                                    ", ",
+                                    Document::String(new_state),
+                                    "}",
+                                ]);
+                            }
+                        }
+                    } else {
+                        let doc = self.generate_field_assignment_open(expr)?;
+                        docs.push(doc);
+                    }
+                }
+                BodyExprKind::LocalAssignTier2 => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                             let tuple_var = self.fresh_temp_var("T2Tuple");
                             let value_str = self.expression_doc(value)?;
                             self.bind_var(var_name, &core_var);
@@ -848,16 +450,21 @@ impl CoreErlangGenerator {
                                 Document::String(tuple_var),
                                 ") in ",
                             ]);
-                        // BT-598: If RHS is control flow with mutations, it returns
-                        // {Result, State} — unpack and update state variable.
-                        } else if self.control_flow_has_mutations(value) {
+                        }
+                    }
+                    if is_last {
+                        self.emit_pure_reply(&mut docs);
+                    }
+                }
+                BodyExprKind::LocalAssignControlFlow => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                             let tuple_var = self.fresh_temp_var("Tuple");
-                            let next_version = self.state_version() + 1;
-                            let new_state = if next_version == 1 {
-                                "State1".to_string()
-                            } else {
-                                format!("State{next_version}")
-                            };
+                            let new_state = self.peek_next_state_var();
                             let value_str = self.expression_doc(value)?;
                             let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                                 "let ",
@@ -877,7 +484,6 @@ impl CoreErlangGenerator {
                             let _ = self.next_state_var();
                             self.bind_var(var_name, &core_var);
 
-                            // Extract threaded locals from updated state
                             if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
                             {
                                 for var in &threaded_vars {
@@ -897,215 +503,324 @@ impl CoreErlangGenerator {
                                 }
                             }
                             docs.push(Document::Vec(doc_parts));
-                        } else {
+                        }
+                    }
+                    if is_last {
+                        self.emit_pure_reply(&mut docs);
+                    }
+                }
+                BodyExprKind::LocalAssignPure => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                             let value_str = self.expression_doc(value)?;
                             self.bind_var(var_name, &core_var);
-                            let doc = docvec![
+                            docs.push(docvec![
                                 "let ",
                                 Document::String(core_var),
                                 " = ",
                                 value_str,
                                 " in ",
-                            ];
-                            docs.push(doc);
+                            ]);
                         }
                     }
+                    if is_last {
+                        self.emit_pure_reply(&mut docs);
+                    }
                 }
-            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                for d in binding_docs {
-                    docs.push(d);
+                BodyExprKind::DestructureAssignment => {
+                    if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                        let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                        for d in binding_docs {
+                            docs.push(d);
+                        }
+                    }
+                    if is_last {
+                        let post_state = self.current_state_var();
+                        docs.push(docvec![
+                            "{'reply', 'nil', ",
+                            Document::String(post_state),
+                            "}",
+                        ]);
+                    }
                 }
-            } else if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
-                // Control flow with local variable threading - need to rebind threaded vars after loop
-                if self.control_flow_has_mutations(expr) {
-                    // BT-598: Control flow with mutations returns {Result, State} tuple.
-                    // Threaded locals are packed into the State map.
-                    // Extract State, then extract each threaded local from it.
-                    let tuple_var = self.fresh_temp_var("Tuple");
-                    let next_version = self.state_version() + 1;
-                    let new_state = if next_version == 1 {
-                        "State1".to_string()
+                BodyExprKind::SuperSend => {
+                    if is_last {
+                        let expr_str = self.expression_doc(expr)?;
+                        docs.push(docvec![
+                            "let _SuperTuple = ",
+                            expr_str,
+                            " in let _Result = call 'erlang':'element'(2, _SuperTuple)",
+                            " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
+                            " in {'reply', _Result, _NewState}",
+                        ]);
                     } else {
-                        format!("State{next_version}")
-                    };
-                    let expr_str = self.expression_doc(expr)?;
-                    let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                        "let ",
-                        Document::String(tuple_var.clone()),
-                        " = ",
-                        expr_str,
-                        " in let ",
-                        Document::String(new_state.clone()),
-                        " = call 'erlang':'element'(2, ",
-                        Document::String(tuple_var),
-                        ") in ",
-                    ]];
-                    let _ = self.next_state_var();
-
-                    // Extract each threaded local from the updated state
-                    for var in &threaded_vars {
-                        let core_var = self
-                            .lookup_var(var)
-                            .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                        doc_parts.push(docvec![
+                        self.emit_super_send_open(expr, &mut docs)?;
+                    }
+                }
+                BodyExprKind::ErrorSend => {
+                    if is_last {
+                        // Error send never returns — no reply tuple needed.
+                        let expr_str = self.expression_doc(expr)?;
+                        docs.push(docvec![expr_str]);
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        let expr_str = self.expression_doc(expr)?;
+                        docs.push(docvec![
                             "let ",
-                            Document::String(core_var),
-                            " = call 'maps':'get'('",
-                            Document::String(Self::local_state_key(var)),
-                            "', ",
-                            Document::String(new_state.clone()),
-                            ") in ",
+                            Document::String(tmp_var),
+                            " = ",
+                            expr_str,
+                            " in ",
                         ]);
                     }
-                    docs.push(Document::Vec(doc_parts));
-                } else if threaded_vars.len() == 1 {
-                    let var = &threaded_vars[0];
-                    let core_var = self
-                        .lookup_var(var)
-                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    let expr_str = self.expression_doc(expr)?;
-                    let doc = docvec!["let ", Document::String(core_var), " = ", expr_str, " in ",];
-                    docs.push(doc);
-                } else {
-                    // Multiple threaded vars - fall back for now
-                    let tmp_var = self.fresh_temp_var("seq");
-                    let expr_str = self.expression_doc(expr)?;
-                    let doc = docvec!["let ", Document::String(tmp_var), " = ", expr_str, " in ",];
-                    docs.push(doc);
                 }
-            } else if Self::is_super_message_send(expr) {
-                // Super message send: must thread state from {reply, Result, NewState} tuple
-                let super_result_var = self.fresh_temp_var("SuperReply");
-                let current_state = self.current_state_var();
-                let new_state = self.next_state_var();
-                let class_name = self.class_name();
+                BodyExprKind::Tier2ValueCall => {
+                    if is_last {
+                        let expr_str = self.expression_doc(expr)?;
+                        docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
+                    } else {
+                        let tuple_var = self.fresh_temp_var("T2Tuple");
+                        let discard_var = self.fresh_temp_var("T2Discard");
+                        let expr_str = self.expression_doc(expr)?;
+                        let new_state = self.next_state_var();
+                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+                            "let ",
+                            Document::String(tuple_var.clone()),
+                            " = ",
+                            expr_str,
+                            " in let ",
+                            Document::String(discard_var),
+                            " = call 'erlang':'element'(1, ",
+                            Document::String(tuple_var.clone()),
+                            ")\n in let ",
+                            Document::String(new_state.clone()),
+                            " = call 'erlang':'element'(2, ",
+                            Document::String(tuple_var),
+                            ") in ",
+                        ]];
 
-                // Generate beamtalk_dispatch:super/5 call (ADR 0006)
-                if let Expression::MessageSend {
-                    selector,
-                    arguments,
-                    ..
-                } = expr
-                {
-                    // Use the domain service method for selector-to-atom conversion
-                    let selector_atom = selector.to_erlang_atom();
-                    let mut arg_docs: Vec<Document<'static>> = Vec::new();
-                    for (j, arg) in arguments.iter().enumerate() {
-                        if j > 0 {
-                            arg_docs.push(Document::Str(", "));
+                        // BT-1213: Extract captured local mutations from NewState
+                        if let Some(mutations) = Self::get_inline_block_captured_mutations(expr) {
+                            for var in &mutations {
+                                let core_var = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                                doc_parts.push(docvec![
+                                    "let ",
+                                    Document::String(core_var),
+                                    " = call 'maps':'get'('",
+                                    Document::String(Self::local_state_key(var)),
+                                    "', ",
+                                    Document::String(new_state.clone()),
+                                    ") in ",
+                                ]);
+                            }
                         }
-                        arg_docs.push(self.expression_doc(arg)?);
+                        docs.push(Document::Vec(doc_parts));
                     }
-                    let doc = docvec![
-                        "let ",
-                        Document::String(super_result_var.clone()),
-                        " = call 'beamtalk_dispatch':'super'('",
-                        Document::String(selector_atom),
-                        "', [",
-                        Document::Vec(arg_docs),
-                        "], Self, ",
-                        Document::String(current_state),
-                        ", '",
-                        Document::String(class_name),
-                        "')",
-                    ];
-                    docs.push(doc);
                 }
-
-                // Extract state from the {reply, Result, NewState} tuple using element/2
-                let doc = docvec![
-                    " in let ",
-                    Document::String(new_state),
-                    " = call 'erlang':'element'(3, ",
-                    Document::String(super_result_var),
-                    ") in ",
-                ];
-                docs.push(doc);
-            } else if self.is_tier2_value_call(expr) {
-                // BT-853: Tier 2 value: call in non-last position.
-                // Returns {Result, NewState} — discard Result, thread NewState.
-                let tuple_var = self.fresh_temp_var("T2Tuple");
-                let discard_var = self.fresh_temp_var("T2Discard");
-                let expr_str = self.expression_doc(expr)?;
-                let new_state = self.next_state_var();
-                let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                    "let ",
-                    Document::String(tuple_var.clone()),
-                    " = ",
-                    expr_str,
-                    " in let ",
-                    Document::String(discard_var),
-                    " = call 'erlang':'element'(1, ",
-                    Document::String(tuple_var.clone()),
-                    ")\n in let ",
-                    Document::String(new_state.clone()),
-                    " = call 'erlang':'element'(2, ",
-                    Document::String(tuple_var),
-                    ") in ",
-                ]];
-
-                // BT-1213: Extract captured local mutations from NewState so
-                // subsequent reads resolve the updated values (not stale bindings).
-                if let Some(mutations) = Self::get_inline_block_captured_mutations(expr) {
-                    for var in &mutations {
-                        let core_var = self
-                            .lookup_var(var)
-                            .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                        doc_parts.push(docvec![
+                BodyExprKind::Tier2SelfSend(ref tier2_args) => {
+                    let doc = self.generate_tier2_self_send_open(expr, tier2_args)?;
+                    docs.push(doc);
+                    if is_last {
+                        self.emit_dispatch_reply(
+                            &mut docs,
+                            "missing dispatch var after Tier 2 self-send",
+                        )?;
+                    }
+                }
+                BodyExprKind::ControlFlowWithMutations => {
+                    if is_last {
+                        let expr_str = self.expression_doc(expr)?;
+                        docs.push(self.emit_tuple_unpack_reply("Tuple", expr_str));
+                    } else {
+                        let tuple_var = self.fresh_temp_var("Tuple");
+                        let new_state = self.peek_next_state_var();
+                        let expr_str = self.expression_doc(expr)?;
+                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
-                            Document::String(core_var),
-                            " = call 'maps':'get'('",
-                            Document::String(Self::local_state_key(var)),
-                            "', ",
+                            Document::String(tuple_var.clone()),
+                            " = ",
+                            expr_str,
+                            " in let ",
                             Document::String(new_state.clone()),
+                            " = call 'erlang':'element'(2, ",
+                            Document::String(tuple_var),
                             ") in ",
+                        ]];
+                        let _ = self.next_state_var();
+
+                        // Extract threaded locals from the updated state
+                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
+                            for var in &threaded_vars {
+                                let core_var = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                                doc_parts.push(docvec![
+                                    "let ",
+                                    Document::String(core_var),
+                                    " = call 'maps':'get'('",
+                                    Document::String(Self::local_state_key(var)),
+                                    "', ",
+                                    Document::String(new_state.clone()),
+                                    ") in ",
+                                ]);
+                            }
+                        }
+                        docs.push(Document::Vec(doc_parts));
+                    }
+                }
+                BodyExprKind::DispatchingSelfSend => {
+                    let doc = self.generate_self_dispatch_open(expr)?;
+                    docs.push(doc);
+                    if is_last {
+                        self.emit_dispatch_reply(
+                            &mut docs,
+                            "missing dispatch var after self-send",
+                        )?;
+                    }
+                }
+                BodyExprKind::EarlyReturn => {
+                    return Err(CodeGenError::Internal(
+                        "EarlyReturn should be handled before match dispatch".to_string(),
+                    ));
+                }
+                BodyExprKind::Pure => {
+                    if is_last {
+                        let expr_str = self.expression_doc(expr)?;
+                        let post_state = self.current_state_var();
+                        docs.push(docvec![
+                            "let _Result = ",
+                            expr_str,
+                            " in {'reply', _Result, ",
+                            Document::String(post_state),
+                            "}",
+                        ]);
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        let expr_str = self.expression_doc(expr)?;
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(tmp_var),
+                            " = ",
+                            expr_str,
+                            " in ",
                         ]);
                     }
                 }
-                docs.push(Document::Vec(doc_parts));
-            } else if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
-                // BT-851: Tier 2 self-send with stateful block arguments.
-                let doc = self.generate_tier2_self_send_open(expr, &tier2_args)?;
-                docs.push(doc);
-            } else if self.control_flow_has_mutations(expr) {
-                // BT-483: Control flow with field mutations returns {Result, State} tuple.
-                // Extract State for subsequent expressions.
-                let tuple_var = self.fresh_temp_var("Tuple");
-                let next_version = self.state_version() + 1;
-                let new_state = if next_version == 1 {
-                    "State1".to_string()
-                } else {
-                    format!("State{next_version}")
-                };
-                let expr_str = self.expression_doc(expr)?;
-                let doc = docvec![
-                    "let ",
-                    Document::String(tuple_var.clone()),
-                    " = ",
-                    expr_str,
-                    " in let ",
-                    Document::String(new_state),
-                    " = call 'erlang':'element'(2, ",
-                    Document::String(tuple_var),
-                    ") in ",
-                ];
-                docs.push(doc);
-                let _ = self.next_state_var();
-            } else if self.is_dispatching_actor_self_send(expr) {
-                // BT-1420: Self-send in non-last position — thread NewState from
-                // safe_dispatch so subsequent expressions see state mutations.
-                let doc = self.generate_self_dispatch_open(expr)?;
-                docs.push(doc);
-            } else {
-                // Non-assignment intermediate expression: wrap in let
-                let tmp_var = self.fresh_temp_var("seq");
-                let expr_str = self.expression_doc(expr)?;
-                let doc = docvec!["let ", Document::String(tmp_var), " = ", expr_str, " in ",];
-                docs.push(doc);
             }
         }
+
         Ok(Document::Vec(docs))
+    }
+
+    /// Emit a generic `{'reply', _Result, State}` close for the last expression
+    /// when the expression itself has already been emitted as an open let chain.
+    /// Used by local assignments and other open-chain handlers in last position.
+    fn emit_pure_reply(&mut self, docs: &mut Vec<Document<'static>>) {
+        let post_state = self.current_state_var();
+        docs.push(docvec![
+            "{'reply', 'nil', ",
+            Document::String(post_state),
+            "}",
+        ]);
+    }
+
+    /// Emit the last-position reply for a dispatch open call (Tier 2 self-send
+    /// or dispatching self-send).  Reads `last_dispatch_var` and `current_state_var`.
+    fn emit_dispatch_reply(
+        &mut self,
+        docs: &mut Vec<Document<'static>>,
+        invariant_msg: &str,
+    ) -> Result<()> {
+        let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
+            CodeGenError::Internal(format!("invariant violation: {invariant_msg}"))
+        })?;
+        let final_state = self.current_state_var();
+        docs.push(docvec![
+            "{'reply', call 'erlang':'element'(1, ",
+            Document::String(dispatch_var),
+            "), ",
+            Document::String(final_state),
+            "}",
+        ]);
+        Ok(())
+    }
+
+    /// Emit the last-position reply for an expression that returns a
+    /// `{Result, State}` tuple (Tier 2 value calls, control flow with
+    /// mutations, early returns with mutations).
+    fn emit_tuple_unpack_reply(
+        &mut self,
+        tuple_label: &str,
+        expr_doc: Document<'static>,
+    ) -> Document<'static> {
+        let tuple_var = self.fresh_temp_var(tuple_label);
+        docvec![
+            "let ",
+            Document::String(tuple_var.clone()),
+            " = ",
+            expr_doc,
+            " in let _Result = call 'erlang':'element'(1, ",
+            Document::String(tuple_var.clone()),
+            ") in let _NewState = call 'erlang':'element'(2, ",
+            Document::String(tuple_var),
+            ") in {'reply', _Result, _NewState}",
+        ]
+    }
+
+    /// Emit a super message send in non-last position, threading state.
+    fn emit_super_send_open(
+        &mut self,
+        expr: &Expression,
+        docs: &mut Vec<Document<'static>>,
+    ) -> Result<()> {
+        let super_result_var = self.fresh_temp_var("SuperReply");
+        let current_state = self.current_state_var();
+        let new_state = self.next_state_var();
+        let class_name = self.class_name();
+
+        if let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            let selector_atom = selector.to_erlang_atom();
+            let mut arg_docs: Vec<Document<'static>> = Vec::new();
+            for (j, arg) in arguments.iter().enumerate() {
+                if j > 0 {
+                    arg_docs.push(Document::Str(", "));
+                }
+                arg_docs.push(self.expression_doc(arg)?);
+            }
+            docs.push(docvec![
+                "let ",
+                Document::String(super_result_var.clone()),
+                " = call 'beamtalk_dispatch':'super'('",
+                Document::String(selector_atom),
+                "', [",
+                Document::Vec(arg_docs),
+                "], Self, ",
+                Document::String(current_state),
+                ", '",
+                Document::String(class_name),
+                "')",
+            ]);
+        }
+
+        docs.push(docvec![
+            " in let ",
+            Document::String(new_state),
+            " = call 'erlang':'element'(3, ",
+            Document::String(super_result_var),
+            ") in ",
+        ]);
+        Ok(())
     }
 
     /// BT-877: Detect the `new => self error: "..."` pattern that indicates a class

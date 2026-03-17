@@ -1137,6 +1137,17 @@ impl CoreErlangGenerator {
         self.state_threading.version()
     }
 
+    /// Returns the name of the next state variable without advancing the
+    /// version counter.  Context-aware: uses `StateAcc*` in loop bodies.
+    pub(super) fn peek_next_state_var(&self) -> String {
+        let next_var = self.state_threading.peek_next_var();
+        if self.in_hybrid_loop || !self.in_loop_body {
+            next_var
+        } else {
+            next_var.replace("State", "StateAcc")
+        }
+    }
+
     /// Sets the state version.
     pub(super) fn set_state_version(&mut self, version: usize) {
         self.state_threading.set_version(version);

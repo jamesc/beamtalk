@@ -323,9 +323,7 @@ impl CoreErlangGenerator {
                 let tuple_var = self.fresh_temp_var("Tuple");
                 let result_var = self.fresh_temp_var("BranchResult");
                 let expr_doc = self.expression_doc(expr)?;
-                let next_version = self.state_version() + 1;
-                self.set_state_version(next_version);
-                let next_state = self.current_state_var();
+                let next_state = self.next_state_var();
                 docs.push(docvec![
                     "let ",
                     Document::String(tuple_var.clone()),
@@ -347,9 +345,7 @@ impl CoreErlangGenerator {
                 // Unpack {Result, State} and thread the state forward.
                 let tuple_var = self.fresh_temp_var("Tuple");
                 let expr_doc = self.expression_doc(expr)?;
-                let next_version = self.state_version() + 1;
-                self.set_state_version(next_version);
-                let next_state = self.current_state_var();
+                let next_state = self.next_state_var();
                 docs.push(docvec![
                     "let ",
                     Document::String(tuple_var.clone()),

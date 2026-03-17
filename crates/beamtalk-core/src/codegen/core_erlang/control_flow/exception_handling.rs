@@ -569,8 +569,7 @@ impl CoreErlangGenerator {
                         // Nested mutation construct returns {Result, State} tuple
                         let tuple_var = self.fresh_temp_var("Tuple");
                         let rv = self.fresh_temp_var("ExResult");
-                        let next_version = self.state_version() + 1;
-                        let next_var = format!("StateAcc{next_version}");
+                        let next_var = self.peek_next_state_var();
                         let expr_doc = self.expression_doc(expr)?;
                         docs.push(docvec![
                             Document::String(format!("let {tuple_var} = ")),
@@ -582,7 +581,7 @@ impl CoreErlangGenerator {
                                 "let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"
                             )),
                         ]);
-                        self.set_state_version(next_version);
+                        let _ = self.next_state_var();
                         result_var = rv;
                     } else {
                         // Regular expression — capture result, state unchanged
