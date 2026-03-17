@@ -41,43 +41,39 @@ Actors gain an optional `handleInfo:` method that receives raw Erlang messages. 
 ```beamtalk
 Actor subclass: Ticker
   state: count = 0
-  state: timer = nil
 
   initialize =>
-    self.timer := Timer every: 1000 do: [self tick!]   // async cast — MUST use ! not .
+    Timer every: 1000 do: [self tick!]   // async cast — MUST use ! not .
 
   tick => self.count := self.count + 1
   getValue => self.count
-  terminate: reason => self.timer cancel
 ```
 
-**Important:** The block passed to `Timer every:do:` executes in the Timer's process, not the actor's. Always use `!` (async cast) for sends back to the actor — using `.` (sync call) will deadlock the Timer process waiting for a reply from a potentially busy actor. Always cancel timers in `terminate:` — the Timer process is unlinked and will otherwise keep ticking into a dead pid indefinitely.
+No `state:` for the timer, no `terminate:` cleanup — Timer processes are **linked to the calling process** (the actor's gen_server). When the actor dies, the linked Timer process dies automatically. No orphan ticks, no boilerplate.
 
-#### Compiler lint: Timer cleanup
+`cancel` remains available for explicit lifecycle control when needed:
 
-The compiler should emit a warning when an Actor calls `Timer every:do:` or `Timer after:do:` but does not define a `terminate:` method. This catches the most common Timer footgun at compile time:
+```beamtalk
+Actor subclass: Poller
+  state: timer = nil
 
-```
-warning: Actor 'Ticker' creates a Timer but does not define terminate: to cancel it.
-  --> src/Ticker.bt:5:21
-   |
- 5 |     self.timer := Timer every: 1000 do: [self tick!]
-   |                   ^^^^^^^^^^^^^^^^^^^^^
-   = hint: Add `terminate: reason => self.timer cancel` to avoid orphaned timer processes
+  startPolling => self.timer := Timer every: 5000 do: [self poll!]
+  stopPolling => self.timer cancel
+  poll => // ...
 ```
 
-The lint checks for `Timer every:do:` or `Timer after:do:` as a message send receiver anywhere in the actor's method bodies. It does not fire if:
-- The actor defines `terminate:` (assumed to handle cleanup)
-- The Timer result is not stored in state (local timers in a method are the caller's responsibility)
+**Important:** The block passed to `Timer every:do:` executes in the Timer's process, not the actor's. Always use `!` (async cast) for sends back to the actor — using `.` (sync call) will deadlock the Timer process waiting for a reply from a potentially busy actor.
 
-Similarly, a `self tick.` (sync call) inside a `Timer every:do:` or `Timer after:do:` block should emit a warning about deadlock:
+#### Compiler lint: sync send in Timer block
+
+A `self tick.` (sync call) inside a `Timer every:do:` or `Timer after:do:` block should emit a warning about deadlock:
 
 ```
 warning: Sync send 'self tick.' inside Timer block will deadlock.
   --> src/Ticker.bt:5:40
    |
- 5 |     self.timer := Timer every: 1000 do: [self tick.]
-   |                                          ^^^^^^^^^^
+ 5 |     Timer every: 1000 do: [self tick.]
+   |                            ^^^^^^^^^^
    = hint: Use 'self tick!' (async cast) instead — Timer blocks execute in a separate process
 ```
 
@@ -136,11 +132,13 @@ Beamtalk bakes this best practice in: errors in `handleInfo:` are logged and the
 
 **Deadlock rules (ADR 0043 applies):** `handleInfo:` executes inside the actor's gen_server process. The same sync-call deadlock rules from ADR 0043 apply: if your handler calls another actor via `.` (sync) that may call back into `self`, it will deadlock. Use `!` (async cast) for outbound sends from `handleInfo:` when re-entrant calls are possible.
 
-#### Timer cleanup
+#### Timer lifecycle: linked to caller
 
-When using the Timer API (`Timer every: 1000 do: [self tick!]`), the Timer spawns an **unlinked, unmonitored** process. If the actor dies without cancelling, the Timer process continues ticking — its `self tick!` casts silently succeed (OTP's `gen_server:cast` to a dead pid returns `ok`) and the timer lives forever. This is why the recommended Ticker example above includes `terminate: reason => self.timer cancel`.
+Timer processes (`Timer every:do:` and `Timer after:do:`) are **linked to the calling process** via `spawn_link`. This is a change from the current `spawn` implementation. The link ensures:
+- When the actor dies, the Timer process dies automatically — no orphaned ticks
+- When the Timer process crashes (unlikely — block execution is wrapped in `catch`), the link propagates the crash to the actor, which triggers supervisor restart
 
-The `handleInfo:` + `send_after` pattern avoids this issue entirely — timer messages are delivered to the actor's own mailbox and stop when the process dies.
+This eliminates the entire class of "forgot to cancel timer in terminate:" bugs. The `handleInfo:` + `send_after` pattern provides the same guarantee via a different mechanism — timer messages are delivered to the actor's own mailbox and stop when the process dies.
 
 #### trap_exit interaction
 
@@ -346,7 +344,7 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 ### Negative
 - Two ways to do timers (Timer API vs `send_after` + `handleInfo:`) — documentation must clearly recommend Timer as default
 - `handleInfo:` exposes raw Erlang terms (tuples, atoms) — breaks the pure Beamtalk abstraction for users who use it
-- Timer API (`Timer every:`) spawns an unlinked process — if the actor dies without cancelling in `terminate:`, the timer keeps ticking into the void. Mitigated by compiler lint (see below)
+- Timer implementation changes from `spawn` to `spawn_link` — if the Timer process crashes (unlikely, block is wrapped in `catch`), the crash propagates to the actor via the link. This is the correct OTP behavior (crash propagation through the supervision tree) but is a behavioral change from the current Timer implementation
 - Deferring named registration means some OTP patterns require workarounds (`Supervisor which:`), and `which:` is O(n) in child count
 
 ### Neutral
@@ -363,9 +361,9 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 
 1. **Codegen:** In `generate_handle_info()` (callbacks.rs ~445-472), check if the class **or any ancestor** defines a `handleInfo:` method. If yes, generate dispatch to it with error logging; if no, generate the current ignore-all stub.
 2. **Validation:** Compile-time error if `handleInfo:` is defined on a non-Actor class.
-3. **Lint — Timer without terminate:** Warn when an Actor calls `Timer every:do:` or `Timer after:do:` but does not define `terminate:`. Implemented as a semantic analysis pass after method resolution. Does not fire if the Timer result is purely local (not stored in state).
+3. **Timer: `spawn` → `spawn_link`:** Change `beamtalk_timer.erl` to use `spawn_link` instead of `spawn` for `after:do:` and `every:do:`. This links the Timer process to the calling process (typically the actor's gen_server), ensuring automatic cleanup on actor death. The existing `catch Block()` in the timer loop prevents block errors from crashing the Timer process.
 4. **Lint — sync send in Timer block:** Warn when a `self method.` (sync call) appears inside a `Timer every:do:` or `Timer after:do:` block. Suggest `self method!` (async cast) instead. Implemented during block analysis in the codegen or semantic pass.
-5. **Tests:** BUnit tests for timer ticks via `handleInfo:` (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, and error-in-handler recovery. EUnit tests in `beamtalk_actor_tests.erl` for the dispatch path itself. Lint tests for both warnings (positive and negative cases).
+5. **Tests:** BUnit tests for timer ticks via `handleInfo:` (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, and error-in-handler recovery. EUnit tests in `beamtalk_actor_tests.erl` for the dispatch path itself. EUnit tests for Timer `spawn_link` behavior (Timer dies when caller dies). Lint tests for sync-in-block warning.
 
 ### Phase 2: Graceful Shutdown Verification (S) — BT-1451
 **Affected components:** Runtime (beamtalk_actor.erl, beamtalk_supervisor.erl)
