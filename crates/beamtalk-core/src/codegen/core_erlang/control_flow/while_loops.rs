@@ -608,7 +608,7 @@ impl CoreErlangGenerator {
 
     /// Generates the condition expression within hybrid loop context.
     ///
-    /// Sets up hybrid field params, generates the condition, and restores state on error.
+    /// Sets up hybrid field params, generates the condition, and restores state on exit.
     fn generate_hybrid_condition(
         &mut self,
         condition: &Expression,
@@ -635,14 +635,9 @@ impl CoreErlangGenerator {
             result
         });
 
-        match cond_result {
-            Ok(doc) => Ok(doc),
-            Err(e) => {
-                self.hybrid_readonly_field_params = prev_readonly_field_params;
-                self.hybrid_mutated_fields = prev_mutated_fields;
-                Err(e)
-            }
-        }
+        self.hybrid_readonly_field_params = prev_readonly_field_params;
+        self.hybrid_mutated_fields = prev_mutated_fields;
+        cond_result
     }
 
     /// Generates the body of a hybrid loop and captures final mutated field var names.
