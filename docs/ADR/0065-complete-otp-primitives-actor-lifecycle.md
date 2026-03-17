@@ -256,11 +256,7 @@ Shutdown timeout should be configurable via `SupervisionSpec`. Currently the shu
 HttpServer supervisionSpec withShutdown: 30000   // 30s graceful shutdown (new method)
 ```
 
-What BT-1451 must verify:
-- `terminate:` receives `#shutdown` reason during supervisor stop
-- `SupervisionSpec #shutdown` timeout propagates correctly to OTP child spec
-- Children receive `terminate:` before supervisor exits
-- Default shutdown timeout is reasonable (5000ms, matching OTP default)
+BT-1451 (approved, PR #1478) addresses `terminate:` runtime support. The `withShutdown:` builder method is not included in BT-1451 — it will be created as a follow-up issue during `/plan-adr`.
 
 ### Gap 5: Hot Code Reload — Defer
 
@@ -300,7 +296,7 @@ Pharo uses cooperative green threads sharing a heap — no actor isolation, no m
 ### Newcomer (from Python/JS/Ruby)
 - **Actor** is all they need. Timer API reads naturally, no OTP concepts to learn
 - **Server** exists but is clearly labelled "advanced" — they'll encounter it when they're ready
-- **The compiler guides migration**: if they try `handleInfo:` on an Actor, the error message tells them exactly what to do
+- **Migration is a one-word change**: `Actor subclass:` → `Server subclass:` when they need raw OTP features
 - **`Supervisor which:`** for discovery is more explicit than global names — easier to trace
 
 ### Smalltalk Developer
@@ -422,13 +418,8 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 5. **Lint — sync send in Timer block:** Warn when a `self method.` (sync call) appears inside a `Timer every:do:` or `Timer after:do:` block. Suggest `self method!` (async cast) instead.
 7. **Tests:** BUnit tests for Server + handleInfo: (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, error-in-handler recovery. Integration tests for the two-hop init chain (`Server subclass: Foo` with `spawn` and `spawnWith:`). EUnit tests for the dispatch path and Timer `spawn_link` behavior. Lint tests for sync-in-block warning.
 
-### Phase 2: Graceful Shutdown Verification (S) — BT-1451
-**Affected components:** Runtime (beamtalk_actor.erl, beamtalk_supervisor.erl), Stdlib (SupervisionSpec.bt)
-
-1. Verify `terminate:` receives `#shutdown` during supervisor stop
-2. Add `withShutdown:` to `SupervisionSpec` fluent builder (currently hardcoded to 5000ms / `#infinity`)
-3. Verify `SupervisionSpec #shutdown` timeout propagates correctly to OTP child spec
-4. Add tests for shutdown ordering and timeout behavior
+### Phase 2: Graceful Shutdown — BT-1451 (approved, PR #1478)
+BT-1451 delivers `terminate:` runtime support. Follow-up issue for `withShutdown:` on `SupervisionSpec` will be created during `/plan-adr`.
 
 ### Deferred
 - Named registration (`spawnAs:` / `Server named:`) — separate ADR post-v0.1, lives on Server
