@@ -109,7 +109,8 @@ send(Receiver, Selector, Args) ->
             ?LOG_DEBUG("Message send", #{
                 class => element(2, Receiver),
                 selector => Selector,
-                caller_pid => self()
+                caller_pid => self(),
+                domain => [beamtalk, runtime]
             }),
             case element(2, Receiver) of
                 'Metaclass' ->
@@ -164,7 +165,8 @@ cast(Receiver, Selector, Args) ->
             ?LOG_DEBUG("Message cast", #{
                 class => element(2, Receiver),
                 selector => Selector,
-                caller_pid => self()
+                caller_pid => self(),
+                domain => [beamtalk, runtime]
             }),
             case element(2, Receiver) of
                 'Metaclass' ->

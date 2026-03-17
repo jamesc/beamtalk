@@ -324,7 +324,8 @@ handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
                                 Class:Reason ->
                                     ?LOG_WARNING(
                                         "list-classes: skipping class ~p: ~p:~p",
-                                        [Pid, Class, Reason]
+                                        [Pid, Class, Reason],
+                                        #{domain => [beamtalk, runtime]}
                                     ),
                                     false
                             end
@@ -593,7 +594,7 @@ run_test_op(undefined, Msg) ->
                 Err, Msg, fun beamtalk_repl_json:format_error_message/1
             );
         _Class:Reason ->
-            ?LOG_ERROR("test-all op failed: ~p", [Reason]),
+            ?LOG_ERROR("test-all op failed: ~p", [Reason], #{domain => [beamtalk, runtime]}),
             Err0 = beamtalk_error:new(runtime_error, 'TestRunner'),
             Err1 = beamtalk_error:with_message(
                 Err0, iolist_to_binary(io_lib:format("Test run failed: ~p", [Reason]))
@@ -620,7 +621,9 @@ run_test_op(ClassName, Msg) when is_binary(ClassName) ->
                         Err, Msg, fun beamtalk_repl_json:format_error_message/1
                     );
                 _Class:Reason ->
-                    ?LOG_ERROR("test op failed for ~s: ~p", [ClassName, Reason]),
+                    ?LOG_ERROR("test op failed for ~s: ~p", [ClassName, Reason], #{
+                        domain => [beamtalk, runtime]
+                    }),
                     Err0 = beamtalk_error:new(runtime_error, 'TestRunner'),
                     Err1 = beamtalk_error:with_message(
                         Err0,
@@ -650,7 +653,9 @@ run_test_op_file(FilePath, Msg) ->
                 Err, Msg, fun beamtalk_repl_json:format_error_message/1
             );
         _Class:Reason ->
-            ?LOG_ERROR("test file op failed for ~s: ~p", [FilePath, Reason]),
+            ?LOG_ERROR("test file op failed for ~s: ~p", [FilePath, Reason], #{
+                domain => [beamtalk, runtime]
+            }),
             Err0 = beamtalk_error:new(runtime_error, 'TestRunner'),
             Err1 = beamtalk_error:with_message(
                 Err0,

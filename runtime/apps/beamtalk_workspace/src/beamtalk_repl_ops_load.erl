@@ -356,7 +356,8 @@ topo_sort_loop([], Pending, Acc) ->
     ?LOG_WARNING(
         "load-project: ~B file(s) have unresolved superclass dependencies "
         "(possible cycle or missing class declaration); loading in original order",
-        [length(Pending)]
+        [length(Pending)],
+        #{domain => [beamtalk, runtime]}
     ),
     lists:reverse(Acc) ++ [maps:get(path, I) || I <- Pending];
 topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->

@@ -98,7 +98,9 @@ live_class_entries() ->
         )
     catch
         exit:{noproc, _} ->
-            ?LOG_WARNING("pg not started when fetching class entries", #{module => ?MODULE}),
+            ?LOG_WARNING("pg not started when fetching class entries", #{
+                module => ?MODULE, domain => [beamtalk, runtime]
+            }),
             []
     end.
 
@@ -272,7 +274,8 @@ validate_class_update(ClassName, OldModule, ClassInfo) ->
             ?LOG_WARNING("Rejected stdlib class shadowing attempt", #{
                 class => ClassName,
                 stdlib_module => OldModule,
-                user_module => NewModule
+                user_module => NewModule,
+                domain => [beamtalk, runtime]
             }),
             record_pending_load_error(ClassName, Error1),
             {error, Error1};
@@ -287,13 +290,15 @@ validate_class_update(ClassName, OldModule, ClassInfo) ->
                             ?LOG_DEBUG("Bootstrap stub replaced by stdlib module", #{
                                 class => ClassName,
                                 stub => OldModule,
-                                stdlib => NewModule
+                                stdlib => NewModule,
+                                domain => [beamtalk, runtime]
                             });
                         false ->
                             ?LOG_WARNING("Class redefined from different module", #{
                                 class => ClassName,
                                 old_module => OldModule,
-                                new_module => NewModule
+                                new_module => NewModule,
+                                domain => [beamtalk, runtime]
                             }),
                             record_class_collision_warning(ClassName, OldModule, NewModule)
                     end;

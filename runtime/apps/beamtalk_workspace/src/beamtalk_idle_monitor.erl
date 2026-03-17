@@ -111,7 +111,9 @@ handle_info(check_idle, State = #state{enabled = true, max_idle_seconds = MaxIdl
     %% Check if we should terminate
     case should_terminate(MaxIdle) of
         true ->
-            ?LOG_WARNING("Workspace idle, shutting down", #{max_idle_seconds => MaxIdle}),
+            ?LOG_WARNING("Workspace idle, shutting down", #{
+                max_idle_seconds => MaxIdle, domain => [beamtalk, runtime]
+            }),
             %% Graceful shutdown - init:stop() is async, stop this gen_server too
             init:stop(),
             {stop, normal, State};

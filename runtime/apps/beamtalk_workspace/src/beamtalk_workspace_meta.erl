@@ -614,7 +614,8 @@ persist_metadata_to_disk(State) ->
         {error, Reason} ->
             ?LOG_WARNING(
                 "Failed to persist workspace metadata to ~s: ~p",
-                [Path, Reason]
+                [Path, Reason],
+                #{domain => [beamtalk, runtime]}
             ),
             {error, Reason}
     end.

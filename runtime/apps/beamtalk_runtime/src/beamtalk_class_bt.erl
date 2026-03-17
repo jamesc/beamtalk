@@ -115,7 +115,9 @@ register_class() ->
     },
     case beamtalk_object_class:start('Class', ClassInfo) of
         {ok, _Pid} ->
-            ?LOG_INFO("Registered Class (ADR 0032 Phase 0 stub)", #{module => ?MODULE}),
+            ?LOG_INFO("Registered Class (ADR 0032 Phase 0 stub)", #{
+                module => ?MODULE, domain => [beamtalk, runtime]
+            }),
             ok;
         {error, {already_started, _}} ->
             %% Class was already registered (compiled stdlib loaded first, or bootstrap
@@ -123,6 +125,8 @@ register_class() ->
             %% via update_class. classBuilder remains discoverable via has_method/1 below.
             ok;
         {error, Reason} ->
-            ?LOG_WARNING("Failed to register Class", #{reason => Reason}),
+            ?LOG_WARNING("Failed to register Class", #{
+                reason => Reason, domain => [beamtalk, runtime]
+            }),
             ok
     end.

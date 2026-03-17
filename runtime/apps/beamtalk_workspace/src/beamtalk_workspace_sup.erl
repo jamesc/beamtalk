@@ -88,8 +88,12 @@ init(Config) ->
     %% because the compiler port binary may not be available in all environments
     %% (e.g., unit tests).
     case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, Reason} -> ?LOG_ERROR("Failed to start beamtalk_compiler app", #{reason => Reason})
+        {ok, _} ->
+            ok;
+        {error, Reason} ->
+            ?LOG_ERROR("Failed to start beamtalk_compiler app", #{
+                reason => Reason, domain => [beamtalk, runtime]
+            })
     end,
 
     ChildSpecs =
@@ -280,7 +284,7 @@ do_setup_file_logger(WorkspaceId) ->
         false ->
             ?LOG_WARNING(
                 "HOME/USERPROFILE not set; skipping file logger",
-                #{workspace_id => WorkspaceId}
+                #{workspace_id => WorkspaceId, domain => [beamtalk, runtime]}
             ),
             ok;
         Home ->
@@ -302,35 +306,34 @@ do_setup_file_logger(WorkspaceId) ->
                         },
                         level => debug,
                         formatter =>
-                            {logger_formatter, #{
-                                template => [time, " [", level, "] ", mfa, " ", msg, "\n"],
-                                single_line => true
-                            }}
+                            {beamtalk_json_formatter, #{}}
                     },
                     %% Lower primary logger level to debug so file handler captures all events.
                     %% Console handler keeps its own level filter unchanged.
                     logger:set_primary_config(level, debug),
                     case logger:add_handler(beamtalk_file_log, logger_std_h, HandlerConfig) of
                         ok ->
-                            ?LOG_INFO("Workspace log file: ~s", [LogFile]),
+                            ?LOG_INFO("Workspace log file: ~s", [LogFile], #{
+                                domain => [beamtalk, runtime]
+                            }),
                             ok;
                         {error, {already_exist, _}} ->
                             ?LOG_INFO(
                                 "Reusing existing workspace file logger",
-                                #{path => LogFile}
+                                #{path => LogFile, domain => [beamtalk, runtime]}
                             ),
                             ok;
                         {error, Reason} ->
                             ?LOG_WARNING(
                                 "Failed to add file logger",
-                                #{reason => Reason, path => LogFile}
+                                #{reason => Reason, path => LogFile, domain => [beamtalk, runtime]}
                             ),
                             ok
                     end;
                 {error, Reason} ->
                     ?LOG_WARNING(
                         "Failed to create log directory",
-                        #{path => LogFile, reason => Reason}
+                        #{path => LogFile, reason => Reason, domain => [beamtalk, runtime]}
                     ),
                     ok
             end

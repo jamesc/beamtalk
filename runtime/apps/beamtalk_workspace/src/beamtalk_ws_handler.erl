@@ -187,7 +187,9 @@ websocket_info(
     {'DOWN', MonRef, process, _Pid, _Reason},
     State = #ws_state{session_mon = MonRef, session_id = SessionId}
 ) ->
-    ?LOG_INFO("Session process terminated, closing WebSocket", #{session => SessionId}),
+    ?LOG_INFO("Session process terminated, closing WebSocket", #{
+        session => SessionId, domain => [beamtalk, runtime]
+    }),
     beamtalk_session_table:delete(SessionId),
     {[{close, 1011, <<"Session terminated">>}], State#ws_state{
         authenticated = false,
@@ -205,7 +207,8 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     ?LOG_INFO("WebSocket client disconnected", #{
         session => SessionId,
         session_pid => SessionPid,
-        peer => Peer
+        peer => Peer,
+        domain => [beamtalk, runtime]
     }),
     %% Unsubscribe from Transcript push messages (ADR 0017)
     beamtalk_transcript_stream:unsubscribe('Transcript'),
@@ -243,7 +246,8 @@ handle_auth(Data, State) ->
                     start_or_resume_session(ResumeId, State);
                 false ->
                     ?LOG_WARNING("WebSocket auth failed: invalid cookie", #{
-                        peer => State#ws_state.peer
+                        peer => State#ws_state.peer,
+                        domain => [beamtalk, runtime]
                     }),
                     Reply = jsx:encode(#{
                         <<"type">> => <<"auth_error">>,
@@ -253,7 +257,8 @@ handle_auth(Data, State) ->
             end;
         _ ->
             ?LOG_WARNING("WebSocket auth failed: invalid auth message", #{
-                peer => State#ws_state.peer
+                peer => State#ws_state.peer,
+                domain => [beamtalk, runtime]
             }),
             Reply = jsx:encode(#{
                 <<"type">> => <<"auth_error">>,
@@ -262,7 +267,9 @@ handle_auth(Data, State) ->
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
     catch
         error:badarg ->
-            ?LOG_WARNING("WebSocket auth failed: malformed JSON", #{peer => State#ws_state.peer}),
+            ?LOG_WARNING("WebSocket auth failed: malformed JSON", #{
+                peer => State#ws_state.peer, domain => [beamtalk, runtime]
+            }),
             Reply = jsx:encode(#{
                 <<"type">> => <<"auth_error">>,
                 <<"message">> => <<"Malformed auth message">>
@@ -312,7 +319,8 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                     ?LOG_INFO("WebSocket session resumed", #{
                         session => ResumeId,
                         session_pid => Pid,
-                        peer => State#ws_state.peer
+                        peer => State#ws_state.peer,
+                        domain => [beamtalk, runtime]
                     }),
                     beamtalk_workspace_meta:update_activity(),
                     beamtalk_transcript_stream:subscribe('Transcript'),
@@ -336,7 +344,8 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                     beamtalk_session_table:delete(ResumeId),
                     ?LOG_INFO("Resumed session expired, creating new", #{
                         old_session => ResumeId,
-                        peer => State#ws_state.peer
+                        peer => State#ws_state.peer,
+                        domain => [beamtalk, runtime]
                     }),
                     create_session(beamtalk_repl_server:generate_session_id(), State)
             end;
@@ -344,7 +353,8 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
             %% Session not found — create new
             ?LOG_INFO("Resume session not found, creating new", #{
                 requested_session => ResumeId,
-                peer => State#ws_state.peer
+                peer => State#ws_state.peer,
+                domain => [beamtalk, runtime]
             }),
             create_session(beamtalk_repl_server:generate_session_id(), State)
     end;
@@ -363,7 +373,8 @@ create_session(SessionId, State) ->
             ?LOG_INFO("WebSocket auth succeeded, session created", #{
                 session => SessionId,
                 session_pid => SessionPid,
-                peer => State#ws_state.peer
+                peer => State#ws_state.peer,
+                domain => [beamtalk, runtime]
             }),
             beamtalk_workspace_meta:update_activity(),
             beamtalk_transcript_stream:subscribe('Transcript'),
@@ -385,7 +396,8 @@ create_session(SessionId, State) ->
         {error, Reason} ->
             ?LOG_ERROR("Session creation failed after auth", #{
                 reason => Reason,
-                peer => State#ws_state.peer
+                peer => State#ws_state.peer,
+                domain => [beamtalk, runtime]
             }),
             ErrorJson = jsx:encode(#{
                 <<"type">> => <<"auth_error">>,
@@ -501,7 +513,9 @@ handle_shutdown(Msg, State) ->
     Params = beamtalk_repl_protocol:get_params(Msg),
     case maps:get(<<"cookie">>, Params, undefined) of
         undefined ->
-            ?LOG_WARNING("Shutdown denied: missing cookie in message", #{}),
+            ?LOG_WARNING("Shutdown denied: missing cookie in message", #{
+                domain => [beamtalk, runtime]
+            }),
             ErrorJson = beamtalk_repl_json:format_error(<<"Shutdown requires cookie">>),
             {[{text, ErrorJson}], State};
         ProvidedCookie when is_binary(ProvidedCookie) ->
@@ -511,7 +525,9 @@ handle_shutdown(Msg, State) ->
                     crypto:hash_equals(ProvidedCookie, NodeCookie),
             case CookieValid of
                 true ->
-                    ?LOG_INFO("Shutdown requested via WebSocket protocol", #{}),
+                    ?LOG_INFO("Shutdown requested via WebSocket protocol", #{
+                        domain => [beamtalk, runtime]
+                    }),
                     %% Send to beamtalk_repl_server (a persistent gen_server)
                     %% instead of self() — the WS handler process dies when
                     %% the client closes the connection, racing the 100ms timer.
@@ -523,12 +539,12 @@ handle_shutdown(Msg, State) ->
                     ),
                     {[{text, Reply}], State};
                 false ->
-                    ?LOG_WARNING("Shutdown denied: invalid cookie", #{}),
+                    ?LOG_WARNING("Shutdown denied: invalid cookie", #{domain => [beamtalk, runtime]}),
                     ErrorJson = beamtalk_repl_json:format_error(<<"Invalid shutdown cookie">>),
                     {[{text, ErrorJson}], State}
             end;
         _ ->
-            ?LOG_WARNING("Shutdown denied: invalid cookie type", #{}),
+            ?LOG_WARNING("Shutdown denied: invalid cookie type", #{domain => [beamtalk, runtime]}),
             ErrorJson = beamtalk_repl_json:format_error(<<"Invalid shutdown cookie">>),
             {[{text, ErrorJson}], State}
     end.
@@ -557,7 +573,9 @@ actor_snapshot_frames() ->
             catch
                 Class:Reason ->
                     ?LOG_WARNING("Failed to snapshot actors", #{
-                        class => Class, reason => Reason
+                        class => Class,
+                        reason => Reason,
+                        domain => [beamtalk, runtime]
                     }),
                     []
             end;

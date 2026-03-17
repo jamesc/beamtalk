@@ -367,7 +367,9 @@ execute_callback(Callback, Value) ->
         catch
             Class:Reason:_Stacktrace ->
                 %% Log error without stack trace to avoid leaking sensitive data
-                ?LOG_ERROR("Error in future callback", #{class => Class, reason => Reason})
+                ?LOG_ERROR("Error in future callback", #{
+                    class => Class, reason => Reason, domain => [beamtalk, runtime]
+                })
         end
     end).
 

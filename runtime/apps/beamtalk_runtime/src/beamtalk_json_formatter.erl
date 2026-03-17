@@ -25,18 +25,20 @@
 -spec format(logger:log_event(), logger:formatter_config()) -> unicode:chardata().
 format(#{level := Level, msg := Msg, meta := Meta}, _Config) ->
     TimeBin = format_time(Meta),
-    MsgBin = format_msg(Msg, Meta),
+    {MsgBin, ReportFields} = format_msg_structured(Msg, Meta),
     Fields0 = [
         {<<"time">>, TimeBin},
         {<<"level">>, atom_to_binary(Level, utf8)},
         {<<"msg">>, MsgBin}
     ],
-    Fields1 = maybe_add(<<"domain">>, format_domain(Meta), Fields0),
+    Fields1 = maybe_add(<<"domain">>, format_domain(Msg, Meta), Fields0),
     Fields2 = maybe_add(<<"class">>, maps:get(beamtalk_class, Meta, undefined), Fields1),
     Fields3 = maybe_add(<<"selector">>, maps:get(beamtalk_selector, Meta, undefined), Fields2),
-    Fields4 = maybe_add(<<"mfa">>, format_mfa(Meta), Fields3),
+    Fields4 = maybe_add(<<"mfa">>, format_mfa(Msg, Meta), Fields3),
     Fields5 = maybe_add(<<"pid">>, format_pid(Meta), Fields4),
-    Json = jsx:encode(lists:reverse(Fields5)),
+    %% Append structured fields extracted from OTP reports
+    Fields6 = lists:foldl(fun({K, V}, Acc) -> maybe_add(K, V, Acc) end, Fields5, ReportFields),
+    Json = jsx:encode(lists:reverse(Fields6)),
     [Json, $\n].
 
 %% @doc Validate formatter configuration. Accepts any config.
@@ -65,11 +67,77 @@ format_time(#{time := Timestamp}) ->
 format_time(_) ->
     <<"unknown">>.
 
-%% @doc Format the log message into a binary string.
--spec format_msg(term(), map()) -> binary().
-format_msg({string, Msg}, _Meta) ->
-    iolist_to_binary(Msg);
-format_msg({report, Report}, Meta) ->
+%% @doc Format the log message and extract structured fields from OTP reports.
+%%
+%% Returns {MessageBinary, ExtraFields} where ExtraFields is a list of
+%% {Key, Value} pairs extracted from structured OTP reports.
+-spec format_msg_structured(term(), map()) -> {binary(), [{binary(), term()}]}.
+format_msg_structured({string, Msg}, _Meta) ->
+    {iolist_to_binary(Msg), []};
+format_msg_structured({report, Report}, Meta) when is_map(Report) ->
+    %% Try to decompose structured OTP reports into fields
+    case extract_report_fields(Report, Meta) of
+        {MsgBin, Fields} ->
+            {MsgBin, Fields};
+        undefined ->
+            {format_report_fallback(Report, Meta), []}
+    end;
+format_msg_structured({report, Report}, Meta) ->
+    {format_report_fallback(Report, Meta), []};
+format_msg_structured({Format, Args}, _Meta) ->
+    {iolist_to_binary(io_lib:format(Format, Args)), []}.
+
+%% @doc Extract structured fields from OTP report maps.
+%%
+%% Recognises gen_server terminate, supervisor, and proc_lib crash reports.
+-spec extract_report_fields(map(), map()) ->
+    {binary(), [{binary(), term()}]} | undefined.
+extract_report_fields(#{label := {gen_server, terminate}, name := Name, reason := Reason}, _Meta) ->
+    Msg = iolist_to_binary(io_lib:format("gen_server ~tp terminated", [Name])),
+    Fields = [
+        {<<"report_type">>, <<"gen_server_terminate">>},
+        {<<"reason">>, iolist_to_binary(io_lib:format("~tp", [Reason]))}
+    ],
+    {Msg, Fields};
+extract_report_fields(
+    #{label := {supervisor, progress}, supervisor := Sup, started := Started}, _Meta
+) ->
+    ChildId =
+        case Started of
+            L when is_list(L) -> proplists:get_value(id, L, unknown);
+            _ -> unknown
+        end,
+    Msg = iolist_to_binary(io_lib:format("supervisor ~tp started child ~tp", [Sup, ChildId])),
+    Fields = [
+        {<<"report_type">>, <<"supervisor_progress">>}
+    ],
+    {Msg, Fields};
+extract_report_fields(
+    #{label := {supervisor, child_terminated}, supervisor := Sup, reason := Reason}, _Meta
+) ->
+    Msg = iolist_to_binary(io_lib:format("supervisor ~tp child terminated: ~tp", [Sup, Reason])),
+    Fields = [
+        {<<"report_type">>, <<"supervisor_child_terminated">>},
+        {<<"reason">>, iolist_to_binary(io_lib:format("~tp", [Reason]))}
+    ],
+    {Msg, Fields};
+extract_report_fields(#{label := {proc_lib, crash}, report := CrashInfo}, _Meta) when
+    is_list(CrashInfo)
+->
+    Reason = proplists:get_value(error_info, CrashInfo, unknown),
+    InitCall = proplists:get_value(initial_call, CrashInfo, unknown),
+    Msg = iolist_to_binary(io_lib:format("process crash: ~tp", [Reason])),
+    Fields = [
+        {<<"report_type">>, <<"proc_lib_crash">>},
+        {<<"initial_call">>, iolist_to_binary(io_lib:format("~tp", [InitCall]))}
+    ],
+    {Msg, Fields};
+extract_report_fields(_Report, _Meta) ->
+    undefined.
+
+%% @doc Format a report using the report callback or fallback.
+-spec format_report_fallback(term(), map()) -> binary().
+format_report_fallback(Report, Meta) ->
     case maps:get(report_cb, Meta, undefined) of
         undefined ->
             iolist_to_binary(io_lib:format("~tp", [Report]));
@@ -78,24 +146,51 @@ format_msg({report, Report}, Meta) ->
             iolist_to_binary(io_lib:format(Format, Args));
         Fun when is_function(Fun, 2) ->
             iolist_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
-    end;
-format_msg({Format, Args}, _Meta) ->
-    iolist_to_binary(io_lib:format(Format, Args)).
+    end.
 
 %% @doc Format the domain metadata as a dot-separated binary.
--spec format_domain(map()) -> binary() | undefined.
-format_domain(#{domain := Domain}) when is_list(Domain) ->
+%%
+%% Uses explicit domain from metadata if present. Otherwise, infers domain
+%% from OTP report labels (gen_server, supervisor, proc_lib → "otp").
+-spec format_domain(term(), map()) -> binary() | undefined.
+format_domain(_Msg, #{domain := Domain}) when is_list(Domain) ->
     iolist_to_binary(
         lists:join($., [atom_to_list(D) || D <- Domain])
     );
-format_domain(_) ->
+format_domain({report, Report}, _Meta) when is_map(Report) ->
+    infer_domain_from_report(Report);
+format_domain(_Msg, _Meta) ->
     undefined.
 
+%% @doc Infer domain from OTP report labels.
+-spec infer_domain_from_report(map()) -> binary() | undefined.
+infer_domain_from_report(#{label := {gen_server, _}}) -> <<"otp">>;
+infer_domain_from_report(#{label := {supervisor, _}}) -> <<"otp">>;
+infer_domain_from_report(#{label := {proc_lib, _}}) -> <<"otp">>;
+infer_domain_from_report(#{label := {application_controller, _}}) -> <<"otp">>;
+infer_domain_from_report(_) -> undefined.
+
 %% @doc Format the MFA metadata as a binary.
--spec format_mfa(map()) -> binary() | undefined.
-format_mfa(#{mfa := {M, F, A}}) ->
+%%
+%% Uses explicit mfa from metadata if present. For OTP reports, extracts
+%% mfa from the report's initial_call or registered name when available.
+-spec format_mfa(term(), map()) -> binary() | undefined.
+format_mfa(_Msg, #{mfa := {M, F, A}}) ->
     iolist_to_binary(io_lib:format("~s:~s/~B", [M, F, A]));
-format_mfa(_) ->
+format_mfa({report, Report}, _Meta) when is_map(Report) ->
+    infer_mfa_from_report(Report);
+format_mfa(_Msg, _Meta) ->
+    undefined.
+
+%% @doc Extract MFA from OTP report fields.
+-spec infer_mfa_from_report(map()) -> binary() | undefined.
+infer_mfa_from_report(#{label := {gen_server, terminate}, name := Name}) when is_atom(Name) ->
+    iolist_to_binary(io_lib:format("~s", [Name]));
+infer_mfa_from_report(#{label := {supervisor, _}, supervisor := {_, Name}}) when is_atom(Name) ->
+    iolist_to_binary(io_lib:format("~s", [Name]));
+infer_mfa_from_report(#{label := {supervisor, _}, supervisor := Name}) when is_atom(Name) ->
+    iolist_to_binary(io_lib:format("~s", [Name]));
+infer_mfa_from_report(_) ->
     undefined.
 
 %% @doc Format the PID metadata as a binary.

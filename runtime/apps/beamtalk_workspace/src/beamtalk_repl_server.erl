@@ -167,7 +167,7 @@ handle_cast(_Msg, State) ->
 %% @private
 handle_info(shutdown_requested, State) ->
     %% Shutdown endpoint (BT-611): initiate OTP-level graceful teardown.
-    ?LOG_INFO("Executing requested shutdown", #{}),
+    ?LOG_INFO("Executing requested shutdown", #{domain => [beamtalk, runtime]}),
     init:stop(),
     {noreply, State};
 handle_info(_Info, State) ->
@@ -175,7 +175,9 @@ handle_info(_Info, State) ->
 
 %% @private
 terminate(Reason, #state{port = Port, web_port = WebPort}) ->
-    ?LOG_INFO("REPL server shutting down", #{reason => Reason, port => Port}),
+    ?LOG_INFO("REPL server shutting down", #{
+        reason => Reason, port => Port, domain => [beamtalk, runtime]
+    }),
     cowboy:stop_listener(?LISTENER_REF),
     case WebPort of
         undefined -> ok;
@@ -214,11 +216,15 @@ maybe_start_web_listener(WebPort, BindAddr) ->
     case cowboy:start_clear(?WEB_LISTENER_REF, TransportOpts, ProtocolOpts) of
         {ok, _Pid} ->
             ActualWebPort = ranch:get_port(?WEB_LISTENER_REF),
-            ?LOG_INFO("Browser workspace listener started", #{port => ActualWebPort}),
+            ?LOG_INFO("Browser workspace listener started", #{
+                port => ActualWebPort, domain => [beamtalk, runtime]
+            }),
             ActualWebPort;
         {error, Reason} ->
             ?LOG_ERROR("Failed to start browser workspace listener", #{
-                port => WebPort, reason => Reason
+                port => WebPort,
+                reason => Reason,
+                domain => [beamtalk, runtime]
             }),
             undefined
     end.
@@ -237,7 +243,8 @@ write_port_file(WorkspaceId, Port, Nonce) ->
         false ->
             ?LOG_WARNING(
                 "HOME/USERPROFILE not set; skipping port file write for workspace ~p",
-                [WorkspaceId]
+                [WorkspaceId],
+                #{domain => [beamtalk, runtime]}
             ),
             ok;
         Home ->
@@ -260,15 +267,20 @@ write_port_file(WorkspaceId, Port, Nonce) ->
                         ok ->
                             case file:rename(TmpPath, PortFilePath) of
                                 ok ->
-                                    ?LOG_DEBUG("Wrote port file: ~s (port ~p, nonce ~s)", [
-                                        PortFilePath, Port, Nonce
-                                    ]),
+                                    ?LOG_DEBUG(
+                                        "Wrote port file: ~s (port ~p, nonce ~s)",
+                                        [
+                                            PortFilePath, Port, Nonce
+                                        ],
+                                        #{domain => [beamtalk, runtime]}
+                                    ),
                                     ok;
                                 {error, RenReason} ->
                                     ?LOG_WARNING(
                                         "Failed to rename port tmp file ~s -> ~s: ~p; "
                                         "falling back to direct write",
-                                        [TmpPath, PortFilePath, RenReason]
+                                        [TmpPath, PortFilePath, RenReason],
+                                        #{domain => [beamtalk, runtime]}
                                     ),
                                     _ = file:delete(TmpPath),
                                     %% Fallback: write directly so the CLI can still
@@ -278,13 +290,15 @@ write_port_file(WorkspaceId, Port, Nonce) ->
                                         ok ->
                                             ?LOG_DEBUG(
                                                 "Wrote port file (fallback): ~s (port ~p, nonce ~s)",
-                                                [PortFilePath, Port, Nonce]
+                                                [PortFilePath, Port, Nonce],
+                                                #{domain => [beamtalk, runtime]}
                                             ),
                                             ok;
                                         {error, FbReason} ->
                                             ?LOG_WARNING(
                                                 "Fallback write of port file ~s failed: ~p",
-                                                [PortFilePath, FbReason]
+                                                [PortFilePath, FbReason],
+                                                #{domain => [beamtalk, runtime]}
                                             ),
                                             ok
                                     end
@@ -292,14 +306,16 @@ write_port_file(WorkspaceId, Port, Nonce) ->
                         {error, Reason} ->
                             ?LOG_WARNING(
                                 "Failed to write port file ~s: ~p",
-                                [TmpPath, Reason]
+                                [TmpPath, Reason],
+                                #{domain => [beamtalk, runtime]}
                             ),
                             ok
                     end;
                 {error, Reason} ->
                     ?LOG_WARNING(
                         "Failed to create directory for port file ~s: ~p",
-                        [PortFilePath, Reason]
+                        [PortFilePath, Reason],
+                        #{domain => [beamtalk, runtime]}
                     ),
                     ok
             end
@@ -346,7 +362,8 @@ handle_protocol_request(Msg, SessionPid) ->
                 class => Class,
                 reason => Reason,
                 stack => lists:sublist(Stack, 5),
-                op => Op
+                op => Op,
+                domain => [beamtalk, runtime]
             }),
             WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason, Class),
             beamtalk_repl_protocol:encode_error(
@@ -369,7 +386,8 @@ handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"clear">>; Op =:= <<"bindin
         "Deprecated protocol op '~s' used by WebSocket client. "
         "These ops are session-local only and cannot be replaced by "
         "Beamtalk-native message sends.",
-        [Op]
+        [Op],
+        #{domain => [beamtalk, runtime]}
     ),
     beamtalk_repl_ops_eval:handle(Op, Params, Msg, SessionPid);
 handle_op(<<"load-source">>, Params, Msg, SessionPid) ->
@@ -389,7 +407,8 @@ handle_op(Op, Params, Msg, SessionPid) when
         "load-file → Workspace load: \"path\", "
         "reload → ClassName reload, "
         "modules → Workspace classes.",
-        [Op]
+        [Op],
+        #{domain => [beamtalk, runtime]}
     ),
     beamtalk_repl_ops_load:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
@@ -424,7 +443,8 @@ handle_op(<<"docs">>, Params, Msg, SessionPid) ->
     ?LOG_NOTICE(
         "Deprecated protocol op 'docs' used by WebSocket client. "
         "Migrate to: Beamtalk help: ClassName or Beamtalk help: ClassName selector: #selector.",
-        []
+        [],
+        #{domain => [beamtalk, runtime]}
     ),
     beamtalk_repl_ops_dev:handle(<<"docs">>, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"unload">> ->

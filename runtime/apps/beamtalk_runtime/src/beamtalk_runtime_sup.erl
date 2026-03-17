@@ -18,7 +18,7 @@ start_link() ->
     Result = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
     case Result of
         {ok, Pid} ->
-            ?LOG_INFO("Runtime supervisor started", #{pid => Pid});
+            ?LOG_INFO("Runtime supervisor started", #{pid => Pid, domain => [beamtalk, runtime]});
         _ ->
             ok
     end,
@@ -82,6 +82,10 @@ init([]) ->
 
     ChildIds = [maps:get(id, S) || S <- ChildSpecs],
     ?LOG_DEBUG("Runtime supervisor init", #{
-        strategy => one_for_one, intensity => 5, period => 10, children => ChildIds
+        strategy => one_for_one,
+        intensity => 5,
+        period => 10,
+        children => ChildIds,
+        domain => [beamtalk, runtime]
     }),
     {ok, {SupFlags, ChildSpecs}}.

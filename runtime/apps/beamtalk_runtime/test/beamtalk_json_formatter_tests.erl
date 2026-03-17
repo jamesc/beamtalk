@@ -142,6 +142,131 @@ format_time_is_iso8601_test() ->
     ).
 
 %%====================================================================
+%% OTP Report Tests
+%%====================================================================
+
+format_gen_server_terminate_report_test() ->
+    Report = #{
+        label => {gen_server, terminate},
+        name => my_server,
+        reason => {error, function_clause}
+    },
+    Event = #{
+        level => error,
+        msg => {report, Report},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assertMatch(<<"gen_server my_server terminated">>, maps:get(<<"msg">>, Decoded)),
+    ?assertEqual(<<"gen_server_terminate">>, maps:get(<<"report_type">>, Decoded)),
+    ?assert(maps:is_key(<<"reason">>, Decoded)),
+    %% Should infer domain as "otp"
+    ?assertEqual(<<"otp">>, maps:get(<<"domain">>, Decoded)),
+    %% Should infer mfa from server name
+    ?assertEqual(<<"my_server">>, maps:get(<<"mfa">>, Decoded)).
+
+format_supervisor_progress_report_test() ->
+    Report = #{
+        label => {supervisor, progress},
+        supervisor => {local, my_sup},
+        started => [{id, my_child}, {pid, self()}]
+    },
+    Event = #{
+        level => info,
+        msg => {report, Report},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assert(binary:match(maps:get(<<"msg">>, Decoded), <<"supervisor">>) =/= nomatch),
+    ?assertEqual(<<"supervisor_progress">>, maps:get(<<"report_type">>, Decoded)),
+    ?assertEqual(<<"otp">>, maps:get(<<"domain">>, Decoded)),
+    ?assertEqual(<<"my_sup">>, maps:get(<<"mfa">>, Decoded)).
+
+format_supervisor_child_terminated_report_test() ->
+    Report = #{
+        label => {supervisor, child_terminated},
+        supervisor => {local, my_sup},
+        reason => normal
+    },
+    Event = #{
+        level => warning,
+        msg => {report, Report},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"supervisor_child_terminated">>, maps:get(<<"report_type">>, Decoded)),
+    ?assertEqual(<<"otp">>, maps:get(<<"domain">>, Decoded)).
+
+format_proc_lib_crash_report_test() ->
+    Report = #{
+        label => {proc_lib, crash},
+        report => [
+            {error_info, {exit, crashed, []}},
+            {initial_call, {my_mod, init, 1}}
+        ]
+    },
+    Event = #{
+        level => error,
+        msg => {report, Report},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"proc_lib_crash">>, maps:get(<<"report_type">>, Decoded)),
+    ?assertEqual(<<"otp">>, maps:get(<<"domain">>, Decoded)),
+    ?assert(maps:is_key(<<"initial_call">>, Decoded)).
+
+format_explicit_domain_overrides_inference_test() ->
+    %% When domain is explicitly set, it should take precedence over inference
+    Report = #{label => {gen_server, terminate}, name => my_server, reason => normal},
+    Event = #{
+        level => error,
+        msg => {report, Report},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            domain => [beamtalk, runtime]
+        }
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"beamtalk.runtime">>, maps:get(<<"domain">>, Decoded)).
+
+format_unknown_report_no_domain_inference_test() ->
+    %% Unknown reports should not get a domain inferred
+    Report = #{some_key => some_value},
+    Event = #{
+        level => info,
+        msg => {report, Report},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assertNot(maps:is_key(<<"domain">>, Decoded)).
+
+format_report_with_callback_test() ->
+    %% Reports with report_cb should use the callback for message formatting
+    Report = #{custom => data},
+    Event = #{
+        level => info,
+        msg => {report, Report},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            report_cb => fun(_R) -> {"Custom: ~s", ["formatted"]} end
+        }
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"Custom: formatted">>, maps:get(<<"msg">>, Decoded)).
+
+format_stdlib_domain_test() ->
+    Event = #{
+        level => info,
+        msg => {string, "stdlib domain test"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            domain => [beamtalk, stdlib]
+        }
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"beamtalk.stdlib">>, maps:get(<<"domain">>, Decoded)).
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 

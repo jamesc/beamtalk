@@ -202,6 +202,7 @@ init(_Args) ->
             ok;
         N ->
             ?LOG_INFO("Recovered class cache from loaded BEAM modules", #{
+                domain => [beamtalk, runtime],
                 classes_recovered => N,
                 class_names => maps:keys(Classes)
             })
@@ -212,7 +213,9 @@ handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From,
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
     CacheSize = map_size(State#state.classes),
     ?LOG_DEBUG("Compile expression", #{
-        module => ModuleName, cache_size => CacheSize
+        domain => [beamtalk, runtime],
+        module => ModuleName,
+        cache_size => CacheSize
     }),
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = beamtalk_compiler_port:compile_expression(
@@ -222,7 +225,9 @@ handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From,
 handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, _From, State) ->
     CacheSize = map_size(State#state.classes),
     ?LOG_DEBUG("Compile expression (trace)", #{
-        module => ModuleName, cache_size => CacheSize
+        domain => [beamtalk, runtime],
+        module => ModuleName,
+        cache_size => CacheSize
     }),
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = beamtalk_compiler_port:compile_expression_trace(
@@ -233,7 +238,9 @@ handle_call({compile, Source, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
     CacheSize = map_size(State#state.classes),
     ?LOG_DEBUG("Compile file", #{
-        path => maps:get(path, Options, undefined), cache_size => CacheSize
+        domain => [beamtalk, runtime],
+        path => maps:get(path, Options, undefined),
+        cache_size => CacheSize
     }),
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = do_compile(State#state.port, Source, Options1),
@@ -261,7 +268,9 @@ handle_cast({register_class, ClassName, MetaMap}, State) ->
     %% ADR 0050 Phase 3: Accumulate class metadata; overwrite on redefinition.
     IsRedefinition = maps:is_key(ClassName, State#state.classes),
     ?LOG_DEBUG("Register class", #{
-        class => ClassName, redefinition => IsRedefinition
+        domain => [beamtalk, runtime],
+        class => ClassName,
+        redefinition => IsRedefinition
     }),
     NewClasses = maps:put(ClassName, MetaMap, State#state.classes),
     {noreply, State#state{classes = NewClasses}};
@@ -269,10 +278,12 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({Port, {exit_status, Status}}, #state{port = Port} = State) ->
-    ?LOG_ERROR("Compiler port exited unexpectedly", #{status => Status}),
+    ?LOG_ERROR("Compiler port exited unexpectedly", #{
+        domain => [beamtalk, runtime], status => Status
+    }),
     {stop, {port_exit_status, Status}, State};
 handle_info({'EXIT', Port, Reason}, #state{port = Port} = State) ->
-    ?LOG_ERROR("Compiler port EXIT", #{reason => Reason}),
+    ?LOG_ERROR("Compiler port EXIT", #{domain => [beamtalk, runtime], reason => Reason}),
     {stop, {port_exit, Reason}, State};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -338,7 +349,9 @@ open_port() ->
         beamtalk_compiler_port:open()
     catch
         error:{compiler_not_found, _} = Err ->
-            ?LOG_ERROR("Failed to open compiler port", #{error => Err}),
+            ?LOG_ERROR("Failed to open compiler port", #{
+                domain => [beamtalk, runtime], error => Err
+            }),
             error(Err)
     end.
 
@@ -354,7 +367,7 @@ open_port() ->
     {ok, term()} | {exit_status, non_neg_integer()} | timeout | port_not_available | decode_error.
 send_port_request(Port, Request, Timeout) ->
     Command = maps:get(command, Request, unknown),
-    ?LOG_DEBUG("Port request", #{command => Command}),
+    ?LOG_DEBUG("Port request", #{domain => [beamtalk, runtime], command => Command}),
     T0 = erlang:monotonic_time(millisecond),
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
@@ -372,6 +385,7 @@ send_port_request(Port, Request, Timeout) ->
                                     false -> unknown
                                 end,
                             ?LOG_DEBUG("Port response", #{
+                                domain => [beamtalk, runtime],
                                 command => Command,
                                 status => Status,
                                 elapsed_ms => Elapsed
@@ -380,13 +394,16 @@ send_port_request(Port, Request, Timeout) ->
                     catch
                         error:badarg ->
                             ?LOG_ERROR("Compiler port decode error", #{
-                                port => Port, elapsed_ms => Elapsed
+                                domain => [beamtalk, runtime],
+                                port => Port,
+                                elapsed_ms => Elapsed
                             }),
                             decode_error
                     end;
                 {Port, {exit_status, ExitStatus}} ->
                     Elapsed = erlang:monotonic_time(millisecond) - T0,
                     ?LOG_DEBUG("Port exit during request", #{
+                        domain => [beamtalk, runtime],
                         command => Command,
                         exit_status => ExitStatus,
                         elapsed_ms => Elapsed
@@ -451,7 +468,9 @@ do_compile(Port, Source, Options) ->
         {ok, Response} ->
             handle_compile_response(Response);
         {exit_status, Status} ->
-            ?LOG_ERROR("Compiler port exited during compile", #{status => Status}),
+            ?LOG_ERROR("Compiler port exited during compile", #{
+                domain => [beamtalk, runtime], status => Status
+            }),
             {error, [#{message => <<"Compiler port exited unexpectedly">>}]};
         timeout ->
             {error, [#{message => <<"Compiler port timed out">>}]};
@@ -468,7 +487,9 @@ do_diagnostics(Port, Source) ->
         {ok, Response} ->
             handle_diagnostics_response(Response);
         {exit_status, Status} ->
-            ?LOG_ERROR("Compiler port exited during diagnostics", #{status => Status}),
+            ?LOG_ERROR("Compiler port exited during diagnostics", #{
+                domain => [beamtalk, runtime], status => Status
+            }),
             {error, [#{message => <<"Compiler port exited unexpectedly">>}]};
         timeout ->
             {error, [#{message => <<"Compiler port timed out">>}]};
@@ -511,7 +532,7 @@ handle_compile_response(#{
 handle_compile_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};
 handle_compile_response(Other) ->
-    ?LOG_ERROR("Unexpected compile response", #{response => Other}),
+    ?LOG_ERROR("Unexpected compile response", #{domain => [beamtalk, runtime], response => Other}),
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 %% Handle response from diagnostics command.
@@ -520,12 +541,14 @@ handle_diagnostics_response(#{status := ok, diagnostics := Diagnostics}) ->
 handle_diagnostics_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};
 handle_diagnostics_response(Other) ->
-    ?LOG_ERROR("Unexpected diagnostics response", #{response => Other}),
+    ?LOG_ERROR("Unexpected diagnostics response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 %% Handle response from version command.
 handle_version_response(#{status := ok, version := Version}) ->
     {ok, Version};
 handle_version_response(Other) ->
-    ?LOG_ERROR("Unexpected version response", #{response => Other}),
+    ?LOG_ERROR("Unexpected version response", #{domain => [beamtalk, runtime], response => Other}),
     {error, unexpected_response}.

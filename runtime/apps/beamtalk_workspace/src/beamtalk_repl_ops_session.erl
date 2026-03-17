@@ -79,7 +79,7 @@ handle(<<"shutdown">>, Params, Msg, _SessionPid) ->
             crypto:hash_equals(ProvidedCookie, NodeCookie),
     case ValidCookie of
         true ->
-            ?LOG_INFO("Shutdown requested via protocol", #{}),
+            ?LOG_INFO("Shutdown requested via protocol", #{domain => [beamtalk, runtime]}),
             erlang:send_after(100, beamtalk_repl_server, shutdown_requested),
             beamtalk_repl_protocol:encode_status(
                 ok,
@@ -87,7 +87,7 @@ handle(<<"shutdown">>, Params, Msg, _SessionPid) ->
                 fun beamtalk_repl_json:term_to_json/1
             );
         false ->
-            ?LOG_WARNING("Shutdown rejected: invalid cookie", #{}),
+            ?LOG_WARNING("Shutdown rejected: invalid cookie", #{domain => [beamtalk, runtime]}),
             Err0 = beamtalk_error:new(auth_error, 'REPL'),
             Err1 = beamtalk_error:with_message(Err0, <<"Invalid cookie">>),
             Err2 = beamtalk_error:with_hint(

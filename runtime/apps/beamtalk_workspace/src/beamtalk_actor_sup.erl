@@ -27,7 +27,7 @@ start_link() ->
     Result = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
     case Result of
         {ok, Pid} ->
-            ?LOG_INFO("Actor supervisor started", #{pid => Pid});
+            ?LOG_INFO("Actor supervisor started", #{pid => Pid, domain => [beamtalk, runtime]});
         _ ->
             ok
     end,
@@ -40,9 +40,13 @@ start_actor(Module, Function, Args) ->
     Result = supervisor:start_child(?MODULE, [Module, Function, Args]),
     case Result of
         {ok, Pid} ->
-            ?LOG_INFO("Actor child started", #{module => Module, child_pid => Pid});
+            ?LOG_INFO("Actor child started", #{
+                module => Module, child_pid => Pid, domain => [beamtalk, runtime]
+            });
         {error, Reason} ->
-            ?LOG_ERROR("Actor child start failed", #{module => Module, reason => Reason})
+            ?LOG_ERROR("Actor child start failed", #{
+                module => Module, reason => Reason, domain => [beamtalk, runtime]
+            })
     end,
     Result.
 

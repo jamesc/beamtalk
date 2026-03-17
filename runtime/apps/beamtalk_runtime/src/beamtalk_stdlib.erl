@@ -79,7 +79,7 @@ init(Parent) ->
 %% @doc Shared initialization logic for stdlib loading.
 -spec do_init() -> ok.
 do_init() ->
-    ?LOG_INFO("Loading compiled stdlib modules"),
+    ?LOG_INFO("Loading compiled stdlib modules", #{domain => [beamtalk, stdlib]}),
     %% Load compiled stdlib modules in dependency order.
     %% Each module's on_load → register_class/0 creates its class process
     %% with correct method maps generated from the .bt source.
@@ -122,19 +122,27 @@ load_compiled_stdlib_modules() ->
                             %% Module loaded. If on_load already ran but the class
                             %% process was killed (e.g., test teardown), re-register.
                             ensure_class_registered(Mod, Class),
-                            ?LOG_DEBUG("Loaded stdlib module", #{module => Mod});
+                            ?LOG_DEBUG("Loaded stdlib module", #{
+                                module => Mod, domain => [beamtalk, stdlib]
+                            });
                         {error, Reason} ->
                             ?LOG_WARNING(
                                 "Failed to load module ~s: ~p",
                                 [format_bt_module(Mod), Reason],
-                                #{module => Mod, reason => Reason}
+                                #{
+                                    module => Mod,
+                                    reason => Reason,
+                                    domain => [beamtalk, stdlib]
+                                }
                             )
                     end
                 end,
                 Sorted
             );
         undefined ->
-            ?LOG_WARNING("No stdlib class metadata found, falling back to discovery"),
+            ?LOG_WARNING("No stdlib class metadata found, falling back to discovery", #{
+                domain => [beamtalk, stdlib]
+            }),
             EbinDir = find_stdlib_ebin(),
             discover_and_load_fallback(EbinDir)
     end.
@@ -166,7 +174,8 @@ ensure_class_registered(Mod, ClassName) ->
             ?LOG_WARNING("Unexpected return from register_class", #{
                 module => Mod,
                 class => ClassName,
-                result => Other
+                result => Other,
+                domain => [beamtalk, stdlib]
             }),
             ok
     catch
@@ -174,7 +183,8 @@ ensure_class_registered(Mod, ClassName) ->
             %% Module doesn't export register_class/0
             ?LOG_WARNING("Module missing register_class/0", #{
                 module => Mod,
-                class => ClassName
+                class => ClassName,
+                domain => [beamtalk, stdlib]
             }),
             ok;
         Class:Reason:Stacktrace ->
@@ -183,7 +193,8 @@ ensure_class_registered(Mod, ClassName) ->
                 class => ClassName,
                 error_class => Class,
                 reason => Reason,
-                stacktrace => Stacktrace
+                stacktrace => Stacktrace,
+                domain => [beamtalk, stdlib]
             }),
             ok
     end.
@@ -220,7 +231,10 @@ topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
             %% Circular dependency or missing superclass — emit remaining as-is
             ?LOG_WARNING(
                 "Stdlib topo_sort: unresolvable dependencies",
-                #{remaining => [C || {_, C, _} <- Deferred]}
+                #{
+                    remaining => [C || {_, C, _} <- Deferred],
+                    domain => [beamtalk, stdlib]
+                }
             ),
             lists:reverse(Acc) ++ Deferred;
         _ ->
@@ -250,12 +264,18 @@ discover_and_load_fallback(Dir) ->
                 fun(Mod) ->
                     case code:ensure_loaded(Mod) of
                         {module, Mod} ->
-                            ?LOG_DEBUG("Loaded stdlib module (fallback)", #{module => Mod});
+                            ?LOG_DEBUG("Loaded stdlib module (fallback)", #{
+                                module => Mod, domain => [beamtalk, stdlib]
+                            });
                         {error, Reason} ->
                             ?LOG_WARNING(
                                 "Failed to load module ~s: ~p",
                                 [format_bt_module(Mod), Reason],
-                                #{module => Mod, reason => Reason}
+                                #{
+                                    module => Mod,
+                                    reason => Reason,
+                                    domain => [beamtalk, stdlib]
+                                }
                             )
                     end
                 end,
@@ -264,7 +284,11 @@ discover_and_load_fallback(Dir) ->
         {error, Reason} ->
             ?LOG_WARNING(
                 "Cannot list stdlib ebin directory",
-                #{dir => Dir, reason => Reason}
+                #{
+                    dir => Dir,
+                    reason => Reason,
+                    domain => [beamtalk, stdlib]
+                }
             )
     end.
 

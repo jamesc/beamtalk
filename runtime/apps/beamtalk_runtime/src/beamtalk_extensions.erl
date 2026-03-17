@@ -141,7 +141,8 @@ register(Class, Selector, Fun, Owner) when
             %% Conflict: different owner
             ?LOG_WARNING(
                 "Extension conflict: '~p' on '~p' (from '~p') overwritten by '~p'",
-                [Selector, Class, OldOwner, Owner]
+                [Selector, Class, OldOwner, Owner],
+                #{domain => [beamtalk, runtime]}
             ),
 
             %% Record conflict for tooling - record BOTH owners

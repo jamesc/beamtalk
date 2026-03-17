@@ -44,7 +44,8 @@ parse_json(Data) ->
                 class => Class,
                 reason => Reason,
                 stack => lists:sublist(Stack, 3),
-                data => Data
+                data => Data,
+                domain => [beamtalk, runtime]
             }),
             {error, not_json}
     end.
@@ -78,7 +79,8 @@ format_error(Reason) ->
                 class => Class,
                 reason => FormatError,
                 stack => lists:sublist(Stack, 5),
-                original_reason => Reason
+                original_reason => Reason,
+                domain => [beamtalk, runtime]
             }),
             jsx:encode(#{
                 <<"type">> => <<"error">>,
@@ -121,7 +123,8 @@ format_error_with_warnings(Reason, Warnings) ->
                 class => Class,
                 reason => FormatError,
                 stack => lists:sublist(Stack, 5),
-                original_reason => Reason
+                original_reason => Reason,
+                domain => [beamtalk, runtime]
             }),
             jsx:encode(#{
                 <<"type">> => <<"error">>,

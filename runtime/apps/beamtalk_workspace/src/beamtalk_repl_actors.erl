@@ -119,7 +119,8 @@ on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
                 actor_pid => ActorPid,
                 class => ClassName,
                 module => ModuleName,
-                reason => Reason
+                reason => Reason,
+                domain => [beamtalk, runtime]
             }),
             {error, {registry_failed, Reason}}
     end.
@@ -152,7 +153,8 @@ try_register_workspace_meta(ActorPid, ClassName) ->
                 actor_pid => ActorPid,
                 class => ClassName,
                 kind => Kind,
-                reason => Reason
+                reason => Reason,
+                domain => [beamtalk, runtime]
             }),
             ok
     end.

@@ -290,7 +290,8 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                                 #{
                                     class => ClassName,
                                     selector => Selector,
-                                    stacktrace => ST
+                                    stacktrace => ST,
+                                    domain => [beamtalk, runtime]
                                 }
                             ),
                             {reply, {error, undef}, ClassVars}
@@ -304,7 +305,8 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                             selector => Selector,
                             error_class => ErrClass,
                             error => Error,
-                            stacktrace => ST
+                            stacktrace => ST,
+                            domain => [beamtalk, runtime]
                         }
                     ),
                     {reply, {error, Error}, ClassVars}
@@ -331,7 +333,8 @@ find_class_method_in_ancestors(_Selector, none, _Depth) ->
 find_class_method_in_ancestors(_Selector, AncestorName, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     ?LOG_WARNING(
         "find_class_method_in_ancestors: max hierarchy depth ~p exceeded at ~p — possible cycle",
-        [?MAX_HIERARCHY_DEPTH, AncestorName]
+        [?MAX_HIERARCHY_DEPTH, AncestorName],
+        #{domain => [beamtalk, runtime]}
     ),
     not_found;
 find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
@@ -347,7 +350,8 @@ find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
                     Class:Reason ->
                         ?LOG_WARNING(
                             "Class chain walk: failed to query ~p class_methods: ~p:~p",
-                            [AncestorName, Class, Reason]
+                            [AncestorName, Class, Reason],
+                            #{domain => [beamtalk, runtime]}
                         ),
                         #{}
                 end,
@@ -362,7 +366,8 @@ find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
                             Class2:Reason2 ->
                                 ?LOG_WARNING(
                                     "Class chain walk: failed to get module for ~p: ~p:~p",
-                                    [AncestorName, Class2, Reason2]
+                                    [AncestorName, Class2, Reason2],
+                                    #{domain => [beamtalk, runtime]}
                                 ),
                                 undefined
                         end,
@@ -584,7 +589,9 @@ try_class_chain_fallthrough(ClassSelf, Selector, Args) ->
     %% The Class methods receive ClassSelf (with its metaclass tag) as self.
     case beamtalk_dispatch:lookup(Selector, Args, ClassSelf, #{}, 'Class') of
         {reply, Result, _NewState} ->
-            ?LOG_DEBUG("Class chain fallthrough succeeded for ~p", [Selector]),
+            ?LOG_DEBUG("Class chain fallthrough succeeded for ~p", [Selector], #{
+                domain => [beamtalk, runtime]
+            }),
             {ok, Result};
         {error, #beamtalk_error{kind = does_not_understand}} ->
             %% Method not found anywhere in the Class chain — tell caller to raise DNU.

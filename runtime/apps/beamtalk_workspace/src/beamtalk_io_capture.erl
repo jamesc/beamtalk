@@ -70,7 +70,9 @@ stop({CapturePid, OldGL}) ->
             receive
                 {captured_output, Output} -> Output
             after ?IO_CAPTURE_TIMEOUT ->
-                ?LOG_WARNING("IO capture output retrieval timed out", #{}),
+                ?LOG_WARNING("IO capture output retrieval timed out", #{
+                    domain => [beamtalk, runtime]
+                }),
                 <<>>
             end;
         false ->
@@ -214,7 +216,9 @@ handle_stdin_request(Subscriber, Prompt) when is_pid(Subscriber) ->
         {stdin_input, Ref, eof} ->
             eof
     after ?STDIN_TIMEOUT ->
-        ?LOG_WARNING("Stdin input timed out after ~pms", [?STDIN_TIMEOUT]),
+        ?LOG_WARNING("Stdin input timed out after ~pms", [?STDIN_TIMEOUT], #{
+            domain => [beamtalk, runtime]
+        }),
         {error, timeout}
     end.
 

@@ -31,7 +31,7 @@ handle_call({'add:', [N]}, _From, #{value := V} = State) ->
 handle_call({'failWith:', [Reason]}, _From, State) ->
     {reply, {error, Reason}, State};
 handle_call({Selector, _Args}, _From, State) ->
-    ?LOG_ERROR("Unknown selector: ~p", [Selector]),
+    ?LOG_ERROR("Unknown selector: ~p", [Selector], #{domain => [beamtalk, runtime]}),
     {reply, {error, {unknown_selector, Selector}}, State}.
 
 handle_cast(_Msg, State) ->
