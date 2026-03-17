@@ -426,7 +426,9 @@ function connectWorkspace(workspaceId: string): void {
       const config = vscode.workspace.getConfiguration("beamtalk");
       const level = config.get<string>("logs.level", "info");
       newClient.subscribeLogs(level).catch((err) => {
-        outputChannel?.warn(`Failed to subscribe to logs: ${err instanceof Error ? err.message : String(err)}`);
+        outputChannel?.warn(
+          `Failed to subscribe to logs: ${err instanceof Error ? err.message : String(err)}`
+        );
       });
     }
   });
