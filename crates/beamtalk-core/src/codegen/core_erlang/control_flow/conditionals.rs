@@ -542,4 +542,59 @@ mod tests {
             "Value type ifTrue:ifFalse: with local mutation should generate inline case. Got:\n{code}"
         );
     }
+
+    #[test]
+    fn test_collect_wrapping_if_true_with_field_mutation() {
+        // BT-1477: collect: block containing ifTrue: with self.field := mutation.
+        // The field mutation inside the conditional must be threaded through the
+        // collect: loop accumulator, not silently lost.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: list =>\n    list collect: [:each | each > 0 ifTrue: [self.n := self.n + 1]. each * 2]\n    self.n\n";
+        let code = codegen(src);
+        // The collect: should use a stateful accumulator (maps:put for field 'n')
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "BT-1477: collect: wrapping ifTrue: with field mutation should thread state. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_if_true_wrapping_do_with_field_mutation() {
+        // BT-1477: ifTrue: wrapping do: block with self.field := mutation.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: flag list: list =>\n    flag ifTrue: [list do: [:each | self.n := self.n + each]]\n    self.n\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("case "),
+            "BT-1477: ifTrue: wrapping do: should generate inline case. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "BT-1477: do: inside ifTrue: should thread field mutations. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_do_wrapping_if_true_with_field_mutation() {
+        // BT-1477: do: block containing ifTrue: with self.field := mutation.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: list =>\n    list do: [:each | each > 0 ifTrue: [self.n := self.n + each]]\n    self.n\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "BT-1477: do: wrapping ifTrue: with field mutation should thread state. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_triple_nested_if_true_do_if_true_with_field_mutation() {
+        // BT-1477: ifTrue: wrapping do: wrapping ifTrue: with self.field := mutation.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: flag list: list =>\n    flag ifTrue: [list do: [:each | each > 0 ifTrue: [self.n := self.n + each]]]\n    self.n\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("case "),
+            "BT-1477: triple-nested should generate inline case. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "BT-1477: triple-nested should thread field mutations. Got:\n{code}"
+        );
+    }
 }

@@ -28,6 +28,8 @@ pub(in crate::codegen::core_erlang) enum BodyExprKind {
     SelfFieldAtPut,
     /// `self.field := value` — direct field assignment.
     FieldAssignment,
+    /// `self.field := expr` where the RHS is control flow with mutations (BT-1477).
+    FieldAssignmentControlFlow,
     /// `var := expr` where the RHS is a Tier 2 `value:` call.
     LocalAssignTier2,
     /// `var := expr` where the RHS is control flow with field mutations.
@@ -249,8 +251,13 @@ impl CoreErlangGenerator {
             return BodyExprKind::SelfFieldAtPut;
         }
 
-        // self.field := value
+        // self.field := value — sub-classify by RHS for control flow with mutations
         if Self::is_field_assignment(expr) {
+            if let Expression::Assignment { value, .. } = expr {
+                if self.control_flow_has_mutations(value) {
+                    return BodyExprKind::FieldAssignmentControlFlow;
+                }
+            }
             return BodyExprKind::FieldAssignment;
         }
 
@@ -452,6 +459,73 @@ impl CoreErlangGenerator {
                     } else {
                         let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
                         docs.push(doc);
+                    }
+                }
+                // BT-1477: self.field := expr where RHS is control flow returning {Value, State}
+                BodyExprKind::FieldAssignmentControlFlow => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                            // Evaluate the RHS (returns {Value, State} tuple)
+                            let tuple_var = self.fresh_temp_var("CfTuple");
+                            let val_var = self.fresh_temp_var("CfVal");
+                            let value_str = self.expression_doc(value)?;
+                            // Unpack the tuple: element(1) is the value, element(2) is the state
+                            let rhs_state = self.fresh_temp_var("CfState");
+                            let field_state = self.next_state_var();
+                            let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+                                "let ",
+                                Document::String(tuple_var.clone()),
+                                " = ",
+                                value_str,
+                                " in let ",
+                                Document::String(val_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(tuple_var.clone()),
+                                ") in let ",
+                                Document::String(rhs_state.clone()),
+                                " = call 'erlang':'element'(2, ",
+                                Document::String(tuple_var),
+                                ") in let ",
+                                Document::String(field_state.clone()),
+                                " = call 'maps':'put'('",
+                                Document::String(field.name.to_string()),
+                                "', ",
+                                Document::String(val_var.clone()),
+                                ", ",
+                                Document::String(rhs_state),
+                                ") in ",
+                            ]];
+                            // Extract threaded locals from the control flow state
+                            // (e.g. ifTrue: [y := 1. y + 1] threads y via __local__ keys)
+                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
+                            {
+                                for var in &threaded_vars {
+                                    let tv_core = self.lookup_var(var).map_or_else(
+                                        || Self::to_core_erlang_var(var),
+                                        String::clone,
+                                    );
+                                    doc_parts.push(docvec![
+                                        "let ",
+                                        Document::String(tv_core),
+                                        " = call 'maps':'get'('",
+                                        Document::String(Self::local_state_key(var)),
+                                        "', ",
+                                        Document::String(field_state.clone()),
+                                        ") in ",
+                                    ]);
+                                }
+                            }
+                            docs.push(Document::Vec(doc_parts));
+                            if is_last {
+                                docs.push(docvec![
+                                    "{'reply', ",
+                                    Document::String(val_var),
+                                    ", ",
+                                    Document::String(field_state),
+                                    "}",
+                                ]);
+                            }
+                        }
                     }
                 }
                 BodyExprKind::LocalAssignTier2 => {
