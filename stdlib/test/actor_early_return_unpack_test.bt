@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1432: Tests early return (^) with super/tier2/self-dispatch values in Actor methods.
+// These return tuples that must be unpacked correctly by the early return handler.
+
+TestCase subclass: ActorEarlyReturnUnpackTest
+
+  testEarlyReturnSuperSend =>
+    a := ActorNlrSuper spawn
+    // ^ super increment should unpack the super 3-tuple and return the result
+    self assert: (a incIfPositive: 1) equals: 1
+    // Verify both state mutations persisted: flag and counter value
+    self assert: (a getFlag) equals: true
+    self assert: (a getValue) equals: 1
+    // Negative path takes the early return before super
+    self assert: (a incIfPositive: -1) equals: "skipped"
+
+  testEarlyReturnTier2ValueCall =>
+    a := ActorNlrTier2 spawn
+    // ^ [total := total + n. total] value should unpack the 2-tuple
+    self assert: (a compute: 5) equals: 5
+    // Negative path
+    self assert: (a compute: -1) equals: "skipped"
+
+  testEarlyReturnSelfDispatch =>
+    a := ActorNlrSelfDispatch spawn
+    // ^ self bump should use dispatch open + reply pattern
+    self assert: (a bumpIfPositive: 1) equals: 1
+    // Verify state mutation persisted through the self-dispatch early return
+    self assert: (a getValue) equals: 1
+    // Bump again
+    self assert: (a bumpIfPositive: 1) equals: 2
+    self assert: (a getValue) equals: 2
+    // Negative path
+    self assert: (a bumpIfPositive: -1) equals: "skipped"

@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1432: ActorNlrTier2 — early return (^) with tier2 value call in Actor method
+// A tier2 value call is a block that captures+mutates local variables,
+// requiring {Result, NewState} tuple unpacking.
+
+Actor subclass: ActorNlrTier2
+  state: count = 0
+
+  // ^ [mutating-local block] value — should unpack the 2-tuple {Result, NewState}
+  compute: n =>
+    total := 0
+    n <= 0 ifTrue: [^"skipped"]
+    ^[
+      total := total + n
+      total
+    ] value
+
+  getCount => self.count

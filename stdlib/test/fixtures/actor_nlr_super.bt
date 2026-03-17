@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1432: ActorNlrSuper — early return (^) with super send in Actor method
+
+Counter subclass: ActorNlrSuper
+  state: flag = false
+
+  // ^ super increment — should unpack the 3-tuple {reply, Result, NewState}
+  incIfPositive: n =>
+    n <= 0 ifTrue: [^"skipped"]
+    self.flag := true
+    ^super increment
+
+  getFlag => self.flag

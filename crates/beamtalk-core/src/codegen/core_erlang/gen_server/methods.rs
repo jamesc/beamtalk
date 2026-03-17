@@ -351,21 +351,57 @@ impl CoreErlangGenerator {
             let is_early_return = matches!(&kind, BodyExprKind::EarlyReturn);
 
             // Early return — always terminates generation regardless of position.
+            // Classify the inner value to handle super/tier2/dispatch returns.
             if is_early_return && supports_early_return {
                 if let Expression::Return { value, .. } = expr {
-                    if self.control_flow_has_mutations(value) {
-                        let value_str = self.expression_doc(value)?;
-                        docs.push(self.emit_tuple_unpack_reply("Tuple", value_str));
-                    } else {
-                        let final_state = self.current_state_var();
-                        let value_str = self.expression_doc(value)?;
-                        docs.push(docvec![
-                            "let _ReturnValue = ",
-                            value_str,
-                            " in {'reply', _ReturnValue, ",
-                            Document::String(final_state),
-                            "}",
-                        ]);
+                    let value_kind = self.classify_body_expr(value);
+                    match value_kind {
+                        BodyExprKind::SuperSend => {
+                            let expr_str = self.expression_doc(value)?;
+                            docs.push(docvec![
+                                "let _SuperTuple = ",
+                                expr_str,
+                                " in let _Result = call 'erlang':'element'(2, _SuperTuple)",
+                                " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
+                                " in {'reply', _Result, _NewState}",
+                            ]);
+                        }
+                        BodyExprKind::Tier2ValueCall => {
+                            let expr_str = self.expression_doc(value)?;
+                            docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
+                        }
+                        BodyExprKind::DispatchingSelfSend => {
+                            let doc = self.generate_self_dispatch_open(value)?;
+                            docs.push(doc);
+                            self.emit_dispatch_reply(
+                                &mut docs,
+                                "missing dispatch var after early-return self-send",
+                            )?;
+                        }
+                        BodyExprKind::Tier2SelfSend(ref tier2_args) => {
+                            let tier2_args = tier2_args.clone();
+                            let doc = self.generate_tier2_self_send_open(value, &tier2_args)?;
+                            docs.push(doc);
+                            self.emit_dispatch_reply(
+                                &mut docs,
+                                "missing dispatch var after early-return tier2 self-send",
+                            )?;
+                        }
+                        BodyExprKind::ControlFlowWithMutations => {
+                            let expr_str = self.expression_doc(value)?;
+                            docs.push(self.emit_tuple_unpack_reply("Tuple", expr_str));
+                        }
+                        _ => {
+                            let final_state = self.current_state_var();
+                            let value_str = self.expression_doc(value)?;
+                            docs.push(docvec![
+                                "let _ReturnValue = ",
+                                value_str,
+                                " in {'reply', _ReturnValue, ",
+                                Document::String(final_state),
+                                "}",
+                            ]);
+                        }
                     }
                     return Ok(Document::Vec(docs));
                 }

@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1432: ActorNlrSelfDispatch — early return (^) with self-dispatch in Actor method
+
+Actor subclass: ActorNlrSelfDispatch
+  state: value = 0
+
+  bump =>
+    self.value := self.value + 1
+    self.value
+
+  // ^ self bump — should use dispatch open + reply pattern
+  bumpIfPositive: n =>
+    n <= 0 ifTrue: [^"skipped"]
+    ^self bump
+
+  getValue => self.value
