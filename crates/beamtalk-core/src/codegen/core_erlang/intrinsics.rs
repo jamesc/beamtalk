@@ -160,7 +160,6 @@ impl CoreErlangGenerator {
     ///   non-mutating falls through to pure-BT Integer method (BT-1054)
     /// - `to:do:` (2 args) → arity validation + mutating-block state threading only (BT-1054)
     /// - `to:by:do:` (3 args) → arity validation + mutating-block state threading only (BT-1054)
-    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn try_generate_block_message(
         &mut self,
         receiver: &Expression,
@@ -168,218 +167,242 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         match selector {
-            // `value` - evaluate block with no arguments
-            // BT-335: When the receiver is a block literal, use fast inline apply.
-            // For other receivers, generate a runtime type check to handle both
-            // blocks (apply) and non-blocks (runtime dispatch via send).
             MessageSelector::Unary(name) if name == "value" => {
-                // BT-851: Check if receiver is a Tier 2 block parameter (zero-arg value)
-                if let Expression::Identifier(id) = receiver {
-                    if self.tier2_block_params.contains(id.name.as_str()) {
-                        let doc = self.generate_block_value_call_stateful(receiver, arguments)?;
-                        return Ok(Some(doc));
-                    }
-                }
-                // BT-1213: Inline Tier 2 block literal with mutations.
-                // When a block literal has captured mutations (e.g. [errors := errors add: #foo]),
-                // inline the body with state threading instead of generating fun + apply.
-                // Without this, generate_block_stateful produces fun(StateAcc) but
-                // generate_block_value_call calls it with 0 args → badarity crash.
-                if let Expression::Block(block) = receiver
-                    && !Self::captured_mutations_for_block(block).is_empty()
-                {
-                    let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
-                    return Ok(Some(doc));
-                }
-                let doc = if matches!(receiver, Expression::Block { .. }) {
-                    self.generate_block_value_call(receiver, &[])?
-                } else {
-                    let recv_var = self.fresh_temp_var("ValRecv");
-                    let recv_code = self.expression_doc(receiver)?;
-                    docvec![
-                        "let ",
-                        Document::String(recv_var.clone()),
-                        " = ",
-                        recv_code,
-                        " in case call 'erlang':'is_function'(",
-                        Document::String(recv_var.clone()),
-                        ") of 'true' when 'true' -> apply ",
-                        Document::String(recv_var.clone()),
-                        " () 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
-                        Document::String(recv_var),
-                        ", 'value', []) end",
-                    ]
-                };
-                Ok(Some(doc))
+                self.try_generate_block_value_unary(receiver, arguments)
             }
 
-            // `repeat` - infinite loop
             MessageSelector::Unary(name) if name == "repeat" => {
                 let doc = self.generate_repeat(receiver)?;
                 Ok(Some(doc))
             }
 
-            // Keyword messages for block evaluation
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-
-                match selector_name.as_str() {
-                    // `value:`, `value:value:`, `value:value:value:` - evaluate block with args
-                    "value:" | "value:value:" | "value:value:value:" => {
-                        // BT-851: Check if receiver is a Tier 2 block parameter
-                        if let Expression::Identifier(id) = receiver {
-                            if self.tier2_block_params.contains(id.name.as_str()) {
-                                let doc =
-                                    self.generate_block_value_call_stateful(receiver, arguments)?;
-                                return Ok(Some(doc));
-                            }
-                        }
-                        // BT-1213: Inline Tier 2 block literal with mutations (keyword variant)
-                        if let Expression::Block(block) = receiver
-                            && !Self::captured_mutations_for_block(block).is_empty()
-                        {
-                            let doc =
-                                self.generate_block_value_inline_with_mutations(block, arguments)?;
-                            return Ok(Some(doc));
-                        }
-                        // Fast path: block literal receiver → fast inline apply
-                        if matches!(receiver, Expression::Block(_)) {
-                            let doc = self.generate_block_value_call(receiver, arguments)?;
-                            return Ok(Some(doc));
-                        }
-                        // BT-1260: Compile-time Erlang FFI receiver (e.g. `(Erlang maps)`) →
-                        // fall through to Erlang interop handler (step 7).
-                        if Self::is_erlang_ffi_receiver(receiver) {
-                            return Ok(None);
-                        }
-                        // BT-1260: Unknown receiver → emit runtime is_function guard with
-                        // beamtalk_primitive:send fallback (mirrors the `value` unary fix).
-                        let doc = self.generate_value_keyword_guard(
-                            receiver,
-                            arguments,
-                            selector_name.as_str(),
-                        )?;
-                        Ok(Some(doc))
-                    }
-
-                    // `whileTrue:` - loop while condition block returns true
-                    "whileTrue:" => {
-                        let doc = self.generate_while_true(receiver, &arguments[0])?;
-                        Ok(Some(doc))
-                    }
-
-                    // `whileFalse:` - loop while condition block returns false
-                    "whileFalse:" => {
-                        let doc = self.generate_while_false(receiver, &arguments[0])?;
-                        Ok(Some(doc))
-                    }
-
-                    // `timesRepeat:` - repeat body N times
-                    // BT-1054: Only intercept for mutating blocks; non-mutating cases
-                    // fall through to the pure-BT tail-recursive Integer method.
-                    "timesRepeat:" => {
-                        use super::block_analysis;
-                        validate_block_arity_exact(
-                            &arguments[0],
-                            0,
-                            "timesRepeat:",
-                            "Fix: Use a zero-arg block. If you need the iteration index, use to:do: instead:\n\
-                             \x20 3 timesRepeat: [self doSomething]\n\
-                             \x20 1 to: 3 do: [:i | self doSomethingWith: i]",
-                        )?;
-                        if let Expression::Block(body_block) = &arguments[0] {
-                            let analysis = block_analysis::analyze_block(body_block);
-                            // BT-1329: Also check for nested list ops with cross-scope mutations
-                            if self.needs_mutation_threading(&analysis)
-                                || self.body_has_list_op_cross_scope_mutations(body_block)
-                            {
-                                let doc = self
-                                    .generate_times_repeat_with_mutations(receiver, body_block)?;
-                                return Ok(Some(doc));
-                            }
-                        }
-                        Ok(None)
-                    }
-
-                    // `to:do:` - range iteration
-                    // BT-1054: Only intercept for mutating blocks; non-mutating cases
-                    // fall through to the pure-BT tail-recursive Integer method.
-                    "to:do:" if arguments.len() == 2 => {
-                        use super::block_analysis;
-                        validate_block_arity_exact(
-                            &arguments[1],
-                            1,
-                            "to:do:",
-                            "Fix: The body block must take one argument (the iteration index):\n\
-                             \x20 1 to: 10 do: [:i | i printString]",
-                        )?;
-                        if let Expression::Block(body_block) = &arguments[1] {
-                            let analysis = block_analysis::analyze_block(body_block);
-                            // BT-1329: Also check for nested list ops with cross-scope mutations
-                            if self.needs_mutation_threading(&analysis)
-                                || self.body_has_list_op_cross_scope_mutations(body_block)
-                            {
-                                let doc = self.generate_to_do_with_mutations(
-                                    receiver,
-                                    &arguments[0],
-                                    body_block,
-                                )?;
-                                return Ok(Some(doc));
-                            }
-                        }
-                        Ok(None)
-                    }
-
-                    // `to:by:do:` - range iteration with step
-                    // BT-1054: Only intercept for mutating blocks; non-mutating cases
-                    // fall through to the pure-BT tail-recursive Integer method.
-                    "to:by:do:" if arguments.len() == 3 => {
-                        use super::block_analysis;
-                        validate_block_arity_exact(
-                            &arguments[2],
-                            1,
-                            "to:by:do:",
-                            "Fix: The body block must take one argument (the iteration index):\n\
-                             \x20 1 to: 10 by: 2 do: [:i | i printString]",
-                        )?;
-                        if let Expression::Block(body_block) = &arguments[2] {
-                            let analysis = block_analysis::analyze_block(body_block);
-                            // BT-1329: Also check for nested list ops with cross-scope mutations
-                            if self.needs_mutation_threading(&analysis)
-                                || self.body_has_list_op_cross_scope_mutations(body_block)
-                            {
-                                let doc = self.generate_to_by_do_with_mutations(
-                                    receiver,
-                                    &arguments[0],
-                                    &arguments[1],
-                                    body_block,
-                                )?;
-                                return Ok(Some(doc));
-                            }
-                        }
-                        Ok(None)
-                    }
-
-                    // `on:do:` - exception handling (try/catch with class matching)
-                    "on:do:" if arguments.len() == 2 => {
-                        let doc = self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
-                        Ok(Some(doc))
-                    }
-
-                    // `ensure:` - cleanup (try/after via try/catch + re-raise)
-                    "ensure:" => {
-                        let doc = self.generate_ensure(receiver, &arguments[0])?;
-                        Ok(Some(doc))
-                    }
-
-                    // Not a block evaluation message
-                    _ => Ok(None),
-                }
+                self.try_generate_block_keyword_message(receiver, arguments, &selector_name)
             }
 
-            // Not a block evaluation message
             _ => Ok(None),
         }
+    }
+
+    /// Generates code for unary `value` message on a block receiver.
+    ///
+    /// BT-335: When the receiver is a block literal, use fast inline apply.
+    /// For other receivers, generate a runtime type check to handle both
+    /// blocks (apply) and non-blocks (runtime dispatch via send).
+    fn try_generate_block_value_unary(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        // BT-851: Check if receiver is a Tier 2 block parameter (zero-arg value)
+        if let Expression::Identifier(id) = receiver {
+            if self.tier2_block_params.contains(id.name.as_str()) {
+                let doc = self.generate_block_value_call_stateful(receiver, arguments)?;
+                return Ok(Some(doc));
+            }
+        }
+        // BT-1213: Inline Tier 2 block literal with mutations.
+        if let Expression::Block(block) = receiver
+            && !Self::captured_mutations_for_block(block).is_empty()
+        {
+            let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
+            return Ok(Some(doc));
+        }
+        let doc = if matches!(receiver, Expression::Block { .. }) {
+            self.generate_block_value_call(receiver, &[])?
+        } else {
+            let recv_var = self.fresh_temp_var("ValRecv");
+            let recv_code = self.expression_doc(receiver)?;
+            docvec![
+                "let ",
+                Document::String(recv_var.clone()),
+                " = ",
+                recv_code,
+                " in case call 'erlang':'is_function'(",
+                Document::String(recv_var.clone()),
+                ") of 'true' when 'true' -> apply ",
+                Document::String(recv_var.clone()),
+                " () 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
+                Document::String(recv_var),
+                ", 'value', []) end",
+            ]
+        };
+        Ok(Some(doc))
+    }
+
+    /// Generates code for keyword block messages (`value:`, `whileTrue:`, `timesRepeat:`, etc.).
+    fn try_generate_block_keyword_message(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+        selector_name: &str,
+    ) -> Result<Option<Document<'static>>> {
+        match selector_name {
+            "value:" | "value:value:" | "value:value:value:" => {
+                self.try_generate_block_value_keyword(receiver, arguments, selector_name)
+            }
+
+            "whileTrue:" => {
+                let doc = self.generate_while_true(receiver, &arguments[0])?;
+                Ok(Some(doc))
+            }
+
+            "whileFalse:" => {
+                let doc = self.generate_while_false(receiver, &arguments[0])?;
+                Ok(Some(doc))
+            }
+
+            "timesRepeat:" => self.try_generate_times_repeat(receiver, arguments),
+
+            "to:do:" if arguments.len() == 2 => self.try_generate_to_do(receiver, arguments),
+
+            "to:by:do:" if arguments.len() == 3 => self.try_generate_to_by_do(receiver, arguments),
+
+            "on:do:" if arguments.len() == 2 => {
+                let doc = self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
+                Ok(Some(doc))
+            }
+
+            "ensure:" => {
+                let doc = self.generate_ensure(receiver, &arguments[0])?;
+                Ok(Some(doc))
+            }
+
+            _ => Ok(None),
+        }
+    }
+
+    /// Generates code for keyword `value:` variants on a block receiver.
+    fn try_generate_block_value_keyword(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+        selector_name: &str,
+    ) -> Result<Option<Document<'static>>> {
+        // BT-851: Check if receiver is a Tier 2 block parameter
+        if let Expression::Identifier(id) = receiver {
+            if self.tier2_block_params.contains(id.name.as_str()) {
+                let doc = self.generate_block_value_call_stateful(receiver, arguments)?;
+                return Ok(Some(doc));
+            }
+        }
+        // BT-1213: Inline Tier 2 block literal with mutations (keyword variant)
+        if let Expression::Block(block) = receiver
+            && !Self::captured_mutations_for_block(block).is_empty()
+        {
+            let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
+            return Ok(Some(doc));
+        }
+        // Fast path: block literal receiver -> fast inline apply
+        if matches!(receiver, Expression::Block(_)) {
+            let doc = self.generate_block_value_call(receiver, arguments)?;
+            return Ok(Some(doc));
+        }
+        // BT-1260: Compile-time Erlang FFI receiver → fall through
+        if Self::is_erlang_ffi_receiver(receiver) {
+            return Ok(None);
+        }
+        // BT-1260: Unknown receiver → runtime is_function guard with fallback
+        let doc = self.generate_value_keyword_guard(receiver, arguments, selector_name)?;
+        Ok(Some(doc))
+    }
+
+    /// Generates code for `timesRepeat:` with mutation threading.
+    ///
+    /// BT-1054: Only intercept for mutating blocks; non-mutating cases
+    /// fall through to the pure-BT tail-recursive Integer method.
+    fn try_generate_times_repeat(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        use super::block_analysis;
+        validate_block_arity_exact(
+            &arguments[0],
+            0,
+            "timesRepeat:",
+            "Fix: Use a zero-arg block. If you need the iteration index, use to:do: instead:\n\
+             \x20 3 timesRepeat: [self doSomething]\n\
+             \x20 1 to: 3 do: [:i | self doSomethingWith: i]",
+        )?;
+        if let Expression::Block(body_block) = &arguments[0] {
+            let analysis = block_analysis::analyze_block(body_block);
+            // BT-1329: Also check for nested list ops with cross-scope mutations
+            if self.needs_mutation_threading(&analysis)
+                || self.body_has_list_op_cross_scope_mutations(body_block)
+            {
+                let doc = self.generate_times_repeat_with_mutations(receiver, body_block)?;
+                return Ok(Some(doc));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Generates code for `to:do:` with mutation threading.
+    ///
+    /// BT-1054: Only intercept for mutating blocks; non-mutating cases
+    /// fall through to the pure-BT tail-recursive Integer method.
+    fn try_generate_to_do(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        use super::block_analysis;
+        validate_block_arity_exact(
+            &arguments[1],
+            1,
+            "to:do:",
+            "Fix: The body block must take one argument (the iteration index):\n\
+             \x20 1 to: 10 do: [:i | i printString]",
+        )?;
+        if let Expression::Block(body_block) = &arguments[1] {
+            let analysis = block_analysis::analyze_block(body_block);
+            // BT-1329: Also check for nested list ops with cross-scope mutations
+            if self.needs_mutation_threading(&analysis)
+                || self.body_has_list_op_cross_scope_mutations(body_block)
+            {
+                let doc =
+                    self.generate_to_do_with_mutations(receiver, &arguments[0], body_block)?;
+                return Ok(Some(doc));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Generates code for `to:by:do:` with mutation threading.
+    ///
+    /// BT-1054: Only intercept for mutating blocks; non-mutating cases
+    /// fall through to the pure-BT tail-recursive Integer method.
+    fn try_generate_to_by_do(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        use super::block_analysis;
+        validate_block_arity_exact(
+            &arguments[2],
+            1,
+            "to:by:do:",
+            "Fix: The body block must take one argument (the iteration index):\n\
+             \x20 1 to: 10 by: 2 do: [:i | i printString]",
+        )?;
+        if let Expression::Block(body_block) = &arguments[2] {
+            let analysis = block_analysis::analyze_block(body_block);
+            // BT-1329: Also check for nested list ops with cross-scope mutations
+            if self.needs_mutation_threading(&analysis)
+                || self.body_has_list_op_cross_scope_mutations(body_block)
+            {
+                let doc = self.generate_to_by_do_with_mutations(
+                    receiver,
+                    &arguments[0],
+                    &arguments[1],
+                    body_block,
+                )?;
+                return Ok(Some(doc));
+            }
+        }
+        Ok(None)
     }
 
     /// Tries to generate code for List/Array methods.
