@@ -675,11 +675,14 @@ impl CoreErlangGenerator {
                     .get(field)
                     .cloned()
                     .unwrap_or_else(|| {
-                        mutated_params
-                            .iter()
-                            .find(|(f, _)| f == field)
-                            .map(|(_, v)| v.clone())
-                            .unwrap_or_default()
+                        mutated_params.iter().find(|(f, _)| f == field).map_or_else(
+                            || {
+                                unreachable!(
+                                    "hybrid while: missing mutated field mapping for `{field}`"
+                                )
+                            },
+                            |(_, v)| v.clone(),
+                        )
                     })
             })
             .collect();
