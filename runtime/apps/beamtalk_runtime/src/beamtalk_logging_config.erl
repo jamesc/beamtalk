@@ -41,6 +41,9 @@
 %% Internal
 -export([ensure_table/0]).
 
+%% Exported for testing
+-export([mcp_signal_path/0]).
+
 -define(DEBUG_TABLE, beamtalk_debug_targets).
 
 -define(VALID_LEVELS, [
@@ -53,7 +56,8 @@
 %% Subsystem registry
 %%====================================================================
 
--spec subsystem_modules(atom()) -> {module_level, [module()]} | {domain, [atom()]} | unknown.
+-spec subsystem_modules(atom()) ->
+    {module_level, [module()]} | {domain, [atom()]} | {mcp_signal, []} | unknown.
 subsystem_modules(actor) ->
     {module_level, [beamtalk_actor]};
 subsystem_modules(supervisor) ->
@@ -68,6 +72,8 @@ subsystem_modules(stdlib) ->
     {module_level, [beamtalk_stdlib, beamtalk_class_registry]};
 subsystem_modules(hotreload) ->
     {module_level, [beamtalk_hot_reload]};
+subsystem_modules(mcp) ->
+    {mcp_signal, []};
 subsystem_modules(runtime) ->
     {domain, [beamtalk, runtime]};
 subsystem_modules(user) ->
@@ -170,7 +176,7 @@ logFormat(Format) ->
 %% @doc Return the list of available debug target symbols.
 -spec debugTargets() -> [atom()].
 debugTargets() ->
-    [actor, supervisor, dispatch, compiler, workspace, stdlib, hotreload, runtime, user].
+    [actor, supervisor, dispatch, compiler, workspace, stdlib, hotreload, mcp, runtime, user].
 
 %% @doc Enable debug logging for a subsystem, class, or actor instance.
 %%
@@ -194,6 +200,23 @@ enableDebug(Target) when is_atom(Target) ->
                 end,
             ets:insert(?DEBUG_TABLE, {Target, subsystem, FilterIds}),
             nil;
+        {mcp_signal, _} ->
+            ensure_table(),
+            case write_mcp_signal_file() of
+                ok ->
+                    ets:insert(?DEBUG_TABLE, {Target, subsystem, []}),
+                    nil;
+                {error, Reason} ->
+                    beamtalk_error:with_message(
+                        beamtalk_error:new(runtime_error, 'BeamtalkInterface', enableDebug),
+                        iolist_to_binary(
+                            io_lib:format(
+                                "Failed to write MCP debug signal file: ~p",
+                                [Reason]
+                            )
+                        )
+                    )
+            end;
         {domain, Domain} ->
             ensure_table(),
             FilterId = list_to_atom("beamtalk_debug_domain_" ++ atom_to_list(Target)),
@@ -258,6 +281,11 @@ disableDebug(Target) when is_atom(Target) ->
                 supervisor -> disable_supervisor_progress();
                 _ -> ok
             end,
+            ets:delete(?DEBUG_TABLE, Target),
+            nil;
+        {mcp_signal, _} ->
+            ensure_table(),
+            remove_mcp_signal_file(),
             ets:delete(?DEBUG_TABLE, Target),
             nil;
         {domain, _Domain} ->
@@ -335,6 +363,8 @@ disableAllDebug() ->
                             supervisor -> disable_supervisor_progress();
                             _ -> ok
                         end;
+                    {mcp_signal, _} ->
+                        remove_mcp_signal_file();
                     {domain, _Domain} ->
                         lists:foreach(fun(Id) -> logger:remove_handler(Id) end, FilterIds);
                     unknown ->
@@ -533,6 +563,8 @@ format_debug_target(T) when is_atom(T) ->
                         [atom_to_binary(M, utf8) || M <- Ms]
                     )
                 );
+            {mcp_signal, _} ->
+                <<"signal file (cross-process)">>;
             {domain, D} ->
                 iolist_to_binary(
                     io_lib:format("domain=~p", [D])
@@ -603,4 +635,101 @@ find_log_file() ->
                 _ ->
                     <<"(standard_io)">>
             end
+    end.
+
+%%====================================================================
+%% Internal helpers — MCP debug signal file
+%%====================================================================
+
+%% @doc Return the path to the MCP debug signal file for the current workspace.
+%%
+%% The signal file lives at `~/.beamtalk/workspaces/{id}/mcp_debug_enabled`.
+%% The MCP server (Rust process) watches for this file and adjusts its
+%% tracing filter level accordingly.
+-spec mcp_signal_path() -> {ok, string()} | {error, term()}.
+mcp_signal_path() ->
+    case beamtalk_workspace_meta:get_metadata() of
+        {ok, #{workspace_id := WorkspaceId}} ->
+            case beamtalk_platform:home_dir() of
+                false ->
+                    CacheDir = filename:basedir(user_cache, "beamtalk"),
+                    {ok,
+                        filename:join([
+                            CacheDir,
+                            "workspaces",
+                            binary_to_list(WorkspaceId),
+                            "mcp_debug_enabled"
+                        ])};
+                Home ->
+                    {ok,
+                        filename:join([
+                            Home,
+                            ".beamtalk",
+                            "workspaces",
+                            binary_to_list(WorkspaceId),
+                            "mcp_debug_enabled"
+                        ])}
+            end;
+        {error, _} ->
+            {error, workspace_not_started}
+    end.
+
+%% @doc Write the MCP debug signal file to enable debug logging in the MCP server.
+-spec write_mcp_signal_file() -> ok | {error, term()}.
+write_mcp_signal_file() ->
+    case mcp_signal_path() of
+        {ok, Path} ->
+            case filelib:ensure_dir(Path) of
+                ok ->
+                    case file:write_file(Path, <<"debug\n">>) of
+                        ok ->
+                            ?LOG_INFO(#{
+                                msg => "MCP debug signal file written",
+                                path => Path
+                            }),
+                            ok;
+                        {error, Reason} ->
+                            ?LOG_ERROR(#{
+                                msg => "Failed to write MCP debug signal file",
+                                path => Path,
+                                reason => Reason
+                            }),
+                            {error, Reason}
+                    end;
+                {error, DirReason} ->
+                    ?LOG_ERROR(#{
+                        msg => "Failed to create directory for MCP debug signal file",
+                        path => Path,
+                        reason => DirReason
+                    }),
+                    {error, DirReason}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% @doc Remove the MCP debug signal file to disable debug logging in the MCP server.
+-spec remove_mcp_signal_file() -> ok.
+remove_mcp_signal_file() ->
+    case mcp_signal_path() of
+        {ok, Path} ->
+            case file:delete(Path) of
+                ok ->
+                    ?LOG_INFO(#{
+                        msg => "MCP debug signal file removed",
+                        path => Path
+                    }),
+                    ok;
+                {error, enoent} ->
+                    ok;
+                {error, Reason} ->
+                    ?LOG_WARNING(#{
+                        msg => "Failed to remove MCP debug signal file",
+                        path => Path,
+                        reason => Reason
+                    }),
+                    ok
+            end;
+        {error, _} ->
+            ok
     end.

@@ -32,7 +32,9 @@ use std::sync::Arc;
 
 use clap::{ArgAction, Parser};
 use rmcp::{ServiceExt, transport::stdio};
-use tracing_subscriber::{self, EnvFilter};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{self, EnvFilter, reload};
 use workspace::{parse_repl_port, parse_workspace_id};
 
 /// Beamtalk MCP server — interact with live beamtalk objects.
@@ -70,19 +72,29 @@ struct Args {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    // Log to stderr (stdout is the MCP stdio transport)
+    // Log to stderr (stdout is the MCP stdio transport).
+    // Use a reloadable filter so the MCP debug signal file can upgrade
+    // the level at runtime (BT-1441).
     let default_directive = directive_for_verbosity(args.verbose);
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_directive)),
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_directive));
+    let (filter, reload_handle) = reload::Layer::new(env_filter);
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_ansi(false),
         )
-        .with_writer(std::io::stderr)
-        .with_ansi(false)
         .init();
 
     // Resolve REPL port, cookie, and workspace ID
     let (port, cookie, workspace_id) = resolve_port_and_cookie(&args).await?;
     tracing::info!(port, workspace_id = ?workspace_id, "Connecting to beamtalk REPL");
+
+    // Keep a copy of the workspace ID for the debug signal watcher (BT-1441).
+    let workspace_id_for_signal = workspace_id.clone();
 
     // Connect to REPL
     let repl_client = client::ReplClient::connect(port, &cookie, workspace_id)
@@ -99,6 +111,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })?;
 
     tracing::info!("Connected to REPL, starting MCP server on stdio");
+
+    // Spawn background task to watch for MCP debug signal file (BT-1441).
+    // The signal file is written by `Beamtalk enableDebug: #mcp` on the
+    // Erlang side and tells us to switch to debug-level tracing.
+    if let Some(ref ws_id) = workspace_id_for_signal {
+        let signal_path = mcp_debug_signal_path(ws_id);
+        spawn_debug_signal_watcher(signal_path, default_directive, reload_handle);
+    }
 
     // Create MCP server and serve on stdio
     let mcp_server = server::BeamtalkMcp::new(Arc::new(repl_client));
@@ -300,6 +320,91 @@ fn directive_for_verbosity(v: u8) -> &'static str {
     }
 }
 
+/// Return the path to the MCP debug signal file for a given workspace.
+///
+/// Mirrors the Erlang-side path: `~/.beamtalk/workspaces/{id}/mcp_debug_enabled`.
+fn mcp_debug_signal_path(workspace_id: &str) -> std::path::PathBuf {
+    // beamtalk_workspace::workspace_dir handles home-dir resolution and
+    // path-traversal validation. Falls back to workspaces_base_dir if
+    // workspace_dir fails (shouldn't happen for valid workspace IDs).
+    beamtalk_workspace::workspace_dir(workspace_id).map_or_else(
+        |e| {
+            tracing::warn!(
+                error = %e,
+                workspace_id,
+                "Failed to resolve workspace dir for MCP debug signal"
+            );
+            beamtalk_workspace::workspaces_base_dir().map_or_else(
+                |_| {
+                    // Non-existent path; signal watcher will simply never trigger
+                    std::path::PathBuf::from("__nonexistent_mcp_signal__")
+                },
+                |base| base.join(workspace_id).join("mcp_debug_enabled"),
+            )
+        },
+        |dir| dir.join("mcp_debug_enabled"),
+    )
+}
+
+/// Spawn a background task that polls for the MCP debug signal file.
+///
+/// When the file appears, the tracing filter is reloaded to `beamtalk_mcp=debug`.
+/// When it disappears, the filter reverts to the original directive.
+fn spawn_debug_signal_watcher(
+    signal_path: std::path::PathBuf,
+    default_directive: &'static str,
+    reload_handle: reload::Handle<EnvFilter, tracing_subscriber::Registry>,
+) {
+    tokio::spawn(async move {
+        let mut debug_enabled = signal_path.exists();
+        if debug_enabled {
+            // Signal file already present at startup — activate debug immediately
+            if let Ok(new_filter) = EnvFilter::try_new("beamtalk_mcp=debug") {
+                if reload_handle.reload(new_filter).is_ok() {
+                    tracing::info!("MCP debug enabled via signal file at startup");
+                }
+            }
+        }
+
+        let poll_interval = std::time::Duration::from_secs(2);
+        loop {
+            tokio::time::sleep(poll_interval).await;
+            let file_exists = signal_path.exists();
+
+            if file_exists && !debug_enabled {
+                // Signal file appeared — switch to debug level
+                if let Ok(new_filter) = EnvFilter::try_new("beamtalk_mcp=debug") {
+                    match reload_handle.reload(new_filter) {
+                        Ok(()) => {
+                            tracing::info!("MCP debug logging enabled via signal file");
+                            debug_enabled = true;
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Failed to reload tracing filter for debug");
+                        }
+                    }
+                }
+            } else if !file_exists && debug_enabled {
+                // Signal file removed — revert to default level
+                if let Ok(new_filter) = EnvFilter::try_new(default_directive) {
+                    match reload_handle.reload(new_filter) {
+                        Ok(()) => {
+                            tracing::info!("MCP debug logging disabled, reverted to default");
+                            debug_enabled = false;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Failed to reload tracing filter for default"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,5 +414,25 @@ mod tests {
         assert_eq!(directive_for_verbosity(0), "beamtalk_mcp=info");
         assert_eq!(directive_for_verbosity(1), "beamtalk_mcp=debug");
         assert_eq!(directive_for_verbosity(2), "beamtalk_mcp=trace");
+    }
+
+    #[test]
+    fn mcp_signal_path_includes_workspace_id() {
+        let path = mcp_debug_signal_path("abc123def456");
+        assert!(
+            path.ends_with("abc123def456/mcp_debug_enabled"),
+            "Signal path should end with workspace_id/mcp_debug_enabled, got: {}",
+            path.display()
+        );
+    }
+
+    #[test]
+    fn mcp_signal_path_contains_beamtalk_dir() {
+        let path = mcp_debug_signal_path("abc123def456");
+        let path_str = path.to_string_lossy();
+        assert!(
+            path_str.contains(".beamtalk") && path_str.contains("workspaces"),
+            "Signal path should be under .beamtalk/workspaces/, got: {path_str}"
+        );
     }
 }
