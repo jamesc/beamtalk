@@ -90,12 +90,36 @@ Object subclass: NotAnActor
 
 **Return value:** The return value of `handleInfo:` is always discarded. The method is called for its side effects (state mutation, logging, spawning work). The codegen extracts the updated state from the dispatch result and returns `{noreply, NewState}` to OTP.
 
-**Error handling:** If `handleInfo:` raises a Beamtalk error (DNU, match failure, etc.), the generated `handle_info/2` logs a warning via `?LOG_WARNING` and returns `{noreply, State}` with the pre-call state. The actor does **not** crash.
+**Error handling:** If `handleInfo:` raises a Beamtalk error (DNU, match failure, etc.), the generated `handle_info/2` logs a warning (including error details) via `?LOG_WARNING` and returns `{noreply, State}` with the **pre-call state**. The actor does **not** crash. All state mutations from the partially-executed method are rolled back.
 
 This is a **deliberate divergence from OTP**: Erlang's gen_server crashes the process on an unmatched `handle_info` clause, triggering supervisor restart. Beamtalk swallows the error because:
 - `handle_info` messages come from external sources — crashing on an unexpected message format punishes the receiver for the sender's mistake
 - Supervised actors would enter crash loops from persistent unexpected messages (e.g., stale timer ticks after hot reload)
 - The "let it crash" philosophy applies to *business logic* failures, not message format surprises
+
+**State rollback on error — debugging implications:** Because errors are swallowed rather than crashing the actor, users can observe the rolled-back state. This can be confusing:
+
+```beamtalk
+handleInfo: msg =>
+  self.count := self.count + 1.      // mutation succeeds
+  self.name := msg unknownMethod.    // raises DNU — entire method's state changes roll back
+  // count is NOT incremented — the actor continues with pre-call state
+```
+
+The warning log shows the error occurred, but the state appears unchanged. This is the same transactional semantics all Beamtalk actor methods use (Core Erlang state threading + try/catch), but it's only observable here because `handleInfo:` swallows errors instead of crashing.
+
+**Best practice:** Keep `handleInfo:` bodies simple — match the message and delegate to a named method. Do fallible operations *before* state mutations where possible:
+
+```beamtalk
+handleInfo: msg =>
+  msg match: [
+    #tick -> [self doWork];
+    _ -> nil   // ignore unknown messages
+  ]
+
+// Named method — if this crashes, the actor crashes (normal OTP semantics)
+doWork => self.count := self.count + 1
+```
 
 If the user wants crash-on-error semantics, they can re-raise explicitly:
 
@@ -141,9 +165,9 @@ The generated `handle_info/2` callback changes from unconditional delegation to 
     let Self = call 'beamtalk_actor':'make_self'(State) in
     case call 'Module':'dispatch'('handleInfo:', [Msg], Self, State) of
         <{'reply', _Result, NewState}> when 'true' -> {'noreply', NewState}
-        <{'error', _Error, NewState}> when 'true' ->
-            call 'logger':'warning'(<<"handleInfo: raised error">>, #{})
-            {'noreply', NewState}
+        <{'error', Error, _ErrState}> when 'true' ->
+            call 'logger':'warning'(<<"handleInfo: raised error: ~p">>, [Error], #{})
+            {'noreply', State}    % explicitly use pre-call state, not partial error state
         <_Other> when 'true' -> {'noreply', State}
     end
 
@@ -152,7 +176,7 @@ The generated `handle_info/2` callback changes from unconditional delegation to 
     {'noreply', State}
 ```
 
-The `{'error', _Error, NewState}` arm logs a warning and continues with the error-arm state (which may include partial mutations). The `_Other` arm is a defensive catch-all that preserves the original state.
+The `{'error', Error, _ErrState}` arm logs a warning with the error details and explicitly returns the pre-call `State` — even though `_ErrState` is the same value in practice (Core Erlang exception unwinding discards intermediate state bindings), using `State` documents the intent: errors always roll back to pre-call state. The `_Other` arm is a defensive catch-all with the same semantics.
 
 ### Gap 2: Named Registration — Defer
 
