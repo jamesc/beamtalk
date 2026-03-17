@@ -1286,6 +1286,17 @@ impl CoreErlangGenerator {
         Some(line)
     }
 
+    /// Convert a span to a human-readable location string for error messages.
+    ///
+    /// Returns `"line N"` when source text is available, falling back to
+    /// `"offset N"` so callers never produce a raw Rust debug `Span { start, end }`.
+    pub(super) fn span_location(&self, span: Span) -> String {
+        match self.span_to_line(span) {
+            Some(line) => format!("line {line}"),
+            None => format!("offset {}", span.start()),
+        }
+    }
+
     /// BT-940: Wraps a Document with a Core Erlang line annotation.
     ///
     /// Produces `( Doc -| [{'line', N}] )` which `erlc` preserves into BEAM
@@ -1777,7 +1788,7 @@ impl CoreErlangGenerator {
                 // as a message receiver (e.g., `super increment`)
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "'super' must be used with a message send".to_string(),
-                    location: format!("{:?}", expr.span()),
+                    location: self.span_location(expr.span()),
                 })
             }
             Expression::Block(block) => self.generate_block(block),
@@ -1830,7 +1841,7 @@ impl CoreErlangGenerator {
                     // only mutate their own state, not the state of other objects.
                     return Err(CodeGenError::UnsupportedFeature {
                         feature: "field assignment to non-self receiver".to_string(),
-                        location: format!("{:?}", target.span()),
+                        location: self.span_location(target.span()),
                     });
                 }
                 // For identifier assignments (e.g., local variables in REPL like `x := 1`),
@@ -1912,17 +1923,17 @@ impl CoreErlangGenerator {
                 // it appeared in a pure expression position, which is not supported.
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "destructuring assignment in expression position".to_string(),
-                    location: format!("{span:?}"),
+                    location: self.span_location(*span),
                 })
             }
             Expression::Error { message, span, .. } => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression error: {message}"),
-                location: format!("{span:?}"),
+                location: self.span_location(*span),
             }),
             Expression::ExpectDirective { .. } => Ok(Document::Nil),
             Expression::Spread { name, .. } => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("spread expression: {}", name.name),
-                location: format!("{:?}", name.span),
+                location: self.span_location(name.span),
             }),
         }
     }

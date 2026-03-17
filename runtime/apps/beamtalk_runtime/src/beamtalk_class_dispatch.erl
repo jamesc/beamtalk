@@ -589,9 +589,6 @@ try_class_chain_fallthrough(ClassSelf, Selector, Args) ->
     %% The Class methods receive ClassSelf (with its metaclass tag) as self.
     case beamtalk_dispatch:lookup(Selector, Args, ClassSelf, #{}, 'Class') of
         {reply, Result, _NewState} ->
-            ?LOG_DEBUG("Class chain fallthrough succeeded for ~p", [Selector], #{
-                domain => [beamtalk, runtime]
-            }),
             {ok, Result};
         {error, #beamtalk_error{kind = does_not_understand}} ->
             %% Method not found anywhere in the Class chain — tell caller to raise DNU.

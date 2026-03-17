@@ -38,10 +38,10 @@ init(Req0, #{handler := Handler} = State) ->
             Req = cowboy_req:reply(Status, Headers, Body, Req1),
             {ok, Req, State};
         Other ->
-            ?LOG_ERROR(
-                "beamtalk_http_server: handler returned non-HTTPResponse: ~p",
-                [Other]
-            ),
+            ?LOG_ERROR("HTTP handler returned non-HTTPResponse", #{
+                value => Other,
+                domain => [beamtalk, stdlib]
+            }),
             Req = cowboy_req:reply(
                 500,
                 #{<<"content-type">> => <<"text/plain">>},
@@ -51,10 +51,12 @@ init(Req0, #{handler := Handler} = State) ->
             {ok, Req, State}
     catch
         Class:Reason:Stack ->
-            ?LOG_ERROR(
-                "beamtalk_http_server: handler crashed: ~p:~p~n~p",
-                [Class, Reason, Stack]
-            ),
+            ?LOG_ERROR("HTTP handler crashed", #{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stack,
+                domain => [beamtalk, stdlib]
+            }),
             Req = cowboy_req:reply(
                 500,
                 #{<<"content-type">> => <<"text/plain">>},
