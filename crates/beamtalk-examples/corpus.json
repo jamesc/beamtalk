@@ -9297,12 +9297,15 @@
         "process",
         "set",
         "subclassing",
+        "testAssignmentRhsSelfSendReturnsValue",
+        "testAssignmentRhsSelfSendThreadsState",
+        "testMultipleAssignmentRhsSelfSends",
         "testMultipleSelfCallsMutateState",
         "testSelfCallAsLastExpressionThreadsState",
         "testSelfCallStateMutationVisible",
         "testSelfCallThenFieldAssignment"
       ],
-      "source": "// BT-1420: Tests that state mutations in self-called methods are visible\n// to the caller after the self-call returns.\n//\n// Fixtures: stdlib/test/fixtures/self_call_state_actor.bt\n\nTestCase subclass: ActorSelfCallStateTest\n\n  // Core regression test: self-call mutates state, caller reads it\n  testSelfCallStateMutationVisible =>\n    a := SelfCallStateActor spawn\n    self assert: a callSetupThenRead equals: 42\n\n  // Multiple sequential self-calls each mutate state\n  testMultipleSelfCallsMutateState =>\n    a := SelfCallStateActor spawn\n    self assert: a callThreeIncrements equals: 3\n\n  // Self-call as last expression threads state back to gen_server\n  testSelfCallAsLastExpressionThreadsState =>\n    a := SelfCallStateActor spawn\n    a callSetupAsLast\n    self assert: a getValue equals: 42\n\n  // Self-call mutation followed by field assignment\n  testSelfCallThenFieldAssignment =>\n    a := SelfCallStateActor spawn\n    self assert: a callSetupThenAssignField equals: 52",
+      "source": "// BT-1420: Tests that state mutations in self-called methods are visible\n// to the caller after the self-call returns.\n//\n// Fixtures: stdlib/test/fixtures/self_call_state_actor.bt\n\nTestCase subclass: ActorSelfCallStateTest\n\n  // Core regression test: self-call mutates state, caller reads it\n  testSelfCallStateMutationVisible =>\n    a := SelfCallStateActor spawn\n    self assert: a callSetupThenRead equals: 42\n\n  // Multiple sequential self-calls each mutate state\n  testMultipleSelfCallsMutateState =>\n    a := SelfCallStateActor spawn\n    self assert: a callThreeIncrements equals: 3\n\n  // Self-call as last expression threads state back to gen_server\n  testSelfCallAsLastExpressionThreadsState =>\n    a := SelfCallStateActor spawn\n    a callSetupAsLast\n    self assert: a getValue equals: 42\n\n  // Self-call mutation followed by field assignment\n  testSelfCallThenFieldAssignment =>\n    a := SelfCallStateActor spawn\n    self assert: a callSetupThenAssignField equals: 52\n\n  // BT-1421: Assignment RHS self-send returns the value, not the dispatch tuple\n  testAssignmentRhsSelfSendReturnsValue =>\n    a := SelfCallStateActor spawn\n    self assert: a callBumpAndCapture equals: 1\n\n  // BT-1421: Assignment RHS self-send threads state correctly\n  testAssignmentRhsSelfSendThreadsState =>\n    a := SelfCallStateActor spawn\n    self assert: a callBumpAndReadState equals: 1\n\n  // BT-1421: Multiple assignment RHS self-sends accumulate state\n  testMultipleAssignmentRhsSelfSends =>\n    a := SelfCallStateActor spawn\n    self assert: a callDoubleBumpAndCapture equals: 3",
       "explanation": "BT-1420: Tests that state mutations in self-called methods are visible to the caller after the self-call returns.  Fixtures: stdlib/test/fixtures/self_call_state_actor.bt"
     },
     {
@@ -14567,6 +14570,10 @@
         "assign",
         "assignment",
         "async",
+        "bump",
+        "callBumpAndCapture",
+        "callBumpAndReadState",
+        "callDoubleBumpAndCapture",
         "callSetupAsLast",
         "callSetupThenAssignField",
         "callSetupThenRead",
@@ -14591,7 +14598,7 @@
         "setupValue",
         "subclassing"
       ],
-      "source": "// BT-1420: Fixture for testing that self-call state mutations are visible\n// to the caller after the self-call returns.\n\nActor subclass: SelfCallStateActor\n  state: value = 0\n  state: count = 0\n\n  // Helper that mutates state — called via self-send\n  setupValue => self.value := 42\n\n  // Calls self helper, then reads the mutated state\n  callSetupThenRead =>\n    self setupValue\n    self.value\n\n  // Helper that increments count\n  incrementCount => self.count := self.count + 1\n\n  // Multiple self-calls that each mutate state\n  callThreeIncrements =>\n    self incrementCount\n    self incrementCount\n    self incrementCount\n    self.count\n\n  // Self-call as the last expression (result should be returned)\n  callSetupAsLast => self setupValue\n\n  // Read value to verify state after callSetupAsLast\n  getValue => self.value\n\n  // Self-call that mutates state, then a field assignment after\n  callSetupThenAssignField =>\n    self setupValue\n    self.count := 10\n    self.value + self.count",
+      "source": "// BT-1420: Fixture for testing that self-call state mutations are visible\n// to the caller after the self-call returns.\n\nActor subclass: SelfCallStateActor\n  state: value = 0\n  state: count = 0\n\n  // Helper that mutates state — called via self-send\n  setupValue => self.value := 42\n\n  // Calls self helper, then reads the mutated state\n  callSetupThenRead =>\n    self setupValue\n    self.value\n\n  // Helper that increments count\n  incrementCount => self.count := self.count + 1\n\n  // Multiple self-calls that each mutate state\n  callThreeIncrements =>\n    self incrementCount\n    self incrementCount\n    self incrementCount\n    self.count\n\n  // Self-call as the last expression (result should be returned)\n  callSetupAsLast => self setupValue\n\n  // Read value to verify state after callSetupAsLast\n  getValue => self.value\n\n  // Self-call that mutates state, then a field assignment after\n  callSetupThenAssignField =>\n    self setupValue\n    self.count := 10\n    self.value + self.count\n\n  // BT-1421: Helper returning a value while mutating state\n  bump =>\n    self.count := self.count + 1\n    self.count\n\n  // BT-1421: Assignment RHS is a self-send — result gets return value, state threads\n  callBumpAndCapture =>\n    result := self bump\n    result\n\n  // BT-1421: Assignment RHS self-send, then read mutated state\n  callBumpAndReadState =>\n    _result := self bump\n    self.count\n\n  // BT-1421: Multiple assignment RHS self-sends\n  callDoubleBumpAndCapture =>\n    first := self bump\n    second := self bump\n    first + second",
       "explanation": "BT-1420: Fixture for testing that self-call state mutations are visible to the caller after the self-call returns."
     },
     {
