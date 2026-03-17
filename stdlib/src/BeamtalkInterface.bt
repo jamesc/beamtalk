@@ -102,22 +102,32 @@ sealed Object subclass: BeamtalkInterface
   /// ```
   debugTargets -> List => (Erlang beamtalk_logging_config) debugTargets
 
-  /// Enable debug logging for a named subsystem.
+  /// Enable debug logging for a subsystem, class, or actor instance.
+  ///
+  /// Accepts symbols (#actor, #compiler, ...), class references (Counter),
+  /// or actor instances (myCounter).
   ///
   /// ## Examples
   /// ```beamtalk
   /// Beamtalk enableDebug: #actor
+  /// Beamtalk enableDebug: Counter
+  /// Beamtalk enableDebug: myCounter
   /// ```
-  enableDebug: target :: Symbol -> Nil =>
+  enableDebug: target :: Object -> Nil =>
     (Erlang beamtalk_logging_config) enableDebug: target
 
-  /// Disable debug logging for a named subsystem.
+  /// Disable debug logging for a subsystem, class, or actor instance.
+  ///
+  /// Accepts symbols (#actor, #compiler, ...), class references (Counter),
+  /// or actor instances (myCounter).
   ///
   /// ## Examples
   /// ```beamtalk
   /// Beamtalk disableDebug: #actor
+  /// Beamtalk disableDebug: Counter
+  /// Beamtalk disableDebug: myCounter
   /// ```
-  disableDebug: target :: Symbol -> Nil =>
+  disableDebug: target :: Object -> Nil =>
     (Erlang beamtalk_logging_config) disableDebug: target
 
   /// Return the list of currently enabled debug targets.

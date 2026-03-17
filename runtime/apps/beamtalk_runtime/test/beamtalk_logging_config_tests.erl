@@ -41,7 +41,15 @@ logging_config_test_() ->
             fun activeDebugTargets_tracks_multiple/0,
             fun enable_disable_cycle_removes_target/0,
             fun enableDebug_domain_target_succeeds/0,
-            fun disableDebug_domain_target_removes/0
+            fun disableDebug_domain_target_removes/0,
+            fun enableDebug_class_reference_succeeds/0,
+            fun disableDebug_class_reference_removes/0,
+            fun enableDebug_actor_instance_succeeds/0,
+            fun disableDebug_actor_instance_removes/0,
+            fun activeDebugTargets_includes_class_and_actor/0,
+            fun enableDebug_invalid_type_returns_error/0,
+            fun disableAllDebug_clears_class_and_actor/0,
+            fun loggerInfo_includes_class_and_actor/0
         ]}.
 
 %%====================================================================
@@ -142,3 +150,121 @@ disableDebug_domain_target_removes() ->
     ?assert(lists:member(user, beamtalk_logging_config:activeDebugTargets())),
     beamtalk_logging_config:disableDebug(user),
     ?assertNot(lists:member(user, beamtalk_logging_config:activeDebugTargets())).
+
+%%====================================================================
+%% Class debug tests
+%%====================================================================
+
+enableDebug_class_reference_succeeds() ->
+    beamtalk_logging_config:disableAllDebug(),
+    %% Create a class reference (class object): class name ends with " class"
+    ClassRef = #beamtalk_object{class = 'TestClass class', class_mod = test_class, pid = self()},
+    ?assertEqual(nil, beamtalk_logging_config:enableDebug(ClassRef)),
+    Active = beamtalk_logging_config:activeDebugTargets(),
+    ?assert(lists:member({class, 'TestClass'}, Active)),
+    beamtalk_logging_config:disableAllDebug().
+
+disableDebug_class_reference_removes() ->
+    beamtalk_logging_config:disableAllDebug(),
+    ClassRef = #beamtalk_object{class = 'TestClass class', class_mod = test_class, pid = self()},
+    beamtalk_logging_config:enableDebug(ClassRef),
+    ?assert(lists:member({class, 'TestClass'}, beamtalk_logging_config:activeDebugTargets())),
+    beamtalk_logging_config:disableDebug(ClassRef),
+    ?assertNot(lists:member({class, 'TestClass'}, beamtalk_logging_config:activeDebugTargets())).
+
+%%====================================================================
+%% Actor debug tests
+%%====================================================================
+
+enableDebug_actor_instance_succeeds() ->
+    beamtalk_logging_config:disableAllDebug(),
+    %% Spawn a simple process to act as an actor
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ActorRef = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Pid},
+    ?assertEqual(nil, beamtalk_logging_config:enableDebug(ActorRef)),
+    Active = beamtalk_logging_config:activeDebugTargets(),
+    ?assert(lists:member({actor, Pid, 'Counter'}, Active)),
+    Pid ! stop,
+    beamtalk_logging_config:disableAllDebug().
+
+disableDebug_actor_instance_removes() ->
+    beamtalk_logging_config:disableAllDebug(),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ActorRef = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Pid},
+    beamtalk_logging_config:enableDebug(ActorRef),
+    ?assert(lists:member({actor, Pid, 'Counter'}, beamtalk_logging_config:activeDebugTargets())),
+    beamtalk_logging_config:disableDebug(ActorRef),
+    ?assertNot(lists:member({actor, Pid, 'Counter'}, beamtalk_logging_config:activeDebugTargets())),
+    Pid ! stop.
+
+%%====================================================================
+%% Mixed target tests
+%%====================================================================
+
+activeDebugTargets_includes_class_and_actor() ->
+    beamtalk_logging_config:disableAllDebug(),
+    %% Enable a subsystem, a class, and an actor
+    beamtalk_logging_config:enableDebug(actor),
+    ClassRef = #beamtalk_object{class = 'MyClass class', class_mod = my_class, pid = self()},
+    beamtalk_logging_config:enableDebug(ClassRef),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ActorRef = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Pid},
+    beamtalk_logging_config:enableDebug(ActorRef),
+    Active = beamtalk_logging_config:activeDebugTargets(),
+    ?assert(lists:member(actor, Active)),
+    ?assert(lists:member({class, 'MyClass'}, Active)),
+    ?assert(lists:member({actor, Pid, 'Counter'}, Active)),
+    Pid ! stop,
+    beamtalk_logging_config:disableAllDebug().
+
+enableDebug_invalid_type_returns_error() ->
+    Result = beamtalk_logging_config:enableDebug(42),
+    ?assertMatch(#beamtalk_error{kind = type_error}, Result).
+
+disableAllDebug_clears_class_and_actor() ->
+    beamtalk_logging_config:disableAllDebug(),
+    ClassRef = #beamtalk_object{class = 'Foo class', class_mod = foo, pid = self()},
+    beamtalk_logging_config:enableDebug(ClassRef),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ActorRef = #beamtalk_object{class = 'Bar', class_mod = bar, pid = Pid},
+    beamtalk_logging_config:enableDebug(ActorRef),
+    beamtalk_logging_config:enableDebug(dispatch),
+    ?assert(length(beamtalk_logging_config:activeDebugTargets()) >= 3),
+    ?assertEqual(nil, beamtalk_logging_config:disableAllDebug()),
+    ?assertEqual([], beamtalk_logging_config:activeDebugTargets()),
+    Pid ! stop.
+
+loggerInfo_includes_class_and_actor() ->
+    beamtalk_logging_config:disableAllDebug(),
+    ClassRef = #beamtalk_object{class = 'Widget class', class_mod = widget, pid = self()},
+    beamtalk_logging_config:enableDebug(ClassRef),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ActorRef = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Pid},
+    beamtalk_logging_config:enableDebug(ActorRef),
+    Info = beamtalk_logging_config:loggerInfo(),
+    ?assert(is_binary(Info)),
+    %% Should mention the class and actor in the output
+    ?assertNotEqual(nomatch, binary:match(Info, <<"Widget">>)),
+    ?assertNotEqual(nomatch, binary:match(Info, <<"Counter">>)),
+    Pid ! stop,
+    beamtalk_logging_config:disableAllDebug().
