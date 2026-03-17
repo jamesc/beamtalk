@@ -241,6 +241,37 @@ Place the include after `-behaviour(...)` (if present) or after `-module(...)`.
 | **warning** | `?LOG_WARNING(Msg, Meta)` | Recoverable issues | Accept error, failed cleanup |
 | **error** | `?LOG_ERROR(Msg, Meta)` | Errors affecting operations | Method not found, timeout |
 
+### Domain Metadata (ADR 0064)
+
+**Every `?LOG_*` call in runtime modules MUST include `domain` metadata** so log events can be filtered by subsystem and formatted correctly by the JSON formatter (`beamtalk_json_formatter`).
+
+| Module location | Domain | Example |
+|----------------|--------|---------|
+| `beamtalk_runtime` app | `[beamtalk, runtime]` | Actor lifecycle, dispatch, supervisor |
+| `beamtalk_stdlib` app | `[beamtalk, stdlib]` | Class loading, registry, logger |
+| `beamtalk_compiler` app | `[beamtalk, runtime]` | Compilation pipeline, port I/O |
+| `beamtalk_workspace` app | `[beamtalk, runtime]` | Workspace bootstrap, REPL server |
+| User code (via `Logger debug:`) | `[beamtalk, user]` | Injected by compiler codegen (BT-1435) |
+
+**Preferred approach — set process metadata in `init/1`:**
+
+```erlang
+init(Args) ->
+    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    %% ... rest of init
+```
+
+This automatically applies to all `?LOG_*` calls from the process without repeating domain in every call.
+
+**Alternative — per-call metadata** (for modules without a process lifecycle):
+
+```erlang
+?LOG_DEBUG("Cache miss", #{
+    domain => [beamtalk, runtime],
+    key => Key
+})
+```
+
 ### Usage Pattern
 
 Always use structured metadata (maps), not format strings:
@@ -252,8 +283,12 @@ io:format(standard_error, "JSON parse failed: ~p~n", [Reason])
 %% ❌ WRONG - function calls (no MFA metadata in log output)
 logger:debug("JSON parse failed", #{reason => Reason})
 
-%% ✅ RIGHT - logger macros (includes MFA automatically)
+%% ❌ WRONG - no domain metadata (invisible to subsystem filtering and JSON formatter)
+?LOG_DEBUG("JSON parse failed", #{reason => Reason})
+
+%% ✅ RIGHT - logger macros with domain (includes MFA automatically)
 ?LOG_DEBUG("JSON parse failed", #{
+    domain => [beamtalk, runtime],
     class => Class,
     reason => Reason,
     stack => lists:sublist(Stack, 3),
@@ -304,7 +339,14 @@ Configure logger in `test/sys.config` to suppress non-error logs:
 
 ### Production Configuration
 
-For production, use info level with MFA and structured output:
+For production, use info level with JSON output for log aggregation (Datadog, Splunk, ELK, Loki):
+
+```beamtalk
+Beamtalk logLevel: #info
+Beamtalk logFormat: #json
+```
+
+Or via `sys.config` for static configuration:
 
 ```erlang
 [
@@ -323,18 +365,39 @@ For production, use info level with MFA and structured output:
 ].
 ```
 
-### Runtime Control
+### Runtime Control (ADR 0064)
 
-Enable debug logging at runtime:
+Control logging via the `Beamtalk` facade in the REPL:
+
+```beamtalk
+Beamtalk logLevel                     // => #debug
+Beamtalk logLevel: #warning           // reduce verbosity
+
+Beamtalk debugTargets                 // => #(#actor, #supervisor, #dispatch, ...)
+Beamtalk enableDebug: #supervisor     // enable per-subsystem
+Beamtalk enableDebug: Counter         // enable per-class
+Beamtalk activeDebugTargets           // see what's enabled
+Beamtalk disableAllDebug              // reset
+
+Beamtalk logFormat: #json             // structured JSON for production
+Beamtalk logFormat: #text             // human-readable (default)
+
+Beamtalk loggerInfo                   // full config dump
+```
+
+View logs from outside the REPL:
+
+```bash
+beamtalk logs                         // last 50 lines
+beamtalk logs --follow                // tail -f style
+beamtalk logs --level error           // filter by severity
+beamtalk logs --format json           // parse JSON for level filtering
+```
+
+For direct Erlang FFI access (power users):
 
 ```erlang
-%% Enable debug level for all modules
-logger:set_primary_config(level, debug).
-
-%% Enable debug for specific module
 logger:set_module_level(beamtalk_repl_server, debug).
-
-%% Disable debug for specific module
 logger:unset_module_level(beamtalk_repl_server).
 ```
 
