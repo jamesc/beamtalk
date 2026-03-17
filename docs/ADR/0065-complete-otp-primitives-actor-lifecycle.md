@@ -1,7 +1,7 @@
 # ADR 0065: Complete OTP Primitives for Actor Lifecycle and Supervision
 
 ## Status
-Proposed (2026-03-17)
+Accepted (2026-03-17)
 
 ## Context
 
