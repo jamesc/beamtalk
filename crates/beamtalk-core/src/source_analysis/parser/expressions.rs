@@ -93,171 +93,199 @@ impl Parser {
     }
 
     /// Parses an assignment or regular expression.
-    #[allow(clippy::too_many_lines)]
     fn parse_assignment(&mut self) -> Expression {
         // Tuple destructuring: `{a, b} := expr`
         // Tuples are not valid expressions, so we intercept `{` here before
         // parse_cascade() would produce an error.
         if self.check(&TokenKind::LeftBrace) {
-            let start = self.current_token().span();
-            let pattern = self.parse_tuple_pattern();
-            if self.match_token(&TokenKind::Assign) {
-                if let Err(error) = self.enter_nesting(start) {
-                    return error;
-                }
-                let value = Box::new(self.parse_assignment());
-                self.leave_nesting();
-                let span = start.merge(value.span());
-                return Expression::DestructureAssignment {
-                    pattern,
-                    value,
-                    span,
-                };
-            }
-            // `{...}` not followed by `:=` — tuple literals are not expressions
-            let span = pattern.span();
-            self.diagnostics.push(Diagnostic::error(
-                "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring",
-                span,
-            ));
-            return Expression::Error {
-                message: "Tuple literal used as expression".into(),
-                span,
-            };
+            return self.parse_tuple_destructure_or_error();
         }
 
         let expr = self.parse_cascade();
 
-        // Check for assignment operators
+        // Check for assignment operator
         if self.match_token(&TokenKind::Assign) {
-            // Array destructuring: `#[a, b] := expr`
-            // List destructuring: `#(a, b) := expr` (BT-1279)
-            // Both use the same Pattern::Array node and at:-based codegen.
-            // The `list_syntax` flag preserves the original delimiter for
-            // round-trip formatting and future type checking.
+            return self.parse_assign_rhs(expr);
+        }
 
-            // Reject cons-style list syntax on the LHS: `#(a | rest) := expr`.
-            // Provide a specific error rather than falling through to the generic
-            // "must be identifier" message.
-            if let Expression::ListLiteral {
-                tail: Some(_),
-                span: lhs_span,
-                ..
-            } = &expr
-            {
-                let span = *lhs_span;
-                self.diagnostics.push(Diagnostic::error(
-                    "Cons syntax `#(head | tail)` is not supported in destructuring patterns; use `#(a, b, c) := expr` instead",
-                    span,
-                ));
-                return Expression::Error {
-                    message: "Invalid destructuring pattern".into(),
-                    span,
-                };
-            }
+        expr
+    }
 
-            let list_syntax = matches!(&expr, Expression::ListLiteral { tail: None, .. });
-            if let Expression::ArrayLiteral {
-                elements,
-                span: lhs_span,
-            }
-            | Expression::ListLiteral {
-                elements,
-                tail: None,
-                span: lhs_span,
-            } = &expr
-            {
-                match Self::collection_elements_to_pattern(elements, *lhs_span, list_syntax) {
-                    Ok(pattern) => {
-                        if let Err(error) = self.enter_nesting(*lhs_span) {
-                            return error;
-                        }
-                        let value = Box::new(self.parse_assignment());
-                        self.leave_nesting();
-                        let span = lhs_span.merge(value.span());
-                        return Expression::DestructureAssignment {
-                            pattern,
-                            value,
-                            span,
-                        };
-                    }
-                    Err(bad_span) => {
-                        self.diagnostics.push(Diagnostic::error(
-                            "Destructuring patterns may only contain identifiers, '_', or literals",
-                            bad_span,
-                        ));
-                        return Expression::Error {
-                            message: "Invalid destructuring pattern".into(),
-                            span: *lhs_span,
-                        };
-                    }
-                }
-            }
-
-            // Map destructuring: `#{#key => var, ...} := expr`
-            if let Expression::MapLiteral {
-                pairs,
-                span: lhs_span,
-            } = &expr
-            {
-                match Self::map_pairs_to_pattern(pairs, *lhs_span) {
-                    Ok(pattern) => {
-                        if let Err(error) = self.enter_nesting(*lhs_span) {
-                            return error;
-                        }
-                        let value = Box::new(self.parse_assignment());
-                        self.leave_nesting();
-                        let span = lhs_span.merge(value.span());
-                        return Expression::DestructureAssignment {
-                            pattern,
-                            value,
-                            span,
-                        };
-                    }
-                    Err(bad_span) => {
-                        self.diagnostics.push(Diagnostic::error(
-                            "Map destructuring: keys must be symbols or string literals, values must be identifiers or '_'",
-                            bad_span,
-                        ));
-                        return Expression::Error {
-                            message: "Invalid map destructuring pattern".into(),
-                            span: *lhs_span,
-                        };
-                    }
-                }
-            }
-
-            // Validate assignment target
-            if !matches!(
-                expr,
-                Expression::Identifier(_) | Expression::FieldAccess { .. }
-            ) {
-                let span = expr.span();
-                self.diagnostics.push(Diagnostic::error(
-                    "Assignment target must be an identifier or field access",
-                    span,
-                ));
-                return Expression::Error {
-                    message: "Invalid assignment target".into(),
-                    span,
-                };
-            }
-
-            // Guard recursive call against stack overflow
-            if let Err(error) = self.enter_nesting(expr.span()) {
+    /// Parses a tuple destructuring assignment (`{a, b} := expr`) or reports an
+    /// error if the `{...}` is not followed by `:=`.
+    fn parse_tuple_destructure_or_error(&mut self) -> Expression {
+        let start = self.current_token().span();
+        let pattern = self.parse_tuple_pattern();
+        if self.match_token(&TokenKind::Assign) {
+            if let Err(error) = self.enter_nesting(start) {
                 return error;
             }
             let value = Box::new(self.parse_assignment());
             self.leave_nesting();
-            let span = expr.span().merge(value.span());
-            return Expression::Assignment {
-                target: Box::new(expr),
+            let span = start.merge(value.span());
+            return Expression::DestructureAssignment {
+                pattern,
                 value,
                 span,
             };
         }
+        // `{...}` not followed by `:=` — tuple literals are not expressions
+        let span = pattern.span();
+        self.diagnostics.push(Diagnostic::error(
+            "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring",
+            span,
+        ));
+        Expression::Error {
+            message: "Tuple literal used as expression".into(),
+            span,
+        }
+    }
 
-        expr
+    /// After `:=` has been consumed, parse the right-hand side of an assignment.
+    ///
+    /// Dispatches to collection destructuring, map destructuring, or simple
+    /// assignment depending on the LHS expression form.
+    fn parse_assign_rhs(&mut self, expr: Expression) -> Expression {
+        // Reject cons-style list syntax on the LHS: `#(a | rest) := expr`.
+        if let Expression::ListLiteral {
+            tail: Some(_),
+            span: lhs_span,
+            ..
+        } = &expr
+        {
+            let span = *lhs_span;
+            self.diagnostics.push(Diagnostic::error(
+                "Cons syntax `#(head | tail)` is not supported in destructuring patterns; use `#(a, b, c) := expr` instead",
+                span,
+            ));
+            return Expression::Error {
+                message: "Invalid destructuring pattern".into(),
+                span,
+            };
+        }
+
+        // Array destructuring: `#[a, b] := expr`
+        // List destructuring: `#(a, b) := expr` (BT-1279)
+        let list_syntax = matches!(&expr, Expression::ListLiteral { tail: None, .. });
+        if let Expression::ArrayLiteral {
+            elements,
+            span: lhs_span,
+        }
+        | Expression::ListLiteral {
+            elements,
+            tail: None,
+            span: lhs_span,
+        } = &expr
+        {
+            return self.parse_collection_destructure(elements, *lhs_span, list_syntax);
+        }
+
+        // Map destructuring: `#{#key => var, ...} := expr`
+        if let Expression::MapLiteral {
+            pairs,
+            span: lhs_span,
+        } = &expr
+        {
+            return self.parse_map_destructure(pairs, *lhs_span);
+        }
+
+        // Simple assignment: `target := value`
+        self.parse_simple_assignment(expr)
+    }
+
+    /// Parses a collection (array/list) destructuring assignment.
+    fn parse_collection_destructure(
+        &mut self,
+        elements: &[Expression],
+        lhs_span: Span,
+        list_syntax: bool,
+    ) -> Expression {
+        match Self::collection_elements_to_pattern(elements, lhs_span, list_syntax) {
+            Ok(pattern) => {
+                if let Err(error) = self.enter_nesting(lhs_span) {
+                    return error;
+                }
+                let value = Box::new(self.parse_assignment());
+                self.leave_nesting();
+                let span = lhs_span.merge(value.span());
+                Expression::DestructureAssignment {
+                    pattern,
+                    value,
+                    span,
+                }
+            }
+            Err(bad_span) => {
+                self.diagnostics.push(Diagnostic::error(
+                    "Destructuring patterns may only contain identifiers, '_', or literals",
+                    bad_span,
+                ));
+                Expression::Error {
+                    message: "Invalid destructuring pattern".into(),
+                    span: lhs_span,
+                }
+            }
+        }
+    }
+
+    /// Parses a map destructuring assignment.
+    fn parse_map_destructure(&mut self, pairs: &[MapPair], lhs_span: Span) -> Expression {
+        match Self::map_pairs_to_pattern(pairs, lhs_span) {
+            Ok(pattern) => {
+                if let Err(error) = self.enter_nesting(lhs_span) {
+                    return error;
+                }
+                let value = Box::new(self.parse_assignment());
+                self.leave_nesting();
+                let span = lhs_span.merge(value.span());
+                Expression::DestructureAssignment {
+                    pattern,
+                    value,
+                    span,
+                }
+            }
+            Err(bad_span) => {
+                self.diagnostics.push(Diagnostic::error(
+                    "Map destructuring: keys must be symbols or string literals, values must be identifiers or '_'",
+                    bad_span,
+                ));
+                Expression::Error {
+                    message: "Invalid map destructuring pattern".into(),
+                    span: lhs_span,
+                }
+            }
+        }
+    }
+
+    /// Parses a simple assignment (`identifier := value` or `field.access := value`).
+    fn parse_simple_assignment(&mut self, expr: Expression) -> Expression {
+        // Validate assignment target
+        if !matches!(
+            expr,
+            Expression::Identifier(_) | Expression::FieldAccess { .. }
+        ) {
+            let span = expr.span();
+            self.diagnostics.push(Diagnostic::error(
+                "Assignment target must be an identifier or field access",
+                span,
+            ));
+            return Expression::Error {
+                message: "Invalid assignment target".into(),
+                span,
+            };
+        }
+
+        // Guard recursive call against stack overflow
+        if let Err(error) = self.enter_nesting(expr.span()) {
+            return error;
+        }
+        let value = Box::new(self.parse_assignment());
+        self.leave_nesting();
+        let span = expr.span().merge(value.span());
+        Expression::Assignment {
+            target: Box::new(expr),
+            value,
+            span,
+        }
     }
 
     /// Converts collection literal elements to a destructuring pattern.
