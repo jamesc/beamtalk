@@ -40,7 +40,7 @@ use crate::ast::{
     Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
 use crate::lint::LintPass;
-use crate::source_analysis::Diagnostic;
+use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 /// Lint pass that warns about dead variable assignments inside blocks on value types.
 pub(crate) struct DeadBlockAssignmentPass;
@@ -407,7 +407,8 @@ fn emit_dead_assignment_warning(
              `ifTrue:ifFalse:` to return alternative values. \
              See: block-scoped variable semantics."
                 .to_string(),
-        ),
+        )
+        .with_category(DiagnosticCategory::DeadAssignment),
     );
 }
 

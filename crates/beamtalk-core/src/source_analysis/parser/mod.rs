@@ -370,6 +370,8 @@ pub enum DiagnosticCategory {
     Lint,
     /// Self-capture-in-actor-block hint (BT-1302).
     SelfCapture,
+    /// Dead assignment in block closure (BT-1476).
+    DeadAssignment,
 }
 
 /// A diagnostic message (error, warning, or hint).

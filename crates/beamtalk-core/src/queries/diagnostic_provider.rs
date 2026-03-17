@@ -190,6 +190,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::SelfCapture,
                     Some(DiagnosticCategory::SelfCapture)
                 )
+                | (
+                    ExpectCategory::DeadAssignment,
+                    Some(DiagnosticCategory::DeadAssignment)
+                )
         )
 }
 
@@ -921,6 +925,43 @@ mod tests {
         assert!(
             dnu,
             "@expect self_capture must NOT suppress the DNU hint on the same expression, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-1476: Dead block assignment warning + @expect dead_assignment ──
+
+    // ── BT-1476: @expect dead_assignment parsing and stale detection ──
+
+    #[test]
+    fn expect_dead_assignment_stale_when_no_diagnostic() {
+        // @expect dead_assignment with no matching diagnostic → stale
+        let source = "@expect dead_assignment\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            stale,
+            "Should emit stale @expect when no dead assignment, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_dead_assignment_parses_correctly() {
+        // @expect dead_assignment should parse without errors
+        let source = "@expect dead_assignment\n42";
+        let tokens = lex_with_eof(source);
+        let (_, parse_diags) = parse(tokens);
+
+        let has_parse_error = parse_diags
+            .iter()
+            .any(|d| d.message.contains("unknown @expect"));
+        assert!(
+            !has_parse_error,
+            "dead_assignment should be a recognized @expect category, got: {parse_diags:?}"
         );
     }
 }
