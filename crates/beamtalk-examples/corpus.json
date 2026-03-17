@@ -9605,11 +9605,11 @@
         "process",
         "set",
         "subclassing",
-        "testCallbackBlockSelfCast",
+        "testDeferredSelfCastFromMethod",
         "testMultipleTimerSelfCasts",
         "testTimerSelfCastUpdatesState"
       ],
-      "source": "// BT-1475: Tests that self-cast sends (!) inside Timer blocks and callback\n// blocks correctly route through the actor mailbox, not via safe_dispatch\n// on a stale captured state.\n\nTestCase subclass: ActorTimerSelfSendTest\n\n  testTimerSelfCastUpdatesState =>\n    // Timer after:do: fires a self bump! — the cast must go through the mailbox\n    a := TimerSelfSendActor spawn\n    Timer sleep: 200\n    self assert: a getCount equals: 1\n\n  testMultipleTimerSelfCasts =>\n    // Multiple Timer-based self-casts should all route through the mailbox\n    a := TimerSelfSendActor spawn\n    // Wait for the initialize timer, then fire two more\n    Timer sleep: 100\n    self assert: a getCount equals: 1\n    // Send additional casts from outside — mix of direct and timer\n    a bump!\n    Timer sleep: 50\n    self assert: a getCount equals: 2\n\n  testCallbackBlockSelfCast =>\n    // A block capturing self and passed to another execution context\n    // should route self! sends through the mailbox\n    c := Counter spawn\n    block := [c increment!]\n    // Execute the block in the test process (simulates cross-process callback)\n    block value\n    Timer sleep: 50\n    self assert: c getValue equals: 1",
+      "source": "// BT-1475: Tests that self-cast sends (!) inside Timer blocks and callback\n// blocks correctly route through the actor mailbox, not via safe_dispatch\n// on a stale captured state.\n\nTestCase subclass: ActorTimerSelfSendTest\n\n  testTimerSelfCastUpdatesState =>\n    // Timer after:do: fires a self bump! — the cast must go through the mailbox\n    a := TimerSelfSendActor spawn\n    Timer sleep: 200\n    self assert: a getCount equals: 1\n\n  testMultipleTimerSelfCasts =>\n    // Multiple Timer-based self-casts should all route through the mailbox\n    a := TimerSelfSendActor spawn\n    // Wait for the initialize timer, then fire two more\n    Timer sleep: 100\n    self assert: a getCount equals: 1\n    // Send additional casts from outside — mix of direct and timer\n    a bump!\n    Timer sleep: 50\n    self assert: a getCount equals: 2\n\n  testDeferredSelfCastFromMethod =>\n    // Calling deferBump schedules a Timer that captures self and fires\n    // self bump! in the Timer process — exercises the BT-1475 fix for\n    // self-cast inside a block created in an actor method.\n    a := TimerSelfSendActor spawn\n    Timer sleep: 200\n    // initialize already bumped once\n    self assert: a getCount equals: 1\n    a deferBump\n    Timer sleep: 200\n    self assert: a getCount equals: 2",
       "explanation": "BT-1475: Tests that self-cast sends (!) inside Timer blocks and callback blocks correctly route through the actor mailbox, not via safe_dispatch on a stale captured state."
     },
     {
@@ -15337,6 +15337,7 @@
         "callback",
         "closure",
         "concurrent",
+        "deferBump",
         "extends",
         "field",
         "for each",
@@ -15362,7 +15363,7 @@
         "subclassing",
         "timer_self_send_actor"
       ],
-      "source": "// BT-1475: Fixture for testing self-send inside Timer blocks.\n// The initialize method schedules a Timer that fires a self-cast,\n// which should route through the actor mailbox — not call safe_dispatch\n// on a stale state snapshot.\n\nActor subclass: TimerSelfSendActor\n  state: count = 0\n\n  initialize => Timer after: 10 do: [self bump!]\n\n  bump => self.count := self.count + 1\n\n  getCount => self.count",
+      "source": "// BT-1475: Fixture for testing self-send inside Timer blocks.\n// The initialize method schedules a Timer that fires a self-cast,\n// which should route through the actor mailbox — not call safe_dispatch\n// on a stale state snapshot.\n\nActor subclass: TimerSelfSendActor\n  state: count = 0\n\n  initialize => Timer after: 10 do: [self bump!]\n\n  bump => self.count := self.count + 1\n\n  // Schedule a self-cast via a deferred Timer callback.\n  // The block [self bump!] captures self and executes in the Timer process.\n  deferBump => Timer after: 10 do: [self bump!]\n\n  getCount => self.count",
       "explanation": "BT-1475: Fixture for testing self-send inside Timer blocks. The initialize method schedules a Timer that fires a self-cast, which should route through the actor mailbox — not call safe_dispatch on a stale state snapshot."
     },
     {

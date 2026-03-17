@@ -13,4 +13,8 @@ Actor subclass: TimerSelfSendActor
 
   bump => self.count := self.count + 1
 
+  // Schedule a self-cast via a deferred Timer callback.
+  // The block [self bump!] captures self and executes in the Timer process.
+  deferBump => Timer after: 10 do: [self bump!]
+
   getCount => self.count

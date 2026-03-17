@@ -24,12 +24,14 @@ TestCase subclass: ActorTimerSelfSendTest
     Timer sleep: 50
     self assert: a getCount equals: 2
 
-  testCallbackBlockSelfCast =>
-    // A block capturing self and passed to another execution context
-    // should route self! sends through the mailbox
-    c := Counter spawn
-    block := [c increment!]
-    // Execute the block in the test process (simulates cross-process callback)
-    block value
-    Timer sleep: 50
-    self assert: c getValue equals: 1
+  testDeferredSelfCastFromMethod =>
+    // Calling deferBump schedules a Timer that captures self and fires
+    // self bump! in the Timer process — exercises the BT-1475 fix for
+    // self-cast inside a block created in an actor method.
+    a := TimerSelfSendActor spawn
+    Timer sleep: 200
+    // initialize already bumped once
+    self assert: a getCount equals: 1
+    a deferBump
+    Timer sleep: 200
+    self assert: a getCount equals: 2

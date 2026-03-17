@@ -631,13 +631,12 @@ impl CoreErlangGenerator {
         }
         let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
 
-        // Generate block body as Document
-        let body_doc = self.generate_block_body(block)?;
-
-        // Pop the scope when done with the block
+        // Generate block body as Document.
+        // BT-1475: Ensure block_depth and scope are restored even on error.
+        let body_result = self.generate_block_body(block);
         self.block_depth -= 1;
         self.pop_scope();
-        Ok(docvec![header, body_doc])
+        Ok(docvec![header, body_result?])
     }
 
     /// BT-851: Generates a Tier 2 stateful block (ADR 0041 Phase 0).
@@ -727,11 +726,12 @@ impl CoreErlangGenerator {
             // Generate body expressions with state threading
             this.generate_block_stateful_body(block, &mut docs)?;
             Ok::<_, crate::codegen::core_erlang::CodeGenError>(docs)
-        })?;
+        });
+        // BT-1475: Ensure block_depth and scope are restored even on error.
         self.block_depth -= 1;
         self.pop_scope();
 
-        Ok(docvec![header, Document::Vec(docs)])
+        Ok(docvec![header, Document::Vec(docs?)])
     }
 
     /// BT-855: Generates an Erlang-compatible wrapper for a block at an Erlang call site.
