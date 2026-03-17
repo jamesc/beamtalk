@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1457: Server subclass fixture for handleInfo: codegen testing
+
+Server subclass: HandleInfoCounter
+  state: count = 0
+  state: lastMsg = nil
+
+  handleInfo: msg =>
+    msg == #tick ifTrue: [self.count := self.count + 1] ifFalse: [self.lastMsg := msg]
+
+  getCount => self.count
+  getLastMsg => self.lastMsg

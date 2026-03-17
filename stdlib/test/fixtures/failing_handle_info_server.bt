@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1457: Server subclass that raises an error in handleInfo: (error recovery testing)
+
+Server subclass: FailingHandleInfoServer
+  state: count = 0
+
+  handleInfo: msg =>
+    msg == #crash ifTrue: [Error new signal: "deliberate handleInfo: error"] ifFalse: [self.count := self.count + 1]
+
+  getCount => self.count

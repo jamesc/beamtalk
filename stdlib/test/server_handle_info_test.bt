@@ -1,0 +1,74 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1457: Tests for Server handleInfo: codegen dispatch (ADR 0065)
+//
+// Fixtures: stdlib/test/fixtures/server_handle_info.bt
+//           stdlib/test/fixtures/failing_handle_info_server.bt
+//           stdlib/test/fixtures/plain_actor_for_info_test.bt
+
+TestCase subclass: ServerHandleInfoTest
+
+  // === Basic handleInfo: dispatch ===
+
+  testServerReceivesTickMessage =>
+    server := HandleInfoCounter spawn
+    Erlang erlang send: server pid msg: #tick
+    Timer sleep: 50
+    self assert: server getCount equals: 1
+    server stop
+
+  testServerReceivesMultipleTicks =>
+    server := HandleInfoCounter spawn
+    Erlang erlang send: server pid msg: #tick
+    Erlang erlang send: server pid msg: #tick
+    Erlang erlang send: server pid msg: #tick
+    Timer sleep: 50
+    self assert: server getCount equals: 3
+    server stop
+
+  testServerHandlesNonTickMessage =>
+    server := HandleInfoCounter spawn
+    Erlang erlang send: server pid msg: #something_else
+    Timer sleep: 50
+    self assert: server getLastMsg equals: #something_else
+    server stop
+
+  // === Plain Actor ignores raw messages ===
+
+  testPlainActorIgnoresRawMessages =>
+    actor := PlainActorForInfoTest spawn
+    actor increment
+    self assert: actor getCount equals: 1
+    Erlang erlang send: actor pid msg: #tick
+    Timer sleep: 50
+    self assert: actor getCount equals: 1
+    actor stop
+
+  testServerIsAliveAfterUnknownMessage =>
+    server := HandleInfoCounter spawn
+    self assert: server isAlive
+    Erlang erlang send: server pid msg: #anything
+    Timer sleep: 50
+    self assert: server isAlive
+    server stop
+
+  // === Error recovery (log-and-continue) ===
+
+  testHandleInfoErrorDoesNotCrashServer =>
+    server := FailingHandleInfoServer spawn
+    Erlang erlang send: server pid msg: #crash
+    Timer sleep: 100
+    self assert: server isAlive
+    server stop
+
+  testHandleInfoErrorPreservesPreCallState =>
+    server := FailingHandleInfoServer spawn
+    Erlang erlang send: server pid msg: #increment
+    Timer sleep: 50
+    self assert: server getCount equals: 1
+    Erlang erlang send: server pid msg: #crash
+    Timer sleep: 100
+    self assert: server isAlive
+    self assert: server getCount equals: 1
+    server stop

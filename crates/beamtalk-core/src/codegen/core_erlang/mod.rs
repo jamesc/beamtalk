@@ -516,6 +516,11 @@ pub fn generate_module_with_warnings(
     );
     let module = &module_with_writeback;
 
+    // ADR 0065 / BT-1457: Set Server subclass flag for handle_info codegen dispatch.
+    if let Some(class) = module.classes.first() {
+        generator.is_server_subclass = hierarchy.is_server_subclass(&class.name.name);
+    }
+
     // BT-213: Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?
@@ -981,6 +986,10 @@ pub(super) struct CoreErlangGenerator {
     /// BT-1435: Selector name of the method currently being compiled.
     /// Used by Logger intrinsics to inject `beamtalk_selector` metadata.
     current_method_selector: Option<String>,
+    /// ADR 0065 / BT-1457: Whether the current class is a Server subclass.
+    /// When true, `generate_handle_info` dispatches to `handleInfo:` with
+    /// log-and-continue error semantics instead of the default ignore-all stub.
+    is_server_subclass: bool,
 }
 
 impl CoreErlangGenerator {
@@ -1025,6 +1034,7 @@ impl CoreErlangGenerator {
                 .is_ok_and(|v| v == "1"),
             warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
             current_method_selector: None,
+            is_server_subclass: false,
         }
     }
 
