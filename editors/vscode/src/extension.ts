@@ -17,6 +17,7 @@ import {
 import { InspectorPanel } from "./inspectorPanel";
 import { TranscriptViewProvider } from "./transcriptView";
 import { WorkspaceClient } from "./workspaceClient";
+import type { LogEntry } from "./workspaceClient";
 import type {
   ActorItemNode,
   BindingItemNode,
@@ -29,6 +30,8 @@ import { WorkspaceTreeDataProvider } from "./workspaceTreeView";
 let client: LanguageClient | undefined;
 let outputChannel: vscode.LogOutputChannel | undefined;
 let traceOutputChannel: vscode.LogOutputChannel | undefined;
+/** Output channel for live runtime log streaming (BT-1433). */
+let logOutputChannel: vscode.OutputChannel | undefined;
 let workspaceTreeProvider: WorkspaceTreeDataProvider | undefined;
 let transcriptViewProvider: TranscriptViewProvider | undefined;
 
@@ -337,6 +340,47 @@ function findProjectRoot(): string | null {
   return folders[0].uri.fsPath;
 }
 
+// ─── Log output formatting (BT-1433) ─────────────────────────────────────────
+
+/**
+ * Format a structured log entry for human-readable display in the Output panel.
+ *
+ * Example output:
+ *   [14:23:01.234] [info] [runtime] beamtalk_supervisor:startChild/2 — Starting child
+ *   [14:23:01.235] [debug] [Counter >> increment] incrementing
+ */
+function formatLogEntry(entry: LogEntry): string {
+  // Extract time portion (HH:MM:SS.mmm) from ISO timestamp
+  let timePart = "";
+  if (entry.time && entry.time !== "unknown") {
+    const tIdx = entry.time.indexOf("T");
+    if (tIdx >= 0) {
+      timePart = entry.time.slice(tIdx + 1).replace("Z", "");
+    } else {
+      timePart = entry.time;
+    }
+  }
+
+  // Build the origin tag: prefer class >> selector, fall back to domain, then mfa
+  let origin = "";
+  if (entry.class) {
+    origin = entry.selector ? `${entry.class} >> ${entry.selector}` : entry.class;
+  } else if (entry.domain) {
+    origin = entry.domain;
+  }
+  if (!origin && entry.mfa) {
+    origin = entry.mfa;
+  }
+
+  const parts: string[] = [];
+  if (timePart) parts.push(`[${timePart}]`);
+  parts.push(`[${entry.level}]`);
+  if (origin) parts.push(`[${origin}]`);
+  parts.push(entry.msg);
+
+  return parts.join(" ");
+}
+
 // ─── Auto-connect via port file watcher ──────────────────────────────────────
 
 /**
@@ -367,9 +411,23 @@ function connectWorkspace(workspaceId: string): void {
   transcriptViewProvider?.setClient(newClient);
 
   // Close inspector panels for actors that have stopped.
+  // Stream log events to the Beamtalk Logs output channel (BT-1433).
   newClient.onPush((event) => {
     if (event.channel === "actors" && event.event === "stopped") {
       InspectorPanel.notifyActorStopped(event.data.pid);
+    } else if (event.channel === "logs" && event.event === "entry") {
+      logOutputChannel?.appendLine(formatLogEntry(event.data));
+    }
+  });
+
+  // Subscribe to log streaming once connected (BT-1433).
+  newClient.onConnectionChange((state) => {
+    if (state === "connected") {
+      const config = vscode.workspace.getConfiguration("beamtalk");
+      const level = config.get<string>("logs.level", "info");
+      newClient.subscribeLogs(level).catch((err) => {
+        outputChannel?.warn(`Failed to subscribe to logs: ${err instanceof Error ? err.message : String(err)}`);
+      });
     }
   });
 
@@ -705,6 +763,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
+  // ─── Beamtalk Logs output channel (BT-1433) ────────────────────────────────
+
+  logOutputChannel ??= vscode.window.createOutputChannel("Beamtalk Logs");
+
   // ─── Workspace Explorer (BT-1023) ──────────────────────────────────────────
 
   workspaceTreeProvider = new WorkspaceTreeDataProvider();
@@ -1000,8 +1062,10 @@ export function deactivate(): Thenable<void> | undefined {
   workspaceTreeProvider = undefined;
   transcriptViewProvider?.setClient(null);
   transcriptViewProvider = undefined;
+  logOutputChannel?.dispose();
   outputChannel?.dispose();
   traceOutputChannel?.dispose();
+  logOutputChannel = undefined;
   outputChannel = undefined;
   traceOutputChannel = undefined;
   return stop;

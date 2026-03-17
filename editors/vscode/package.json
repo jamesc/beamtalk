@@ -252,6 +252,21 @@
           "type": "boolean",
           "default": false,
           "description": "Start the Beamtalk REPL in ephemeral mode (-e). Bindings are not persisted across sessions."
+        },
+        "beamtalk.logs.level": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "notice",
+            "warning",
+            "error",
+            "critical",
+            "alert",
+            "emergency"
+          ],
+          "default": "info",
+          "description": "Minimum log level for the Beamtalk Logs output channel. Only events at or above this level are streamed from the workspace."
         }
       }
     },
