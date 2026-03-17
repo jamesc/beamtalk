@@ -685,7 +685,9 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::EarlyReturn => {
-                    unreachable!("EarlyReturn handled above");
+                    return Err(CodeGenError::Internal(
+                        "EarlyReturn should be handled before match dispatch".to_string(),
+                    ));
                 }
                 BodyExprKind::Pure => {
                     if is_last {
