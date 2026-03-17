@@ -334,12 +334,13 @@ fn mcp_debug_signal_path(workspace_id: &str) -> std::path::PathBuf {
                 workspace_id,
                 "Failed to resolve workspace dir for MCP debug signal"
             );
-            beamtalk_workspace::workspaces_base_dir()
-                .map(|base| base.join(workspace_id).join("mcp_debug_enabled"))
-                .unwrap_or_else(|_| {
+            beamtalk_workspace::workspaces_base_dir().map_or_else(
+                |_| {
                     // Non-existent path; signal watcher will simply never trigger
                     std::path::PathBuf::from("__nonexistent_mcp_signal__")
-                })
+                },
+                |base| base.join(workspace_id).join("mcp_debug_enabled"),
+            )
         },
         |dir| dir.join("mcp_debug_enabled"),
     )
