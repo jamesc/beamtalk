@@ -287,8 +287,10 @@ format_selector(_) ->
 
 %% @private
 -spec format_mfa(map()) -> binary() | undefined.
-format_mfa(#{mfa := {M, F, A}}) ->
-    iolist_to_binary(io_lib:format("~s:~s/~B", [M, F, A]));
+format_mfa(#{mfa := {M, F, A}}) when is_atom(M), is_atom(F), is_integer(A) ->
+    iolist_to_binary(
+        io_lib:format("~s:~s/~B", [atom_to_list(M), atom_to_list(F), A])
+    );
 format_mfa(_) ->
     undefined.
 
