@@ -72,7 +72,7 @@ Beamtalk logLevel: #warning          // reduce log verbosity
 Beamtalk logLevel: #debug            // restore full capture
 ```
 
-`logLevel:` sets the OTP **primary log level** — the same thing `Logger setLevel:` does today. This controls the minimum severity for all log events across all handlers. In Beamtalk's workspace model there is no separate "console" — the only meaningful log destination is the workspace file logger (`~/.beamtalk/workspaces/{id}/workspace.log`), which is viewed via `beamtalk logs`.
+`logLevel:` sets the OTP **primary log level** — the same thing `Logger setLevel:` does today. This controls the minimum severity for all log events across all handlers. In Beamtalk's workspace model there is no separate "console" — the only meaningful log destination is the workspace file logger (`~/.beamtalk/workspaces/{id}/workspace.log`), which is viewed via `beamtalk workspace logs`.
 
 Replaces `Logger setLevel:` as the canonical API. `Logger setLevel:` remains as a deprecated alias for backwards compatibility.
 
@@ -302,26 +302,26 @@ Active debug targets are tracked in a Beamtalk-owned ETS table (similar to `beam
 
 New subsystems can be registered by adding entries to the subsystem map in the implementation module. This is an internal extension point, not a user-facing API.
 
-### 5. `beamtalk logs` CLI Command
+### 5. `beamtalk workspace logs` CLI Command
 
 A new CLI subcommand for viewing workspace logs without entering the REPL:
 
 ```bash
 # Show recent log entries (default: last 50 lines)
-beamtalk logs
+beamtalk workspace logs
 
 # Follow log output (tail -f style)
-beamtalk logs --follow
+beamtalk workspace logs --follow
 
 # Filter by minimum level
-beamtalk logs --level debug
-beamtalk logs --level error
+beamtalk workspace logs --level debug
+beamtalk workspace logs --level error
 
 # Show logs for a specific workspace
-beamtalk logs --workspace <id>
+beamtalk workspace logs --workspace <id>
 
 # Show log file path
-beamtalk logs --path
+beamtalk workspace logs --path
 ```
 
 **Workspace discovery:** Uses the same workspace discovery logic as `beamtalk attach` — finds the most recently active workspace in `~/.beamtalk/workspaces/`. If multiple workspaces exist, defaults to the most recent and supports `--workspace` to select explicitly.
@@ -361,7 +361,7 @@ Hierarchical dot-separated namespace (`getLogger('myapp.db')`). Children inherit
 ### Newcomer (coming from Python/JS/Ruby)
 - `Beamtalk logLevel: #debug` is immediately intuitive
 - `Beamtalk debugTargets` provides discoverability — no need to guess subsystem names
-- `beamtalk logs --follow` matches their expectations from `heroku logs --tail` or `docker logs -f`
+- `beamtalk workspace logs --follow` matches their expectations from `heroku logs --tail` or `docker logs -f`
 - Error messages guide them to valid options
 
 ### Smalltalk Developer
@@ -376,8 +376,8 @@ Hierarchical dot-separated namespace (`getLogger('myapp.db')`). Children inherit
 - Subsystem grouping is a convenience they don't get in raw OTP
 
 ### Production Operator
-- `beamtalk logs --follow --level error` for monitoring without a REPL
-- `beamtalk logs --path` for integration with external log aggregation (filebeat, fluentd)
+- `beamtalk workspace logs --follow --level error` for monitoring without a REPL
+- `beamtalk workspace logs --path` for integration with external log aggregation (filebeat, fluentd)
 - `Beamtalk logFormat: #json` for structured logging to aggregation systems (Datadog, Splunk, ELK, Loki) — follows the standard BEAM production pattern of JSON to file + sidecar
 - No workspace connection required for log access — works on stopped workspaces
 
@@ -439,7 +439,7 @@ A dedicated new singleton class for logging configuration. Rejected because it a
 - Targeted debugging becomes possible without drowning in noise — enable `#supervisor` only, see only supervisor events
 - Full discoverability — `debugTargets` lists what's available, `activeDebugTargets` shows what's on
 - Log domains (`[beamtalk, runtime]` vs `[beamtalk, user]`) clearly distinguish Erlang runtime internals from Beamtalk user code in log output
-- Operators can access logs without a REPL session via `beamtalk logs`
+- Operators can access logs without a REPL session via `beamtalk workspace logs`
 - Builds directly on OTP logger — no custom logging framework, no abstraction inversion
 - `Logger` stays simple and focused on emission
 - Compiler-inlined Logger calls match Elixir's proven approach and ensure per-class filtering works correctly
@@ -454,7 +454,7 @@ A dedicated new singleton class for logging configuration. Rejected because it a
 
 ### Neutral
 - OTP logger's full filter pipeline is not exposed — `Beamtalk` provides the 90% use case (per-target level override). Power users can still call Erlang's `logger` module directly via FFI
-- `beamtalk logs` reads files directly, not via the workspace protocol — it works offline but won't show in-memory log events that haven't been flushed
+- `beamtalk workspace logs` reads files directly, not via the workspace protocol — it works offline but won't show in-memory log events that haven't been flushed
 - Per-actor debug (`enableDebug: myCounter`) is transient — it's lost if the actor restarts. This is appropriate for live debugging but means you can't persistently monitor a specific actor across restarts. Class-level debug (`enableDebug: Counter`) is persistent and covers all instances including newly created ones
 - Custom log handler management (adding/removing handlers via `Beamtalk`) is not included. Users needing additional handlers (e.g., a separate audit log or a remote log shipper) can use Erlang FFI (`(Erlang logger) add_handler: ...`). A Beamtalk-native handler API can be added later when there's demand, likely alongside the metrics/instrumentation work (BT-1429)
 
@@ -488,7 +488,7 @@ A dedicated new singleton class for logging configuration. Rejected because it a
 
 **Affected components:** `runtime/apps/beamtalk_runtime/src/beamtalk_logging_config.erl` (new), `stdlib/src/BeamtalkInterface.bt`, `runtime/apps/beamtalk_stdlib/src/beamtalk_logger.erl` (deprecation warning)
 
-### Phase 2: `beamtalk logs` CLI Command (M)
+### Phase 2: `beamtalk workspace logs` CLI Command (M)
 - Add `logs` subcommand to `beamtalk-cli`
 - Implement workspace log file discovery (reuse workspace discovery from `attach`)
 - Implement `--follow` (file watching), `--level` (line-level filtering), `--path` (print path)
@@ -500,7 +500,7 @@ A dedicated new singleton class for logging configuration. Rejected because it a
 - Add `logger_formatter_json` (or `thoas` + custom formatter) as a runtime dependency
 - Add `logFormat/0`, `logFormat/1` to `beamtalk_logging_config.erl`
 - Implement formatter swap via `logger:update_handler_config(beamtalk_file_log, formatter, {Module, Config})`
-- Add `--format json|text` flag to `beamtalk logs` CLI command
+- Add `--format json|text` flag to `beamtalk workspace logs` CLI command
 - EUnit tests
 
 **Affected components:** `runtime/apps/beamtalk_runtime/src/beamtalk_logging_config.erl`, `stdlib/src/BeamtalkInterface.bt`, `runtime/rebar.config` (new dep), `crates/beamtalk-cli/src/commands/logs.rs`
@@ -546,7 +546,7 @@ The test `sys.config` sets `logger_level` to `error` to suppress log noise durin
 | 1a | BT-1436 | Core logging config: logLevel, subsystem debug, loggerInfo | M | — |
 | 1b | BT-1437 | User-class and per-actor debug filtering | M | BT-1435, BT-1436 |
 | 1c | BT-1438 | Deprecate Logger setLevel: | S | BT-1436 |
-| 2 | BT-1439 | `beamtalk logs` CLI command | M | — |
+| 2 | BT-1439 | `beamtalk workspace logs` CLI command | M | — |
 | 3 | BT-1440 | JSON log format switching | S | BT-1436, BT-1439 |
 | 4 | BT-1441 | MCP debug target (cross-boundary) | S | BT-1436, BT-1428 |
 

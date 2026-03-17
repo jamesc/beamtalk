@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `beamtalk logs` — view workspace log files without a running REPL session.
+//! `beamtalk workspace logs` — view workspace log files without a running REPL session.
 //!
 //! **DDD Context:** CLI
 //!
@@ -11,6 +11,8 @@
 
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
@@ -83,7 +85,7 @@ impl LogLevel {
     }
 }
 
-/// Run the `beamtalk logs` command.
+/// Run the `beamtalk workspace logs` command.
 pub fn run(
     workspace_id: Option<&str>,
     follow: bool,
@@ -132,7 +134,7 @@ fn resolve_log_path(workspace_id: Option<&str>) -> Result<PathBuf> {
             ),
             None => miette!(
                 "No workspace found for current directory. \
-                 Specify a workspace: `beamtalk logs --workspace <id>`"
+                 Specify a workspace: `beamtalk workspace logs --workspace <id>`"
             ),
         });
     }
@@ -207,7 +209,33 @@ fn extract_json_level(line: &str) -> Option<LogLevel> {
     }
 }
 
+/// Return the inode of an open file (Unix) or 0 (non-Unix).
+#[cfg(unix)]
+fn file_inode(file: &File) -> u64 {
+    file.metadata().map(|m| m.ino()).unwrap_or(0)
+}
+
+#[cfg(not(unix))]
+fn file_inode(_file: &File) -> u64 {
+    0
+}
+
+/// Return the inode of a path (Unix) or 0 (non-Unix).
+#[cfg(unix)]
+fn path_inode(path: &PathBuf) -> u64 {
+    fs::metadata(path).map(|m| m.ino()).unwrap_or(0)
+}
+
+#[cfg(not(unix))]
+fn path_inode(_path: &PathBuf) -> u64 {
+    0
+}
+
 /// Follow the log file, streaming new lines as they appear (poll-based).
+///
+/// Detects log rotation (OTP `logger_std_h` renames the file and creates a
+/// new one) by comparing inodes. When rotation is detected, re-opens the
+/// new file from the beginning so no log lines are lost.
 fn tail_follow(
     path: &PathBuf,
     min_level: Option<LogLevel>,
@@ -215,31 +243,59 @@ fn tail_follow(
 ) -> Result<()> {
     let file = File::open(path).into_diagnostic()?;
     let mut reader = BufReader::new(file);
+    let mut current_inode = file_inode(reader.get_ref());
 
     // Seek to end — we only want new content
     reader.seek(SeekFrom::End(0)).into_diagnostic()?;
 
     let mut line = String::new();
+    let mut stale_polls: u32 = 0;
     loop {
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => {
-                // No new data — poll again after a short sleep
+                // No new data — check for rotation every ~1s (5 polls)
+                stale_polls += 1;
+                if stale_polls >= 5 {
+                    stale_polls = 0;
+                    let disk_inode = path_inode(path);
+                    if disk_inode != 0 && disk_inode != current_inode {
+                        // File was rotated — drain remaining lines from old file,
+                        // then reopen the new file from the start
+                        loop {
+                            line.clear();
+                            match reader.read_line(&mut line) {
+                                Ok(0) | Err(_) => break,
+                                Ok(_) => print_if_matches(&line, min_level, format),
+                            }
+                        }
+                        let new_file = File::open(path).into_diagnostic()?;
+                        current_inode = file_inode(&new_file);
+                        reader = BufReader::new(new_file);
+                        continue;
+                    }
+                }
                 thread::sleep(Duration::from_millis(200));
             }
             Ok(_) => {
-                let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                if let Some(min) = min_level {
-                    if matches_level(trimmed, min, format) {
-                        println!("{trimmed}");
-                    }
-                } else {
-                    println!("{trimmed}");
-                }
+                stale_polls = 0;
+                print_if_matches(&line, min_level, format);
             }
             Err(e) => {
                 return Err(miette!("Error reading log file: {e}"));
             }
         }
+    }
+}
+
+/// Print a log line if it passes the level filter.
+fn print_if_matches(line: &str, min_level: Option<LogLevel>, format: Option<LogFormat>) {
+    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+    if let Some(min) = min_level {
+        if matches_level(trimmed, min, format) {
+            println!("{trimmed}");
+        }
+    } else {
+        println!("{trimmed}");
     }
 }
