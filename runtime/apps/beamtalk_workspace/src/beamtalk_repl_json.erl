@@ -379,10 +379,12 @@ term_to_json_future_pid(Pid) ->
 %% @doc Format an error reason as a human-readable message.
 -spec format_error_message(term()) -> binary().
 format_error_message(#{'$beamtalk_class' := Class, error := Error}) ->
+    Enriched = maybe_use_singleton_binding_name(Error),
     ClassName = atom_to_binary(Class, utf8),
-    iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Error)]);
+    iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Enriched)]);
 format_error_message(#beamtalk_error{} = Error) ->
-    iolist_to_binary(beamtalk_error:format(Error));
+    Enriched = maybe_use_singleton_binding_name(Error),
+    iolist_to_binary(beamtalk_error:format(Enriched));
 format_error_message(empty_expression) ->
     <<"Empty expression">>;
 format_error_message(timeout) ->
@@ -405,10 +407,12 @@ format_error_message({invalid_request, Reason}) ->
 format_error_message({parse_error, Details}) ->
     iolist_to_binary([<<"Parse error: ">>, format_name(Details)]);
 format_error_message({eval_error, _Class, #{'$beamtalk_class' := ExClass, error := Error}}) ->
+    Enriched = maybe_use_singleton_binding_name(Error),
     ClassName = atom_to_binary(ExClass, utf8),
-    iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Error)]);
+    iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Enriched)]);
 format_error_message({eval_error, _Class, #beamtalk_error{} = Error}) ->
-    iolist_to_binary(beamtalk_error:format(Error));
+    Enriched = maybe_use_singleton_binding_name(Error),
+    iolist_to_binary(beamtalk_error:format(Enriched));
 format_error_message({eval_error, Class, Reason}) ->
     iolist_to_binary([
         <<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<":">>, format_name(Reason)
@@ -515,3 +519,25 @@ format_name(Name) ->
 -spec to_binary(atom() | binary()) -> binary().
 to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8);
 to_binary(V) when is_binary(V) -> V.
+
+%% @private Rewrite DNU error class names for singleton instances.
+%%
+%% When a singleton instance (e.g., Workspace) gets a DNU, the error uses the
+%% class name (WorkspaceInterface) which is confusing — the user typed "Workspace".
+%% Replace the class name with the binding name so errors read naturally.
+-spec maybe_use_singleton_binding_name(beamtalk_error:error()) -> beamtalk_error:error().
+maybe_use_singleton_binding_name(
+    #beamtalk_error{kind = does_not_understand, class = Class} = Error
+) when is_atom(Class) ->
+    case beamtalk_workspace_config:binding_name_for_class(Class) of
+        {ok, BindingName} ->
+            %% Regenerate the message with the binding name.
+            NewMessage = beamtalk_error:generate_message(
+                does_not_understand, BindingName, Error#beamtalk_error.selector
+            ),
+            Error#beamtalk_error{message = NewMessage};
+        undefined ->
+            Error
+    end;
+maybe_use_singleton_binding_name(Error) ->
+    Error.
