@@ -108,13 +108,13 @@
 %% ```
 -spec lookup(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 lookup(Selector, Args, Self, State, CurrentClass) ->
-    ?LOG_DEBUG("Dispatching ~p on class ~p", [Selector, CurrentClass]),
+    ?LOG_DEBUG("Dispatch lookup", #{selector => Selector, class => CurrentClass}),
 
     %% Step 1: Check extension registry first (guard against missing ETS table)
     case check_extension(CurrentClass, Selector) of
         {ok, Fun} ->
             %% Found extension method - invoke it
-            ?LOG_DEBUG("Found extension method ~p on ~p", [Selector, CurrentClass]),
+            ?LOG_DEBUG("Found extension method", #{selector => Selector, class => CurrentClass}),
             invoke_extension(Fun, Args, Self, State);
         not_found ->
             %% Step 2: Check class's own method table
@@ -144,7 +144,7 @@ lookup(Selector, Args, Self, State, CurrentClass) ->
 %% ```
 -spec super(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 super(Selector, Args, Self, State, CurrentClass) ->
-    ?LOG_DEBUG("Super dispatch ~p from class ~p", [Selector, CurrentClass]),
+    ?LOG_DEBUG("Super dispatch", #{selector => Selector, class => CurrentClass}),
 
     %% Look up the current class to get its superclass
     case beamtalk_class_registry:whereis_class(CurrentClass) of
@@ -167,9 +167,9 @@ super(Selector, Args, Self, State, CurrentClass) ->
                     %% Check extension registry on superclass before hierarchy walk
                     case check_extension(SuperclassName, Selector) of
                         {ok, Fun} ->
-                            ?LOG_DEBUG("Found extension method ~p on superclass ~p via super", [
-                                Selector, SuperclassName
-                            ]),
+                            ?LOG_DEBUG("Found extension method via super", #{
+                                selector => Selector, class => SuperclassName
+                            }),
                             invoke_extension(Fun, Args, Self, State);
                         not_found ->
                             %% Start lookup at superclass (skip current class)
@@ -232,10 +232,9 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
 lookup_in_class_chain_slow(Selector, _Args, _Self, _State, ClassName, _ClassPid, Depth) when
     Depth > ?MAX_HIERARCHY_DEPTH
 ->
-    ?LOG_WARNING(
-        "lookup_in_class_chain_slow: max hierarchy depth ~p exceeded at ~p — possible cycle",
-        [?MAX_HIERARCHY_DEPTH, ClassName]
-    ),
+    ?LOG_WARNING("Max hierarchy depth exceeded — possible cycle", #{
+        max_depth => ?MAX_HIERARCHY_DEPTH, class => ClassName, selector => Selector
+    }),
     {error,
         beamtalk_error:new(
             does_not_understand,
@@ -248,14 +247,14 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, Dep
     case beamtalk_object_class:has_method(ClassPid, Selector) of
         true ->
             %% Found the method - invoke it
-            ?LOG_DEBUG("Found method ~p in class ~p (hierarchy walk)", [Selector, ClassName]),
+            ?LOG_DEBUG("Found method in hierarchy", #{selector => Selector, class => ClassName}),
             invoke_method(ClassName, ClassPid, Selector, Args, Self, State, Depth);
         false ->
             %% Not found in this class - try superclass
             case beamtalk_object_class:superclass(ClassPid) of
                 none ->
                     %% Reached root without finding method
-                    ?LOG_DEBUG("Method ~p not found in hierarchy (root: ~p)", [Selector, ClassName]),
+                    ?LOG_DEBUG("Method not found in hierarchy", #{selector => Selector, root => ClassName}),
                     %% BT-753: Derive class from Self when State is empty (class objects).
                     ErrorClass = class_name_from(Self, State, ClassName),
                     Error = beamtalk_error:new(
@@ -267,9 +266,9 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, Dep
                     {error, Error};
                 SuperclassName ->
                     %% Recurse to superclass
-                    ?LOG_DEBUG("Method ~p not in ~p, trying superclass ~p", [
-                        Selector, ClassName, SuperclassName
-                    ]),
+                    ?LOG_DEBUG("Method not in class, trying superclass", #{
+                        selector => Selector, class => ClassName, superclass => SuperclassName
+                    }),
                     case beamtalk_class_registry:whereis_class(SuperclassName) of
                         undefined ->
                             {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
@@ -318,7 +317,7 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                     %% Module exists but lacks dispatch/4 — continue to superclass (BT-427)
                     continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth);
                 true ->
-                    ?LOG_DEBUG("Invoking ~p:dispatch(~p, ...)", [ModuleName, Selector]),
+                    ?LOG_DEBUG("Invoking compiled dispatch", #{module => ModuleName, selector => Selector}),
                     %% Intercept displayString/inspect for actor instances to avoid
                     %% deadlock. Both compiled Object methods send a message back to
                     %% Self (displayString calls self printString, inspect delegates
@@ -339,10 +338,9 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                                 {error, Error, _State} -> {error, Error}
                             catch
                                 Type:Reason:Stack ->
-                                    ?LOG_ERROR(
-                                        "Erlang error in beamtalk_object_ops:dispatch: ~p",
-                                        [Reason]
-                                    ),
+                                    ?LOG_ERROR("Erlang error in beamtalk_object_ops:dispatch", #{
+                                        reason => Reason, selector => Selector
+                                    }),
                                     Wrapped = beamtalk_exception_handler:ensure_wrapped(
                                         Type, Reason, Stack
                                     ),
@@ -362,9 +360,9 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                                 end
                             catch
                                 Type:Reason:Stack ->
-                                    ?LOG_ERROR("Erlang error in ~p:dispatch: ~p", [
-                                        ModuleName, Reason
-                                    ]),
+                                    ?LOG_ERROR("Erlang error in compiled dispatch", #{
+                                        module => ModuleName, selector => Selector, reason => Reason
+                                    }),
                                     Wrapped = beamtalk_exception_handler:ensure_wrapped(
                                         Type, Reason, Stack
                                     ),
@@ -422,10 +420,9 @@ invoke_extension(Fun, Args, _Self, State) ->
         {reply, Result, State}
     catch
         error:Reason:Stacktrace ->
-            ?LOG_ERROR(
-                "Extension method threw error: ~p~nStacktrace: ~p",
-                [Reason, Stacktrace]
-            ),
+            ?LOG_ERROR("Extension method threw error", #{
+                reason => Reason, stacktrace => Stacktrace
+            }),
             erlang:raise(error, Reason, Stacktrace)
     end.
 
