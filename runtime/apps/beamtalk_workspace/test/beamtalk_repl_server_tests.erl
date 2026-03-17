@@ -1781,7 +1781,7 @@ parse_receiver_leading_whitespace_single_token_test() ->
 
 walk_chain_empty_selectors_test() ->
     %% walk_chain with no selectors returns the class unchanged — no registry call
-    ?assertEqual({ok, 'String'}, beamtalk_repl_ops_dev:walk_chain('String', [])).
+    ?assertEqual({ok, 'String', instance}, beamtalk_repl_ops_dev:walk_chain('String', [])).
 
 walk_chain_single_hop_found_test() ->
     Pid = spawn_mock_class_with_return_types(
@@ -1789,7 +1789,7 @@ walk_chain_single_hop_found_test() ->
     ),
     try
         ?assertEqual(
-            {ok, 'Integer'},
+            {ok, 'Integer', instance},
             beamtalk_repl_ops_dev:walk_chain('WalkChainTestA', [size])
         )
     after
@@ -1812,7 +1812,7 @@ walk_chain_broken_chain_test() ->
 
 walk_chain_class_empty_selectors_test() ->
     %% walk_chain_class with no selectors returns the class unchanged — no registry call
-    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [])).
+    ?assertEqual({ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [])).
 
 walk_chain_class_single_hop_found_test() ->
     Pid = spawn_mock_class_with_return_types(
@@ -1820,7 +1820,7 @@ walk_chain_class_single_hop_found_test() ->
     ),
     try
         ?assertEqual(
-            {ok, 'WalkChainClassTestA'},
+            {ok, 'WalkChainClassTestA', instance},
             beamtalk_repl_ops_dev:walk_chain_class('WalkChainClassTestA', [new])
         )
     after
@@ -1832,7 +1832,7 @@ walk_chain_class_single_hop_found_test() ->
 %% the metaclass, which has the same class-side methods. The chain should stay on the
 %% class side rather than returning undefined.
 walk_chain_class_class_selector_stays_on_class_side_test() ->
-    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [class])).
+    ?assertEqual({ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [class])).
 
 walk_chain_class_class_then_method_test() ->
     Pid = spawn_mock_class_with_return_types(
@@ -1841,7 +1841,7 @@ walk_chain_class_class_then_method_test() ->
     try
         %% `WalkChainClassB class new` — `class` stays on class side, then `new` resolves
         ?assertEqual(
-            {ok, 'WalkChainClassB'},
+            {ok, 'WalkChainClassB', instance},
             beamtalk_repl_ops_dev:walk_chain_class('WalkChainClassB', [class, new])
         )
     after
@@ -1858,7 +1858,7 @@ walk_chain_multi_hop_test() ->
     ),
     try
         ?assertEqual(
-            {ok, 'String'},
+            {ok, 'String', instance},
             beamtalk_repl_ops_dev:walk_chain('WalkChainMultiA', [size, reversed])
         )
     after
@@ -1880,7 +1880,7 @@ walk_chain_superclass_inheritance_test() ->
     ),
     try
         ?assertEqual(
-            {ok, 'Integer'},
+            {ok, 'Integer', instance},
             beamtalk_repl_ops_dev:walk_chain('WalkChainSub', [size])
         )
     after
@@ -1898,7 +1898,7 @@ resolve_chain_type_single_hop_test() ->
     ),
     try
         ?assertEqual(
-            {ok, 'Integer'},
+            {ok, 'Integer', instance},
             beamtalk_repl_ops_dev:resolve_chain_type(<<"counter getValue">>, #{
                 counter => #beamtalk_object{
                     class = 'ResolveChainTestA', class_mod = undefined, pid = self()
@@ -1919,7 +1919,7 @@ resolve_chain_type_multi_hop_test() ->
     ),
     try
         ?assertEqual(
-            {ok, 'String'},
+            {ok, 'String', instance},
             beamtalk_repl_ops_dev:resolve_chain_type(
                 <<"counter getValue reversed">>,
                 #{
