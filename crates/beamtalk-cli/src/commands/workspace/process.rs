@@ -191,6 +191,7 @@ pub fn start_detached_node(
                                                           web_port => {web_port_erl}, \
                                                           auto_cleanup => {auto_cleanup}, \
                                                           max_idle_seconds => {idle_timeout}}}), \
+         logger:remove_handler(default), \
          {otp_app_start}\
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"Workspace {workspace_id} started on port ~B~n\", [ActualPort]), \
@@ -234,6 +235,17 @@ pub fn start_detached_node(
             false
         }
     };
+
+    // Redirect the OTP default logger handler to stderr via -kernel VM args
+    // (BT-1431). Without this, OTP logger events between VM start and the
+    // workspace file handler setup in beamtalk_workspace_sup:init/1 go to stdout
+    // (which is /dev/null for detached nodes) and are silently lost. Since stderr
+    // is already redirected to startup.log above, this captures boot-time OTP
+    // events alongside VM crash output in the same file. The -kernel logger config
+    // takes effect from the very first moment the VM boots, before any -eval code.
+    cmd.arg("-kernel")
+        .arg("logger")
+        .arg(beamtalk_cli::repl_startup::KERNEL_LOGGER_STDERR);
 
     let child = cmd.spawn().map_err(|e| {
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")

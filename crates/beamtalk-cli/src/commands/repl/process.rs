@@ -12,7 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use miette::{Result, miette};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use beamtalk_cli::repl_startup;
 
@@ -113,6 +113,13 @@ pub(crate) fn start_beam_node(
     let mut cmd = Command::new("erl");
     cmd.arg("-noshell")
         .args(&args)
+        // Redirect OTP default logger to stderr from boot (BT-1431). The startup
+        // prelude removes the default handler, but there's a window between VM
+        // start and the -eval code where early events (e.g. application startup
+        // failures) would otherwise go to stdout and be parsed as protocol.
+        .arg("-kernel")
+        .arg("logger")
+        .arg(repl_startup::KERNEL_LOGGER_STDERR)
         .current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -230,6 +237,31 @@ pub(crate) fn read_port_from_child(child: &mut Child) -> Result<u16> {
     ))
 }
 
+/// Drain stderr from a BEAM child process in a background thread (BT-1431).
+///
+/// OTP logger output and VM diagnostics go to stderr. Without draining, the
+/// pipe buffer fills up and the BEAM node blocks. Lines are logged via
+/// `tracing::debug` so they appear in `RUST_LOG=debug` output.
+///
+/// Takes ownership of the child's stderr handle via `take()`.
+/// The returned `JoinHandle` can be ignored — the thread exits when the
+/// child process closes stderr (i.e. on exit).
+pub(crate) fn drain_child_stderr(child: &mut Child) -> Option<std::thread::JoinHandle<()>> {
+    let stderr = child.stderr.take()?;
+    Some(std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            match line {
+                Ok(line) if !line.is_empty() => {
+                    debug!(target: "beamtalk::beam_stderr", "{}", line);
+                }
+                Ok(_) => {} // skip empty lines
+                Err(_) => break,
+            }
+        }
+    }))
+}
+
 /// Default REPL port (`0` = OS-assigned ephemeral port).
 ///
 /// Using `0` eliminates port conflicts between multiple workspaces or other
@@ -257,4 +289,43 @@ pub(crate) fn resolve_port(port_arg: Option<u16>) -> Result<u16> {
 /// Priority: CLI flag > `BEAMTALK_NODE_NAME` env var > None
 pub(crate) fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
     node_arg.or_else(|| std::env::var("BEAMTALK_NODE_NAME").ok())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drain_child_stderr_takes_handle_and_drains() {
+        // Spawn a child that writes to stderr then exits.
+        let mut child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("echo 'test stderr line' >&2")
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to spawn test child");
+
+        let handle = drain_child_stderr(&mut child);
+        assert!(handle.is_some(), "should return a join handle");
+        assert!(child.stderr.is_none(), "stderr should be taken");
+
+        // Wait for child and drain thread to finish.
+        let _ = child.wait();
+        handle
+            .unwrap()
+            .join()
+            .expect("drain thread should not panic");
+    }
+
+    #[test]
+    fn drain_child_stderr_returns_none_without_pipe() {
+        // Child with no stderr pipe → drain returns None.
+        let mut child = std::process::Command::new("true")
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Failed to spawn test child");
+
+        assert!(drain_child_stderr(&mut child).is_none());
+        let _ = child.wait();
+    }
 }

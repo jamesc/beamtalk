@@ -80,8 +80,8 @@ use client::ReplClient;
 use display::{format_error, format_value, history_path, print_help};
 use helper::ReplHelper;
 use process::{
-    BeamChildGuard, connect_with_retries, read_port_from_child, resolve_node_name, resolve_port,
-    start_beam_node,
+    BeamChildGuard, connect_with_retries, drain_child_stderr, read_port_from_child,
+    resolve_node_name, resolve_port, start_beam_node,
 };
 
 /// JSON response from the REPL backend.
@@ -384,6 +384,10 @@ pub fn run(
         } else {
             port
         };
+
+        // Drain stderr in a background thread to prevent pipe buffer fill-up
+        // and capture OTP logger/VM diagnostic output (BT-1431).
+        let _stderr_drain = drain_child_stderr(&mut child);
 
         // Foreground mode: use Erlang cookie, or "nocookie" for nodes without -setcookie
         let fg_cookie = read_erlang_cookie().unwrap_or_else(|| "nocookie".to_string());
