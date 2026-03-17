@@ -163,6 +163,104 @@ pub(super) struct ThreadingPlan {
     pub mutated_fields: Vec<String>,
 }
 
+/// Pre-computed body-effect predicates for threading strategy selection.
+///
+/// Analyzing the loop body for various effects (tier-2 calls, control-flow mutations,
+/// conditional writes, etc.) requires iterating over all body statements. This struct
+/// computes each predicate once and reuses the results across strategy selection and
+/// fallback-reason diagnosis.
+#[allow(clippy::struct_excessive_bools)]
+struct BodyEffects {
+    /// Condition block has state effects (field writes or self-sends).
+    cond_has_state_effects: bool,
+    /// Body has a tier-2 value call assigned to a threaded local.
+    has_tier2_threaded_assign: bool,
+    /// Body has nested list ops incompatible with direct-params (BT-1329).
+    has_non_tuple_safe_list_op: bool,
+    /// Body has control-flow sub-expressions with field mutations.
+    has_cf_mutations: bool,
+    /// Body has inline conditionals writing to threaded locals.
+    has_conditional_threaded_writes: bool,
+    /// Last expression in body is a `DestructureAssignment`.
+    last_is_destructure: bool,
+}
+
+impl BodyEffects {
+    /// Analyze the loop body and condition to compute all effect predicates.
+    fn analyze(
+        generator: &CoreErlangGenerator,
+        body: &crate::ast::Block,
+        condition: Option<&Expression>,
+        threaded_locals: &[String],
+    ) -> Self {
+        let cond_has_state_effects = condition.is_some_and(|c| {
+            if let Expression::Block(cb) = c {
+                block_analysis::analyze_block(cb).has_state_effects()
+            } else {
+                false
+            }
+        });
+
+        // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
+        // fall back to StateAcc mode so `generate_local_var_assignment_in_loop`
+        // can properly unpack the {Result, NewStateAcc} tuple.
+        let has_tier2_threaded_assign = body.body.iter().any(|s| {
+            if let Expression::Assignment { target, value, .. } = &s.expression {
+                if let Expression::Identifier(id) = target.as_ref() {
+                    if threaded_locals.contains(&id.name.to_string()) {
+                        return generator.is_tier2_value_call(value);
+                    }
+                }
+            }
+            false
+        });
+
+        // BT-1329: Check for nested list ops with cross-scope mutations whose inner
+        // blocks can't use tuple-acc. These fall back to map-acc which references
+        // StateAcc — incompatible with direct-params mode.
+        let has_non_tuple_safe_list_op = body.body.iter().any(|s| {
+            CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
+                &s.expression,
+                &generator.semantic_facts,
+            )
+        });
+
+        // Guard: control-flow sub-expressions with field mutations (e.g.
+        // `flag ifTrue: [self.n := ...]`). These generate `StateAcc`-dependent code.
+        let has_cf_mutations = body
+            .body
+            .iter()
+            .any(|s| generator.control_flow_has_mutations(&s.expression));
+
+        // Guard: inline conditionals that write threaded locals (e.g.
+        // `each > max ifTrue: [max := each]`). `control_flow_has_mutations` only
+        // catches field writes; this catches the pure-overwrite-local pattern.
+        let has_conditional_threaded_writes = body.body.iter().any(|s| {
+            CoreErlangGenerator::inline_conditional_writes_threaded(
+                &s.expression,
+                threaded_locals,
+                &generator.semantic_facts,
+            )
+        });
+
+        // DestructureAssignment as the last expr is not supported in tuple-acc mode:
+        // `emit_destructure_last_expr` always emits the map-shaped StateAcc path.
+        let last_is_destructure = body
+            .body
+            .last()
+            .is_some_and(|s| matches!(s.expression, Expression::DestructureAssignment { .. }));
+
+        Self {
+            cond_has_state_effects,
+            has_tier2_threaded_assign,
+            has_non_tuple_safe_list_op,
+            has_cf_mutations,
+            has_conditional_threaded_writes,
+            last_is_destructure,
+        }
+    }
+}
+
 impl ThreadingPlan {
     /// Creates a `ThreadingPlan` for a foldl-based loop body (`do:`, `collect:`, etc.).
     ///
@@ -206,7 +304,6 @@ impl ThreadingPlan {
         Self::new_impl(generator, body, None, false, true)
     }
 
-    #[allow(clippy::too_many_lines)]
     fn new_impl(
         generator: &mut CoreErlangGenerator,
         body: &crate::ast::Block,
@@ -226,180 +323,40 @@ impl ThreadingPlan {
         let threaded_locals = generator.compute_threaded_locals_for_loop(body, condition);
         let initial_state_var = generator.current_state_var();
 
-        // BT-1275: Use direct fun parameters only for letrec loops when:
-        // - caller opts in via `allow_direct_params`
-        // - there are local vars to thread
-        // - the body has no field mutations or self-sends
-        // - the body has no Tier-2 block calls on threaded locals (those return {Result, StateAcc}
-        //   and require the StateAcc extraction that `generate_local_var_assignment_in_loop` does)
-        // Field mutations require StateAcc to persist actor state across iterations.
-        // Pre-analyze body once — reused for both `use_direct_params` and `use_tuple_acc`.
+        // Pre-analyze body once — reused across all strategy decisions.
         let body_analysis = block_analysis::analyze_block(body);
 
-        let use_direct_params = if !allow_direct_params || threaded_locals.is_empty() {
-            false
-        } else {
-            let cond_has_state_effects = condition.is_some_and(|c| {
-                if let Expression::Block(cb) = c {
-                    block_analysis::analyze_block(cb).has_state_effects()
-                } else {
-                    false
-                }
-            });
-            // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
-            // fall back to StateAcc mode so `generate_local_var_assignment_in_loop`
-            // can properly unpack the {Result, NewStateAcc} tuple.
-            let body_has_tier2_threaded_assign = body.body.iter().any(|s| {
-                if let Expression::Assignment { target, value, .. } = &s.expression {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        if threaded_locals.contains(&id.name.to_string()) {
-                            return generator.is_tier2_value_call(value);
-                        }
-                    }
-                }
-                false
-            });
-            // BT-1329: Check for nested list ops with cross-scope mutations whose inner
-            // blocks can't use tuple-acc. These fall back to map-acc which references
-            // StateAcc — incompatible with direct-params mode.
-            let body_has_non_tuple_safe_list_op = body.body.iter().any(|s| {
-                CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
-                    &s.expression,
-                    &generator.semantic_facts,
-                )
-            });
-            !body_analysis.has_state_effects()
-                && !cond_has_state_effects
-                && !body_has_tier2_threaded_assign
-                && !body_has_non_tuple_safe_list_op
-        };
+        // Pre-compute all body-effect predicates once to avoid repeated iteration.
+        let effects = BodyEffects::analyze(generator, body, condition, &threaded_locals);
 
-        // BT-1276: Tuple accumulator optimization for foldl list-ops.
-        //
-        // Eligible when the body has only simple local var mutations — no field writes,
-        // no self-sends, no tier-2 assignments, and no complex control-flow subexpressions
-        // that generate `StateAcc`-dependent code (e.g. `ifTrue:` with inner mutations).
-        //
-        // ValueType methods have no `State` gen_server variable in scope; `collect:`,
-        // `select:`, and `inject:` tuple paths call `append_repack_stateacc` which seeds
-        // from `initial_state_var` (= the current `State` name). Using tuple-acc in
-        // ValueType context would reference an unbound variable — always fall through to
-        // the map-acc path which uses its own fresh `maps:new()` seed instead.
-        let use_tuple_acc = if !allow_tuple_acc
-            || threaded_locals.is_empty()
-            || matches!(generator.context, CodeGenContext::ValueType)
-        {
-            false
-        } else {
-            let body_has_tier2_threaded_assign_tuple = body.body.iter().any(|s| {
-                if let Expression::Assignment { target, value, .. } = &s.expression {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        if threaded_locals.contains(&id.name.to_string()) {
-                            return generator.is_tier2_value_call(value);
-                        }
-                    }
-                }
-                false
-            });
-            let body_has_cf_mutations = body
-                .body
-                .iter()
-                .any(|s| generator.control_flow_has_mutations(&s.expression));
-            let body_has_conditional_threaded_writes = body.body.iter().any(|s| {
-                CoreErlangGenerator::inline_conditional_writes_threaded(
-                    &s.expression,
-                    &threaded_locals,
-                    &generator.semantic_facts,
-                )
-            });
-            // DestructureAssignment as the last expr is not supported in tuple-acc mode:
-            // `emit_destructure_last_expr` always emits the map-shaped StateAcc path.
-            let body_last_is_destructure = body
-                .body
-                .last()
-                .is_some_and(|s| matches!(s.expression, Expression::DestructureAssignment { .. }));
-            !body_analysis.has_state_effects()
-                && !body_has_tier2_threaded_assign_tuple
-                && !body_has_cf_mutations
-                && !body_has_conditional_threaded_writes
-                && !body_last_is_destructure
-        };
+        // BT-1275: Direct fun parameters for letrec loops.
+        let use_direct_params = Self::select_direct_params(
+            allow_direct_params,
+            &threaded_locals,
+            &body_analysis,
+            &effects,
+        );
+
+        // BT-1276: Tuple accumulator for foldl list-ops.
+        let use_tuple_acc = Self::select_tuple_acc(
+            allow_tuple_acc,
+            &threaded_locals,
+            context,
+            &body_analysis,
+            &effects,
+        );
 
         // BT-1326: Hybrid direct-params + State threading for letrec loops.
-        //
-        // Eligible when:
-        // - caller opts in via `allow_direct_params` (letrec loops only)
-        // - there are local vars to thread
-        // - body has field mutations (but NOT self-sends — those need async dispatch)
-        // - condition has no state effects
-        // - no tier-2 threaded-local assignments
-        // - actor context only (ValueType has no actor State to thread)
-        // - NOT already using use_direct_params (mutually exclusive)
-        let use_hybrid_params = if !allow_direct_params
-            || threaded_locals.is_empty()
-            || use_direct_params
-            || !matches!(context, CodeGenContext::Actor)
-        {
-            false
-        } else {
-            let cond_has_state_effects_for_hybrid = condition.is_some_and(|c| {
-                if let Expression::Block(cb) = c {
-                    block_analysis::analyze_block(cb).has_state_effects()
-                } else {
-                    false
-                }
-            });
-            let body_has_tier2_threaded_assign_hybrid = body.body.iter().any(|s| {
-                if let Expression::Assignment { target, value, .. } = &s.expression {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        if threaded_locals.contains(&id.name.to_string()) {
-                            return generator.is_tier2_value_call(value);
-                        }
-                    }
-                }
-                false
-            });
-            // Guard: if any body expression is nested control flow with mutations (e.g.
-            // `flag ifTrue: [self.n := ...]`), fall back to StateAcc mode.
-            // `emit_non_assign_expr` for BodyKind::Letrec hardcodes `StateAccN` naming;
-            // hybrid mode uses `StateN`. Mixed naming causes unbound variable errors.
-            let body_has_cf_mutations_hybrid = body
-                .body
-                .iter()
-                .any(|s| generator.control_flow_has_mutations(&s.expression));
-            // Guard: inline conditionals that write threaded locals (e.g.
-            // `each > max ifTrue: [max := each]`). `control_flow_has_mutations` only
-            // catches field writes; this catches the pure-overwrite-local pattern that
-            // `emit_non_assign_expr` would thread via StateAcc naming.
-            let body_has_conditional_threaded_writes_hybrid = body.body.iter().any(|s| {
-                CoreErlangGenerator::inline_conditional_writes_threaded(
-                    &s.expression,
-                    &threaded_locals,
-                    &generator.semantic_facts,
-                )
-            });
-            // BT-1329: Check for nested list ops incompatible with direct-params.
-            let body_has_non_tuple_safe_list_op_hybrid = body.body.iter().any(|s| {
-                CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
-                    &s.expression,
-                    &generator.semantic_facts,
-                )
-            });
-            // Eligible when body has field mutations but no self-sends:
-            // - self-sends require async gen_server dispatch; hybrid mode only handles
-            //   direct field-map mutations which produce simple maps:put code.
-            !body_analysis.field_writes.is_empty()
-                && !body_analysis.has_self_sends
-                && !cond_has_state_effects_for_hybrid
-                && !body_has_tier2_threaded_assign_hybrid
-                && !body_has_cf_mutations_hybrid
-                && !body_has_conditional_threaded_writes_hybrid
-                && !body_has_non_tuple_safe_list_op_hybrid
-        };
+        let use_hybrid_params = Self::select_hybrid_params(
+            allow_direct_params,
+            &threaded_locals,
+            context,
+            use_direct_params,
+            &body_analysis,
+            &effects,
+        );
 
         // BT-1326: In hybrid mode, collect fields that are read but never written.
-        // These will be pre-extracted before the letrec (one maps:get total) and
-        // passed as direct fun parameters, eliminating per-iteration maps:get calls.
         let readonly_fields = if use_hybrid_params {
             let mut fields: Vec<String> = body_analysis
                 .field_reads
@@ -413,133 +370,18 @@ impl ThreadingPlan {
         };
 
         // BT-1343: Determine fallback reason when no optimized convention was selected.
-        let fallback_reason =
-            if use_direct_params || use_tuple_acc || use_hybrid_params {
-                StateAccFallbackReason::None
-            } else if threaded_locals.is_empty() {
-                StateAccFallbackReason::NoThreadedLocals
-            } else if !allow_direct_params && !allow_tuple_acc {
-                StateAccFallbackReason::NotLetrec
-            } else if body_analysis.has_self_sends {
-                StateAccFallbackReason::SelfSendInBody
-            } else if !body_analysis.field_writes.is_empty() {
-                // Field writes present (self-sends already excluded above) but not eligible
-                // for hybrid — check specific guards
-                if body.body.iter().any(|s| {
-                    CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
-                        &s.expression,
-                        &generator.semantic_facts,
-                    )
-                }) {
-                    StateAccFallbackReason::NestedListOpCrossScope
-                } else if body.body.iter().any(|s| {
-                    if let Expression::Assignment { target, value, .. } = &s.expression {
-                        if let Expression::Identifier(id) = target.as_ref() {
-                            if threaded_locals.contains(&id.name.to_string()) {
-                                return generator.is_tier2_value_call(value);
-                            }
-                        }
-                    }
-                    false
-                }) {
-                    StateAccFallbackReason::Tier2ValueCallOnThreaded
-                } else if condition.is_some_and(|c| {
-                    if let Expression::Block(cb) = c {
-                        block_analysis::analyze_block(cb).has_state_effects()
-                    } else {
-                        false
-                    }
-                }) {
-                    StateAccFallbackReason::ConditionStateEffects
-                } else if body
-                    .body
-                    .iter()
-                    .any(|s| generator.control_flow_has_mutations(&s.expression))
-                {
-                    StateAccFallbackReason::ControlFlowMutations
-                } else if body.body.iter().any(|s| {
-                    CoreErlangGenerator::inline_conditional_writes_threaded(
-                        &s.expression,
-                        &threaded_locals,
-                        &generator.semantic_facts,
-                    )
-                }) {
-                    StateAccFallbackReason::InlineConditionalThreadedWrite
-                } else if body.body.last().is_some_and(|s| {
-                    matches!(s.expression, Expression::DestructureAssignment { .. })
-                }) {
-                    StateAccFallbackReason::DestructureAsLastExpr
-                } else {
-                    // Generic fallback — body has state effects but doesn't match
-                    // any specific guard above. Re-check for self-sends first.
-                    if body_analysis.has_self_sends {
-                        StateAccFallbackReason::SelfSendInBody
-                    } else {
-                        StateAccFallbackReason::ControlFlowMutations
-                    }
-                }
-            } else if matches!(generator.context, CodeGenContext::ValueType) {
-                StateAccFallbackReason::ValueTypeContext
-            } else {
-                // Check the specific guards that prevented optimization
-                if body.body.iter().any(|s| {
-                    CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
-                        &s.expression,
-                        &generator.semantic_facts,
-                    )
-                }) {
-                    StateAccFallbackReason::NestedListOpCrossScope
-                } else if body.body.iter().any(|s| {
-                    if let Expression::Assignment { target, value, .. } = &s.expression {
-                        if let Expression::Identifier(id) = target.as_ref() {
-                            if threaded_locals.contains(&id.name.to_string()) {
-                                return generator.is_tier2_value_call(value);
-                            }
-                        }
-                    }
-                    false
-                }) {
-                    StateAccFallbackReason::Tier2ValueCallOnThreaded
-                } else if condition.is_some_and(|c| {
-                    if let Expression::Block(cb) = c {
-                        block_analysis::analyze_block(cb).has_state_effects()
-                    } else {
-                        false
-                    }
-                }) {
-                    StateAccFallbackReason::ConditionStateEffects
-                } else if body
-                    .body
-                    .iter()
-                    .any(|s| generator.control_flow_has_mutations(&s.expression))
-                {
-                    StateAccFallbackReason::ControlFlowMutations
-                } else if body.body.iter().any(|s| {
-                    CoreErlangGenerator::inline_conditional_writes_threaded(
-                        &s.expression,
-                        &threaded_locals,
-                        &generator.semantic_facts,
-                    )
-                }) {
-                    StateAccFallbackReason::InlineConditionalThreadedWrite
-                } else if body.body.last().is_some_and(|s| {
-                    matches!(s.expression, Expression::DestructureAssignment { .. })
-                }) {
-                    StateAccFallbackReason::DestructureAsLastExpr
-                } else {
-                    // Generic fallback — body has state effects but doesn't match
-                    // any specific guard above. Re-check for self-sends first.
-                    if body_analysis.has_self_sends {
-                        StateAccFallbackReason::SelfSendInBody
-                    } else {
-                        StateAccFallbackReason::ControlFlowMutations
-                    }
-                }
-            };
+        let optimized_selected = use_direct_params || use_tuple_acc || use_hybrid_params;
+        let any_optimization_allowed = allow_direct_params || allow_tuple_acc;
+        let fallback_reason = Self::determine_fallback_reason(
+            optimized_selected,
+            any_optimization_allowed,
+            &threaded_locals,
+            context,
+            &body_analysis,
+            &effects,
+        );
 
         // BT-1342: In hybrid mode, collect fields that are written (mutated).
-        // These will be pre-extracted before the letrec and passed as direct
-        // fun parameters, eliminating per-iteration maps:get/maps:put overhead.
         let mutated_fields = if use_hybrid_params {
             let mut fields: Vec<String> = body_analysis.field_writes.iter().cloned().collect();
             fields.sort(); // deterministic codegen
@@ -559,6 +401,139 @@ impl ThreadingPlan {
             readonly_fields,
             fallback_reason,
             mutated_fields,
+        }
+    }
+
+    /// BT-1275: Select direct fun parameters for letrec loops when the body has no
+    /// field mutations, self-sends, tier-2 threaded assignments, or nested list ops
+    /// incompatible with direct-params mode.
+    fn select_direct_params(
+        allow_direct_params: bool,
+        threaded_locals: &[String],
+        body_analysis: &block_analysis::BlockMutationAnalysis,
+        effects: &BodyEffects,
+    ) -> bool {
+        if !allow_direct_params || threaded_locals.is_empty() {
+            return false;
+        }
+        !body_analysis.has_state_effects()
+            && !effects.cond_has_state_effects
+            && !effects.has_tier2_threaded_assign
+            && !effects.has_non_tuple_safe_list_op
+    }
+
+    /// BT-1276: Select tuple accumulator for foldl list-ops when eligible: body has
+    /// only simple local var mutations — no field writes, self-sends, tier-2 assignments,
+    /// complex control flow, conditional threaded writes, or destructure-as-last-expr.
+    ///
+    /// `ValueType` methods have no `State` `gen_server` variable in scope; tuple-acc would
+    /// reference an unbound variable — always fall through to the map-acc path.
+    fn select_tuple_acc(
+        allow_tuple_acc: bool,
+        threaded_locals: &[String],
+        context: CodeGenContext,
+        body_analysis: &block_analysis::BlockMutationAnalysis,
+        effects: &BodyEffects,
+    ) -> bool {
+        if !allow_tuple_acc
+            || threaded_locals.is_empty()
+            || matches!(context, CodeGenContext::ValueType)
+        {
+            return false;
+        }
+        !body_analysis.has_state_effects()
+            && !effects.has_tier2_threaded_assign
+            && !effects.has_cf_mutations
+            && !effects.has_conditional_threaded_writes
+            && !effects.last_is_destructure
+    }
+
+    /// BT-1326: Select hybrid direct-params + State threading for letrec loops.
+    ///
+    /// Eligible when body has field mutations but NOT self-sends, and no guards
+    /// (tier-2 assignments, control-flow mutations, conditional writes, nested list ops)
+    /// prevent it. Actor context only (`ValueType` has no actor State to thread).
+    fn select_hybrid_params(
+        allow_direct_params: bool,
+        threaded_locals: &[String],
+        context: CodeGenContext,
+        use_direct_params: bool,
+        body_analysis: &block_analysis::BlockMutationAnalysis,
+        effects: &BodyEffects,
+    ) -> bool {
+        if !allow_direct_params
+            || threaded_locals.is_empty()
+            || use_direct_params
+            || !matches!(context, CodeGenContext::Actor)
+        {
+            return false;
+        }
+        !body_analysis.field_writes.is_empty()
+            && !body_analysis.has_self_sends
+            && !effects.cond_has_state_effects
+            && !effects.has_tier2_threaded_assign
+            && !effects.has_cf_mutations
+            && !effects.has_conditional_threaded_writes
+            && !effects.has_non_tuple_safe_list_op
+    }
+
+    /// BT-1343: Determine why `StateAcc` fallback was chosen (if no optimized mode was selected).
+    ///
+    /// `optimized_selected` is true when any optimized convention was chosen.
+    /// `any_optimization_allowed` is true when the caller allows direct-params or tuple-acc.
+    fn determine_fallback_reason(
+        optimized_selected: bool,
+        any_optimization_allowed: bool,
+        threaded_locals: &[String],
+        context: CodeGenContext,
+        body_analysis: &block_analysis::BlockMutationAnalysis,
+        effects: &BodyEffects,
+    ) -> StateAccFallbackReason {
+        if optimized_selected {
+            return StateAccFallbackReason::None;
+        }
+        if threaded_locals.is_empty() {
+            return StateAccFallbackReason::NoThreadedLocals;
+        }
+        if !any_optimization_allowed {
+            return StateAccFallbackReason::NotLetrec;
+        }
+        if body_analysis.has_self_sends {
+            return StateAccFallbackReason::SelfSendInBody;
+        }
+        if !body_analysis.field_writes.is_empty() {
+            // Field writes present (self-sends already excluded above) but not eligible
+            // for hybrid — check specific guards.
+            return Self::diagnose_guard_failure(body_analysis, effects);
+        }
+        if matches!(context, CodeGenContext::ValueType) {
+            return StateAccFallbackReason::ValueTypeContext;
+        }
+        // No field writes, not ValueType — check the specific guards that prevented optimization.
+        Self::diagnose_guard_failure(body_analysis, effects)
+    }
+
+    /// Identify the specific guard that prevented an optimized threading convention.
+    fn diagnose_guard_failure(
+        body_analysis: &block_analysis::BlockMutationAnalysis,
+        effects: &BodyEffects,
+    ) -> StateAccFallbackReason {
+        if effects.has_non_tuple_safe_list_op {
+            StateAccFallbackReason::NestedListOpCrossScope
+        } else if effects.has_tier2_threaded_assign {
+            StateAccFallbackReason::Tier2ValueCallOnThreaded
+        } else if effects.cond_has_state_effects {
+            StateAccFallbackReason::ConditionStateEffects
+        } else if effects.has_cf_mutations {
+            StateAccFallbackReason::ControlFlowMutations
+        } else if effects.has_conditional_threaded_writes {
+            StateAccFallbackReason::InlineConditionalThreadedWrite
+        } else if effects.last_is_destructure {
+            StateAccFallbackReason::DestructureAsLastExpr
+        } else if body_analysis.has_self_sends {
+            StateAccFallbackReason::SelfSendInBody
+        } else {
+            StateAccFallbackReason::ControlFlowMutations
         }
     }
 
