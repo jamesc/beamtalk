@@ -12,6 +12,13 @@
 %%%
 %%% Debug targets are tracked in an ETS table so that
 %%% `activeDebugTargets/0` can report what is currently enabled.
+%%%
+%%% `enableDebug/1` is polymorphic on argument type:
+%%% - **Symbol** (atom) — enables debug for a named subsystem
+%%% - **Class reference** (`#beamtalk_object{}` with class tag) —
+%%%   installs a primary logger filter for `beamtalk_class` metadata
+%%% - **Actor instance** (`#beamtalk_object{}` with PID) —
+%%%   sets per-process debug level (transient, lost on restart)
 
 -module(beamtalk_logging_config).
 
@@ -109,9 +116,16 @@ logLevel(Level) ->
 debugTargets() ->
     [actor, supervisor, dispatch, compiler, workspace, stdlib, hotreload, runtime, user].
 
-%% @doc Enable debug logging for a named subsystem.
-%% Returns `nil` on success or `#beamtalk_error{}` for unknown targets.
--spec enableDebug(atom()) -> nil | #beamtalk_error{}.
+%% @doc Enable debug logging for a subsystem, class, or actor instance.
+%%
+%% Accepts three argument types:
+%% - Atom (symbol): enables debug for a named subsystem
+%% - Class reference (#beamtalk_object with class tag): installs a primary
+%%   logger filter matching #{beamtalk_class => ClassName} metadata and sets
+%%   module level on the compiled class module
+%% - Actor instance (#beamtalk_object with PID): sets per-process debug level
+%%   (transient — lost on actor restart)
+-spec enableDebug(term()) -> nil | #beamtalk_error{}.
 enableDebug(Target) when is_atom(Target) ->
     case subsystem_modules(Target) of
         {module_level, Modules} ->
@@ -160,16 +174,25 @@ enableDebug(Target) when is_atom(Target) ->
             )
     end;
 enableDebug(Target) ->
-    beamtalk_error:with_message(
-        beamtalk_error:new(type_error, 'BeamtalkInterface', enableDebug),
-        iolist_to_binary(
-            io_lib:format("Debug target must be an atom, got: ~p", [Target])
-        )
-    ).
+    case detect_target_type(Target) of
+        {class, ClassName} ->
+            enable_class_debug(ClassName);
+        {actor, Pid, ClassName} ->
+            enable_actor_debug(Pid, ClassName);
+        unknown ->
+            beamtalk_error:with_message(
+                beamtalk_error:new(type_error, 'BeamtalkInterface', enableDebug),
+                iolist_to_binary(
+                    io_lib:format(
+                        "enableDebug: expects a symbol, class, or actor, got: ~p",
+                        [Target]
+                    )
+                )
+            )
+    end.
 
-%% @doc Disable debug logging for a named subsystem.
-%% Returns `nil` on success or `#beamtalk_error{}` for unknown targets.
--spec disableDebug(atom()) -> nil | #beamtalk_error{}.
+%% @doc Disable debug logging for a subsystem, class, or actor instance.
+-spec disableDebug(term()) -> nil | #beamtalk_error{}.
 disableDebug(Target) when is_atom(Target) ->
     case subsystem_modules(Target) of
         {module_level, Modules} ->
@@ -203,18 +226,43 @@ disableDebug(Target) when is_atom(Target) ->
             )
     end;
 disableDebug(Target) ->
-    beamtalk_error:with_message(
-        beamtalk_error:new(type_error, 'BeamtalkInterface', disableDebug),
-        iolist_to_binary(
-            io_lib:format("Debug target must be an atom, got: ~p", [Target])
-        )
-    ).
+    case detect_target_type(Target) of
+        {class, ClassName} ->
+            disable_class_debug(ClassName);
+        {actor, Pid, _ClassName} ->
+            disable_actor_debug(Pid);
+        unknown ->
+            beamtalk_error:with_message(
+                beamtalk_error:new(type_error, 'BeamtalkInterface', disableDebug),
+                iolist_to_binary(
+                    io_lib:format(
+                        "disableDebug: expects a symbol, class, or actor, got: ~p",
+                        [Target]
+                    )
+                )
+            )
+    end.
 
 %% @doc Return the list of currently enabled debug targets.
--spec activeDebugTargets() -> [atom()].
+%%
+%% Returns a mixed list:
+%% - Atoms for subsystem targets (e.g. `actor`, `compiler`)
+%% - `{class, ClassName}` tuples for class debug targets
+%% - `{actor, Pid, ClassName}` tuples for per-actor debug targets
+-spec activeDebugTargets() -> list().
 activeDebugTargets() ->
     ensure_table(),
-    [Name || {Name, _Type, _Ids} <- ets:tab2list(?DEBUG_TABLE)].
+    lists:map(
+        fun
+            ({Name, subsystem, _Ids}) ->
+                Name;
+            ({ClassName, user_class, _Ids}) ->
+                {class, ClassName};
+            ({Pid, actor_instance, {ClassName, _FilterIds}}) ->
+                {actor, Pid, ClassName}
+        end,
+        ets:tab2list(?DEBUG_TABLE)
+    ).
 
 %% @doc Disable all debug targets and clear module-level overrides.
 -spec disableAllDebug() -> nil.
@@ -222,19 +270,28 @@ disableAllDebug() ->
     ensure_table(),
     Targets = ets:tab2list(?DEBUG_TABLE),
     lists:foreach(
-        fun({Target, _Type, FilterIds}) ->
-            case subsystem_modules(Target) of
-                {module_level, Modules} ->
-                    lists:foreach(fun(M) -> logger:unset_module_level(M) end, Modules),
-                    case Target of
-                        supervisor -> disable_supervisor_progress();
-                        _ -> ok
-                    end;
-                {domain, _Domain} ->
-                    lists:foreach(fun(Id) -> logger:remove_handler(Id) end, FilterIds);
-                unknown ->
-                    ok
-            end
+        fun
+            ({Target, subsystem, FilterIds}) ->
+                case subsystem_modules(Target) of
+                    {module_level, Modules} ->
+                        lists:foreach(fun(M) -> logger:unset_module_level(M) end, Modules),
+                        case Target of
+                            supervisor -> disable_supervisor_progress();
+                            _ -> ok
+                        end;
+                    {domain, _Domain} ->
+                        lists:foreach(fun(Id) -> logger:remove_handler(Id) end, FilterIds);
+                    unknown ->
+                        ok
+                end;
+            ({ClassName, user_class, FilterIds}) ->
+                lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds),
+                case beamtalk_class_module_table:lookup(ClassName) of
+                    {ok, Module} -> logger:unset_module_level(Module);
+                    not_found -> ok
+                end;
+            ({_Pid, actor_instance, {_ClassName, FilterIds}}) ->
+                lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds)
         end,
         Targets
     ),
@@ -254,23 +311,7 @@ loggerInfo() ->
                 iolist_to_binary(
                     lists:map(
                         fun(T) ->
-                            ModulesStr =
-                                case subsystem_modules(T) of
-                                    {module_level, Ms} ->
-                                        iolist_to_binary(
-                                            lists:join(
-                                                <<", ">>,
-                                                [atom_to_binary(M, utf8) || M <- Ms]
-                                            )
-                                        );
-                                    {domain, D} ->
-                                        iolist_to_binary(
-                                            io_lib:format("domain=~p", [D])
-                                        );
-                                    unknown ->
-                                        <<"(unknown)">>
-                                end,
-                            io_lib:format("  ~s → ~s\n", [T, ModulesStr])
+                            format_debug_target(T)
                         end,
                         Active
                     )
@@ -285,7 +326,151 @@ loggerInfo() ->
     ).
 
 %%====================================================================
-%% Internal helpers
+%% Internal helpers — target type detection
+%%====================================================================
+
+%% @doc Detect whether a non-atom target is a class reference or actor instance.
+-spec detect_target_type(term()) -> {class, atom()} | {actor, pid(), atom()} | unknown.
+detect_target_type(#beamtalk_object{class = ClassTag, pid = Pid}) ->
+    case beamtalk_class_registry:is_class_name(ClassTag) of
+        true ->
+            %% Class reference — strip " class" suffix to get the actual class name
+            ClassStr = atom_to_list(ClassTag),
+            ClassName = list_to_atom(lists:sublist(ClassStr, length(ClassStr) - 6)),
+            {class, ClassName};
+        false ->
+            %% Actor instance — has a PID and a plain class name
+            {actor, Pid, ClassTag}
+    end;
+detect_target_type(_) ->
+    unknown.
+
+%%====================================================================
+%% Internal helpers — class debug
+%%====================================================================
+
+%% @doc Enable debug logging for a user class.
+%%
+%% Installs a primary logger filter that allows debug events where
+%% `#{beamtalk_class => ClassName}` metadata matches. Also sets module
+%% level on the compiled class module for direct `?LOG_*` calls.
+-spec enable_class_debug(atom()) -> nil | #beamtalk_error{}.
+enable_class_debug(ClassName) ->
+    ensure_table(),
+    FilterId = list_to_atom("beamtalk_debug_class_" ++ atom_to_list(ClassName)),
+    FilterFun = fun(LogEvent, _Extra) ->
+        case LogEvent of
+            #{meta := #{beamtalk_class := C}} when C =:= ClassName ->
+                LogEvent;
+            _ ->
+                ignore
+        end
+    end,
+    logger:add_primary_filter(FilterId, {FilterFun, []}),
+    %% Also set module level on the compiled class module
+    case beamtalk_class_module_table:lookup(ClassName) of
+        {ok, Module} ->
+            logger:set_module_level(Module, debug);
+        not_found ->
+            ok
+    end,
+    ets:insert(?DEBUG_TABLE, {ClassName, user_class, [FilterId]}),
+    nil.
+
+%% @doc Disable debug logging for a user class.
+-spec disable_class_debug(atom()) -> nil.
+disable_class_debug(ClassName) ->
+    ensure_table(),
+    case ets:lookup(?DEBUG_TABLE, ClassName) of
+        [{ClassName, user_class, FilterIds}] ->
+            lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds),
+            case beamtalk_class_module_table:lookup(ClassName) of
+                {ok, Module} -> logger:unset_module_level(Module);
+                not_found -> ok
+            end,
+            ets:delete(?DEBUG_TABLE, ClassName),
+            nil;
+        [] ->
+            nil
+    end.
+
+%%====================================================================
+%% Internal helpers — actor debug
+%%====================================================================
+
+%% @doc Enable debug logging for a specific actor process.
+%%
+%% Installs a primary logger filter that allows debug events from
+%% the actor's PID. This is transient — lost when the actor restarts.
+-spec enable_actor_debug(pid(), atom()) -> nil.
+enable_actor_debug(Pid, ClassName) ->
+    ensure_table(),
+    FilterId = list_to_atom(
+        "beamtalk_debug_actor_" ++ pid_to_list(Pid)
+    ),
+    FilterFun = fun(LogEvent, _Extra) ->
+        case LogEvent of
+            #{meta := #{pid := P}} when P =:= Pid ->
+                LogEvent;
+            _ ->
+                ignore
+        end
+    end,
+    logger:add_primary_filter(FilterId, {FilterFun, []}),
+    ets:insert(?DEBUG_TABLE, {Pid, actor_instance, {ClassName, [FilterId]}}),
+    nil.
+
+%% @doc Disable debug logging for a specific actor process.
+-spec disable_actor_debug(pid()) -> nil.
+disable_actor_debug(Pid) ->
+    ensure_table(),
+    case ets:lookup(?DEBUG_TABLE, Pid) of
+        [{Pid, actor_instance, {_ClassName, FilterIds}}] ->
+            lists:foreach(fun(Id) -> logger:remove_primary_filter(Id) end, FilterIds),
+            ets:delete(?DEBUG_TABLE, Pid),
+            nil;
+        [] ->
+            nil
+    end.
+
+%%====================================================================
+%% Internal helpers — formatting
+%%====================================================================
+
+%% @doc Format a debug target entry for loggerInfo output.
+-spec format_debug_target(term()) -> iodata().
+format_debug_target({class, ClassName}) ->
+    [<<"  ">>, atom_to_binary(ClassName, utf8), <<" (class) -> metadata filter\n">>];
+format_debug_target({actor, Pid, ClassName}) ->
+    PidBin = list_to_binary(pid_to_list(Pid)),
+    [
+        <<"  ">>,
+        atom_to_binary(ClassName, utf8),
+        <<" actor (">>,
+        PidBin,
+        <<") -> process filter\n">>
+    ];
+format_debug_target(T) when is_atom(T) ->
+    ModulesStr =
+        case subsystem_modules(T) of
+            {module_level, Ms} ->
+                iolist_to_binary(
+                    lists:join(
+                        <<", ">>,
+                        [atom_to_binary(M, utf8) || M <- Ms]
+                    )
+                );
+            {domain, D} ->
+                iolist_to_binary(
+                    io_lib:format("domain=~p", [D])
+                );
+            unknown ->
+                <<"(unknown)">>
+        end,
+    [<<"  ">>, atom_to_binary(T, utf8), <<" -> ">>, ModulesStr, <<"\n">>].
+
+%%====================================================================
+%% Internal helpers — ETS and logger
 %%====================================================================
 
 %% @doc Ensure the debug-targets ETS table exists. Creates it on first access.
