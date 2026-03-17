@@ -292,14 +292,14 @@ set_level_deprecation_warning_only_once_test() ->
         %% First call — should emit warning
         ?assertEqual(nil, beamtalk_logger:'setLevel:'(info)),
         receive
-            {captured_log, #{level := warning}} -> ok
+            {captured_log, #{level := warning, msg := {string, _}}} -> ok
         after 1000 ->
             error("Expected first deprecation warning not received")
         end,
         %% Second call — should NOT emit warning
         ?assertEqual(nil, beamtalk_logger:'setLevel:'(debug)),
         receive
-            {captured_log, #{level := warning}} ->
+            {captured_log, #{level := warning, msg := {string, _}}} ->
                 error("Deprecation warning should only be emitted once")
         after 200 ->
             ok
