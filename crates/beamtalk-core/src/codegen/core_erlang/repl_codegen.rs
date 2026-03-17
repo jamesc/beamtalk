@@ -116,11 +116,12 @@ impl CoreErlangGenerator {
             return Ok(Document::Vec(parts));
         }
 
-        let expr_code = self.expression_doc(expression)?;
+        let (expr_code, repl_mutated) =
+            self.expression_doc_with_repl_mutation_tracking(expression)?;
         let final_state = self.current_state_var();
         let src_bin = Self::binary_string_literal(source_text);
 
-        let return_tuple: Document<'static> = if self.repl_loop_mutated {
+        let return_tuple: Document<'static> = if repl_mutated {
             docvec![
                 "let _LoopResult = call 'erlang':'element'(1, Result) in \
                  let _LoopState = call 'erlang':'element'(2, Result) in \
@@ -173,13 +174,12 @@ impl CoreErlangGenerator {
         let mut step_pairs: Vec<(String, Document<'static>)> = Vec::new();
 
         for (i, expr) in expressions[..n - 1].iter().enumerate() {
-            self.repl_loop_mutated = false;
             let result_var = format!("_R{}", i + 1);
-            let part = self.generate_repl_intermediate_expr(expr, &result_var)?;
+            let (part, repl_mutated) = self.generate_repl_intermediate_expr(expr, &result_var)?;
             body_parts.push(part);
-            // BT-790: When `repl_loop_mutated` is true, `result_var` holds `{Result, StateAcc}`.
+            // BT-790: When `repl_mutated` is true, `result_var` holds `{Result, StateAcc}`.
             // Extract element 1 for the trace step so callers see the unwrapped value.
-            let step_val: Document<'static> = if self.repl_loop_mutated {
+            let step_val: Document<'static> = if repl_mutated {
                 docvec!["call 'erlang':'element'(1, ", result_var, ")",]
             } else {
                 Document::String(result_var)
@@ -187,7 +187,6 @@ impl CoreErlangGenerator {
             step_pairs.push((source_texts[i].clone(), step_val));
         }
 
-        self.repl_loop_mutated = false;
         let last_expr = &expressions[n - 1];
         let (pre_bindings, last_val_doc, trace_return) =
             self.generate_trace_last_expr(last_expr, &source_texts[n - 1], step_pairs)?;
@@ -261,11 +260,11 @@ impl CoreErlangGenerator {
             }
         }
 
-        let val_doc = self.expression_doc(expr)?;
+        let (val_doc, repl_mutated) = self.expression_doc_with_repl_mutation_tracking(expr)?;
         let final_state = self.current_state_var();
 
         let mut all_steps = prev_steps;
-        let trace_return: Document<'static> = if self.repl_loop_mutated {
+        let trace_return: Document<'static> = if repl_mutated {
             all_steps.push((source_text.to_string(), Document::Str("_LoopTraceResult")));
             let steps_doc = Self::build_steps_list_doc(all_steps);
             let new_state = self.next_state_var();
@@ -388,15 +387,16 @@ impl CoreErlangGenerator {
         }
 
         // Capture the expression output (ADR 0018 bridge)
-        let expr_code = self.expression_doc(expression)?;
+        let (expr_code, repl_mutated) =
+            self.expression_doc_with_repl_mutation_tracking(expression)?;
 
         // Check if state was mutated (must happen after capture)
         let final_state = self.current_state_var();
 
-        let return_tuple: Document<'static> = if self.repl_loop_mutated {
+        let return_tuple: Document<'static> = if repl_mutated {
             // BT-483: Mutation-threaded control flow returns {Result, State} tuple.
             // Extract display value and updated bindings using element/2.
-            // BT-245: repl_loop_mutated catches mutations inside StateAcc-threaded loops
+            // BT-245: repl_mutated catches mutations inside StateAcc-threaded loops
             // where current_state_var() is restored after the loop.
             Document::Str(
                 "let _LoopResult = call 'erlang':'element'(1, Result) in \
@@ -463,17 +463,11 @@ impl CoreErlangGenerator {
 
         // Process all but the last expression
         for (i, expr) in expressions[..n - 1].iter().enumerate() {
-            // BT-790: Reset mutation flag before each intermediate expression so a loop in
-            // intermediate position doesn't bleed its flag into subsequent expressions.
-            self.repl_loop_mutated = false;
             let result_var = format!("_R{}", i + 1);
-            let part = self.generate_repl_intermediate_expr(expr, &result_var)?;
+            let (part, _repl_mutated) = self.generate_repl_intermediate_expr(expr, &result_var)?;
             body_parts.push(part);
         }
 
-        // BT-790: Reset mutation flag before the last expression so a loop in an intermediate
-        // position doesn't incorrectly trigger element/2 unwrapping on the final return tuple.
-        self.repl_loop_mutated = false;
         let last_expr = &expressions[n - 1];
         let (pre_bindings, last_val_doc, return_tuple) = self.generate_repl_last_expr(last_expr)?;
 
@@ -512,11 +506,13 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// let _Rx = <expr> in
     /// ```
+    /// Returns `(doc, repl_mutated)` where `repl_mutated` indicates whether the
+    /// expression was mutation-threaded (returned `{Result, StateAcc}`).
     fn generate_repl_intermediate_expr(
         &mut self,
         expr: &Expression,
         result_var: &str,
-    ) -> Result<Document<'static>> {
+    ) -> Result<(Document<'static>, bool)> {
         if let Expression::DestructureAssignment { pattern, value, .. } = expr {
             let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
             let mut result: Vec<Document<'static>> = binding_docs;
@@ -528,7 +524,7 @@ impl CoreErlangGenerator {
                 Document::String(rhs_var),
                 " in\n",
             ]);
-            return Ok(Document::Vec(result));
+            return Ok((Document::Vec(result), false));
         }
 
         if let Expression::Assignment { target, value, .. } = expr {
@@ -537,50 +533,53 @@ impl CoreErlangGenerator {
                 let current_state = self.current_state_var();
                 let val_doc = self.expression_doc(value)?;
                 let new_state = self.next_state_var();
-                return Ok(docvec![
-                    "    let ",
-                    result_var.to_string(),
-                    " = ",
-                    val_doc,
-                    " in let ",
-                    new_state,
-                    " = call 'maps':'put'('",
-                    var_name,
-                    "', ",
-                    result_var.to_string(),
-                    ", ",
-                    current_state,
-                    ") in\n",
-                ]);
+                return Ok((
+                    docvec![
+                        "    let ",
+                        result_var.to_string(),
+                        " = ",
+                        val_doc,
+                        " in let ",
+                        new_state,
+                        " = call 'maps':'put'('",
+                        var_name,
+                        "', ",
+                        result_var.to_string(),
+                        ", ",
+                        current_state,
+                        ") in\n",
+                    ],
+                    false,
+                ));
             }
         }
         // Non-assignment: evaluate for side effects, discard value.
         // BT-790: If the expression is a mutation-threaded loop, it returns {Result, StateAcc}.
         // Extract the updated StateAcc and thread it to subsequent expressions.
-        let expr_doc = self.expression_doc(expr)?;
-        if self.repl_loop_mutated {
+        let (expr_doc, repl_mutated) = self.expression_doc_with_repl_mutation_tracking(expr)?;
+        if repl_mutated {
             // BT-790: Loop with mutations returns {Result, StateAcc} — extract StateAcc and
             // thread it forward so subsequent expressions see the updated bindings.
             let new_state = self.next_state_var();
-            Ok(docvec![
-                "    let ",
-                result_var.to_string(),
-                " = ",
-                expr_doc,
-                " in let ",
-                new_state,
-                " = call 'erlang':'element'(2, ",
-                result_var.to_string(),
-                ") in\n",
-            ])
+            Ok((
+                docvec![
+                    "    let ",
+                    result_var.to_string(),
+                    " = ",
+                    expr_doc,
+                    " in let ",
+                    new_state,
+                    " = call 'erlang':'element'(2, ",
+                    result_var.to_string(),
+                    ") in\n",
+                ],
+                true,
+            ))
         } else {
-            Ok(docvec![
-                "    let ",
-                result_var.to_string(),
-                " = ",
-                expr_doc,
-                " in\n",
-            ])
+            Ok((
+                docvec!["    let ", result_var.to_string(), " = ", expr_doc, " in\n",],
+                false,
+            ))
         }
     }
 
@@ -626,9 +625,9 @@ impl CoreErlangGenerator {
             }
         }
         // Non-assignment: same logic as single-expression path
-        let val_doc = self.expression_doc(expr)?;
+        let (val_doc, repl_mutated) = self.expression_doc_with_repl_mutation_tracking(expr)?;
         let final_state = self.current_state_var();
-        let return_tuple: Document<'static> = if self.repl_loop_mutated {
+        let return_tuple: Document<'static> = if repl_mutated {
             Document::Str(
                 "let _LoopResult = call 'erlang':'element'(1, Result) in \
                  let _LoopState = call 'erlang':'element'(2, Result) in \
@@ -660,16 +659,22 @@ impl CoreErlangGenerator {
     ) -> Result<(Vec<Document<'static>>, String)> {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
-        // Pre-evaluate the RHS using the shared helper so we can detect and unwrap
+        // Pre-evaluate the RHS with mutation tracking so we can detect and unwrap
         // mutation-threaded results ({Result, StateAcc}) before extraction.
-        let (rhs_doc, raw_var) = self.eval_rhs_to_temp_var(value, "Rhs", "    let ", " in\n")?;
-        docs.push(rhs_doc);
+        let raw_var = self.fresh_temp_var("Rhs");
+        let (val_doc, repl_mutated) = self.expression_doc_with_repl_mutation_tracking(value)?;
+        docs.push(docvec![
+            "    let ",
+            Document::String(raw_var.clone()),
+            " = ",
+            val_doc,
+            " in\n",
+        ]);
 
         // If the RHS was a mutation-threaded expression (e.g. a loop), it returned
         // {Result, StateAcc}. Hoist the unwrapped value and advance REPL state so
         // the correct current_state_var() is used for subsequent maps:put calls.
-        let rhs_var = if self.repl_loop_mutated {
-            self.repl_loop_mutated = false;
+        let rhs_var = if repl_mutated {
             let value_var = self.fresh_temp_var("RhsVal");
             let new_state = self.next_state_var();
             docs.push(docvec![

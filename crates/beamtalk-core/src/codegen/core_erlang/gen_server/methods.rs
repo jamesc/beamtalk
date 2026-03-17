@@ -370,21 +370,16 @@ impl CoreErlangGenerator {
                             docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
                         }
                         BodyExprKind::DispatchingSelfSend => {
-                            let doc = self.generate_self_dispatch_open(value)?;
+                            let (doc, dispatch_var) = self.generate_self_dispatch_open(value)?;
                             docs.push(doc);
-                            self.emit_dispatch_reply(
-                                &mut docs,
-                                "missing dispatch var after early-return self-send",
-                            )?;
+                            self.emit_dispatch_reply(&mut docs, &dispatch_var);
                         }
                         BodyExprKind::Tier2SelfSend(ref tier2_args) => {
                             let tier2_args = tier2_args.clone();
-                            let doc = self.generate_tier2_self_send_open(value, &tier2_args)?;
+                            let (doc, dispatch_var) =
+                                self.generate_tier2_self_send_open(value, &tier2_args)?;
                             docs.push(doc);
-                            self.emit_dispatch_reply(
-                                &mut docs,
-                                "missing dispatch var after early-return tier2 self-send",
-                            )?;
+                            self.emit_dispatch_reply(&mut docs, &dispatch_var);
                         }
                         BodyExprKind::ControlFlowWithMutations => {
                             let expr_str = self.expression_doc(value)?;
@@ -408,13 +403,9 @@ impl CoreErlangGenerator {
 
             match kind {
                 BodyExprKind::SelfFieldAtPut => {
-                    let doc = self.generate_self_field_at_put_open(expr)?;
+                    let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
                     docs.push(doc);
                     if is_last {
-                        let val_var = self
-                            .last_open_scope_result
-                            .clone()
-                            .unwrap_or_else(|| "_".to_string());
                         let final_state = self.current_state_var();
                         docs.push(docvec![
                             "{'reply', ",
@@ -455,7 +446,7 @@ impl CoreErlangGenerator {
                             }
                         }
                     } else {
-                        let doc = self.generate_field_assignment_open(expr)?;
+                        let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
                         docs.push(doc);
                     }
                 }
@@ -552,16 +543,10 @@ impl CoreErlangGenerator {
                             let core_var = self
                                 .lookup_var(var_name)
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                            // Dispatch the self-send (threads state, sets last_dispatch_var)
-                            let dispatch_doc = self.generate_self_dispatch_open(value)?;
+                            // Dispatch the self-send (threads state, returns dispatch var)
+                            let (dispatch_doc, dispatch_var) =
+                                self.generate_self_dispatch_open(value)?;
                             docs.push(dispatch_doc);
-                            // Bind result (element 1 of dispatch tuple) to the local variable
-                            let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
-                                CodeGenError::Internal(
-                                    "missing dispatch var after self-send in assignment RHS"
-                                        .to_string(),
-                                )
-                            })?;
                             self.bind_var(var_name, &core_var);
                             docs.push(docvec![
                                 "let ",
@@ -691,13 +676,11 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::Tier2SelfSend(ref tier2_args) => {
-                    let doc = self.generate_tier2_self_send_open(expr, tier2_args)?;
+                    let (doc, dispatch_var) =
+                        self.generate_tier2_self_send_open(expr, tier2_args)?;
                     docs.push(doc);
                     if is_last {
-                        self.emit_dispatch_reply(
-                            &mut docs,
-                            "missing dispatch var after Tier 2 self-send",
-                        )?;
+                        self.emit_dispatch_reply(&mut docs, &dispatch_var);
                     }
                 }
                 BodyExprKind::ControlFlowWithMutations => {
@@ -742,13 +725,10 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::DispatchingSelfSend => {
-                    let doc = self.generate_self_dispatch_open(expr)?;
+                    let (doc, dispatch_var) = self.generate_self_dispatch_open(expr)?;
                     docs.push(doc);
                     if is_last {
-                        self.emit_dispatch_reply(
-                            &mut docs,
-                            "missing dispatch var after self-send",
-                        )?;
+                        self.emit_dispatch_reply(&mut docs, &dispatch_var);
                     }
                 }
                 BodyExprKind::EarlyReturn => {
@@ -798,24 +778,16 @@ impl CoreErlangGenerator {
     }
 
     /// Emit the last-position reply for a dispatch open call (Tier 2 self-send
-    /// or dispatching self-send).  Reads `last_dispatch_var` and `current_state_var`.
-    fn emit_dispatch_reply(
-        &mut self,
-        docs: &mut Vec<Document<'static>>,
-        invariant_msg: &str,
-    ) -> Result<()> {
-        let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
-            CodeGenError::Internal(format!("invariant violation: {invariant_msg}"))
-        })?;
+    /// or dispatching self-send).  Uses the explicitly-passed `dispatch_var` and `current_state_var`.
+    fn emit_dispatch_reply(&mut self, docs: &mut Vec<Document<'static>>, dispatch_var: &str) {
         let final_state = self.current_state_var();
         docs.push(docvec![
             "{'reply', call 'erlang':'element'(1, ",
-            Document::String(dispatch_var),
+            Document::String(dispatch_var.to_string()),
             "), ",
             Document::String(final_state),
             "}",
         ]);
-        Ok(())
     }
 
     /// Emit the last-position reply for an expression that returns a
@@ -1472,15 +1444,13 @@ impl CoreErlangGenerator {
                 if has_class_vars {
                     if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
                         // Open-scope expression: generate it and close with class_var_result.
-                        // The result var is stored in last_open_scope_result.
-                        self.last_open_scope_result = None;
-                        let expr_str = self.expression_doc(expr)?;
+                        let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
                         let final_cv = self.current_class_var();
-                        if let Some(result_var) = &self.last_open_scope_result.clone() {
+                        if let Some(result_var) = open_scope {
                             let doc = docvec![
                                 expr_str,
                                 "{'class_var_result', ",
-                                Document::String(result_var.clone()),
+                                Document::String(result_var),
                                 ", ",
                                 Document::String(final_cv),
                                 "}",
@@ -1498,13 +1468,12 @@ impl CoreErlangGenerator {
                         }
                     } else {
                         let result_var = self.fresh_temp_var("Ret");
-                        // BT-1201: Clear before expression_doc so we only see open-scope results
+                        // BT-1201: Use expression_doc_with_open_scope to detect open-scope results
                         // produced by THIS expression, not by a previous field assignment.
-                        self.last_open_scope_result = None;
-                        let expr_str = self.expression_doc(expr)?;
+                        let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
                         // BT-1201: If expression produced an open scope (e.g. `x := self classMethod`),
                         // close it with the open-scope result variable, then wrap.
-                        if let Some(open_scope_result) = self.last_open_scope_result.take() {
+                        if let Some(open_scope_result) = open_scope {
                             if self.class_var_mutated {
                                 let final_cv = self.current_class_var();
                                 let doc = docvec![
@@ -1553,20 +1522,18 @@ impl CoreErlangGenerator {
                     // BT-891: Class method self-send as last expression with no class vars.
                     // The generated code leaves an open scope ending with `in ` — we must
                     // close it with the unwrapped result variable.
-                    self.last_open_scope_result = None;
-                    let expr_str = self.expression_doc(expr)?;
-                    if let Some(result_var) = &self.last_open_scope_result.clone() {
-                        docs.push(docvec![expr_str, Document::String(result_var.clone()),]);
+                    let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                    if let Some(result_var) = open_scope {
+                        docs.push(docvec![expr_str, Document::String(result_var),]);
                     } else {
                         docs.push(docvec![expr_str]);
                     }
                 } else {
-                    // BT-1201: Clear before expression_doc so we only see open-scope results
+                    // BT-1201: Use expression_doc_with_open_scope to detect open-scope results
                     // produced by THIS expression, not by a previous field assignment.
-                    self.last_open_scope_result = None;
-                    let expr_str = self.expression_doc(expr)?;
+                    let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
                     // BT-1201: If expression produced an open scope, close it with the result.
-                    if let Some(open_scope_result) = self.last_open_scope_result.take() {
+                    if let Some(open_scope_result) = open_scope {
                         docs.push(docvec![expr_str, Document::String(open_scope_result)]);
                     } else {
                         docs.push(docvec![expr_str]);
@@ -1589,15 +1556,14 @@ impl CoreErlangGenerator {
                         let core_var = self
                             .lookup_var(var_name)
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        // BT-1201: Clear before expression_doc so we only see open-scope results
+                        // BT-1201: Use expression_doc_with_open_scope to detect open-scope results
                         // produced by THIS expression, not by a previous field assignment.
-                        self.last_open_scope_result = None;
-                        let val_doc = self.expression_doc(value)?;
+                        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
                         self.bind_var(var_name, &core_var);
                         // BT-1201: If the RHS produced an open scope (e.g., `x := self classMethod`),
-                        // the doc ends with `in ` and the actual result is in last_open_scope_result.
+                        // the doc ends with `in ` and the actual result is in the open_scope return.
                         // Emit the open scope first, then bind the variable to the result.
-                        if let Some(open_scope_result) = self.last_open_scope_result.take() {
+                        if let Some(open_scope_result) = open_scope {
                             docs.push(docvec![
                                 val_doc,
                                 "let ",

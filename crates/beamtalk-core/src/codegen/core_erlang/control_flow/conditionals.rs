@@ -243,22 +243,22 @@ impl CoreErlangGenerator {
             if Self::is_field_assignment(expr) {
                 // generate_field_assignment_open emits open let chain:
                 // "let _Val = <value> in let StateAccN = maps:put(...) in "
-                let doc = self.generate_field_assignment_open(expr)?;
+                let (doc, val_var) = self.generate_field_assignment_open(expr)?;
                 docs.push(doc);
                 if is_last {
-                    // BT-884: last_open_scope_result holds the assigned value variable
-                    last_result.clone_from(&self.last_open_scope_result);
+                    // BT-884: val_var holds the assigned value variable
+                    last_result = Some(val_var);
                 }
                 // If not last, the let chain stays open for the next expression
             } else if Self::is_local_var_assignment(expr) {
                 // BT-1053/BT-1225: Local variable mutation inside conditional branch.
                 // generate_local_var_assignment_in_loop emits open let chain:
                 // "let _Val = <value> in let StateAccN = maps:put('__local__key', _Val, StateAccM) in "
-                let doc = self.generate_local_var_assignment_in_loop(expr)?;
+                let (doc, val_var) = self.generate_local_var_assignment_in_loop(expr)?;
                 docs.push(doc);
                 if is_last {
-                    // last_open_scope_result is set to _Val by generate_local_var_assignment_in_loop
-                    last_result.clone_from(&self.last_open_scope_result);
+                    // val_var is the _Val bound by generate_local_var_assignment_in_loop
+                    last_result = Some(val_var);
                 } else {
                     // BT-1225: Bind the variable name to the temp var so subsequent reads
                     // within this block resolve directly to the temp var (e.g. `_Val1`)
@@ -275,9 +275,6 @@ impl CoreErlangGenerator {
                             "is_local_var_assignment must ensure assignment target is an Identifier"
                         );
                     };
-                    let val_var = self.last_open_scope_result.clone().expect(
-                        "generate_local_var_assignment_in_loop must set last_open_scope_result",
-                    );
                     self.bind_var(&id.name, &val_var);
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
