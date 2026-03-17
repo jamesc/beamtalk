@@ -351,7 +351,7 @@ async_send(ActorPid, 'onExit:', [Block], FuturePid) ->
     %% Use a unique ref token to correlate the ready message (prevents stale/parallel confusion).
     Caller = self(),
     Token = make_ref(),
-    spawn(fun() ->
+    WatcherPid = spawn(fun() ->
         Ref = erlang:monitor(process, ActorPid),
         Caller ! {onExit_ready, Token},
         receive
@@ -372,7 +372,14 @@ async_send(ActorPid, 'onExit:', [Block], FuturePid) ->
     case
         receive
             {onExit_ready, Token} -> ok
-        after 5000 -> timeout
+        after 5000 ->
+            %% Kill the watcher to prevent ghost callbacks and flush stale token.
+            exit(WatcherPid, kill),
+            receive
+                {onExit_ready, Token} -> ok
+            after 0 -> ok
+            end,
+            timeout
         end
     of
         ok ->
@@ -487,7 +494,7 @@ sync_send(ActorPid, 'onExit:', [Block]) ->
     %% Use a unique ref token to correlate the ready message.
     Caller = self(),
     Token = make_ref(),
-    spawn(fun() ->
+    WatcherPid = spawn(fun() ->
         Ref = erlang:monitor(process, ActorPid),
         Caller ! {onExit_ready, Token},
         receive
@@ -508,7 +515,14 @@ sync_send(ActorPid, 'onExit:', [Block]) ->
     case
         receive
             {onExit_ready, Token} -> ok
-        after 5000 -> timeout
+        after 5000 ->
+            %% Kill the watcher to prevent ghost callbacks and flush stale token.
+            exit(WatcherPid, kill),
+            receive
+                {onExit_ready, Token} -> ok
+            after 0 -> ok
+            end,
+            timeout
         end
     of
         ok -> ok;
