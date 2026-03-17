@@ -158,17 +158,19 @@ Beamtalk equivalent of `logger:i()`. Returns a formatted string for human consum
 
 ```beamtalk
 Beamtalk logLevel: #potato
-// => Error: argument_error in BeamtalkInterface >> logLevel:
-//    Level must be one of: #emergency, #alert, #critical, #error, #warning, #notice, #info, #debug
+// => BeamtalkInterface does not understand logLevel: #potato
+//    argument_error: Level must be one of: #emergency, #alert, #critical, #error, #warning, #notice, #info, #debug
 
 Beamtalk enableDebug: #nonexistent
-// => Error: argument_error in BeamtalkInterface >> enableDebug:
-//    Unknown debug target: #nonexistent. Use Beamtalk debugTargets for available targets.
+// => BeamtalkInterface does not understand enableDebug: #nonexistent
+//    argument_error: Unknown debug target. Use Beamtalk debugTargets for available targets.
 
 Beamtalk enableDebug: 42
-// => Error: type_error in BeamtalkInterface >> enableDebug:
-//    Expected a Symbol (subsystem name), Class, or Actor instance
+// => BeamtalkInterface does not understand enableDebug: 42
+//    type_error: Expected a Symbol (subsystem name), Class, or Actor instance
 ```
+
+Errors use `#beamtalk_error{}` records (see ADR 0015, ADR 0060) with `class: 'BeamtalkInterface'`, `selector:`, and `hint:` fields — consistent with all other Beamtalk error reporting.
 
 ### 2. SASL Report Integration
 
@@ -242,7 +244,7 @@ This is analogous to how `+` on integers compiles to `erlang:'+'` directly rathe
 
 The domain and metadata enable distinct formatting for different log origins:
 
-```
+```text
 [debug] [runtime] beamtalk_supervisor:startChild/2 Starting child counter_1 under actor_sup
 [debug] [Counter] increment: incrementing
 [info]  [otp] supervisor: {local,actor_sup} started: [{pid,<0.234.0>},{id,counter_1}]
@@ -327,7 +329,7 @@ beamtalk logs --path
 **Implementation:** Pure file reading — no workspace connection required. Works even when the workspace is stopped (reading historical logs). The `--follow` flag uses file watching (similar to `tail -f`).
 
 **Output format:** Passes through the logger formatter output. Domain prefixes distinguish log origins:
-```
+```text
 2026-03-17T14:23:01.234Z [debug] [runtime] beamtalk_supervisor:startChild/2 Starting child counter_1 under actor_sup
 2026-03-17T14:23:01.235Z [info]  [runtime] beamtalk_actor:init/1 Actor initialized: class=Counter, state_keys=[count]
 2026-03-17T14:23:01.236Z [debug] [Counter] increment: incrementing
@@ -496,7 +498,7 @@ A dedicated new singleton class for logging configuration. Rejected because it a
 
 ### Phase 3: Log Format Switching (S)
 - Add `logger_formatter_json` (or `thoas` + custom formatter) as a runtime dependency
-- Add `logFormat/0`, `logFormat/1` to `beamtalk_interface.erl`
+- Add `logFormat/0`, `logFormat/1` to `beamtalk_logging_config.erl`
 - Implement formatter swap via `logger:update_handler_config(beamtalk_file_log, formatter, {Module, Config})`
 - Add `--format json|text` flag to `beamtalk logs` CLI command
 - EUnit tests
