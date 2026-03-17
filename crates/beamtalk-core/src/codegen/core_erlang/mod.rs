@@ -968,6 +968,9 @@ pub(super) struct CoreErlangGenerator {
     codegen_diagnostics_enabled: bool,
     /// BT-1343: Whether `StateAcc` fallback should be promoted to warning (`BEAMTALK_WARN_STATEACC=1`).
     warn_stateacc: bool,
+    /// BT-1435: Selector name of the method currently being compiled.
+    /// Used by Logger intrinsics to inject `beamtalk_selector` metadata.
+    current_method_selector: Option<String>,
 }
 
 impl CoreErlangGenerator {
@@ -1012,6 +1015,7 @@ impl CoreErlangGenerator {
             codegen_diagnostics_enabled: std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS")
                 .is_ok_and(|v| v == "1"),
             warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
+            current_method_selector: None,
         }
     }
 
@@ -1056,6 +1060,7 @@ impl CoreErlangGenerator {
             codegen_diagnostics_enabled: std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS")
                 .is_ok_and(|v| v == "1"),
             warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
+            current_method_selector: None,
         }
     }
 

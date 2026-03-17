@@ -755,6 +755,8 @@ impl CoreErlangGenerator {
         self.push_scope();
         // BT-295: Track method params for @primitive codegen
         self.current_method_params.clear();
+        // BT-1435: Track current method selector for Logger intrinsic metadata.
+        self.current_method_selector = Some(method.selector.name().to_string());
         let mut params = vec!["Self".to_string()];
         for param in &method.parameters {
             let var_name = self.fresh_var(&param.name.name);
@@ -797,6 +799,7 @@ impl CoreErlangGenerator {
         // syntactically invalid (e.g., `fun (...) ->\n\n`).
         if body.is_empty() {
             self.pop_scope();
+            self.current_method_selector = None;
             self.current_nlr_token = None;
             if let Some(token_var) = nlr_token_var {
                 let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
@@ -968,6 +971,7 @@ impl CoreErlangGenerator {
         }
 
         self.pop_scope();
+        self.current_method_selector = None;
         self.current_nlr_token = None;
 
         // BT-940: Annotate the `fun` expression (not just the body) with source line.
