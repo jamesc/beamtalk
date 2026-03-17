@@ -180,7 +180,7 @@ pub fn start_detached_node(
     let eval_cmd = build_workspace_eval_cmd(
         &pid_file_path_str,
         workspace_id,
-        project_path_str,
+        &project_path_str,
         port,
         &web_port_erl,
         &bind_addr_erl,
