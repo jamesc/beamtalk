@@ -361,14 +361,14 @@ function formatLogEntry(entry: LogEntry): string {
     }
   }
 
-  // Build the origin tag: prefer class >> selector, fall back to domain, then mfa
+  // Build the origin tag: class >> selector if available, with domain as context.
+  // Falls back to domain alone, then mfa.
   let origin = "";
   if (entry.class) {
     origin = entry.selector ? `${entry.class} >> ${entry.selector}` : entry.class;
   } else if (entry.domain) {
     origin = entry.domain;
-  }
-  if (!origin && entry.mfa) {
+  } else if (entry.mfa) {
     origin = entry.mfa;
   }
 

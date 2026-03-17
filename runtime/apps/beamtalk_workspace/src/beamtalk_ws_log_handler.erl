@@ -78,14 +78,10 @@ subscribe() ->
 subscribe(Level) when is_atom(Level) ->
     ensure_table(),
     Pid = self(),
-    %% Remove any existing subscription first (allows level update)
-    case ets:lookup(?SUB_TABLE, Pid) of
-        [{Pid, _OldLevel, OldRef}] ->
-            erlang:demonitor(OldRef, [flush]),
-            ets:delete(?SUB_TABLE, Pid);
-        [] ->
-            ok
-    end,
+    %% Remove any existing subscription first (allows level update).
+    %% The orphaned monitor process from the old subscription will
+    %% see that the ETS entry is gone when the process eventually dies.
+    ets:delete(?SUB_TABLE, Pid),
     %% Use a separate process to monitor the subscriber and clean up on death.
     MonRef = make_ref(),
     spawn(fun() -> monitor_subscriber(Pid, MonRef) end),
@@ -95,8 +91,10 @@ subscribe(Level) when is_atom(Level) ->
 %% @doc Unsubscribe the calling process from log events.
 -spec unsubscribe() -> ok.
 unsubscribe() ->
-    Pid = self(),
-    ets:delete(?SUB_TABLE, Pid),
+    case ets:info(?SUB_TABLE) of
+        undefined -> ok;
+        _ -> ets:delete(?SUB_TABLE, self())
+    end,
     ok.
 
 %%====================================================================
@@ -134,8 +132,16 @@ log(#{level := Level} = LogEvent, _Config) ->
                 [] ->
                     ok;
                 _ ->
-                    %% Format once, send to all matching subscribers
-                    Formatted = format_event(LogEvent),
+                    %% Format once, send to all matching subscribers.
+                    %% Wrap in try/catch — a crash in log/2 causes OTP to
+                    %% remove the handler entirely, silently breaking streaming.
+                    Formatted =
+                        try
+                            format_event(LogEvent)
+                        catch
+                            _:_ ->
+                                #{level => atom_to_binary(Level, utf8), msg => <<"[format error]">>}
+                        end,
                     lists:foreach(
                         fun({Pid, SubLevel, _MonRef}) ->
                             SubLevelVal = ?LEVEL_VALUE(SubLevel),
