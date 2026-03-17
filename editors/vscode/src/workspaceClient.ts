@@ -44,12 +44,24 @@ export interface SessionInfo {
   id: string;
 }
 
+export interface LogEntry {
+  level: string;
+  time: string;
+  msg: string;
+  domain?: string;
+  class?: string;
+  selector?: string;
+  mfa?: string;
+  pid?: string;
+}
+
 export type PushEvent =
   | { channel: "actors"; event: "spawned"; data: ActorInfo }
   | { channel: "actors"; event: "stopped"; data: ActorStoppedInfo }
   | { channel: "classes"; event: "loaded"; data: { class: string } }
   | { channel: "bindings"; event: "changed"; data: { session: string } }
-  | { channel: "transcript"; text: string };
+  | { channel: "transcript"; text: string }
+  | { channel: "logs"; event: "entry"; data: LogEntry };
 
 // ─── WebSocket abstraction for testability ───────────────────────────────────
 
@@ -274,6 +286,26 @@ export class WorkspaceClient {
     };
   }
 
+  /**
+   * Subscribe to live log streaming from the workspace.
+   *
+   * @param level  Minimum log level to receive (default: all levels).
+   *   Valid values: "emergency", "alert", "critical", "error", "warning",
+   *   "notice", "info", "debug".
+   */
+  async subscribeLogs(level?: string): Promise<void> {
+    const params: Record<string, unknown> = { op: "subscribe-logs" };
+    if (level) {
+      params.level = level;
+    }
+    await this._request(params);
+  }
+
+  /** Unsubscribe from live log streaming. */
+  async unsubscribeLogs(): Promise<void> {
+    await this._request({ op: "unsubscribe-logs" });
+  }
+
   // ─── Events ──────────────────────────────────────────────────────────────
 
   /**
@@ -456,6 +488,21 @@ export class WorkspaceClient {
         channel: "bindings",
         event: "changed",
         data: { session: String(data.session ?? "") },
+      });
+    } else if (channel === "logs" && event === "entry" && data) {
+      this._emitPush({
+        channel: "logs",
+        event: "entry",
+        data: {
+          level: String(data.level ?? "info"),
+          time: String(data.time ?? ""),
+          msg: String(data.msg ?? ""),
+          domain: data.domain != null ? String(data.domain) : undefined,
+          class: data.class != null ? String(data.class) : undefined,
+          selector: data.selector != null ? String(data.selector) : undefined,
+          mfa: data.mfa != null ? String(data.mfa) : undefined,
+          pid: data.pid != null ? String(data.pid) : undefined,
+        },
       });
     }
   }

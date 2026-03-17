@@ -31,7 +31,9 @@
     pending_eval :: term() | undefined,
     %% BT-698: IO capture process pid and correlation ref for stdin routing
     io_capture_pid :: pid() | undefined,
-    stdin_ref :: reference() | undefined
+    stdin_ref :: reference() | undefined,
+    %% BT-1433: Whether this session is subscribed to log streaming
+    log_subscribed :: boolean()
 }).
 
 %% @doc HTTP upgrade to WebSocket.
@@ -43,7 +45,8 @@ init(Req, _Opts) ->
             peer = Peer,
             pending_eval = undefined,
             io_capture_pid = undefined,
-            stdin_ref = undefined
+            stdin_ref = undefined,
+            log_subscribed = false
         },
         #{idle_timeout => infinity, max_frame_size => 1048576}}.
 
@@ -182,6 +185,20 @@ websocket_info({class_loaded, ClassName}, State = #ws_state{authenticated = true
         <<"data">> => #{<<"class">> => atom_to_binary(ClassName, utf8)}
     }),
     {[{text, Push}], State};
+%% BT-1433: Log event push from beamtalk_ws_log_handler
+websocket_info(
+    {log_event, EventData}, State = #ws_state{authenticated = true, log_subscribed = true}
+) ->
+    Push = jsx:encode(#{
+        <<"type">> => <<"push">>,
+        <<"channel">> => <<"logs">>,
+        <<"event">> => <<"entry">>,
+        <<"data">> => encode_log_event(EventData)
+    }),
+    {[{text, Push}], State};
+websocket_info({log_event, _EventData}, State) ->
+    %% Not subscribed or not authenticated — drop silently
+    {ok, State};
 %% Session process died — clean up ETS entry and close WebSocket
 websocket_info(
     {'DOWN', MonRef, process, _Pid, _Reason},
@@ -218,6 +235,8 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     beamtalk_class_events:unsubscribe(),
     %% Unsubscribe from bindings-changed push messages
     beamtalk_bindings_events:unsubscribe(),
+    %% Unsubscribe from log streaming (BT-1433)
+    beamtalk_ws_log_handler:unsubscribe(),
     %% Keep session alive for resume — session idle monitor handles cleanup.
     %% Don't delete from ETS or stop the process here.
     ok.
@@ -294,6 +313,12 @@ handle_protocol(Data, SessionPid, State) ->
                 <<"stdin">> ->
                     %% BT-698: Route stdin input to IO capture process
                     handle_stdin(Msg, State);
+                <<"subscribe-logs">> ->
+                    %% BT-1433: Subscribe to live log streaming
+                    handle_subscribe_logs(Msg, State);
+                <<"unsubscribe-logs">> ->
+                    %% BT-1433: Unsubscribe from log streaming
+                    handle_unsubscribe_logs(Msg, State);
                 _ ->
                     Response = beamtalk_repl_server:handle_protocol_request(Msg, SessionPid),
                     {[{text, Response}], State}
@@ -640,3 +665,60 @@ truncate_utf8(Bin, MaxBytes) ->
         {error, Valid, _} -> Valid;
         Valid when is_binary(Valid) -> Valid
     end.
+
+%%% Internal — Log streaming (BT-1433)
+
+%% @private
+%% Subscribe to live log events. Accepts an optional level parameter.
+handle_subscribe_logs(Msg, State = #ws_state{log_subscribed = true}) ->
+    %% Already subscribed — unsubscribe first to update the level filter
+    beamtalk_ws_log_handler:unsubscribe(),
+    do_subscribe_logs(Msg, State);
+handle_subscribe_logs(Msg, State) ->
+    do_subscribe_logs(Msg, State).
+
+%% @private
+do_subscribe_logs(Msg, State) ->
+    Params = beamtalk_repl_protocol:get_params(Msg),
+    Level = parse_log_level(maps:get(<<"level">>, Params, undefined)),
+    beamtalk_ws_log_handler:subscribe(Level),
+    Response = beamtalk_repl_protocol:encode_status(
+        ok, Msg, fun beamtalk_repl_json:term_to_json/1
+    ),
+    {[{text, Response}], State#ws_state{log_subscribed = true}}.
+
+%% @private
+handle_unsubscribe_logs(Msg, State) ->
+    beamtalk_ws_log_handler:unsubscribe(),
+    Response = beamtalk_repl_protocol:encode_status(
+        ok, Msg, fun beamtalk_repl_json:term_to_json/1
+    ),
+    {[{text, Response}], State#ws_state{log_subscribed = false}}.
+
+%% @private
+%% Parse a log level from a binary or default to debug.
+-spec parse_log_level(binary() | undefined) -> logger:level().
+parse_log_level(undefined) -> debug;
+parse_log_level(<<"emergency">>) -> emergency;
+parse_log_level(<<"alert">>) -> alert;
+parse_log_level(<<"critical">>) -> critical;
+parse_log_level(<<"error">>) -> error;
+parse_log_level(<<"warning">>) -> warning;
+parse_log_level(<<"notice">>) -> notice;
+parse_log_level(<<"info">>) -> info;
+parse_log_level(<<"debug">>) -> debug;
+parse_log_level(_) -> debug.
+
+%% @private
+%% Encode a log event map for JSON push. Converts atom keys to binary keys
+%% and strips undefined values.
+-spec encode_log_event(map()) -> map().
+encode_log_event(EventData) ->
+    maps:fold(
+        fun
+            (_K, undefined, Acc) -> Acc;
+            (K, V, Acc) -> maps:put(atom_to_binary(K, utf8), V, Acc)
+        end,
+        #{},
+        EventData
+    ).
