@@ -1338,6 +1338,7 @@ impl CoreErlangGenerator {
     ///         call 'erlang':'element'(4, ClassSelf), 'new:', [~{}~])
     ///     in _Result
     /// ```
+    #[allow(clippy::too_many_lines)] // Error-path cleanup adds necessary lines
     pub(in crate::codegen::core_erlang) fn generate_class_method_functions(
         &mut self,
         class: &ClassDefinition,
