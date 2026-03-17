@@ -101,7 +101,7 @@ perf_test_() ->
     {setup,
      fun setup/0,
      fun(_) -> ok end,
-     {timeout, 120, fun all_benchmarks/0}}.
+     {timeout, 180, fun all_benchmarks/0}}.
 
 all_benchmarks() ->
     bench_raw_message_roundtrip(),
@@ -113,7 +113,8 @@ all_benchmarks() ->
     bench_concurrent_callers(),
     bench_overhead_comparison(),
     bench_overhead_comparison_hires(),
-    bench_block_threading().
+    bench_block_threading(),
+    bench_method_threading().
 
 %% --- 1. Raw message send/receive (baseline) ---
 
@@ -839,4 +840,141 @@ bench_block_threading() ->
          FullExtract16pMedian / max(MixedNativeMedian, 1)]),
 
     ok.
+
+%%====================================================================
+%% Method-level state threading benchmarks
+%%====================================================================
+
+%% Measures the overhead of straight-line field mutations in method bodies:
+%%   - Sequential maps:put chains vs map update syntax
+%%   - Field read-after-write (maps:get after maps:put)
+%%   - Mixed locals + fields (locals are zero-cost let bindings)
+%%   - Small-map vs large-map (>32 keys) scaling
+%%
+%% These are single function calls (no loops), so we use the hi-res
+%% batched approach to get sub-microsecond per-call figures.
+
+-define(METHOD_BATCH, 1000).
+-define(METHOD_ITERATIONS, 1000).
+-define(METHOD_WARMUP, 200).
+
+bench_method_threading() ->
+    %% Pre-construct state maps once (not per iteration).
+    %% In a real actor, State is the gen_server state already in scope.
+    SmallState = bench_method_threading:small_state(),
+    BigState   = bench_method_threading:big_state(),
+
+    %% --- Sequential field assignments: 3, 6, 10 fields ---
+    FA3Native  = method_bench(fun() -> bench_method_threading:field_assign_native_3(SmallState) end),
+    FA3Maps    = method_bench(fun() -> bench_method_threading:field_assign_maps_3(SmallState) end),
+    FA6Native  = method_bench(fun() -> bench_method_threading:field_assign_native_6(SmallState) end),
+    FA6Maps    = method_bench(fun() -> bench_method_threading:field_assign_maps_6(SmallState) end),
+    FA10Native = method_bench(fun() -> bench_method_threading:field_assign_native_10(SmallState) end),
+    FA10Maps   = method_bench(fun() -> bench_method_threading:field_assign_maps_10(SmallState) end),
+
+    report_ns("method/field_assign_native_3f", FA3Native, ?METHOD_ITERATIONS),
+    report_ns("method/field_assign_maps_3f", FA3Maps, ?METHOD_ITERATIONS),
+    report_ns("method/field_assign_native_6f", FA6Native, ?METHOD_ITERATIONS),
+    report_ns("method/field_assign_maps_6f", FA6Maps, ?METHOD_ITERATIONS),
+    report_ns("method/field_assign_native_10f", FA10Native, ?METHOD_ITERATIONS),
+    report_ns("method/field_assign_maps_10f", FA10Maps, ?METHOD_ITERATIONS),
+
+    FA3NativeNs  = maps:get(median, FA3Native),
+    FA3MapsNs    = maps:get(median, FA3Maps),
+    FA6NativeNs  = maps:get(median, FA6Native),
+    FA6MapsNs    = maps:get(median, FA6Maps),
+    FA10NativeNs = maps:get(median, FA10Native),
+    FA10MapsNs   = maps:get(median, FA10Maps),
+
+    io:format(standard_error,
+        "PERF: method/field_assign_overhead 3f=~.2fx 6f=~.2fx 10f=~.2fx vs native~n",
+        [FA3MapsNs / max(FA3NativeNs, 1),
+         FA6MapsNs / max(FA6NativeNs, 1),
+         FA10MapsNs / max(FA10NativeNs, 1)]),
+
+    %% --- Field read-after-write (dependent chain): 5, 10 fields ---
+    RAW5Native  = method_bench(fun() -> bench_method_threading:field_raw_native_5(SmallState) end),
+    RAW5Maps    = method_bench(fun() -> bench_method_threading:field_raw_maps_5(SmallState) end),
+    RAW10Native = method_bench(fun() -> bench_method_threading:field_raw_native_10(SmallState) end),
+    RAW10Maps   = method_bench(fun() -> bench_method_threading:field_raw_maps_10(SmallState) end),
+
+    report_ns("method/field_raw_native_5f", RAW5Native, ?METHOD_ITERATIONS),
+    report_ns("method/field_raw_maps_5f", RAW5Maps, ?METHOD_ITERATIONS),
+    report_ns("method/field_raw_native_10f", RAW10Native, ?METHOD_ITERATIONS),
+    report_ns("method/field_raw_maps_10f", RAW10Maps, ?METHOD_ITERATIONS),
+
+    RAW5NativeNs  = maps:get(median, RAW5Native),
+    RAW5MapsNs    = maps:get(median, RAW5Maps),
+    RAW10NativeNs = maps:get(median, RAW10Native),
+    RAW10MapsNs   = maps:get(median, RAW10Maps),
+
+    io:format(standard_error,
+        "PERF: method/field_raw_overhead 5f=~.2fx 10f=~.2fx vs native~n",
+        [RAW5MapsNs / max(RAW5NativeNs, 1),
+         RAW10MapsNs / max(RAW10NativeNs, 1)]),
+
+    %% --- Mixed locals + fields ---
+    MixedNative = method_bench(fun() -> bench_method_threading:mixed_native_10(SmallState) end),
+    MixedMaps   = method_bench(fun() -> bench_method_threading:mixed_maps_10(SmallState) end),
+
+    report_ns("method/mixed_native_10", MixedNative, ?METHOD_ITERATIONS),
+    report_ns("method/mixed_maps_10", MixedMaps, ?METHOD_ITERATIONS),
+
+    MixedNativeNs = maps:get(median, MixedNative),
+    MixedMapsNs   = maps:get(median, MixedMaps),
+
+    io:format(standard_error,
+        "PERF: method/mixed_overhead ~.2fx vs native~n",
+        [MixedMapsNs / max(MixedNativeNs, 1)]),
+
+    %% --- Large-map variants (>32 keys) ---
+    BigFA3   = method_bench(fun() -> bench_method_threading:field_assign_bigmap_3(BigState) end),
+    BigFA6   = method_bench(fun() -> bench_method_threading:field_assign_bigmap_6(BigState) end),
+    BigFA10  = method_bench(fun() -> bench_method_threading:field_assign_bigmap_10(BigState) end),
+    BigRAW5  = method_bench(fun() -> bench_method_threading:field_raw_bigmap_5(BigState) end),
+    BigRAW10 = method_bench(fun() -> bench_method_threading:field_raw_bigmap_10(BigState) end),
+
+    report_ns("method/bigmap_field_assign_3f", BigFA3, ?METHOD_ITERATIONS),
+    report_ns("method/bigmap_field_assign_6f", BigFA6, ?METHOD_ITERATIONS),
+    report_ns("method/bigmap_field_assign_10f", BigFA10, ?METHOD_ITERATIONS),
+    report_ns("method/bigmap_field_raw_5f", BigRAW5, ?METHOD_ITERATIONS),
+    report_ns("method/bigmap_field_raw_10f", BigRAW10, ?METHOD_ITERATIONS),
+
+    BigFA3Ns   = maps:get(median, BigFA3),
+    BigFA6Ns   = maps:get(median, BigFA6),
+    BigFA10Ns  = maps:get(median, BigFA10),
+    BigRAW5Ns  = maps:get(median, BigRAW5),
+    BigRAW10Ns = maps:get(median, BigRAW10),
+
+    %% Compare bigmap maps:put chain vs native map update syntax
+    io:format(standard_error,
+        "PERF: method/bigmap_assign_overhead 3f=~.2fx 6f=~.2fx 10f=~.2fx vs smallmap~n",
+        [BigFA3Ns / max(FA3MapsNs, 1),
+         BigFA6Ns / max(FA6MapsNs, 1),
+         BigFA10Ns / max(FA10MapsNs, 1)]),
+    io:format(standard_error,
+        "PERF: method/bigmap_raw_overhead 5f=~.2fx 10f=~.2fx vs smallmap~n",
+        [BigRAW5Ns / max(RAW5MapsNs, 1),
+         BigRAW10Ns / max(RAW10MapsNs, 1)]),
+
+    ok.
+
+%% @doc Run a method benchmark with hi-res batching.
+%% Returns stats map with median/mean/etc in nanoseconds per call.
+-spec method_bench(fun(() -> term())) -> #{median := number(), mean := number(),
+                                            min := number(), max := number(),
+                                            p95 := number(), p99 := number()}.
+method_bench(Fun) ->
+    %% Warmup
+    lists:foreach(fun(_) ->
+        lists:foreach(fun(_) -> Fun() end, lists:seq(1, ?METHOD_BATCH))
+    end, lists:seq(1, ?METHOD_WARMUP div ?METHOD_BATCH + 1)),
+    %% Measure
+    BatchTimings = lists:map(fun(_) ->
+        {T, _} = timer:tc(fun() ->
+            lists:foreach(fun(_) -> Fun() end, lists:seq(1, ?METHOD_BATCH))
+        end),
+        T * 1000 div ?METHOD_BATCH
+    end, lists:seq(1, ?METHOD_ITERATIONS)),
+    stats(BatchTimings).
 
