@@ -366,7 +366,14 @@ impl CoreErlangGenerator {
             return docvec![header, nest(INDENT, docvec![line(), body_doc,]), "\n",];
         }
 
-        let params_str = param_vars.join(", ");
+        let mut param_docs: Vec<Document<'static>> = Vec::new();
+        for (i, v) in param_vars.iter().enumerate() {
+            if i > 0 {
+                param_docs.push(Document::Str(", "));
+            }
+            param_docs.push(Document::String(v.clone()));
+        }
+        let params_doc = Document::Vec(param_docs);
         let args_case = docvec![
             "case Args of",
             nest(
@@ -374,7 +381,7 @@ impl CoreErlangGenerator {
                 docvec![
                     line(),
                     "<[",
-                    Document::String(params_str),
+                    params_doc,
                     "]> when 'true' ->",
                     nest(INDENT, docvec![line(), body_doc,]),
                     line(),
