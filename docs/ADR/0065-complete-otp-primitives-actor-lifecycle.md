@@ -32,11 +32,31 @@ This ADR evaluates five gaps and makes a disposition for each:
 
 ## Decision
 
-### Gap 1: `handleInfo:` — Implement (High-level API + escape hatch)
+### Core design: Actor/Server class hierarchy
 
-Actors gain an optional `handleInfo:` method that receives raw Erlang messages. The existing `Timer` API remains the recommended path for periodic work. `handleInfo:` is the escape hatch for OTP interop.
+Introduce `Server` as a subclass of `Actor` that exposes BEAM-level OTP primitives. The class hierarchy expresses the abstraction boundary:
 
-#### Timer API (recommended for most users)
+- **`Actor`** — Beamtalk-level: message-passing, state, Timer API, lifecycle (`initialize`, `terminate:`). Most users, most of the time.
+- **`Server`** — BEAM-level: raw message handling (`handleInfo:`), and the natural home for future OTP features (named registration, `trapExit`, `codeChange:from:`).
+
+```
+Object
+  └── Actor           # Beamtalk objects — messages, state, Timer
+        └── Server    # BEAM processes — handleInfo:, raw OTP interop
+```
+
+This uses OO's core strength: the class you extend communicates your relationship to the runtime. `Actor subclass: Counter` says "I'm a Beamtalk object." `Server subclass: PeriodicWorker` says "I'm a BEAM process that happens to be written in Beamtalk."
+
+### Actor — simple actors (no changes)
+
+```beamtalk
+Actor subclass: Counter
+  state: count = 0
+  increment => self.count := self.count + 1
+  getValue => self.count
+```
+
+Timer API works on any Actor:
 
 ```beamtalk
 Actor subclass: Ticker
@@ -49,42 +69,15 @@ Actor subclass: Ticker
   getValue => self.count
 ```
 
-No `state:` for the timer, no `terminate:` cleanup — Timer processes are **linked to the calling process** (the actor's gen_server). When the actor dies, the linked Timer process dies automatically. No orphan ticks, no boilerplate.
+No `state:` for the timer, no `terminate:` cleanup — Timer processes are **linked to the calling process** via `spawn_link`. When the actor dies, the linked Timer process dies automatically.
 
-`cancel` remains available for explicit lifecycle control when needed:
-
-```beamtalk
-Actor subclass: Poller
-  state: timer = nil
-
-  startPolling => self.timer := Timer every: 5000 do: [self poll!]
-  stopPolling => self.timer cancel
-  poll => // ...
-```
-
-**Important:** The block passed to `Timer every:do:` executes in the Timer's process, not the actor's. Always use `!` (async cast) for sends back to the actor — using `.` (sync call) will deadlock the Timer process waiting for a reply from a potentially busy actor.
-
-#### Compiler lint: sync send in Timer block
-
-A `self tick.` (sync call) inside a `Timer every:do:` or `Timer after:do:` block should emit a warning about deadlock:
-
-```
-warning: Sync send 'self tick.' inside Timer block will deadlock.
-  --> src/Ticker.bt:5:40
-   |
- 5 |     Timer every: 1000 do: [self tick.]
-   |                            ^^^^^^^^^^
-   = hint: Use 'self tick!' (async cast) instead — Timer blocks execute in a separate process
-```
-
-#### `handleInfo:` escape hatch (for OTP interop)
+### Server — full OTP interop
 
 ```beamtalk
-Actor subclass: PeriodicWorker
+Server subclass: PeriodicWorker
   state: count = 0
 
   initialize =>
-    // Use Erlang's send_after for in-process timer ticks
     Erlang erlang send_after: 1000 dest: self pid msg: #tick
 
   handleInfo: msg =>
@@ -96,25 +89,54 @@ Actor subclass: PeriodicWorker
       {#DOWN, _ref, #process, _pid, reason} -> [
         Logger info: "Monitored process exited: " ++ reason displayString
       ];
-      _ -> nil   // ignore unknown messages
+      _ -> nil
     ]
 
   getValue => self.count
 ```
 
-#### Error on misuse
+`handleInfo:` is only available on `Server` subclasses. Defining it on an `Actor` subclass is a compile error with an actionable message:
 
-```beamtalk
-// Defining handleInfo: on a value type is a compile error:
-Object subclass: NotAnActor
-  handleInfo: msg => msg   // => Error: handleInfo: is only valid on Actor subclasses
+```
+error: handleInfo: is only available on Server subclasses.
+  --> src/MyActor.bt:5:3
+   |
+ 5 |   handleInfo: msg => ...
+   |   ^^^^^^^^^^^
+   = hint: Change 'Actor subclass:' to 'Server subclass:'
 ```
 
-#### Semantics and error contract
+#### Migration: Actor to Server
 
-**Return value:** The return value of `handleInfo:` is always discarded. The method is called for its side effects (state mutation, logging, spawning work). The codegen extracts the updated state from the dispatch result and returns `{noreply, NewState}` to OTP.
+Promoting an Actor to a Server is a one-word change. All existing methods continue to work — Server inherits everything from Actor:
 
-**Error handling — log and continue (not crash):** If `handleInfo:` raises a Beamtalk error (DNU, match failure, etc.), the generated `handle_info/2` logs a warning (including error details) via `?LOG_WARNING` and returns `{noreply, State}` with the **pre-call state**. The actor does **not** crash. Any state mutations from the partially-executed method are rolled back to the pre-call state.
+```beamtalk
+// Before
+Actor subclass: MyThing
+  // ...
+
+// After — all existing methods still work, handleInfo: now available
+Server subclass: MyThing
+  handleInfo: msg => ...
+```
+
+#### What lives on Server (now and future)
+
+| Feature | Status | Rationale |
+|---------|--------|-----------|
+| `handleInfo:` | This ADR | Raw BEAM message reception |
+| Named registration (`spawnAs:`) | Future ADR | Process-level identity |
+| `trapExit` | Future | Process-level exit signal handling |
+| `codeChange:from:` | Future | Process-level state migration |
+
+Features that stay on Actor (all processes need them):
+- `initialize`, `terminate:`, `pid`, `monitor`, `onExit:`, `spawn`, `stop`, `isAlive`
+
+### handleInfo: semantics
+
+**Return value:** Always discarded. The method is called for its side effects (state mutation, logging, spawning work).
+
+**Error handling — log and continue (not crash):** If `handleInfo:` raises a Beamtalk error (DNU, match failure, etc.), the generated `handle_info/2` logs a warning (including error details) via `?LOG_WARNING` and returns `{noreply, State}` with the **pre-call state**. The actor does **not** crash.
 
 This is a **deliberate divergence from OTP's default**, but it matches what the Elixir ecosystem converged on in practice. In OTP, an unmatched `handle_info` clause crashes the gen_server. This is annoying enough that virtually every production Elixir GenServer includes the same boilerplate catch-all:
 
@@ -128,25 +150,61 @@ end
 
 This pattern is so universal it has been debated repeatedly in the Elixir community (see [References](#references)). The consensus: `handle_info` receives external messages you don't fully control — stale timers after hot reload, library internals, monitoring messages from code you didn't write. Crashing on these punishes the receiver for the sender's mistake.
 
-Beamtalk bakes this best practice in: errors in `handleInfo:` are logged and the actor continues. This means one fewer thing for developers to remember, at the cost of a semantic difference from raw OTP that BEAM veterans should be aware of.
+Beamtalk bakes this best practice in: errors in `handleInfo:` are logged and the server continues. This means one fewer thing for developers to remember, at the cost of a semantic difference from raw OTP that BEAM veterans should be aware of.
 
 **Deadlock rules (ADR 0043 applies):** `handleInfo:` executes inside the actor's gen_server process. The same sync-call deadlock rules from ADR 0043 apply: if your handler calls another actor via `.` (sync) that may call back into `self`, it will deadlock. Use `!` (async cast) for outbound sends from `handleInfo:` when re-entrant calls are possible.
 
-#### Timer lifecycle: linked to caller
+### Timer lifecycle: linked to caller
 
 Timer processes (`Timer every:do:` and `Timer after:do:`) are **linked to the calling process** via `spawn_link`. This is a change from the current `spawn` implementation. The link ensures:
 - When the actor dies, the Timer process dies automatically — no orphaned ticks
 - When the Timer process crashes (unlikely — block execution is wrapped in `catch`), the link propagates the crash to the actor, which triggers supervisor restart
 
-This eliminates the entire class of "forgot to cancel timer in terminate:" bugs. The `handleInfo:` + `send_after` pattern provides the same guarantee via a different mechanism — timer messages are delivered to the actor's own mailbox and stop when the process dies.
+This eliminates the entire class of "forgot to cancel timer in terminate:" bugs. `cancel` remains available for explicit lifecycle control when needed.
 
-#### trap_exit interaction
+**Compiler lint — sync send in Timer block:** A `self method.` (sync call) inside a `Timer every:do:` or `Timer after:do:` block emits a warning:
 
-Actors that set `process_flag(trap_exit, true)` via Erlang FFI will receive `{'EXIT', Pid, Reason}` tuples in `handleInfo:`. This interacts with `onExit:` (BT-1442): if a monitored process is also linked, the actor receives both a `{'DOWN', ...}` tuple (from the monitor) and an `{'EXIT', ...}` tuple (from the trapped link). This double-notification scenario is not prevented — users combining `trap_exit` with `onExit:` must handle deduplication themselves. Explicit `trap_exit` support is not a first-class Beamtalk feature; it is available only through the Erlang FFI escape hatch.
+```
+warning: Sync send 'self tick.' inside Timer block will deadlock.
+  --> src/Ticker.bt:5:40
+   |
+ 5 |     Timer every: 1000 do: [self tick.]
+   |                            ^^^^^^^^^^
+   = hint: Use 'self tick!' (async cast) instead — Timer blocks execute in a separate process
+```
 
-#### Testing handleInfo:
+### Codegen changes
 
-BUnit tests can trigger `handleInfo:` by using `Erlang erlang send:` to send raw messages to the actor's pid:
+For **Server subclasses** (class extends Server, or any ancestor is Server), the generated `handle_info/2` dispatches to `handleInfo:`:
+
+```erlang
+'handle_info'/2 = fun (Msg, State) ->
+    let Self = call 'beamtalk_actor':'make_self'(State) in
+    case call 'Module':'dispatch'('handleInfo:', [Msg], Self, State) of
+        <{'reply', _Result, NewState}> when 'true' -> {'noreply', NewState}
+        <{'error', Error, _ErrState}> when 'true' ->
+            call 'logger':'warning'(<<"handleInfo: raised error: ~p">>, [Error], #{})
+            {'noreply', State}    % explicitly use pre-call state
+        <_Other> when 'true' -> {'noreply', State}
+    end
+```
+
+For **Actor subclasses** (not Server), the current ignore-all stub is generated:
+
+```erlang
+'handle_info'/2 = fun (_Msg, State) ->
+    {'noreply', State}
+```
+
+The check is simple: "is this class a Server?" — no need to walk the hierarchy looking for a `handleInfo:` method definition.
+
+### trap_exit interaction
+
+Servers that set `process_flag(trap_exit, true)` via Erlang FFI will receive `{'EXIT', Pid, Reason}` tuples in `handleInfo:`. This interacts with `onExit:` (BT-1442): if a monitored process is also linked, the server receives both a `{'DOWN', ...}` tuple (from the monitor) and an `{'EXIT', ...}` tuple (from the trapped link). The double-notification scenario is not prevented — users combining `trap_exit` with `onExit:` must handle deduplication themselves. A first-class `trapExit` method on Server is a future enhancement.
+
+### Testing handleInfo:
+
+BUnit tests can trigger `handleInfo:` by sending raw messages to the server's pid:
 
 ```beamtalk
 testHandleInfoTick =>
@@ -155,29 +213,6 @@ testHandleInfoTick =>
   Timer sleep: 50.
   self assert: worker getValue equals: 2   // 1 from initialize + 1 from test
 ```
-
-#### Codegen changes
-
-The generated `handle_info/2` callback changes from unconditional delegation to conditional dispatch. The codegen must check whether `handleInfo:` is defined **anywhere in the class hierarchy** (not just the immediate class), since `dispatch` walks the inheritance chain and would otherwise fall through to `doesNotUnderstand:` — crashing the actor on a raw Erlang message.
-
-```erlang
-% If the class (or any ancestor) defines handleInfo:
-'handle_info'/2 = fun (Msg, State) ->
-    let Self = call 'beamtalk_actor':'make_self'(State) in
-    case call 'Module':'dispatch'('handleInfo:', [Msg], Self, State) of
-        <{'reply', _Result, NewState}> when 'true' -> {'noreply', NewState}
-        <{'error', Error, _ErrState}> when 'true' ->
-            call 'logger':'warning'(<<"handleInfo: raised error: ~p">>, [Error], #{})
-            {'noreply', State}    % explicitly use pre-call state, not partial error state
-        <_Other> when 'true' -> {'noreply', State}
-    end
-
-% If NO class in the hierarchy defines handleInfo: (current behavior, unchanged)
-'handle_info'/2 = fun (_Msg, State) ->
-    {'noreply', State}
-```
-
-The `{'error', Error, _ErrState}` arm logs a warning with the error details and explicitly returns the pre-call `State` — even though `_ErrState` is the same value in practice (Core Erlang exception unwinding discards intermediate state bindings), using `State` documents the intent: errors always roll back to pre-call state. The `_Other` arm is a defensive catch-all with the same semantics.
 
 ### Gap 2: Named Registration — Defer
 
@@ -189,7 +224,7 @@ db := app which: DatabasePool.
 db query: "SELECT 1"
 ```
 
-Named registration (`spawnAs:` / `Actor named:`) is deferred to a dedicated ADR post-v0.1. Rationale:
+Named registration (`spawnAs:` / `Server named:`) is deferred to a dedicated ADR post-v0.1. When implemented, it will live on Server — process-level identity is a BEAM concept. Rationale for deferral:
 - Supervision tree discovery is idiomatic OTP
 - Named registration adds complexity: name conflicts, crash recovery re-registration, global vs local scope
 - The runtime already supports `{local, Name}` in `beamtalk_actor:start_link/3` — the plumbing exists when we need it
@@ -231,7 +266,7 @@ What BT-1451 must verify:
 
 ### Gap 5: Hot Code Reload — Defer
 
-The current `code_change/3` handles basic field migration (adding/removing fields via `beamtalk_hot_reload`). A user-facing `codeChange:from:` method for custom state migration is deferred until there's a real production use case. The current mechanism is sufficient for development workflows.
+The current `code_change/3` handles basic field migration (adding/removing fields via `beamtalk_hot_reload`). A user-facing `codeChange:from:` method for custom state migration is deferred until there's a real production use case. When implemented, it will live on Server. The current mechanism is sufficient for development workflows.
 
 ## Prior Art
 
@@ -242,57 +277,56 @@ A well-known pain point: an unmatched `handle_info` clause crashes the GenServer
 
 **What we adopt:** The `handleInfo:` method mirrors `handle_info/2` semantics — same OTP callback, Beamtalk syntax. We bake in the community's log-and-continue best practice as the default error contract, eliminating the boilerplate catch-all.
 
-**What we adapt:** Beamtalk recommends the `Timer` API as the default, with `handleInfo:` as an explicit escape hatch. Elixir has no such layering — all timer patterns require `handle_info`.
+**What we adapt:** Beamtalk separates the simple actor API (Timer, message-passing) from the OTP escape hatch (handleInfo:) via the Actor/Server class hierarchy. Elixir has no such separation — all GenServers are equally low-level.
 
 ### Akka Typed — Signals vs Messages
 Akka Typed separates *signals* (lifecycle events: `PreRestart`, `PostStop`, `Terminated`) from *messages* (user-defined typed protocol) via `receiveSignal`. Timers use `Behaviors.withTimers` with a keyed `TimerScheduler` — timers are automatically cancelled on actor restart and deduplicated by key.
 
-**What we learn:** The signal/message split is clean but heavyweight. Beamtalk's `terminate:` + `handleInfo:` achieves similar separation with less ceremony. Akka's keyed timers are elegant — a future `Timer` enhancement could add key-based deduplication.
+**What we learn:** The signal/message split is clean but heavyweight. Beamtalk's Actor/Server hierarchy achieves similar layering with less ceremony — Actor handles lifecycle, Server adds raw message access. Akka's keyed timers are elegant — a future `Timer` enhancement could add key-based deduplication.
 
 ### Pony — No Raw Messages
 Pony's actor model is fully typed: every message is a statically typed behavior call. There is no catch-all handler, no raw message reception, and no global actor registry. Discovery is by reference passing only.
 
-**What we learn:** Pony validates that a typed-first approach (Beamtalk's `Timer` API) is the right default. But Beamtalk runs on BEAM where raw messages are a reality (monitors, timers, interop), so an escape hatch is necessary.
+**What we learn:** Pony validates that a typed-first approach (Beamtalk's Actor + Timer API) is the right default. But Beamtalk runs on BEAM where raw messages are a reality (monitors, timers, interop), so the Server escape hatch is necessary.
 
 ### Newspeak — Promise-Based Actors
 Newspeak's actors communicate via asynchronous message sends that return promises. No `handle_info` equivalent exists — all messages are typed method calls. No built-in supervision or actor registry.
 
-**What we learn:** Newspeak confirms that Beamtalk's high-level approach (normal method sends for actor communication) is aligned with the Smalltalk tradition. `handleInfo:` is a pragmatic BEAM departure.
+**What we learn:** Newspeak confirms that Beamtalk's high-level approach (Actor, normal method sends) is aligned with the Smalltalk tradition. Server's `handleInfo:` is a pragmatic BEAM departure.
 
-### Pharo Smalltalk — Green Threads
-Pharo uses cooperative green threads sharing a heap — no actor isolation, no mailbox, no supervision. Timer patterns use `Delay wait` in loops. No named process registry.
-
-**What we learn:** Pharo's lack of actor infrastructure validates Beamtalk's value proposition: BEAM gives us what Pharo can't — true process isolation, supervision, and fault tolerance.
+### Pharo Smalltalk — Green Threads and Class Hierarchy
+Pharo uses cooperative green threads sharing a heap — no actor isolation, no mailbox, no supervision. But Pharo's class hierarchy (`Object → Process → different kinds of process`) demonstrates the pattern of using inheritance to layer process capabilities. Beamtalk's Actor/Server hierarchy follows the same Smalltalk tradition: use the class hierarchy to communicate intent.
 
 ## User Impact
 
 ### Newcomer (from Python/JS/Ruby)
-- **Timer API** is immediately accessible: `Timer every: 1000 do: [self tick!]` reads naturally
-- **`handleInfo:`** can be ignored until they need OTP interop — progressive disclosure
-- **Error on value types** prevents confusion about which objects can receive raw messages
+- **Actor** is all they need. Timer API reads naturally, no OTP concepts to learn
+- **Server** exists but is clearly labelled "advanced" — they'll encounter it when they're ready
+- **The compiler guides migration**: if they try `handleInfo:` on an Actor, the error message tells them exactly what to do
 - **`Supervisor which:`** for discovery is more explicit than global names — easier to trace
 
 ### Smalltalk Developer
-- **Timer API** preserves message-passing purity — `self tick!` is just a message send
-- **`handleInfo:`** is a named method on an actor — still message-passing, just with raw Erlang terms as arguments
+- **Actor/Server hierarchy** is textbook Smalltalk design — use the class hierarchy to organize capabilities
+- **Timer API** preserves message-passing purity on Actor — `self tick!` is just a message send
+- **Server** is explicitly an FFI escape hatch — like Smalltalk's primitive access. The boundary is clear
 - **Rejecting links** keeps the abstraction clean — Smalltalk has no link equivalent
-- **No global registry** aligns with Smalltalk's object-reference model (pass references, don't look up names)
 
 ### Erlang/BEAM Developer
-- **`handleInfo:`** maps directly to `handle_info/2` — no new concepts to learn
-- **`match:` with tuple destructuring** makes DOWN/EXIT handling feel natural: `{#DOWN, _ref, #process, _pid, reason}`
-- **Timer API** may feel indirect at first, but `self tick!` generating a `gen_server:cast` is standard OTP
-- **Deferring named registration** is acceptable — `Supervisor which:` covers the main use case; raw `erlang:register` is available via FFI
+- **Server** maps directly to "I'm writing a gen_server" — `handleInfo:` is handle_info/2
+- **`match:` with tuple destructuring** makes DOWN/EXIT handling feel natural
+- **Actor** may feel restrictive at first, but they'll appreciate that teammates who don't know OTP can be productive with Actor while they use Server for the systems work
+- **Log-and-continue** differs from OTP's crash-by-default — documented clearly, matches Elixir community practice
 
 ### Production Operator
-- **`handleInfo:`** generates standard OTP callbacks — visible in observer, debuggable with `sys:get_state/1`
+- **Server** processes in observer are immediately identifiable as "full OTP" — expect raw message handling
+- **Actor** processes are simpler — pure message-passing, no raw message surprises
 - **Graceful shutdown** (BT-1451) enables proper drain/cleanup sequences
-- **No hidden magic** — Timer creates a visible process, `handleInfo:` dispatches through standard gen_server
+- Both types generate standard gen_server — visible in observer, debuggable with `sys:get_state/1`
 
 ### Tooling Developer
-- **`handleInfo:`** is a regular method — LSP can provide completions and diagnostics
-- **Compile-time check** (actor-only) is a simple AST validation
-- **No new syntax** — just a conventionally-named method
+- **`handleInfo:`** is a regular method on Server — LSP can provide completions
+- **Compile-time check** is a simple superclass check (extends Server?), not a method-existence walk
+- **No new syntax** — Server is a stdlib class, `handleInfo:` is a conventionally-named method
 
 ## Steelman Analysis
 
@@ -303,34 +337,34 @@ Pharo uses cooperative green threads sharing a heap — no actor isolation, no m
 | **Newcomer** | "One API to learn. `Timer every:` and `onExit:` cover every pattern I'll hit in my first year. I never need to know what a tuple is." |
 | **Smalltalk purist** | "Clean separation. No Erlang terms leak into my object world — everything is message-passing. The BEAM is an implementation detail, not something my code should know about." |
 | **BEAM veteran** | "Timer + `onExit:` covers 90% of use cases. For the other 10%, I can use Erlang FFI directly. A half-baked handleInfo: that swallows errors differently from OTP is worse than no handleInfo: — it's a trap for anyone who thinks they know handle_info semantics." |
-| **Language designer** | "Two timer mechanisms means two things to document, two things beginners find in search results, and an eternal FAQ: 'when do I use Timer vs handleInfo:?'. Every abstraction layer you add is a layer someone has to learn. One mechanism is strictly simpler — and Timer is the better one." |
-| **Operator** | "Every Timer is a visible process in observer. With handleInfo:, timer ticks are invisible — they're just messages in a mailbox. Visible processes are easier to debug than invisible messages." |
+| **Language designer** | "Every abstraction layer you add is a layer someone has to learn. Timer is sufficient. Adding Server and handleInfo: to the class hierarchy for 10% of users adds permanent complexity to the type system for everyone." |
+| **Operator** | "Every Timer is a visible process in observer. With handleInfo:, timer ticks are invisible — just messages in a mailbox. Visible processes are easier to debug than invisible messages." |
 
-### Raw handleInfo: Only — no Timer API (rejected)
+### handleInfo: on any Actor — no Server class (rejected)
 
-| Cohort | Best argument for handleInfo: Only |
-|--------|--------------------------------------|
-| **Newcomer** | "Every Erlang/Elixir tutorial teaches handle_info. If I Google 'Beamtalk timer', I want to find the same pattern. A custom Timer class with different semantics means I can't use any existing BEAM learning resources." |
-| **BEAM veteran** | "Standard OTP. I can use `send_after`, DOWN handlers, `trap_exit`, `sys:trace` — all the tools I already know. No extra processes to trace, no deadlock from sync calls in Timer blocks, no behavioral changes from spawn→spawn_link. The handle_info pattern has been production-proven for 30 years." |
-| **Language designer** | "One mechanism, zero magic. The user writes a method, the codegen wires it to a callback. No hidden Timer processes, no implicit linking, no lint rules to explain. Simplicity is a feature." |
-| **Operator** | "I can trace every message in the system with `sys:trace`. Timer processes are opaque — I can't see what block they're running, when they'll fire next, or what actor they're connected to. handleInfo: ticks are standard OTP messages in a standard mailbox." |
+| Cohort | Best argument for handleInfo: on any Actor |
+|--------|---------------------------------------------|
+| **Newcomer** | "One base class, one concept. I don't have to choose between Actor and Server — I just add handleInfo: when I need it. Less to learn upfront." |
+| **BEAM veteran** | "Every actor IS a gen_server. Hiding handle_info behind a subclass creates a false distinction. If I'm debugging a production issue and the actor is receiving unexpected messages, I want handle_info available everywhere, not gated behind a class change." |
+| **Language designer** | "The Actor/Server split adds a class to the hierarchy, a migration path to document, and a decision point ('which base class?') that doesn't exist today. Optional methods are simpler than class hierarchies for gating capabilities." |
+| **Operator** | "In production, I sometimes need to add handleInfo: to an actor that wasn't designed for it — to add instrumentation, catch stray messages, or debug a leak. A class hierarchy change is heavier than adding a method." |
 
-### Both — Timer API + handleInfo: escape hatch (decided)
+### Actor/Server hierarchy (decided)
 
-| Cohort | Best argument for Both |
-|--------|------------------------|
-| **Newcomer** | "`Timer every: 1000 do: [self tick!]` — I wrote a periodic actor in one line and I didn't need to understand OTP callbacks, raw tuples, or Erlang FFI. When I'm ready, handleInfo: is there." |
-| **Smalltalk purist** | "Timer preserves message-passing purity for 90% of code. handleInfo: is explicitly an escape hatch — like Smalltalk's FFI. The boundary is clear: normal code uses messages, interop code uses handleInfo:." |
-| **BEAM veteran** | "I get full OTP when I need it, and I don't have to explain `erlang:send_after` to a teammate who just wants a polling loop. Timer + handleInfo: maps cleanly to Elixir's community pattern: use a library for common cases, drop to GenServer when needed." |
-| **Language designer** | "The key insight is that Timer and handleInfo: serve different audiences and different use cases — Timer is Beamtalk-native (message sends between objects), handleInfo: is BEAM-native (raw messages between processes). These aren't redundant mechanisms; they're different abstraction levels. Languages that try to have only one level (Pony: typed only, Erlang: raw only) pay a tax at the boundary they don't cover." |
-| **Operator** | "Timer processes are linked — they die with the actor, visible in supervision trees. handleInfo: messages are standard OTP — visible in sys:trace. Both mechanisms are observable through different tools. I'd rather have two observable mechanisms than one mechanism that's invisible to half my tooling." |
+| Cohort | Best argument for Actor/Server |
+|--------|--------------------------------|
+| **Newcomer** | "`Actor subclass: Counter` — that's all I know, that's all I need. Server is labelled 'advanced'. If I ever need it, the compiler error tells me exactly what to change — one word." |
+| **Smalltalk purist** | "This is textbook Smalltalk design. The class hierarchy communicates intent. `Actor` says 'I'm an object.' `Server` says 'I'm a process.' Pharo does the same with `Object → Process`. The inheritance chain IS the documentation." |
+| **BEAM veteran** | "When I see `Server subclass:`, I immediately know: this is a full OTP service with handle_info, maybe trap_exit, maybe named registration. When I see `Actor subclass:`, I know it's simplified — I don't need to think about raw messages. The class name is triage information." |
+| **Language designer** | "This eliminates the 'two mechanisms on one class' objection entirely. Timer is Actor's mechanism. handleInfo: is Server's. They're not redundant — they're on different classes at different abstraction levels. The FAQ 'when do I use which?' answers itself from the class you extend. And future OTP features (named registration, trapExit, codeChange) have a natural home without polluting Actor's API." |
+| **Operator** | "In observer, I can tell the difference between an Actor (simple, message-passing) and a Server (full OTP). That's free observability from the class hierarchy." |
 
 ### Tension Points
 
-- **Timer-Only vs Both:** The language designer's "two mechanisms is confusing" argument is genuine. The counter is that Timer and handleInfo: serve different abstraction levels (Beamtalk objects vs BEAM processes), not the same level twice. The FAQ "when do I use which?" has a clear answer: Timer by default, handleInfo: only for raw BEAM interop.
-- **handleInfo: Only vs Both:** The BEAM veteran's "30 years of production-proven patterns" argument is strong. The counter is that Beamtalk's value proposition is making BEAM accessible to non-BEAM developers — forcing everyone through handle_info contradicts that goal.
-- **Error contract tension:** BEAM veterans expect crash-on-error in handle_info (OTP default). Beamtalk swallows errors (Elixir community best practice). Both positions are defensible. We chose swallowing because it eliminates boilerplate, at the cost of surprising BEAM veterans.
-- **Named registration:** Smalltalk purists want reference-passing only; BEAM vets want atom registration. Resolution: defer — `Supervisor which:` is sufficient for v0.1.
+- **"One class is simpler" vs hierarchy:** The argument that optional methods are simpler than a class hierarchy is genuine. The counter: optional methods require lints, error messages about "only valid on Actors", and documentation explaining when to use which. The class hierarchy makes all of that implicit — the type system enforces the boundary.
+- **"Every actor IS a gen_server" vs hiding capabilities:** BEAM veterans are right that Actor/Server is a false distinction at the BEAM level. But Beamtalk's value proposition is that most users shouldn't need to know it's a gen_server. The hierarchy serves the 90% (Actor users) while giving the 10% (Server users) full power.
+- **Error contract:** BEAM veterans expect crash-on-error in handle_info (OTP default). Beamtalk's Server swallows errors (Elixir community best practice). Both positions are defensible. We chose swallowing because it eliminates universal boilerplate.
+- **Named registration:** Deferred. `Supervisor which:` (O(n) scan) is sufficient for v0.1. Server is the natural home when it's implemented.
 - **All cohorts agree** on rejecting links and deferring hot code reload.
 
 ## Alternatives Considered
@@ -340,8 +374,13 @@ Rely entirely on the Timer class for periodic work and `onExit:` for lifecycle n
 
 **Rejected because:** This makes BEAM interop impossible for legitimate use cases — receiving messages from Erlang processes, handling `erlang:send_after` ticks, processing raw monitor notifications. The Timer API works for Beamtalk-to-Beamtalk communication but breaks down at the BEAM boundary.
 
+### Alternative: handleInfo: on any Actor (no Server class)
+Allow any Actor subclass to define `handleInfo:` as an optional method, with a compile error if defined on a value type.
+
+**Rejected because:** This puts two timer mechanisms (Timer API and send_after + handleInfo:) on the same class, creating a permanent FAQ: "when do I use Timer vs handleInfo:?" The Actor/Server hierarchy makes the answer structural — Timer is for Actor, handleInfo: is for Server. It also clutters Actor's conceptual surface with OTP escape hatches that 90% of users don't need, and provides no natural home for future OTP features (named registration, trapExit) without continuing to add optional methods to Actor.
+
 ### Alternative: Named Registration Now
-Add `spawnAs:` and `Actor named:` for v0.1.
+Add `spawnAs:` and `Server named:` for v0.1.
 
 **Rejected because:** Named registration introduces complexity (atom exhaustion risk, name conflict handling, crash recovery re-registration, global vs local vs via scope) that isn't justified by current use cases. `Supervisor which:` covers service discovery within a supervision tree. The runtime plumbing (`beamtalk_actor:start_link/3` already accepts `{local, Name}`) is ready when we need it.
 
@@ -353,37 +392,39 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 ## Consequences
 
 ### Positive
-- Actors can participate in full OTP messaging patterns (timer ticks, monitor notifications, interop with Erlang processes)
-- Progressive disclosure: newcomers use Timer, experienced users drop to `handleInfo:`
-- Graceful shutdown (BT-1451) enables production-quality lifecycle management
-- No new syntax — `handleInfo:` is just a method name convention recognized by codegen
+- Clean separation: Actor for Beamtalk-level programming, Server for BEAM-level programming
+- The class hierarchy communicates intent — developers and operators know what to expect from each
+- Future OTP features have a natural home on Server without polluting Actor's API
+- No "two mechanisms on one class" confusion — Timer is Actor's, handleInfo: is Server's
+- Compiler-guided migration from Actor to Server (one-word change, actionable error message)
+- Timer `spawn_link` eliminates orphaned timer processes — no cleanup boilerplate needed
+- handleInfo: error contract (log-and-continue) eliminates universal Elixir catch-all boilerplate
 
 ### Negative
-- Two ways to do timers (Timer API vs `send_after` + `handleInfo:`) — documentation must clearly recommend Timer as default
-- `handleInfo:` exposes raw Erlang terms (tuples, atoms) — breaks the pure Beamtalk abstraction for users who use it
-- Timer implementation changes from `spawn` to `spawn_link` — if the Timer process crashes (unlikely, block is wrapped in `catch`), the crash propagates to the actor via the link. This is the correct OTP behavior (crash propagation through the supervision tree) but is a behavioral change from the current Timer implementation
+- One more class in the hierarchy (Actor → Server) — adds a decision point for users
+- Server's log-and-continue error handling differs from OTP's crash-by-default — may surprise BEAM veterans
+- Timer implementation changes from `spawn` to `spawn_link` — behavioral change from the current Timer (if Timer process crashes, crash propagates to caller via link)
 - Deferring named registration means some OTP patterns require workarounds (`Supervisor which:`), and `which:` is O(n) in child count
 
 ### Neutral
 - Rejecting links has no practical impact — no known use case requires them beyond what monitors + supervisors provide
 - Deferring hot code reload is low-risk — the current field migration handles development workflows
-- `handleInfo:` is opt-in — actors that don't define it behave exactly as before
-- `handleInfo:` errors are logged-and-continued (not crash-the-actor) — matches what the Elixir community does manually in every production GenServer, but may surprise BEAM veterans who expect OTP's crash-by-default
 - `handleInfo:` return values are always discarded — the method is called for side effects only
 
 ## Implementation
 
-### Phase 1: `handleInfo:` (M)
-**Affected components:** Parser (no changes), Codegen (callbacks.rs), Runtime (beamtalk_actor.erl)
+### Phase 1: Server class and handleInfo: (M)
+**Affected components:** Stdlib (Server.bt), Codegen (callbacks.rs, actor detection), Runtime (beamtalk_actor.erl)
 
-1. **Codegen:** In `generate_handle_info()` (callbacks.rs ~445-472), check if the class **or any ancestor** defines a `handleInfo:` method. If yes, generate dispatch to it with error logging; if no, generate the current ignore-all stub.
-2. **Validation:** Compile-time error if `handleInfo:` is defined on a non-Actor class.
-3. **Timer: `spawn` → `spawn_link`:** Change `beamtalk_timer.erl` to use `spawn_link` instead of `spawn` for `after:do:` and `every:do:`. This links the Timer process to the calling process (typically the actor's gen_server), ensuring automatic cleanup on actor death. The existing `catch Block()` in the timer loop prevents block errors from crashing the Timer process.
-4. **Lint — sync send in Timer block:** Warn when a `self method.` (sync call) appears inside a `Timer every:do:` or `Timer after:do:` block. Suggest `self method!` (async cast) instead. Implemented during block analysis in the codegen or semantic pass.
-5. **Tests:** BUnit tests for timer ticks via `handleInfo:` (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, and error-in-handler recovery. EUnit tests in `beamtalk_actor_tests.erl` for the dispatch path itself. EUnit tests for Timer `spawn_link` behavior (Timer dies when caller dies). Lint tests for sync-in-block warning.
+1. **Stdlib:** Add `Server.bt` — `Actor subclass: Server` with doc comments explaining its role as the BEAM-level OTP escape hatch. No new methods in the .bt file itself; the capabilities are unlocked by codegen detecting Server ancestry.
+2. **Codegen:** In `generate_handle_info()` (callbacks.rs ~445-472), check if the class extends Server. If yes, generate dispatch to `handleInfo:` with error logging; if no (plain Actor), generate the current ignore-all stub.
+3. **Validation:** Compile-time error with actionable hint if `handleInfo:` is defined on a non-Server class.
+4. **Timer: `spawn` → `spawn_link`:** Change `beamtalk_timer.erl` to use `spawn_link` instead of `spawn` for `after:do:` and `every:do:`. This links the Timer process to the calling process, ensuring automatic cleanup on caller death. The existing `catch Block()` in the timer loop prevents block errors from crashing the Timer process.
+5. **Lint — sync send in Timer block:** Warn when a `self method.` (sync call) appears inside a `Timer every:do:` or `Timer after:do:` block. Suggest `self method!` (async cast) instead.
+6. **Tests:** BUnit tests for Server + handleInfo: (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, error-in-handler recovery, and Actor-rejects-handleInfo: validation. EUnit tests for the dispatch path and Timer `spawn_link` behavior. Lint tests for sync-in-block warning.
 
 ### Phase 2: Graceful Shutdown Verification (S) — BT-1451
-**Affected components:** Runtime (beamtalk_actor.erl, beamtalk_supervisor.erl)
+**Affected components:** Runtime (beamtalk_actor.erl, beamtalk_supervisor.erl), Stdlib (SupervisionSpec.bt)
 
 1. Verify `terminate:` receives `#shutdown` during supervisor stop
 2. Add `withShutdown:` to `SupervisionSpec` fluent builder (currently hardcoded to 5000ms / `#infinity`)
@@ -391,8 +432,9 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 4. Add tests for shutdown ordering and timeout behavior
 
 ### Deferred
-- Named registration (`spawnAs:` / `Actor named:`) — separate ADR post-v0.1
-- User-defined `codeChange:from:` — when a production use case emerges
+- Named registration (`spawnAs:` / `Server named:`) — separate ADR post-v0.1, lives on Server
+- `trapExit` as first-class Server method — when a use case requires it beyond FFI
+- User-defined `codeChange:from:` on Server — when a production use case emerges
 - Links — rejected; revisit only if a compelling pattern requires them
 
 ## References
