@@ -31,8 +31,8 @@ TestCase subclass: ActorMonitorTest
     exitCounter := AtomicCounter new: #actorMonitorTestExit
     counter onExit: [:_reason | exitCounter increment]
     counter stop
-    // Give the watcher process time to fire
-    Timer sleep: 50
+    // Poll with bounded wait instead of fixed sleep (avoids timing flakiness)
+    50 timesRepeat: [exitCounter value < 1 ifTrue: [Timer sleep: 10]]
     self assert: exitCounter value equals: 1
     exitCounter delete
 
@@ -43,7 +43,8 @@ TestCase subclass: ActorMonitorTest
     counter onExit: [:_reason | exitCounter increment]
     counter onExit: [:_reason | exitCounter increment]
     counter stop
-    Timer sleep: 50
+    // Poll with bounded wait instead of fixed sleep
+    50 timesRepeat: [exitCounter value < 2 ifTrue: [Timer sleep: 10]]
     self assert: exitCounter value equals: 2
     exitCounter delete
 

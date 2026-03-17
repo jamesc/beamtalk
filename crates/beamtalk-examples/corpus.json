@@ -9203,13 +9203,16 @@
         "assign",
         "assignment",
         "async",
+        "branch",
         "concurrent",
+        "conditional",
         "constructor",
         "create",
         "duck typing",
         "extends",
         "gen_server",
         "genserver",
+        "if",
         "inherit",
         "inheritance",
         "instantiate",
@@ -9230,7 +9233,7 @@
         "testPidReturnsAPid",
         "testRespondsToMonitorMethods"
       ],
-      "source": "// BT-1442: Tests for Actor monitor/pid/onExit: process monitoring API\n\nTestCase subclass: ActorMonitorTest\n\n  testPidReturnsAPid =>\n    counter := Counter spawn\n    rawPid := counter pid\n    self assert: rawPid class equals: Pid\n    self assert: rawPid isAlive\n    counter stop\n\n  testMonitorReturnsReference =>\n    counter := Counter spawn\n    ref := counter monitor\n    self assert: ref class equals: Reference\n    ref demonitor\n    counter stop\n\n  testDemonitorCancelsMonitor =>\n    counter := Counter spawn\n    ref := counter monitor\n    result := ref demonitor\n    self assert: result\n    counter stop\n\n  testOnExitCallsBlockOnActorDeath =>\n    counter := Counter spawn\n    exitCounter := AtomicCounter new: #actorMonitorTestExit\n    counter onExit: [:_reason | exitCounter increment]\n    counter stop\n    // Give the watcher process time to fire\n    Timer sleep: 50\n    self assert: exitCounter value equals: 1\n    exitCounter delete\n\n  testMultipleOnExitCallbacks =>\n    // Multiple onExit: callbacks can be registered on the same actor\n    counter := Counter spawn\n    exitCounter := AtomicCounter new: #actorMonitorTestMulti\n    counter onExit: [:_reason | exitCounter increment]\n    counter onExit: [:_reason | exitCounter increment]\n    counter stop\n    Timer sleep: 50\n    self assert: exitCounter value equals: 2\n    exitCounter delete\n\n  testRespondsToMonitorMethods =>\n    counter := Counter spawn\n    self assert: (counter respondsTo: #pid)\n    self assert: (counter respondsTo: #monitor)\n    self assert: (counter respondsTo: #onExit:)\n    counter stop\n\n  testErlangMonitorWithActorProxy =>\n    // Direct Erlang FFI monitor should work with actor proxy (auto-coercion)\n    counter := Counter spawn\n    ref := Erlang erlang monitor: #process arg: counter\n    self assert: ref class equals: Reference\n    Erlang erlang demonitor: ref\n    counter stop",
+      "source": "// BT-1442: Tests for Actor monitor/pid/onExit: process monitoring API\n\nTestCase subclass: ActorMonitorTest\n\n  testPidReturnsAPid =>\n    counter := Counter spawn\n    rawPid := counter pid\n    self assert: rawPid class equals: Pid\n    self assert: rawPid isAlive\n    counter stop\n\n  testMonitorReturnsReference =>\n    counter := Counter spawn\n    ref := counter monitor\n    self assert: ref class equals: Reference\n    ref demonitor\n    counter stop\n\n  testDemonitorCancelsMonitor =>\n    counter := Counter spawn\n    ref := counter monitor\n    result := ref demonitor\n    self assert: result\n    counter stop\n\n  testOnExitCallsBlockOnActorDeath =>\n    counter := Counter spawn\n    exitCounter := AtomicCounter new: #actorMonitorTestExit\n    counter onExit: [:_reason | exitCounter increment]\n    counter stop\n    // Poll with bounded wait instead of fixed sleep (avoids timing flakiness)\n    50 timesRepeat: [exitCounter value < 1 ifTrue: [Timer sleep: 10]]\n    self assert: exitCounter value equals: 1\n    exitCounter delete\n\n  testMultipleOnExitCallbacks =>\n    // Multiple onExit: callbacks can be registered on the same actor\n    counter := Counter spawn\n    exitCounter := AtomicCounter new: #actorMonitorTestMulti\n    counter onExit: [:_reason | exitCounter increment]\n    counter onExit: [:_reason | exitCounter increment]\n    counter stop\n    // Poll with bounded wait instead of fixed sleep\n    50 timesRepeat: [exitCounter value < 2 ifTrue: [Timer sleep: 10]]\n    self assert: exitCounter value equals: 2\n    exitCounter delete\n\n  testRespondsToMonitorMethods =>\n    counter := Counter spawn\n    self assert: (counter respondsTo: #pid)\n    self assert: (counter respondsTo: #monitor)\n    self assert: (counter respondsTo: #onExit:)\n    counter stop\n\n  testErlangMonitorWithActorProxy =>\n    // Direct Erlang FFI monitor should work with actor proxy (auto-coercion)\n    counter := Counter spawn\n    ref := Erlang erlang monitor: #process arg: counter\n    self assert: ref class equals: Reference\n    Erlang erlang demonitor: ref\n    counter stop",
       "explanation": "BT-1442: Tests for Actor monitor/pid/onExit: process monitoring API"
     },
     {

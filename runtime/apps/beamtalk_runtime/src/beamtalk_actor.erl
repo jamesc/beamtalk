@@ -348,10 +348,12 @@ async_send(ActorPid, monitor, [], FuturePid) ->
 async_send(ActorPid, 'onExit:', [Block], FuturePid) ->
     %% BT-1442: onExit: monitors the actor and calls block with reason on exit.
     %% Synchronize with the watcher to ensure the monitor is set up before resolving.
+    %% Use a unique ref token to correlate the ready message (prevents stale/parallel confusion).
     Caller = self(),
+    Token = make_ref(),
     spawn(fun() ->
         Ref = erlang:monitor(process, ActorPid),
-        Caller ! {onExit_ready, self()},
+        Caller ! {onExit_ready, Token},
         receive
             {'DOWN', Ref, process, ActorPid, Reason} ->
                 try
@@ -367,11 +369,23 @@ async_send(ActorPid, 'onExit:', [Block], FuturePid) ->
                 end
         end
     end),
-    receive
-        {onExit_ready, _} -> ok
-    after 5000 -> ok
+    case
+        receive
+            {onExit_ready, Token} -> ok
+        after 5000 -> timeout
+        end
+    of
+        ok ->
+            beamtalk_future:resolve(FuturePid, ok);
+        timeout ->
+            Error = beamtalk_error:new(
+                timeout,
+                unknown,
+                'onExit:',
+                <<"onExit: watcher did not start within 5000ms">>
+            ),
+            beamtalk_future:reject(FuturePid, Error)
     end,
-    beamtalk_future:resolve(FuturePid, ok),
     ok;
 async_send(ActorPid, Selector, Args, FuturePid) ->
     %% BT-886: Check liveness before sending, and spawn a watcher to detect
@@ -470,10 +484,12 @@ sync_send(ActorPid, monitor, []) ->
 sync_send(ActorPid, 'onExit:', [Block]) ->
     %% BT-1442: onExit: monitors the actor and calls block with reason on exit.
     %% Synchronize with the watcher to ensure the monitor is set up before returning.
+    %% Use a unique ref token to correlate the ready message.
     Caller = self(),
+    Token = make_ref(),
     spawn(fun() ->
         Ref = erlang:monitor(process, ActorPid),
-        Caller ! {onExit_ready, self()},
+        Caller ! {onExit_ready, Token},
         receive
             {'DOWN', Ref, process, ActorPid, Reason} ->
                 try
@@ -489,9 +505,14 @@ sync_send(ActorPid, 'onExit:', [Block]) ->
                 end
         end
     end),
-    receive
-        {onExit_ready, _} -> ok
-    after 5000 -> ok
+    case
+        receive
+            {onExit_ready, Token} -> ok
+        after 5000 -> timeout
+        end
+    of
+        ok -> ok;
+        timeout -> raise_timeout('onExit:')
     end;
 sync_send(ActorPid, Selector, Args) ->
     case is_process_alive(ActorPid) of
