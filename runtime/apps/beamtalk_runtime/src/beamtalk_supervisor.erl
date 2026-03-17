@@ -77,10 +77,14 @@ startLink(Self) ->
     Module = beamtalk_object_class:module_name(ClassPid),
     case Module:start_link() of
         {ok, Pid} ->
+            ?LOG_INFO("Supervisor started", #{supervisor => ClassName, module => Module, pid => Pid}),
             {beamtalk_supervisor, ClassName, Module, Pid};
         {error, {already_started, Pid}} ->
             {beamtalk_supervisor, ClassName, Module, Pid};
         {error, Reason} ->
+            ?LOG_ERROR("Supervisor start failed", #{
+                supervisor => ClassName, module => Module, reason => Reason
+            }),
             Error = beamtalk_error:new(
                 runtime_error,
                 ClassName,
@@ -110,8 +114,17 @@ static_init(Module, ClassName) ->
     BtStrategy = call_class_method_direct(ClassName, Module, class_strategy, ClassSelf, ClassVars),
     MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf, ClassVars),
     MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf, ClassVars),
-    SupFlags = #{strategy => to_otp_strategy(BtStrategy), intensity => MaxR, period => MaxT},
+    Strategy = to_otp_strategy(BtStrategy),
+    SupFlags = #{strategy => Strategy, intensity => MaxR, period => MaxT},
     Specs = build_child_specs(Children),
+    ChildIds = [maps:get(id, S) || S <- Specs],
+    ?LOG_DEBUG("Supervisor static init", #{
+        supervisor => ClassName,
+        strategy => Strategy,
+        max_restarts => MaxR,
+        restart_window => MaxT,
+        children => ChildIds
+    }),
     {ok, {SupFlags, Specs}}.
 
 %% @doc Initialize a dynamic supervisor without calling through the class gen_server.
@@ -129,6 +142,12 @@ dynamic_init(Module, ClassName) ->
     MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf, ClassVars),
     SupFlags = #{strategy => simple_one_for_one, intensity => MaxR, period => MaxT},
     Specs = build_child_specs([ChildClass]),
+    ?LOG_DEBUG("DynamicSupervisor init", #{
+        supervisor => ClassName,
+        strategy => simple_one_for_one,
+        max_restarts => MaxR,
+        restart_window => MaxT
+    }),
     {ok, {SupFlags, Specs}}.
 
 %% @doc Return the running supervisor instance, or nil if not started.
@@ -218,6 +237,9 @@ terminateChild(Self, Arg) ->
                 ChildId = beamtalk_object_class:class_name(ChildClassPid),
                 case supervisor:terminate_child(SupPid, ChildId) of
                     ok ->
+                        ?LOG_INFO("Supervisor child terminated", #{
+                            supervisor => SupClass, child => ChildId
+                        }),
                         nil;
                     {error, Reason} ->
                         Error = beamtalk_error:new(
@@ -233,6 +255,9 @@ terminateChild(Self, Arg) ->
                 ChildPid = element(4, Arg),
                 case supervisor:terminate_child(SupPid, ChildPid) of
                     ok ->
+                        ?LOG_INFO("DynamicSupervisor child terminated", #{
+                            supervisor => SupClass, child_pid => ChildPid
+                        }),
                         nil;
                     {error, not_found} ->
                         Error = beamtalk_error:new(
@@ -273,8 +298,17 @@ startChild(Self) ->
     with_live_supervisor(SupClass, startChild, fun() ->
         case supervisor:start_child(SupPid, []) of
             {ok, ChildPid} ->
+                ?LOG_INFO("DynamicSupervisor child started", #{
+                    supervisor => SupClass,
+                    child => ChildClass,
+                    module => ChildModule,
+                    child_pid => ChildPid
+                }),
                 wrap_child(ChildClass, ChildModule, ChildPid);
             {error, Reason} ->
+                ?LOG_ERROR("DynamicSupervisor child start failed", #{
+                    supervisor => SupClass, child => ChildClass, reason => Reason
+                }),
                 Error = beamtalk_error:new(
                     runtime_error,
                     SupClass,
@@ -304,8 +338,17 @@ startChild(Self, Args) ->
     with_live_supervisor(SupClass, 'startChild:', fun() ->
         case supervisor:start_child(SupPid, [Args]) of
             {ok, ChildPid} ->
+                ?LOG_INFO("DynamicSupervisor child started", #{
+                    supervisor => SupClass,
+                    child => ChildClass,
+                    module => ChildModule,
+                    child_pid => ChildPid
+                }),
                 wrap_child(ChildClass, ChildModule, ChildPid);
             {error, Reason} ->
+                ?LOG_ERROR("DynamicSupervisor child start failed", #{
+                    supervisor => SupClass, child => ChildClass, reason => Reason
+                }),
                 Error = beamtalk_error:new(
                     runtime_error,
                     SupClass,
@@ -340,6 +383,7 @@ stop(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
     with_live_supervisor(ClassName, stop, fun() ->
+        ?LOG_INFO("Supervisor stopping", #{supervisor => ClassName, pid => Pid}),
         gen_server:stop(Pid),
         nil
     end).
@@ -611,6 +655,9 @@ with_live_supervisor(ClassName, Selector, Fun) ->
         exit:{noproc, _} ->
             %% supervisor:* calls use gen_server:call internally, which exits
             %% with {noproc, MFA} when the target process is dead.
+            ?LOG_WARNING("Supervisor stale handle", #{
+                supervisor => ClassName, selector => Selector
+            }),
             Error = beamtalk_error:new(
                 runtime_error,
                 ClassName,
@@ -620,6 +667,9 @@ with_live_supervisor(ClassName, Selector, Fun) ->
             error(beamtalk_exception_handler:ensure_wrapped(Error));
         exit:noproc ->
             %% gen_server:stop/1 exits with the bare atom noproc (no MFA wrapper).
+            ?LOG_WARNING("Supervisor stale handle", #{
+                supervisor => ClassName, selector => Selector
+            }),
             Error = beamtalk_error:new(
                 runtime_error,
                 ClassName,

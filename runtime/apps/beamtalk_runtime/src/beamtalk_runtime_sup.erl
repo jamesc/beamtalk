@@ -10,10 +10,19 @@
 -export([start_link/0]).
 -export([init/1]).
 
+-include_lib("kernel/include/logger.hrl").
+
 %% @doc Start the runtime supervisor.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    Result = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
+    case Result of
+        {ok, Pid} ->
+            ?LOG_INFO("Runtime supervisor started", #{pid => Pid});
+        _ ->
+            ok
+    end,
+    Result.
 
 %% @private
 init([]) ->
@@ -71,4 +80,8 @@ init([]) ->
         }
     ],
 
+    ChildIds = [maps:get(id, S) || S <- ChildSpecs],
+    ?LOG_DEBUG("Runtime supervisor init", #{
+        strategy => one_for_one, intensity => 5, period => 10, children => ChildIds
+    }),
     {ok, {SupFlags, ChildSpecs}}.
