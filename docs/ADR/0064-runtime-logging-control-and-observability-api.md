@@ -1,7 +1,7 @@
 # ADR 0064: Runtime Logging Control and Observability API
 
 ## Status
-Proposed (2026-03-17)
+Accepted (2026-03-17)
 
 ## Context
 
