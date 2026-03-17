@@ -244,9 +244,7 @@ after_timer_dies_when_caller_dies_test() ->
         after 1000 -> error(timeout)
         end,
     wait_for_exit(Wrapper, 1000),
-    %% Give the linked timer a moment to process the EXIT
-    timer:sleep(50),
-    ?assertNot(erlang:is_process_alive(maps:get(pid, T))).
+    wait_for_exit(maps:get(pid, T), 1000).
 
 every_timer_dies_when_caller_dies_test() ->
     Parent = self(),
@@ -261,5 +259,4 @@ every_timer_dies_when_caller_dies_test() ->
         after 1000 -> error(timeout)
         end,
     wait_for_exit(Wrapper, 1000),
-    timer:sleep(50),
-    ?assertNot(erlang:is_process_alive(maps:get(pid, T))).
+    wait_for_exit(maps:get(pid, T), 1000).
