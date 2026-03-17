@@ -41,13 +41,17 @@ Actors gain an optional `handleInfo:` method that receives raw Erlang messages. 
 ```beamtalk
 Actor subclass: Ticker
   state: count = 0
+  state: timer = nil
 
   initialize =>
-    Timer every: 1000 do: [self tick!]   // async cast avoids blocking timer process
+    self.timer := Timer every: 1000 do: [self tick!]   // async cast — MUST use ! not .
 
   tick => self.count := self.count + 1
   getValue => self.count
+  terminate: reason => self.timer cancel
 ```
+
+**Important:** The block passed to `Timer every:do:` executes in the Timer's process, not the actor's. Always use `!` (async cast) for sends back to the actor — using `.` (sync call) will deadlock the Timer process waiting for a reply from a potentially busy actor. Always cancel timers in `terminate:` — the Timer process is unlinked and will otherwise keep ticking into a dead pid indefinitely.
 
 #### `handleInfo:` escape hatch (for OTP interop)
 
@@ -82,24 +86,73 @@ Object subclass: NotAnActor
   handleInfo: msg => msg   // => Error: handleInfo: is only valid on Actor subclasses
 ```
 
+#### Semantics and error contract
+
+**Return value:** The return value of `handleInfo:` is always discarded. The method is called for its side effects (state mutation, logging, spawning work). The codegen extracts the updated state from the dispatch result and returns `{noreply, NewState}` to OTP.
+
+**Error handling:** If `handleInfo:` raises a Beamtalk error (DNU, match failure, etc.), the generated `handle_info/2` logs a warning via `?LOG_WARNING` and returns `{noreply, State}` with the pre-call state. The actor does **not** crash.
+
+This is a **deliberate divergence from OTP**: Erlang's gen_server crashes the process on an unmatched `handle_info` clause, triggering supervisor restart. Beamtalk swallows the error because:
+- `handle_info` messages come from external sources — crashing on an unexpected message format punishes the receiver for the sender's mistake
+- Supervised actors would enter crash loops from persistent unexpected messages (e.g., stale timer ticks after hot reload)
+- The "let it crash" philosophy applies to *business logic* failures, not message format surprises
+
+If the user wants crash-on-error semantics, they can re-raise explicitly:
+
+```beamtalk
+handleInfo: msg =>
+  msg match: [
+    #tick -> [self doWork];
+    _ -> Error signal: "Unexpected info message: " ++ msg displayString
+  ]
+```
+
+**Deadlock rules (ADR 0043 applies):** `handleInfo:` executes inside the actor's gen_server process. The same sync-call deadlock rules from ADR 0043 apply: if your handler calls another actor via `.` (sync) that may call back into `self`, it will deadlock. Use `!` (async cast) for outbound sends from `handleInfo:` when re-entrant calls are possible.
+
+#### Timer cleanup
+
+When using the Timer API (`Timer every: 1000 do: [self tick!]`), the Timer spawns an **unlinked, unmonitored** process. If the actor dies without cancelling, the Timer process continues ticking — its `self tick!` casts silently succeed (OTP's `gen_server:cast` to a dead pid returns `ok`) and the timer lives forever. This is why the recommended Ticker example above includes `terminate: reason => self.timer cancel`.
+
+The `handleInfo:` + `send_after` pattern avoids this issue entirely — timer messages are delivered to the actor's own mailbox and stop when the process dies.
+
+#### trap_exit interaction
+
+Actors that set `process_flag(trap_exit, true)` via Erlang FFI will receive `{'EXIT', Pid, Reason}` tuples in `handleInfo:`. This interacts with `onExit:` (BT-1442): if a monitored process is also linked, the actor receives both a `{'DOWN', ...}` tuple (from the monitor) and an `{'EXIT', ...}` tuple (from the trapped link). This double-notification scenario is not prevented — users combining `trap_exit` with `onExit:` must handle deduplication themselves. Explicit `trap_exit` support is not a first-class Beamtalk feature; it is available only through the Erlang FFI escape hatch.
+
+#### Testing handleInfo:
+
+BUnit tests can trigger `handleInfo:` by using `Erlang erlang send:` to send raw messages to the actor's pid:
+
+```beamtalk
+testHandleInfoTick =>
+  worker := PeriodicWorker spawn.
+  Erlang erlang send: worker pid msg: #tick.
+  Timer sleep: 50.
+  self assert: worker getValue equals: 2   // 1 from initialize + 1 from test
+```
+
 #### Codegen changes
 
-The generated `handle_info/2` callback changes from unconditional delegation to conditional dispatch:
+The generated `handle_info/2` callback changes from unconditional delegation to conditional dispatch. The codegen must check whether `handleInfo:` is defined **anywhere in the class hierarchy** (not just the immediate class), since `dispatch` walks the inheritance chain and would otherwise fall through to `doesNotUnderstand:` — crashing the actor on a raw Erlang message.
 
 ```erlang
-% If the class defines handleInfo:
+% If the class (or any ancestor) defines handleInfo:
 'handle_info'/2 = fun (Msg, State) ->
     let Self = call 'beamtalk_actor':'make_self'(State) in
     case call 'Module':'dispatch'('handleInfo:', [Msg], Self, State) of
         <{'reply', _Result, NewState}> when 'true' -> {'noreply', NewState}
-        <{'error', _Error, NewState}> when 'true' -> {'noreply', NewState}
+        <{'error', _Error, NewState}> when 'true' ->
+            call 'logger':'warning'(<<"handleInfo: raised error">>, #{})
+            {'noreply', NewState}
         <_Other> when 'true' -> {'noreply', State}
     end
 
-% If the class does NOT define handleInfo: (current behavior, unchanged)
+% If NO class in the hierarchy defines handleInfo: (current behavior, unchanged)
 'handle_info'/2 = fun (_Msg, State) ->
     {'noreply', State}
 ```
+
+The `{'error', _Error, NewState}` arm logs a warning and continues with the error-arm state (which may include partial mutations). The `_Other` arm is a defensive catch-all that preserves the original state.
 
 ### Gap 2: Named Registration — Defer
 
@@ -115,6 +168,8 @@ Named registration (`spawnAs:` / `Actor named:`) is deferred to a dedicated ADR 
 - Supervision tree discovery is idiomatic OTP
 - Named registration adds complexity: name conflicts, crash recovery re-registration, global vs local scope
 - The runtime already supports `{local, Name}` in `beamtalk_actor:start_link/3` — the plumbing exists when we need it
+
+**Known limitation:** `which:` performs a linear scan via `supervisor:which_children/1` + `lists:search/2` — O(n) in the number of children. This is fine for static supervisors with a handful of children, but would be slow on DynamicSupervisors with thousands of children. Named registration would provide O(1) lookup. This is acceptable for v0.1 but is a motivating use case for the future named registration ADR.
 
 ### Gap 3: Links — Reject
 
@@ -137,10 +192,10 @@ Actor subclass: HttpServer
     Logger info: "Shutting down" metadata: #{"reason" => reason displayString}
 ```
 
-Shutdown timeout is configurable via `SupervisionSpec`:
+Shutdown timeout should be configurable via `SupervisionSpec`. Currently the shutdown value is hardcoded (5000ms for workers, `#infinity` for supervisors). BT-1451 or a follow-up should add `withShutdown:` to the fluent builder:
 
 ```beamtalk
-HttpServer supervisionSpec withShutdown: 30000   // 30s graceful shutdown
+HttpServer supervisionSpec withShutdown: 30000   // 30s graceful shutdown (new method)
 ```
 
 What BT-1451 must verify:
@@ -217,11 +272,12 @@ Pharo uses cooperative green threads sharing a heap — no actor isolation, no m
 ### Timer-Only (rejected alternative)
 - **Newcomer**: "I never need to think about OTP internals — `Timer every:` just works"
 - **Smalltalk purist**: "Clean — no Erlang tuples leak into my Smalltalk world"
-- **Language designer**: "Most elegant — one mechanism for everything, no escape hatches"
+- **Language designer**: "Having two timer mechanisms is genuinely confusing. Documentation must explain both, beginners will find both, and we'll forever answer 'why not just use handleInfo:?'. The Timer API saves 3 lines of boilerplate over send_after — is that worth a second mechanism with its own orphan-leak footgun? One mechanism, well-understood, is strictly simpler."
+- **Operator**: "Fewer moving parts. Timer processes are visible but unexplained in observer — 'what's that extra process?' One mechanism means one thing to debug."
 
 ### Raw `handleInfo:` Only (rejected alternative)
-- **BEAM veteran**: "I can use standard OTP patterns — `send_after`, DOWN handling, `trap_exit` — nothing hidden"
-- **Operator**: "Standard OTP — I know exactly what's happening at the BEAM level"
+- **BEAM veteran**: "I can use standard OTP patterns — `send_after`, DOWN handling, `trap_exit` — nothing hidden. Every Erlang dev knows handle_info. No orphaned timer processes, no cleanup in terminate:, no deadlock footgun from sync calls in Timer blocks."
+- **Operator**: "Standard OTP — I know exactly what's happening at the BEAM level. No extra processes to trace."
 
 ### Both — Timer API + `handleInfo:` escape hatch (decided)
 - **Newcomer**: "Timer works out of the box; I can go deeper when I'm ready"
@@ -261,29 +317,32 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 ### Negative
 - Two ways to do timers (Timer API vs `send_after` + `handleInfo:`) — documentation must clearly recommend Timer as default
 - `handleInfo:` exposes raw Erlang terms (tuples, atoms) — breaks the pure Beamtalk abstraction for users who use it
-- Deferring named registration means some OTP patterns require workarounds (`Supervisor which:`)
+- Timer API (`Timer every:`) spawns an unlinked process — if the actor dies without cancelling in `terminate:`, the timer keeps ticking into the void. Documentation must recommend cancelling timers in `terminate:`
+- Deferring named registration means some OTP patterns require workarounds (`Supervisor which:`), and `which:` is O(n) in child count
 
 ### Neutral
 - Rejecting links has no practical impact — no known use case requires them beyond what monitors + supervisors provide
 - Deferring hot code reload is low-risk — the current field migration handles development workflows
 - `handleInfo:` is opt-in — actors that don't define it behave exactly as before
+- `handleInfo:` errors are logged-and-swallowed (not crash-the-actor) — a deliberate divergence from OTP's default, justified by the external-message origin but surprising to Erlang veterans who expect crash semantics
+- `handleInfo:` return values are always discarded — the method is called for side effects only
 
 ## Implementation
 
 ### Phase 1: `handleInfo:` (M)
 **Affected components:** Parser (no changes), Codegen (callbacks.rs), Runtime (beamtalk_actor.erl)
 
-1. **Codegen:** In `generate_handle_info()` (callbacks.rs ~445-472), check if the class defines a `handleInfo:` method. If yes, generate dispatch to it; if no, generate the current ignore-all stub.
-2. **Runtime:** Add `Timer sendAfter:dest:msg:` class method to Timer.bt as convenience wrapper around `erlang:send_after/3`.
-3. **Validation:** Compile-time error if `handleInfo:` is defined on a non-Actor class.
-4. **Tests:** BUnit tests for timer ticks via `handleInfo:`, DOWN message handling, unknown message ignoring.
+1. **Codegen:** In `generate_handle_info()` (callbacks.rs ~445-472), check if the class **or any ancestor** defines a `handleInfo:` method. If yes, generate dispatch to it with error logging; if no, generate the current ignore-all stub.
+2. **Validation:** Compile-time error if `handleInfo:` is defined on a non-Actor class.
+3. **Tests:** BUnit tests for timer ticks via `handleInfo:` (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, and error-in-handler recovery. EUnit tests in `beamtalk_actor_tests.erl` for the dispatch path itself.
 
 ### Phase 2: Graceful Shutdown Verification (S) — BT-1451
 **Affected components:** Runtime (beamtalk_actor.erl, beamtalk_supervisor.erl)
 
 1. Verify `terminate:` receives `#shutdown` during supervisor stop
-2. Verify `SupervisionSpec #shutdown` timeout propagates to OTP child spec
-3. Add tests for shutdown ordering and timeout behavior
+2. Add `withShutdown:` to `SupervisionSpec` fluent builder (currently hardcoded to 5000ms / `#infinity`)
+3. Verify `SupervisionSpec #shutdown` timeout propagates correctly to OTP child spec
+4. Add tests for shutdown ordering and timeout behavior
 
 ### Deferred
 - Named registration (`spawnAs:` / `Actor named:`) — separate ADR post-v0.1
