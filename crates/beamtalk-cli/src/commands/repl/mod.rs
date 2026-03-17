@@ -615,6 +615,328 @@ mod timeout_warning_tests {
     }
 }
 
+/// Result of handling a single REPL command line.
+///
+/// Returned by [`handle_repl_command`] to tell the main loop what to do next.
+enum CommandResult {
+    /// The line was a command and has been handled; continue the loop.
+    Handled,
+    /// The user typed `:exit` / `:quit`; break out of the loop.
+    Exit,
+    /// The line is not a REPL command; fall through to expression evaluation.
+    NotACommand,
+}
+
+/// Dispatch a single REPL command (lines starting with `:`).
+///
+/// Extracted from the main loop to reduce nesting depth. Returns
+/// [`CommandResult::NotACommand`] when the line is not a recognised command
+/// so the caller can fall through to expression accumulation/evaluation.
+fn handle_repl_command(
+    line: &str,
+    client: &mut ReplClient,
+    last_loaded_path: &mut Option<(String, bool)>,
+) -> CommandResult {
+    match line {
+        ":exit" | ":quit" | ":q" => return CommandResult::Exit,
+        ":help" | ":h" | ":?" => {
+            print_help();
+            return CommandResult::Handled;
+        }
+        _ if line.starts_with(":help ") || line.starts_with(":h ") => {
+            handle_help_topic(line, client);
+            return CommandResult::Handled;
+        }
+        ":clear" => {
+            match client.clear_bindings() {
+                Ok(_) => println!("Bindings cleared."),
+                Err(e) => eprintln!("Error: {e}"),
+            }
+            return CommandResult::Handled;
+        }
+        ":bindings" | ":b" => {
+            handle_bindings(client);
+            return CommandResult::Handled;
+        }
+        _ if line.starts_with(":load ") || line.starts_with(":l ") => {
+            handle_load(line, client, last_loaded_path);
+            return CommandResult::Handled;
+        }
+        _ if line.starts_with(":reload ") || line.starts_with(":r ") => {
+            let raw = extract_command_arg(line, ":reload ", Some(":r "));
+            let class_name = strip_path_quotes(raw);
+            let expr = format!("{class_name} reload");
+            eval_and_display(client, &expr);
+            return CommandResult::Handled;
+        }
+        _ if line.starts_with(":unload ") => {
+            let class_name = extract_command_arg(line, ":unload ", None)
+                .trim()
+                .to_string();
+            if class_name.is_empty() {
+                eprintln!("Usage: :unload <ClassName>");
+            } else {
+                match client.unload(&class_name) {
+                    Ok(response) => display_eval_response(&response),
+                    Err(e) => eprintln!("Error: {e}"),
+                }
+            }
+            return CommandResult::Handled;
+        }
+        ":unload" => {
+            eprintln!("Usage: :unload <ClassName>");
+            return CommandResult::Handled;
+        }
+        ":reload" | ":r" => {
+            handle_reload_last(client, last_loaded_path.as_ref());
+            return CommandResult::Handled;
+        }
+        _ if line.starts_with(":test ") || line.starts_with(":t ") => {
+            let raw = extract_command_arg(line, ":test ", Some(":t "));
+            let class_name = raw.trim();
+            let expr = if class_name.is_empty() {
+                "Workspace test".to_string()
+            } else {
+                format!("Workspace test: {class_name}")
+            };
+            eval_and_display(client, &expr);
+            return CommandResult::Handled;
+        }
+        ":test" | ":t" => {
+            eval_and_display(client, "Workspace test");
+            return CommandResult::Handled;
+        }
+        ":show-codegen" | ":sc" => {
+            eprintln!("Usage: :show-codegen <expression>");
+            return CommandResult::Handled;
+        }
+        _ if line.starts_with(":show-codegen ") || line.starts_with(":sc ") => {
+            handle_show_codegen(line, client);
+            return CommandResult::Handled;
+        }
+        _ => {}
+    }
+
+    // Detect common commands typed without ':' prefix.
+    // Only match full command names to avoid false positives with
+    // single-letter variable names (e.g. `r`, `l`, `b`).
+    let first_word = line.split_whitespace().next().unwrap_or("");
+    if let Some(suggestion) = match first_word {
+        "load" => Some(":load"),
+        "reload" => Some(":reload"),
+        "unload" => Some(":unload"),
+        "help" => Some(":help"),
+        "exit" | "quit" => Some(":exit"),
+        "clear" => Some(":clear"),
+        "bindings" => Some(":bindings"),
+        "test" => Some(":test"),
+        "show-codegen" => Some(":show-codegen"),
+        _ => None,
+    } {
+        eprintln!("Hint: did you mean `{suggestion}`? REPL commands start with `:`");
+        return CommandResult::Handled;
+    }
+
+    CommandResult::NotACommand
+}
+
+/// Handle `:help <topic>` -- look up docs for a class or method.
+fn handle_help_topic(line: &str, client: &mut ReplClient) {
+    let args = extract_command_arg(line, ":help ", Some(":h "));
+
+    if args.is_empty() {
+        print_help();
+        return;
+    }
+
+    // Parse "ClassName", "ClassName selector",
+    // "ClassName class", or "ClassName class selector"
+    let tokens: Vec<&str> = args.split_whitespace().collect();
+    let (class_name, class_side, selector) = match tokens.as_slice() {
+        [cls] => (*cls, false, None),
+        [cls, sel] if *sel == "class" => (*cls, true, None),
+        [cls, mid, sel, ..] if *mid == "class" => (*cls, true, Some(*sel)),
+        [cls, sel, ..] => (*cls, false, Some(*sel)),
+        _ => (args, false, None),
+    };
+
+    match client.get_docs(class_name, class_side, selector) {
+        Ok(response) => {
+            if response.is_error() {
+                if let Some(msg) = response.error_message() {
+                    eprintln!("{msg}");
+                }
+            } else if let Some(docs) = &response.docs {
+                println!("{docs}");
+            }
+        }
+        Err(e) => eprintln!("Error: {e}"),
+    }
+}
+
+/// Handle `:bindings` -- display current REPL variable bindings.
+fn handle_bindings(client: &mut ReplClient) {
+    match client.get_bindings() {
+        Ok(response) => {
+            if let Some(serde_json::Value::Object(map)) = response.bindings {
+                if map.is_empty() {
+                    println!("No bindings.");
+                } else {
+                    for (name, value) in map {
+                        println!("  {name} = {}", format_value(&value));
+                    }
+                }
+            }
+        }
+        Err(e) => eprintln!("Error: {e}"),
+    }
+}
+
+/// Handle `:load <path>` -- load a file or directory.
+fn handle_load(line: &str, client: &mut ReplClient, last_loaded_path: &mut Option<(String, bool)>) {
+    let raw = extract_command_arg(line, ":load ", Some(":l "));
+    let path = strip_path_quotes(raw);
+
+    if path.is_empty() {
+        eprintln!("Usage: :load <path>");
+        return;
+    }
+
+    if Path::new(path).is_dir() {
+        load_directory(client, path, false);
+        *last_loaded_path = Some((path.to_string(), true));
+    } else {
+        let expr = format!("Workspace load: \"{}\"", escape_for_string_literal(path));
+        eval_and_display(client, &expr);
+        *last_loaded_path = Some((path.to_string(), false));
+    }
+}
+
+/// Handle `:reload` with no argument -- reload the last loaded path.
+fn handle_reload_last(client: &mut ReplClient, last_loaded_path: Option<&(String, bool)>) {
+    let Some((path, is_directory)) = last_loaded_path else {
+        eprintln!("No file or directory loaded yet. Use :load <path> first.");
+        return;
+    };
+    if *is_directory {
+        let display_path = path.trim_end_matches('/');
+        load_directory(client, display_path, true);
+    } else {
+        let expr = format!("Workspace load: \"{}\"", escape_for_string_literal(path));
+        eval_and_display(client, &expr);
+    }
+}
+
+/// Handle `:show-codegen <expr>` -- display generated Core Erlang.
+fn handle_show_codegen(line: &str, client: &mut ReplClient) {
+    let code = extract_command_arg(line, ":show-codegen ", Some(":sc "));
+    if code.is_empty() {
+        eprintln!("Usage: :show-codegen <expression>");
+        return;
+    }
+    match client.show_codegen(code) {
+        Ok(response) => {
+            if response.is_error() {
+                if let Some(msg) = response.error_message() {
+                    eprintln!("{}", display::format_error(msg));
+                }
+            } else if let Some(ref core) = response.core_erlang {
+                display::display_codegen(core);
+            }
+            if !response.is_error() && response.core_erlang.is_none() && response.warnings.is_none()
+            {
+                println!("No code generated.");
+            }
+            if let Some(ref warns) = response.warnings {
+                for w in warns {
+                    eprintln!("{}", color::paint(color::YELLOW, &format!("Warning: {w}")));
+                }
+            }
+        }
+        Err(e) => eprintln!("Error: {e}"),
+    }
+}
+
+/// Send an expression for evaluation and display the response.
+///
+/// Convenience wrapper used by several REPL command handlers.
+fn eval_and_display(client: &mut ReplClient, expr: &str) {
+    match client.eval(expr) {
+        Ok(response) => display_eval_response(&response),
+        Err(e) => eprintln!("Error: {e}"),
+    }
+}
+
+/// Evaluate with reconnect-on-failure logic.
+///
+/// Returns `true` if the REPL loop should break (fatal communication error).
+fn eval_with_reconnect(
+    client: &mut ReplClient,
+    rl: &Editor<ReplHelper, FileHistory>,
+    accumulated: &str,
+    interrupted: &Arc<AtomicBool>,
+) -> bool {
+    interrupted.store(false, Ordering::SeqCst);
+    match client.eval_interruptible(accumulated, interrupted) {
+        Ok(response) => {
+            display_eval_response(&response);
+            false
+        }
+        Err(e) => {
+            eprintln!("Communication error: {e}");
+            eprintln!("Attempting to reconnect to REPL backend...");
+            attempt_reconnect_and_retry(client, rl, accumulated, interrupted)
+        }
+    }
+}
+
+/// Try to reconnect and retry evaluation after a communication error.
+///
+/// Returns `true` if the REPL loop should break (fatal error).
+fn attempt_reconnect_and_retry(
+    client: &mut ReplClient,
+    rl: &Editor<ReplHelper, FileHistory>,
+    accumulated: &str,
+    interrupted: &Arc<AtomicBool>,
+) -> bool {
+    match client.reconnect() {
+        Ok(resumed) => {
+            if resumed {
+                eprintln!("Reconnected (session resumed). Retrying evaluation...");
+            } else {
+                eprintln!("Reconnected (new session). Retrying evaluation...");
+                // BT-1021: Emit updated session line so external consumers
+                // (e.g. VS Code) can track the new session ID.
+                if let Some(session_id) = client.session_id() {
+                    println!("[beamtalk] session: {session_id}");
+                }
+            }
+            // Keep the completion helper's session ID in sync
+            if let Some(h) = rl.helper() {
+                h.update_session_id(client.session_id());
+            }
+            // Reset interrupt flag for the retry attempt
+            interrupted.store(false, Ordering::SeqCst);
+            match client.eval_interruptible(accumulated, interrupted) {
+                Ok(response) => {
+                    display_eval_response(&response);
+                    false
+                }
+                Err(e2) => {
+                    eprintln!("Communication error after reconnect: {e2}");
+                    eprintln!("The REPL backend may have crashed. Exiting.");
+                    true
+                }
+            }
+        }
+        Err(re) => {
+            eprintln!("Reconnect failed: {re}");
+            eprintln!("The REPL backend may have crashed. Exiting.");
+            true
+        }
+    }
+}
+
 /// Display the output, warnings, errors, and value from an eval response.
 fn display_eval_response(response: &ReplResponse) {
     // Print captured stdout before value/error (BT-355)
@@ -652,10 +974,6 @@ fn display_eval_response(response: &ReplResponse) {
 /// Sets up rustyline with tab completion and history, registers the SIGINT
 /// handler, then enters the read-eval-print loop. Returns when the user
 /// types `:exit` / `:quit`, presses Ctrl-D, or a communication error occurs.
-#[expect(
-    clippy::too_many_lines,
-    reason = "REPL main loop handles many commands"
-)]
 pub(crate) fn repl_loop(
     client: &mut ReplClient,
     host: &str,
@@ -684,328 +1002,13 @@ pub(crate) fn repl_loop(
     let mut last_loaded_path: Option<(String, bool)> = None; // (path, is_directory)
     loop {
         let prompt = if line_buffer.is_empty() { "> " } else { "..> " };
-        match rl.readline(prompt) {
-            Ok(line) => {
-                let line = line.trim();
+        let readline = rl.readline(prompt);
 
-                // In multi-line mode, empty line continues accumulation
-                if line.is_empty() && line_buffer.is_empty() {
-                    continue;
-                }
-
-                // First line: check if it's a REPL command (only when not
-                // already accumulating a multi-line expression)
-                if line_buffer.is_empty() {
-                    // Add commands to history immediately. Expression history
-                    // is deferred until input is complete (avoids duplicates
-                    // for multi-line expressions).
-                    if line.starts_with(':') {
-                        let _ = rl.add_history_entry(line);
-                    }
-
-                    // Handle special commands
-                    match line {
-                        ":exit" | ":quit" | ":q" => {
-                            println!("Goodbye!");
-                            break;
-                        }
-                        ":help" | ":h" | ":?" => {
-                            print_help();
-                            continue;
-                        }
-                        _ if line.starts_with(":help ") || line.starts_with(":h ") => {
-                            let args = extract_command_arg(line, ":help ", Some(":h "));
-
-                            if args.is_empty() {
-                                print_help();
-                                continue;
-                            }
-
-                            // Parse "ClassName", "ClassName selector",
-                            // "ClassName class", or "ClassName class selector"
-                            let tokens: Vec<&str> = args.split_whitespace().collect();
-                            let (class_name, class_side, selector) = match tokens.as_slice() {
-                                [cls] => (*cls, false, None),
-                                [cls, sel] if *sel == "class" => (*cls, true, None),
-                                [cls, mid, sel, ..] if *mid == "class" => (*cls, true, Some(*sel)),
-                                [cls, sel, ..] => (*cls, false, Some(*sel)),
-                                _ => (args, false, None),
-                            };
-
-                            match client.get_docs(class_name, class_side, selector) {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("{msg}");
-                                        }
-                                    } else if let Some(docs) = &response.docs {
-                                        println!("{docs}");
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
-                            }
-                            continue;
-                        }
-                        ":clear" => {
-                            match client.clear_bindings() {
-                                Ok(_) => println!("Bindings cleared."),
-                                Err(e) => eprintln!("Error: {e}"),
-                            }
-                            continue;
-                        }
-                        ":bindings" | ":b" => {
-                            match client.get_bindings() {
-                                Ok(response) => {
-                                    if let Some(serde_json::Value::Object(map)) = response.bindings
-                                    {
-                                        if map.is_empty() {
-                                            println!("No bindings.");
-                                        } else {
-                                            for (name, value) in map {
-                                                println!("  {name} = {}", format_value(&value));
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
-                            }
-                            continue;
-                        }
-                        _ if line.starts_with(":load ") || line.starts_with(":l ") => {
-                            let raw = extract_command_arg(line, ":load ", Some(":l "));
-                            let path = strip_path_quotes(raw);
-
-                            if path.is_empty() {
-                                eprintln!("Usage: :load <path>");
-                                continue;
-                            }
-
-                            if Path::new(path).is_dir() {
-                                // Directory load: recursively find and load each .bt file via eval
-                                load_directory(client, path, false);
-                                last_loaded_path = Some((path.to_string(), true));
-                            } else {
-                                let expr = format!(
-                                    "Workspace load: \"{}\"",
-                                    escape_for_string_literal(path)
-                                );
-                                match client.eval(&expr) {
-                                    Ok(response) => display_eval_response(&response),
-                                    Err(e) => eprintln!("Error: {e}"),
-                                }
-                                last_loaded_path = Some((path.to_string(), false));
-                            }
-                            continue;
-                        }
-                        _ if line.starts_with(":reload ") || line.starts_with(":r ") => {
-                            let raw = extract_command_arg(line, ":reload ", Some(":r "));
-                            let class_name = strip_path_quotes(raw);
-                            // :reload Counter → Counter reload
-                            let expr = format!("{class_name} reload");
-                            match client.eval(&expr) {
-                                Ok(response) => display_eval_response(&response),
-                                Err(e) => eprintln!("Error: {e}"),
-                            }
-                            continue;
-                        }
-                        _ if line.starts_with(":unload ") => {
-                            let class_name = extract_command_arg(line, ":unload ", None)
-                                .trim()
-                                .to_string();
-                            if class_name.is_empty() {
-                                eprintln!("Usage: :unload <ClassName>");
-                            } else {
-                                match client.unload(&class_name) {
-                                    Ok(response) => display_eval_response(&response),
-                                    Err(e) => eprintln!("Error: {e}"),
-                                }
-                            }
-                            continue;
-                        }
-                        ":unload" => {
-                            eprintln!("Usage: :unload <ClassName>");
-                            continue;
-                        }
-                        ":reload" | ":r" => {
-                            // :reload (no arg) → reload the last loaded path (directory or file)
-                            if let Some((path, is_directory)) = &last_loaded_path {
-                                if *is_directory {
-                                    // Strip trailing slash for consistent message output
-                                    let display_path = path.trim_end_matches('/');
-                                    load_directory(client, display_path, true);
-                                } else {
-                                    let expr = format!(
-                                        "Workspace load: \"{}\"",
-                                        escape_for_string_literal(path)
-                                    );
-                                    match client.eval(&expr) {
-                                        Ok(response) => display_eval_response(&response),
-                                        Err(e) => eprintln!("Error: {e}"),
-                                    }
-                                }
-                            } else {
-                                eprintln!(
-                                    "No file or directory loaded yet. Use :load <path> first."
-                                );
-                            }
-                            continue;
-                        }
-                        _ if line.starts_with(":test ") || line.starts_with(":t ") => {
-                            let raw = extract_command_arg(line, ":test ", Some(":t "));
-                            let class_name = raw.trim();
-                            if class_name.is_empty() {
-                                // :test → Workspace test
-                                match client.eval("Workspace test") {
-                                    Ok(response) => display_eval_response(&response),
-                                    Err(e) => eprintln!("Error: {e}"),
-                                }
-                            } else {
-                                // :test CounterTest → Workspace test: CounterTest
-                                let expr = format!("Workspace test: {class_name}");
-                                match client.eval(&expr) {
-                                    Ok(response) => display_eval_response(&response),
-                                    Err(e) => eprintln!("Error: {e}"),
-                                }
-                            }
-                            continue;
-                        }
-                        ":test" | ":t" => {
-                            // :test → Workspace test
-                            match client.eval("Workspace test") {
-                                Ok(response) => display_eval_response(&response),
-                                Err(e) => eprintln!("Error: {e}"),
-                            }
-                            continue;
-                        }
-                        // BT-724: :show-codegen / :sc command
-                        ":show-codegen" | ":sc" => {
-                            eprintln!("Usage: :show-codegen <expression>");
-                            continue;
-                        }
-                        _ if line.starts_with(":show-codegen ") || line.starts_with(":sc ") => {
-                            let code = extract_command_arg(line, ":show-codegen ", Some(":sc "));
-                            if code.is_empty() {
-                                eprintln!("Usage: :show-codegen <expression>");
-                                continue;
-                            }
-                            match client.show_codegen(code) {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("{}", display::format_error(msg));
-                                        }
-                                    } else if let Some(ref core) = response.core_erlang {
-                                        display::display_codegen(core);
-                                    }
-                                    if !response.is_error()
-                                        && response.core_erlang.is_none()
-                                        && response.warnings.is_none()
-                                    {
-                                        println!("No code generated.");
-                                    }
-                                    if let Some(ref warns) = response.warnings {
-                                        for w in warns {
-                                            eprintln!(
-                                                "{}",
-                                                color::paint(
-                                                    color::YELLOW,
-                                                    &format!("Warning: {w}")
-                                                )
-                                            );
-                                        }
-                                    }
-                                }
-                                Err(e) => eprintln!("Error: {e}"),
-                            }
-                            continue;
-                        }
-                        _ => {}
-                    }
-
-                    // Detect common commands typed without ':' prefix.
-                    // Only match full command names to avoid false positives with
-                    // single-letter variable names (e.g. `r`, `l`, `b`).
-                    let first_word = line.split_whitespace().next().unwrap_or("");
-                    if let Some(suggestion) = match first_word {
-                        "load" => Some(":load"),
-                        "reload" => Some(":reload"),
-                        "unload" => Some(":unload"),
-                        "help" => Some(":help"),
-                        "exit" | "quit" => Some(":exit"),
-                        "clear" => Some(":clear"),
-                        "bindings" => Some(":bindings"),
-                        "test" => Some(":test"),
-                        "show-codegen" => Some(":show-codegen"),
-                        _ => None,
-                    } {
-                        eprintln!(
-                            "Hint: did you mean `{suggestion}`? REPL commands start with `:`"
-                        );
-                        continue;
-                    }
-                } // end if line_buffer.is_empty() (command handling)
-
-                // Accumulate input for multi-line expression detection
-                line_buffer.push(line.to_string());
-                let accumulated = line_buffer.join("\n");
-
-                if !is_input_complete(&accumulated) {
-                    // Input is incomplete — continue reading
-                    continue;
-                }
-
-                // Input is complete — add to history as single entry and evaluate
-                let _ = rl.add_history_entry(&accumulated);
-
-                // Evaluate expression (BT-666: interruptible via Ctrl-C)
-                // Clear any stale interrupt flag before starting eval
-                interrupted.store(false, Ordering::SeqCst);
-                match client.eval_interruptible(&accumulated, &interrupted) {
-                    Ok(response) => display_eval_response(&response),
-                    Err(e) => {
-                        eprintln!("Communication error: {e}");
-                        eprintln!("Attempting to reconnect to REPL backend...");
-                        match client.reconnect() {
-                            Ok(resumed) => {
-                                if resumed {
-                                    eprintln!(
-                                        "Reconnected (session resumed). Retrying evaluation..."
-                                    );
-                                } else {
-                                    eprintln!("Reconnected (new session). Retrying evaluation...");
-                                    // BT-1021: Emit updated session line so external consumers
-                                    // (e.g. VS Code) can track the new session ID.
-                                    if let Some(session_id) = client.session_id() {
-                                        println!("[beamtalk] session: {session_id}");
-                                    }
-                                }
-                                // Keep the completion helper's session ID in sync
-                                if let Some(h) = rl.helper() {
-                                    h.update_session_id(client.session_id());
-                                }
-                                // Reset interrupt flag for the retry attempt
-                                interrupted.store(false, Ordering::SeqCst);
-                                match client.eval_interruptible(&accumulated, &interrupted) {
-                                    Ok(response) => display_eval_response(&response),
-                                    Err(e2) => {
-                                        eprintln!("Communication error after reconnect: {e2}");
-                                        eprintln!("The REPL backend may have crashed. Exiting.");
-                                        break;
-                                    }
-                                }
-                            }
-                            Err(re) => {
-                                eprintln!("Reconnect failed: {re}");
-                                eprintln!("The REPL backend may have crashed. Exiting.");
-                                break;
-                            }
-                        }
-                    }
-                }
-                line_buffer.clear();
-            }
+        // Handle readline errors (Ctrl+C, Ctrl+D, I/O errors)
+        let line = match readline {
+            Ok(line) => line,
             Err(ReadlineError::Interrupted) => {
-                // Ctrl+C — cancel multi-line input if buffering, otherwise just newline
+                // Ctrl+C -- cancel multi-line input if buffering, otherwise just newline
                 // BT-666: Clear the interrupt flag (signal handler also fires)
                 interrupted.store(false, Ordering::SeqCst);
                 if !line_buffer.is_empty() {
@@ -1013,9 +1016,9 @@ pub(crate) fn repl_loop(
                     eprintln!("Cancelled");
                 }
                 println!();
+                continue;
             }
             Err(ReadlineError::Eof) => {
-                // Ctrl+D - exit
                 println!("Goodbye!");
                 break;
             }
@@ -1023,7 +1026,50 @@ pub(crate) fn repl_loop(
                 eprintln!("Readline error: {e}");
                 break;
             }
+        };
+        let line = line.trim();
+
+        // In multi-line mode, empty line continues accumulation
+        if line.is_empty() && line_buffer.is_empty() {
+            continue;
         }
+
+        // First line: check if it's a REPL command (only when not
+        // already accumulating a multi-line expression)
+        if line_buffer.is_empty() {
+            // Add commands to history immediately. Expression history
+            // is deferred until input is complete (avoids duplicates
+            // for multi-line expressions).
+            if line.starts_with(':') {
+                let _ = rl.add_history_entry(line);
+            }
+
+            match handle_repl_command(line, client, &mut last_loaded_path) {
+                CommandResult::Handled => continue,
+                CommandResult::Exit => {
+                    println!("Goodbye!");
+                    break;
+                }
+                CommandResult::NotACommand => {}
+            }
+        }
+
+        // Accumulate input for multi-line expression detection
+        line_buffer.push(line.to_string());
+        let accumulated = line_buffer.join("\n");
+
+        if !is_input_complete(&accumulated) {
+            continue;
+        }
+
+        // Input is complete -- add to history as single entry and evaluate
+        let _ = rl.add_history_entry(&accumulated);
+
+        // Evaluate expression (BT-666: interruptible via Ctrl-C)
+        if eval_with_reconnect(client, &rl, &accumulated, &interrupted) {
+            break;
+        }
+        line_buffer.clear();
     }
 
     // Save history
