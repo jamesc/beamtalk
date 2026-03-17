@@ -99,16 +99,10 @@ Server subclass: PeriodicWorker
   getValue => self.count
 ```
 
-`handleInfo:` is only available on `Server` subclasses. Defining it on an `Actor` subclass is a compile error with an actionable message:
-
-```
-error: handleInfo: is only available on Server subclasses.
-  --> src/MyActor.bt:5:3
-   |
- 5 |   handleInfo: msg => ...
-   |   ^^^^^^^^^^^
-   = hint: Change 'Actor subclass:' to 'Server subclass:'
-```
+`handleInfo:` is defined on `Server` with a default no-op implementation (`handleInfo: msg => nil`). Actor does not define it. This means:
+- Server subclasses can override `handleInfo:` to handle raw messages
+- Sending `handleInfo:` to a plain Actor raises a normal `doesNotUnderstand` — no special-case compiler code needed
+- The codegen uses `is_server_subclass()` to decide which `handle_info/2` to generate (dispatch vs ignore stub), following the same pattern as the existing `is_supervisor_subclass` check
 
 #### Migration: Actor to Server
 
@@ -420,13 +414,13 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 ### Phase 1: Server class and handleInfo: (M)
 **Affected components:** Stdlib (Server.bt), Codegen (callbacks.rs, actor detection), Runtime (beamtalk_actor.erl)
 
-1. **Stdlib:** Add `Server.bt` — `abstract Actor subclass: Server` with doc comments explaining its role as the BEAM-level OTP escape hatch. No new methods in the .bt file itself; the capabilities are unlocked by codegen detecting Server ancestry. Verify that `Server.bt` generates a correct `init/1` that passes `InitArgs` through the two-hop chain (`UserClass → server:init → Actor base`), including `spawnWith:` args.
+1. **Stdlib:** Add `Server.bt` — `abstract Actor subclass: Server` with a default `handleInfo: msg => nil` (overridable no-op). Actor does not define `handleInfo:` — plain Actors raise DNU if sent this message. Verify that `Server.bt` generates a correct `init/1` that passes `InitArgs` through the two-hop chain (`UserClass → server:init → Actor base`), including `spawnWith:` args.
 2. **Hierarchy resolution:** Add `is_server_subclass()` to `ClassHierarchy`, following the existing `is_supervisor_subclass` pattern. Enrich `class_superclass_index` in the package compiler so cross-file inheritance (`Server subclass: Foo` in one file, `Foo subclass: Bar` in another) resolves correctly — analogous to how `Actor` is handled today.
 3. **Codegen:** In `generate_handle_info()` (callbacks.rs ~445-472), check if the class is a Server subclass via `is_server_subclass()`. If yes, generate dispatch to `handleInfo:` with error logging; if no (plain Actor), generate the current ignore-all stub.
-4. **Validation:** Compile-time error with actionable hint if `handleInfo:` is defined on a non-Server class.
+4. **No special validation needed:** `handleInfo:` is a regular method on Server. Actor doesn't define it — DNU is the natural error. The codegen `is_server_subclass()` check determines which `handle_info/2` to generate.
 4. **Timer: `spawn` → `spawn_link`:** Change `beamtalk_timer.erl` to use `spawn_link` instead of `spawn` for `after:do:` and `every:do:`. This links the Timer process to the calling process, ensuring automatic cleanup on caller death. The existing `catch Block()` in the timer loop prevents block errors from crashing the Timer process.
 5. **Lint — sync send in Timer block:** Warn when a `self method.` (sync call) appears inside a `Timer every:do:` or `Timer after:do:` block. Suggest `self method!` (async cast) instead.
-7. **Tests:** BUnit tests for Server + handleInfo: (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, error-in-handler recovery, and Actor-rejects-handleInfo: compile error. Integration tests for the two-hop init chain (`Server subclass: Foo` with `spawn` and `spawnWith:`). EUnit tests for the dispatch path and Timer `spawn_link` behavior. Lint tests for sync-in-block warning.
+7. **Tests:** BUnit tests for Server + handleInfo: (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, error-in-handler recovery. Integration tests for the two-hop init chain (`Server subclass: Foo` with `spawn` and `spawnWith:`). EUnit tests for the dispatch path and Timer `spawn_link` behavior. Lint tests for sync-in-block warning.
 
 ### Phase 2: Graceful Shutdown Verification (S) — BT-1451
 **Affected components:** Runtime (beamtalk_actor.erl, beamtalk_supervisor.erl), Stdlib (SupervisionSpec.bt)
