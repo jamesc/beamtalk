@@ -248,9 +248,10 @@ fn build_script_eval_cmd(
 ) -> String {
     format!(
         "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
-         {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
-                                                          project_path => <<\"{project_path_escaped}\">>, \
-                                                          repl => false}}), \
+         {{ok, _}} = beamtalk_workspace_sup:start_link(\
+         #{{workspace_id => <<\"{workspace_id}\">>, \
+         project_path => <<\"{project_path_escaped}\">>, \
+         repl => false}}), \
          ClassPid = beamtalk_class_registry:whereis_class('{class_name}'), \
          case ClassPid of \
              undefined -> \

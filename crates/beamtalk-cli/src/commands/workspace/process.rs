@@ -126,7 +126,8 @@ pub fn start_detached_node(
     let project_path = get_workspace_metadata(workspace_id)?.project_path;
     let project_path_str = project_path
         .to_str()
-        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?;
+        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", project_path))?
+        .to_owned();
 
     // On Windows, escape backslashes in the project path for Erlang string syntax (BT-661)
     #[cfg(windows)]
@@ -177,25 +178,16 @@ pub fn start_detached_node(
         None => String::new(),
     };
 
-    let eval_cmd = format!(
-        "ok = file:write_file(\"{pid_file_path_str}\", os:getpid()), \
-         application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
-         application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
-         application:set_env(beamtalk_runtime, tcp_port, {port}), \
-         application:set_env(beamtalk_runtime, web_port, {web_port_erl}), \
-         {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
-         {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
-                                                          project_path => <<\"{project_path_str}\">>, \
-                                                          tcp_port => {port}, \
-                                                          bind_addr => {bind_addr_erl}, \
-                                                          web_port => {web_port_erl}, \
-                                                          auto_cleanup => {auto_cleanup}, \
-                                                          max_idle_seconds => {idle_timeout}}}), \
-         logger:remove_handler(default), \
-         {otp_app_start}\
-         {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
-         io:format(\"Workspace {workspace_id} started on port ~B~n\", [ActualPort]), \
-         receive stop -> ok end."
+    let eval_cmd = build_workspace_eval_cmd(
+        &pid_file_path_str,
+        workspace_id,
+        &project_path_str,
+        port,
+        &web_port_erl,
+        &bind_addr_erl,
+        auto_cleanup,
+        idle_timeout,
+        &otp_app_start,
     );
 
     // Write cookie to args file (BT-726: not visible in `ps aux`)
@@ -479,6 +471,45 @@ fn wait_for_tcp_ready(
              Ensure Erlang/OTP is installed correctly.{log_suffix}"
         )
     })
+}
+
+/// Build the Erlang `-eval` string for workspace node startup.
+///
+/// Separated from `start_detached_node` to reduce nesting depth and keep the
+/// format string at a manageable indentation level.
+#[allow(clippy::too_many_arguments)]
+fn build_workspace_eval_cmd(
+    pid_file_path_str: &str,
+    workspace_id: &str,
+    project_path_str: &str,
+    port: u16,
+    web_port_erl: &str,
+    bind_addr_erl: &str,
+    auto_cleanup: bool,
+    idle_timeout: u64,
+    otp_app_start: &str,
+) -> String {
+    format!(
+        "ok = file:write_file(\"{pid_file_path_str}\", os:getpid()), \
+         application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
+         application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
+         application:set_env(beamtalk_runtime, tcp_port, {port}), \
+         application:set_env(beamtalk_runtime, web_port, {web_port_erl}), \
+         {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+         {{ok, _}} = beamtalk_workspace_sup:start_link(\
+         #{{workspace_id => <<\"{workspace_id}\">>, \
+         project_path => <<\"{project_path_str}\">>, \
+         tcp_port => {port}, \
+         bind_addr => {bind_addr_erl}, \
+         web_port => {web_port_erl}, \
+         auto_cleanup => {auto_cleanup}, \
+         max_idle_seconds => {idle_timeout}}}), \
+         logger:remove_handler(default), \
+         {otp_app_start}\
+         {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
+         io:format(\"Workspace {workspace_id} started on port ~B~n\", [ActualPort]), \
+         receive stop -> ok end."
+    )
 }
 
 /// Read the PID written by the BEAM node to its workspace PID file.
