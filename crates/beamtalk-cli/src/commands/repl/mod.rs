@@ -717,26 +717,6 @@ fn handle_repl_command(
         _ => {}
     }
 
-    // Detect common commands typed without ':' prefix.
-    // Only match full command names to avoid false positives with
-    // single-letter variable names (e.g. `r`, `l`, `b`).
-    let first_word = line.split_whitespace().next().unwrap_or("");
-    if let Some(suggestion) = match first_word {
-        "load" => Some(":load"),
-        "reload" => Some(":reload"),
-        "unload" => Some(":unload"),
-        "help" => Some(":help"),
-        "exit" | "quit" => Some(":exit"),
-        "clear" => Some(":clear"),
-        "bindings" => Some(":bindings"),
-        "test" => Some(":test"),
-        "show-codegen" => Some(":show-codegen"),
-        _ => None,
-    } {
-        eprintln!("Hint: did you mean `{suggestion}`? REPL commands start with `:`");
-        return CommandResult::Handled;
-    }
-
     CommandResult::NotACommand
 }
 
