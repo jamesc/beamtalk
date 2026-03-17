@@ -60,6 +60,7 @@
             {'bt@stdlib@regex', 'Regex', 'Value'},
             {'bt@stdlib@result', 'Result', 'Value'},
             {'bt@stdlib@runtime_error', 'RuntimeError', 'Error'},
+            {'bt@stdlib@server', 'Server', 'Actor'},
             {'bt@stdlib@set', 'Set', 'Collection'},
             {'bt@stdlib@stack_frame', 'StackFrame', 'Value'},
             {'bt@stdlib@stream', 'Stream', 'Object'},

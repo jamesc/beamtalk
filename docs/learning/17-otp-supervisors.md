@@ -216,6 +216,16 @@ Key instance-side API:
 | `sup count` | Count running children |
 | `sup stop` | Shut down the supervisor and all children |
 
+## Graceful shutdown timeout
+
+By default, workers get 5000ms to shut down and nested supervisors get
+unlimited time. Use `withShutdown:` to override the timeout (in milliseconds)
+for children that need time to drain connections or flush state:
+
+```beamtalk
+HttpServer supervisionSpec withShutdown: 30000   // 30s graceful shutdown
+```
+
 ## Summary
 
 Static supervision tree:

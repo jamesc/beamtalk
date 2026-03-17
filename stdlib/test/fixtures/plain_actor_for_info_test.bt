@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1457: Plain Actor to verify it still ignores raw messages
+
+Actor subclass: PlainActorForInfoTest
+  state: count = 0
+
+  increment => self.count := self.count + 1
+
+  getCount => self.count

@@ -290,6 +290,14 @@ TestCase subclass: Ch11MultipleActors
     self assert: c2 getValue equals: 1
 ```
 
+## Actor vs Server
+
+Most actors use `Actor subclass:`. If you need to receive raw Erlang messages
+(timer events, monitor DOWN tuples, system messages), use `Server subclass:`
+instead. Server is an abstract subclass of Actor — migration is a one-word
+change. See the [Server documentation](../beamtalk-language-features.md#server--otp-interop-adr-0065)
+for details.
+
 ## Key differences from Value classes
 
 | Aspect         | Value class           | Actor                         |
