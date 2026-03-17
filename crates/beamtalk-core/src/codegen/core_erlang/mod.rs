@@ -2354,6 +2354,19 @@ impl CoreErlangGenerator {
             return Ok(self.generate_class_builder_register());
         }
 
+        // BT-1478: Logger intrinsics — generate inline logger:log/3 calls.
+        // These are the method bodies for Logger.bt's @intrinsic declarations.
+        // Direct `Logger warn:` calls are intercepted at the call site by
+        // try_generate_logger_intrinsic (which injects the caller's class/selector
+        // as metadata). This body path is reached only via indirect dispatch
+        // (e.g., perform:), in which case Logger's own class/selector metadata
+        // is appropriate.
+        if !is_quoted {
+            if let Some(doc) = self.try_generate_logger_body_intrinsic(name) {
+                return Ok(doc);
+            }
+        }
+
         // BT-340: For selector-based primitives, try to emit a direct BIF call
         // instead of delegating through a hand-written dispatch module.
         if is_quoted {
@@ -2394,6 +2407,95 @@ impl CoreErlangGenerator {
         Ok(Document::String(format!(
             "call '{runtime_module}':'dispatch'('{name}', [{params_str}], {self_var})"
         )))
+    }
+
+    /// BT-1478: Generates inline `logger:log/3` code for Logger @intrinsic bodies.
+    ///
+    /// Maps intrinsic names to OTP logger levels:
+    /// - `loggerDebug` / `loggerDebugMeta` → `debug`
+    /// - `loggerInfo` / `loggerInfoMeta` → `info`
+    /// - `loggerWarn` / `loggerWarnMeta` → `warning`
+    /// - `loggerError` / `loggerErrorMeta` → `error`
+    ///
+    /// Returns `None` for non-logger intrinsic names.
+    fn try_generate_logger_body_intrinsic(&mut self, name: &str) -> Option<Document<'static>> {
+        let (level, has_metadata) = match name {
+            "loggerDebug" => ("debug", false),
+            "loggerInfo" => ("info", false),
+            "loggerWarn" => ("warning", false),
+            "loggerError" => ("error", false),
+            "loggerDebugMeta" => ("debug", true),
+            "loggerInfoMeta" => ("info", true),
+            "loggerWarnMeta" => ("warning", true),
+            "loggerErrorMeta" => ("error", true),
+            _ => return None,
+        };
+
+        let params = self.current_method_params.clone();
+        let msg_param = params
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "Message".to_string());
+
+        let ctx_class = self.class_name();
+        let ctx_selector = self
+            .current_method_selector
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let metadata_map_doc = docvec![
+            "~{",
+            "'domain' => ['beamtalk' | ['user']], ",
+            "'beamtalk_class' => '",
+            Document::String(ctx_class),
+            "', ",
+            "'beamtalk_selector' => '",
+            Document::String(ctx_selector),
+            "'",
+            "}~",
+        ];
+
+        let discard_var = self.fresh_temp_var("LogOk");
+
+        let log_call_doc = if has_metadata {
+            let meta_param = params.get(1).cloned().unwrap_or_else(|| "Meta".to_string());
+            let merge_var = self.fresh_temp_var("LogMeta");
+            docvec![
+                "let ",
+                Document::String(merge_var.clone()),
+                " = call 'maps':'merge'(",
+                Document::String(meta_param),
+                ", ",
+                metadata_map_doc,
+                ") in call 'logger':'log'('",
+                Document::String(level.to_string()),
+                "', ",
+                Document::String(msg_param),
+                ", ",
+                Document::String(merge_var),
+                ")"
+            ]
+        } else {
+            docvec![
+                "call 'logger':'log'('",
+                Document::String(level.to_string()),
+                "', ",
+                Document::String(msg_param),
+                ", ",
+                metadata_map_doc,
+                ")"
+            ]
+        };
+
+        let doc = docvec![
+            "let ",
+            Document::String(discard_var),
+            " = ",
+            log_call_doc,
+            " in 'nil'"
+        ];
+
+        Some(doc)
     }
 
     /// ADR 0038: Generates code for the `classBuilderRegister` intrinsic.
