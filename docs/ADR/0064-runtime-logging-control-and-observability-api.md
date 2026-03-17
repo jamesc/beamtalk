@@ -534,8 +534,26 @@ Per-module level filtering via `logger:set_module_level/2` is evaluated *before*
 
 The test `sys.config` sets `logger_level` to `error` to suppress log noise during test runs. This is unaffected by the API changes — `Beamtalk logLevel:` modifies runtime state, not config files. E2e tests that check REPL output are unaffected since they use separate BEAM nodes with their own logger config.
 
+## Implementation Tracking
+
+**Epic:** BT-1434
+**Issues:** BT-1435, BT-1436, BT-1437, BT-1438, BT-1439, BT-1440, BT-1441
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Blocked by |
+|-------|-------|-------|------|------------|
+| 0 | BT-1435 | Inline Logger calls at compile time with domain metadata | M | — |
+| 1a | BT-1436 | Core logging config: logLevel, subsystem debug, loggerInfo | M | — |
+| 1b | BT-1437 | User-class and per-actor debug filtering | M | BT-1435, BT-1436 |
+| 1c | BT-1438 | Deprecate Logger setLevel: | S | BT-1436 |
+| 2 | BT-1439 | `beamtalk logs` CLI command | M | — |
+| 3 | BT-1440 | JSON log format switching | S | BT-1436, BT-1439 |
+| 4 | BT-1441 | MCP debug target (cross-boundary) | S | BT-1436, BT-1428 |
+
+**Parallel start:** BT-1435, BT-1436, BT-1439 can begin immediately.
+
 ## References
-- Related issues: BT-1423 (Runtime Observability Logging epic), BT-1424 (SASL), BT-1429 (Runtime metrics ADR)
+- Related issues: BT-1423 (Runtime Observability Logging epic), BT-1424 (SASL), BT-1429 (Runtime metrics ADR), BT-1434 (Implementation epic)
 - Related ADRs: ADR 0040 (Workspace-Native REPL Commands — two-object model), ADR 0010 (Global Objects and Singleton Dispatch)
 - OTP Logger docs: https://www.erlang.org/doc/apps/kernel/logger.html
 - Elixir Logger docs: https://hexdocs.pm/logger/Logger.html
