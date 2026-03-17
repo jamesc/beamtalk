@@ -197,16 +197,33 @@ init(_Args) ->
     %% Compile requests arriving before recovery completes are queued by the
     %% gen_server mailbox — they will not see an empty cache.
     Classes = recover_from_beam_modules(),
+    case map_size(Classes) of
+        0 ->
+            ok;
+        N ->
+            ?LOG_INFO("Recovered class cache from loaded BEAM modules", #{
+                classes_recovered => N,
+                class_names => maps:keys(Classes)
+            })
+    end,
     {ok, #state{port = Port, classes = Classes}}.
 
 handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
+    CacheSize = map_size(State#state.classes),
+    ?LOG_DEBUG("Compile expression", #{
+        module => ModuleName, cache_size => CacheSize
+    }),
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = beamtalk_compiler_port:compile_expression(
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),
     {reply, Result, State};
 handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, _From, State) ->
+    CacheSize = map_size(State#state.classes),
+    ?LOG_DEBUG("Compile expression (trace)", #{
+        module => ModuleName, cache_size => CacheSize
+    }),
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = beamtalk_compiler_port:compile_expression_trace(
         State#state.port, Source, ModuleName, KnownVars, Options1
@@ -214,6 +231,10 @@ handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, 
     {reply, Result, State};
 handle_call({compile, Source, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
+    CacheSize = map_size(State#state.classes),
+    ?LOG_DEBUG("Compile file", #{
+        path => maps:get(path, Options, undefined), cache_size => CacheSize
+    }),
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = do_compile(State#state.port, Source, Options1),
     {reply, Result, State};
@@ -238,6 +259,10 @@ handle_call(_Request, _From, State) ->
 
 handle_cast({register_class, ClassName, MetaMap}, State) ->
     %% ADR 0050 Phase 3: Accumulate class metadata; overwrite on redefinition.
+    IsRedefinition = maps:is_key(ClassName, State#state.classes),
+    ?LOG_DEBUG("Register class", #{
+        class => ClassName, redefinition => IsRedefinition
+    }),
     NewClasses = maps:put(ClassName, MetaMap, State#state.classes),
     {noreply, State#state{classes = NewClasses}};
 handle_cast(_Msg, State) ->
@@ -328,22 +353,45 @@ open_port() ->
 -spec send_port_request(port(), map(), timeout()) ->
     {ok, term()} | {exit_status, non_neg_integer()} | timeout | port_not_available | decode_error.
 send_port_request(Port, Request, Timeout) ->
+    Command = maps:get(command, Request, unknown),
+    ?LOG_DEBUG("Port request", #{command => Command}),
+    T0 = erlang:monotonic_time(millisecond),
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
         true ->
             receive
                 {Port, {data, ResponseBin}} ->
+                    Elapsed = erlang:monotonic_time(millisecond) - T0,
                     try binary_to_term(ResponseBin, [safe]) of
                         %% [safe] prevents atom exhaustion: all response atoms are
                         %% literals in this module and guaranteed to exist.
-                        Response -> {ok, Response}
+                        Response ->
+                            Status =
+                                case is_map(Response) of
+                                    true -> maps:get(status, Response, unknown);
+                                    false -> unknown
+                                end,
+                            ?LOG_DEBUG("Port response", #{
+                                command => Command,
+                                status => Status,
+                                elapsed_ms => Elapsed
+                            }),
+                            {ok, Response}
                     catch
                         error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error", #{port => Port}),
+                            ?LOG_ERROR("Compiler port decode error", #{
+                                port => Port, elapsed_ms => Elapsed
+                            }),
                             decode_error
                     end;
-                {Port, {exit_status, Status}} ->
-                    {exit_status, Status}
+                {Port, {exit_status, ExitStatus}} ->
+                    Elapsed = erlang:monotonic_time(millisecond) - T0,
+                    ?LOG_DEBUG("Port exit during request", #{
+                        command => Command,
+                        exit_status => ExitStatus,
+                        elapsed_ms => Elapsed
+                    }),
+                    {exit_status, ExitStatus}
             after Timeout ->
                 %% Close the port so any late response cannot poison the next request.
                 catch port_close(Port),
