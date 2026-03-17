@@ -48,12 +48,7 @@ impl Drop for ToolTimer {
     fn drop(&mut self) {
         let elapsed_ms = self.start.elapsed().as_millis() as u64;
         let status = if self.is_error { "error" } else { "ok" };
-        tracing::debug!(
-            tool = self.tool,
-            elapsed_ms,
-            status,
-            "tool completed"
-        );
+        tracing::debug!(tool = self.tool, elapsed_ms, status, "tool completed");
     }
 }
 
@@ -289,7 +284,12 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("evaluate");
         let use_trace = params.trace.unwrap_or(false);
-        tracing::debug!(tool = "evaluate", code_len = params.code.len(), trace = use_trace, "tool invoked");
+        tracing::debug!(
+            tool = "evaluate",
+            code_len = params.code.len(),
+            trace = use_trace,
+            "tool invoked"
+        );
         let response = self
             .client
             .evaluate_with_options(&params.code, use_trace)
