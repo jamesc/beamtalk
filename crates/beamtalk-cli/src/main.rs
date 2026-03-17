@@ -190,6 +190,10 @@ enum Command {
         #[arg(long)]
         level: Option<String>,
 
+        /// Expected log format for level filtering (text, json)
+        #[arg(long)]
+        format: Option<String>,
+
         /// Print the log file path and exit
         #[arg(long)]
         path: bool,
@@ -453,8 +457,15 @@ fn run() -> Result<()> {
             workspace,
             follow,
             level,
+            format,
             path,
-        } => commands::logs::run(workspace.as_deref(), follow, level.as_deref(), path),
+        } => commands::logs::run(
+            workspace.as_deref(),
+            follow,
+            level.as_deref(),
+            format.as_deref(),
+            path,
+        ),
         Command::Lint { path, format } => commands::lint::run_lint(&path, format),
         Command::Workspace { action } => commands::workspace::cli::run(action),
         Command::TestScript {

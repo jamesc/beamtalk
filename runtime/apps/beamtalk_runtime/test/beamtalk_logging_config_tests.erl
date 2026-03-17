@@ -32,6 +32,11 @@ logging_config_test_() ->
             fun logLevel_set_valid_changes_level/0,
             fun logLevel_set_invalid_returns_error/0,
             fun logLevel_set_non_atom_returns_error/0,
+            fun logFormat_returns_text_by_default/0,
+            fun logFormat_set_json_changes_format/0,
+            fun logFormat_set_text_restores_default/0,
+            fun logFormat_invalid_returns_error/0,
+            fun logFormat_non_atom_returns_error/0,
             fun debugTargets_returns_expected_list/0,
             fun enableDebug_valid_symbol_succeeds/0,
             fun enableDebug_invalid_symbol_returns_error/0,
@@ -78,6 +83,37 @@ logLevel_set_invalid_returns_error() ->
 
 logLevel_set_non_atom_returns_error() ->
     Result = beamtalk_logging_config:logLevel(<<"debug">>),
+    ?assertMatch(#beamtalk_error{kind = type_error}, Result).
+
+%%====================================================================
+%% Log format tests
+%%====================================================================
+
+logFormat_returns_text_by_default() ->
+    %% Without a beamtalk_file_log handler, the default should be text.
+    ?assertEqual(text, beamtalk_logging_config:logFormat()).
+
+logFormat_set_json_changes_format() ->
+    %% Install a temporary file handler so we can test format switching.
+    install_test_file_handler(),
+    ?assertEqual(nil, beamtalk_logging_config:logFormat(json)),
+    ?assertEqual(json, beamtalk_logging_config:logFormat()),
+    remove_test_file_handler().
+
+logFormat_set_text_restores_default() ->
+    install_test_file_handler(),
+    beamtalk_logging_config:logFormat(json),
+    ?assertEqual(json, beamtalk_logging_config:logFormat()),
+    ?assertEqual(nil, beamtalk_logging_config:logFormat(text)),
+    ?assertEqual(text, beamtalk_logging_config:logFormat()),
+    remove_test_file_handler().
+
+logFormat_invalid_returns_error() ->
+    Result = beamtalk_logging_config:logFormat(yaml),
+    ?assertMatch(#beamtalk_error{kind = type_error}, Result).
+
+logFormat_non_atom_returns_error() ->
+    Result = beamtalk_logging_config:logFormat(<<"json">>),
     ?assertMatch(#beamtalk_error{kind = type_error}, Result).
 
 debugTargets_returns_expected_list() ->
@@ -360,3 +396,25 @@ mcp_signal_file_with_workspace_test_() ->
                 end}
             ]
         end}.
+
+%%====================================================================
+%% Test helpers
+%%====================================================================
+
+%% @doc Install a temporary beamtalk_file_log handler for format-switching tests.
+install_test_file_handler() ->
+    _ = logger:remove_handler(beamtalk_file_log),
+    logger:add_handler(beamtalk_file_log, logger_std_h, #{
+        config => #{type => standard_io},
+        level => debug,
+        formatter =>
+            {logger_formatter, #{
+                template => [time, " [", level, "] ", msg, "\n"],
+                single_line => true
+            }}
+    }).
+
+%% @doc Remove the temporary beamtalk_file_log handler.
+remove_test_file_handler() ->
+    _ = logger:remove_handler(beamtalk_file_log),
+    ok.

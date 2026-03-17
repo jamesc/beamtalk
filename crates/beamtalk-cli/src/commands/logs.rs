@@ -19,6 +19,26 @@ use miette::{IntoDiagnostic, Result, miette};
 
 use super::workspace;
 
+/// Output format for log display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogFormat {
+    Text,
+    Json,
+}
+
+impl LogFormat {
+    /// Parse a log format from a CLI argument string.
+    pub fn from_str_arg(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "text" => Ok(Self::Text),
+            "json" => Ok(Self::Json),
+            _ => Err(miette!(
+                "Unknown log format '{s}'. Valid formats: text, json"
+            )),
+        }
+    }
+}
+
 /// Minimum severity levels for log filtering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
@@ -68,9 +88,11 @@ pub fn run(
     workspace_id: Option<&str>,
     follow: bool,
     level: Option<&str>,
+    format: Option<&str>,
     path_only: bool,
 ) -> Result<()> {
     let min_level = level.map(LogLevel::from_str_arg).transpose()?;
+    let log_format = format.map(LogFormat::from_str_arg).transpose()?;
 
     let log_path = resolve_log_path(workspace_id)?;
 
@@ -88,9 +110,9 @@ pub fn run(
     }
 
     if follow {
-        tail_follow(&log_path, min_level)
+        tail_follow(&log_path, min_level, log_format)
     } else {
-        show_last_lines(&log_path, 50, min_level)
+        show_last_lines(&log_path, 50, min_level, log_format)
     }
 }
 
@@ -120,14 +142,19 @@ fn resolve_log_path(workspace_id: Option<&str>) -> Result<PathBuf> {
 }
 
 /// Show the last `n` lines of the log file, optionally filtered by level.
-fn show_last_lines(path: &PathBuf, n: usize, min_level: Option<LogLevel>) -> Result<()> {
+fn show_last_lines(
+    path: &PathBuf,
+    n: usize,
+    min_level: Option<LogLevel>,
+    format: Option<LogFormat>,
+) -> Result<()> {
     let content = fs::read_to_string(path).into_diagnostic()?;
     let lines: Vec<&str> = content.lines().collect();
 
     let filtered: Vec<&str> = if let Some(min) = min_level {
         lines
             .into_iter()
-            .filter(|line| matches_level(line, min))
+            .filter(|line| matches_level(line, min, format))
             .collect()
     } else {
         lines
@@ -145,15 +172,47 @@ fn show_last_lines(path: &PathBuf, n: usize, min_level: Option<LogLevel>) -> Res
 ///
 /// Lines without a recognized level marker are always shown (they may be
 /// continuation lines from a multi-line log entry).
-fn matches_level(line: &str, min: LogLevel) -> bool {
+///
+/// When `format` is `Json`, attempts to extract the `"level"` field from
+/// the JSON object for filtering. Falls back to text-based detection.
+fn matches_level(line: &str, min: LogLevel, format: Option<LogFormat>) -> bool {
+    if format == Some(LogFormat::Json) {
+        if let Some(level) = extract_json_level(line) {
+            return level >= min;
+        }
+    }
     match LogLevel::from_log_line(line) {
         Some(line_level) => line_level >= min,
         None => true, // show continuation lines / lines without a level
     }
 }
 
+/// Extract the log level from a JSON log line by looking for `"level":"..."`.
+///
+/// Uses a simple substring search to avoid pulling in a JSON parser on the
+/// CLI side.
+fn extract_json_level(line: &str) -> Option<LogLevel> {
+    // Look for "level":"<value>" pattern
+    let marker = "\"level\":\"";
+    let start = line.find(marker)? + marker.len();
+    let end = line[start..].find('"')? + start;
+    let level_str = &line[start..end];
+    match level_str {
+        "debug" => Some(LogLevel::Debug),
+        "info" => Some(LogLevel::Info),
+        "notice" => Some(LogLevel::Notice),
+        "warning" => Some(LogLevel::Warning),
+        "error" => Some(LogLevel::Error),
+        _ => None,
+    }
+}
+
 /// Follow the log file, streaming new lines as they appear (poll-based).
-fn tail_follow(path: &PathBuf, min_level: Option<LogLevel>) -> Result<()> {
+fn tail_follow(
+    path: &PathBuf,
+    min_level: Option<LogLevel>,
+    format: Option<LogFormat>,
+) -> Result<()> {
     let file = File::open(path).into_diagnostic()?;
     let mut reader = BufReader::new(file);
 
@@ -171,7 +230,7 @@ fn tail_follow(path: &PathBuf, min_level: Option<LogLevel>) -> Result<()> {
             Ok(_) => {
                 let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
                 if let Some(min) = min_level {
-                    if matches_level(trimmed, min) {
+                    if matches_level(trimmed, min, format) {
                         println!("{trimmed}");
                     }
                 } else {
