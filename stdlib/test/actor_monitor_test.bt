@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1442: Tests for Actor monitor/pid/onExit: process monitoring API
+
+TestCase subclass: ActorMonitorTest
+
+  testPidReturnsAPid =>
+    counter := Counter spawn
+    rawPid := counter pid
+    self assert: rawPid class equals: Pid
+    self assert: rawPid isAlive
+    counter stop
+
+  testMonitorReturnsReference =>
+    counter := Counter spawn
+    ref := counter monitor
+    self assert: ref class equals: Reference
+    ref demonitor
+    counter stop
+
+  testDemonitorCancelsMonitor =>
+    counter := Counter spawn
+    ref := counter monitor
+    result := ref demonitor
+    self assert: result
+    counter stop
+
+  testOnExitCallsBlockOnActorDeath =>
+    counter := Counter spawn
+    exitCounter := AtomicCounter new: #actorMonitorTestExit
+    counter onExit: [:_reason | exitCounter increment]
+    counter stop
+    // Give the watcher process time to fire
+    Timer sleep: 50
+    self assert: exitCounter value equals: 1
+    exitCounter delete
+
+  testMultipleOnExitCallbacks =>
+    // Multiple onExit: callbacks can be registered on the same actor
+    counter := Counter spawn
+    exitCounter := AtomicCounter new: #actorMonitorTestMulti
+    counter onExit: [:_reason | exitCounter increment]
+    counter onExit: [:_reason | exitCounter increment]
+    counter stop
+    Timer sleep: 50
+    self assert: exitCounter value equals: 2
+    exitCounter delete
+
+  testRespondsToMonitorMethods =>
+    counter := Counter spawn
+    self assert: (counter respondsTo: #pid)
+    self assert: (counter respondsTo: #monitor)
+    self assert: (counter respondsTo: #onExit:)
+    counter stop
+
+  testErlangMonitorWithActorProxy =>
+    // Direct Erlang FFI monitor should work with actor proxy (auto-coercion)
+    counter := Counter spawn
+    ref := Erlang erlang monitor: #process arg: counter
+    self assert: ref class equals: Reference
+    Erlang erlang demonitor: ref
+    counter stop

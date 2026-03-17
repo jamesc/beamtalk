@@ -39,6 +39,14 @@ pub(crate) fn pid_extra(selector: &str) -> Option<Document<'static>> {
     }
 }
 
+pub(crate) fn reference_extra(selector: &str) -> Option<Document<'static>> {
+    match selector {
+        // BT-1442: demonitor cancels a monitor created by Actor>>monitor
+        "demonitor" => Some(Document::Str("call 'erlang':'demonitor'(Self)")),
+        _ => None,
+    }
+}
+
 pub(crate) fn no_extra(_selector: &str) -> Option<Document<'static>> {
     None
 }

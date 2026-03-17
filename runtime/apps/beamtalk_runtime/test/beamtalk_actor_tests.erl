@@ -1065,6 +1065,10 @@ respondsTo_inherited_methods_test() ->
 
     %% Actor-specific built-in should also be reported
     ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isAlive]})),
+    %% BT-1442: pid, monitor, onExit: should be reported
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [pid]})),
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [monitor]})),
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['onExit:']})),
 
     gen_server:stop(Counter).
 
@@ -1146,6 +1150,56 @@ monitor_delivers_down_on_actor_death_test() ->
     receive
         {'DOWN', Ref, process, Counter, normal} -> ok
     after 1000 ->
+        ?assert(false)
+    end.
+
+%%% BT-1442: pid tests
+
+pid_async_returns_pid_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, pid, [], Future),
+    Result = beamtalk_future:await(Future),
+    ?assert(is_pid(Result)),
+    ?assertEqual(Counter, Result),
+    gen_server:stop(Counter).
+
+pid_sync_returns_pid_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    Result = beamtalk_actor:sync_send(Counter, pid, []),
+    ?assert(is_pid(Result)),
+    ?assertEqual(Counter, Result),
+    gen_server:stop(Counter).
+
+%%% BT-1442: onExit: tests
+
+on_exit_sync_calls_block_on_death_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    Self = self(),
+    Block = fun(Reason) -> Self ! {exit_reason, Reason} end,
+    beamtalk_actor:sync_send(Counter, 'onExit:', [Block]),
+    gen_server:stop(Counter, normal, 1000),
+    %% Give the watcher process time to be scheduled and call the block
+    timer:sleep(50),
+    receive
+        {exit_reason, normal} -> ok
+    after 2000 ->
+        ?assert(false)
+    end.
+
+on_exit_async_calls_block_on_death_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    Self = self(),
+    Block = fun(Reason) -> Self ! {exit_reason_async, Reason} end,
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, 'onExit:', [Block], Future),
+    ?assertEqual(ok, beamtalk_future:await(Future)),
+    gen_server:stop(Counter, normal, 1000),
+    %% Give the watcher process time to be scheduled and call the block
+    timer:sleep(50),
+    receive
+        {exit_reason_async, normal} -> ok
+    after 2000 ->
         ?assert(false)
     end.
 

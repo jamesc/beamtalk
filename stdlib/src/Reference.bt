@@ -50,5 +50,19 @@ sealed Object subclass: Reference
   /// ```
   /= other -> Boolean => @primitive "/="
 
+  /// Cancel a monitor associated with this reference.
+  ///
+  /// If this reference was returned by `Actor>>monitor`, calling `demonitor`
+  /// prevents future `DOWN` messages from being delivered. Note that a `DOWN`
+  /// message already in the caller's mailbox is not removed — use
+  /// `Erlang erlang demonitor: ref arg: #(#flush)` if you need to flush it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ref := actor monitor
+  /// ref demonitor          // => true
+  /// ```
+  demonitor -> Boolean => @primitive "demonitor"
+
   /// Return a hash value for the reference.
   hash -> Integer => @primitive "hash"

@@ -92,7 +92,7 @@ pub fn generate_primitive_bif(
             selector,
             params,
             "call 'beamtalk_opaque_ops':'ref_to_string'(Self)",
-            actor_types::no_extra,
+            actor_types::reference_extra,
         ),
         "Future" => actor_types::generate_future_bif(selector, params),
         "FileHandle" => actor_types::generate_file_handle_bif(selector, params),
