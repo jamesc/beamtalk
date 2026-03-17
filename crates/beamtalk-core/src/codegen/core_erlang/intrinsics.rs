@@ -1747,6 +1747,142 @@ impl CoreErlangGenerator {
 
         Ok(None)
     }
+
+    /// BT-1435: Tries to generate inline `logger:log/3` calls for Logger class sends.
+    ///
+    /// Recognizes `Logger debug:`, `Logger info:`, `Logger warn:`, `Logger error:`
+    /// (and their `*:metadata:` variants) and generates direct OTP `logger:log/3`
+    /// calls with domain metadata injected at the call site.
+    ///
+    /// `Logger setLevel:` is NOT inlined — it continues through normal class dispatch
+    /// to `beamtalk_logger.erl`.
+    ///
+    /// - Returns `Ok(Some(doc))` if the message was a Logger intrinsic
+    /// - Returns `Ok(None)` if not a Logger message (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # Generated Code
+    ///
+    /// For `Logger debug: "msg"`:
+    /// ```erlang
+    /// call 'logger':'log'('debug', <<"msg">>, #{
+    ///     'domain' => ['beamtalk', 'user'],
+    ///     'beamtalk_class' => 'Counter',
+    ///     'beamtalk_selector' => 'increment'
+    /// })
+    /// ```
+    ///
+    /// For `Logger debug: "msg" metadata: #{"key" => val}`:
+    /// ```erlang
+    /// call 'logger':'log'('debug', <<"msg">>, call 'maps':'merge'(UserMeta, #{
+    ///     'domain' => ['beamtalk', 'user'],
+    ///     'beamtalk_class' => 'Counter',
+    ///     'beamtalk_selector' => 'increment'
+    /// }))
+    /// ```
+    pub(in crate::codegen::core_erlang) fn try_generate_logger_intrinsic(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        // Only intercept ClassReference receivers named "Logger"
+        let class_name = match receiver {
+            Expression::ClassReference { name, .. } if name.name == "Logger" => &name.name,
+            _ => return Ok(None),
+        };
+
+        // Map Beamtalk selectors to OTP logger levels
+        let (level, has_metadata) = match selector {
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+                match selector_name.as_str() {
+                    "debug:" if arguments.len() == 1 => ("debug", false),
+                    "info:" if arguments.len() == 1 => ("info", false),
+                    "warn:" if arguments.len() == 1 => ("warning", false),
+                    "error:" if arguments.len() == 1 => ("error", false),
+                    "debug:metadata:" if arguments.len() == 2 => ("debug", true),
+                    "info:metadata:" if arguments.len() == 2 => ("info", true),
+                    "warn:metadata:" if arguments.len() == 2 => ("warning", true),
+                    "error:metadata:" if arguments.len() == 2 => ("error", true),
+                    // setLevel: and any other selector — fall through to normal dispatch
+                    _ => return Ok(None),
+                }
+            }
+            _ => return Ok(None),
+        };
+
+        // Get the message argument
+        let msg_doc = self.expression_doc(&arguments[0])?;
+
+        // Build domain metadata map
+        // The class name comes from the compilation context (the class being compiled)
+        let ctx_class = self.class_name();
+        let ctx_selector = self
+            .current_method_selector
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let _ = class_name; // Logger class name itself is not needed in the metadata
+
+        let metadata_map_doc = docvec![
+            "~{",
+            "'domain' => ['beamtalk' | ['user']], ",
+            "'beamtalk_class' => '",
+            Document::String(ctx_class),
+            "', ",
+            "'beamtalk_selector' => '",
+            Document::String(ctx_selector),
+            "'",
+            "}~",
+        ];
+
+        // logger:log/3 returns 'ok', but Beamtalk Logger methods return 'nil'.
+        // Bind the result to a temp var and return 'nil'.
+        let discard_var = self.fresh_temp_var("LogOk");
+
+        let log_call_doc = if has_metadata {
+            // With user metadata: merge user map with compiler-injected map
+            let user_meta_doc = self.expression_doc(&arguments[1])?;
+            let merge_var = self.fresh_temp_var("LogMeta");
+            docvec![
+                "let ",
+                Document::String(merge_var.clone()),
+                " = call 'maps':'merge'(",
+                user_meta_doc,
+                ", ",
+                metadata_map_doc,
+                ") in call 'logger':'log'('",
+                Document::String(level.to_string()),
+                "', ",
+                msg_doc,
+                ", ",
+                Document::String(merge_var),
+                ")"
+            ]
+        } else {
+            // Without user metadata: use compiler-injected map directly
+            docvec![
+                "call 'logger':'log'('",
+                Document::String(level.to_string()),
+                "', ",
+                msg_doc,
+                ", ",
+                metadata_map_doc,
+                ")"
+            ]
+        };
+
+        let doc = docvec![
+            "let ",
+            Document::String(discard_var),
+            " = ",
+            log_call_doc,
+            " in 'nil'"
+        ];
+
+        Ok(Some(doc))
+    }
 }
 
 #[cfg(test)]

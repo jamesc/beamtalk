@@ -18,6 +18,15 @@ use std::path::{Path, PathBuf};
 
 use miette::{Result, miette};
 
+/// OTP kernel logger configuration that redirects the default handler to stderr.
+///
+/// Used as `-kernel logger <this>` VM arg across REPL, workspace, and compilation
+/// nodes (BT-1431). Ensures early boot OTP logger events go to stderr instead of
+/// stdout, preventing them from being lost (detached nodes) or mixed into protocol
+/// output (REPL/compilation nodes).
+pub const KERNEL_LOGGER_STDERR: &str =
+    "[{handler, default, logger_std_h, #{config => #{type => standard_error}}}]";
+
 /// Whether the runtime was found in a development checkout or an installed layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeLayout {

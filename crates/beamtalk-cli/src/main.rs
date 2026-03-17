@@ -172,6 +172,33 @@ enum Command {
         paths: Vec<String>,
     },
 
+    /// View workspace log files
+    ///
+    /// Shows the most recent workspace's log file. Defaults to the last 50 lines.
+    /// Use `--follow` to stream new lines, `--level` to filter by severity,
+    /// or `--path` to print the log file path.
+    Logs {
+        /// Select a specific workspace by name or ID
+        #[arg(long)]
+        workspace: Option<String>,
+
+        /// Stream new log lines as they appear (like `tail -f`)
+        #[arg(long, short)]
+        follow: bool,
+
+        /// Filter by minimum severity level (debug, info, notice, warning, error)
+        #[arg(long)]
+        level: Option<String>,
+
+        /// Expected log format for level filtering (text, json)
+        #[arg(long)]
+        format: Option<String>,
+
+        /// Print the log file path and exit
+        #[arg(long)]
+        path: bool,
+    },
+
     /// Run style/redundancy lint checks on source files
     Lint {
         /// Source file or directory to lint
@@ -426,6 +453,19 @@ fn run() -> Result<()> {
             commands::fmt::run_fmt(&paths, false)
         }
         Command::FmtCheck { paths } => commands::fmt::run_fmt(&paths, true),
+        Command::Logs {
+            workspace,
+            follow,
+            level,
+            format,
+            path,
+        } => commands::logs::run(
+            workspace.as_deref(),
+            follow,
+            level.as_deref(),
+            format.as_deref(),
+            path,
+        ),
         Command::Lint { path, format } => commands::lint::run_lint(&path, format),
         Command::Workspace { action } => commands::workspace::cli::run(action),
         Command::TestScript {

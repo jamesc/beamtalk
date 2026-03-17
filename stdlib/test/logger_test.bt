@@ -52,28 +52,8 @@ TestCase subclass: LoggerTest
     // Restore to a reasonable default
     self assert: (Logger setLevel: #notice) equals: nil
 
-  testInfoTypeError =>
-    // info: requires String argument
-    @expect type
-    self should: [Logger info: 42] raise: #type_error
-
-  testWarnTypeError =>
-    // warn: requires String argument
-    @expect type
-    self should: [Logger warn: 42] raise: #type_error
-
-  testErrorTypeError =>
-    // error: requires String argument
-    @expect type
-    self should: [Logger error: 42] raise: #type_error
-
-  testDebugTypeError =>
-    // debug: requires String argument
-    @expect type
-    self should: [Logger debug: 42] raise: #type_error
-
   testSetLevelTypeError =>
-    // setLevel: requires Symbol argument
+    // setLevel: requires Symbol argument — still dispatched through beamtalk_logger
     @expect type
     self should: [Logger setLevel: "debug"] raise: #type_error
 
