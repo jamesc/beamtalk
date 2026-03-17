@@ -28,3 +28,18 @@ TestCase subclass: ActorSelfCallStateTest
   testSelfCallThenFieldAssignment =>
     a := SelfCallStateActor spawn
     self assert: a callSetupThenAssignField equals: 52
+
+  // BT-1421: Assignment RHS self-send returns the value, not the dispatch tuple
+  testAssignmentRhsSelfSendReturnsValue =>
+    a := SelfCallStateActor spawn
+    self assert: a callBumpAndCapture equals: 1
+
+  // BT-1421: Assignment RHS self-send threads state correctly
+  testAssignmentRhsSelfSendThreadsState =>
+    a := SelfCallStateActor spawn
+    self assert: a callBumpAndReadState equals: 1
+
+  // BT-1421: Multiple assignment RHS self-sends accumulate state
+  testMultipleAssignmentRhsSelfSends =>
+    a := SelfCallStateActor spawn
+    self assert: a callDoubleBumpAndCapture equals: 3

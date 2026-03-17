@@ -37,3 +37,24 @@ Actor subclass: SelfCallStateActor
     self setupValue
     self.count := 10
     self.value + self.count
+
+  // BT-1421: Helper returning a value while mutating state
+  bump =>
+    self.count := self.count + 1
+    self.count
+
+  // BT-1421: Assignment RHS is a self-send — result gets return value, state threads
+  callBumpAndCapture =>
+    result := self bump
+    result
+
+  // BT-1421: Assignment RHS self-send, then read mutated state
+  callBumpAndReadState =>
+    _result := self bump
+    self.count
+
+  // BT-1421: Multiple assignment RHS self-sends
+  callDoubleBumpAndCapture =>
+    first := self bump
+    second := self bump
+    first + second

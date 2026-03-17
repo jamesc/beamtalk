@@ -31,6 +31,8 @@ enum BodyExprKind {
     LocalAssignTier2,
     /// `var := expr` where the RHS is control flow with field mutations.
     LocalAssignControlFlow,
+    /// `var := self method` — local assignment where RHS is a dispatching self-send.
+    LocalAssignSelfSend,
     /// `var := expr` — simple local assignment.
     LocalAssignPure,
     /// `{a, b} := expr` — destructure assignment.
@@ -266,6 +268,10 @@ impl CoreErlangGenerator {
                 }
                 if self.control_flow_has_mutations(value) {
                     return BodyExprKind::LocalAssignControlFlow;
+                }
+                // BT-1421: var := self method — self-send as assignment RHS
+                if self.is_dispatching_actor_self_send(value) {
+                    return BodyExprKind::LocalAssignSelfSend;
                 }
             }
             return BodyExprKind::LocalAssignPure;
@@ -542,6 +548,38 @@ impl CoreErlangGenerator {
                                 }
                             }
                             docs.push(Document::Vec(doc_parts));
+                        }
+                    }
+                    if is_last {
+                        self.emit_pure_reply(&mut docs);
+                    }
+                }
+                // BT-1421: var := self method — dispatch RHS, bind result to var
+                BodyExprKind::LocalAssignSelfSend => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            // Dispatch the self-send (threads state, sets last_dispatch_var)
+                            let dispatch_doc = self.generate_self_dispatch_open(value)?;
+                            docs.push(dispatch_doc);
+                            // Bind result (element 1 of dispatch tuple) to the local variable
+                            let dispatch_var = self.last_dispatch_var.clone().ok_or_else(|| {
+                                CodeGenError::Internal(
+                                    "missing dispatch var after self-send in assignment RHS"
+                                        .to_string(),
+                                )
+                            })?;
+                            self.bind_var(var_name, &core_var);
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(core_var),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(dispatch_var),
+                                ") in ",
+                            ]);
                         }
                     }
                     if is_last {
