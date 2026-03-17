@@ -23,7 +23,7 @@
 
 -module(beamtalk_workspace_config).
 
--export([singletons/0, value_singletons/0, binding_names/0]).
+-export([singletons/0, value_singletons/0, binding_names/0, binding_name_for_class/1]).
 
 -type singleton_config() :: #{
     binding_name := atom(),
@@ -90,3 +90,16 @@ binding_names() ->
     ActorNames = [maps:get(binding_name, S) || S <- singletons()],
     ValueNames = [maps:get(binding_name, S) || S <- value_singletons()],
     ActorNames ++ ValueNames.
+
+%% @doc Map a singleton class name to its user-facing binding name.
+%%
+%% Returns `{ok, BindingName}` if the class is a known singleton,
+%% `undefined` otherwise. Used by error formatting to show binding names
+%% (e.g., "Workspace" instead of "WorkspaceInterface") in REPL errors.
+-spec binding_name_for_class(atom()) -> {ok, atom()} | undefined.
+binding_name_for_class(ClassName) ->
+    All = singletons() ++ value_singletons(),
+    case lists:search(fun(#{class_name := C}) -> C =:= ClassName end, All) of
+        {value, #{binding_name := Name}} -> {ok, Name};
+        false -> undefined
+    end.

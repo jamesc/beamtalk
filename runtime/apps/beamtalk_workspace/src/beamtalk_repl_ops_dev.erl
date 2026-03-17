@@ -743,7 +743,8 @@ get_context_completions(Line, Bindings) when is_binary(Line) ->
         {expression, ReceiverExpr, Prefix} ->
             %% Multi-token receiver expression — resolve via chain type inference (BT-1006)
             case resolve_chain_type(ReceiverExpr, Bindings) of
-                {ok, ClassName} -> complete_instance_methods(ClassName, Prefix);
+                {ok, ClassName, class} -> complete_class_methods(ClassName, Prefix);
+                {ok, ClassName, instance} -> complete_instance_methods(ClassName, Prefix);
                 undefined -> []
             end;
         {Receiver, <<>>} ->
@@ -1036,15 +1037,19 @@ parse_binary_hops([Token | Rest]) ->
 %% For each `{unary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
 %% For each `{binary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
 %% Returns `undefined` (graceful fallback) when any hop lacks a return-type annotation.
--spec walk_mixed_chain(atom(), [chain_hop()]) -> {ok, atom()} | undefined.
+-spec walk_mixed_chain(atom(), [chain_hop()]) -> {ok, atom(), instance | class} | undefined.
 walk_mixed_chain(ClassName, Hops) ->
     walk_mixed_chain(ClassName, Hops, 0).
 
--spec walk_mixed_chain(atom(), [chain_hop()], non_neg_integer()) -> {ok, atom()} | undefined.
+-spec walk_mixed_chain(atom(), [chain_hop()], non_neg_integer()) ->
+    {ok, atom(), instance | class} | undefined.
 walk_mixed_chain(ClassName, [], _Depth) ->
-    {ok, ClassName};
+    {ok, ClassName, instance};
 walk_mixed_chain(_ClassName, _Hops, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     undefined;
+walk_mixed_chain(ClassName, [{unary, class} | Rest], _Depth) ->
+    %% `instance class` transitions to the class side.
+    walk_mixed_chain_class(ClassName, Rest);
 walk_mixed_chain(ClassName, [{_Kind, Sel} | Rest], Depth) ->
     case beamtalk_class_registry:get_method_return_type(ClassName, Sel) of
         {ok, NextClass} -> walk_mixed_chain(NextClass, Rest, Depth + 1);
@@ -1056,9 +1061,9 @@ walk_mixed_chain(ClassName, [{_Kind, Sel} | Rest], Depth) ->
 %%
 %% The first hop uses `get_class_method_return_type`; subsequent hops transition to
 %% instance-side via `walk_mixed_chain/3`.
--spec walk_mixed_chain_class(atom(), [chain_hop()]) -> {ok, atom()} | undefined.
+-spec walk_mixed_chain_class(atom(), [chain_hop()]) -> {ok, atom(), instance | class} | undefined.
 walk_mixed_chain_class(ClassName, []) ->
-    {ok, ClassName};
+    {ok, ClassName, class};
 walk_mixed_chain_class(ClassName, [{unary, class} | Rest]) ->
     %% `ClassName class` → metaclass; stay on the class side for completions.
     walk_mixed_chain_class(ClassName, Rest);
@@ -1077,7 +1082,7 @@ walk_mixed_chain_class(ClassName, [{_Kind, Sel} | Rest]) ->
 %% When the unary tokenizer fails, tries the binary/mixed tokenizer (BT-1071).
 %% When both tokenizers fail (e.g. parenthesised subexpressions, keyword sends
 %% mid-chain), falls back to compiler-based type resolution (BT-1068, ADR 0045 Option C).
--spec resolve_chain_type(binary(), map()) -> {ok, atom()} | undefined.
+-spec resolve_chain_type(binary(), map()) -> {ok, atom(), instance | class} | undefined.
 resolve_chain_type(Expr, Bindings) ->
     case tokenise_send_chain(Expr) of
         {ok, ReceiverToken, Selectors} ->
@@ -1111,10 +1116,10 @@ resolve_chain_type(Expr, Bindings) ->
 %% Sends the expression to the Rust compiler via the port. The compiler parses
 %% it fully, runs type inference, and returns the type of the last expression.
 %% Falls back to `undefined' if the compiler is unavailable or the type is unknown.
--spec resolve_type_via_compiler(binary()) -> {ok, atom()} | undefined.
+-spec resolve_type_via_compiler(binary()) -> {ok, atom(), instance | class} | undefined.
 resolve_type_via_compiler(Expr) ->
     try beamtalk_compiler:resolve_completion_type(Expr) of
-        {ok, ClassName} -> {ok, ClassName};
+        {ok, ClassName} -> {ok, ClassName, instance};
         {error, type_unknown} -> undefined
     catch
         _:_ -> undefined
@@ -1125,15 +1130,18 @@ resolve_type_via_compiler(Expr) ->
 %%
 %% Returns `{ok, FinalClassName}` when every hop has a known return type,
 %% or `undefined` when any hop breaks (annotation absent or non-Simple).
--spec walk_chain(atom(), [atom()]) -> {ok, atom()} | undefined.
+-spec walk_chain(atom(), [atom()]) -> {ok, atom(), instance | class} | undefined.
 walk_chain(ClassName, Selectors) ->
     walk_chain(ClassName, Selectors, 0).
 
--spec walk_chain(atom(), [atom()], non_neg_integer()) -> {ok, atom()} | undefined.
+-spec walk_chain(atom(), [atom()], non_neg_integer()) -> {ok, atom(), instance | class} | undefined.
 walk_chain(ClassName, [], _Depth) ->
-    {ok, ClassName};
+    {ok, ClassName, instance};
 walk_chain(_ClassName, _Selectors, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     undefined;
+walk_chain(ClassName, [class | Rest], _Depth) ->
+    %% `instance class` transitions to the class side — offer class methods.
+    walk_chain_class(ClassName, Rest);
 walk_chain(ClassName, [Selector | Rest], Depth) ->
     case beamtalk_runtime_api:get_method_return_type(ClassName, Selector) of
         {ok, NextClass} -> walk_chain(NextClass, Rest, Depth + 1);
@@ -1150,9 +1158,9 @@ walk_chain(ClassName, [Selector | Rest], Depth) ->
 %% return type). When a class object receives `class`, it returns its metaclass, which
 %% has the same class-side methods for completion purposes. We stay on the class side
 %% rather than failing the chain.
--spec walk_chain_class(atom(), [atom()]) -> {ok, atom()} | undefined.
+-spec walk_chain_class(atom(), [atom()]) -> {ok, atom(), instance | class} | undefined.
 walk_chain_class(ClassName, []) ->
-    {ok, ClassName};
+    {ok, ClassName, class};
 walk_chain_class(ClassName, [class | Rest]) ->
     %% `ClassName class` → metaclass; for completions treat as still on the class side.
     walk_chain_class(ClassName, Rest);
@@ -1175,6 +1183,23 @@ filter_hidden_methods(Selectors) ->
 -spec complete_instance_methods(atom(), binary()) -> [binary()].
 complete_instance_methods(ClassName, Prefix) ->
     MethodSelectors = filter_hidden_methods(collect_all_methods(ClassName, 0)),
+    filter_by_prefix(MethodSelectors, Prefix).
+
+%% @private
+%% @doc Return all class-side methods of a class filtered by the given prefix.
+%%
+%% Includes class methods plus ProtoObject instance methods (e.g. `class`,
+%% `respondsTo:`) since class objects are also objects.
+-spec complete_class_methods(atom(), binary()) -> [binary()].
+complete_class_methods(ClassName, Prefix) ->
+    ProtoObjMethods = filter_hidden_methods(collect_all_methods('ProtoObject', 0)),
+    ClassMethods = collect_all_class_methods(ClassName, 0),
+    filter_by_prefix(ClassMethods ++ ProtoObjMethods, Prefix).
+
+%% @private
+%% @doc Filter method selectors by a binary prefix, returning sorted binaries.
+-spec filter_by_prefix([atom()], binary()) -> [binary()].
+filter_by_prefix(MethodSelectors, Prefix) ->
     All = [atom_to_binary(S, utf8) || S <- MethodSelectors],
     case Prefix of
         <<>> ->
