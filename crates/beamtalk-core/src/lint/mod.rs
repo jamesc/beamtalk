@@ -24,6 +24,7 @@ mod dead_block_assignment;
 mod effect_free_statement;
 mod shadowed_block_param;
 mod trailing_caret;
+mod sync_send_in_timer_block;
 mod unnecessary_parens;
 mod value_like_object;
 // ── add new lint modules here (alphabetical) ──────────────────────────────
@@ -49,6 +50,7 @@ fn all_passes() -> Vec<Box<dyn LintPass>> {
         Box::new(dead_block_assignment::DeadBlockAssignmentPass),
         Box::new(effect_free_statement::EffectFreeStatementPass),
         Box::new(shadowed_block_param::ShadowedBlockParamPass),
+        Box::new(sync_send_in_timer_block::SyncSendInTimerBlockPass),
         Box::new(trailing_caret::TrailingCaretPass),
         Box::new(unnecessary_parens::UnnecessaryParensPass),
         Box::new(value_like_object::ValueLikeObjectPass),

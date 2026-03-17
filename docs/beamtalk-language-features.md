@@ -14,6 +14,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Core Syntax](#core-syntax)
 - [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
 - [Actor Message Passing](#actor-message-passing)
+- [Server — OTP Interop (ADR 0065)](#server--otp-interop-adr-0065)
 - [Supervision Trees (ADR 0059)](#supervision-trees-adr-0059)
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
@@ -779,6 +780,94 @@ col eventCount          // => 1 (now correctly reflects the event)
 
 ---
 
+## Server — OTP Interop (ADR 0065)
+
+`Server` is an **abstract** subclass of `Actor` for BEAM-level OTP interop. The class hierarchy expresses the abstraction boundary:
+
+```text
+Object
+  └── Actor           # Beamtalk objects — messages, state, Timer
+        └── Server    # BEAM processes — handleInfo:, raw OTP interop (abstract)
+```
+
+- **`Actor`** — Beamtalk-level: message-passing, state, Timer API, lifecycle (`initialize`, `terminate:`). Most users, most of the time.
+- **`Server`** — BEAM-level: raw message handling (`handleInfo:`), and the natural home for future OTP features (named registration, `trapExit`, `codeChange:from:`).
+
+### Defining a Server
+
+Use `Server subclass:` when you need to receive raw Erlang messages (timer events, monitor DOWN tuples, system messages). All existing Actor methods continue to work — Server inherits everything from Actor.
+
+```beamtalk
+Server subclass: PeriodicWorker
+  state: count = 0
+
+  initialize =>
+    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+
+  handleInfo: msg =>
+    msg match: [
+      #tick -> [
+        self.count := self.count + 1.
+        Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+      ];
+      _ -> nil
+    ]
+
+  getValue => self.count
+```
+
+### handleInfo: Semantics
+
+- Defined on `Server` with a **default no-op** implementation — messages are ignored unless you override it.
+- **Error handling:** errors in `handleInfo:` are logged and the server continues (log-and-continue). A bad message does not crash the server.
+- Sending `handleInfo:` to a plain `Actor` raises `doesNotUnderstand` — only Server subclasses have this method.
+
+### Migration: Actor to Server
+
+Promoting an Actor to a Server is a one-word change. All existing methods continue to work:
+
+```beamtalk
+// Before
+Actor subclass: MyThing
+  // ...
+
+// After — all existing methods still work, handleInfo: now available
+Server subclass: MyThing
+  handleInfo: msg => ...
+```
+
+### Timer Lifecycle
+
+Timer processes (`Timer every:do:` and `Timer after:do:`) are **linked to the calling process** via `spawn_link`. This means:
+
+- When the actor dies, linked Timer processes die automatically — no orphaned ticks
+- `cancel` still works for explicit lifecycle control
+- User code errors in Timer blocks are wrapped in `catch` — they do not crash the Timer process
+
+```beamtalk
+Actor subclass: Ticker
+  state: count = 0
+
+  initialize =>
+    Timer every: 1000 do: [self tick!]   // async cast — MUST use ! not .
+
+  tick => self.count := self.count + 1
+  getValue => self.count
+```
+
+No `state:` for the timer reference, no `terminate:` cleanup needed — the link handles it.
+
+### BEAM Mapping
+
+| Beamtalk | BEAM |
+|----------|------|
+| `Server subclass:` | gen_server with `handle_info/2` dispatch |
+| `handleInfo: msg` | `handle_info(Msg, State)` callback |
+| `Actor subclass:` | gen_server with `handle_info/2` ignore stub |
+| Timer `spawn_link` | Timer process linked to calling process |
+
+---
+
 ## Supervision Trees (ADR 0059)
 
 Beamtalk provides declarative OTP supervision trees via `Supervisor subclass:` and `DynamicSupervisor subclass:`. This is the Beamtalk idiom for "let it crash" fault tolerance — define which actors should be restarted automatically, and how.
@@ -856,7 +945,7 @@ Actor subclass: BackgroundJob
 
 ### SupervisionSpec — Per-Child Overrides
 
-Use `SupervisionSpec` when you need to override a child's restart policy or provide startup arguments:
+Use `SupervisionSpec` when you need to override a child's restart policy, provide startup arguments, or set a custom shutdown timeout:
 
 ```beamtalk
 Supervisor subclass: WebApp
@@ -864,6 +953,12 @@ Supervisor subclass: WebApp
     #(DatabasePool
       HTTPRouter supervisionSpec withRestart: #transient
       (MetricsCollector supervisionSpec withId: #metrics withArgs: #{#port => 9090}))
+```
+
+Use `withShutdown:` to set a graceful shutdown timeout (in milliseconds) for children that need time to drain connections or flush state. The default is 5000ms for workers and `infinity` for nested supervisors.
+
+```beamtalk
+HttpServer supervisionSpec withShutdown: 30000   // 30s graceful shutdown
 ```
 
 ### Dynamic Supervisor
@@ -921,6 +1016,7 @@ root which: DatabaseSupervisor      // => #Supervisor<DatabaseSupervisor,_>
 | `count` | `supervisor:count_children/1` (active count) |
 | `children` | `supervisor:which_children/1` (running child ids) |
 | `which: Class` | find child by module in `which_children` result |
+| `withShutdown:` | `shutdown` field in child spec (default 5000ms workers, infinity supervisors) |
 | `stop` | `gen_server:stop/1` |
 
 ---
@@ -1381,9 +1477,10 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 | Class | Description |
 |-------|-------------|
 | **Actor** | Base class for all actors (BEAM processes) |
+| **Server** | Abstract Actor subclass for BEAM-level OTP interop (`handleInfo:`) ([ADR 0065](ADR/0065-complete-otp-primitives-actor-lifecycle.md)) |
 | **Supervisor**, **DynamicSupervisor** | OTP supervision trees ([ADR 0059](ADR/0059-supervision-tree-syntax.md)) |
 | **AtomicCounter** | Lock-free shared counter |
-| **Timer** | Periodic and one-shot timers |
+| **Timer** | Periodic and one-shot timers (linked to calling process via `spawn_link`) |
 | **Pid**, **Reference**, **Port** | BEAM primitive types |
 
 **Error handling:**
