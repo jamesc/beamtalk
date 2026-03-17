@@ -120,8 +120,10 @@
     raise_type_error('debug:metadata:', <<"Metadata must be a Dictionary">>).
 
 %% @doc Set the primary log level.
+%% @deprecated Use {@link beamtalk_system:logLevel/1} (`Beamtalk logLevel:`) instead.
 -spec 'setLevel:'(atom()) -> 'nil'.
 'setLevel:'(Level) when is_atom(Level) ->
+    maybe_emit_deprecation_warning(),
     case logger:set_primary_config(level, Level) of
         ok ->
             nil;
@@ -180,6 +182,18 @@ logError(Msg, Meta) -> 'error:metadata:'(Msg, Meta).
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
+
+%% @private Emit a deprecation warning for setLevel: on first call only.
+-spec maybe_emit_deprecation_warning() -> ok.
+maybe_emit_deprecation_warning() ->
+    Key = beamtalk_logger_setlevel_deprecated,
+    case persistent_term:get(Key, false) of
+        true ->
+            ok;
+        false ->
+            persistent_term:put(Key, true),
+            ?LOG_WARNING("Logger setLevel: is deprecated. Use Beamtalk logLevel: instead.")
+    end.
 
 %% @private Raise a type error for the Logger class.
 -spec raise_type_error(atom(), binary()) -> no_return().
