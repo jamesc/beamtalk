@@ -379,6 +379,177 @@ impl MethodKindMeta {
     }
 }
 
+/// Convert an AST method definition to `MethodMeta`.
+fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
+    MethodMeta {
+        selector: m.selector.name().to_string(),
+        arity: m.selector.arity(),
+        kind: MethodKindMeta::from_ast(m.kind),
+        is_sealed: m.is_sealed,
+        spawns_block: false,
+        return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
+        param_types: m
+            .parameters
+            .iter()
+            .map(|p| {
+                p.type_annotation
+                    .as_ref()
+                    .map(|t| t.type_name().to_string())
+            })
+            .collect(),
+        doc: m.doc_comment.clone(),
+    }
+}
+
+/// Synthesize auto-generated getter, functional-updater, and keyword constructor
+/// methods for Value subclasses with state declarations.
+///
+/// This mirrors the logic in `add_value_auto_methods` in the semantic analyzer
+/// (`class_hierarchy/mod.rs`) and ensures the type checker can resolve
+/// state-based accessors without having to process the source `.bt` file first.
+fn synthesize_value_auto_methods(
+    class: &beamtalk_core::ast::ClassDefinition,
+    class_name: &str,
+    methods: &mut Vec<MethodMeta>,
+    class_methods: &mut Vec<MethodMeta>,
+) {
+    let user_selectors: std::collections::HashSet<String> =
+        methods.iter().map(|m| m.selector.clone()).collect();
+    let user_class_selectors: std::collections::HashSet<String> =
+        class_methods.iter().map(|m| m.selector.clone()).collect();
+
+    for slot in &class.state {
+        let slot_name = slot.name.name.as_str();
+
+        // Auto getter: `fieldName` → slot type (or Object if unannotated)
+        if !user_selectors.contains(slot_name) {
+            let default_str = slot
+                .default_value
+                .as_ref()
+                .map_or_else(|| "nil".to_string(), fmt_default);
+            let getter_doc = format!(
+                "Returns the `{slot_name}` field value. Default: `{default_str}`.\n\n*(compiler-generated)*"
+            );
+            methods.push(MethodMeta {
+                selector: slot_name.to_string(),
+                arity: 0,
+                kind: MethodKindMeta::Primary,
+                is_sealed: false,
+                spawns_block: false,
+                return_type: slot
+                    .type_annotation
+                    .as_ref()
+                    .map(|t| t.type_name().to_string()),
+                param_types: vec![],
+                doc: Some(getter_doc),
+            });
+        }
+
+        // Auto functional updater: `withFieldName:` → Self type
+        let with_sel = {
+            let mut chars = slot_name.chars();
+            match chars.next() {
+                None => "with:".to_string(),
+                Some(first) => {
+                    let cap: String = first.to_uppercase().collect();
+                    format!("with{}{}:", cap, chars.as_str())
+                }
+            }
+        };
+        if !user_selectors.contains(&with_sel) {
+            let param_type = slot
+                .type_annotation
+                .as_ref()
+                .map(|t| t.type_name().to_string());
+            let setter_doc = format!(
+                "Returns a new `{class_name}` with `{slot_name}` set to the given value.\n\n*(compiler-generated)*"
+            );
+            methods.push(MethodMeta {
+                selector: with_sel,
+                arity: 1,
+                kind: MethodKindMeta::Primary,
+                is_sealed: false,
+                spawns_block: false,
+                return_type: Some(class_name.to_string()),
+                param_types: vec![param_type],
+                doc: Some(setter_doc),
+            });
+        }
+    }
+
+    // Auto keyword constructor on the class side: `field1:field2:...`
+    let kw_sel: String = class.state.iter().fold(String::new(), |mut acc, s| {
+        acc.push_str(s.name.name.as_str());
+        acc.push(':');
+        acc
+    });
+    if !user_class_selectors.contains(&kw_sel) {
+        let arity = class.state.len();
+        let param_types = class
+            .state
+            .iter()
+            .map(|s| {
+                s.type_annotation
+                    .as_ref()
+                    .map(|t| t.type_name().to_string())
+            })
+            .collect();
+        let args_desc: String = class
+            .state
+            .iter()
+            .map(|s| {
+                let dv = s
+                    .default_value
+                    .as_ref()
+                    .map_or_else(|| "nil".to_string(), fmt_default);
+                format!("{} (default: {})", s.name.name, dv)
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ctor_doc =
+            format!("Creates a new `{class_name}`. Args: {args_desc}.\n\n*(compiler-generated)*");
+        class_methods.push(MethodMeta {
+            selector: kw_sel,
+            arity,
+            kind: MethodKindMeta::Primary,
+            is_sealed: false,
+            spawns_block: false,
+            return_type: Some(class_name.to_string()),
+            param_types,
+            doc: Some(ctor_doc),
+        });
+    }
+}
+
+/// Mark Timer class methods that spawn their block argument in a separate BEAM process.
+///
+/// BT-1312: replaces hardcoded list in `validators.rs` so the self-capture validator
+/// can skip false-positive warnings.
+fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
+    let mut found_after = false;
+    let mut found_every = false;
+    for m in class_methods.iter_mut() {
+        match m.selector.as_str() {
+            "after:do:" => {
+                m.spawns_block = true;
+                found_after = true;
+            }
+            "every:do:" => {
+                m.spawns_block = true;
+                found_every = true;
+            }
+            _ => {}
+        }
+    }
+    if !found_after || !found_every {
+        miette::bail!(
+            "Timer metadata mismatch: expected class methods `after:do:` and `every:do:` \
+             but found_after={found_after}, found_every={found_every}"
+        );
+    }
+    Ok(())
+}
+
 /// Format a default-value expression as a short string for doc generation.
 ///
 /// Mirrors `format_default_value` in `beamtalk-core/class_hierarchy/mod.rs`.
@@ -412,7 +583,6 @@ fn fmt_default(expr: &beamtalk_core::ast::Expression) -> String {
 /// Parses the full class definition to extract the class name, superclass,
 /// flags, state declarations, and method signatures. Each stdlib file
 /// contains exactly one class definition.
-#[allow(clippy::too_many_lines)] // inherently long: parses state, methods, synthesizes auto-methods
 fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMeta> {
     let source = fs::read_to_string(path)
         .into_diagnostic()
@@ -433,51 +603,9 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         );
     }
 
-    let mut methods: Vec<MethodMeta> = class
-        .methods
-        .iter()
-        .map(|m| MethodMeta {
-            selector: m.selector.name().to_string(),
-            arity: m.selector.arity(),
-            kind: MethodKindMeta::from_ast(m.kind),
-            is_sealed: m.is_sealed,
-            spawns_block: false,
-            return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
-            param_types: m
-                .parameters
-                .iter()
-                .map(|p| {
-                    p.type_annotation
-                        .as_ref()
-                        .map(|t| t.type_name().to_string())
-                })
-                .collect(),
-            doc: m.doc_comment.clone(),
-        })
-        .collect();
-
-    let mut class_methods: Vec<MethodMeta> = class
-        .class_methods
-        .iter()
-        .map(|m| MethodMeta {
-            selector: m.selector.name().to_string(),
-            arity: m.selector.arity(),
-            kind: MethodKindMeta::from_ast(m.kind),
-            is_sealed: m.is_sealed,
-            spawns_block: false,
-            return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
-            param_types: m
-                .parameters
-                .iter()
-                .map(|p| {
-                    p.type_annotation
-                        .as_ref()
-                        .map(|t| t.type_name().to_string())
-                })
-                .collect(),
-            doc: m.doc_comment.clone(),
-        })
-        .collect();
+    let mut methods: Vec<MethodMeta> = class.methods.iter().map(method_def_to_meta).collect();
+    let mut class_methods: Vec<MethodMeta> =
+        class.class_methods.iter().map(method_def_to_meta).collect();
 
     let state = class
         .state
@@ -501,147 +629,16 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         .map(|cv| cv.name.name.to_string())
         .collect();
 
-    // For Value subclasses with state declarations, synthesize the auto-generated
-    // getter and functional-updater methods so that `generated_builtins.rs` includes
-    // them. This mirrors the logic in `add_value_auto_methods` in the semantic
-    // analyzer (class_hierarchy/mod.rs) and ensures the type checker can resolve
-    // state-based accessors without having to process the source .bt file first.
     let class_name = class.name.name.to_string();
+
+    // Synthesize auto-generated methods for Value subclasses with state
     if class.class_kind == beamtalk_core::ast::ClassKind::Value && !class.state.is_empty() {
-        let user_selectors: std::collections::HashSet<String> =
-            methods.iter().map(|m| m.selector.clone()).collect();
-        let user_class_selectors: std::collections::HashSet<String> =
-            class_methods.iter().map(|m| m.selector.clone()).collect();
-
-        for slot in &class.state {
-            let slot_name = slot.name.name.as_str();
-
-            // Auto getter: `fieldName` → slot type (or Object if unannotated)
-            if !user_selectors.contains(slot_name) {
-                let default_str = slot
-                    .default_value
-                    .as_ref()
-                    .map_or_else(|| "nil".to_string(), fmt_default);
-                let getter_doc = format!(
-                    "Returns the `{slot_name}` field value. Default: `{default_str}`.\n\n*(compiler-generated)*"
-                );
-                methods.push(MethodMeta {
-                    selector: slot_name.to_string(),
-                    arity: 0,
-                    kind: MethodKindMeta::Primary,
-                    is_sealed: false,
-                    spawns_block: false,
-                    return_type: slot
-                        .type_annotation
-                        .as_ref()
-                        .map(|t| t.type_name().to_string()),
-                    param_types: vec![],
-                    doc: Some(getter_doc),
-                });
-            }
-
-            // Auto functional updater: `withFieldName:` → Self type
-            let with_sel = {
-                let mut chars = slot_name.chars();
-                match chars.next() {
-                    None => "with:".to_string(),
-                    Some(first) => {
-                        let cap: String = first.to_uppercase().collect();
-                        format!("with{}{}:", cap, chars.as_str())
-                    }
-                }
-            };
-            if !user_selectors.contains(&with_sel) {
-                let param_type = slot
-                    .type_annotation
-                    .as_ref()
-                    .map(|t| t.type_name().to_string());
-                let setter_doc = format!(
-                    "Returns a new `{class_name}` with `{slot_name}` set to the given value.\n\n*(compiler-generated)*"
-                );
-                methods.push(MethodMeta {
-                    selector: with_sel,
-                    arity: 1,
-                    kind: MethodKindMeta::Primary,
-                    is_sealed: false,
-                    spawns_block: false,
-                    return_type: Some(class_name.clone()),
-                    param_types: vec![param_type],
-                    doc: Some(setter_doc),
-                });
-            }
-        }
-
-        // Auto keyword constructor on the class side: `field1:field2:...`
-        let kw_sel: String = class.state.iter().fold(String::new(), |mut acc, s| {
-            acc.push_str(s.name.name.as_str());
-            acc.push(':');
-            acc
-        });
-        if !user_class_selectors.contains(&kw_sel) {
-            let arity = class.state.len();
-            let param_types = class
-                .state
-                .iter()
-                .map(|s| {
-                    s.type_annotation
-                        .as_ref()
-                        .map(|t| t.type_name().to_string())
-                })
-                .collect();
-            let args_desc: String = class
-                .state
-                .iter()
-                .map(|s| {
-                    let dv = s
-                        .default_value
-                        .as_ref()
-                        .map_or_else(|| "nil".to_string(), fmt_default);
-                    format!("{} (default: {})", s.name.name, dv)
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            let ctor_doc = format!(
-                "Creates a new `{class_name}`. Args: {args_desc}.\n\n*(compiler-generated)*"
-            );
-            class_methods.push(MethodMeta {
-                selector: kw_sel,
-                arity,
-                kind: MethodKindMeta::Primary,
-                is_sealed: false,
-                spawns_block: false,
-                return_type: Some(class_name.clone()),
-                param_types,
-                doc: Some(ctor_doc),
-            });
-        }
+        synthesize_value_auto_methods(class, &class_name, &mut methods, &mut class_methods);
     }
 
-    // Timer's `after:do:` and `every:do:` spawn their block argument in a
-    // separate BEAM process. Mark them so the self-capture validator can skip
-    // false-positive warnings (BT-1312, replaces hardcoded list in validators.rs).
+    // Mark Timer methods that spawn their block argument
     if class_name == "Timer" {
-        let mut found_after = false;
-        let mut found_every = false;
-        for m in &mut class_methods {
-            match m.selector.as_str() {
-                "after:do:" => {
-                    m.spawns_block = true;
-                    found_after = true;
-                }
-                "every:do:" => {
-                    m.spawns_block = true;
-                    found_every = true;
-                }
-                _ => {}
-            }
-        }
-        if !found_after || !found_every {
-            miette::bail!(
-                "Timer metadata mismatch: expected class methods `after:do:` and `every:do:` \
-                 but found_after={found_after}, found_every={found_every}"
-            );
-        }
+        mark_timer_spawns(&mut class_methods)?;
     }
 
     Ok(ClassMeta {
