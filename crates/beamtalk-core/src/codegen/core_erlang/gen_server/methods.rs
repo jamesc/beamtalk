@@ -212,12 +212,7 @@ impl CoreErlangGenerator {
         &mut self,
         method: &MethodDefinition,
     ) -> Result<Document<'static>> {
-        let body: Vec<&Expression> = method
-            .body
-            .iter()
-            .map(|s| &s.expression)
-            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-            .collect();
+        let body = super::super::util::collect_body_exprs(&method.body);
         self.generate_body_exprs_with_reply(&body, true)
     }
 
@@ -229,12 +224,7 @@ impl CoreErlangGenerator {
         &mut self,
         block: &Block,
     ) -> Result<Document<'static>> {
-        let body: Vec<&Expression> = block
-            .body
-            .iter()
-            .map(|s| &s.expression)
-            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-            .collect();
+        let body = super::super::util::collect_body_exprs(&block.body);
         self.generate_body_exprs_with_reply(&body, false)
     }
 
@@ -1438,12 +1428,7 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         // Filter out @expect directives (compile-time only, no runtime representation).
-        let body: Vec<&Expression> = method
-            .body
-            .iter()
-            .map(|s| &s.expression)
-            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-            .collect();
+        let body = super::super::util::collect_body_exprs(&method.body);
         for (i, expr) in body.iter().enumerate() {
             let is_last = i == body.len() - 1;
 

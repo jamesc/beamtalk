@@ -249,12 +249,7 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
         self.push_scope();
 
-        let body: Vec<&Expression> = block
-            .body
-            .iter()
-            .map(|s| &s.expression)
-            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-            .collect();
+        let body = super::super::util::collect_body_exprs(&block.body);
 
         // Empty block returns nil with unchanged state
         if body.is_empty() {
