@@ -157,6 +157,11 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
+        // BT-1435: Logger intrinsics — inline logger:log/3 with domain metadata
+        if let Some(doc) = self.try_generate_logger_intrinsic(receiver, selector, arguments)? {
+            return Ok(doc);
+        }
+
         // BT-374 / ADR 0010: Workspace binding dispatch + class method calls
         if let Some(doc) = self.try_handle_class_reference(receiver, selector, arguments)? {
             return Ok(doc);

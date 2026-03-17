@@ -91,6 +91,8 @@ impl CoreErlangGenerator {
         self.current_method_params.clear();
 
         let selector_name = method.selector.name();
+        // BT-1435: Track current method selector for Logger intrinsic metadata.
+        self.current_method_selector = Some(selector_name.to_string());
 
         // BT-295: Collect parameter variable names (mutates scope via fresh_var)
         let param_vars: Vec<String> = method
@@ -195,6 +197,7 @@ impl CoreErlangGenerator {
 
         // Pop the scope when done with this method
         self.pop_scope();
+        self.current_method_selector = None;
 
         Ok(result_doc)
     }
@@ -1256,6 +1259,8 @@ impl CoreErlangGenerator {
             self.reset_state_version();
             self.class_var_version = 0;
             self.class_var_mutated = false;
+            // BT-1435: Track current method selector for Logger intrinsic metadata.
+            self.current_method_selector = Some(selector_name.to_string());
 
             // Bind ClassSelf as 'self' in scope
             self.bind_var("self", "ClassSelf");
@@ -1334,6 +1339,7 @@ impl CoreErlangGenerator {
 
             self.pop_scope();
             self.in_class_method = false;
+            self.current_method_selector = None;
         }
         self.class_var_names.clear();
         self.class_method_selectors.clear();
