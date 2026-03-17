@@ -555,17 +555,21 @@ init(State) when is_map(State) ->
         {ok, Class} when is_atom(Class) ->
             case maps:is_key('__methods__', State) of
                 true ->
-                    StateKeys = [K || K <- maps:keys(State),
-                                      K =/= '__methods__',
-                                      K =/= ClassKey,
-                                      K =/= '__class_mod__'],
+                    StateKeys = [
+                        K
+                     || K <- maps:keys(State),
+                        K =/= '__methods__',
+                        K =/= ClassKey,
+                        K =/= '__class_mod__'
+                    ],
                     ?LOG_INFO("Actor started", #{
                         class => Class,
                         pid => self(),
                         state_keys => StateKeys
                     }),
                     {ok, State};
-                false -> {stop, {missing_key, '__methods__'}}
+                false ->
+                    {stop, {missing_key, '__methods__'}}
             end;
         {ok, _NonAtom} ->
             {stop, {invalid_value, ClassKey}};
@@ -730,7 +734,10 @@ changed_state_keys(OldState, NewState) ->
     InternalKeys = ['__methods__', beamtalk_tagged_map:class_key(), '__class_mod__'],
     AllKeys = lists:usort(maps:keys(OldState) ++ maps:keys(NewState)),
     UserKeys = AllKeys -- InternalKeys,
-    [K || K <- UserKeys, maps:get(K, OldState, '__absent__') =/= maps:get(K, NewState, '__absent__')].
+    [
+        K
+     || K <- UserKeys, maps:get(K, OldState, '__absent__') =/= maps:get(K, NewState, '__absent__')
+    ].
 
 %% @doc Construct a Self reference (#beamtalk_object{}) from the actor's state.
 %% Self contains class metadata and the actor's pid, enabling reflection
@@ -848,7 +855,8 @@ dispatch_user_method(Selector, Args, Self, State) ->
                 class => beamtalk_tagged_map:class_of(State, unknown),
                 pid => self()
             });
-        _ -> ok
+        _ ->
+            ok
     end,
     Methods = maps:get('__methods__', State),
     case maps:find(Selector, Methods) of

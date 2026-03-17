@@ -254,7 +254,9 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, Dep
             case beamtalk_object_class:superclass(ClassPid) of
                 none ->
                     %% Reached root without finding method
-                    ?LOG_DEBUG("Method not found in hierarchy", #{selector => Selector, root => ClassName}),
+                    ?LOG_DEBUG("Method not found in hierarchy", #{
+                        selector => Selector, root => ClassName
+                    }),
                     %% BT-753: Derive class from Self when State is empty (class objects).
                     ErrorClass = class_name_from(Self, State, ClassName),
                     Error = beamtalk_error:new(
@@ -317,7 +319,9 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                     %% Module exists but lacks dispatch/4 — continue to superclass (BT-427)
                     continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth);
                 true ->
-                    ?LOG_DEBUG("Invoking compiled dispatch", #{module => ModuleName, selector => Selector}),
+                    ?LOG_DEBUG("Invoking compiled dispatch", #{
+                        module => ModuleName, selector => Selector
+                    }),
                     %% Intercept displayString/inspect for actor instances to avoid
                     %% deadlock. Both compiled Object methods send a message back to
                     %% Self (displayString calls self printString, inspect delegates
