@@ -554,8 +554,22 @@ init(State) when is_map(State) ->
     case maps:find(ClassKey, State) of
         {ok, Class} when is_atom(Class) ->
             case maps:is_key('__methods__', State) of
-                true -> {ok, State};
-                false -> {stop, {missing_key, '__methods__'}}
+                true ->
+                    StateKeys = [
+                        K
+                     || K <- maps:keys(State),
+                        K =/= '__methods__',
+                        K =/= ClassKey,
+                        K =/= '__class_mod__'
+                    ],
+                    ?LOG_INFO("Actor started", #{
+                        class => Class,
+                        pid => self(),
+                        state_keys => StateKeys
+                    }),
+                    {ok, State};
+                false ->
+                    {stop, {missing_key, '__methods__'}}
             end;
         {ok, _NonAtom} ->
             {stop, {invalid_value, ClassKey}};
@@ -574,32 +588,51 @@ init(_NonMapState) ->
 -spec handle_cast(term(), map()) -> {noreply, map()}.
 handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args) ->
     Self = make_self(State),
+    ?LOG_DEBUG("Actor dispatch (cast fire-and-forget)", #{
+        class => beamtalk_tagged_map:class_of(State, unknown),
+        selector => Selector,
+        mode => cast
+    }),
+    T0 = erlang:monotonic_time(microsecond),
     case dispatch(Selector, Args, Self, State) of
         {reply, _Result, NewState} ->
             %% Fire-and-forget: result is discarded
+            log_dispatch_complete(State, NewState, Selector, cast, T0),
             {noreply, NewState};
         {noreply, NewState} ->
+            log_dispatch_complete(State, NewState, Selector, cast, T0),
             {noreply, NewState};
         {error, Reason, NewState} ->
             %% Log error but don't crash — caller expects no reply
+            T1 = erlang:monotonic_time(microsecond),
             ?LOG_WARNING("Fire-and-forget dispatch error", #{
-                selector => Selector, reason => Reason
+                selector => Selector, reason => Reason, duration_us => T1 - T0
             }),
             {noreply, NewState}
     end;
 handle_cast({Selector, Args, FuturePid}, State) ->
     Self = make_self(State),
+    ?LOG_DEBUG("Actor dispatch (async)", #{
+        class => beamtalk_tagged_map:class_of(State, unknown),
+        selector => Selector,
+        caller_pid => FuturePid,
+        mode => async
+    }),
+    T0 = erlang:monotonic_time(microsecond),
     case dispatch(Selector, Args, Self, State) of
         {reply, Result, NewState} ->
             %% Resolve the future with the result
+            log_dispatch_complete(State, NewState, Selector, async, T0),
             beamtalk_future:resolve(FuturePid, Result),
             {noreply, NewState};
         {noreply, NewState} ->
             %% Method didn't return a value, resolve with nil
+            log_dispatch_complete(State, NewState, Selector, async, T0),
             beamtalk_future:resolve(FuturePid, nil),
             {noreply, NewState};
         {error, Reason, NewState} ->
             %% Method failed, reject the future
+            log_dispatch_complete(State, NewState, Selector, async, T0),
             beamtalk_future:reject(FuturePid, Reason),
             {noreply, NewState}
     end;
@@ -612,16 +645,26 @@ handle_cast(Msg, State) ->
 %% Message format: {Selector, Args}
 %% Dispatches to method and returns result immediately.
 -spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
-handle_call({Selector, Args}, _From, State) ->
+handle_call({Selector, Args}, From, State) ->
     Self = make_self(State),
+    ?LOG_DEBUG("Actor dispatch (sync)", #{
+        class => beamtalk_tagged_map:class_of(State, unknown),
+        selector => Selector,
+        caller_pid => element(1, From),
+        mode => sync
+    }),
+    T0 = erlang:monotonic_time(microsecond),
     case dispatch(Selector, Args, Self, State) of
         {reply, Result, NewState} ->
+            log_dispatch_complete(State, NewState, Selector, sync, T0),
             {reply, Result, NewState};
         {noreply, NewState} ->
             %% Method didn't return a value, return nil
+            log_dispatch_complete(State, NewState, Selector, sync, T0),
             {reply, nil, NewState};
         {error, Reason, NewState} ->
             %% Method failed, return error tuple
+            log_dispatch_complete(State, NewState, Selector, sync, T0),
             {reply, {error, Reason}, NewState}
     end;
 handle_call(Msg, _From, State) ->
@@ -651,10 +694,53 @@ code_change(OldVsn, State, Extra) ->
 %% By default, does nothing.
 %% Generated actors can override this for cleanup.
 -spec terminate(term(), map()) -> ok.
-terminate(_Reason, _State) ->
+terminate(Reason, State) ->
+    Class = beamtalk_tagged_map:class_of(State, unknown),
+    ?LOG_INFO("Actor stopped", #{
+        class => Class,
+        pid => self(),
+        reason => Reason
+    }),
     ok.
 
 %%% Helper Functions
+
+%% @private
+%% @doc Log dispatch completion with timing and state mutation info.
+-spec log_dispatch_complete(map(), map(), atom(), atom(), integer()) -> ok.
+log_dispatch_complete(OldState, NewState, Selector, Mode, T0) ->
+    T1 = erlang:monotonic_time(microsecond),
+    Duration = T1 - T0,
+    ChangedKeys = changed_state_keys(OldState, NewState),
+    case ChangedKeys of
+        [] ->
+            ?LOG_DEBUG("Actor dispatch complete", #{
+                selector => Selector,
+                mode => Mode,
+                duration_us => Duration
+            });
+        _ ->
+            ?LOG_DEBUG("Actor dispatch complete", #{
+                selector => Selector,
+                mode => Mode,
+                duration_us => Duration,
+                changed_keys => ChangedKeys
+            })
+    end,
+    ok.
+
+%% @private
+%% @doc Compute which user-visible state keys changed between two state maps.
+%% Excludes internal keys (__methods__, $beamtalk_class, __class_mod__).
+-spec changed_state_keys(map(), map()) -> [atom()].
+changed_state_keys(OldState, NewState) ->
+    InternalKeys = ['__methods__', beamtalk_tagged_map:class_key(), '__class_mod__'],
+    AllKeys = lists:usort(maps:keys(OldState) ++ maps:keys(NewState)),
+    UserKeys = AllKeys -- InternalKeys,
+    [
+        K
+     || K <- UserKeys, maps:get(K, OldState, '__absent__') =/= maps:get(K, NewState, '__absent__')
+    ].
 
 %% @doc Construct a Self reference (#beamtalk_object{}) from the actor's state.
 %% Self contains class metadata and the actor's pid, enabling reflection
@@ -766,6 +852,15 @@ dispatch(Selector, Args, Self, State) ->
 -spec dispatch_user_method(atom(), list(), #beamtalk_object{}, map()) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
 dispatch_user_method(Selector, Args, Self, State) ->
+    case Selector of
+        initialize ->
+            ?LOG_DEBUG("Initialize hook invoked", #{
+                class => beamtalk_tagged_map:class_of(State, unknown),
+                pid => self()
+            });
+        _ ->
+            ok
+    end,
     Methods = maps:get('__methods__', State),
     case maps:find(Selector, Methods) of
         {ok, Fun} when is_function(Fun, 4) ->
@@ -878,6 +973,11 @@ dispatch_via_hierarchy(Selector, Args, Self, State) ->
 %% @doc Create a does_not_understand error result.
 -spec make_dnu_error(atom(), atom(), map()) -> {error, term(), map()}.
 make_dnu_error(Selector, ClassName, State) ->
+    ?LOG_WARNING("doesNotUnderstand", #{
+        class => ClassName,
+        selector => Selector,
+        pid => self()
+    }),
     Error = beamtalk_error:new(
         does_not_understand,
         ClassName,

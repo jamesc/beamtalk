@@ -42,6 +42,7 @@
 -export([send/3, cast/3]).
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% Compiled stdlib modules are generated from Core Erlang.
 %% Dialyzer can't resolve them if stdlib hasn't been built yet.
@@ -105,6 +106,11 @@ send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
 send(Receiver, Selector, Args) ->
     case is_actor(Receiver) of
         true ->
+            ?LOG_DEBUG("Message send", #{
+                class => element(2, Receiver),
+                selector => Selector,
+                caller_pid => self()
+            }),
             case element(2, Receiver) of
                 'Metaclass' ->
                     %% ADR 0036 (BT-802): Metaclass objects dispatch synchronously via
@@ -155,6 +161,11 @@ cast({beamtalk_future, _} = Future, Selector, Args) ->
 cast(Receiver, Selector, Args) ->
     case is_actor(Receiver) of
         true ->
+            ?LOG_DEBUG("Message cast", #{
+                class => element(2, Receiver),
+                selector => Selector,
+                caller_pid => self()
+            }),
             case element(2, Receiver) of
                 'Metaclass' ->
                     %% Metaclass objects cannot receive cast messages
