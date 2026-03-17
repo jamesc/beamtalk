@@ -52,7 +52,8 @@
 %% Subsystem registry
 %%====================================================================
 
--spec subsystem_modules(atom()) -> {module_level, [module()]} | {domain, [atom()]} | {mcp_signal, []} | unknown.
+-spec subsystem_modules(atom()) ->
+    {module_level, [module()]} | {domain, [atom()]} | {mcp_signal, []} | unknown.
 subsystem_modules(actor) ->
     {module_level, [beamtalk_actor]};
 subsystem_modules(supervisor) ->

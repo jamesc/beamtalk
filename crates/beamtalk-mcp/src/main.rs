@@ -328,17 +328,18 @@ fn mcp_debug_signal_path(workspace_id: &str) -> std::path::PathBuf {
     // path-traversal validation. Falls back to workspaces_base_dir if
     // workspace_dir fails (shouldn't happen for valid workspace IDs).
     beamtalk_workspace::workspace_dir(workspace_id).map_or_else(
-        |_| {
-            beamtalk_workspace::workspaces_base_dir().map_or_else(
-                |_| {
-                    std::path::PathBuf::from("/tmp")
-                        .join(".beamtalk")
-                        .join("workspaces")
-                        .join(workspace_id)
-                        .join("mcp_debug_enabled")
-                },
-                |base| base.join(workspace_id).join("mcp_debug_enabled"),
-            )
+        |e| {
+            tracing::warn!(
+                error = %e,
+                workspace_id,
+                "Failed to resolve workspace dir for MCP debug signal"
+            );
+            beamtalk_workspace::workspaces_base_dir()
+                .map(|base| base.join(workspace_id).join("mcp_debug_enabled"))
+                .unwrap_or_else(|_| {
+                    // Non-existent path; signal watcher will simply never trigger
+                    std::path::PathBuf::from("__nonexistent_mcp_signal__")
+                })
         },
         |dir| dir.join("mcp_debug_enabled"),
     )
