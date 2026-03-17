@@ -570,7 +570,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-46",
-      "title": "— System reflection (BeamtalkInterface) (beamtalk-language-features)",
+      "title": "Beamtalk — System reflection (BeamtalkInterface) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
@@ -580,7 +580,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-47",
-      "title": "— Project operations (WorkspaceInterface) (beamtalk-language-features)",
+      "title": "Workspace — Project operations (WorkspaceInterface) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "async",
@@ -595,7 +595,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-48",
-      "title": "Class-based reload via (beamtalk-language-features)",
+      "title": "Class-based reload via Behaviour >> reload (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features",
@@ -748,7 +748,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-6",
-      "title": "with (beamtalk-language-features)",
+      "title": "with*: functional setters (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "assign",
@@ -813,7 +813,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-63",
-      "title": "Diagnostic Suppression ( (beamtalk-language-features)",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "assign",
@@ -831,7 +831,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-64",
-      "title": "Diagnostic Suppression ( (beamtalk-language-features)",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
@@ -841,7 +841,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-65",
-      "title": "Diagnostic Suppression ( (beamtalk-language-features)",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "Actor",
@@ -1203,7 +1203,7 @@
     },
     {
       "id": "docs-learning-03-variables-block-0",
-      "title": "Assignment with (03-variables)",
+      "title": "Assignment with := (03-variables)",
       "category": "learning",
       "tags": [
         "03-variables",
@@ -1218,7 +1218,7 @@
     },
     {
       "id": "docs-learning-03-variables-block-2",
-      "title": "Assignment with (03-variables)",
+      "title": "Assignment with := (03-variables)",
       "category": "learning",
       "tags": [
         "03-variables",
@@ -1540,7 +1540,7 @@
     },
     {
       "id": "docs-learning-07-blocks-block-13",
-      "title": "Non-local returns with (07-blocks)",
+      "title": "Non-local returns with ^ (07-blocks)",
       "category": "learning",
       "tags": [
         "07-blocks",
@@ -1787,7 +1787,7 @@
     },
     {
       "id": "docs-learning-08-control-flow-block-16",
-      "title": "Early exit with (08-control-flow)",
+      "title": "Early exit with ^ (08-control-flow)",
       "category": "learning",
       "tags": [
         "08-control-flow",
@@ -1803,7 +1803,7 @@
     },
     {
       "id": "docs-learning-08-control-flow-block-17",
-      "title": "Early exit with (08-control-flow)",
+      "title": "Early exit with ^ (08-control-flow)",
       "category": "learning",
       "tags": [
         "08-control-flow",
@@ -2239,7 +2239,7 @@
     },
     {
       "id": "docs-learning-11-actors-block-3",
-      "title": "The (11-actors)",
+      "title": "The initialize method (11-actors)",
       "category": "learning",
       "tags": [
         "11-actors",

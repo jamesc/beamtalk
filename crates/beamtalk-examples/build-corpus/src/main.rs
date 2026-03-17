@@ -343,18 +343,27 @@ fn extract_md_code_blocks(root: &Path, path: &Path, entries: &mut Vec<CorpusEntr
     let mut block_content = String::new();
     let mut block_index = 0u32;
     let mut current_heading = String::new();
+    let mut in_heading = false;
 
     for event in parser {
         match event {
             Event::Start(Tag::Heading { .. }) => {
                 current_heading.clear();
+                in_heading = true;
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                in_heading = false;
             }
             Event::Text(text) => {
                 if in_beamtalk_block {
                     block_content.push_str(&text);
-                } else if current_heading.is_empty() && text.len() < 200 {
-                    // Capture heading text for context
-                    current_heading = text.to_string();
+                } else if in_heading {
+                    current_heading.push_str(&text);
+                }
+            }
+            Event::Code(code) => {
+                if in_heading {
+                    current_heading.push_str(&code);
                 }
             }
             Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(lang))) => {
