@@ -74,3 +74,73 @@ sealed Object subclass: BeamtalkInterface
   /// Beamtalk version
   /// ```
   version -> String => (Erlang beamtalk_interface) version
+
+  // --- Logging configuration (delegates to beamtalk_logging_config) ---
+
+  /// Return the current OTP primary log level as a symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk logLevel
+  /// ```
+  logLevel -> Symbol => (Erlang beamtalk_logging_config) logLevel
+
+  /// Set the OTP primary log level.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk logLevel: #debug
+  /// ```
+  logLevel: level :: Symbol -> Nil =>
+    (Erlang beamtalk_logging_config) logLevel: level
+
+  /// Return the list of available debug target symbols.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk debugTargets
+  /// ```
+  debugTargets -> List => (Erlang beamtalk_logging_config) debugTargets
+
+  /// Enable debug logging for a named subsystem.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk enableDebug: #actor
+  /// ```
+  enableDebug: target :: Symbol -> Nil =>
+    (Erlang beamtalk_logging_config) enableDebug: target
+
+  /// Disable debug logging for a named subsystem.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk disableDebug: #actor
+  /// ```
+  disableDebug: target :: Symbol -> Nil =>
+    (Erlang beamtalk_logging_config) disableDebug: target
+
+  /// Return the list of currently enabled debug targets.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk activeDebugTargets
+  /// ```
+  activeDebugTargets -> List =>
+    (Erlang beamtalk_logging_config) activeDebugTargets
+
+  /// Disable all debug targets.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk disableAllDebug
+  /// ```
+  disableAllDebug -> Nil => (Erlang beamtalk_logging_config) disableAllDebug
+
+  /// Return a formatted description of the current logger state.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk loggerInfo
+  /// ```
+  loggerInfo -> String => (Erlang beamtalk_logging_config) loggerInfo
