@@ -78,14 +78,16 @@ subscribe() ->
 subscribe(Level) when is_atom(Level) ->
     ensure_table(),
     Pid = self(),
-    %% Remove any existing subscription first (allows level update).
-    %% The orphaned monitor process from the old subscription will
-    %% see that the ETS entry is gone when the process eventually dies.
+    %% Remove any existing subscription (allows level update).
     ets:delete(?SUB_TABLE, Pid),
-    %% Use a separate process to monitor the subscriber and clean up on death.
-    MonRef = make_ref(),
-    spawn(fun() -> monitor_subscriber(Pid, MonRef) end),
-    ets:insert(?SUB_TABLE, {Pid, Level, MonRef}),
+    %% Insert the subscription entry, then spawn a monitor process.
+    %% The monitor must be established *after* insert so that if the
+    %% subscriber dies between insert and monitor, the DOWN fires and
+    %% cleans up the entry. If the subscriber dies *before* insert,
+    %% `erlang:monitor` on a dead pid delivers DOWN immediately,
+    %% cleaning up the entry we just inserted.
+    ets:insert(?SUB_TABLE, {Pid, Level}),
+    spawn(fun() -> monitor_subscriber(Pid) end),
     ok.
 
 %% @doc Unsubscribe the calling process from log events.
@@ -143,7 +145,7 @@ log(#{level := Level} = LogEvent, _Config) ->
                                 #{level => atom_to_binary(Level, utf8), msg => <<"[format error]">>}
                         end,
                     lists:foreach(
-                        fun({Pid, SubLevel, _MonRef}) ->
+                        fun({Pid, SubLevel}) ->
                             SubLevelVal = ?LEVEL_VALUE(SubLevel),
                             case LevelVal =< SubLevelVal of
                                 true ->
@@ -164,8 +166,8 @@ log(#{level := Level} = LogEvent, _Config) ->
 
 %% @private
 %% @doc Monitor a subscriber and clean up its ETS entry when it dies.
--spec monitor_subscriber(pid(), reference()) -> ok.
-monitor_subscriber(Pid, _Tag) ->
+-spec monitor_subscriber(pid()) -> ok.
+monitor_subscriber(Pid) ->
     MonRef = erlang:monitor(process, Pid),
     receive
         {'DOWN', MonRef, process, Pid, _Reason} ->
