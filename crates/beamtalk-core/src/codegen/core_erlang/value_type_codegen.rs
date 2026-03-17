@@ -787,12 +787,7 @@ impl CoreErlangGenerator {
         // Each `:=` produces a new Self{N} snapshot via maps:put (see generate_field_assignment).
         // Field reads use current_self_var() to reference the latest snapshot.
         // Filter out @expect directives — they are compile-time only and generate no code.
-        let body: Vec<&Expression> = method
-            .body
-            .iter()
-            .map(|s| &s.expression)
-            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-            .collect();
+        let body = super::util::collect_body_exprs(&method.body);
 
         // If filtering leaves no executable expressions, emit a safe fallback to
         // avoid generating an empty Core Erlang function body which would be
@@ -1125,12 +1120,7 @@ impl CoreErlangGenerator {
         // in the outer scope after popping the parameter scope.
         let mut rebound_vars: Vec<(String, String)> = Vec::new();
 
-        let body: Vec<&Expression> = block
-            .body
-            .iter()
-            .map(|s| &s.expression)
-            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-            .collect();
+        let body = super::util::collect_body_exprs(&block.body);
 
         for body_expr in &body {
             if Self::is_local_var_assignment(body_expr) {
@@ -1434,12 +1424,7 @@ impl CoreErlangGenerator {
                                block: &crate::ast::Block|
          -> Result<Document<'static>> {
             codegen.push_scope();
-            let body: Vec<&Expression> = block
-                .body
-                .iter()
-                .map(|s| &s.expression)
-                .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-                .collect();
+            let body = super::util::collect_body_exprs(&block.body);
 
             let mut parts: Vec<Document<'static>> = Vec::new();
             for body_expr in &body {

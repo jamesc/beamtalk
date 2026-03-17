@@ -1120,12 +1120,7 @@ impl CoreErlangGenerator {
             .iter()
             .any(|s| Self::is_field_assignment(&s.expression));
 
-        let filtered_body: Vec<&Expression> = body
-            .body
-            .iter()
-            .map(|s| &s.expression)
-            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-            .collect();
+        let filtered_body = super::util::collect_body_exprs(&body.body);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         let mut has_mutations = false;

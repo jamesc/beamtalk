@@ -1021,47 +1021,9 @@ impl CoreErlangGenerator {
 
     /// Creates a new code generator with a primitive binding table.
     fn with_bindings(module_name: &str, bindings: PrimitiveBindingTable) -> Self {
-        Self {
-            module_name: module_name.to_string(),
-            var_context: VariableContext::new(),
-            state_threading: StateThreading::new(),
-            in_loop_body: false,
-            in_hybrid_loop: false,
-            in_direct_params_loop: false,
-            direct_params_list_op_result: None,
-            hybrid_readonly_field_params: std::collections::HashMap::new(),
-            hybrid_mutated_fields: std::collections::HashSet::new(),
-            is_repl_mode: false,
-            context: CodeGenContext::Actor,
-            source_text: None,
-            primitive_bindings: bindings,
-            class_identity: None,
-            current_method_params: Vec::new(),
-            sealed_method_selectors: std::collections::HashSet::new(),
-            workspace_mode: false,
-            stdlib_mode: false,
-            in_class_method: false,
-            class_var_names: std::collections::HashSet::new(),
-            class_method_selectors: std::collections::HashSet::new(),
-            class_slot_constructor_selector: None,
-            class_var_version: 0,
-            class_var_mutated: false,
-            last_open_scope_result: None,
-            repl_loop_mutated: false,
-            last_dispatch_var: None,
-            current_nlr_token: None,
-            self_version: 0,
-            class_module_index: std::collections::HashMap::new(),
-            source_path: None,
-            tier2_block_params: std::collections::HashSet::new(),
-            tier2_method_info: std::collections::HashMap::new(),
-            codegen_warnings: Vec::new(),
-            semantic_facts: crate::semantic_analysis::SemanticFacts::default(),
-            codegen_diagnostics_enabled: std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS")
-                .is_ok_and(|v| v == "1"),
-            warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
-            current_method_selector: None,
-        }
+        let mut generator = Self::new(module_name);
+        generator.primitive_bindings = bindings;
+        generator
     }
 
     /// Pushes a new scope for variable bindings.

@@ -757,12 +757,7 @@ impl CoreErlangGenerator {
         // Don't push/pop scope — the let-bindings must be visible to subsequent
         // method body expressions (the whole point of the mutation).
         if self.context == CodeGenContext::ValueType && !self.in_loop_body {
-            let body: Vec<&Expression> = block
-                .body
-                .iter()
-                .map(|s| &s.expression)
-                .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-                .collect();
+            let body = super::util::collect_body_exprs(&block.body);
 
             let mut parts: Vec<Document<'static>> = Vec::new();
             parts.extend(arg_bindings);

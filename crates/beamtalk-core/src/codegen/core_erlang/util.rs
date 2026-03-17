@@ -12,7 +12,7 @@
 
 use super::document::{Document, join};
 use super::{CoreErlangGenerator, Result};
-use crate::ast::{ClassDefinition, Expression};
+use crate::ast::{ClassDefinition, Expression, ExpressionStatement};
 use crate::docvec;
 
 /// BT-745: Generate a `'beamtalk_class' = [{...}]` attribute fragment for the
@@ -35,6 +35,17 @@ pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<
         join(entries, &Document::Str(", ")),
         "]"
     ]
+}
+
+/// Filters `@expect` directives from a statement body, returning only the
+/// codegen-relevant expressions.  This is the canonical extraction point —
+/// every call-site that previously inlined this `.iter().map().filter()` chain
+/// should call this helper instead.
+pub(super) fn collect_body_exprs(body: &[ExpressionStatement]) -> Vec<&Expression> {
+    body.iter()
+        .map(|s| &s.expression)
+        .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+        .collect()
 }
 
 /// BT-940: `'file'` module attribute helper for BEAM stacktrace file names.

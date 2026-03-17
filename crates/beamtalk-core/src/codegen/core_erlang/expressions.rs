@@ -885,12 +885,7 @@ impl CoreErlangGenerator {
         block: &Block,
         docs: &mut Vec<Document<'static>>,
     ) -> Result<()> {
-        let filtered_body: Vec<&Expression> = block
-            .body
-            .iter()
-            .map(|s| &s.expression)
-            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-            .collect();
+        let filtered_body = super::util::collect_body_exprs(&block.body);
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
@@ -1111,137 +1106,89 @@ impl CoreErlangGenerator {
         //      bind it to a temp variable.
         //   2. Send the first message (`increment`) and all subsequent
         //      cascade messages to that same bound receiver.
-        if let Expression::MessageSend {
-            receiver: underlying_receiver,
+        //
+        // Normalize the cascade into (underlying_receiver, all_messages) so
+        // both the MessageSend and non-MessageSend cases share one code path.
+        let (underlying_receiver, all_messages): (
+            &Expression,
+            Vec<(&MessageSelector, &[Expression])>,
+        ) = if let Expression::MessageSend {
+            receiver: inner,
             selector: first_selector,
             arguments: first_arguments,
             ..
         } = receiver
         {
-            let receiver_var = self.fresh_temp_var("Receiver");
-            let recv_doc = self.expression_doc(underlying_receiver)?;
-            let mut docs: Vec<Document<'static>> = vec![docvec![
-                "let ",
-                Document::String(receiver_var.clone()),
-                " = ",
-                recv_doc,
-                " in "
-            ]];
-
-            // Total number of messages in the cascade: first + remaining
-            let total_messages = messages.len() + 1;
-
-            for index in 0..total_messages {
-                let is_last = index == total_messages - 1;
-
-                // Determine which selector/arguments to use:
-                // index 0 -> first message from the initial MessageSend
-                // index > 0 -> messages[index - 1]
-                let (selector, arguments): (&MessageSelector, &[Expression]) = if index == 0 {
-                    (first_selector, first_arguments.as_slice())
-                } else {
-                    let msg = &messages[index - 1];
-                    (&msg.selector, msg.arguments.as_slice())
-                };
-
-                // Unified message dispatch to the bound receiver
-                let selector_atom = selector.to_erlang_atom();
-                if matches!(selector, MessageSelector::Binary(_)) {
-                    return Err(CodeGenError::UnsupportedFeature {
-                        feature: "binary selectors in cascades".to_string(),
-                        location: "cascade message with binary selector".to_string(),
-                    });
-                }
-
-                // BT-884: Hoist field-assignment arg bindings BEFORE the `let _ =`
-                // wrapper so that StateN remains in scope for subsequent messages.
-                let arg_docs = self.generate_cascade_args(arguments, &mut docs)?;
-
-                if !is_last {
-                    // For all but the last message, discard the result
-                    docs.push(Document::Str("let _ = "));
-                }
-
-                docs.push(docvec![
-                    "call 'beamtalk_message_dispatch':'send'(",
-                    Document::String(receiver_var.clone()),
-                    ", '",
-                    Document::String(selector_atom),
-                    "', [",
-                ]);
-                for (j, arg_doc) in arg_docs.into_iter().enumerate() {
-                    if j > 0 {
-                        docs.push(Document::Str(", "));
-                    }
-                    docs.push(arg_doc);
-                }
-
-                docs.push(Document::Str("])"));
-
-                if !is_last {
-                    docs.push(Document::Str(" in "));
-                }
+            let mut all: Vec<(&MessageSelector, &[Expression])> =
+                Vec::with_capacity(messages.len() + 1);
+            all.push((first_selector, first_arguments.as_slice()));
+            for msg in messages {
+                all.push((&msg.selector, msg.arguments.as_slice()));
             }
-
-            Ok(Document::Vec(docs))
+            (inner.as_ref(), all)
         } else {
-            // Fallback: if the receiver is not a MessageSend (which should not
-            // happen for well-formed cascades), preserve the previous behavior:
-            // evaluate the receiver once and send all cascade messages to it.
-            let receiver_var = self.fresh_temp_var("Receiver");
-            let recv_doc = self.expression_doc(receiver)?;
-            let mut docs: Vec<Document<'static>> = vec![docvec![
-                "let ",
-                Document::String(receiver_var.clone()),
-                " = ",
-                recv_doc,
-                " in "
-            ]];
+            // Fallback: receiver is not a MessageSend — send all cascade
+            // messages directly to it.
+            let all: Vec<(&MessageSelector, &[Expression])> = messages
+                .iter()
+                .map(|msg| (&msg.selector, msg.arguments.as_slice()))
+                .collect();
+            (receiver, all)
+        };
 
-            // Generate each message send, discarding intermediate results
-            for (i, message) in messages.iter().enumerate() {
-                let is_last = i == messages.len() - 1;
+        let receiver_var = self.fresh_temp_var("Receiver");
+        let recv_doc = self.expression_doc(underlying_receiver)?;
+        let mut docs: Vec<Document<'static>> = vec![docvec![
+            "let ",
+            Document::String(receiver_var.clone()),
+            " = ",
+            recv_doc,
+            " in "
+        ]];
 
-                // Unified message dispatch to the bound receiver
-                let selector_atom = message.selector.to_erlang_atom();
-                if matches!(message.selector, MessageSelector::Binary(_)) {
-                    return Err(CodeGenError::UnsupportedFeature {
-                        feature: "binary selectors in cascades".to_string(),
-                        location: "cascade message with binary selector".to_string(),
-                    });
-                }
+        let total_messages = all_messages.len();
+        for (index, (selector, arguments)) in all_messages.into_iter().enumerate() {
+            let is_last = index == total_messages - 1;
 
-                // BT-884: Hoist field-assignment arg bindings BEFORE `let _ =`.
-                let arg_docs = self.generate_cascade_args(&message.arguments, &mut docs)?;
-
-                if !is_last {
-                    // For all but the last message, discard the result
-                    docs.push(Document::Str("let _ = "));
-                }
-
-                docs.push(docvec![
-                    "call 'beamtalk_message_dispatch':'send'(",
-                    Document::String(receiver_var.clone()),
-                    ", '",
-                    Document::String(selector_atom),
-                    "', [",
-                ]);
-                for (j, arg_doc) in arg_docs.into_iter().enumerate() {
-                    if j > 0 {
-                        docs.push(Document::Str(", "));
-                    }
-                    docs.push(arg_doc);
-                }
-
-                docs.push(Document::Str("])"));
-
-                if !is_last {
-                    docs.push(Document::Str(" in "));
-                }
+            let selector_atom = selector.to_erlang_atom();
+            if matches!(selector, MessageSelector::Binary(_)) {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "binary selectors in cascades".to_string(),
+                    location: "cascade message with binary selector".to_string(),
+                });
             }
 
-            Ok(Document::Vec(docs))
+            // BT-884: Hoist field-assignment arg bindings BEFORE the `let _ =`
+            // wrapper so that StateN remains in scope for subsequent messages.
+            let arg_docs = self.generate_cascade_args(arguments, &mut docs)?;
+
+            if !is_last {
+                // For all but the last message, discard the result
+                docs.push(Document::Str("let _ = "));
+            }
+
+            docs.push(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                Document::String(receiver_var.clone()),
+                ", '",
+                Document::String(selector_atom),
+                "', [",
+            ]);
+            for (j, arg_doc) in arg_docs.into_iter().enumerate() {
+                if j > 0 {
+                    docs.push(Document::Str(", "));
+                }
+                docs.push(arg_doc);
+            }
+
+            docs.push(Document::Str("])"));
+
+            if !is_last {
+                docs.push(Document::Str(" in "));
+            }
         }
+
+        Ok(Document::Vec(docs))
     }
 
     /// Generates the body of a block with proper state threading.
@@ -1254,12 +1201,7 @@ impl CoreErlangGenerator {
         }
 
         // Filter out @expect directives — they are compile-time only and generate no code.
-        let body: Vec<&Expression> = block
-            .body
-            .iter()
-            .map(|s| &s.expression)
-            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-            .collect();
+        let body = super::util::collect_body_exprs(&block.body);
 
         self.generate_block_body_slice(&body)
     }
