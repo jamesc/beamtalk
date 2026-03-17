@@ -156,7 +156,7 @@ Beamtalk bakes this best practice in: errors in `handleInfo:` are logged and the
 
 Timer processes (`Timer every:do:` and `Timer after:do:`) are **linked to the calling process** via `spawn_link`. This is a change from the current `spawn` implementation. The link ensures:
 - When the actor dies, the Timer process dies automatically — no orphaned ticks
-- When the Timer process crashes (unlikely — block execution is wrapped in `catch`), the link propagates the crash to the actor, which triggers supervisor restart
+- If the Timer process is killed externally (e.g., `exit(Pid, kill)`), the link propagates the exit to the actor, triggering supervisor restart. User code errors in the block cannot crash the Timer — they are wrapped in `catch`
 
 This eliminates the entire class of "forgot to cancel timer in terminate:" bugs. `cancel` remains available for explicit lifecycle control when needed.
 
@@ -414,8 +414,8 @@ Add `actor link` and `actor unlink` to mirror `erlang:link/1` and `erlang:unlink
 2. **Hierarchy resolution:** Add `is_server_subclass()` to `ClassHierarchy`, following the existing `is_supervisor_subclass` pattern. Enrich `class_superclass_index` in the package compiler so cross-file inheritance (`Server subclass: Foo` in one file, `Foo subclass: Bar` in another) resolves correctly — analogous to how `Actor` is handled today.
 3. **Codegen:** In `generate_handle_info()` (callbacks.rs ~445-472), check if the class is a Server subclass via `is_server_subclass()`. If yes, generate dispatch to `handleInfo:` with error logging; if no (plain Actor), generate the current ignore-all stub.
 4. **No special validation needed:** `handleInfo:` is a regular method on Server. Actor doesn't define it — DNU is the natural error. The codegen `is_server_subclass()` check determines which `handle_info/2` to generate.
-4. **Timer: `spawn` → `spawn_link`:** Change `beamtalk_timer.erl` to use `spawn_link` instead of `spawn` for `after:do:` and `every:do:`. This links the Timer process to the calling process, ensuring automatic cleanup on caller death. The existing `catch Block()` in the timer loop prevents block errors from crashing the Timer process.
-5. **Lint — sync send in Timer block:** Warn when a `self method.` (sync call) appears inside a `Timer every:do:` or `Timer after:do:` block. Suggest `self method!` (async cast) instead.
+5. **Timer: `spawn` → `spawn_link`:** Change `beamtalk_timer.erl` to use `spawn_link` instead of `spawn` for `after:do:` and `every:do:`. This links the Timer process to the calling process, ensuring automatic cleanup on caller death. The existing `catch Block()` in the timer loop prevents block errors from crashing the Timer process.
+6. **Lint — sync send in Timer block:** Warn when a `self method.` (sync call) appears inside a `Timer every:do:` or `Timer after:do:` block. Suggest `self method!` (async cast) instead.
 7. **Tests:** BUnit tests for Server + handleInfo: (using `Erlang erlang send:` to inject raw messages), DOWN message handling, unknown message ignoring, error-in-handler recovery. Integration tests for the two-hop init chain (`Server subclass: Foo` with `spawn` and `spawnWith:`). EUnit tests for the dispatch path and Timer `spawn_link` behavior. Lint tests for sync-in-block warning.
 
 ### Phase 2: Graceful Shutdown — BT-1451 (approved, PR #1478)
