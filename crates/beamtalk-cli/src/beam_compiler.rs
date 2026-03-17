@@ -282,6 +282,12 @@ impl BeamCompiler {
             .arg("minimal")
             .arg("-boot")
             .arg("no_dot_erlang")
+            // Redirect OTP default logger to stderr (BT-1431). Without this,
+            // logger output goes to stdout and mixes into the compilation
+            // protocol, causing parse failures or ugly error messages.
+            .arg("-kernel")
+            .arg("logger")
+            .arg(beamtalk_cli::repl_startup::KERNEL_LOGGER_STDERR)
             .args(&pa_args)
             .arg("-s")
             .arg("beamtalk_build_worker")
