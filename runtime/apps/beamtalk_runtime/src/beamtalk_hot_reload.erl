@@ -53,10 +53,14 @@ code_change(_OldVsn, State, {NewInstanceVars, Module}) when
     is_map(State), is_list(NewInstanceVars), is_atom(Module)
 ->
     %% BT-572: Field migration during hot reload
+    ?LOG_INFO("code_change: field migration", #{
+        module => Module, new_instance_vars => NewInstanceVars
+    }),
     MigratedState = maybe_migrate_class_key(State),
     NewState = migrate_fields(MigratedState, NewInstanceVars, Module),
     {ok, NewState};
 code_change(_OldVsn, State, _Extra) when is_map(State) ->
+    ?LOG_DEBUG("code_change: class key migration check", #{}),
     {ok, maybe_migrate_class_key(State)};
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -82,7 +86,9 @@ trigger_code_change(Module, Pids) ->
 -spec trigger_code_change(atom(), [pid()], term()) ->
     {ok, non_neg_integer(), [{pid(), term()}]}.
 trigger_code_change(Module, Pids, Extra) ->
-    lists:foldl(
+    PidCount = length(Pids),
+    ?LOG_INFO("Triggering code_change", #{module => Module, actor_count => PidCount}),
+    Result = lists:foldl(
         fun(Pid, {ok, Upgraded, Failures}) ->
             case try_change_code(Pid, Module, Extra) of
                 ok ->
@@ -93,7 +99,21 @@ trigger_code_change(Module, Pids, Extra) ->
         end,
         {ok, 0, []},
         Pids
-    ).
+    ),
+    {ok, Upgraded, Failures} = Result,
+    case Failures of
+        [] ->
+            ?LOG_INFO("code_change complete", #{
+                module => Module, upgraded => Upgraded
+            });
+        _ ->
+            ?LOG_INFO("code_change complete with failures", #{
+                module => Module,
+                upgraded => Upgraded,
+                failure_count => length(Failures)
+            })
+    end,
+    Result.
 
 %%====================================================================
 %% Internal functions
