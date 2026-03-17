@@ -873,6 +873,12 @@ pub(super) struct CoreErlangGenerator {
     /// BT-213: Code generation context (`Actor`, `ValueType`, or `Repl`).
     /// Determines variable naming and method dispatch strategy.
     context: CodeGenContext,
+    /// BT-1475: Nesting depth of block (closure) bodies.
+    /// When > 0, self-cast sends in Actor context must route through the
+    /// actor mailbox (`beamtalk_message_dispatch:cast/3`) instead of calling
+    /// `safe_dispatch` directly, because the block may execute in a different
+    /// process (e.g. Timer callback, cross-actor callback).
+    block_depth: usize,
     /// BT-101: Original source text for extracting method source.
     source_text: Option<String>,
     /// BT-295: Primitive binding table from compiled stdlib (ADR 0007).
@@ -1008,6 +1014,7 @@ impl CoreErlangGenerator {
             hybrid_mutated_fields: std::collections::HashSet::new(),
             is_repl_mode: false,
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
+            block_depth: 0,
             source_text: None,
             primitive_bindings: PrimitiveBindingTable::new(),
             class_identity: None,

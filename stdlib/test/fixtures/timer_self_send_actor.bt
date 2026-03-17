@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1475: Fixture for testing self-send inside Timer blocks.
+// The initialize method schedules a Timer that fires a self-cast,
+// which should route through the actor mailbox — not call safe_dispatch
+// on a stale state snapshot.
+
+Actor subclass: TimerSelfSendActor
+  state: count = 0
+
+  initialize => Timer after: 10 do: [self bump!]
+
+  bump => self.count := self.count + 1
+
+  getCount => self.count

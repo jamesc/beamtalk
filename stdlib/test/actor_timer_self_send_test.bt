@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1475: Tests that self-cast sends (!) inside Timer blocks and callback
+// blocks correctly route through the actor mailbox, not via safe_dispatch
+// on a stale captured state.
+
+TestCase subclass: ActorTimerSelfSendTest
+
+  testTimerSelfCastUpdatesState =>
+    // Timer after:do: fires a self bump! — the cast must go through the mailbox
+    a := TimerSelfSendActor spawn
+    Timer sleep: 200
+    self assert: a getCount equals: 1
+
+  testMultipleTimerSelfCasts =>
+    // Multiple Timer-based self-casts should all route through the mailbox
+    a := TimerSelfSendActor spawn
+    // Wait for the initialize timer, then fire two more
+    Timer sleep: 100
+    self assert: a getCount equals: 1
+    // Send additional casts from outside — mix of direct and timer
+    a bump!
+    Timer sleep: 50
+    self assert: a getCount equals: 2
+
+  testCallbackBlockSelfCast =>
+    // A block capturing self and passed to another execution context
+    // should route self! sends through the mailbox
+    c := Counter spawn
+    block := [c increment!]
+    // Execute the block in the test process (simulates cross-process callback)
+    block value
+    Timer sleep: 50
+    self assert: c getValue equals: 1

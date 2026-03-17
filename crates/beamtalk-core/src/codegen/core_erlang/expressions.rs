@@ -618,6 +618,8 @@ impl CoreErlangGenerator {
 
         // Pure block: plain fun (no mutations to thread via Tier 2)
         self.push_scope();
+        // BT-1475: Track block nesting so self-cast sends route through the mailbox
+        self.block_depth += 1;
 
         let mut param_parts: Vec<Document<'static>> = Vec::new();
         for (i, param) in block.parameters.iter().enumerate() {
@@ -633,6 +635,7 @@ impl CoreErlangGenerator {
         let body_doc = self.generate_block_body(block)?;
 
         // Pop the scope when done with the block
+        self.block_depth -= 1;
         self.pop_scope();
         Ok(docvec![header, body_doc])
     }
@@ -662,6 +665,8 @@ impl CoreErlangGenerator {
         captured_vars: &[String],
     ) -> Result<Document<'static>> {
         self.push_scope();
+        // BT-1475: Track block nesting so self-cast sends route through the mailbox
+        self.block_depth += 1;
 
         // Bind block parameters
         let mut param_parts: Vec<Document<'static>> = Vec::new();
@@ -723,6 +728,7 @@ impl CoreErlangGenerator {
             this.generate_block_stateful_body(block, &mut docs)?;
             Ok::<_, crate::codegen::core_erlang::CodeGenError>(docs)
         })?;
+        self.block_depth -= 1;
         self.pop_scope();
 
         Ok(docvec![header, Document::Vec(docs)])
