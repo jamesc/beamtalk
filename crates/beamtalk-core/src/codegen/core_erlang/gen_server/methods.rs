@@ -136,7 +136,15 @@ impl CoreErlangGenerator {
         };
 
         // Generate body as Document
-        let method_body_doc = self.generate_method_definition_body_with_reply(method)?;
+        let method_body_doc = match self.generate_method_definition_body_with_reply(method) {
+            Ok(doc) => doc,
+            Err(e) => {
+                self.current_nlr_token = None;
+                self.pop_scope();
+                self.current_method_selector = None;
+                return Err(e);
+            }
+        };
 
         self.current_nlr_token = None;
 
@@ -1410,7 +1418,17 @@ impl CoreErlangGenerator {
                 // Empty class method body returns self (ClassSelf)
                 docvec!["ClassSelf"]
             } else {
-                let inner_doc = self.generate_class_method_body(method, &class.class_variables)?;
+                let inner_doc =
+                    match self.generate_class_method_body(method, &class.class_variables) {
+                        Ok(doc) => doc,
+                        Err(e) => {
+                            self.current_nlr_token = None;
+                            self.pop_scope();
+                            self.in_class_method = false;
+                            self.current_method_selector = None;
+                            return Err(e);
+                        }
+                    };
                 self.current_nlr_token = None;
                 // BT-1202: Use self.class_var_mutated (not just whether class vars are declared)
                 // to preserve the {class_var_result, ...} contract. The normal path only wraps
