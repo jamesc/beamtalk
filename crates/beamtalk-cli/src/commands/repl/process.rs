@@ -295,6 +295,7 @@ pub(crate) fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn drain_child_stderr_takes_handle_and_drains() {
         // Spawn a child that writes to stderr then exits.
@@ -317,6 +318,7 @@ mod tests {
             .expect("drain thread should not panic");
     }
 
+    #[cfg(unix)]
     #[test]
     fn drain_child_stderr_returns_none_without_pipe() {
         // Child with no stderr pipe → drain returns None.
