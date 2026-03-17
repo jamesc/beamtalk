@@ -396,6 +396,48 @@ impl CoreErlangGenerator {
                             let expr_str = self.expression_doc(value)?;
                             docs.push(self.emit_tuple_unpack_reply("Tuple", expr_str));
                         }
+                        // BT-1477: ^ self.field := <control-flow-with-mutations>
+                        BodyExprKind::FieldAssignmentControlFlow => {
+                            if let Expression::Assignment {
+                                target, value: rhs, ..
+                            } = &**value
+                            {
+                                if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                                    let tuple_var = self.fresh_temp_var("CfTuple");
+                                    let val_var = self.fresh_temp_var("CfVal");
+                                    let rhs_str = self.expression_doc(rhs)?;
+                                    let rhs_state = self.fresh_temp_var("CfState");
+                                    let field_state = self.next_state_var();
+                                    docs.push(docvec![
+                                        "let ",
+                                        Document::String(tuple_var.clone()),
+                                        " = ",
+                                        rhs_str,
+                                        " in let ",
+                                        Document::String(val_var.clone()),
+                                        " = call 'erlang':'element'(1, ",
+                                        Document::String(tuple_var.clone()),
+                                        ") in let ",
+                                        Document::String(rhs_state.clone()),
+                                        " = call 'erlang':'element'(2, ",
+                                        Document::String(tuple_var),
+                                        ") in let ",
+                                        Document::String(field_state.clone()),
+                                        " = call 'maps':'put'('",
+                                        Document::String(field.name.to_string()),
+                                        "', ",
+                                        Document::String(val_var.clone()),
+                                        ", ",
+                                        Document::String(rhs_state),
+                                        ") in {'reply', ",
+                                        Document::String(val_var),
+                                        ", ",
+                                        Document::String(field_state),
+                                        "}",
+                                    ]);
+                                }
+                            }
+                        }
                         _ => {
                             let final_state = self.current_state_var();
                             let value_str = self.expression_doc(value)?;

@@ -295,6 +295,45 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
+                // BT-1477: self.field := <control-flow-with-mutations> inside a conditional branch.
+                // Unpack the {Value, State} tuple from the RHS, then apply maps:put for the field.
+                BodyExprKind::FieldAssignmentControlFlow => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                            let tuple_var = self.fresh_temp_var("CfTuple");
+                            let val_var = self.fresh_temp_var("CfVal");
+                            let rhs_doc = self.expression_doc(value)?;
+                            let rhs_state = self.fresh_temp_var("CfState");
+                            let new_state = self.next_state_var();
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(tuple_var.clone()),
+                                " = ",
+                                rhs_doc,
+                                " in let ",
+                                Document::String(val_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(tuple_var.clone()),
+                                ") in let ",
+                                Document::String(rhs_state.clone()),
+                                " = call 'erlang':'element'(2, ",
+                                Document::String(tuple_var),
+                                ") in let ",
+                                Document::String(new_state),
+                                " = call 'maps':'put'('",
+                                Document::String(field.name.to_string()),
+                                "', ",
+                                Document::String(val_var.clone()),
+                                ", ",
+                                Document::String(rhs_state),
+                                ") in ",
+                            ]);
+                            if is_last {
+                                last_result = Some(val_var);
+                            }
+                        }
+                    }
+                }
                 BodyExprKind::ControlFlowWithMutations => {
                     if is_last {
                         // Last expression is nested control flow with mutations.
