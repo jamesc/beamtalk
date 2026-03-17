@@ -1605,6 +1605,20 @@ impl CoreErlangGenerator {
         all_mutations: &[String],
     ) -> Result<Document<'static>> {
         self.push_scope();
+        let result = self.build_vt_conditional_branch_parts(block, all_mutations);
+        self.pop_scope();
+        result
+    }
+
+    /// Inner implementation for `generate_vt_conditional_branch`.
+    ///
+    /// Separated so that `push_scope`/`pop_scope` always bracket the fallible
+    /// work regardless of whether `?` propagates an error.
+    fn build_vt_conditional_branch_parts(
+        &mut self,
+        block: &crate::ast::Block,
+        all_mutations: &[String],
+    ) -> Result<Document<'static>> {
         let body = super::util::collect_body_exprs(&block.body);
 
         let mut parts: Vec<Document<'static>> = Vec::new();
@@ -1636,7 +1650,6 @@ impl CoreErlangGenerator {
         // Return the final values of all captured mutations
         let return_doc = Self::build_vt_mutation_return(self, all_mutations);
         parts.push(return_doc);
-        self.pop_scope();
         Ok(Document::Vec(parts))
     }
 
