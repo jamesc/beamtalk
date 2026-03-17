@@ -91,7 +91,8 @@ sealed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk logLevel: #debug
   /// ```
-  logLevel: level :: Symbol -> Nil => (Erlang beamtalk_logging_config) logLevel: level
+  logLevel: level :: Symbol -> Nil =>
+    (Erlang beamtalk_logging_config) logLevel: level
 
   /// Return the list of available debug target symbols.
   ///
@@ -107,7 +108,8 @@ sealed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk enableDebug: #actor
   /// ```
-  enableDebug: target :: Symbol -> Nil => (Erlang beamtalk_logging_config) enableDebug: target
+  enableDebug: target :: Symbol -> Nil =>
+    (Erlang beamtalk_logging_config) enableDebug: target
 
   /// Disable debug logging for a named subsystem.
   ///
@@ -115,7 +117,8 @@ sealed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk disableDebug: #actor
   /// ```
-  disableDebug: target :: Symbol -> Nil => (Erlang beamtalk_logging_config) disableDebug: target
+  disableDebug: target :: Symbol -> Nil =>
+    (Erlang beamtalk_logging_config) disableDebug: target
 
   /// Return the list of currently enabled debug targets.
   ///
@@ -123,7 +126,8 @@ sealed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk activeDebugTargets
   /// ```
-  activeDebugTargets -> List => (Erlang beamtalk_logging_config) activeDebugTargets
+  activeDebugTargets -> List =>
+    (Erlang beamtalk_logging_config) activeDebugTargets
 
   /// Disable all debug targets.
   ///
