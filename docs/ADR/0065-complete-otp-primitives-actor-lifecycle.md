@@ -427,6 +427,19 @@ BT-1451 delivers `terminate:` runtime support. Follow-up issue for `withShutdown
 - User-defined `codeChange:from:` on Server — when a production use case emerges
 - Links — rejected; revisit only if a compelling pattern requires them
 
+## Implementation Tracking
+
+**Epic:** BT-1453
+**Issues:**
+- BT-1454: Server stdlib class + hierarchy resolution (S) — Phase 1
+- BT-1455: Timer spawn → spawn_link (S) — Phase 1
+- BT-1456: SupervisionSpec withShutdown: (S) — Phase 1
+- BT-1457: handleInfo: codegen dispatch (M) — Phase 2, blocked by BT-1454
+- BT-1458: Sync-in-Timer-block lint (M) — Phase 3, blocked by BT-1455
+- BT-1459: Documentation (S) — Phase 3, blocked by BT-1457
+
+**Status:** Planned
+
 ## References
 - Related issues: BT-1452 (this ADR), BT-1442 (monitor/pid/onExit — landed), BT-1451 (terminate: runtime fix — in progress)
 - Related ADRs: ADR 0005 (BEAM Object Model), ADR 0013 (Class Methods/Instantiation), ADR 0043 (Sync-by-Default Messaging), ADR 0059 (Supervision Tree Syntax)
