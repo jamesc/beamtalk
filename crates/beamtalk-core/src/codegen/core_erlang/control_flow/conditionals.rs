@@ -245,7 +245,7 @@ impl CoreErlangGenerator {
             let is_last = i == body.len() - 1;
 
             match kind {
-                BodyExprKind::FieldAssignment | BodyExprKind::SelfFieldAtPut => {
+                BodyExprKind::FieldAssignment => {
                     // generate_field_assignment_open emits open let chain:
                     // "let _Val = <value> in let StateAccN = maps:put(...) in "
                     let (doc, val_var) = self.generate_field_assignment_open(expr)?;
@@ -338,9 +338,12 @@ impl CoreErlangGenerator {
                         ]);
                     }
                 }
-                // All other kinds (EarlyReturn, SuperSend, ErrorSend, Tier2ValueCall,
-                // Tier2SelfSend, DispatchingSelfSend, Pure) are treated as pure
-                // expressions in the conditional branch context.
+                // All other kinds (SelfFieldAtPut, EarlyReturn, SuperSend, ErrorSend,
+                // Tier2ValueCall, Tier2SelfSend, DispatchingSelfSend, Pure) are treated
+                // as pure expressions in the conditional branch context.
+                // Note: SelfFieldAtPut falls through here (matching pre-refactor behavior)
+                // since generate_field_assignment_open expects Assignment{FieldAccess},
+                // not the MessageSend form used by fieldAt:put:.
                 _ => {
                     if is_last {
                         // Last non-assignment: bind to result variable
