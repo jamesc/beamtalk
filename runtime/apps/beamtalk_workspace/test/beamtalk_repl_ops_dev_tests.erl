@@ -451,7 +451,9 @@ walk_chain_class_empty_selectors_test() ->
 
 walk_chain_class_meta_selector_test() ->
     %% `class` selector on a class object stays on the class side
-    ?assertEqual({ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [class])).
+    ?assertEqual(
+        {ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [class])
+    ).
 
 walk_chain_class_multi_class_selectors_test() ->
     ?assertEqual({ok, 'Foo', class}, beamtalk_repl_ops_dev:walk_chain_class('Foo', [class, class])).
@@ -555,7 +557,9 @@ walk_mixed_chain_unknown_binary_selector_test() ->
 %%====================================================================
 
 walk_mixed_chain_class_empty_hops_test() ->
-    ?assertEqual({ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_mixed_chain_class('Integer', [])).
+    ?assertEqual(
+        {ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_mixed_chain_class('Integer', [])
+    ).
 
 walk_mixed_chain_class_meta_selector_test() ->
     %% `{unary, class}` on a class object stays on the class side
@@ -699,13 +703,10 @@ handle_complete_new_format_empty_prefix_test() ->
 %%====================================================================
 
 chain_with_registry_test_() ->
-    {setup,
-        fun setup_chain_registry/0,
-        fun teardown_chain_registry/1,
-        [
-            fun walk_mixed_chain_binary_plus_returns_integer/0,
-            fun walk_mixed_chain_binary_lt_returns_boolean/0
-        ]}.
+    {setup, fun setup_chain_registry/0, fun teardown_chain_registry/1, [
+        fun walk_mixed_chain_binary_plus_returns_integer/0,
+        fun walk_mixed_chain_binary_lt_returns_boolean/0
+    ]}.
 
 setup_chain_registry() ->
     %% Start pg if not running
@@ -744,10 +745,12 @@ teardown_chain_registry(Pids) ->
                 true ->
                     MRef = monitor(process, Pid),
                     exit(Pid, kill),
-                    receive {'DOWN', MRef, process, Pid, _} -> ok
+                    receive
+                        {'DOWN', MRef, process, Pid, _} -> ok
                     after 1000 -> ok
                     end;
-                false -> ok
+                false ->
+                    ok
             end
         end,
         Pids

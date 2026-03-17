@@ -1832,7 +1832,9 @@ walk_chain_class_single_hop_found_test() ->
 %% the metaclass, which has the same class-side methods. The chain should stay on the
 %% class side rather than returning undefined.
 walk_chain_class_class_selector_stays_on_class_side_test() ->
-    ?assertEqual({ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [class])).
+    ?assertEqual(
+        {ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [class])
+    ).
 
 walk_chain_class_class_then_method_test() ->
     Pid = spawn_mock_class_with_return_types(

@@ -246,15 +246,18 @@ generate_message(Kind, Class, Selector) ->
 %% (e.g., `methods`, `allMethods`, `superclass`), suggest using `class` to
 %% access it. Degrades gracefully if the class registry is unavailable.
 -spec maybe_enrich_dnu_hint(#beamtalk_error{}) -> #beamtalk_error{}.
-maybe_enrich_dnu_hint(#beamtalk_error{class = Class, selector = Selector} = Error)
-  when is_atom(Class), is_atom(Selector), Selector =/= undefined ->
+maybe_enrich_dnu_hint(#beamtalk_error{class = Class, selector = Selector} = Error) when
+    is_atom(Class), is_atom(Selector), Selector =/= undefined
+->
     try beamtalk_dispatch:responds_to(Selector, 'Class') of
         true ->
             SelBin = atom_to_binary(Selector, utf8),
             Hint = iolist_to_binary([
-                <<"'">>, SelBin,
+                <<"'">>,
+                SelBin,
                 <<"' is a class-side message — use 'class ">>,
-                SelBin, <<"' to send it to an instance's class">>
+                SelBin,
+                <<"' to send it to an instance's class">>
             ]),
             Error#beamtalk_error{hint = Hint};
         false ->
