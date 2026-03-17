@@ -72,7 +72,7 @@ small_state() ->
       x => 0, y => 0, z => 0, a => 0, b => 0, c => 0,
       d => 0, e => 0, f => 0, g => 0}.
 
-%% @doc Large actor state (34 keys, past BEAM small-map threshold).
+%% @doc Large actor state (37 keys, past BEAM small-map threshold).
 -spec big_state() -> map().
 big_state() ->
     lists:foldl(
