@@ -909,17 +909,27 @@ pub(super) struct CoreErlangGenerator {
     class_var_version: usize,
     /// BT-412: Whether class variables were mutated in the current method.
     class_var_mutated: bool,
-    /// BT-412: Name of the result variable from the last open-scope expression
-    /// (class var assignment or class method self-send). Used by the class method
-    /// body generator to reference the result when closing open scopes.
+    /// BT-412/BT-1448: Internal side-channel for open-scope expression results.
+    ///
+    /// Set deep inside `generate_expression` when a class var assignment, class method
+    /// self-send, or direct-params list-op produces an open let-chain. Read by:
+    /// - `expression_doc_with_open_scope()` — the public API for callers to detect open scopes
+    /// - The annotation guard in `generate_expression` — to skip line annotations on open chains
+    ///
+    /// External callers should use `expression_doc_with_open_scope()` instead of reading
+    /// this field directly. Functions that produce their own open let-chains
+    /// (`generate_field_assignment_open`, `generate_self_field_at_put_open`,
+    /// `generate_local_var_assignment_in_loop`) return the result variable explicitly.
     last_open_scope_result: Option<String>,
-    /// BT-245: Whether a state-threading loop mutated REPL bindings.
-    /// Set by `_with_mutations` loop codegen when `is_repl_mode` is true.
-    /// Checked by `generate_eval_module_body` to return `{'nil', Result}`.
+    /// BT-245/BT-1448: Internal flag for REPL mutation-threaded expressions.
+    ///
+    /// Set deep inside `generate_expression` when mutation-threaded control flow
+    /// (loops, conditionals, exception handlers, inline value calls) produces a
+    /// `{Result, State}` tuple that the REPL must unpack.
+    ///
+    /// External callers should use `expression_doc_with_repl_mutation_tracking()`
+    /// instead of reading this field directly.
     repl_loop_mutated: bool,
-    /// BT-245: Name of the dispatch tuple variable from the last `generate_self_dispatch_open`.
-    /// Contains `{Result, State}` — callers can extract element 1 for the result value.
-    last_dispatch_var: Option<String>,
     /// BT-754: Core Erlang variable name holding the non-local return token for the current
     /// value type method, or `None` when no NLR infrastructure is active.
     ///
@@ -1003,7 +1013,6 @@ impl CoreErlangGenerator {
             class_var_mutated: false,
             last_open_scope_result: None,
             repl_loop_mutated: false,
-            last_dispatch_var: None,
             current_nlr_token: None,
             self_version: 0,
             class_module_index: std::collections::HashMap::new(),
@@ -1775,9 +1784,12 @@ impl CoreErlangGenerator {
                     self.generate_message_send(receiver, selector, arguments)
                 }?;
                 // BT-940: Annotate message sends with source line for BEAM stacktraces.
-                // Only annotate CLOSED expressions — class method sends return open let-chains
-                // (last_open_scope_result is Some after the call) which cannot be annotated.
-                if self.last_open_scope_result.is_none() {
+                // Only annotate CLOSED expressions — open let-chains (class method sends,
+                // direct-params list ops) cannot be annotated because the trailing `in`
+                // breaks Core Erlang syntax when wrapped in `( expr -| [annotation] )`.
+                if self.last_open_scope_result.is_none()
+                    && self.direct_params_list_op_result.is_none()
+                {
                     if let Some(line_num) = self.span_to_line(*span) {
                         return Ok(Self::annotate_with_line(doc, line_num));
                     }

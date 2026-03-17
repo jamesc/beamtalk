@@ -111,6 +111,9 @@ impl CoreErlangGenerator {
                 // BT-1329: In direct-params loop context, skip StateAcc repack and omit
                 // trailing 'nil'. The extracted vars are left as open let-bindings so they
                 // escape to the outer scope (the caller chains the next expression directly).
+                // BT-1448: Signal open scope so the annotation guard in generate_expression
+                // does not wrap this open let-chain in `( ... -| [...] )`.
+                self.last_open_scope_result = Some("_".to_string());
                 docvec![
                     " in let ",
                     Document::String(fold_result.clone()),

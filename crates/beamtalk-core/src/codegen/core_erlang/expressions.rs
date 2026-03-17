@@ -885,7 +885,7 @@ impl CoreErlangGenerator {
             let is_last = i == filtered_body.len() - 1;
 
             if Self::is_field_assignment(expr) {
-                let doc = self.generate_field_assignment_open(expr)?;
+                let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
                 docs.push(doc);
                 if is_last {
                     // Return the assigned value and updated state.
@@ -906,7 +906,7 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if Self::is_local_var_assignment(expr) {
-                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                let (assign_doc, _val_var) = self.generate_local_var_assignment_in_loop(expr)?;
                 docs.push(assign_doc);
                 if let Expression::Assignment { target, .. } = expr {
                     if let Expression::Identifier(id) = target.as_ref() {
@@ -952,11 +952,8 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Non-assignment expression
-                // BT-1397: Clear before generating to detect open-scope results from
-                // class method self-sends.
-                self.last_open_scope_result = None;
-                let doc = self.generate_expression(expr)?;
-                let open_scope = self.last_open_scope_result.take();
+                // BT-1397: Detect open-scope results from class method self-sends.
+                let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
                 if is_last {
                     // Wrap result in {Result, StateAcc} tuple
                     let state = self.current_state_var();
@@ -1381,9 +1378,9 @@ impl CoreErlangGenerator {
                 // BT-1397: Class method self-send as last expression in a block body.
                 // The generated code leaves an open scope ending with `in ` — close it
                 // with the unwrapped result variable (same pattern as generate_class_method_body).
-                self.last_open_scope_result = None;
-                docs.push(self.generate_expression(expr)?);
-                if let Some(result_var) = self.last_open_scope_result.take() {
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                docs.push(expr_doc);
+                if let Some(result_var) = open_scope {
                     docs.push(Document::String(result_var));
                 }
             } else if is_last {
@@ -1392,7 +1389,8 @@ impl CoreErlangGenerator {
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 // This leaves the let bindings open for subsequent expressions
-                docs.push(self.generate_field_assignment_open(expr)?);
+                let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
+                docs.push(doc);
             } else if is_local_assignment {
                 // Local variable assignment: generate with proper binding
                 if let Expression::Assignment { target, value, .. } = expr {
@@ -1410,15 +1408,14 @@ impl CoreErlangGenerator {
                         // Capture the value expression (preserves side effects)
                         // Important: capture BEFORE updating the mapping,
                         // so that any uses of the variable in the RHS see the previous binding.
-                        // BT-1397: Clear before RHS so we detect open-scope results from
-                        // class method self-sends in the value expression.
-                        self.last_open_scope_result = None;
-                        let val_doc = self.expression_doc(value)?;
+                        // BT-1397: Detect open-scope results from class method self-sends
+                        // in the value expression.
+                        let (val_doc, open_scope) = self.expression_doc_with_open_scope(value)?;
                         // Now update the mapping so subsequent expressions see this binding.
                         self.bind_var(var_name, &core_var);
                         // BT-1397: If the RHS produced an open scope (class method self-send),
                         // emit the open scope then bind the variable to its result.
-                        if let Some(open_scope_result) = self.last_open_scope_result.take() {
+                        if let Some(open_scope_result) = open_scope {
                             docs.push(docvec![
                                 val_doc,
                                 "let ",
@@ -1466,9 +1463,8 @@ impl CoreErlangGenerator {
             } else if self.is_class_method_self_send(expr) {
                 // BT-1397: Class method self-send as non-last expression in a block body.
                 // The generated code leaves an open scope — emit it and discard the result.
-                self.last_open_scope_result = None;
-                let expr_doc = self.expression_doc(expr)?;
-                if let Some(result_var) = self.last_open_scope_result.take() {
+                let (expr_doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+                if let Some(result_var) = open_scope {
                     docs.push(docvec![
                         expr_doc,
                         "let _Unit = ",
@@ -1816,13 +1812,8 @@ impl CoreErlangGenerator {
         for arg in arguments {
             if Self::is_field_assignment(arg) {
                 // Push hoisted binding directly to docs (preserves source order).
-                docs.push(self.generate_field_assignment_open(arg)?);
-                let val_var = self.last_open_scope_result.take().ok_or_else(|| {
-                    CodeGenError::Internal(
-                        "generate_field_assignment_open did not set last_open_scope_result"
-                            .to_string(),
-                    )
-                })?;
+                let (doc, val_var) = self.generate_field_assignment_open(arg)?;
+                docs.push(doc);
                 arg_docs.push(Document::String(val_var));
             } else {
                 arg_docs.push(self.expression_doc(arg)?);

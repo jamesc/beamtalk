@@ -520,7 +520,7 @@ impl CoreErlangGenerator {
             let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
-                let doc = self.generate_field_assignment_open(expr)?;
+                let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
                 docs.push(doc);
                 if is_last {
                     // BT-483: Field assignment returns the assigned value
@@ -532,20 +532,18 @@ impl CoreErlangGenerator {
                     result_var = "'nil'".to_string();
                 }
             } else if self.is_actor_self_send(expr) {
-                let doc = self.generate_self_dispatch_open(expr)?;
+                let (doc, dispatch_var) = self.generate_self_dispatch_open(expr)?;
                 docs.push(doc);
                 if is_last {
-                    // BT-483: Self-dispatch result is in last_dispatch_var
-                    if let Some(dv) = self.last_dispatch_var.clone() {
-                        let rv = self.fresh_temp_var("ExResult");
-                        docs.push(Document::String(format!(
-                            "let {rv} = call 'erlang':'element'(1, {dv}) in "
-                        )));
-                        result_var = rv;
-                    }
+                    // BT-483: Self-dispatch result is in dispatch_var
+                    let rv = self.fresh_temp_var("ExResult");
+                    docs.push(Document::String(format!(
+                        "let {rv} = call 'erlang':'element'(1, {dispatch_var}) in "
+                    )));
+                    result_var = rv;
                 }
             } else if Self::is_local_var_assignment(expr) {
-                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                let (assign_doc, _val_var) = self.generate_local_var_assignment_in_loop(expr)?;
                 docs.push(assign_doc);
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                 let binding_docs = self.generate_destructure_bindings(pattern, value)?;

@@ -135,6 +135,39 @@ impl CoreErlangGenerator {
         self.generate_expression(expr)
     }
 
+    /// Generates an expression and returns any open-scope result variable that was produced.
+    ///
+    /// BT-1448: Replaces the manual clear-before/read-after pattern on `last_open_scope_result`.
+    /// Some expressions (class method self-sends, class var assignments) produce an open let-chain
+    /// ending with `in ` and set a result variable that the caller must use to close the scope.
+    /// This method encapsulates that side-channel into an explicit return value.
+    pub(super) fn expression_doc_with_open_scope(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<(super::document::Document<'static>, Option<String>)> {
+        self.last_open_scope_result = None;
+        let doc = self.generate_expression(expr)?;
+        Ok((doc, self.last_open_scope_result.take()))
+    }
+
+    /// Generates an expression and returns whether it set `repl_loop_mutated`.
+    ///
+    /// BT-1448: Replaces the manual reset-before/read-after pattern on `repl_loop_mutated`.
+    /// Mutation-threaded control flow (loops, conditionals, exception handlers) and inline
+    /// value calls set `repl_loop_mutated` deep in the call stack. REPL codegen needs to
+    /// know whether the expression returned a `{Result, State}` tuple that must be unpacked.
+    /// This method encapsulates the side-channel into an explicit return value.
+    pub(super) fn expression_doc_with_repl_mutation_tracking(
+        &mut self,
+        expr: &crate::ast::Expression,
+    ) -> Result<(super::document::Document<'static>, bool)> {
+        self.repl_loop_mutated = false;
+        let doc = self.generate_expression(expr)?;
+        let mutated = self.repl_loop_mutated;
+        self.repl_loop_mutated = false;
+        Ok((doc, mutated))
+    }
+
     /// Generates a fresh variable name and binds it in the current scope.
     ///
     /// Use this for user-visible bindings (block parameters, assignments, etc.)
