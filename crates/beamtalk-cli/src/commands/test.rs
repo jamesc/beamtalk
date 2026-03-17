@@ -990,12 +990,52 @@ struct CompiledDocTest {
     assertion_count: usize,
 }
 
+/// Shared state threaded through the test pipeline phases.
+///
+/// Each phase reads from and writes to this struct, avoiding the need to pass
+/// many individual variables between the extracted phase functions.
+struct TestPipeline {
+    /// Original test path from CLI.
+    test_path: Utf8PathBuf,
+    /// Resolved list of `.bt` test files to process.
+    test_files: Vec<Utf8PathBuf>,
+    /// Temporary build directory for compiled artifacts.
+    build_dir: Utf8PathBuf,
+    /// Whether to treat warnings as errors.
+    warnings_as_errors: bool,
+    /// Discovered packages: `(canonical_root, manifest)`.
+    discovered_packages: Vec<(Utf8PathBuf, manifest::PackageManifest)>,
+    /// Package root to package name mapping.
+    pkg_root_to_name: HashMap<Utf8PathBuf, String>,
+    /// Per-package class module indexes.
+    pkg_class_indexes: PkgClassIndexes,
+    /// Merged class-name to module-name index across all packages.
+    class_module_index: HashMap<String, String>,
+    /// Merged class-name to superclass-name index across all packages.
+    class_superclass_index: HashMap<String, String>,
+    /// Fixture class-name to module-name index.
+    fixture_class_index: HashMap<String, String>,
+    /// Module names of pre-compiled fixtures (from `fixtures/` directory).
+    precompiled_modules: HashSet<String>,
+    /// All fixture module names (pre-compiled + `@load`-compiled).
+    all_fixture_modules: Vec<String>,
+    /// All generated `.erl` `EUnit` wrapper files to compile.
+    all_erl_files: Vec<Utf8PathBuf>,
+    /// Compiled `BUnit` test metadata.
+    compiled_tests: Vec<CompiledTest>,
+    /// Compiled doc test metadata.
+    compiled_doc_tests: Vec<CompiledDocTest>,
+    /// Package BEAM module names (from built packages).
+    package_modules: Vec<String>,
+    /// Package ebin directories (for code path).
+    package_ebin_dirs: Vec<Utf8PathBuf>,
+}
+
 /// Run `BUnit` tests.
 ///
 /// Discovers `TestCase` subclasses in `.bt` files, compiles them, generates
 /// `EUnit` wrappers, and runs all tests in a single BEAM process.
 #[instrument(skip_all)]
-#[allow(clippy::too_many_lines)] // test orchestration pipeline: discover, compile, run, report
 pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
     info!("Starting BUnit test run");
     let start_time = Instant::now();
@@ -1023,6 +1063,27 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
     let build_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
         .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
 
+    let mut pipeline = initialize_pipeline(test_path, test_files, build_dir, warnings_as_errors)?;
+    compile_fixtures(&mut pipeline)?;
+    discover_and_compile_tests(&mut pipeline)?;
+
+    if pipeline.compiled_tests.is_empty() && pipeline.compiled_doc_tests.is_empty() {
+        println!("No tests found");
+        return Ok(());
+    }
+
+    build_packages(&mut pipeline)?;
+    let result = execute_tests(&pipeline)?;
+    report_results(&pipeline, &result, start_time)
+}
+
+/// Initialize the test pipeline: discover packages and build class indexes.
+fn initialize_pipeline(
+    test_path: Utf8PathBuf,
+    test_files: Vec<Utf8PathBuf>,
+    build_dir: Utf8PathBuf,
+    warnings_as_errors: bool,
+) -> Result<TestPipeline> {
     // Discover all unique package roots: walk up from each test file's directory,
     // and also check the CWD. This allows `beamtalk test .` from a parent directory
     // (e.g. `examples/`) to find and build all packages that contain test files.
@@ -1060,7 +1121,7 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
         pkgs
     };
 
-    // Map from package root → package name for test module naming.
+    // Map from package root -> package name for test module naming.
     // Used to prefix test module names with the package name when multiple
     // packages are in scope, preventing module collisions (e.g. two packages
     // that both define a `SmokeTest` class would otherwise both compile to
@@ -1097,19 +1158,37 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
         }
     }
 
-    // Phase 0: Pre-compile all fixtures in the fixtures/ subdirectory.
-    // This makes all fixture classes available during test execution — like
-    // a Smalltalk image where all classes exist in the running environment.
-    let mut compiled_tests = Vec::new();
-    let mut compiled_doc_tests: Vec<CompiledDocTest> = Vec::new();
-    let mut all_erl_files = Vec::new();
-    let mut all_fixture_modules = Vec::new();
-    let mut precompiled_modules: HashSet<String> = HashSet::new();
+    Ok(TestPipeline {
+        test_path,
+        test_files,
+        build_dir,
+        warnings_as_errors,
+        discovered_packages,
+        pkg_root_to_name,
+        pkg_class_indexes,
+        class_module_index,
+        class_superclass_index,
+        fixture_class_index: HashMap::new(),
+        precompiled_modules: HashSet::new(),
+        all_fixture_modules: Vec::new(),
+        all_erl_files: Vec::new(),
+        compiled_tests: Vec::new(),
+        compiled_doc_tests: Vec::new(),
+        package_modules: Vec::new(),
+        package_ebin_dirs: Vec::new(),
+    })
+}
 
-    let fixtures_dir = if test_path.is_dir() {
-        test_path.join("fixtures")
+/// Phase 0: Pre-compile all fixtures in the `fixtures/` subdirectory.
+///
+/// Makes all fixture classes available during test execution -- like
+/// a Smalltalk image where all classes exist in the running environment.
+fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
+    let fixtures_dir = if pipeline.test_path.is_dir() {
+        pipeline.test_path.join("fixtures")
     } else {
-        test_path
+        pipeline
+            .test_path
             .parent()
             .map(|p| p.join("fixtures"))
             .unwrap_or_default()
@@ -1124,200 +1203,270 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
     } else {
         HashMap::new()
     };
-    class_module_index.extend(fixture_class_index.clone());
+    pipeline
+        .class_module_index
+        .extend(fixture_class_index.clone());
 
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,
-        &build_dir,
-        &class_module_index,
-        &class_superclass_index,
-        warnings_as_errors,
+        &pipeline.build_dir,
+        &pipeline.class_module_index,
+        &pipeline.class_superclass_index,
+        pipeline.warnings_as_errors,
     )?;
     for module_name in &precompiled {
-        precompiled_modules.insert(module_name.clone());
+        pipeline.precompiled_modules.insert(module_name.clone());
     }
-    all_fixture_modules.extend(precompiled);
+    pipeline.all_fixture_modules.extend(precompiled);
+    pipeline.fixture_class_index = fixture_class_index;
 
-    // Phase 1: Discover test classes and compile
+    Ok(())
+}
+
+/// Phase 1: Discover test classes, compile test files and doc tests.
+///
+/// For each test file: resolves `@load` fixtures, compiles `TestCase` subclasses
+/// to Core Erlang, generates `EUnit` wrappers, and discovers doc tests. Core files
+/// are batch-compiled to BEAM at the end for efficiency.
+fn discover_and_compile_tests(pipeline: &mut TestPipeline) -> Result<()> {
     let mut fixture_modules_by_name: HashMap<String, Utf8PathBuf> = HashMap::new();
     // Accumulate all test-file core paths; batch-compile after the loop to avoid
     // one BEAM process startup per file.
     let mut pending_test_cores: Vec<Utf8PathBuf> = Vec::new();
 
+    let fixtures_dir = if pipeline.test_path.is_dir() {
+        pipeline.test_path.join("fixtures")
+    } else {
+        pipeline
+            .test_path
+            .parent()
+            .map(|p| p.join("fixtures"))
+            .unwrap_or_default()
+    };
+
+    // Clone test_files to avoid borrow conflict with pipeline fields.
+    let test_files = pipeline.test_files.clone();
+
     for test_file in &test_files {
-        // Build per-file effective class index: own package's classes + fixtures.
-        // This prevents class name collisions between packages when running tests
-        // from a common parent directory.
-        let (file_class_index, file_super_index) = class_index_for_file(
+        compile_single_test_file(
+            pipeline,
             test_file,
-            &pkg_class_indexes,
-            &fixture_class_index,
-            &class_module_index,
-            &class_superclass_index,
-        );
-
-        let (mut test_classes, load_files) = discover_test_classes(test_file)?;
-
-        // When multiple packages are in scope, prefix the test module name with
-        // the owning package name to prevent `bt@smoke_test.beam` collisions
-        // between two packages that each define a class named `SmokeTest`.
-        // Single-package runs are unaffected (no prefix added when only one package
-        // is discovered), preserving backwards-compatible module names.
-        if discovered_packages.len() > 1 {
-            let pkg_name_slug = canonical_package_root(test_file)
-                .and_then(|r| pkg_root_to_name.get(&r))
-                .map(|n| beamtalk_core::codegen::core_erlang::to_module_name(n));
-
-            if let Some(ref prefix) = pkg_name_slug {
-                for tc in &mut test_classes {
-                    let stem = beamtalk_core::codegen::core_erlang::to_module_name(&tc.class_name);
-                    tc.module_name = format!("bt@{prefix}@{stem}");
-                }
-            }
-        }
-
-        // Handle deprecated @load directives as fallback.
-        // Fixtures in the fixtures/ directory are already compiled above.
-        for load_path in &load_files {
-            let fixture_path = Utf8PathBuf::from(load_path);
-
-            let fixture_module = fixture_module_name(&fixture_path)?;
-
-            // Skip if already pre-compiled from the fixtures directory
-            if precompiled_modules.contains(&fixture_module) {
-                if fixture_path.starts_with(&fixtures_dir) {
-                    // This @load points into fixtures_dir itself — already compiled in Phase 0
-                    eprintln!(
-                        "Deprecated: '// @load {load_path}' in '{test_file}' — fixture is already available \
-                         from the fixtures directory. Remove this directive."
-                    );
-                    continue;
-                }
-                // A non-fixture @load shares a module name with a precompiled fixture —
-                // running both would silently use the wrong implementation.
-                miette::bail!(
-                    "Fixture module name collision for '{fixture_module}': \
-                     precompiled fixture vs '@load {load_path}' in '{test_file}'"
-                );
-            }
-
-            // Non-fixture @load (e.g., examples/) — compile and warn
-            eprintln!(
-                "Deprecated: '// @load {load_path}' in '{test_file}' — move fixture to '{fixtures_dir}' to \
-                 make it automatically available."
-            );
-
-            if let Some(existing_path) = fixture_modules_by_name.get(&fixture_module) {
-                if existing_path != &fixture_path {
-                    miette::bail!(
-                        "Fixture module name collision for '{fixture_module}': '{}' vs '{}'",
-                        existing_path,
-                        fixture_path
-                    );
-                }
-                // Already compiled this fixture — skip
-                continue;
-            }
-            fixture_modules_by_name.insert(fixture_module.clone(), fixture_path.clone());
-
-            if !fixture_path.exists() {
-                miette::bail!(
-                    "Fixture file '{}' referenced by @load in '{}' not found",
-                    load_path,
-                    test_file
-                );
-            }
-            let module_name = compile_fixture(
-                &fixture_path,
-                &build_dir,
-                &file_class_index,
-                &file_super_index,
-                warnings_as_errors,
-            )?;
-            all_fixture_modules.push(module_name);
-        }
-
-        // Compile TestCase subclasses
-        for test_class in test_classes {
-            // Generate Core Erlang for the test file (BEAM compilation is batched below)
-            let core_file = generate_core_file(
-                test_file,
-                &test_class.module_name,
-                &build_dir,
-                &file_class_index,
-                &file_super_index,
-                warnings_as_errors,
-            )
-            .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
-            pending_test_cores.push(core_file);
-
-            // Generate EUnit wrapper
-            let eunit_module = format!("{}_tests", test_class.module_name);
-            let wrapper_source = generate_eunit_wrapper(&test_class, test_file.as_str());
-
-            let erl_file = build_dir.join(format!("{eunit_module}.erl"));
-            fs::write(&erl_file, &wrapper_source)
-                .into_diagnostic()
-                .wrap_err("Failed to write EUnit wrapper")?;
-            all_erl_files.push(erl_file);
-
-            compiled_tests.push(CompiledTest {
-                source_file: test_file.clone(),
-                test_class,
-                eunit_module,
-            });
-        }
-
-        // Discover doc tests in the same file
-        let doc_results = discover_and_compile_doc_tests(
-            test_file,
-            &build_dir,
-            &file_class_index,
-            &file_super_index,
-            warnings_as_errors,
+            &fixtures_dir,
+            &mut fixture_modules_by_name,
+            &mut pending_test_cores,
         )?;
-        for dr in doc_results {
-            all_erl_files.push(dr.erl_file);
-            compiled_doc_tests.push(CompiledDocTest {
-                source_file: test_file.clone(),
-                display_name: dr.display_name,
-                eunit_module: dr.eunit_module,
-                assertion_count: dr.assertion_count,
-            });
-        }
     }
 
-    // Phase 1c: Batch compile all test file cores in a single BEAM process startup.
+    // Batch compile all test file cores in a single BEAM process startup.
     // This replaces the previous per-file compile_batch calls (one BEAM startup per file).
     if !pending_test_cores.is_empty() {
-        let compiler = BeamCompiler::new(build_dir.clone());
+        let compiler = BeamCompiler::new(pipeline.build_dir.clone());
         compiler
             .compile_batch(&pending_test_cores)
             .wrap_err("Failed to compile test file BEAM files")?;
     }
 
-    if compiled_tests.is_empty() && compiled_doc_tests.is_empty() {
-        println!("No tests found");
-        return Ok(());
+    // Deduplicate fixture modules
+    pipeline.all_fixture_modules.sort();
+    pipeline.all_fixture_modules.dedup();
+
+    Ok(())
+}
+
+/// Discover, compile, and generate wrappers for a single test file.
+///
+/// Handles `@load` directive resolution, multi-package module name prefixing,
+/// `TestCase` compilation, `EUnit` wrapper generation, and doc test discovery.
+fn compile_single_test_file(
+    pipeline: &mut TestPipeline,
+    test_file: &Utf8Path,
+    fixtures_dir: &Utf8Path,
+    fixture_modules_by_name: &mut HashMap<String, Utf8PathBuf>,
+    pending_test_cores: &mut Vec<Utf8PathBuf>,
+) -> Result<()> {
+    // Build per-file effective class index: own package's classes + fixtures.
+    // This prevents class name collisions between packages when running tests
+    // from a common parent directory.
+    let (file_class_index, file_super_index) = class_index_for_file(
+        test_file,
+        &pipeline.pkg_class_indexes,
+        &pipeline.fixture_class_index,
+        &pipeline.class_module_index,
+        &pipeline.class_superclass_index,
+    );
+
+    let (mut test_classes, load_files) = discover_test_classes(test_file)?;
+
+    // When multiple packages are in scope, prefix the test module name with
+    // the owning package name to prevent `bt@smoke_test.beam` collisions
+    // between two packages that each define a class named `SmokeTest`.
+    // Single-package runs are unaffected (no prefix added when only one package
+    // is discovered), preserving backwards-compatible module names.
+    if pipeline.discovered_packages.len() > 1 {
+        let pkg_name_slug = canonical_package_root(test_file)
+            .and_then(|r| pipeline.pkg_root_to_name.get(&r))
+            .map(|n| beamtalk_core::codegen::core_erlang::to_module_name(n));
+
+        if let Some(ref prefix) = pkg_name_slug {
+            for tc in &mut test_classes {
+                let stem = beamtalk_core::codegen::core_erlang::to_module_name(&tc.class_name);
+                tc.module_name = format!("bt@{prefix}@{stem}");
+            }
+        }
     }
 
-    // Deduplicate fixture modules
-    all_fixture_modules.sort();
-    all_fixture_modules.dedup();
+    // Handle deprecated @load directives as fallback.
+    // Fixtures in the fixtures/ directory are already compiled above.
+    resolve_load_directives(
+        pipeline,
+        test_file,
+        &load_files,
+        fixtures_dir,
+        fixture_modules_by_name,
+        &file_class_index,
+        &file_super_index,
+    )?;
 
-    // Phase 1b: Build all discovered packages so their .beam files are available.
-    // This ensures package-defined classes are compiled and their on_load hooks
-    // will register them in the class registry when loaded during the test run.
-    let mut package_modules: Vec<String> = Vec::new();
-    let mut package_ebin_dirs: Vec<Utf8PathBuf> = Vec::new();
-    for (pkg_root, pkg) in &discovered_packages {
+    // Compile TestCase subclasses
+    for test_class in test_classes {
+        // Generate Core Erlang for the test file (BEAM compilation is batched below)
+        let core_file = generate_core_file(
+            test_file,
+            &test_class.module_name,
+            &pipeline.build_dir,
+            &file_class_index,
+            &file_super_index,
+            pipeline.warnings_as_errors,
+        )
+        .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
+        pending_test_cores.push(core_file);
+
+        // Generate EUnit wrapper
+        let eunit_module = format!("{}_tests", test_class.module_name);
+        let wrapper_source = generate_eunit_wrapper(&test_class, test_file.as_str());
+
+        let erl_file = pipeline.build_dir.join(format!("{eunit_module}.erl"));
+        fs::write(&erl_file, &wrapper_source)
+            .into_diagnostic()
+            .wrap_err("Failed to write EUnit wrapper")?;
+        pipeline.all_erl_files.push(erl_file);
+
+        pipeline.compiled_tests.push(CompiledTest {
+            source_file: test_file.to_path_buf(),
+            test_class,
+            eunit_module,
+        });
+    }
+
+    // Discover doc tests in the same file
+    let doc_results = discover_and_compile_doc_tests(
+        test_file,
+        &pipeline.build_dir,
+        &file_class_index,
+        &file_super_index,
+        pipeline.warnings_as_errors,
+    )?;
+    for dr in doc_results {
+        pipeline.all_erl_files.push(dr.erl_file);
+        pipeline.compiled_doc_tests.push(CompiledDocTest {
+            source_file: test_file.to_path_buf(),
+            display_name: dr.display_name,
+            eunit_module: dr.eunit_module,
+            assertion_count: dr.assertion_count,
+        });
+    }
+
+    Ok(())
+}
+
+/// Resolve and compile deprecated `@load` directives for a test file.
+///
+/// Validates against pre-compiled fixtures, detects module name collisions,
+/// and compiles any non-fixture `@load` references that aren't yet available.
+fn resolve_load_directives(
+    pipeline: &mut TestPipeline,
+    test_file: &Utf8Path,
+    load_files: &[String],
+    fixtures_dir: &Utf8Path,
+    fixture_modules_by_name: &mut HashMap<String, Utf8PathBuf>,
+    file_class_index: &HashMap<String, String>,
+    file_super_index: &HashMap<String, String>,
+) -> Result<()> {
+    for load_path in load_files {
+        let fixture_path = Utf8PathBuf::from(load_path);
+
+        let fixture_module = fixture_module_name(&fixture_path)?;
+
+        // Skip if already pre-compiled from the fixtures directory
+        if pipeline.precompiled_modules.contains(&fixture_module) {
+            if fixture_path.starts_with(fixtures_dir) {
+                // This @load points into fixtures_dir itself -- already compiled in Phase 0
+                eprintln!(
+                    "Deprecated: '// @load {load_path}' in '{test_file}' \u{2014} fixture is already available \
+                     from the fixtures directory. Remove this directive."
+                );
+                continue;
+            }
+            // A non-fixture @load shares a module name with a precompiled fixture --
+            // running both would silently use the wrong implementation.
+            miette::bail!(
+                "Fixture module name collision for '{fixture_module}': \
+                 precompiled fixture vs '@load {load_path}' in '{test_file}'"
+            );
+        }
+
+        // Non-fixture @load (e.g., examples/) -- compile and warn
+        eprintln!(
+            "Deprecated: '// @load {load_path}' in '{test_file}' \u{2014} move fixture to '{fixtures_dir}' to \
+             make it automatically available."
+        );
+
+        if let Some(existing_path) = fixture_modules_by_name.get(&fixture_module) {
+            if existing_path != &fixture_path {
+                miette::bail!(
+                    "Fixture module name collision for '{fixture_module}': '{}' vs '{}'",
+                    existing_path,
+                    fixture_path
+                );
+            }
+            // Already compiled this fixture -- skip
+            continue;
+        }
+        fixture_modules_by_name.insert(fixture_module.clone(), fixture_path.clone());
+
+        if !fixture_path.exists() {
+            miette::bail!(
+                "Fixture file '{}' referenced by @load in '{}' not found",
+                load_path,
+                test_file
+            );
+        }
+        let module_name = compile_fixture(
+            &fixture_path,
+            &pipeline.build_dir,
+            file_class_index,
+            file_super_index,
+            pipeline.warnings_as_errors,
+        )?;
+        pipeline.all_fixture_modules.push(module_name);
+    }
+
+    Ok(())
+}
+
+/// Phase 2: Build all discovered packages so their `.beam` files are available.
+///
+/// Ensures package-defined classes are compiled and their `on_load` hooks
+/// will register them in the class registry when loaded during the test run.
+fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
+    for (pkg_root, pkg) in &pipeline.discovered_packages {
         let ebin_dir = pkg_root.join("_build").join("dev").join("ebin");
         println!("Building package '{}'...", pkg.name);
         let build_options = beamtalk_core::CompilerOptions {
             stdlib_mode: false,
             allow_primitives: false,
             workspace_mode: false,
-            warnings_as_errors,
+            warnings_as_errors: pipeline.warnings_as_errors,
             ..Default::default()
         };
         super::build::build(pkg_root.as_str(), &build_options).wrap_err_with(|| {
@@ -1328,79 +1477,98 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
         })?;
         let modules = collect_beam_module_names(&ebin_dir)?;
         debug!(count = modules.len(), "Discovered package modules");
-        package_modules.extend(modules);
-        package_ebin_dirs.push(ebin_dir);
+        pipeline.package_modules.extend(modules);
+        pipeline.package_ebin_dirs.push(ebin_dir);
     }
 
-    let total_bunit_tests: usize = compiled_tests
-        .iter()
-        .map(|t| t.test_class.test_methods.len())
-        .sum();
-    let total_doc_tests: usize = compiled_doc_tests.iter().map(|d| d.assertion_count).sum();
-    let total_tests = total_bunit_tests + total_doc_tests;
+    Ok(())
+}
 
-    println!("Compiling {} test file(s)...", test_files.len());
+/// Phase 3: Compile `EUnit` wrappers and run all tests.
+///
+/// Returns the `EunitResult` for result reporting.
+fn execute_tests(pipeline: &TestPipeline) -> Result<EunitResult> {
+    println!("Compiling {} test file(s)...", pipeline.test_files.len());
 
-    // Phase 2: Compile EUnit wrappers
-    compile_erl_files(&all_erl_files, &build_dir)?;
+    // Compile EUnit wrappers
+    compile_erl_files(&pipeline.all_erl_files, &pipeline.build_dir)?;
 
-    // Phase 3: Run tests
+    // Run tests
     println!("Running tests...\n");
 
-    let mut eunit_modules: Vec<&str> = compiled_tests
+    let mut eunit_modules: Vec<&str> = pipeline
+        .compiled_tests
         .iter()
         .map(|t| t.eunit_module.as_str())
         .collect();
-    for dt in &compiled_doc_tests {
+    for dt in &pipeline.compiled_doc_tests {
         eunit_modules.push(&dt.eunit_module);
     }
 
-    let result = run_eunit_tests(
+    run_eunit_tests(
         &eunit_modules,
-        &all_fixture_modules,
-        &package_modules,
-        &build_dir,
-        &package_ebin_dirs,
-    )?;
+        &pipeline.all_fixture_modules,
+        &pipeline.package_modules,
+        &pipeline.build_dir,
+        &pipeline.package_ebin_dirs,
+    )
+}
 
-    // Phase 4: Report results
+/// Phase 4: Aggregate and report test results.
+fn report_results(
+    pipeline: &TestPipeline,
+    result: &EunitResult,
+    start_time: Instant,
+) -> Result<()> {
+    let total_bunit_tests: usize = pipeline
+        .compiled_tests
+        .iter()
+        .map(|t| t.test_class.test_methods.len())
+        .sum();
+    let total_doc_tests: usize = pipeline
+        .compiled_doc_tests
+        .iter()
+        .map(|d| d.assertion_count)
+        .sum();
+    let total_tests = total_bunit_tests + total_doc_tests;
+
     let mut total_passed = 0;
     let mut total_failed = 0;
     let mut failed_details = Vec::new();
 
     // Report BUnit TestCase results
-    for compiled in &compiled_tests {
+    for compiled in &pipeline.compiled_tests {
         let test_count = compiled.test_class.test_methods.len();
         let class_name = &compiled.test_class.class_name;
 
         if let Some(failure) = result.failed_modules.get(&compiled.eunit_module) {
             total_failed += test_count;
-            println!("  {class_name}: {test_count} tests, 0 passed ✗");
+            println!("  {class_name}: {test_count} tests, 0 passed \u{2717}");
             failed_details.push(format!(
                 "FAIL {} ({}):\n{}",
                 class_name, compiled.source_file, failure
             ));
         } else {
             total_passed += test_count;
-            println!("  {class_name}: {test_count} tests, {test_count} passed ✓");
+            println!("  {class_name}: {test_count} tests, {test_count} passed \u{2713}");
         }
     }
 
     // Report doc test results
-    for doc_test in &compiled_doc_tests {
+    for doc_test in &pipeline.compiled_doc_tests {
         let test_count = doc_test.assertion_count;
         let name = &doc_test.display_name;
 
         if let Some(failure) = result.failed_modules.get(&doc_test.eunit_module) {
             total_failed += test_count;
-            println!("  {name}: {test_count} tests, 0 passed ✗");
+            println!("  {name}: {test_count} tests, 0 passed \u{2717}");
             failed_details.push(format!(
                 "FAIL {} ({}):\n{}",
                 name, doc_test.source_file, failure
             ));
         } else {
             total_passed += test_count;
-            println!("  {name}: {test_count} tests, {test_count} passed ✓");
+            println!("  {name}: {test_count} tests, {test_count} passed \u{2713}");
         }
     }
 
@@ -1411,7 +1579,7 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
     if total_failed == 0 {
         println!(
             "{} file(s), {} tests, {} passed, 0 failed ({:.1}s)",
-            test_files.len(),
+            pipeline.test_files.len(),
             total_tests,
             total_passed,
             elapsed_secs,
@@ -1423,7 +1591,7 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
         eprintln!();
         eprintln!(
             "{} file(s), {} tests, {} passed, {} failed ({:.1}s)",
-            test_files.len(),
+            pipeline.test_files.len(),
             total_tests,
             total_passed,
             total_failed,
