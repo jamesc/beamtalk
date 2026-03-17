@@ -27,6 +27,21 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-10",
+      "title": "Reflection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "p := Point x: 3 y: 4\np fieldAt: #x          // => 3\np fieldAt: #y          // => 4\np fieldNames size      // => 2  (contains #x and #y; order is not guaranteed)\np class                // => Point\nPoint superclass       // => Value",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-11",
       "title": "Message Sends (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -36,7 +51,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-12",
+      "id": "docs-beamtalk-language-features-block-13",
       "title": "Field Access and Assignment (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -56,7 +71,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-13",
+      "id": "docs-beamtalk-language-features-block-14",
       "title": "Field Access and Assignment (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -71,7 +86,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-14",
+      "id": "docs-beamtalk-language-features-block-15",
       "title": "Field Access and Assignment (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -93,7 +108,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-15",
+      "id": "docs-beamtalk-language-features-block-16",
       "title": "Blocks (Closures) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -108,7 +123,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-16",
+      "id": "docs-beamtalk-language-features-block-17",
       "title": "Blocks (Closures) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -137,7 +152,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-18",
+      "id": "docs-beamtalk-language-features-block-19",
       "title": "Typed Class Syntax (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -205,7 +220,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-20",
+      "id": "docs-beamtalk-language-features-block-21",
       "title": "Local Variable Mutations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -226,7 +241,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-21",
+      "id": "docs-beamtalk-language-features-block-22",
       "title": "Field Mutations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -259,7 +274,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-24",
+      "id": "docs-beamtalk-language-features-block-25",
       "title": "Error Messages (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -280,7 +295,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-28",
+      "id": "docs-beamtalk-language-features-block-29",
       "title": "Actor-to-Actor Coordination (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -290,7 +305,44 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-29",
+      "id": "docs-beamtalk-language-features-block-3",
+      "title": "Actor Lifecycle Hooks (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Actor",
+        "ResourceActor",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "doWork",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "if not",
+        "inherit",
+        "inheritance",
+        "initialize",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "negation",
+        "process",
+        "property",
+        "set",
+        "subclassing",
+        "terminate:",
+        "unless"
+      ],
+      "source": "Actor subclass: ResourceActor\n  state: handle = nil\n\n  initialize =>\n    self.handle := Resource open\n\n  terminate: reason =>\n    self.handle isNil ifFalse: [self.handle close]\n\n  doWork => self.handle process",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-30",
       "title": "Actor-to-Actor Coordination (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -300,7 +352,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-31",
+      "id": "docs-beamtalk-language-features-block-32",
       "title": "Static Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -318,7 +370,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-32",
+      "id": "docs-beamtalk-language-features-block-33",
       "title": "Static Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -336,7 +388,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-33",
+      "id": "docs-beamtalk-language-features-block-34",
       "title": "Class-Side Configuration Defaults (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -359,7 +411,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-34",
+      "id": "docs-beamtalk-language-features-block-35",
       "title": "Actor Supervision Policy (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -384,7 +436,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-37",
+      "id": "docs-beamtalk-language-features-block-38",
       "title": "Dynamic Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -407,7 +459,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-39",
+      "id": "docs-beamtalk-language-features-block-40",
       "title": "Nested Supervisors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -425,25 +477,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-4",
-      "title": "Construction forms (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "constructor",
-        "create",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// 1. new — all slots get their declared defaults\np := Point new                       // => Point(0, 0)\n\n// 2. new: — provide a map of slot values; missing keys keep defaults\np := Point new: #{#x => 3, #y => 4}  // => Point(3, 4)\n\n// 3. Keyword constructor — auto-generated from slot names\np := Point x: 3 y: 4                 // => Point(3, 4)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-40",
+      "id": "docs-beamtalk-language-features-block-41",
       "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -456,7 +490,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-41",
+      "id": "docs-beamtalk-language-features-block-42",
       "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -469,7 +503,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-42",
+      "id": "docs-beamtalk-language-features-block-43",
       "title": "Destructuring in Match Arms (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -484,7 +518,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-43",
+      "id": "docs-beamtalk-language-features-block-44",
       "title": "Rest Patterns in Destructuring (BT-1251) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -499,7 +533,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-44",
+      "id": "docs-beamtalk-language-features-block-45",
       "title": "Live Patching (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -535,7 +569,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-45",
+      "id": "docs-beamtalk-language-features-block-46",
       "title": "— System reflection (BeamtalkInterface) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -545,7 +579,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-46",
+      "id": "docs-beamtalk-language-features-block-47",
       "title": "— Project operations (WorkspaceInterface) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -560,7 +594,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-47",
+      "id": "docs-beamtalk-language-features-block-48",
       "title": "Class-based reload via (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -574,7 +608,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-5",
-      "title": "with (beamtalk-language-features)",
+      "title": "Construction forms (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "assign",
@@ -587,11 +621,11 @@
         "mutation",
         "set"
       ],
-      "source": "p  := Point x: 1 y: 2\np2 := p withX: 10       // new object: x=10, y=2\np  x                     // => 1   (original unchanged)\np2 x                     // => 10\np2 y                     // => 2\n\n// Chaining\np3 := (Point new withX: 5) withY: 7   // x=5, y=7",
+      "source": "// 1. new — all slots get their declared defaults\np := Point new                       // => Point(0, 0)\n\n// 2. new: — provide a map of slot values; missing keys keep defaults\np := Point new: #{#x => 3, #y => 4}  // => Point(3, 4)\n\n// 3. Keyword constructor — auto-generated from slot names\np := Point x: 3 y: 4                 // => Point(3, 4)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-52",
+      "id": "docs-beamtalk-language-features-block-53",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -607,7 +641,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-53",
+      "id": "docs-beamtalk-language-features-block-54",
       "title": "Bag — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -631,7 +665,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-54",
+      "id": "docs-beamtalk-language-features-block-55",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -650,7 +684,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-55",
+      "id": "docs-beamtalk-language-features-block-56",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -671,7 +705,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-56",
+      "id": "docs-beamtalk-language-features-block-57",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -684,7 +718,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-57",
+      "id": "docs-beamtalk-language-features-block-58",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -700,7 +734,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-58",
+      "id": "docs-beamtalk-language-features-block-59",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -713,7 +747,25 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-59",
+      "id": "docs-beamtalk-language-features-block-6",
+      "title": "with (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "p  := Point x: 1 y: 2\np2 := p withX: 10       // new object: x=10, y=2\np  x                     // => 1   (original unchanged)\np2 x                     // => 10\np2 y                     // => 2\n\n// Chaining\np3 := (Point new withX: 5) withY: 7   // x=5, y=7",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-60",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -732,33 +784,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-6",
-      "title": "Immutability enforcement (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "exception",
-        "extends",
-        "field",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "mutate",
-        "mutation",
-        "property",
-        "raise",
-        "set",
-        "subclassing",
-        "throw"
-      ],
-      "source": "// Compile error — rejected before the code runs:\n// Value subclass: BadPoint\n//   state: x = 0\n//   badSetX: v => self.x := v   ← error: Cannot assign to slot\n\n// Runtime error:\np := Point x: 1 y: 2\np fieldAt: #x put: 99   // raises: immutable_value",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-60",
+      "id": "docs-beamtalk-language-features-block-61",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -768,7 +794,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-61",
+      "id": "docs-beamtalk-language-features-block-62",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -786,7 +812,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-62",
+      "id": "docs-beamtalk-language-features-block-63",
       "title": "Diagnostic Suppression ( (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -804,7 +830,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-63",
+      "id": "docs-beamtalk-language-features-block-64",
       "title": "Diagnostic Suppression ( (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -814,7 +840,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-64",
+      "id": "docs-beamtalk-language-features-block-65",
       "title": "Diagnostic Suppression ( (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -843,7 +869,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-67",
+      "id": "docs-beamtalk-language-features-block-68",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -866,7 +892,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-68",
+      "id": "docs-beamtalk-language-features-block-69",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -876,7 +902,33 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-69",
+      "id": "docs-beamtalk-language-features-block-7",
+      "title": "Immutability enforcement (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "exception",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "property",
+        "raise",
+        "set",
+        "subclassing",
+        "throw"
+      ],
+      "source": "// Compile error — rejected before the code runs:\n// Value subclass: BadPoint\n//   state: x = 0\n//   badSetX: v => self.x := v   ← error: Cannot assign to slot\n\n// Runtime error:\np := Point x: 1 y: 2\np fieldAt: #x put: 99   // raises: immutable_value",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-70",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -886,22 +938,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-7",
-      "title": "Value equality (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "p1 := Point x: 3 y: 4\np2 := Point x: 3 y: 4\np1 == p2    // => true\n\np3 := Point x: 9 y: 9\np1 == p3    // => false\n\n// with*: result equals a freshly constructed object\n(p1 withX: 10) == (Point x: 10 y: 4)   // => true",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-70",
+      "id": "docs-beamtalk-language-features-block-71",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -924,7 +961,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-72",
+      "id": "docs-beamtalk-language-features-block-73",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -939,7 +976,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-73",
+      "id": "docs-beamtalk-language-features-block-74",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -949,7 +986,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-75",
+      "id": "docs-beamtalk-language-features-block-76",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -962,7 +999,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-76",
+      "id": "docs-beamtalk-language-features-block-77",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -986,6 +1023,21 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-8",
+      "title": "Value equality (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "p1 := Point x: 3 y: 4\np2 := Point x: 3 y: 4\np1 == p2    // => true\n\np3 := Point x: 9 y: 9\np1 == p3    // => false\n\n// with*: result equals a freshly constructed object\n(p1 withX: 10) == (Point x: 10 y: 4)   // => true",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-9",
       "title": "Value objects in collections (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1007,21 +1059,6 @@
         "where"
       ],
       "source": "points := #((Point x: 1 y: 1), (Point x: 2 y: 2), (Point x: 3 y: 3))\n\n// collect: transforms elements\npoints collect: [:p | p x]           // => #(1, 2, 3)\n\n// select: filters elements\npoints select: [:p | p x > 1]        // => #(Point(2,2), Point(3,3))\n\n// inject:into: folds\npoints inject: 0 into: [:sum :p | sum + p x]   // => 6",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-9",
-      "title": "Reflection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "p := Point x: 3 y: 4\np fieldAt: #x          // => 3\np fieldAt: #y          // => 4\np fieldNames size      // => 2  (contains #x and #y; order is not guaranteed)\np class                // => Point\nPoint superclass       // => Value",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -9297,12 +9334,15 @@
         "process",
         "set",
         "subclassing",
+        "testAssignmentRhsSelfSendReturnsValue",
+        "testAssignmentRhsSelfSendThreadsState",
+        "testMultipleAssignmentRhsSelfSends",
         "testMultipleSelfCallsMutateState",
         "testSelfCallAsLastExpressionThreadsState",
         "testSelfCallStateMutationVisible",
         "testSelfCallThenFieldAssignment"
       ],
-      "source": "// BT-1420: Tests that state mutations in self-called methods are visible\n// to the caller after the self-call returns.\n//\n// Fixtures: stdlib/test/fixtures/self_call_state_actor.bt\n\nTestCase subclass: ActorSelfCallStateTest\n\n  // Core regression test: self-call mutates state, caller reads it\n  testSelfCallStateMutationVisible =>\n    a := SelfCallStateActor spawn\n    self assert: a callSetupThenRead equals: 42\n\n  // Multiple sequential self-calls each mutate state\n  testMultipleSelfCallsMutateState =>\n    a := SelfCallStateActor spawn\n    self assert: a callThreeIncrements equals: 3\n\n  // Self-call as last expression threads state back to gen_server\n  testSelfCallAsLastExpressionThreadsState =>\n    a := SelfCallStateActor spawn\n    a callSetupAsLast\n    self assert: a getValue equals: 42\n\n  // Self-call mutation followed by field assignment\n  testSelfCallThenFieldAssignment =>\n    a := SelfCallStateActor spawn\n    self assert: a callSetupThenAssignField equals: 52",
+      "source": "// BT-1420: Tests that state mutations in self-called methods are visible\n// to the caller after the self-call returns.\n//\n// Fixtures: stdlib/test/fixtures/self_call_state_actor.bt\n\nTestCase subclass: ActorSelfCallStateTest\n\n  // Core regression test: self-call mutates state, caller reads it\n  testSelfCallStateMutationVisible =>\n    a := SelfCallStateActor spawn\n    self assert: a callSetupThenRead equals: 42\n\n  // Multiple sequential self-calls each mutate state\n  testMultipleSelfCallsMutateState =>\n    a := SelfCallStateActor spawn\n    self assert: a callThreeIncrements equals: 3\n\n  // Self-call as last expression threads state back to gen_server\n  testSelfCallAsLastExpressionThreadsState =>\n    a := SelfCallStateActor spawn\n    a callSetupAsLast\n    self assert: a getValue equals: 42\n\n  // Self-call mutation followed by field assignment\n  testSelfCallThenFieldAssignment =>\n    a := SelfCallStateActor spawn\n    self assert: a callSetupThenAssignField equals: 52\n\n  // BT-1421: Assignment RHS self-send returns the value, not the dispatch tuple\n  testAssignmentRhsSelfSendReturnsValue =>\n    a := SelfCallStateActor spawn\n    self assert: a callBumpAndCapture equals: 1\n\n  // BT-1421: Assignment RHS self-send threads state correctly\n  testAssignmentRhsSelfSendThreadsState =>\n    a := SelfCallStateActor spawn\n    self assert: a callBumpAndReadState equals: 1\n\n  // BT-1421: Multiple assignment RHS self-sends accumulate state\n  testMultipleAssignmentRhsSelfSends =>\n    a := SelfCallStateActor spawn\n    self assert: a callDoubleBumpAndCapture equals: 3",
       "explanation": "BT-1420: Tests that state mutations in self-called methods are visible to the caller after the self-call returns.  Fixtures: stdlib/test/fixtures/self_call_state_actor.bt"
     },
     {
@@ -9417,6 +9457,51 @@
       ],
       "source": "// BT-916: Tests for self.slot := assignment in actor methods\n// Verifies that state is correctly threaded through:\n//   - multiple slot assignments in one method\n//   - slot assignment inside ifTrue:ifFalse: conditional\n//   - slot assignment inside block (do:, collect:)\n//   - slot assignment with early return (^)\n//\n// Compile-time checks (value type error, withSlot: bypass warning) are\n// validated by Rust unit tests in semantic_analysis/validators.rs (BT-914)\n// and by the E2E @load-error test in tests/e2e/cases/actor_slot.bt\n\nTestCase subclass: ActorSlotTest\n\n  testMultipleSlotAssignmentsInOneMethod =>\n    // Both count and total are updated and persist correctly\n    c := ActorSlotCounter spawn\n    result := c incrementBoth: 10\n    self assert: result equals: #{#count => 1, #total => 10}\n    result2 := c incrementBoth: 5\n    self assert: result2 equals: #{#count => 2, #total => 15}\n\n  testMultipleAssignmentsToSameSlot =>\n    // Three sequential assignments to the same slot accumulate correctly\n    c := ActorSlotCounter spawn\n    self assert: (c addThrice: 3) equals: 9\n    self assert: (c addThrice: 1) equals: 12\n\n  testSlotAssignmentInsideConditional =>\n    // Slot assignment inside ifTrue: is applied when condition is true\n    c := ConditionalMutationCounter spawn\n    self assert: (c conditionalIncrement: true) equals: 1\n    self assert: (c conditionalIncrement: true) equals: 2\n    // Slot assignment is NOT applied when condition is false\n    self assert: (c conditionalIncrement: false) equals: 2\n\n  testSlotAssignmentInsideIfTrueIfFalse =>\n    // Both branches of ifTrue:ifFalse: correctly thread state\n    c := ConditionalMutationCounter spawn\n    self assert: (c conditionalToggle: true) equals: 10\n    c reset\n    self assert: (c conditionalToggle: false) equals: -1\n\n  testSlotAssignmentInsideDoBlock =>\n    // do: with self.slot := accumulates correctly\n    c := ActorSlotCounter spawn\n    self assert: (c sumItems: #(1, 2, 3, 4, 5)) equals: 15\n    // State persists after the method completes\n    self assert: c getTotal equals: 15\n\n  testSlotAssignmentInsideDoBlockTwoSlots =>\n    // do: with mutations to two different slots both thread correctly\n    c := ActorSlotCounter spawn\n    result := c countAndSum: #(10, 20, 30)\n    self assert: result equals: #{#count => 3, #total => 60}\n    self assert: c getCount equals: 3\n    self assert: c getTotal equals: 60\n\n  testSlotAssignmentInsideCollectBlock =>\n    // collect: with self.slot := in block: result is correct and state is updated\n    c := ActorSlotCounter spawn\n    result := c collectDoubled: #(1, 2, 3)\n    self assert: result equals: #(2, 4, 6)\n    // count was incremented once per element\n    self assert: c getCount equals: 3\n\n  testSlotAssignmentWithEarlyReturn =>\n    // Slot assignment before ifTrue:[^value] preserves the updated state\n    c := ActorSlotCounter spawn\n    // count=0+1=1 >= 1, so early return fires\n    result := c addAndCheckLimit: 1\n    self assert: result equals: #reached\n    self assert: c getCount equals: 1\n\n  testSlotAssignmentWithEarlyReturnNotFired =>\n    // When the limit is not reached, normal path runs and state is still updated\n    c := ActorSlotCounter spawn\n    // count=0+1=1 < 5, so early return does NOT fire\n    result := c addAndCheckLimit: 5\n    self assert: result equals: #not_yet\n    self assert: c getCount equals: 1\n    // count=1+1=2 < 5, still not reached\n    result2 := c addAndCheckLimit: 5\n    self assert: result2 equals: #not_yet\n    self assert: c getCount equals: 2\n    // count=2+1=3 < 5, still not reached\n    result3 := c addAndCheckLimit: 5\n    self assert: result3 equals: #not_yet\n    self assert: c getCount equals: 3\n    // count=3+1=4 < 5, still not reached\n    result4 := c addAndCheckLimit: 5\n    self assert: result4 equals: #not_yet\n    self assert: c getCount equals: 4\n    // count=4+1=5 >= 5, early return fires\n    result5 := c addAndCheckLimit: 5\n    self assert: result5 equals: #reached\n    self assert: c getCount equals: 5\n\n  testSlotAssignmentBeforeEarlyReturnValue =>\n    // total is incremented before the ^ so the returned value reflects the new state\n    c := ActorSlotCounter spawn\n    // total=0+1=1 > 0, so returns total=1\n    result := c addAndReturnIfAbove: 0\n    self assert: result equals: 1\n    self assert: c getTotal equals: 1\n\n  testSlotAssignmentBeforeEarlyReturnFallthrough =>\n    // When threshold not exceeded, falls through to -1 but state is still updated\n    c := ActorSlotCounter spawn\n    // total=0+1=1, 1 > 100? No, returns -1\n    result := c addAndReturnIfAbove: 100\n    self assert: result equals: -1\n    self assert: c getTotal equals: 1\n\n  testStatePersistedAcrossMultipleCalls =>\n    // State accumulates correctly across independent method calls\n    c := ActorSlotCounter spawn\n    c incrementBoth: 10; incrementBoth: 20; incrementBoth: 30\n    self assert: c getCount equals: 3\n    self assert: c getTotal equals: 60\n\n  testResetClearsBothSlots =>\n    // reset clears both slots back to 0\n    c := ActorSlotCounter spawn\n    c incrementBoth: 42\n    c reset\n    self assert: c getCount equals: 0\n    self assert: c getTotal equals: 0",
       "explanation": "BT-916: Tests for self.slot := assignment in actor methods Verifies that state is correctly threaded through:   - multiple slot assignments in one method   - slot assignment inside ifTrue:ifFalse: conditional   - slot assignment inside block (do:, collect:)   - slot assignment with early return (^)  Compile-time checks (value type error, withSlot: bypass warning) are validated by Rust unit tests in semantic_analysis/validators.rs (BT-914) and by the E2E @load-error test in tests/e2e/cases/actor_slot.bt"
+    },
+    {
+      "id": "stdlib-test-actor-terminate-test",
+      "title": "ActorTerminateTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ActorTerminateTest",
+        "TestCase",
+        "actor_terminate_test",
+        "assign",
+        "assignment",
+        "async",
+        "branch",
+        "concurrent",
+        "conditional",
+        "constructor",
+        "create",
+        "duck typing",
+        "extends",
+        "gen_server",
+        "genserver",
+        "if",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "interface",
+        "method check",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "protocol",
+        "set",
+        "subclassing",
+        "testActorWithoutTerminateStopsCleanly",
+        "testRespondsToTerminate",
+        "testTerminateCalledOnStop",
+        "testTerminateCanReadActorState",
+        "testTerminateCanReadMutatedState",
+        "testTerminateExceptionDoesNotPreventShutdown",
+        "testTerminateNotCalledOnKill",
+        "testTerminateReceivesNormalReason"
+      ],
+      "source": "// Tests for Actor terminate: lifecycle hook.\n//\n// Fixtures: stdlib/test/fixtures/terminate_actor.bt\n//           stdlib/test/fixtures/failing_terminate_actor.bt\n\nTestCase subclass: ActorTerminateTest\n\n  // === Basic terminate protocol ===\n  testTerminateCalledOnStop =>\n    table := Ets new: #terminateOnStop type: #set\n    actor := TerminateActor spawnWith: #{#tableName => #terminateOnStop}\n    actor stop\n    self assert: (table at: #called) equals: true\n    table delete\n\n  testTerminateReceivesNormalReason =>\n    table := Ets new: #terminateReason type: #set\n    actor := TerminateActor spawnWith: #{#tableName => #terminateReason}\n    actor stop\n    self assert: (table at: #reason) equals: #normal\n    table delete\n\n  testTerminateCanReadActorState =>\n    table := Ets new: #terminateState type: #set\n    actor := TerminateActor spawnWith: #{\n      #tableName => #terminateState,\n      #value => 42\n    }\n    actor stop\n    self assert: (table at: #value) equals: 42\n    table delete\n\n  testTerminateCanReadMutatedState =>\n    table := Ets new: #terminateMutated type: #set\n    actor := TerminateActor spawnWith: #{#tableName => #terminateMutated}\n    actor setValue: 99\n    actor stop\n    self assert: (table at: #value) equals: 99\n    table delete\n\n  // === Kill bypasses terminate ===\n  testTerminateNotCalledOnKill =>\n    table := Ets new: #terminateKill type: #set\n    actor := TerminateActor spawnWith: #{#tableName => #terminateKill}\n    // Unlink so the kill signal doesn't propagate to the test process\n    Erlang erlang unlink: actor pid\n    actor kill\n    // Poll until the actor is dead\n    50 timesRepeat: [actor isAlive ifTrue: [Timer sleep: 10]]\n    self deny: actor isAlive\n    // terminate: should NOT have been called\n    self assert: (table at: #called) equals: nil\n    table delete\n\n  // === Exception handling ===\n  testTerminateExceptionDoesNotPreventShutdown =>\n    actor := FailingTerminateActor spawn\n    self assert: actor isAlive\n    actor stop\n    self deny: actor isAlive\n\n  // === Actors without terminate ===\n  testActorWithoutTerminateStopsCleanly =>\n    counter := Counter spawn\n    self assert: counter isAlive\n    counter stop\n    self deny: counter isAlive\n\n  // === respondsTo: ===\n  testRespondsToTerminate =>\n    actor := TerminateActor spawn\n    self assert: (actor respondsTo: #terminate:)\n    actor stop",
+      "explanation": "Tests for Actor terminate: lifecycle hook.  Fixtures: stdlib/test/fixtures/terminate_actor.bt           stdlib/test/fixtures/failing_terminate_actor.bt"
     },
     {
       "id": "stdlib-test-architecture-doc-examples-test",
@@ -13281,6 +13366,37 @@
       "explanation": "Fixture for actor_initialize_test.bt — actor whose initialize raises an error"
     },
     {
+      "id": "stdlib-test-fixtures-failing-terminate-actor",
+      "title": "FailingTerminateActor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "FailingTerminateActor",
+        "actor",
+        "async",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "failing_terminate_actor",
+        "field",
+        "gen_server",
+        "genserver",
+        "getValue",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "process",
+        "property",
+        "subclassing",
+        "terminate:"
+      ],
+      "source": "// Fixture for actor_terminate_test.bt — actor whose terminate: raises an error\n\nActor subclass: FailingTerminateActor\n  state: value = 0\n\n  getValue => self.value\n\n  terminate: _reason => Error new signal: \"terminate failed on purpose\"",
+      "explanation": "Fixture for actor_terminate_test.bt — actor whose terminate: raises an error"
+    },
+    {
       "id": "stdlib-test-fixtures-field-mutation-accumulator",
       "title": "FieldMutationAccumulator",
       "category": "stdlib-fixtures",
@@ -14567,6 +14683,10 @@
         "assign",
         "assignment",
         "async",
+        "bump",
+        "callBumpAndCapture",
+        "callBumpAndReadState",
+        "callDoubleBumpAndCapture",
         "callSetupAsLast",
         "callSetupThenAssignField",
         "callSetupThenRead",
@@ -14591,7 +14711,7 @@
         "setupValue",
         "subclassing"
       ],
-      "source": "// BT-1420: Fixture for testing that self-call state mutations are visible\n// to the caller after the self-call returns.\n\nActor subclass: SelfCallStateActor\n  state: value = 0\n  state: count = 0\n\n  // Helper that mutates state — called via self-send\n  setupValue => self.value := 42\n\n  // Calls self helper, then reads the mutated state\n  callSetupThenRead =>\n    self setupValue\n    self.value\n\n  // Helper that increments count\n  incrementCount => self.count := self.count + 1\n\n  // Multiple self-calls that each mutate state\n  callThreeIncrements =>\n    self incrementCount\n    self incrementCount\n    self incrementCount\n    self.count\n\n  // Self-call as the last expression (result should be returned)\n  callSetupAsLast => self setupValue\n\n  // Read value to verify state after callSetupAsLast\n  getValue => self.value\n\n  // Self-call that mutates state, then a field assignment after\n  callSetupThenAssignField =>\n    self setupValue\n    self.count := 10\n    self.value + self.count",
+      "source": "// BT-1420: Fixture for testing that self-call state mutations are visible\n// to the caller after the self-call returns.\n\nActor subclass: SelfCallStateActor\n  state: value = 0\n  state: count = 0\n\n  // Helper that mutates state — called via self-send\n  setupValue => self.value := 42\n\n  // Calls self helper, then reads the mutated state\n  callSetupThenRead =>\n    self setupValue\n    self.value\n\n  // Helper that increments count\n  incrementCount => self.count := self.count + 1\n\n  // Multiple self-calls that each mutate state\n  callThreeIncrements =>\n    self incrementCount\n    self incrementCount\n    self incrementCount\n    self.count\n\n  // Self-call as the last expression (result should be returned)\n  callSetupAsLast => self setupValue\n\n  // Read value to verify state after callSetupAsLast\n  getValue => self.value\n\n  // Self-call that mutates state, then a field assignment after\n  callSetupThenAssignField =>\n    self setupValue\n    self.count := 10\n    self.value + self.count\n\n  // BT-1421: Helper returning a value while mutating state\n  bump =>\n    self.count := self.count + 1\n    self.count\n\n  // BT-1421: Assignment RHS is a self-send — result gets return value, state threads\n  callBumpAndCapture =>\n    result := self bump\n    result\n\n  // BT-1421: Assignment RHS self-send, then read mutated state\n  callBumpAndReadState =>\n    _result := self bump\n    self.count\n\n  // BT-1421: Multiple assignment RHS self-sends\n  callDoubleBumpAndCapture =>\n    first := self bump\n    second := self bump\n    first + second",
       "explanation": "BT-1420: Fixture for testing that self-call state mutations are visible to the caller after the self-call returns."
     },
     {
@@ -14860,6 +14980,43 @@
       ],
       "source": "// TaggedValue — BT-996 fixture: single-slot Value subclass whose factory method\n// uses `ClassName slot: value` syntax inside a class method body.\n//\n// This exercises the BT-996 bug fix: `TaggedValue tag: t` inside `class fromTag:` must\n// dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter.\n\nValue subclass: TaggedValue\n  state: tag = \"\"\n\n  class fromTag: t => TaggedValue tag: t",
       "explanation": "TaggedValue — BT-996 fixture: single-slot Value subclass whose factory method uses `ClassName slot: value` syntax inside a class method body.  This exercises the BT-996 bug fix: `TaggedValue tag: t` inside `class fromTag:` must dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter."
+    },
+    {
+      "id": "stdlib-test-fixtures-terminate-actor",
+      "title": "TerminateActor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "TerminateActor",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "getValue",
+        "if not",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "negation",
+        "process",
+        "property",
+        "set",
+        "setValue:",
+        "subclassing",
+        "terminate:",
+        "terminate_actor",
+        "unless"
+      ],
+      "source": "// Fixture for actor_terminate_test.bt — actor with terminate: hook\n\nActor subclass: TerminateActor\n  state: tableName = nil\n  state: value = 0\n\n  setValue: v => self.value := v\n\n  getValue => self.value\n\n  terminate: reason =>\n    self.tableName isNil\n      ifFalse: [\n        table := Ets named: self.tableName\n        table at: #called put: true\n        table at: #reason put: reason\n        table at: #value put: self.value\n      ]",
+      "explanation": "Fixture for actor_terminate_test.bt — actor with terminate: hook"
     },
     {
       "id": "stdlib-test-fixtures-test-dynamic-supervisor-custom",
@@ -16059,23 +16216,19 @@
         "raise",
         "subclassing",
         "testDebugReturnsNil",
-        "testDebugTypeError",
         "testDebugWithMetadata",
         "testErrorReturnsNil",
-        "testErrorTypeError",
         "testErrorWithMetadata",
         "testInfoReturnsNil",
-        "testInfoTypeError",
         "testInfoWithMetadata",
         "testSetLevel",
         "testSetLevelInvalidLevel",
         "testSetLevelTypeError",
         "testWarnReturnsNil",
-        "testWarnTypeError",
         "testWarnWithMetadata",
         "throw"
       ],
-      "source": "// Tests the Logger class — info:, warn:, error:, debug:, metadata variants,\n// setLevel:, and type-error validation\n\nTestCase subclass: LoggerTest\n\n  testInfoReturnsNil =>\n    // info: returns nil\n    self assert: (Logger info: \"test info message\") equals: nil\n\n  testInfoWithMetadata =>\n    // info:metadata: returns nil\n    self assert: (Logger info: \"test info\" metadata: #{\n      \"key\" => \"value\"\n    }) equals: nil\n\n  testWarnReturnsNil =>\n    // warn: returns nil\n    self assert: (Logger warn: \"test warn message\") equals: nil\n\n  testWarnWithMetadata =>\n    // warn:metadata: returns nil\n    self assert: (Logger warn: \"test warn\" metadata: #{\n      \"attempt\" => 2\n    }) equals: nil\n\n  testErrorReturnsNil =>\n    // error: returns nil\n    self assert: (Logger error: \"test error message\") equals: nil\n\n  testErrorWithMetadata =>\n    // error:metadata: returns nil\n    self assert: (Logger error: \"test error\" metadata: #{\n      \"reason\" => \"timeout\"\n    }) equals: nil\n\n  testDebugReturnsNil =>\n    // debug: returns nil\n    self assert: (Logger debug: \"test debug message\") equals: nil\n\n  testDebugWithMetadata =>\n    // debug:metadata: returns nil\n    self assert: (Logger debug: \"test debug\" metadata: #{\n      \"count\" => 42\n    }) equals: nil\n\n  testSetLevel =>\n    // setLevel: accepts valid log levels\n    self assert: (Logger setLevel: #debug) equals: nil\n    // Restore to a reasonable default\n    self assert: (Logger setLevel: #notice) equals: nil\n\n  testInfoTypeError =>\n    // info: requires String argument\n    @expect type\n    self should: [Logger info: 42] raise: #type_error\n\n  testWarnTypeError =>\n    // warn: requires String argument\n    @expect type\n    self should: [Logger warn: 42] raise: #type_error\n\n  testErrorTypeError =>\n    // error: requires String argument\n    @expect type\n    self should: [Logger error: 42] raise: #type_error\n\n  testDebugTypeError =>\n    // debug: requires String argument\n    @expect type\n    self should: [Logger debug: 42] raise: #type_error\n\n  testSetLevelTypeError =>\n    // setLevel: requires Symbol argument\n    @expect type\n    self should: [Logger setLevel: \"debug\"] raise: #type_error\n\n  testSetLevelInvalidLevel =>\n    // setLevel: with invalid symbol raises argument_error\n    self should: [Logger setLevel: #not_a_real_level] raise: #argument_error",
+      "source": "// Tests the Logger class — info:, warn:, error:, debug:, metadata variants,\n// setLevel:, and type-error validation\n\nTestCase subclass: LoggerTest\n\n  testInfoReturnsNil =>\n    // info: returns nil\n    self assert: (Logger info: \"test info message\") equals: nil\n\n  testInfoWithMetadata =>\n    // info:metadata: returns nil\n    self assert: (Logger info: \"test info\" metadata: #{\n      \"key\" => \"value\"\n    }) equals: nil\n\n  testWarnReturnsNil =>\n    // warn: returns nil\n    self assert: (Logger warn: \"test warn message\") equals: nil\n\n  testWarnWithMetadata =>\n    // warn:metadata: returns nil\n    self assert: (Logger warn: \"test warn\" metadata: #{\n      \"attempt\" => 2\n    }) equals: nil\n\n  testErrorReturnsNil =>\n    // error: returns nil\n    self assert: (Logger error: \"test error message\") equals: nil\n\n  testErrorWithMetadata =>\n    // error:metadata: returns nil\n    self assert: (Logger error: \"test error\" metadata: #{\n      \"reason\" => \"timeout\"\n    }) equals: nil\n\n  testDebugReturnsNil =>\n    // debug: returns nil\n    self assert: (Logger debug: \"test debug message\") equals: nil\n\n  testDebugWithMetadata =>\n    // debug:metadata: returns nil\n    self assert: (Logger debug: \"test debug\" metadata: #{\n      \"count\" => 42\n    }) equals: nil\n\n  testSetLevel =>\n    // setLevel: accepts valid log levels\n    self assert: (Logger setLevel: #debug) equals: nil\n    // Restore to a reasonable default\n    self assert: (Logger setLevel: #notice) equals: nil\n\n  testSetLevelTypeError =>\n    // setLevel: requires Symbol argument — still dispatched through beamtalk_logger\n    @expect type\n    self should: [Logger setLevel: \"debug\"] raise: #type_error\n\n  testSetLevelInvalidLevel =>\n    // setLevel: with invalid symbol raises argument_error\n    self should: [Logger setLevel: #not_a_real_level] raise: #argument_error",
       "explanation": "Tests the Logger class — info:, warn:, error:, debug:, metadata variants, setLevel:, and type-error validation"
     },
     {

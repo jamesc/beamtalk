@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for actor_terminate_test.bt — actor whose terminate: raises an error
+
+Actor subclass: FailingTerminateActor
+  state: value = 0
+
+  getValue => self.value
+
+  terminate: _reason => Error new signal: "terminate failed on purpose"

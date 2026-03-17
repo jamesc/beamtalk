@@ -1,0 +1,76 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Actor terminate: lifecycle hook.
+//
+// Fixtures: stdlib/test/fixtures/terminate_actor.bt
+//           stdlib/test/fixtures/failing_terminate_actor.bt
+
+TestCase subclass: ActorTerminateTest
+
+  // === Basic terminate protocol ===
+  testTerminateCalledOnStop =>
+    table := Ets new: #terminateOnStop type: #set
+    actor := TerminateActor spawnWith: #{#tableName => #terminateOnStop}
+    actor stop
+    self assert: (table at: #called) equals: true
+    table delete
+
+  testTerminateReceivesNormalReason =>
+    table := Ets new: #terminateReason type: #set
+    actor := TerminateActor spawnWith: #{#tableName => #terminateReason}
+    actor stop
+    self assert: (table at: #reason) equals: #normal
+    table delete
+
+  testTerminateCanReadActorState =>
+    table := Ets new: #terminateState type: #set
+    actor := TerminateActor spawnWith: #{
+      #tableName => #terminateState,
+      #value => 42
+    }
+    actor stop
+    self assert: (table at: #value) equals: 42
+    table delete
+
+  testTerminateCanReadMutatedState =>
+    table := Ets new: #terminateMutated type: #set
+    actor := TerminateActor spawnWith: #{#tableName => #terminateMutated}
+    actor setValue: 99
+    actor stop
+    self assert: (table at: #value) equals: 99
+    table delete
+
+  // === Kill bypasses terminate ===
+  testTerminateNotCalledOnKill =>
+    table := Ets new: #terminateKill type: #set
+    actor := TerminateActor spawnWith: #{#tableName => #terminateKill}
+    // Unlink so the kill signal doesn't propagate to the test process
+    Erlang erlang unlink: actor pid
+    actor kill
+    // Poll until the actor is dead
+    50 timesRepeat: [actor isAlive ifTrue: [Timer sleep: 10]]
+    self deny: actor isAlive
+    // terminate: should NOT have been called
+    self assert: (table at: #called) equals: nil
+    table delete
+
+  // === Exception handling ===
+  testTerminateExceptionDoesNotPreventShutdown =>
+    actor := FailingTerminateActor spawn
+    self assert: actor isAlive
+    actor stop
+    self deny: actor isAlive
+
+  // === Actors without terminate ===
+  testActorWithoutTerminateStopsCleanly =>
+    counter := Counter spawn
+    self assert: counter isAlive
+    counter stop
+    self deny: counter isAlive
+
+  // === respondsTo: ===
+  testRespondsToTerminate =>
+    actor := TerminateActor spawn
+    self assert: (actor respondsTo: #terminate:)
+    actor stop

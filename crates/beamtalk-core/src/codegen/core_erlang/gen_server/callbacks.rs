@@ -506,12 +506,12 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// 'terminate'/2 = fun (Reason, State) ->
-    ///     %% Call terminate method if defined
+    ///     %% Call terminate: method if defined — exceptions must not prevent shutdown
     ///     let Self = call 'beamtalk_actor':'make_self'(State) in
-    ///     case call 'module':'dispatch'('terminate', [Reason], Self, State) of
-    ///         <{'reply', _Result, _State}> when 'true' -> 'ok'
-    ///         <_Other> when 'true' -> 'ok'
-    ///     end
+    ///     let _TermDisp = try call 'module':'dispatch'('terminate:', [Reason], Self, State)
+    ///         of _TermOk -> 'ok'
+    ///         catch <_TermT, _TermE, _TermS> -> 'ok'
+    ///     in 'ok'
     /// ```
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_terminate(
@@ -525,30 +525,26 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    "%% Call terminate method if defined",
+                    "%% Call terminate: method if defined — exceptions must not prevent shutdown",
                     line(),
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
                     line(),
                     docvec![
-                        "case call '",
+                        "let _TermDisp = try call '",
                         Document::String(module_name.clone()),
-                        "':'dispatch'('terminate', [Reason], Self, State) of"
+                        "':'dispatch'('terminate:', [Reason], Self, State)"
                     ],
                     nest(
                         INDENT,
                         docvec![
                             line(),
-                            // Core Erlang doesn't allow duplicate _ patterns, use unique ignored vars
-                            "<{'reply', _TermResult, _TermState}> when 'true' -> 'ok'",
+                            "of _TermOk -> 'ok'",
                             line(),
-                            // dispatch returns 3-tuple {'error', Error, State}, not 2-tuple
-                            "<{'error', _TermError, _TermState2}> when 'true' -> 'ok'",
-                            line(),
-                            "<_TermOther> when 'true' -> 'ok'",
+                            "catch <_TermT, _TermE, _TermS> -> 'ok'",
                         ]
                     ),
                     line(),
-                    "end",
+                    "in 'ok'",
                 ]
             ),
             "\n",
