@@ -601,21 +601,30 @@ mcp_signal_path() ->
 write_mcp_signal_file() ->
     case mcp_signal_path() of
         {ok, Path} ->
-            ok = filelib:ensure_dir(Path),
-            case file:write_file(Path, <<"debug\n">>) of
+            case filelib:ensure_dir(Path) of
                 ok ->
-                    ?LOG_INFO(#{
-                        msg => "MCP debug signal file written",
-                        path => Path
-                    }),
-                    ok;
-                {error, Reason} ->
+                    case file:write_file(Path, <<"debug\n">>) of
+                        ok ->
+                            ?LOG_INFO(#{
+                                msg => "MCP debug signal file written",
+                                path => Path
+                            }),
+                            ok;
+                        {error, Reason} ->
+                            ?LOG_ERROR(#{
+                                msg => "Failed to write MCP debug signal file",
+                                path => Path,
+                                reason => Reason
+                            }),
+                            {error, Reason}
+                    end;
+                {error, DirReason} ->
                     ?LOG_ERROR(#{
-                        msg => "Failed to write MCP debug signal file",
+                        msg => "Failed to create directory for MCP debug signal file",
                         path => Path,
-                        reason => Reason
+                        reason => DirReason
                     }),
-                    {error, Reason}
+                    {error, DirReason}
             end;
         {error, Reason} ->
             {error, Reason}
