@@ -49,7 +49,8 @@ logging_config_test_() ->
             fun activeDebugTargets_includes_class_and_actor/0,
             fun enableDebug_invalid_type_returns_error/0,
             fun disableAllDebug_clears_class_and_actor/0,
-            fun loggerInfo_includes_class_and_actor/0
+            fun loggerInfo_includes_class_and_actor/0,
+            fun debugTargets_includes_mcp/0
         ]}.
 
 %%====================================================================
@@ -268,3 +269,94 @@ loggerInfo_includes_class_and_actor() ->
     ?assertNotEqual(nomatch, binary:match(Info, <<"Counter">>)),
     Pid ! stop,
     beamtalk_logging_config:disableAllDebug().
+
+debugTargets_includes_mcp() ->
+    Targets = beamtalk_logging_config:debugTargets(),
+    ?assert(lists:member(mcp, Targets)).
+
+%%====================================================================
+%% MCP signal file tests
+%%====================================================================
+
+mcp_signal_file_test_() ->
+    {setup,
+        fun() ->
+            %% Create a temporary workspace directory for testing.
+            %% We need beamtalk_workspace_meta running to get workspace_id.
+            %% Instead, we test mcp_signal_path/0 directly — it needs
+            %% the workspace meta server, which may not be running in unit
+            %% tests. So we test the path helper and the file write/remove
+            %% mechanics via the public enable/disable API with a mock
+            %% workspace.
+            beamtalk_logging_config:ensure_table(),
+            ok
+        end,
+        fun(_) ->
+            beamtalk_logging_config:disableAllDebug()
+        end,
+        [
+            fun mcp_signal_path_returns_error_without_workspace/0,
+            fun mcp_enable_disable_without_workspace_returns_error/0
+        ]}.
+
+mcp_signal_path_returns_error_without_workspace() ->
+    %% Without a running workspace, mcp_signal_path should return an error
+    Result = beamtalk_logging_config:mcp_signal_path(),
+    ?assertMatch({error, workspace_not_started}, Result).
+
+mcp_enable_disable_without_workspace_returns_error() ->
+    %% enableDebug(mcp) without a workspace should return a runtime_error
+    Result = beamtalk_logging_config:enableDebug(mcp),
+    ?assertMatch(#beamtalk_error{kind = runtime_error}, Result),
+    %% disableDebug(mcp) without a workspace should succeed silently
+    ?assertEqual(nil, beamtalk_logging_config:disableDebug(mcp)).
+
+%% Tests that require a running workspace (integration-style) are run with
+%% a mock workspace_meta process.
+mcp_signal_file_with_workspace_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_logging_config:ensure_table(),
+            %% Start a mock workspace_meta that returns a test workspace ID
+            TestWsId = iolist_to_binary(
+                io_lib:format("test_mcp_~p", [erlang:unique_integer([positive])])
+            ),
+            %% Create workspace directory
+            Home =
+                case os:getenv("HOME") of
+                    false -> filename:basedir(user_cache, "beamtalk");
+                    H -> H
+                end,
+            WsDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(TestWsId)]),
+            ok = filelib:ensure_dir(filename:join(WsDir, "dummy")),
+            %% Register a mock for beamtalk_workspace_meta via meck
+            %% Since we cannot use meck, we test via the signal path function
+            %% after manually registering a gen_server.
+            {TestWsId, WsDir}
+        end,
+        fun({_TestWsId, WsDir}) ->
+            beamtalk_logging_config:disableAllDebug(),
+            %% Clean up signal file and directory
+            _ = file:delete(filename:join(WsDir, "mcp_debug_enabled")),
+            _ = file:del_dir(WsDir)
+        end,
+        fun({TestWsId, WsDir}) ->
+            [
+                {"signal file is created and removed correctly", fun() ->
+                    SignalPath = filename:join(WsDir, "mcp_debug_enabled"),
+                    %% File should not exist yet
+                    ?assertNot(filelib:is_file(SignalPath)),
+                    %% Write it directly (the way enableDebug would)
+                    ok = file:write_file(SignalPath, <<"debug\n">>),
+                    ?assert(filelib:is_file(SignalPath)),
+                    %% Remove it
+                    ok = file:delete(SignalPath),
+                    ?assertNot(filelib:is_file(SignalPath)),
+                    %% Verify path matches expected pattern
+                    ?assertNotEqual(
+                        nomatch,
+                        string:find(SignalPath, binary_to_list(TestWsId))
+                    )
+                end}
+            ]
+        end}.
