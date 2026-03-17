@@ -28,6 +28,8 @@
 -export([
     logLevel/0,
     logLevel/1,
+    logFormat/0,
+    logFormat/1,
     debugTargets/0,
     enableDebug/1,
     disableDebug/1,
@@ -44,6 +46,8 @@
 -define(VALID_LEVELS, [
     emergency, alert, critical, error, warning, notice, info, debug
 ]).
+
+-define(VALID_FORMATS, [text, json]).
 
 %%====================================================================
 %% Subsystem registry
@@ -107,6 +111,58 @@ logLevel(Level) ->
             io_lib:format(
                 "Log level must be an atom, got: ~p",
                 [Level]
+            )
+        )
+    ).
+
+%% @doc Return the current log format as an atom (`text` or `json`).
+%%
+%% Inspects the formatter configured on the `beamtalk_file_log` handler.
+%% Returns `text` if the handler uses `logger_formatter` (the OTP default),
+%% `json` if it uses `beamtalk_json_formatter`, or `text` if no file
+%% handler is installed.
+-spec logFormat() -> text | json.
+logFormat() ->
+    case logger:get_handler_config(beamtalk_file_log) of
+        {ok, #{formatter := {beamtalk_json_formatter, _}}} ->
+            json;
+        _ ->
+            text
+    end.
+
+%% @doc Switch the log format on the `beamtalk_file_log` handler.
+%%
+%% `text` configures `logger_formatter` with the default template.
+%% `json` configures `beamtalk_json_formatter` for structured JSON output.
+%% Returns `nil` on success or a `#beamtalk_error{}` for an invalid format.
+-spec logFormat(atom()) -> nil | #beamtalk_error{}.
+logFormat(text) ->
+    Formatter =
+        {logger_formatter, #{
+            template => [time, " [", level, "] ", mfa, " ", msg, "\n"],
+            single_line => true
+        }},
+    apply_format(Formatter);
+logFormat(json) ->
+    Formatter = {beamtalk_json_formatter, #{}},
+    apply_format(Formatter);
+logFormat(Format) when is_atom(Format) ->
+    beamtalk_error:with_message(
+        beamtalk_error:new(type_error, 'BeamtalkInterface', logFormat),
+        iolist_to_binary(
+            io_lib:format(
+                "Invalid log format: ~p. Valid formats: ~p",
+                [Format, ?VALID_FORMATS]
+            )
+        )
+    );
+logFormat(Format) ->
+    beamtalk_error:with_message(
+        beamtalk_error:new(type_error, 'BeamtalkInterface', logFormat),
+        iolist_to_binary(
+            io_lib:format(
+                "Log format must be an atom, got: ~p",
+                [Format]
             )
         )
     ).
@@ -318,12 +374,29 @@ loggerInfo() ->
                 )
         end,
     LogFile = find_log_file(),
+    Format = logFormat(),
     iolist_to_binary(
         io_lib:format(
-            "Log level: ~s\nFormat: text\nLog file: ~s\nActive debug targets:\n~s",
-            [Level, LogFile, ActiveStr]
+            "Log level: ~s\nFormat: ~s\nLog file: ~s\nActive debug targets:\n~s",
+            [Level, Format, LogFile, ActiveStr]
         )
     ).
+
+%%====================================================================
+%% Internal helpers — format switching
+%%====================================================================
+
+%% @doc Apply a formatter config to the beamtalk_file_log handler.
+-spec apply_format({module(), map()}) -> nil | #beamtalk_error{}.
+apply_format(Formatter) ->
+    case logger:get_handler_config(beamtalk_file_log) of
+        {ok, _} ->
+            ok = logger:update_handler_config(beamtalk_file_log, formatter, Formatter),
+            nil;
+        {error, _} ->
+            %% No file handler installed — nothing to switch, succeed silently.
+            nil
+    end.
 
 %%====================================================================
 %% Internal helpers — target type detection
@@ -517,12 +590,17 @@ disable_supervisor_progress() ->
     ),
     ok.
 
-%% @doc Try to find the current log file path from the default handler config.
+%% @doc Try to find the current log file path from the file log handler.
 -spec find_log_file() -> binary().
 find_log_file() ->
-    case logger:get_handler_config(default) of
+    case logger:get_handler_config(beamtalk_file_log) of
         {ok, #{config := #{file := File}}} ->
             iolist_to_binary(File);
         _ ->
-            <<"(standard_io)">>
+            case logger:get_handler_config(default) of
+                {ok, #{config := #{file := File}}} ->
+                    iolist_to_binary(File);
+                _ ->
+                    <<"(standard_io)">>
+            end
     end.
