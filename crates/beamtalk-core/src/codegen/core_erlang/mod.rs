@@ -116,6 +116,7 @@ use crate::source_analysis::{Diagnostic, Span};
 use document::{Document, INDENT, line, nest};
 use primitive_bindings::PrimitiveBindingTable;
 use state_codegen::StateThreading;
+use std::collections::HashSet;
 use std::fmt;
 use thiserror::Error;
 use variable_context::VariableContext;
@@ -2026,10 +2027,7 @@ impl CoreErlangGenerator {
     ///
     /// Check if an expression is a control flow construct (whileTrue:, whileFalse:, timesRepeat:, etc.)
     /// with literal blocks that has threaded mutations. Returns the threaded variable names if so.
-    #[allow(clippy::too_many_lines)] // one branch per control flow construct (whileTrue:, timesRepeat:, etc.)
     fn get_control_flow_threaded_vars(&self, expr: &Expression) -> Option<Vec<String>> {
-        use crate::codegen::core_erlang::block_analysis::analyze_block;
-
         let Expression::MessageSend {
             receiver,
             selector: MessageSelector::Keyword(parts),
@@ -2042,277 +2040,217 @@ impl CoreErlangGenerator {
 
         let selector_name: String = parts.iter().map(|kw| kw.keyword.as_str()).collect();
 
-        // Check for whileTrue:/whileFalse: with literal blocks
-        if (selector_name == "whileTrue:" || selector_name == "whileFalse:")
-            && matches!(receiver.as_ref(), Expression::Block(_))
-            && arguments
-                .first()
-                .is_some_and(|a| matches!(a, Expression::Block(_)))
-        {
-            // Extract blocks - the matches! above guarantees these will succeed
-            let Expression::Block(cond_block) = receiver.as_ref() else {
-                return None;
-            };
-            let Some(Expression::Block(body_block)) = arguments.first() else {
-                return None;
-            };
+        match selector_name.as_str() {
+            "whileTrue:" | "whileFalse:" => self.threaded_vars_while(receiver, arguments),
+            "timesRepeat:" => self.threaded_vars_times_repeat(arguments),
+            "to:do:" if arguments.len() == 2 => self.threaded_vars_to_do(&arguments[1]),
+            "to:by:do:" if arguments.len() == 3 => self.threaded_vars_to_do(&arguments[2]),
+            // BT-1276: collect:/select:/reject: pack updated locals into the StateAcc map
+            // returned as element(2, ...) of the result tuple, so the outer method body can
+            // extract them via maps:get — same pattern as do:/inject:into:.
+            "do:" | "collect:" | "select:" | "reject:" => {
+                self.threaded_vars_single_block_simple(arguments)
+            }
+            "inject:into:" if arguments.len() == 2 => {
+                self.threaded_vars_single_block_simple(&arguments[1..])
+            }
+            _ => None,
+        }
+    }
 
-            let cond_analysis = self
-                .semantic_facts
-                .block_profile(&cond_block.span)
-                .cloned()
-                .unwrap_or_else(|| analyze_block(cond_block));
-            let body_analysis = self
-                .semantic_facts
-                .block_profile(&body_block.span)
-                .cloned()
-                .unwrap_or_else(|| analyze_block(body_block));
+    /// Computes threaded vars for `whileTrue:` / `whileFalse:` — the condition block
+    /// (receiver) and body block (first argument) are both analyzed and their
+    /// captured-reads/writes are unioned.
+    fn threaded_vars_while(
+        &self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Option<Vec<String>> {
+        use crate::codegen::core_erlang::block_analysis::analyze_block;
 
-            // BT-1224: Use captured_reads (not local_reads) to exclude block-local variables.
-            // Block-local vars (defined inside the block before being read) must not be
-            // extracted from the state map after the loop — they were never packed in.
-            let all_captured_reads: std::collections::HashSet<String> = cond_analysis
-                .captured_reads
-                .union(&body_analysis.captured_reads)
-                .cloned()
-                .collect();
-            let all_writes: std::collections::HashSet<String> = cond_analysis
-                .local_writes
-                .union(&body_analysis.local_writes)
-                .cloned()
-                .collect();
+        let Expression::Block(cond_block) = receiver else {
+            return None;
+        };
+        let Some(Expression::Block(body_block)) = arguments.first() else {
+            return None;
+        };
 
-            // Threaded vars are those captured from outer scope AND written
-            let threaded: Vec<String> = all_captured_reads
-                .intersection(&all_writes)
-                .cloned()
-                .collect();
+        let cond_analysis = self
+            .semantic_facts
+            .block_profile(&cond_block.span)
+            .cloned()
+            .unwrap_or_else(|| analyze_block(cond_block));
+        let body_analysis = self
+            .semantic_facts
+            .block_profile(&body_block.span)
+            .cloned()
+            .unwrap_or_else(|| analyze_block(body_block));
 
-            if !threaded.is_empty() {
-                return Some(threaded);
+        // BT-1224: Use captured_reads (not local_reads) to exclude block-local variables.
+        // Block-local vars (defined inside the block before being read) must not be
+        // extracted from the state map after the loop — they were never packed in.
+        let all_captured_reads: std::collections::HashSet<String> = cond_analysis
+            .captured_reads
+            .union(&body_analysis.captured_reads)
+            .cloned()
+            .collect();
+        let all_writes: std::collections::HashSet<String> = cond_analysis
+            .local_writes
+            .union(&body_analysis.local_writes)
+            .cloned()
+            .collect();
+
+        // Threaded vars are those captured from outer scope AND written
+        let threaded: Vec<String> = all_captured_reads
+            .intersection(&all_writes)
+            .cloned()
+            .collect();
+
+        if threaded.is_empty() {
+            None
+        } else {
+            Some(threaded)
+        }
+    }
+
+    /// Computes threaded vars for `timesRepeat:` — single body block with
+    /// cross-scope mutation support (BT-1329).
+    fn threaded_vars_times_repeat(&self, arguments: &[Expression]) -> Option<Vec<String>> {
+        let Some(Expression::Block(body_block)) = arguments.first() else {
+            return None;
+        };
+
+        let (mut captured, mut writes) = self.collect_block_vars(body_block);
+        self.augment_with_cross_scope_mutations(
+            body_block,
+            &mut captured,
+            &mut writes,
+            &HashSet::new(),
+        );
+
+        let threaded: Vec<String> = captured.intersection(&writes).cloned().collect();
+        if threaded.is_empty() {
+            None
+        } else {
+            Some(threaded)
+        }
+    }
+
+    /// Computes threaded vars for `to:do:` and `to:by:do:` — single body block with
+    /// a block parameter (loop variable) that must be excluded, plus cross-scope
+    /// mutation support (BT-1329).
+    fn threaded_vars_to_do(&self, body_block_expr: &Expression) -> Option<Vec<String>> {
+        let Expression::Block(body_block) = body_block_expr else {
+            return None;
+        };
+
+        let block_params = Self::block_param_names(body_block);
+        let (mut captured, mut writes) = self.collect_block_vars(body_block);
+        self.augment_with_cross_scope_mutations(
+            body_block,
+            &mut captured,
+            &mut writes,
+            &block_params,
+        );
+
+        let threaded: Vec<String> = captured
+            .intersection(&writes)
+            .filter(|v| !block_params.contains(*v))
+            .cloned()
+            .collect();
+
+        if threaded.is_empty() {
+            None
+        } else {
+            Some(threaded)
+        }
+    }
+
+    /// Computes threaded vars for loop forms whose body block needs only simple
+    /// captured-reads vs local-writes analysis (no cross-scope mutations).
+    /// Used for `do:`, `inject:into:`, `collect:`, `select:`, `reject:`.
+    fn threaded_vars_single_block_simple(&self, arguments: &[Expression]) -> Option<Vec<String>> {
+        use crate::codegen::core_erlang::block_analysis::analyze_block;
+
+        let Some(Expression::Block(body_block)) = arguments.first() else {
+            return None;
+        };
+
+        let body_analysis = self
+            .semantic_facts
+            .block_profile(&body_block.span)
+            .cloned()
+            .unwrap_or_else(|| analyze_block(body_block));
+
+        let block_params = Self::block_param_names(body_block);
+
+        // BT-1224: Use captured_reads to exclude block-local vars from threading.
+        // Block params are implicitly excluded since they're not in captured_reads.
+        let threaded: Vec<String> = body_analysis
+            .captured_reads
+            .intersection(&body_analysis.local_writes)
+            .filter(|v| !block_params.contains(*v))
+            .cloned()
+            .collect();
+
+        if threaded.is_empty() {
+            None
+        } else {
+            Some(threaded)
+        }
+    }
+
+    /// Returns the set of block parameter names for exclusion from threaded vars.
+    fn block_param_names(block: &Block) -> HashSet<String> {
+        block
+            .parameters
+            .iter()
+            .map(|p| p.name.to_string())
+            .collect()
+    }
+
+    /// Collects captured-reads and local-writes from a block's analysis profile.
+    /// BT-1224: Uses `captured_reads` (not `local_reads`) to exclude block-local vars.
+    fn collect_block_vars(&self, block: &Block) -> (HashSet<String>, HashSet<String>) {
+        use crate::codegen::core_erlang::block_analysis::analyze_block;
+
+        let analysis = self
+            .semantic_facts
+            .block_profile(&block.span)
+            .cloned()
+            .unwrap_or_else(|| analyze_block(block));
+
+        (analysis.captured_reads, analysis.local_writes)
+    }
+
+    /// BT-1329: Augments captured/writes sets with cross-scope mutations from nested
+    /// list ops, and includes outer-scope write-only variables.
+    fn augment_with_cross_scope_mutations(
+        &self,
+        block: &Block,
+        captured: &mut HashSet<String>,
+        writes: &mut HashSet<String>,
+        excluded_params: &HashSet<String>,
+    ) {
+        let mut cross_scope = HashSet::new();
+        for stmt in &block.body {
+            Self::collect_list_op_cross_scope_mutations_recursive(
+                &stmt.expression,
+                &self.semantic_facts,
+                &mut cross_scope,
+            );
+        }
+        *captured = captured.union(&cross_scope).cloned().collect();
+        *writes = writes.union(&cross_scope).cloned().collect();
+        // BT-1329: Include outer-scope write-only variables.
+        for v in &writes.clone() {
+            if !excluded_params.contains(v.as_str())
+                && !captured.contains(v)
+                && self.lookup_var(v).is_some()
+            {
+                captured.insert(v.clone());
             }
         }
-
-        // Check for timesRepeat: with literal block
-        if selector_name == "timesRepeat:"
-            && arguments
-                .first()
-                .is_some_and(|a| matches!(a, Expression::Block(_)))
-        {
-            let Some(Expression::Block(body_block)) = arguments.first() else {
-                return None;
-            };
-
-            let body_analysis = self
-                .semantic_facts
-                .block_profile(&body_block.span)
-                .cloned()
-                .unwrap_or_else(|| analyze_block(body_block));
-
-            // BT-1224: Use captured_reads to exclude block-local vars from threading.
-            let mut captured = body_analysis.captured_reads.clone();
-            let mut writes = body_analysis.local_writes.clone();
-            // BT-1329: Include cross-scope mutations from nested list ops
-            let mut cross_scope = std::collections::HashSet::new();
-            for stmt in &body_block.body {
-                Self::collect_list_op_cross_scope_mutations_recursive(
-                    &stmt.expression,
-                    &self.semantic_facts,
-                    &mut cross_scope,
-                );
-            }
-            captured = captured.union(&cross_scope).cloned().collect();
-            writes = writes.union(&cross_scope).cloned().collect();
-            // BT-1329: Include outer-scope write-only variables.
-            for v in &writes {
-                if !captured.contains(v) && self.lookup_var(v).is_some() {
-                    captured.insert(v.clone());
-                }
-            }
-            let threaded: Vec<String> = captured.intersection(&writes).cloned().collect();
-
-            if !threaded.is_empty() {
-                return Some(threaded);
-            }
-        }
-
-        // Check for to:do: or to:by:do: with literal block
-        if (selector_name == "to:do:"
-            && arguments.len() == 2
-            && matches!(&arguments[1], Expression::Block(_)))
-            || (selector_name == "to:by:do:"
-                && arguments.len() == 3
-                && matches!(&arguments[2], Expression::Block(_)))
-        {
-            let body_block_expr = if selector_name == "to:do:" {
-                &arguments[1]
-            } else {
-                &arguments[2]
-            };
-            let Expression::Block(body_block) = body_block_expr else {
-                return None;
-            };
-
-            let body_analysis = self
-                .semantic_facts
-                .block_profile(&body_block.span)
-                .cloned()
-                .unwrap_or_else(|| analyze_block(body_block));
-
-            // The block parameter (e.g., `n` in `[:n | ...]`) is NOT a threaded variable
-            let block_params: std::collections::HashSet<String> = body_block
-                .parameters
-                .iter()
-                .map(|p| p.name.to_string())
-                .collect();
-
-            // BT-1224: Use captured_reads to exclude block-local vars from threading.
-            // Block params are implicitly excluded since they're not in captured_reads.
-            let mut captured = body_analysis.captured_reads.clone();
-            let mut writes = body_analysis.local_writes.clone();
-            // BT-1329: Include cross-scope mutations from nested list ops
-            let mut cross_scope = std::collections::HashSet::new();
-            for stmt in &body_block.body {
-                Self::collect_list_op_cross_scope_mutations_recursive(
-                    &stmt.expression,
-                    &self.semantic_facts,
-                    &mut cross_scope,
-                );
-            }
-            captured = captured.union(&cross_scope).cloned().collect();
-            writes = writes.union(&cross_scope).cloned().collect();
-            // BT-1329: Include outer-scope write-only variables.
-            for v in &writes {
-                if !block_params.contains(v.as_str())
-                    && !captured.contains(v)
-                    && self.lookup_var(v).is_some()
-                {
-                    captured.insert(v.clone());
-                }
-            }
-            let threaded: Vec<String> = captured
-                .intersection(&writes)
-                .filter(|v| !block_params.contains(*v))
-                .cloned()
-                .collect();
-
-            if !threaded.is_empty() {
-                return Some(threaded);
-            }
-        }
-
-        // Check for do: (list iteration) with literal block
-        if selector_name == "do:"
-            && arguments
-                .first()
-                .is_some_and(|a| matches!(a, Expression::Block(_)))
-        {
-            let Some(Expression::Block(body_block)) = arguments.first() else {
-                return None;
-            };
-
-            let body_analysis = self
-                .semantic_facts
-                .block_profile(&body_block.span)
-                .cloned()
-                .unwrap_or_else(|| analyze_block(body_block));
-
-            // The block parameter (e.g., `item` in `[:item | ...]`) is NOT a threaded variable
-            let block_params: std::collections::HashSet<String> = body_block
-                .parameters
-                .iter()
-                .map(|p| p.name.to_string())
-                .collect();
-
-            // BT-1224: Use captured_reads to exclude block-local vars from threading.
-            // Block params are implicitly excluded since they're not in captured_reads.
-            let threaded: Vec<String> = body_analysis
-                .captured_reads
-                .intersection(&body_analysis.local_writes)
-                .filter(|v| !block_params.contains(*v))
-                .cloned()
-                .collect();
-
-            if !threaded.is_empty() {
-                return Some(threaded);
-            }
-        }
-
-        // Check for inject:into: with literal block
-        if selector_name == "inject:into:"
-            && arguments.len() == 2
-            && matches!(&arguments[1], Expression::Block(_))
-        {
-            let Expression::Block(body_block) = &arguments[1] else {
-                return None;
-            };
-
-            let body_analysis = self
-                .semantic_facts
-                .block_profile(&body_block.span)
-                .cloned()
-                .unwrap_or_else(|| analyze_block(body_block));
-
-            // The block parameters (acc, item) are NOT threaded variables
-            let block_params: std::collections::HashSet<String> = body_block
-                .parameters
-                .iter()
-                .map(|p| p.name.to_string())
-                .collect();
-
-            // BT-1224: Use captured_reads to exclude block-local vars from threading.
-            // Block params are implicitly excluded since they're not in captured_reads.
-            let threaded: Vec<String> = body_analysis
-                .captured_reads
-                .intersection(&body_analysis.local_writes)
-                .filter(|v| !block_params.contains(*v))
-                .cloned()
-                .collect();
-
-            if !threaded.is_empty() {
-                return Some(threaded);
-            }
-        }
-
-        // BT-1276: Check for collect:/select:/reject: with literal block.
-        // These list-ops pack updated locals into the StateAcc map returned as
-        // element(2, ...) of the result tuple, so the outer method body can extract them
-        // via maps:get — same pattern as do:/inject:into:.
-        if matches!(selector_name.as_str(), "collect:" | "select:" | "reject:")
-            && arguments
-                .first()
-                .is_some_and(|a| matches!(a, Expression::Block(_)))
-        {
-            let Some(Expression::Block(body_block)) = arguments.first() else {
-                return None;
-            };
-
-            let body_analysis = self
-                .semantic_facts
-                .block_profile(&body_block.span)
-                .cloned()
-                .unwrap_or_else(|| analyze_block(body_block));
-
-            let block_params: std::collections::HashSet<String> = body_block
-                .parameters
-                .iter()
-                .map(|p| p.name.to_string())
-                .collect();
-
-            // BT-1224: Use captured_reads to exclude block-local vars from threading.
-            let threaded: Vec<String> = body_analysis
-                .captured_reads
-                .intersection(&body_analysis.local_writes)
-                .filter(|v| !block_params.contains(*v))
-                .cloned()
-                .collect();
-
-            if !threaded.is_empty() {
-                return Some(threaded);
-            }
-        }
-
-        None
     }
 
     /// Validates that a stored closure (block assigned to variable) doesn't contain mutations.

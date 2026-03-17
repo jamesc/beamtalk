@@ -45,4 +45,6 @@ stop(_State) ->
     application:unset_env(beamtalk_runtime, actor_spawn_callback),
     %% Unregister class load callback (BT-1020)
     application:unset_env(beamtalk_runtime, class_load_callback),
+    %% Remove WebSocket log handler (BT-1433)
+    _ = logger:remove_handler(beamtalk_ws_log),
     ok.

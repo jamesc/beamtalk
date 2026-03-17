@@ -83,6 +83,10 @@ init(Config) ->
         false -> ok
     end,
 
+    %% Set up WebSocket log handler for live log streaming (BT-1433).
+    %% Registered in all modes — subscribers opt in per-session.
+    setup_ws_log_handler(),
+
     %% Start the compiler application (ADR 0022)
     %% This is started dynamically rather than as a static app dependency
     %% because the compiler port binary may not be available in all environments
@@ -300,8 +304,8 @@ do_setup_file_logger(WorkspaceId) ->
                     HandlerConfig = #{
                         config => #{
                             file => LogFile,
-                            % 1 MB per file
-                            max_no_bytes => 1048576,
+                            % 10 MB per file
+                            max_no_bytes => 10485760,
                             max_no_files => 5
                         },
                         level => debug,
@@ -337,4 +341,28 @@ do_setup_file_logger(WorkspaceId) ->
                     ),
                     ok
             end
+    end.
+
+%%% WebSocket Log Handler (BT-1433)
+
+%% @private
+%% @doc Register the WebSocket log handler with OTP logger.
+%% The handler forwards log events to subscribed WebSocket sessions.
+-spec setup_ws_log_handler() -> ok.
+setup_ws_log_handler() ->
+    case
+        logger:add_handler(beamtalk_ws_log, beamtalk_ws_log_handler, #{
+            level => debug
+        })
+    of
+        ok ->
+            ok;
+        {error, {already_exist, _}} ->
+            ok;
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "Failed to add WebSocket log handler",
+                #{reason => Reason, domain => [beamtalk, runtime]}
+            ),
+            ok
     end.
