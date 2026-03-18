@@ -781,7 +781,9 @@ pub fn compile_source_with_bindings(
     // BT-782: Apply @expect directives to suppress matching diagnostics.
     beamtalk_core::queries::diagnostic_provider::apply_expect_directives(&module, &mut diagnostics);
 
-    // Check for errors (and optionally treat warnings/hints as errors)
+    // Check for errors (and optionally treat warnings/hints as errors).
+    // Deprecation-category warnings (BT-1529) are excluded from warnings-as-errors
+    // to allow gradual migration during the deprecation period.
     let has_errors = diagnostics.iter().any(|d| {
         d.severity == beamtalk_core::source_analysis::Severity::Error
             || (options.warnings_as_errors
@@ -789,7 +791,9 @@ pub fn compile_source_with_bindings(
                     d.severity,
                     beamtalk_core::source_analysis::Severity::Warning
                         | beamtalk_core::source_analysis::Severity::Hint
-                ))
+                )
+                && d.category
+                    != Some(beamtalk_core::source_analysis::DiagnosticCategory::Deprecation))
     });
 
     if !diagnostics.is_empty() {
@@ -1273,6 +1277,34 @@ end
         assert!(
             result.is_err(),
             "warnings_as_errors must override suppress_warnings: compilation should fail"
+        );
+    }
+
+    /// BT-1529: Deprecation warnings (wrong keyword/class-kind) should NOT
+    /// be promoted to errors by `warnings_as_errors`. This allows `just test-bunit`
+    /// (which uses `--warnings-as-errors`) to pass during the deprecation period.
+    #[test]
+    fn test_deprecation_warning_excluded_from_warnings_as_errors() {
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("deprecation.bt");
+        let core_file = temp_path.join("deprecation.core");
+        // Object subclass with state: triggers a Deprecation-category warning
+        fs::write(
+            &source_file,
+            "Object subclass: BadObj\n  state: x = 0\n  value => self.x",
+        )
+        .unwrap();
+
+        let options = beamtalk_core::CompilerOptions {
+            warnings_as_errors: true,
+            ..Default::default()
+        };
+        let result = compile_source(&source_file, "bt@deprecation", &core_file, &options);
+
+        assert!(
+            result.is_ok(),
+            "Deprecation warnings should not fail compilation even with warnings_as_errors: {result:?}"
         );
     }
 }

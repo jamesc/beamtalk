@@ -374,6 +374,10 @@ pub enum DiagnosticCategory {
     DeadAssignment,
     /// Duplicate extension method conflict (BT-1516).
     ExtensionConflict,
+    /// Deprecation warning (BT-1529) — wrong keyword/class-kind combination.
+    ///
+    /// Excluded from `--warnings-as-errors` to allow gradual migration.
+    Deprecation,
 }
 
 /// A diagnostic message (error, warning, or hint).
