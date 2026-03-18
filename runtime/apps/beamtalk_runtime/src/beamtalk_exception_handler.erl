@@ -444,7 +444,7 @@ signal_from_class(ClassName) ->
 %%
 %% BT-1524: Called by `Exception signal: "msg"` or `MyCustomError signal: "msg"`.
 %% Extracts the class name from the ClassSelf record and delegates to signal_message/2.
--spec class_signal_message(term(), #beamtalk_object{}) -> no_return().
+-spec class_signal_message(term(), #beamtalk_object{} | term()) -> no_return().
 class_signal_message(Message, #beamtalk_object{class = ClassTag}) ->
     ClassName = strip_class_suffix(ClassTag),
     signal_message(Message, ClassName);
@@ -456,7 +456,7 @@ class_signal_message(Message, _ClassSelf) ->
 %%
 %% BT-1524: Called by `Exception signal` or `MyCustomError signal`.
 %% Extracts the class name from the ClassSelf record and delegates to signal_from_class/1.
--spec class_signal(#beamtalk_object{}) -> no_return().
+-spec class_signal(#beamtalk_object{} | term()) -> no_return().
 class_signal(#beamtalk_object{class = ClassTag}) ->
     ClassName = strip_class_suffix(ClassTag),
     signal_from_class(ClassName);
