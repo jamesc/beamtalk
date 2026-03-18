@@ -46,8 +46,8 @@ pub fn detect_extension_conflicts(index: &ExtensionIndex) -> Vec<ExtensionConfli
 /// Converts extension conflicts into compiler diagnostics.
 ///
 /// For each conflict, produces one error diagnostic per duplicate location
-/// (all locations after the first). The first definition's span is used for
-/// the primary error, and the hint shows the path of the other definition(s).
+/// (all locations after the first). Each error spans the duplicate's location,
+/// and the hint references the first definition's location.
 ///
 /// When all definitions are in the same file, the hint says "also defined at
 /// offset N in this file". For cross-file conflicts, it includes the file path.
@@ -74,7 +74,9 @@ pub fn conflict_diagnostics(conflicts: &[ExtensionConflict]) -> Vec<Diagnostic> 
         // The first location is the "original" definition.
         // All subsequent locations get an error pointing to them, with a hint
         // referencing the first definition.
-        let first = &locs[0];
+        let Some(first) = locs.first() else {
+            continue;
+        };
 
         for duplicate in &locs[1..] {
             let message = format!("extension conflict on `{display_key}`: duplicate definition");
