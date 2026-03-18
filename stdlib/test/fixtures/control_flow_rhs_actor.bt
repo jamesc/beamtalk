@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1479: Actor fixture for testing control flow RHS in field assignments,
+// SelfFieldAtPut, and destructure assignments with state threading.
+
+Actor subclass: ControlFlowRhsActor
+  state: x = 0
+  state: y = 0
+
+  // Gap 1a: self.field := <control-flow-with-mutations>
+  // The RHS returns {Value, State} which must be unpacked before storing.
+  assignFieldFromConditional: flag =>
+    self.x := flag
+      ifTrue: [
+        self.y := 10
+        42
+      ]
+      ifFalse: [0]
+    self.x
+
+  // Gap 1b: Same pattern but with local var in the control flow
+  assignFieldFromConditionalWithLocal: flag =>
+    self.x := flag
+      ifTrue: [
+        tmp := self.y + 5
+        self.y := tmp
+        tmp * 2
+      ]
+      ifFalse: [0]
+    self.x
+
+  // Gap 3: SelfFieldAtPut inside conditional branch
+  // fieldAt:put: inside ifTrue: must be handled explicitly, not fall through to wildcard
+  conditionalFieldAtPut: flag =>
+    flag ifTrue: [self fieldAt: #x put: 99]
+    self.x
+
+  // self.field := <collect: with mutations>
+  assignFieldFromCollect: items =>
+    self.x := items
+      collect: [:item |
+        self.y := self.y + 1
+        item * 2
+      ]
+    self.x
+
+  getX => self.x
+
+  getY => self.y
+
+  reset =>
+    self.x := 0
+    self.y := 0

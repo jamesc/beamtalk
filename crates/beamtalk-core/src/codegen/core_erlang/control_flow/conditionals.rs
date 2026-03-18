@@ -356,6 +356,126 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
+                // BT-1479: self fieldAt: name put: expr — explicit handler for reflective field mutation
+                BodyExprKind::SelfFieldAtPut => {
+                    let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
+                    docs.push(doc);
+                    if is_last {
+                        last_result = Some(val_var);
+                    }
+                }
+                // BT-1479: self fieldAt: name put: expr where RHS is control flow returning {Value, State}
+                BodyExprKind::SelfFieldAtPutControlFlow => {
+                    if let Expression::MessageSend { arguments, .. } = expr {
+                        let name_var = self.fresh_temp_var("Name");
+                        let name_code = self.expression_doc(&arguments[0])?;
+                        let tuple_var = self.fresh_temp_var("CfTuple");
+                        let val_var = self.fresh_temp_var("CfVal");
+                        let val_code = self.expression_doc(&arguments[1])?;
+                        let rhs_state = self.fresh_temp_var("CfState");
+                        let new_state = self.next_state_var();
+                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+                            "let ",
+                            Document::String(name_var.clone()),
+                            " = ",
+                            name_code,
+                            " in let ",
+                            Document::String(tuple_var.clone()),
+                            " = ",
+                            val_code,
+                            " in let ",
+                            Document::String(val_var.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            Document::String(tuple_var.clone()),
+                            ") in let ",
+                            Document::String(rhs_state.clone()),
+                            " = call 'erlang':'element'(2, ",
+                            Document::String(tuple_var),
+                            ") in let ",
+                            Document::String(new_state.clone()),
+                            " = call 'maps':'put'(",
+                            Document::String(name_var),
+                            ", ",
+                            Document::String(val_var.clone()),
+                            ", ",
+                            Document::String(rhs_state),
+                            ") in ",
+                        ]];
+                        // Rebind threaded __local__ vars from the updated state
+                        // so subsequent expressions in this branch see fresh values.
+                        if let Some(threaded_vars) =
+                            self.get_control_flow_threaded_vars(&arguments[1])
+                        {
+                            for var in &threaded_vars {
+                                let tv_core = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                                doc_parts.push(docvec![
+                                    "let ",
+                                    Document::String(tv_core.clone()),
+                                    " = call 'maps':'get'('",
+                                    Document::String(Self::local_state_key(var)),
+                                    "', ",
+                                    Document::String(new_state.clone()),
+                                    ") in ",
+                                ]);
+                                self.bind_var(var, &tv_core);
+                            }
+                        }
+                        docs.push(Document::Vec(doc_parts));
+                        if is_last {
+                            last_result = Some(val_var);
+                        }
+                    }
+                }
+                // BT-1479: {a, b} := expr where RHS is control flow returning {Value, State}
+                BodyExprKind::DestructureAssignmentControlFlow => {
+                    if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                        let tuple_var = self.fresh_temp_var("CfTuple");
+                        let actual_val = self.fresh_temp_var("CfVal");
+                        let value_str = self.expression_doc(value)?;
+                        let next_state = self.next_state_var();
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(tuple_var.clone()),
+                            " = ",
+                            value_str,
+                            " in let ",
+                            Document::String(actual_val.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            Document::String(tuple_var.clone()),
+                            ") in let ",
+                            Document::String(next_state.clone()),
+                            " = call 'erlang':'element'(2, ",
+                            Document::String(tuple_var),
+                            ") in ",
+                        ]);
+                        // Rebind threaded __local__ vars from the updated state
+                        // so subsequent expressions in this branch see fresh values.
+                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
+                            for var in &threaded_vars {
+                                let tv_core = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                                docs.push(docvec![
+                                    "let ",
+                                    Document::String(tv_core.clone()),
+                                    " = call 'maps':'get'('",
+                                    Document::String(Self::local_state_key(var)),
+                                    "', ",
+                                    Document::String(next_state.clone()),
+                                    ") in ",
+                                ]);
+                                self.bind_var(var, &tv_core);
+                            }
+                        }
+                        let binding_docs =
+                            self.generate_destructure_bindings_from_var(pattern, &actual_val)?;
+                        for d in binding_docs {
+                            docs.push(d);
+                        }
+                    }
+                }
                 BodyExprKind::ControlFlowWithMutations => {
                     if is_last {
                         // Last expression is nested control flow with mutations.
@@ -399,12 +519,9 @@ impl CoreErlangGenerator {
                         ]);
                     }
                 }
-                // All other kinds (SelfFieldAtPut, EarlyReturn, SuperSend, ErrorSend,
+                // All other kinds (EarlyReturn, SuperSend, ErrorSend,
                 // Tier2ValueCall, Tier2SelfSend, DispatchingSelfSend, Pure) are treated
                 // as pure expressions in the conditional branch context.
-                // Note: SelfFieldAtPut falls through here (matching pre-refactor behavior)
-                // since generate_field_assignment_open expects Assignment{FieldAccess},
-                // not the MessageSend form used by fieldAt:put:.
                 _ => {
                     if is_last {
                         // Last non-assignment: bind to result variable
@@ -656,6 +773,47 @@ mod tests {
         assert!(
             code.contains("maps':'put'('n'"),
             "BT-1477: triple-nested should thread field mutations. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_field_assignment_control_flow_rhs_unpacks_tuple() {
+        // BT-1479: self.field := <control-flow-with-mutations> must unpack {Value, State}
+        let src = "Actor subclass: A\n  state: x = 0\n  state: y = 0\n\n  m: flag =>\n    self.x := flag ifTrue: [self.y := 1. 42] ifFalse: [0]\n    self.x\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("element'(1,"),
+            "FieldAssignmentControlFlow should unpack element(1) from RHS tuple. Got:\n{code}"
+        );
+        assert!(
+            code.contains("element'(2,"),
+            "FieldAssignmentControlFlow should unpack element(2) for state. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('x'"),
+            "Should update field 'x' via maps:put. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_self_field_at_put_in_conditional_branch() {
+        // BT-1479: SelfFieldAtPut inside conditional branch must not fall through to wildcard
+        let src = "Actor subclass: A\n  state: x = 0\n\n  m: flag =>\n    flag ifTrue: [self fieldAt: #x put: 42]\n    self.x\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'put'("),
+            "SelfFieldAtPut in conditional branch should generate maps:put. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_self_field_at_put_in_method_body() {
+        // BT-1479: self fieldAt: name put: value in method body (non-conditional context)
+        let src = "Actor subclass: A\n  state: x = 0\n\n  m =>\n    self fieldAt: #x put: 42\n    self.x\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'put'("),
+            "SelfFieldAtPut should generate maps:put. Got:\n{code}"
         );
     }
 }

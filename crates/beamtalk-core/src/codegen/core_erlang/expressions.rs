@@ -1607,6 +1607,19 @@ impl CoreErlangGenerator {
         Ok(docs)
     }
 
+    /// Like [`Self::generate_destructure_bindings`] but takes a pre-evaluated variable name
+    /// instead of an expression.  Used when the RHS has already been unpacked from a
+    /// `{Value, State}` tuple (e.g., `DestructureAssignmentControlFlow`).
+    pub(super) fn generate_destructure_bindings_from_var(
+        &mut self,
+        pattern: &Pattern,
+        rhs_var: &str,
+    ) -> Result<Vec<Document<'static>>> {
+        let (docs, _bound) =
+            self.generate_pattern_extractions_from_var(pattern, rhs_var, "let ", " in ")?;
+        Ok(docs)
+    }
+
     /// Evaluates `value` into a fresh temporary variable, returning the binding document and var name.
     ///
     /// Shared first step for [`Self::generate_destructure_extractions`] (compiled-code) and
