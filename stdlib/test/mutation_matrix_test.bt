@@ -171,24 +171,24 @@ TestCase subclass: MutationMatrixTest
     a fieldAtPutInConditional: false
     self assert: a getCounter equals: 0
 
-  // ── BT-1481: Known codegen bugs (uncomment when fixed) ─────────────
+// ── BT-1481: Known codegen bugs (uncomment when fixed) ─────────────
 
-  // P2-16: anySatisfy: block with mutation — unbound State1 (BT-1481)
-  // testAnySatisfyMutation =>
-  //   a := MutationMatrixActor spawn
-  //   count := a anySatisfyMutation: #(1, 2, 3)
-  //   self assert: a getFlag equals: false
-  //   self assert: count equals: 3
+// P2-16: anySatisfy: block with mutation — unbound State1 (BT-1481)
+// testAnySatisfyMutation =>
+//   a := MutationMatrixActor spawn
+//   count := a anySatisfyMutation: #(1, 2, 3)
+//   self assert: a getFlag equals: false
+//   self assert: count equals: 3
 
-  // P2-16b: allSatisfy: with a match
-  // testAllSatisfyMutation =>
-  //   a := MutationMatrixActor spawn
-  //   count := a allSatisfyMutation: #(1, 2, 3)
-  //   self assert: a getFlag equals: true
-  //   self assert: count equals: 3
+// P2-16b: allSatisfy: with a match
+// testAllSatisfyMutation =>
+//   a := MutationMatrixActor spawn
+//   count := a allSatisfyMutation: #(1, 2, 3)
+//   self assert: a getFlag equals: true
+//   self assert: count equals: 3
 
-  // P2-22: Block value with mutation — unbound State1 (BT-1481)
-  // testBlockValueMutation =>
-  //   a := MutationMatrixActor spawn
-  //   count := a blockValueMutation
-  //   self assert: count equals: 42
+// P2-22: Block value with mutation — unbound State1 (BT-1481)
+// testBlockValueMutation =>
+//   a := MutationMatrixActor spawn
+//   count := a blockValueMutation
+//   self assert: count equals: 42
