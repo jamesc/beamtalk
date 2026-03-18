@@ -561,6 +561,27 @@ Result, Interval, Set, Bag, HTTPRequest, HTTPResponse, HTTPRoute, HTTPRouter, Su
 - Phase 4 ships after one release cycle with warnings
 - Phase 5 is ongoing
 
+## Implementation Tracking
+
+**Epic:** [BT-1526](https://linear.app/beamtalk/issue/BT-1526)
+**Status:** Planned
+
+| Phase | Issue | Title | Size |
+|-------|-------|-------|------|
+| 1 | BT-1527 | Parse `field:` keyword and track declared keyword in AST | S |
+| 1 | BT-1528 | ClassKind hierarchy propagation | M |
+| 2 | BT-1529 | Compiler warnings for wrong keyword/class-kind combinations | M |
+| 3 | BT-1530 | Migrate stdlib Value subclasses: `state:` → `field:` | S |
+| 3 | BT-1531 | Migrate Object-with-state fixtures to Value subclass | S |
+| 3 | BT-1532 | Reclassify Collection as Value subclass | M |
+| 3 | BT-1533 | Convert TestCase to Value subclass with functional setUp | M |
+| 3 | BT-1534 | Migrate test subclass setUp syntax | S |
+| 4 | BT-1535 | Promote keyword/class-kind warnings to compile errors | S |
+| 5 | BT-1536 | Update language features documentation | S |
+| 5 | BT-1537 | LSP completions for field:/state: by class kind | S |
+
+**Follow-up:** [BT-1524](https://linear.app/beamtalk/issue/BT-1524) (Object non-instantiable, move new/new: to Value, Exception class signal:)
+
 ## References
 - Related issues: [BT-1520](https://linear.app/beamtalk/issue/BT-1520/adr-separate-statefield-keywords-by-class-kind), [BT-1524](https://linear.app/beamtalk/issue/BT-1524/make-object-non-instantiable-move-newnew-to-value-add-class-signal-to) (Object non-instantiable)
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (BEAM Object Model), [ADR 0042](0042-immutable-value-objects-actor-mutable-state.md) (Immutable Value Objects)
