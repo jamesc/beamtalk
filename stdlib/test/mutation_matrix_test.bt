@@ -5,6 +5,8 @@
 // control flow × nesting × mutation patterns for Actor state threading.
 // Each test exercises one specific pattern and asserts correct state.
 //
+// Also covers BT-1479 control-flow RHS patterns (P2-19 through P2-21).
+//
 // Test P2-16 (anySatisfy:/allSatisfy: + mutation) omitted — codegen bug
 // produces unbound State1 variable in dispatch. Filed as BT-1481.
 
@@ -140,3 +142,31 @@ TestCase subclass: MutationMatrixTest
     a := MutationMatrixActor spawn
     count := a emptyCollectionMutation
     self assert: count equals: 42
+
+  // ── BT-1479: Control flow RHS patterns ─────────────────────────────
+
+  // P2-19: Field assign from conditional with mutation in RHS
+  testFieldAssignFromConditionalRhs =>
+    a := MutationMatrixActor spawn
+    count := a fieldAssignFromConditionalRhs: true
+    self assert: count equals: 42
+    self assert: a getFlag equals: true
+    a reset
+    count := a fieldAssignFromConditionalRhs: false
+    self assert: count equals: 0
+
+  // P2-20: Field assign from collect: with mutation in RHS
+  testFieldAssignFromCollectRhs =>
+    a := MutationMatrixActor spawn
+    count := a fieldAssignFromCollectRhs: #(1, 2, 3)
+    self assert: count equals: 3
+    self assert: a getLog equals: #(2, 4, 6)
+
+  // P2-21: fieldAt:put: inside conditional branch
+  testFieldAtPutInConditional =>
+    a := MutationMatrixActor spawn
+    a fieldAtPutInConditional: true
+    self assert: a getCounter equals: 99
+    a reset
+    a fieldAtPutInConditional: false
+    self assert: a getCounter equals: 0

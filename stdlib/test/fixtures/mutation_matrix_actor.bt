@@ -178,3 +178,29 @@ Actor subclass: MutationMatrixActor
     self.counter := 42
     #() do: [:x | self.counter := self.counter + x]
     self.counter
+
+  // ── BT-1479: Control flow RHS patterns ─────────────────────────────
+
+  // P2-19: Field assign from conditional with mutation in RHS (BT-1479)
+  fieldAssignFromConditionalRhs: flag =>
+    self.counter := flag
+      ifTrue: [
+        self.flag := true
+        42
+      ]
+      ifFalse: [0]
+    self.counter
+
+  // P2-20: Field assign from collect: with mutation in RHS (BT-1479)
+  fieldAssignFromCollectRhs: items =>
+    self.log := items
+      collect: [:x |
+        self.counter := self.counter + 1
+        x * 2
+      ]
+    self.counter
+
+  // P2-21: fieldAt:put: inside conditional branch (BT-1479)
+  fieldAtPutInConditional: flag =>
+    flag ifTrue: [self fieldAt: #counter put: 99]
+    self.counter
