@@ -213,6 +213,73 @@ ffi_newOrExisting_shim_test() ->
         catch ets:delete(bt_ets_test_ffi_new_or_existing)
     end.
 
+newOrExisting_concurrent_creators_test() ->
+    %% Multiple processes call newOrExisting simultaneously — all should succeed
+    %% and see the same table (exercises the ets:new loser/fallback path).
+    %% Spawned processes wait for a signal before exiting so the table owner
+    %% stays alive throughout the test.
+    Name = bt_ets_test_concurrent_create,
+    catch ets:delete(Name),
+    Self = self(),
+    N = 10,
+    try
+        Pids = [
+            spawn_link(fun() ->
+                Result = (catch beamtalk_ets:'newOrExisting:type:'(Name, set)),
+                Self ! {done, self(), Result},
+                %% Keep process alive until test is done (table owner must stay alive)
+                receive
+                    stop -> ok
+                end
+            end)
+         || _ <- lists:seq(1, N)
+        ],
+        Results = [
+            receive
+                {done, _, R} -> R
+            after 5000 -> timeout
+            end
+         || _ <- lists:seq(1, N)
+        ],
+        %% All should return the same Ets wrapper (no crashes or timeouts)
+        lists:foreach(
+            fun(R) ->
+                ?assertMatch(
+                    #{'$beamtalk_class' := 'Ets', table := bt_ets_test_concurrent_create}, R
+                )
+            end,
+            Results
+        ),
+        %% Verify the table is functional
+        Table = hd(Results),
+        beamtalk_ets:insert(Table, <<"marker">>, <<"present">>),
+        ?assertEqual(<<"present">>, beamtalk_ets:lookup(Table, <<"marker">>)),
+        %% Release spawned processes
+        [P ! stop || P <- Pids]
+    after
+        catch ets:delete(Name)
+    end.
+
+newOrExisting_reuse_with_different_type_test() ->
+    %% If a table exists as a set, calling newOrExisting with orderedSet should
+    %% return the existing table (not fail or create a conflicting one).
+    Name = bt_ets_test_reuse_diff_type,
+    catch ets:delete(Name),
+    try
+        %% Create as set
+        Table1 = beamtalk_ets:'newOrExisting:type:'(Name, set),
+        beamtalk_ets:insert(Table1, <<"key">>, <<"value">>),
+        %% Request as orderedSet — should return existing set table
+        Table2 = beamtalk_ets:'newOrExisting:type:'(Name, orderedSet),
+        ?assertMatch(#{'$beamtalk_class' := 'Ets', table := bt_ets_test_reuse_diff_type}, Table2),
+        %% Original data should still be there (it's the same table)
+        ?assertEqual(<<"value">>, beamtalk_ets:lookup(Table2, <<"key">>)),
+        %% Underlying type is still set (not orderedSet)
+        ?assertEqual(set, ets:info(Name, type))
+    after
+        catch ets:delete(Name)
+    end.
+
 %%% ============================================================================
 %%% lookup/2
 %%% ============================================================================
