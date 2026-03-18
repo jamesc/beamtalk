@@ -303,6 +303,7 @@ fn compile_stdlib_file(
         bindings,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        &[],
     )
 }
 
