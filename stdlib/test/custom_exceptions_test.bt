@@ -6,9 +6,7 @@
 TestCase subclass: CustomExceptionsTest
 
   testSignalFromCustomErrorRaisesWithCorrectClass =>
-    result := [
-      MyCustomError signal: "oops"
-    ] on: Exception do: [:e | e class]
+    result := [MyCustomError signal: "oops"] on: Exception do: [:e | e class]
     self assert: result equals: MyCustomError
 
   testSignalNoArgsOnCustomErrorRaisesWithClassName =>

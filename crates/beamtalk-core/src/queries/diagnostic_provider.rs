@@ -365,10 +365,7 @@ mod tests {
                 && d.message.contains("spawn")
                 && d.severity == crate::source_analysis::Severity::Error
         });
-        assert!(
-            has_error,
-            "Expected actor new error, got: {diagnostics:?}"
-        );
+        assert!(has_error, "Expected actor new error, got: {diagnostics:?}");
     }
 
     #[test]
@@ -383,10 +380,7 @@ mod tests {
                 && d.message.contains("spawn")
                 && d.message.contains("new:")
         });
-        assert!(
-            has_error,
-            "Expected actor new: error, got: {diagnostics:?}"
-        );
+        assert!(has_error, "Expected actor new: error, got: {diagnostics:?}");
     }
 
     #[test]
