@@ -202,7 +202,6 @@ TestCase subclass: MutationMatrixTest
 
   // ── List (high risk) ──────────────────────────────────────────────────
 
-<<<<<<< HEAD
   // P3-1: detect: with field mutation in predicate block (BT-1486)
   // Mutation in the predicate block should persist after detect: returns.
   testDetectMutation =>
