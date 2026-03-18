@@ -523,7 +523,11 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
         }
     }
 
-    let keyword = if is_class { "classState: " } else { "state: " };
+    let keyword = if is_class {
+        "classState: "
+    } else {
+        state.declared_keyword.as_str()
+    };
     let mut decl: Vec<Document<'static>> = vec![
         Document::Str(keyword),
         Document::String(state.name.name.to_string()),
@@ -1600,6 +1604,26 @@ mod tests {
         state.doc_comment = Some("The current count.".into());
         let output = unparse_state_declaration(&state).to_pretty_string();
         assert_eq!(output, "/// The current count.\nstate: count");
+    }
+
+    #[test]
+    fn field_declaration_unparse() {
+        use crate::ast::DeclaredKeyword;
+        let mut decl = StateDeclaration::new(Identifier::new("x", span()), span());
+        decl.declared_keyword = DeclaredKeyword::Field;
+        let output = unparse_state_declaration(&decl).to_pretty_string();
+        assert_eq!(output, "field: x");
+    }
+
+    #[test]
+    fn field_declaration_round_trip() {
+        let source = "Object subclass: Foo\n  field: count = 0\n";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("field: count = 0"),
+            "expected field: in output, got: {output}"
+        );
     }
 
     #[test]

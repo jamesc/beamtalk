@@ -921,7 +921,10 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
 )]
 fn test_class_registration_generation() {
     // BT-218: Test that class definitions generate registration code
-    use crate::ast::{ClassDefinition, Identifier, MethodDefinition, MethodKind, StateDeclaration};
+    use crate::ast::{
+        ClassDefinition, DeclaredKeyword, Identifier, MethodDefinition, MethodKind,
+        StateDeclaration,
+    };
     use crate::source_analysis::Span;
 
     // Create a Counter class with instance variables and methods
@@ -939,6 +942,7 @@ fn test_class_registration_generation() {
             type_annotation: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            declared_keyword: DeclaredKeyword::default(),
             span: Span::new(0, 10),
         }],
         methods: vec![
@@ -1102,7 +1106,7 @@ fn test_no_class_registration_for_empty_module() {
 #[allow(clippy::too_many_lines)]
 fn test_multiple_classes_registration() {
     // BT-218: Test that modules with multiple classes register all of them
-    use crate::ast::{ClassDefinition, Identifier, StateDeclaration};
+    use crate::ast::{ClassDefinition, DeclaredKeyword, Identifier, StateDeclaration};
     use crate::source_analysis::Span;
 
     fn make_actor_class(
@@ -1126,6 +1130,7 @@ fn test_multiple_classes_registration() {
                 type_annotation: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: Span::new(0, 10),
             }],
             methods: vec![],
@@ -1236,7 +1241,7 @@ fn test_multi_class_early_error_short_circuits() {
     //
     // We verify this by checking the generated code structure: each _RegN
     // (except the last) must be wrapped in a case that short-circuits on error.
-    use crate::ast::{ClassDefinition, Identifier, StateDeclaration};
+    use crate::ast::{ClassDefinition, DeclaredKeyword, Identifier, StateDeclaration};
     use crate::source_analysis::Span;
 
     fn make_class(name: &str, name_len: u32, span_end: u32) -> ClassDefinition {
@@ -1254,6 +1259,7 @@ fn test_multi_class_early_error_short_circuits() {
                 type_annotation: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: Span::new(0, 5),
             }],
             methods: vec![],
@@ -1310,7 +1316,7 @@ fn test_three_class_short_circuit_nesting() {
     // BT-749: Verify nesting correctness for N=3 classes.
     // Short-circuit cases are added for indices 0 and 1 (all except the last).
     // The last class (index 2) is returned directly with no extra wrapping.
-    use crate::ast::{ClassDefinition, Identifier, StateDeclaration};
+    use crate::ast::{ClassDefinition, DeclaredKeyword, Identifier, StateDeclaration};
     use crate::source_analysis::Span;
 
     fn make_class(name: &str, name_len: u32) -> ClassDefinition {
@@ -1328,6 +1334,7 @@ fn test_three_class_short_circuit_nesting() {
                 type_annotation: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: Span::new(0, 5),
             }],
             methods: vec![],
@@ -1759,6 +1766,7 @@ fn test_generate_with_bindings_compiles_value_type() {
             default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
             comments: CommentAttachment::default(),
             doc_comment: None,
+            declared_keyword: DeclaredKeyword::default(),
             span: Span::new(0, 0),
         }],
         vec![],
@@ -2017,6 +2025,7 @@ fn test_object_subclass_no_auto_getters() {
             default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
             comments: CommentAttachment::default(),
             doc_comment: None,
+            declared_keyword: DeclaredKeyword::default(),
             span: Span::new(0, 0),
         }],
         methods: vec![],
@@ -2080,6 +2089,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
             default_value: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            declared_keyword: DeclaredKeyword::default(),
             span: Span::new(0, 0),
         }],
         methods: vec![x_method],
@@ -2178,6 +2188,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
             )),
             comments: CommentAttachment::default(),
             doc_comment: None,
+            declared_keyword: DeclaredKeyword::default(),
             span: Span::new(0, 0),
         }],
         methods: vec![],
@@ -2419,6 +2430,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: Span::new(0, 0),
             },
             StateDeclaration {
@@ -2427,6 +2439,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: Span::new(0, 0),
             },
         ],
@@ -3100,6 +3113,7 @@ fn make_native_actor_with_class_methods() -> Module {
             default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
             comments: CommentAttachment::default(),
             doc_comment: None,
+            declared_keyword: DeclaredKeyword::default(),
             span: Span::new(0, 0),
         }],
         comments: CommentAttachment::default(),

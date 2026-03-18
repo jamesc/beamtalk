@@ -48,6 +48,7 @@ Module {
                             },
                         ),
                     ),
+                    declared_keyword: State,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
@@ -405,6 +406,7 @@ Module {
                             },
                         ),
                     ),
+                    declared_keyword: State,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,

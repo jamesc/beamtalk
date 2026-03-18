@@ -1371,8 +1371,8 @@ mod tests {
     use super::builtins::builtin_method;
     use super::*;
     use crate::ast::{
-        ClassDefinition, ClassKind, CommentAttachment, Identifier, MethodDefinition,
-        ParameterDefinition, StateDeclaration, TypeAnnotation,
+        ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword, Identifier,
+        MethodDefinition, ParameterDefinition, StateDeclaration, TypeAnnotation,
     };
     use crate::semantic_analysis::test_helpers::test_span;
     use crate::source_analysis::Span;
@@ -1713,6 +1713,7 @@ mod tests {
                 default_value: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: test_span(),
             }],
             methods: vec![MethodDefinition {

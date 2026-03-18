@@ -459,9 +459,34 @@ pub struct StandaloneMethodDefinition {
     pub span: Span,
 }
 
+/// Which keyword was used to declare an instance variable.
+///
+/// Both `state:` and `field:` parse to [`StateDeclaration`]; this enum tracks
+/// which keyword appeared in source so the formatter can round-trip it and
+/// Phase 2 warnings can fire when the wrong keyword is used for a class kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum DeclaredKeyword {
+    /// The `state:` keyword (mutable actor state).
+    #[default]
+    State,
+    /// The `field:` keyword (immutable value-object data).
+    Field,
+}
+
+impl DeclaredKeyword {
+    /// Returns the source-level keyword string (with trailing space).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::State => "state: ",
+            Self::Field => "field: ",
+        }
+    }
+}
+
 /// A state (instance variable) declaration.
 ///
-/// Example: `state: value: Integer = 0`
+/// Example: `state: value :: Integer = 0`
 #[derive(Debug, Clone, PartialEq)]
 pub struct StateDeclaration {
     /// The field name.
@@ -470,6 +495,8 @@ pub struct StateDeclaration {
     pub type_annotation: Option<TypeAnnotation>,
     /// Optional default value.
     pub default_value: Option<Expression>,
+    /// Which keyword was used in source (`state:` or `field:`).
+    pub declared_keyword: DeclaredKeyword,
     /// Non-doc comments (`//` and `/* */`) appearing before this field.
     pub comments: CommentAttachment,
     /// Doc comment attached to this field (`///` lines).
@@ -486,6 +513,7 @@ impl StateDeclaration {
             name,
             type_annotation: None,
             default_value: None,
+            declared_keyword: DeclaredKeyword::default(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,
@@ -499,6 +527,7 @@ impl StateDeclaration {
             name,
             type_annotation: Some(type_annotation),
             default_value: None,
+            declared_keyword: DeclaredKeyword::default(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,
@@ -512,6 +541,7 @@ impl StateDeclaration {
             name,
             type_annotation: None,
             default_value: Some(default_value),
+            declared_keyword: DeclaredKeyword::default(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,
@@ -530,6 +560,7 @@ impl StateDeclaration {
             name,
             type_annotation: Some(type_annotation),
             default_value: Some(default_value),
+            declared_keyword: DeclaredKeyword::default(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             span,

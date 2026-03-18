@@ -9,8 +9,8 @@
 //! - Method definitions with optional `sealed` modifier
 
 use crate::ast::{
-    ClassDefinition, Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector,
-    MethodDefinition, MethodKind, ParameterDefinition, StandaloneMethodDefinition,
+    ClassDefinition, DeclaredKeyword, Expression, ExpressionStatement, Identifier, KeywordPart,
+    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition, StandaloneMethodDefinition,
     StateDeclaration, TypeAnnotation,
 };
 use crate::source_analysis::TokenKind;
@@ -209,8 +209,9 @@ impl Parser {
             && !self.is_at_class_definition()
             && !self.is_at_standalone_method_definition()
         {
-            // Check for state declaration: `state: fieldName ...`
-            if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
+            // Check for state/field declaration: `state: fieldName ...` or `field: fieldName ...`
+            if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:")
+            {
                 if let Some(state_decl) = self.parse_state_declaration() {
                     state.push(state_decl);
                 }
@@ -416,27 +417,34 @@ impl Parser {
         self.is_keyword_method_params_at(start_offset)
     }
 
-    /// Parses a state declaration.
+    /// Parses a state/field declaration.
     ///
     /// Syntax:
-    /// - `state: fieldName`
-    /// - `state: fieldName = defaultValue`
-    /// - `state: fieldName :: TypeName`
-    /// - `state: fieldName :: TypeName = defaultValue`
+    /// - `state: fieldName` / `field: fieldName`
+    /// - `state: fieldName = defaultValue` / `field: fieldName = defaultValue`
+    /// - `state: fieldName :: TypeName` / `field: fieldName :: TypeName`
+    /// - `state: fieldName :: TypeName = defaultValue` / `field: ...`
     fn parse_state_declaration(&mut self) -> Option<StateDeclaration> {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
         let mut comments = self.collect_comment_attachment();
 
-        // Consume `state:`
-        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
+        // Determine which keyword was used and consume it
+        let declared_keyword = if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
+        {
+            DeclaredKeyword::State
+        } else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "field:") {
+            DeclaredKeyword::Field
+        } else {
             return None;
-        }
+        };
+        let keyword_label = declared_keyword.as_str().trim();
         self.advance();
 
         // Parse field name and optional type annotation
         let (name, type_annotation) = if let TokenKind::Identifier(_) = self.current_kind() {
-            let name_ident = self.parse_identifier("Expected field name after 'state:'");
+            let name_ident =
+                self.parse_identifier(&format!("Expected field name after '{keyword_label}'"));
 
             // Check for optional type annotation (:: TypeName)
             let type_ann = if self.match_token(&TokenKind::DoubleColon) {
@@ -454,7 +462,7 @@ impl Parser {
             };
             (name_ident, type_ann)
         } else {
-            self.error("Expected field name after 'state:'");
+            self.error(format!("Expected field name after '{keyword_label}'"));
             let span = self.current_token().span();
             (Identifier::new("Error", span), None)
         };
@@ -482,6 +490,7 @@ impl Parser {
             name,
             type_annotation,
             default_value,
+            declared_keyword,
             comments,
             doc_comment,
             span,
@@ -550,6 +559,7 @@ impl Parser {
             name,
             type_annotation,
             default_value,
+            declared_keyword: DeclaredKeyword::State,
             comments,
             doc_comment,
             span,
@@ -817,7 +827,7 @@ impl Parser {
                     && self.is_at_method_definition()
             )
             && !self.is_at_standalone_method_definition()
-            && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "classState:")
+            && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
         {
             let pos_before = self.current;
@@ -854,7 +864,7 @@ impl Parser {
                     || self.is_at_class_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "classState:")
+                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
                 {
                     break;
                 }
@@ -870,7 +880,7 @@ impl Parser {
                     || self.is_at_class_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "classState:")
+                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
                 {
                     // Trailing period at end of method — not needed (BT-948)
                     self.diagnostics.push(
@@ -908,7 +918,7 @@ impl Parser {
                     || self.is_at_class_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "classState:")
+                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
                 {
                     break;
                 }
