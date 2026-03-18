@@ -295,20 +295,21 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
-                // BT-1479: self.field := expr where RHS is control flow returning {Value, State}
+                // BT-1477: self.field := <control-flow-with-mutations> inside a conditional branch.
+                // Unpack the {Value, State} tuple from the RHS, then apply maps:put for the field.
                 BodyExprKind::FieldAssignmentControlFlow => {
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::FieldAccess { field, .. } = target.as_ref() {
                             let tuple_var = self.fresh_temp_var("CfTuple");
                             let val_var = self.fresh_temp_var("CfVal");
-                            let value_str = self.expression_doc(value)?;
+                            let rhs_doc = self.expression_doc(value)?;
                             let rhs_state = self.fresh_temp_var("CfState");
-                            let field_state = self.next_state_var();
-                            docs.push(docvec![
+                            let new_state = self.next_state_var();
+                            let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                                 "let ",
                                 Document::String(tuple_var.clone()),
                                 " = ",
-                                value_str,
+                                rhs_doc,
                                 " in let ",
                                 Document::String(val_var.clone()),
                                 " = call 'erlang':'element'(1, ",
@@ -318,7 +319,7 @@ impl CoreErlangGenerator {
                                 " = call 'erlang':'element'(2, ",
                                 Document::String(tuple_var),
                                 ") in let ",
-                                Document::String(field_state),
+                                Document::String(new_state.clone()),
                                 " = call 'maps':'put'('",
                                 Document::String(field.name.to_string()),
                                 "', ",
@@ -326,7 +327,29 @@ impl CoreErlangGenerator {
                                 ", ",
                                 Document::String(rhs_state),
                                 ") in ",
-                            ]);
+                            ]];
+                            // Rebind threaded __local__ vars from the updated state
+                            // so subsequent expressions in this branch see fresh values.
+                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
+                            {
+                                for var in &threaded_vars {
+                                    let tv_core = self.lookup_var(var).map_or_else(
+                                        || Self::to_core_erlang_var(var),
+                                        String::clone,
+                                    );
+                                    doc_parts.push(docvec![
+                                        "let ",
+                                        Document::String(tv_core.clone()),
+                                        " = call 'maps':'get'('",
+                                        Document::String(Self::local_state_key(var)),
+                                        "', ",
+                                        Document::String(new_state.clone()),
+                                        ") in ",
+                                    ]);
+                                    self.bind_var(var, &tv_core);
+                                }
+                            }
+                            docs.push(Document::Vec(doc_parts));
                             if is_last {
                                 last_result = Some(val_var);
                             }
@@ -658,11 +681,65 @@ mod tests {
     }
 
     #[test]
+    fn test_collect_wrapping_if_true_with_field_mutation() {
+        // BT-1477: collect: block containing ifTrue: with self.field := mutation.
+        // The field mutation inside the conditional must be threaded through the
+        // collect: loop accumulator, not silently lost.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: list =>\n    list collect: [:each | each > 0 ifTrue: [self.n := self.n + 1]. each * 2]\n    self.n\n";
+        let code = codegen(src);
+        // The collect: should use a stateful accumulator (maps:put for field 'n')
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "BT-1477: collect: wrapping ifTrue: with field mutation should thread state. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_if_true_wrapping_do_with_field_mutation() {
+        // BT-1477: ifTrue: wrapping do: block with self.field := mutation.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: flag list: list =>\n    flag ifTrue: [list do: [:each | self.n := self.n + each]]\n    self.n\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("case "),
+            "BT-1477: ifTrue: wrapping do: should generate inline case. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "BT-1477: do: inside ifTrue: should thread field mutations. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_do_wrapping_if_true_with_field_mutation() {
+        // BT-1477: do: block containing ifTrue: with self.field := mutation.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: list =>\n    list do: [:each | each > 0 ifTrue: [self.n := self.n + each]]\n    self.n\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "BT-1477: do: wrapping ifTrue: with field mutation should thread state. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_triple_nested_if_true_do_if_true_with_field_mutation() {
+        // BT-1477: ifTrue: wrapping do: wrapping ifTrue: with self.field := mutation.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  m: flag list: list =>\n    flag ifTrue: [list do: [:each | each > 0 ifTrue: [self.n := self.n + each]]]\n    self.n\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("case "),
+            "BT-1477: triple-nested should generate inline case. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "BT-1477: triple-nested should thread field mutations. Got:\n{code}"
+        );
+    }
+
+    #[test]
     fn test_field_assignment_control_flow_rhs_unpacks_tuple() {
         // BT-1479: self.field := <control-flow-with-mutations> must unpack {Value, State}
         let src = "Actor subclass: A\n  state: x = 0\n  state: y = 0\n\n  m: flag =>\n    self.x := flag ifTrue: [self.y := 1. 42] ifFalse: [0]\n    self.x\n";
         let code = codegen(src);
-        // The RHS is a conditional with mutations — should unpack tuple before storing
         assert!(
             code.contains("element'(1,"),
             "FieldAssignmentControlFlow should unpack element(1) from RHS tuple. Got:\n{code}"
@@ -671,7 +748,6 @@ mod tests {
             code.contains("element'(2,"),
             "FieldAssignmentControlFlow should unpack element(2) for state. Got:\n{code}"
         );
-        // Field 'x' should be set with the unpacked value, not the raw tuple
         assert!(
             code.contains("maps':'put'('x'"),
             "Should update field 'x' via maps:put. Got:\n{code}"
@@ -683,7 +759,6 @@ mod tests {
         // BT-1479: SelfFieldAtPut inside conditional branch must not fall through to wildcard
         let src = "Actor subclass: A\n  state: x = 0\n\n  m: flag =>\n    flag ifTrue: [self fieldAt: #x put: 42]\n    self.x\n";
         let code = codegen(src);
-        // fieldAt:put: inside ifTrue: should generate maps:put with the field name
         assert!(
             code.contains("maps':'put'("),
             "SelfFieldAtPut in conditional branch should generate maps:put. Got:\n{code}"
