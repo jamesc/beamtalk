@@ -803,6 +803,265 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// BT-1481: Generates code for `list anySatisfy:` with mutation analysis.
+    pub(in crate::codegen::core_erlang) fn generate_list_any_satisfy(
+        &mut self,
+        receiver: &Expression,
+        body: &Expression,
+    ) -> Result<Document<'static>> {
+        validate_block_arity_exact(
+            body,
+            1,
+            "anySatisfy:",
+            "Fix: The body block must take one argument (each element):\n\
+             \x20 list anySatisfy: [:item | item > 0]",
+        )?;
+
+        if let Expression::Block(body_block) = body {
+            let analysis = block_analysis::analyze_block(body_block);
+            if self.needs_mutation_threading(&analysis) {
+                return self
+                    .generate_list_bool_predicate_with_mutations(receiver, body_block, false);
+            }
+        }
+
+        // No mutations: fall through to simple BIF call (lists:any/2)
+        let list_var = self.fresh_temp_var("temp");
+        let recv_code = self.expression_doc(receiver)?;
+        let body_var = self.fresh_temp_var("temp");
+        let body_code = self.expression_doc(body)?;
+
+        Ok(docvec![
+            format!("let {list_var} = "),
+            recv_code,
+            format!(" in let {body_var} = "),
+            body_code,
+            format!(
+                " in case call 'erlang':'is_list'({list_var}) of \
+                 <'true'> when 'true' -> \
+                 call 'lists':'any'({body_var}, {list_var}) \
+                 <'false'> when 'true' -> \
+                 call 'beamtalk_primitive':'send'({list_var}, 'anySatisfy:', [{body_var}]) end"
+            ),
+        ])
+    }
+
+    /// BT-1481: Generates code for `list allSatisfy:` with mutation analysis.
+    pub(in crate::codegen::core_erlang) fn generate_list_all_satisfy(
+        &mut self,
+        receiver: &Expression,
+        body: &Expression,
+    ) -> Result<Document<'static>> {
+        validate_block_arity_exact(
+            body,
+            1,
+            "allSatisfy:",
+            "Fix: The body block must take one argument (each element):\n\
+             \x20 list allSatisfy: [:item | item > 0]",
+        )?;
+
+        if let Expression::Block(body_block) = body {
+            let analysis = block_analysis::analyze_block(body_block);
+            if self.needs_mutation_threading(&analysis) {
+                return self
+                    .generate_list_bool_predicate_with_mutations(receiver, body_block, true);
+            }
+        }
+
+        // No mutations: fall through to simple BIF call (lists:all/2)
+        let list_var = self.fresh_temp_var("temp");
+        let recv_code = self.expression_doc(receiver)?;
+        let body_var = self.fresh_temp_var("temp");
+        let body_code = self.expression_doc(body)?;
+
+        Ok(docvec![
+            format!("let {list_var} = "),
+            recv_code,
+            format!(" in let {body_var} = "),
+            body_code,
+            format!(
+                " in case call 'erlang':'is_list'({list_var}) of \
+                 <'true'> when 'true' -> \
+                 call 'lists':'all'({body_var}, {list_var}) \
+                 <'false'> when 'true' -> \
+                 call 'beamtalk_primitive':'send'({list_var}, 'allSatisfy:', [{body_var}]) end"
+            ),
+        ])
+    }
+
+    /// BT-1481: Generates stateful `anySatisfy:`/`allSatisfy:` using `lists:foldl`
+    /// with state threading and a boolean accumulator.
+    ///
+    /// Note: Unlike `lists:any/2` and `lists:all/2`, this does NOT short-circuit.
+    /// All elements are always processed because field mutations must execute for
+    /// every element to maintain correct state.
+    ///
+    /// Accumulator is `{BoolAcc, StateVars...}` (tuple) or `{BoolAcc, StateAcc}` (map).
+    /// - `is_all = false` (anySatisfy): `BoolAcc` starts `false`, set to `true` on match
+    /// - `is_all = true` (allSatisfy): `BoolAcc` starts `true`, set to `false` on failure
+    #[allow(clippy::too_many_lines)]
+    pub(in crate::codegen::core_erlang) fn generate_list_bool_predicate_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        body: &Block,
+        is_all: bool,
+    ) -> Result<Document<'static>> {
+        let plan = ThreadingPlan::new_for_foldl_list_op(self, body);
+        self.emit_loop_convention_diagnostic(&plan, body.span);
+
+        let list_var = self.fresh_temp_var("temp");
+        let recv_code = self.expression_doc(receiver)?;
+        let safe_list_var = self.fresh_temp_var("temp");
+        let lambda_var = self.fresh_temp_var("temp");
+        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
+        let item_var = Self::to_core_erlang_var(item_param);
+        let acc_state_var = self.fresh_temp_var("AccSt");
+        let init_bool = if is_all { "'true'" } else { "'false'" };
+
+        if plan.use_tuple_acc {
+            // Tuple-accumulator path: {BoolAcc, Var1, ..., VarN}
+            let vars_doc = plan.current_vars_doc(self);
+            let init_tuple_doc = docvec!["{", init_bool, ", ", vars_doc, "}"];
+
+            let mut docs: Vec<Document<'static>> = Vec::new();
+            docs.push(docvec![
+                "let ",
+                Document::String(list_var.clone()),
+                " = ",
+                recv_code,
+                " in let ",
+                Document::String(safe_list_var.clone()),
+                " = case call 'erlang':'is_list'(",
+                Document::String(list_var.clone()),
+                ") of <'true'> when 'true' -> ",
+                Document::String(list_var.clone()),
+                " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
+                Document::String(list_var),
+                ") end in let ",
+                Document::String(lambda_var.clone()),
+                " = fun (",
+                Document::String(item_var.clone()),
+                ", ",
+                Document::String(acc_state_var.clone()),
+                ") -> let BoolAcc = call 'erlang':'element'(1, ",
+                Document::String(acc_state_var.clone()),
+                ") in ",
+            ]);
+
+            self.push_scope();
+            if let Some(param) = body.parameters.first() {
+                self.bind_var(&param.name, &item_var);
+            }
+            docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
+
+            let (body_doc, _) = self.generate_threaded_loop_body(
+                body,
+                &plan,
+                &BodyKind::FoldlBoolPredicate { is_all },
+            )?;
+            docs.push(body_doc);
+            self.pop_scope();
+
+            let fold_result = self.fresh_temp_var("FoldResult");
+            let bool_result = self.fresh_temp_var("BoolResult");
+
+            let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
+            if self.in_direct_params_loop {
+                self.direct_params_list_op_result = Some(bool_result.clone());
+                docs.push(docvec![
+                    " in let ",
+                    Document::String(fold_result.clone()),
+                    " = call 'lists':'foldl'(",
+                    Document::String(lambda_var),
+                    ", ",
+                    init_tuple_doc,
+                    ", ",
+                    Document::String(safe_list_var),
+                    ") in let ",
+                    Document::String(bool_result.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    Document::String(fold_result),
+                    ") in ",
+                    extract_doc,
+                ]);
+            } else {
+                let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
+                docs.push(docvec![
+                    " in let ",
+                    Document::String(fold_result.clone()),
+                    " = call 'lists':'foldl'(",
+                    Document::String(lambda_var),
+                    ", ",
+                    init_tuple_doc,
+                    ", ",
+                    Document::String(safe_list_var),
+                    ") in let ",
+                    Document::String(bool_result.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    Document::String(fold_result),
+                    ") in ",
+                    extract_doc,
+                    repack_doc,
+                    "{",
+                    Document::String(bool_result),
+                    ", ",
+                    Document::String(stateacc),
+                    "}",
+                ]);
+            }
+            return Ok(Document::Vec(docs));
+        }
+
+        // Map-accumulator path.
+        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(pack_doc);
+        docs.push(docvec![
+            format!("let {list_var} = "),
+            recv_code,
+            format!(
+                " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
+                 <'true'> when 'true' -> {list_var} \
+                 <'false'> when 'true' -> \
+                 call 'beamtalk_collection':'to_list'({list_var}) end \
+                 in let {lambda_var} = fun ({item_var}, {acc_state_var}) -> \
+                 let BoolAcc = call 'erlang':'element'(1, {acc_state_var}) in \
+                 let StateAcc = call 'erlang':'element'(2, {acc_state_var}) in "
+            ),
+        ]);
+
+        self.push_scope();
+        if let Some(param) = body.parameters.first() {
+            self.bind_var(&param.name, &item_var);
+        }
+        docs.extend(plan.generate_unpack_at_iteration_start(self));
+
+        let (body_doc, _) = self.generate_threaded_loop_body(
+            body,
+            &plan,
+            &BodyKind::FoldlBoolPredicate { is_all },
+        )?;
+        docs.push(body_doc);
+        self.pop_scope();
+
+        let fold_result = self.fresh_temp_var("FoldResult");
+        let bool_result = self.fresh_temp_var("BoolResult");
+        let state_out = self.fresh_temp_var("StOut");
+
+        let mut post_code = format!(
+            " in let {fold_result} = call 'lists':'foldl'({lambda_var}, \
+             {{{init_bool}, {init_state}}}, {safe_list_var}) \
+             in let {bool_result} = call 'erlang':'element'(1, {fold_result}) \
+             in let {state_out} = call 'erlang':'element'(2, {fold_result}) in "
+        );
+        post_code.push_str(&plan.generate_extract_suffix(&state_out, self));
+        let _ = write!(post_code, "{{{bool_result}, {state_out}}}");
+        docs.push(Document::String(post_code));
+
+        Ok(Document::Vec(docs))
+    }
+
     pub(in crate::codegen::core_erlang) fn generate_list_inject(
         &mut self,
         receiver: &Expression,

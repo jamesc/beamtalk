@@ -23,6 +23,8 @@ pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
             | "collect:"
             | "select:"
             | "reject:"
+            | "anySatisfy:"
+            | "allSatisfy:"
             | "inject:into:"
             | "on:do:"
             | "ensure:"

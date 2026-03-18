@@ -205,27 +205,29 @@ Actor subclass: MutationMatrixActor
     flag ifTrue: [self fieldAt: #counter put: 99]
     self.counter
 
-// ── BT-1481: Known codegen bugs (commented out) ────────────────────
+  // ── BT-1481: anySatisfy:/allSatisfy: state threading ──────────────
 
-// P2-16: anySatisfy: block with mutation — unbound State1 (BT-1481)
-// anySatisfyMutation: items =>
-//   result := items anySatisfy: [:x |
-//     self.counter := self.counter + 1
-//     x > 10
-//   ]
-//   self.flag := result
-//   self.counter
+  // P2-16: anySatisfy: block with mutation
+  anySatisfyMutation: items =>
+    result := items
+      anySatisfy: [:x |
+        self.counter := self.counter + 1
+        x > 10
+      ]
+    self.flag := result
+    self.counter
 
-// P2-16b: allSatisfy: block with mutation — same bug (BT-1481)
-// allSatisfyMutation: items =>
-//   result := items allSatisfy: [:x |
-//     self.counter := self.counter + 1
-//     x > 0
-//   ]
-//   self.flag := result
-//   self.counter
+  // P2-16b: allSatisfy: block with mutation
+  allSatisfyMutation: items =>
+    result := items
+      allSatisfy: [:x |
+        self.counter := self.counter + 1
+        x > 0
+      ]
+    self.flag := result
+    self.counter
 
-// P2-22: Block value with mutation — unbound State1 (BT-1481)
-// blockValueMutation =>
-//   _result := [self.counter := self.counter + 42] value
-//   self.counter
+  // P2-22: Block value with mutation (BT-1481)
+  blockValueMutation =>
+    _result := [self.counter := self.counter + 42] value
+    self.counter
