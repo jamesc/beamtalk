@@ -56,8 +56,15 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             .collect();
         lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
 
+        // BT-1476: Apply @expect directives to suppress matching lint diagnostics.
+        // Note: apply_expect_directives may inject Severity::Warning for stale
+        // @expect annotations, so we include those in the output.
+        beamtalk_core::queries::diagnostic_provider::apply_expect_directives(
+            &module,
+            &mut lint_diags,
+        );
+
         for diag in &lint_diags {
-            debug_assert_eq!(diag.severity, Severity::Lint);
             match format {
                 OutputFormat::Text => {
                     let compile_diag =
@@ -67,7 +74,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
                 OutputFormat::Json => {
                     let json = serde_json::json!({
                         "file": file.as_str(),
-                        "severity": "lint",
+                        "severity": format!("{:?}", diag.severity).to_lowercase(),
                         "message": diag.message.as_str(),
                         "span_start": diag.span.start(),
                         "span_end": diag.span.end(),
@@ -78,7 +85,13 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             }
         }
 
-        total_lint_count += lint_diags.len();
+        // Only count actual lint diagnostics toward the failure threshold.
+        // apply_expect_directives may inject Severity::Warning for stale @expect
+        // annotations — those should be displayed but not fail the command.
+        total_lint_count += lint_diags
+            .iter()
+            .filter(|d| d.severity == Severity::Lint)
+            .count();
     }
 
     if total_lint_count > 0 {

@@ -871,6 +871,8 @@ pub enum ExpectCategory {
     Unused,
     /// Suppress self-capture-in-actor-block hints.
     SelfCapture,
+    /// Suppress dead-block-assignment warnings (BT-1476).
+    DeadAssignment,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -884,6 +886,7 @@ impl ExpectCategory {
             "type" => Some(Self::Type),
             "unused" => Some(Self::Unused),
             "self_capture" => Some(Self::SelfCapture),
+            "dead_assignment" => Some(Self::DeadAssignment),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -897,6 +900,7 @@ impl ExpectCategory {
             Self::Type => "type",
             Self::Unused => "unused",
             Self::SelfCapture => "self_capture",
+            Self::DeadAssignment => "dead_assignment",
             Self::All => "all",
         }
     }
