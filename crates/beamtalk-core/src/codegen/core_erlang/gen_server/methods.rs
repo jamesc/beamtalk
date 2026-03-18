@@ -593,7 +593,7 @@ impl CoreErlangGenerator {
                 // BT-1479: self fieldAt: name put: expr where RHS is control flow returning {Value, State}
                 BodyExprKind::SelfFieldAtPutControlFlow => {
                     if let Expression::MessageSend { arguments, .. } = expr {
-                        let name_var = self.fresh_var("Name");
+                        let name_var = self.fresh_temp_var("Name");
                         let name_code = self.expression_doc(&arguments[0])?;
                         let tuple_var = self.fresh_temp_var("CfTuple");
                         let val_var = self.fresh_temp_var("CfVal");

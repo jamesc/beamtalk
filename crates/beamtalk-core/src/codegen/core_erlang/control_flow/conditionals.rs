@@ -367,14 +367,14 @@ impl CoreErlangGenerator {
                 // BT-1479: self fieldAt: name put: expr where RHS is control flow returning {Value, State}
                 BodyExprKind::SelfFieldAtPutControlFlow => {
                     if let Expression::MessageSend { arguments, .. } = expr {
-                        let name_var = self.fresh_var("Name");
+                        let name_var = self.fresh_temp_var("Name");
                         let name_code = self.expression_doc(&arguments[0])?;
                         let tuple_var = self.fresh_temp_var("CfTuple");
                         let val_var = self.fresh_temp_var("CfVal");
                         let val_code = self.expression_doc(&arguments[1])?;
                         let rhs_state = self.fresh_temp_var("CfState");
-                        let field_state = self.next_state_var();
-                        docs.push(docvec![
+                        let new_state = self.next_state_var();
+                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
                             Document::String(name_var.clone()),
                             " = ",
@@ -392,7 +392,7 @@ impl CoreErlangGenerator {
                             " = call 'erlang':'element'(2, ",
                             Document::String(tuple_var),
                             ") in let ",
-                            Document::String(field_state),
+                            Document::String(new_state.clone()),
                             " = call 'maps':'put'(",
                             Document::String(name_var),
                             ", ",
@@ -400,7 +400,29 @@ impl CoreErlangGenerator {
                             ", ",
                             Document::String(rhs_state),
                             ") in ",
-                        ]);
+                        ]];
+                        // Rebind threaded __local__ vars from the updated state
+                        // so subsequent expressions in this branch see fresh values.
+                        if let Some(threaded_vars) =
+                            self.get_control_flow_threaded_vars(&arguments[1])
+                        {
+                            for var in &threaded_vars {
+                                let tv_core = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                                doc_parts.push(docvec![
+                                    "let ",
+                                    Document::String(tv_core.clone()),
+                                    " = call 'maps':'get'('",
+                                    Document::String(Self::local_state_key(var)),
+                                    "', ",
+                                    Document::String(new_state.clone()),
+                                    ") in ",
+                                ]);
+                                self.bind_var(var, &tv_core);
+                            }
+                        }
+                        docs.push(Document::Vec(doc_parts));
                         if is_last {
                             last_result = Some(val_var);
                         }
