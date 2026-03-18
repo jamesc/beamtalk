@@ -5,7 +5,7 @@ Accepted (2026-03-18)
 
 ## Context
 
-Beamtalk has three class kinds — Object, Value, and Actor — but currently accepts the `state:` keyword on all of them. This creates a footgun: an `Object subclass:` with `state:` compiles without warning, but mutations via `self.slot :=` silently don't persist between method calls because plain Object subclasses have no process to hold state and no state-threading return semantics.
+Beamtalk has three class kinds — Object, Value, and Actor — but currently accepts the `state:` keyword on all of them. This creates a footgun: an `Object subclass:` with `state:` compiles silently, but updates via `self.slot :=` return an updated snapshot that callers must rebind (e.g., `c := c increment`). Without rebinding, `c` still references the original value and changes appear lost.
 
 **The footgun in action:**
 ```beamtalk
@@ -17,10 +17,10 @@ Object subclass: Counter
 
 c := Counter new.
 c increment.
-c value              // => 0   — mutation was lost!
+c value              // => 0   — c was not rebound to the updated snapshot
 ```
 
-The assignment `self.count := self.count + 1` compiles and runs, but the new state is discarded because Object subclasses are dispatched as plain function calls with no process to persist state and no returns-new-self threading.
+The assignment `self.count := self.count + 1` compiles and runs — `increment` returns an updated snapshot, but callers must rebind (e.g., `c := c increment`). Without rebinding, `c` still references the original value. Object subclasses have no process to persist state automatically, and the returns-new-self semantics are implicit, making it easy to silently lose updates.
 
 ADR 0042 established the two-category object model (immutable Value, mutable Actor) but left `Object subclass:` in an ambiguous middle ground. A codebase audit found 21 `Object subclass:` files with `state:` declarations in the stdlib (all in test fixtures and examples). More critically, the same footgun appears in real-world Beamtalk applications:
 
@@ -315,9 +315,9 @@ Every language that distinguishes value from mutable does it at two levels: clas
 
 ## Steelman Analysis
 
-### Alternative B: Elixir-Style Object (returns-new-self)
+### Alternative B: Lean Into Existing Object Snapshot Semantics
 
-Allow `state:` on Object, but `self.slot :=` returns a new self that the caller must rebind.
+Keep `state:` on Object, leaning into the existing snapshot/rebinding model where `self.slot :=` already returns an updated value and callers rebind.
 
 | Cohort | Strongest argument |
 |--------|-------------------|
@@ -327,7 +327,7 @@ Allow `state:` on Object, but `self.slot :=` returns a new self that the caller 
 | **Operator** | "Fewer class kinds to reason about at runtime — two execution models (process / no-process) is simpler to monitor than three class kinds." |
 | **Language designer** | "A returns-new-self Object preserves the uniform object model — every class can hold data, which is more composable and requires fewer special cases in the language." |
 
-**Why we rejected it:** Returns-new-self is exactly what Value already does. Having both Object-with-returns-new-self AND Value creates two ways to do the same thing, and users constantly ask "should this be Object or Value?" The ETS-backed Value pattern (immutable handle to external mutable state) proves that Value alone handles the "I need mutable external state without a process" case cleanly.
+**Why we rejected it:** Object already has snapshot/rebinding semantics — this alternative just makes them the documented, endorsed model. But that is exactly what Value already does. Having both Object-with-explicit-returns-new-self AND Value creates two ways to do the same thing, and users constantly ask "should this be Object or Value?" The ETS-backed Value pattern (immutable handle to external mutable state) proves that Value alone handles the "I need mutable external state without a process" case cleanly.
 
 ### Alternative C: Status Quo + Compiler Warnings
 
@@ -378,9 +378,9 @@ Object subclass: Point
 
 Rejected because warnings are ignorable, and the silent state loss footgun is severe enough to warrant a hard error. Half-measures prolong the confusion.
 
-### Elixir-style returns-new-self Object (Option B)
+### Lean into existing Object snapshot semantics (Option B)
 
-Allow `state:` on Object, where `self.slot :=` compiles to state threading (returns new self, caller rebinds).
+Keep `state:` on Object, leaning into the existing snapshot/rebinding model where `self.slot :=` already returns an updated value and callers rebind.
 
 ```beamtalk
 Object subclass: Point
@@ -388,10 +388,10 @@ Object subclass: Point
   state: y = 0
 
   moveRight: dx =>
-    self.x := self.x + dx    // returns new Point, caller rebinds
+    self.x := self.x + dx    // already returns new Point; caller rebinds
 ```
 
-Rejected because this is exactly what Value already does. Two mechanisms for the same semantics creates confusion without adding capability. The conversation that led to this ADR confirmed this: when asked "what's the client code difference?", there was none.
+Rejected because this is exactly what Value already does. Endorsing the same semantics on both Object and Value creates two ways to do the same thing without adding capability. The conversation that led to this ADR confirmed this: when asked "what's the client code difference?", there was none.
 
 ### Just ban state: on Object, keep state: for Value and Actor (Option D)
 
