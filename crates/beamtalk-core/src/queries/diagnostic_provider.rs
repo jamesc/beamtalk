@@ -350,42 +350,42 @@ mod tests {
         );
     }
 
-    // ── BT-563: Actor subclass new/new: warnings ──
+    // ── BT-563 / BT-1524: Actor subclass new/new: errors ──
 
     #[test]
-    fn warn_actor_subclass_new() {
-        // Counter is an Actor subclass — using `new` should warn
+    fn error_actor_subclass_new() {
+        // Counter is an Actor subclass — using `new` should error
         let source = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n\nCounter new";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
-        let has_warning = diagnostics.iter().any(|d| {
+        let has_error = diagnostics.iter().any(|d| {
             d.message.contains("Actor subclass")
                 && d.message.contains("spawn")
-                && d.severity == crate::source_analysis::Severity::Warning
+                && d.severity == crate::source_analysis::Severity::Error
         });
         assert!(
-            has_warning,
-            "Expected actor new warning, got: {diagnostics:?}"
+            has_error,
+            "Expected actor new error, got: {diagnostics:?}"
         );
     }
 
     #[test]
-    fn warn_actor_subclass_new_with_args() {
+    fn error_actor_subclass_new_with_args() {
         let source = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n\nCounter new: #{value => 0}";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
-        let has_warning = diagnostics.iter().any(|d| {
+        let has_error = diagnostics.iter().any(|d| {
             d.message.contains("Actor subclass")
                 && d.message.contains("spawn")
                 && d.message.contains("new:")
         });
         assert!(
-            has_warning,
-            "Expected actor new: warning, got: {diagnostics:?}"
+            has_error,
+            "Expected actor new: error, got: {diagnostics:?}"
         );
     }
 
@@ -549,19 +549,19 @@ mod tests {
     }
 
     #[test]
-    fn warn_actor_new_inside_method_body() {
-        // Actor new warning should also fire inside method bodies
+    fn error_actor_new_inside_method_body() {
+        // Actor new error should also fire inside method bodies
         let source = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n\nObject subclass: Factory\n  make => Counter new";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
-        let has_warning = diagnostics
+        let has_error = diagnostics
             .iter()
             .any(|d| d.message.contains("Actor subclass") && d.message.contains("spawn"));
         assert!(
-            has_warning,
-            "Expected actor new warning inside method, got: {diagnostics:?}"
+            has_error,
+            "Expected actor new error inside method, got: {diagnostics:?}"
         );
     }
 

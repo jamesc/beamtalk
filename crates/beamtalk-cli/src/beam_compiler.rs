@@ -1212,44 +1212,26 @@ end
         assert_eq!(final_set.len(), 1000, "Expected 1000 unique counter values");
     }
 
-    /// Source that triggers an actor-new Warning (using `new` on an Actor subclass).
+    /// Source that triggers an actor-new Error (using `new` on an Actor subclass).
+    /// BT-1524: Promoted from warning to error.
     const ACTOR_NEW_SOURCE: &str =
         "Actor subclass: TestActorWarnings\n  doNothing => nil\n\nTestActorWarnings new";
 
     #[test]
-    fn test_warnings_as_errors_off_allows_warning() {
+    fn test_actor_new_is_compile_error() {
         let temp = TempDir::new().unwrap();
         let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         let source_file = temp_path.join("actor_new.bt");
         let core_file = temp_path.join("actor_new.core");
         fs::write(&source_file, ACTOR_NEW_SOURCE).unwrap();
 
-        let options = beamtalk_core::CompilerOptions::default(); // warnings_as_errors: false
+        let options = beamtalk_core::CompilerOptions::default();
         let result = compile_source(&source_file, "actor_new", &core_file, &options);
 
-        assert!(
-            result.is_ok(),
-            "Should compile despite actor-new warning when warnings_as_errors is off: {result:?}"
-        );
-    }
-
-    #[test]
-    fn test_warnings_as_errors_on_fails_on_warning() {
-        let temp = TempDir::new().unwrap();
-        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let source_file = temp_path.join("actor_new.bt");
-        let core_file = temp_path.join("actor_new.core");
-        fs::write(&source_file, ACTOR_NEW_SOURCE).unwrap();
-
-        let options = beamtalk_core::CompilerOptions {
-            warnings_as_errors: true,
-            ..Default::default()
-        };
-        let result = compile_source(&source_file, "actor_new", &core_file, &options);
-
+        // BT-1524: actor new is now an error, not a warning — always fails
         assert!(
             result.is_err(),
-            "Should fail when warnings_as_errors is on and a warning is emitted"
+            "Should fail to compile: actor new is a compile-time error: {result:?}"
         );
     }
 

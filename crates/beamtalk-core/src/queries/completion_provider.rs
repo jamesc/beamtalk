@@ -1538,7 +1538,8 @@ mod tests {
 
     #[test]
     fn counter_class_reference_completions_include_spawn() {
-        // `Counter <TAB>` (ClassReference) should offer spawn/spawnWith:/new/new:
+        // `Counter <TAB>` (ClassReference) should offer spawn/spawnWith:
+        // BT-1524: new/new: overrides removed from Actor — no longer offered as class methods
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nCounter ";
         let completions = completions_at(source, Position::new(5, 8));
         let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
@@ -1550,19 +1551,12 @@ mod tests {
             labels.contains(&"spawnWith:"),
             "Counter class-side should offer 'spawnWith:'. Got: {labels:?}"
         );
-        assert!(
-            labels.contains(&"new"),
-            "Counter class-side should offer 'new'. Got: {labels:?}"
-        );
-        assert!(
-            labels.contains(&"new:"),
-            "Counter class-side should offer 'new:'. Got: {labels:?}"
-        );
     }
 
     #[test]
     fn counter_class_message_completions_include_spawn() {
         // `Counter class <TAB>` should offer the same class-side methods as `Counter <TAB>`
+        // BT-1524: new/new: overrides removed from Actor — no longer offered as class methods
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nCounter class ";
         let completions = completions_at(source, Position::new(5, 14));
         let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
@@ -1573,10 +1567,6 @@ mod tests {
         assert!(
             labels.contains(&"spawnWith:"),
             "Counter class <TAB> should offer 'spawnWith:'. Got: {labels:?}"
-        );
-        assert!(
-            labels.contains(&"new"),
-            "Counter class <TAB> should offer 'new'. Got: {labels:?}"
         );
         // Should NOT offer instance methods via `class` keyword
         assert!(
