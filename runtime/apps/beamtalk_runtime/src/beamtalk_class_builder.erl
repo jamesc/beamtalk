@@ -124,7 +124,7 @@ do_register(ClassName, ClassInfo) ->
             %% Hot reload path: class already exists, update its metadata.
             case beamtalk_object_class:update_class(ClassName, ClassInfo) of
                 {ok, _IVars} ->
-                    ?LOG_INFO("Updated class via ClassBuilder (hot reload)", #{
+                    ?LOG_DEBUG("Updated class via ClassBuilder (hot reload)", #{
                         class => ClassName, module => ?MODULE, domain => [beamtalk, runtime]
                     }),
                     notify_class_loaded(ClassName),

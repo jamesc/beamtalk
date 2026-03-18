@@ -109,6 +109,7 @@ send(Receiver, Selector, Args) ->
             ?LOG_DEBUG("Message send", #{
                 class => element(2, Receiver),
                 selector => Selector,
+                receiver_pid => element(4, Receiver),
                 caller_pid => self(),
                 domain => [beamtalk, runtime]
             }),
@@ -165,6 +166,7 @@ cast(Receiver, Selector, Args) ->
             ?LOG_DEBUG("Message cast", #{
                 class => element(2, Receiver),
                 selector => Selector,
+                receiver_pid => element(4, Receiver),
                 caller_pid => self(),
                 domain => [beamtalk, runtime]
             }),

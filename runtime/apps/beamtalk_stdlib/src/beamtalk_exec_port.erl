@@ -63,7 +63,7 @@ open() ->
 %% @doc Open a port to the exec binary at the given path.
 -spec open(file:filename_all()) -> port().
 open(BinaryPath) ->
-    ?LOG_INFO("Opening exec port", #{binary => BinaryPath}),
+    ?LOG_INFO("Opening exec port", #{binary => BinaryPath, domain => [beamtalk, stdlib]}),
     open_port({spawn_executable, BinaryPath}, [
         {packet, 4},
         binary,

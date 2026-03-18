@@ -215,6 +215,7 @@ handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From,
     ?LOG_DEBUG("Compile expression", #{
         domain => [beamtalk, runtime],
         module => ModuleName,
+        source_preview => binary:part(Source, 0, min(80, byte_size(Source))),
         cache_size => CacheSize
     }),
     Options1 = Options#{class_hierarchy => State#state.classes},
@@ -227,6 +228,7 @@ handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, 
     ?LOG_DEBUG("Compile expression (trace)", #{
         domain => [beamtalk, runtime],
         module => ModuleName,
+        source_preview => binary:part(Source, 0, min(80, byte_size(Source))),
         cache_size => CacheSize
     }),
     Options1 = Options#{class_hierarchy => State#state.classes},

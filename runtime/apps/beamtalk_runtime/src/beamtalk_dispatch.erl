@@ -108,10 +108,6 @@
 %% ```
 -spec lookup(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 lookup(Selector, Args, Self, State, CurrentClass) ->
-    ?LOG_DEBUG("Dispatch lookup", #{
-        selector => Selector, class => CurrentClass, domain => [beamtalk, runtime]
-    }),
-
     %% Step 1: Check extension registry first (guard against missing ETS table)
     case check_extension(CurrentClass, Selector) of
         {ok, Fun} ->
@@ -148,10 +144,6 @@ lookup(Selector, Args, Self, State, CurrentClass) ->
 %% ```
 -spec super(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 super(Selector, Args, Self, State, CurrentClass) ->
-    ?LOG_DEBUG("Super dispatch", #{
-        selector => Selector, class => CurrentClass, domain => [beamtalk, runtime]
-    }),
-
     %% Look up the current class to get its superclass
     case beamtalk_class_registry:whereis_class(CurrentClass) of
         undefined ->
@@ -258,9 +250,6 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, Dep
     case beamtalk_object_class:has_method(ClassPid, Selector) of
         true ->
             %% Found the method - invoke it
-            ?LOG_DEBUG("Found method in hierarchy", #{
-                selector => Selector, class => ClassName, domain => [beamtalk, runtime]
-            }),
             invoke_method(ClassName, ClassPid, Selector, Args, Self, State, Depth);
         false ->
             %% Not found in this class - try superclass
@@ -283,12 +272,6 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, Dep
                     {error, Error};
                 SuperclassName ->
                     %% Recurse to superclass
-                    ?LOG_DEBUG("Method not in class, trying superclass", #{
-                        selector => Selector,
-                        class => ClassName,
-                        superclass => SuperclassName,
-                        domain => [beamtalk, runtime]
-                    }),
                     case beamtalk_class_registry:whereis_class(SuperclassName) of
                         undefined ->
                             {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
@@ -337,11 +320,6 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                     %% Module exists but lacks dispatch/4 — continue to superclass (BT-427)
                     continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth);
                 true ->
-                    ?LOG_DEBUG("Invoking compiled dispatch", #{
-                        module => ModuleName,
-                        selector => Selector,
-                        domain => [beamtalk, runtime]
-                    }),
                     %% Intercept displayString/inspect for actor instances to avoid
                     %% deadlock. Both compiled Object methods send a message back to
                     %% Self (displayString calls self printString, inspect delegates

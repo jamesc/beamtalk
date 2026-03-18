@@ -215,7 +215,7 @@ impl CoreErlangGenerator {
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "super used alone (must be in message send like 'super method: arg')"
                         .to_string(),
-                    location: format!("byte offset {}", id.span.start()),
+                    location: self.span_location(id.span),
                 })
             }
             _ => {
@@ -376,7 +376,7 @@ impl CoreErlangGenerator {
                     "cannot access instance field '{}' in a class method",
                     field.name
                 ),
-                location: format!("{:?}", field.span),
+                location: self.span_location(field.span),
             });
         }
         // For now, assume receiver is 'self' and access from State/Self
@@ -407,9 +407,21 @@ impl CoreErlangGenerator {
             }
         }
 
+        let receiver_desc = match receiver {
+            Expression::Identifier(id) => id.name.to_string(),
+            _ => "receiver".to_string(),
+        };
+        let location = match self.span_to_line(receiver.span()) {
+            Some(line) => format!("line {line}"),
+            None => format!("offset {}", receiver.span().start()),
+        };
         Err(CodeGenError::UnsupportedFeature {
-            feature: "complex field access".to_string(),
-            location: format!("{:?}", receiver.span()),
+            feature: format!(
+                "field access on a non-self receiver — use a getter method instead: \
+                `{receiver_desc} {field_name}` rather than `{receiver_desc}.{field_name}`",
+                field_name = field.name
+            ),
+            location,
         })
     }
 
@@ -618,6 +630,8 @@ impl CoreErlangGenerator {
 
         // Pure block: plain fun (no mutations to thread via Tier 2)
         self.push_scope();
+        // BT-1475: Track block nesting so self-cast sends route through the mailbox
+        self.block_depth += 1;
 
         let mut param_parts: Vec<Document<'static>> = Vec::new();
         for (i, param) in block.parameters.iter().enumerate() {
@@ -629,12 +643,12 @@ impl CoreErlangGenerator {
         }
         let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
 
-        // Generate block body as Document
-        let body_doc = self.generate_block_body(block)?;
-
-        // Pop the scope when done with the block
+        // Generate block body as Document.
+        // BT-1475: Ensure block_depth and scope are restored even on error.
+        let body_result = self.generate_block_body(block);
+        self.block_depth -= 1;
         self.pop_scope();
-        Ok(docvec![header, body_doc])
+        Ok(docvec![header, body_result?])
     }
 
     /// BT-851: Generates a Tier 2 stateful block (ADR 0041 Phase 0).
@@ -662,6 +676,8 @@ impl CoreErlangGenerator {
         captured_vars: &[String],
     ) -> Result<Document<'static>> {
         self.push_scope();
+        // BT-1475: Track block nesting so self-cast sends route through the mailbox
+        self.block_depth += 1;
 
         // Bind block parameters
         let mut param_parts: Vec<Document<'static>> = Vec::new();
@@ -722,10 +738,12 @@ impl CoreErlangGenerator {
             // Generate body expressions with state threading
             this.generate_block_stateful_body(block, &mut docs)?;
             Ok::<_, crate::codegen::core_erlang::CodeGenError>(docs)
-        })?;
+        });
+        // BT-1475: Ensure block_depth and scope are restored even on error.
+        self.block_depth -= 1;
         self.pop_scope();
 
-        Ok(docvec![header, Document::Vec(docs)])
+        Ok(docvec![header, Document::Vec(docs?)])
     }
 
     /// BT-855: Generates an Erlang-compatible wrapper for a block at an Erlang call site.
@@ -1462,7 +1480,7 @@ impl CoreErlangGenerator {
                 _ => {
                     return Err(CodeGenError::UnsupportedFeature {
                         feature: "Nested patterns in array destructuring".to_string(),
-                        location: format!("{:?}", elem.span()),
+                        location: self.span_location(elem.span()),
                     });
                 }
             }
@@ -1649,7 +1667,7 @@ impl CoreErlangGenerator {
             _ => {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Unsupported destructuring pattern kind".to_string(),
-                    location: format!("{:?}", pattern.span()),
+                    location: self.span_location(pattern.span()),
                 });
             }
         };
@@ -1739,7 +1757,7 @@ impl CoreErlangGenerator {
                         _ => {
                             return Err(CodeGenError::UnsupportedFeature {
                                 feature: "Nested patterns in array destructuring".to_string(),
-                                location: format!("{:?}", elem.span()),
+                                location: self.span_location(elem.span()),
                             });
                         }
                     }
@@ -1839,7 +1857,7 @@ impl CoreErlangGenerator {
                         _ => {
                             return Err(CodeGenError::UnsupportedFeature {
                                 feature: "Nested patterns in tuple destructuring".to_string(),
-                                location: format!("{:?}", elem.span()),
+                                location: self.span_location(elem.span()),
                             });
                         }
                     }
@@ -1868,7 +1886,7 @@ impl CoreErlangGenerator {
                         _ => {
                             return Err(CodeGenError::UnsupportedFeature {
                                 feature: "Nested patterns in map destructuring".to_string(),
-                                location: format!("{:?}", pair.value.span()),
+                                location: self.span_location(pair.value.span()),
                             });
                         }
                     }
@@ -1877,7 +1895,7 @@ impl CoreErlangGenerator {
             _ => {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Unsupported destructuring pattern kind".to_string(),
-                    location: format!("{:?}", pattern.span()),
+                    location: self.span_location(pattern.span()),
                 });
             }
         }
@@ -1925,7 +1943,7 @@ impl CoreErlangGenerator {
         if arms.is_empty() {
             return Err(CodeGenError::UnsupportedFeature {
                 feature: "match expression with no arms".to_string(),
-                location: format!("{:?}", value.span()),
+                location: self.span_location(value.span()),
             });
         }
 
@@ -1943,7 +1961,7 @@ impl CoreErlangGenerator {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "List-syntax pattern `#(...)` in match: arm is not yet supported"
                         .to_string(),
-                    location: format!("{span:?}"),
+                    location: self.span_location(*span),
                 });
             }
             // Rest patterns in match arms are not yet supported (BT-1251 only adds
@@ -1956,7 +1974,7 @@ impl CoreErlangGenerator {
             {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Rest pattern `...` in match: arm is not yet supported".to_string(),
-                    location: format!("{span:?}"),
+                    location: self.span_location(*span),
                 });
             }
         }
@@ -2405,7 +2423,7 @@ impl CoreErlangGenerator {
             }
             elem => Err(CodeGenError::UnsupportedFeature {
                 feature: "Unsupported pattern in Array match arm element".to_string(),
-                location: format!("{:?}", elem.span()),
+                location: self.span_location(elem.span()),
             }),
         }
     }
@@ -2453,7 +2471,7 @@ impl CoreErlangGenerator {
                 // `generate_array_match_arm` and never reach this path.
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "Array pattern nested inside a composite native pattern (tuple/list) is not supported".to_string(),
-                    location: format!("{:?}", pattern.span()),
+                    location: self.span_location(pattern.span()),
                 })
             }
             Pattern::List { elements, tail, .. } => {
@@ -2539,7 +2557,7 @@ impl CoreErlangGenerator {
                      Only stdlib sealed types (e.g. Result) support constructor patterns in this release.",
                     class.name, selector, class.name, selector
                 ),
-                location: format!("{span:?}"),
+                location: self.span_location(span),
             }
         })?;
 
@@ -2553,7 +2571,7 @@ impl CoreErlangGenerator {
                     keywords.len(),
                     fields.binding_fields.len()
                 ),
-                location: format!("{span:?}"),
+                location: self.span_location(span),
             });
         }
 
@@ -2701,7 +2719,7 @@ impl CoreErlangGenerator {
                     _ => {
                         return Err(CodeGenError::UnsupportedFeature {
                             feature: format!("operator '{op}' in guard expression"),
-                            location: format!("{:?}", expr.span()),
+                            location: self.span_location(expr.span()),
                         });
                     }
                 };
@@ -2718,7 +2736,7 @@ impl CoreErlangGenerator {
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: "complex guard expression (only comparisons and arithmetic allowed)"
                     .to_string(),
-                location: format!("{:?}", expr.span()),
+                location: self.span_location(expr.span()),
             }),
         }
     }
