@@ -242,7 +242,13 @@ Allow both `+Feature` and `.extension` patterns. Rejected because having two con
 Let developers name extension files however they want. Rejected because consistent naming enables tooling (glob patterns, IDE file browsers) and makes extensions discoverable across packages.
 
 ### Protocol/typeclass approach (Elixir-style)
-Instead of open classes, use protocols — `Printable` protocol with per-type implementations. This avoids ETS global mutation and last-writer-wins conflicts entirely, and is statically analyzable. Rejected because protocols solve a different problem (ad-hoc polymorphism across types for a single operation) while extensions solve the Beamtalk problem (adding new operations to existing types). Beamtalk's Smalltalk heritage requires that `Integer >> double` feels like a regular method on Integer — protocols would require `Doubleable protocol: 42` instead of `42 double`, violating message-passing semantics. Protocols are complementary (ADR 0025) but do not replace open classes.
+Instead of open classes, use protocols — `Serializable` protocol with per-type implementations. This avoids ETS global mutation and last-writer-wins conflicts entirely, and is statically analyzable. Rejected as a *replacement* for open classes, but acknowledged as **complementary** — many practical uses of `>>` (JSON serialization, formatting, logging) are protocol-shaped and would be better expressed as protocols once they exist.
+
+The two mechanisms solve different axes of the expression problem:
+- **Open classes (`>>`):** Add new operations to a single type — `Integer >> factorial`. Natural as a message send (`5 factorial`), awkward as a protocol (a `Factorial` protocol with one implementor is ceremony for no benefit).
+- **Protocols:** Add a single operation across many types — `Serializable` implemented for Integer, String, Array, etc. Statically verifiable, no conflict risk, but requires invocation syntax that may not feel like a regular message send.
+
+Beamtalk will add protocols (required for the gradual type system, ADR 0025). When that happens, the guidance should be: use protocols for cross-type operations, use `>>` for type-specific additions. Some existing `>>` extensions may migrate to protocol implementations — this is expected and healthy.
 
 ## Consequences
 
