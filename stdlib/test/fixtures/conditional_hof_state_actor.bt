@@ -1,0 +1,111 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1477: Actor fixture for testing state threading composition between
+// conditional blocks (ifTrue:/ifFalse:/ifTrue:ifFalse:) and HOF blocks
+// (do:/collect:/select:) — mutations in nested block combinations must persist
+
+Actor subclass: ConditionalHofStateActor
+  state: count = 0
+  state: items = #()
+
+  // --- ifTrue: wrapping do: with field mutation ---
+  // flag=true => count += each for each in list
+  conditionalDoIncrement: flag with: list =>
+    flag ifTrue: [list do: [:each | self.count := self.count + each]]
+    self.count
+
+  // --- ifFalse: wrapping do: with field mutation ---
+  conditionalDoDecrement: flag with: list =>
+    flag ifFalse: [list do: [:each | self.count := self.count - each]]
+    self.count
+
+  // --- ifTrue:ifFalse: wrapping do: with field mutations in both branches ---
+  conditionalDoToggle: flag with: list =>
+    flag ifTrue: [
+      list do: [:each | self.count := self.count + each]
+    ] ifFalse: [list do: [:each | self.count := self.count - each]]
+    self.count
+
+  // --- do: wrapping ifTrue: with field mutation ---
+  // items do: [:each | each > 0 ifTrue: [self.count := self.count + each]]
+  doWithConditionalMutation: list =>
+    list do: [:each | each > 0 ifTrue: [self.count := self.count + each]]
+    self.count
+
+  // --- collect: wrapping ifTrue: with field mutation ---
+  // Returns collected results AND mutates count
+  collectWithConditionalMutation: list =>
+    result := list
+      collect: [:each |
+        each > 0 ifTrue: [self.count := self.count + 1]
+        each * 2
+      ]
+    self.items := result
+    self.count
+
+  // --- ifTrue: wrapping collect: (returns collected list) ---
+  conditionalCollect: flag with: list =>
+    flag ifTrue: [self.items := list collect: [:each | each * 2]]
+    self.items
+
+  // --- Triple nesting: ifTrue: wrapping do: wrapping ifTrue: ---
+  tripleNested: flag with: list =>
+    flag ifTrue: [
+      list do: [:each | each > 0 ifTrue: [self.count := self.count + each]]
+    ]
+    self.count
+
+  // --- select: wrapping ifTrue: with field mutation ---
+  // Filter positives AND count how many were positive
+  selectWithConditionalMutation: list =>
+    result := list
+      select: [:each |
+        each > 0 ifTrue: [self.count := self.count + 1]
+        each > 0
+      ]
+    self.items := result
+    self.count
+
+  // --- reject: wrapping ifTrue: with field mutation ---
+  // Reject negatives AND count how many were rejected
+  rejectWithConditionalMutation: list =>
+    result := list
+      reject: [:each |
+        each < 0 ifTrue: [self.count := self.count + 1]
+        each < 0
+      ]
+    self.items := result
+    self.count
+
+  // --- inject:into: wrapping ifTrue: with field mutation ---
+  // Sum only positives AND count how many
+  injectWithConditionalMutation: list =>
+    result := list
+      inject: 0
+      into: [:acc :each |
+        each > 0 ifTrue: [self.count := self.count + 1]
+        each > 0 ifTrue: [acc + each] ifFalse: [acc]
+      ]
+    result
+
+  // --- collect: with ifTrue:ifFalse: as last expression (result IS the conditional) ---
+  collectConditionalLast: list =>
+    self.items := list
+      collect: [:each |
+        each > 0
+          ifTrue: [
+            self.count := self.count + 1
+            each * 10
+          ]
+          ifFalse: [each]
+      ]
+    self.items
+
+  getCount => self.count
+
+  getItems => self.items
+
+  reset =>
+    self.count := 0
+    self.items := #()

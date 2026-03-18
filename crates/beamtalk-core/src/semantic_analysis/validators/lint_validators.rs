@@ -601,6 +601,10 @@ pub(crate) fn check_effect_free_statements(
     }
 }
 
+// BT-1476 validator removed: all control-flow selectors and Tier 2 blocks
+// now have state threading. The dead_block_assignment lint (lint/) remains
+// for `beamtalk lint` usage with @expect dead_assignment suppression.
+
 #[cfg(test)]
 mod tests {
     use super::*;
