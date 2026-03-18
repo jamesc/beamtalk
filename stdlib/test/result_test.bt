@@ -79,7 +79,7 @@ TestCase subclass: ResultTest
 
   testUnwrapOnErrorWithExceptionReRaises =>
     // Result tryDo: captures an exception — unwrap re-raises it
-    r := Result tryDo: [Exception new signal: "test error"]
+    r := Result tryDo: [Exception signal: "test error"]
     self should: [r unwrap] raise: #signal
 
   // =========================================================================
@@ -196,17 +196,17 @@ TestCase subclass: ResultTest
     self assert: r value equals: 42
 
   testTryDoWithExceptionReturnsError =>
-    r := Result tryDo: [Exception new signal: "boom"]
+    r := Result tryDo: [Exception signal: "boom"]
     self assert: r isError
 
   testTryDoErrorReasonIsException =>
     // isKindOf: does not work for actor-based class instances (Exception);
     // verify the error reason is non-nil (not nil) instead.
-    r := Result tryDo: [Exception new signal: "boom"]
+    r := Result tryDo: [Exception signal: "boom"]
     self deny: r error isNil
 
   testTryDoCanUnwrapException =>
-    r := Result tryDo: [Exception new signal: "boom"]
+    r := Result tryDo: [Exception signal: "boom"]
     self should: [r unwrap] raise: #signal
 
   // =========================================================================

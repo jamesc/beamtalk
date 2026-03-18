@@ -3615,7 +3615,7 @@ mod tests {
     }
 
     #[test]
-    fn test_actor_new_warning_in_standalone_method() {
+    fn test_actor_new_error_in_standalone_method() {
         use crate::ast::{MethodKind, StandaloneMethodDefinition};
 
         // BT-656: actor `new` usage warning inside standalone method definitions
@@ -3676,19 +3676,22 @@ mod tests {
         };
 
         let result = analyse(&module);
-        let actor_warnings: Vec<_> = result
+        let actor_errors: Vec<_> = result
             .diagnostics
             .iter()
-            .filter(|d| d.message.contains("should use `spawn`"))
+            .filter(|d| {
+                d.message.contains("must use `spawn`")
+                    && d.severity == crate::source_analysis::Severity::Error
+            })
             .collect();
 
         assert_eq!(
-            actor_warnings.len(),
+            actor_errors.len(),
             1,
             "Should detect actor new usage in standalone method, got: {:?}",
             result.diagnostics
         );
-        assert!(actor_warnings[0].message.contains("Counter"));
+        assert!(actor_errors[0].message.contains("Counter"));
     }
 
     // ── ADR 0050 Phase 4: analyse_with_known_vars_and_classes ──

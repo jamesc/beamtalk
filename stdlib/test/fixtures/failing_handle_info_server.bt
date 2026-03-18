@@ -8,7 +8,7 @@ Server subclass: FailingHandleInfoServer
 
   handleInfo: msg =>
     msg == #crash ifTrue: [
-      Error new signal: "deliberate handleInfo: error"
+      Error signal: "deliberate handleInfo: error"
     ] ifFalse: [self.count := self.count + 1]
 
   getCount => self.count

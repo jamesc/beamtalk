@@ -64,7 +64,7 @@ sealed Value subclass: Result
   /// Result error: #not_found   // => Result error: #not_found
   /// Result error: Error new    // => Result error: <Error>
   /// ```
-  /// To capture a raised exception as a Result, use `Result tryDo: [Error new signal: "oops"]`.
+  /// To capture a raised exception as a Result, use `Result tryDo: [Error signal: "oops"]`.
   class error: reason -> Result => (Erlang beamtalk_result) makeError: reason
 
   /// Evaluate a block and return a Result (class method).
@@ -76,8 +76,8 @@ sealed Value subclass: Result
   /// ## Examples
   /// ```beamtalk
   /// Result tryDo: [42]                          // => Result ok: 42
-  /// Result tryDo: [Exception new signal: "oops"]   // => Result error: <Exception>
-  /// Result tryDo: [File readAll: "missing.txt"] // => Result error: <IOError>
+  /// Result tryDo: [Exception signal: "oops"]   // => Result error: <Exception>
+  /// Result tryDo: [(File readAll: "missing.txt") unwrap] // => Result error: <Exception>
   /// ```
   class sealed tryDo: block :: Block -> Result =>
     (Erlang beamtalk_result) tryDo: block
@@ -117,7 +117,7 @@ sealed Value subclass: Result
     self.isOk
       ifTrue: [self.okValue]
       ifFalse: [
-        Exception new signal: "Cannot access 'value' on Result error — use valueOr:, ifOk:ifError:, or unwrap"
+        Exception signal: "Cannot access 'value' on Result error — use valueOr:, ifOk:ifError:, or unwrap"
       ]
 
   /// The error reason. Raises if this is an ok Result.
@@ -132,7 +132,7 @@ sealed Value subclass: Result
   sealed error -> Object =>
     self.isOk
       ifTrue: [
-        Exception new signal: "Cannot access 'error' on Result ok — use ifOk:ifError: or mapError:"
+        Exception signal: "Cannot access 'error' on Result ok — use ifOk:ifError: or mapError:"
       ]
       ifFalse: [self.errReason]
 

@@ -123,7 +123,11 @@ fn walk_module_with_hierarchy(
     walk_module(module, &mut |expr| visitor(expr, hierarchy, diagnostics));
 }
 
-/// BT-563: Warn when Actor subclasses use `new` or `new:` instead of `spawn`.
+/// BT-563 / BT-1524: Error when Actor subclasses use `new` or `new:` instead of `spawn`.
+///
+/// Promoted from warning to error in BT-1524: actors are process-based and must
+/// use `spawn`/`spawnWith:` for instantiation. Using `new`/`new:` on an actor
+/// class is always a bug.
 pub(crate) fn check_actor_new_usage(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -151,13 +155,13 @@ fn visit_actor_new(
                 && hierarchy.is_actor_subclass(class_name)
             {
                 diagnostics.push(
-                    Diagnostic::warning(
+                    Diagnostic::error(
                         format!(
-                            "Actor subclass `{class_name}` should use `spawn` instead of `{sel}`"
+                            "Actor subclass `{class_name}` must use `spawn` instead of `{sel}`"
                         ),
                         *span,
                     )
-                    .with_hint("Use spawn instead of new for Actor subclasses"),
+                    .with_hint("Actors are processes — use spawn/spawnWith: instead of new/new:"),
                 );
             }
         }
@@ -175,13 +179,15 @@ fn visit_actor_new(
                     && hierarchy.is_actor_subclass(class_name)
                 {
                     diagnostics.push(
-                        Diagnostic::warning(
+                        Diagnostic::error(
                             format!(
-                                "Actor subclass `{class_name}` should use `spawn` instead of `{sel}`"
+                                "Actor subclass `{class_name}` must use `spawn` instead of `{sel}`"
                             ),
                             msg.span,
                         )
-                        .with_hint("Use spawn instead of new for Actor subclasses"),
+                        .with_hint(
+                            "Actors are processes — use spawn/spawnWith: instead of new/new:",
+                        ),
                     );
                 }
             }

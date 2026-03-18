@@ -81,31 +81,31 @@ TestCase subclass: Ch12CustomErrors
 
   testSignalCustomError =>
     result := [
-      ValidationError new signal: "bad input"
+      ValidationError signal: "bad input"
     ] on: ValidationError do: [:e | e message]
     self assert: result equals: "bad input"
 
   testCatchByParentClass =>
     result := [
-      ValidationError new signal: "oops"
+      ValidationError signal: "oops"
     ] on: Error do: [:e | "caught by Error"]
     self assert: result equals: "caught by Error"
 
   testCatchByRootException =>
     result := [
-      ValidationError new signal: "oops"
+      ValidationError signal: "oops"
     ] on: Exception do: [:e | "caught by Exception"]
     self assert: result equals: "caught by Exception"
 
   testNonMatchingClassDoesNotCatch =>
     result := [
-      [ValidationError new signal: "no"] on: TypeError do: [:e | "wrong"]
+      [ValidationError signal: "no"] on: TypeError do: [:e | "wrong"]
     ] on: Exception do: [:e | "correct"]
     self assert: result equals: "correct"
 
   testExceptionClassPreserved =>
     result := [
-      ValidationError new signal: "test"
+      ValidationError signal: "test"
     ] on: Exception do: [:e | e class]
     self assert: result equals: ValidationError
 ```
@@ -300,7 +300,7 @@ TestCase subclass: Ch12Validator
 [code] on: MyCustomError do: [:e | handler]  — catch custom exception
 [code] ensure: [always-runs]                 — guaranteed cleanup
 self error: "message"                        — raise from your code
-MyError new signal: "message"                — raise custom exception
+MyError signal: "message"                    — raise custom exception
 ```
 
 **Exception hierarchy:**

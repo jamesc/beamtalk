@@ -1634,8 +1634,15 @@ mod tests {
             selectors.contains(&"spawnWith:"),
             "spawnWith: must be in class_methods"
         );
-        assert!(selectors.contains(&"new"), "new must be in class_methods");
-        assert!(selectors.contains(&"new:"), "new: must be in class_methods");
+        // BT-1524: new/new: overrides removed from Actor — no longer class-side
+        assert!(
+            !selectors.contains(&"new"),
+            "new must NOT be in Actor class_methods after BT-1524"
+        );
+        assert!(
+            !selectors.contains(&"new:"),
+            "new: must NOT be in Actor class_methods after BT-1524"
+        );
 
         // Instance methods must NOT appear on class side
         assert!(
@@ -1668,11 +1675,7 @@ mod tests {
             "spawnWith: doc should describe actor creation"
         );
 
-        let new = class_methods.iter().find(|m| m.selector == "new").unwrap();
-        assert!(
-            new.doc.as_deref().unwrap().contains("spawn"),
-            "new error-guard doc should mention spawn"
-        );
+        // BT-1524: new/new: overrides removed — no longer in Actor class_methods
     }
 
     #[test]

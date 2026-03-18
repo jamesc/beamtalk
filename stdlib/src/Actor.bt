@@ -36,24 +36,6 @@ Object subclass: Actor
   /// ```
   class sealed spawnWith: initArgs => @intrinsic actorSpawnWith
 
-  /// Raises an InstantiationError — actors must use `spawn`, not `new`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Counter new   // => ERROR: instantiation_error
-  /// ```
-  class sealed new =>
-    InstantiationError new signal: "Actors must use spawn, not new"
-
-  /// Raises an InstantiationError — actors must use `spawnWith:`, not `new:`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Counter new: #{}   // => ERROR: instantiation_error
-  /// ```
-  class sealed new: _initArgs =>
-    InstantiationError new signal: "Actors must use spawnWith:, not new:"
-
   // === Supervision defaults ===
 
   /// Default OTP restart policy for this actor class.

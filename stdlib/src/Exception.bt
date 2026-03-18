@@ -15,6 +15,27 @@
 /// @see Error (for non-resumable exceptions)
 Object subclass: Exception
 
+  /// Create and raise a new exception with the given message.
+  ///
+  /// This is the preferred way to signal exceptions. Class-side, so no
+  /// instance allocation is needed: `Exception signal: "oops"` or
+  /// `MyCustomError signal: "bad input"`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Exception signal: "something went wrong"
+  /// MyCustomError signal: "bad input"
+  /// ```
+  class signal: msg :: String -> Nil => @primitive "classSignal:"
+
+  /// Create and raise a new exception with the class name as the message.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Exception signal
+  /// ```
+  class signal -> Nil => @primitive "classSignal"
+
   /// Return the error message string.
   ///
   /// ## Examples
@@ -82,10 +103,10 @@ Object subclass: Exception
   /// ```
   signal -> Nil => @primitive "signal"
 
-  /// Create and raise a new exception with the given message.
+  /// Raise this exception instance with the given message.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Exception signal: "something went wrong"
+  /// (Exception new) signal: "something went wrong"
   /// ```
   signal: msg :: String -> Nil => @primitive "signal:"

@@ -53,6 +53,18 @@ pub(crate) fn generate_exception_bif(
         "stackTrace" => Some(Document::Str(
             "call 'beamtalk_exception_handler':'dispatch'('stackTrace', [], Self)",
         )),
+        // BT-1524: Class-side signal primitives — raise exceptions without instance allocation.
+        "classSignal:" => {
+            let p0 = param(params, 0, "_Msg");
+            Some(docvec![
+                "call 'beamtalk_exception_handler':'class_signal_message'(",
+                p0.to_string(),
+                ", ClassSelf)"
+            ])
+        }
+        "classSignal" => Some(Document::Str(
+            "call 'beamtalk_exception_handler':'class_signal'(ClassSelf)",
+        )),
         _ => None,
     }
 }
