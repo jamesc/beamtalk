@@ -128,7 +128,7 @@ impl CoreErlangGenerator {
     /// Returns the expression as a `Document` for direct composition via `docvec!`.
     ///
     /// ADR 0018: Simple forwarding to `generate_expression`.
-    pub(super) fn expression_doc(
+    pub(crate) fn expression_doc(
         &mut self,
         expr: &Expression,
     ) -> Result<super::document::Document<'static>> {
@@ -157,7 +157,7 @@ impl CoreErlangGenerator {
     /// value calls set `repl_loop_mutated` deep in the call stack. REPL codegen needs to
     /// know whether the expression returned a `{Result, State}` tuple that must be unpacked.
     /// This method encapsulates the side-channel into an explicit return value.
-    pub(super) fn expression_doc_with_repl_mutation_tracking(
+    pub(crate) fn expression_doc_with_repl_mutation_tracking(
         &mut self,
         expr: &crate::ast::Expression,
     ) -> Result<(super::document::Document<'static>, bool)> {
@@ -183,7 +183,7 @@ impl CoreErlangGenerator {
     ///
     /// Use this for internal codegen temporaries (loop variables, function bindings,
     /// etc.) that should never shadow or be confused with user identifiers.
-    pub(super) fn fresh_temp_var(&mut self, base: &str) -> String {
+    pub(crate) fn fresh_temp_var(&mut self, base: &str) -> String {
         self.var_context.fresh_var(base)
     }
 

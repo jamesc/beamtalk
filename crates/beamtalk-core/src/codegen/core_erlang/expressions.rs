@@ -1699,7 +1699,7 @@ impl CoreErlangGenerator {
     /// - `extraction_docs` are the element-extraction let-bindings
     /// - `bound_pairs` is `Vec<(beamtalk_name, core_erlang_var)>` for each `Pattern::Variable` bound
     #[allow(clippy::too_many_lines, clippy::type_complexity)]
-    pub(super) fn generate_pattern_extractions_from_var(
+    pub(crate) fn generate_pattern_extractions_from_var(
         &mut self,
         pattern: &Pattern,
         rhs_var: &str,

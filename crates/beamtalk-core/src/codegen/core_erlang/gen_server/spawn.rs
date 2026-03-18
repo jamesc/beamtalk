@@ -463,7 +463,7 @@ impl CoreErlangGenerator {
     /// Returns a Core Erlang binary string literal for the given string.
     ///
     /// Produces: `#{#<byte1>(8,1,'integer',['unsigned'|['big']]), ...}#`
-    pub(in crate::codegen::core_erlang) fn binary_string_literal(s: &str) -> String {
+    pub(crate) fn binary_string_literal(s: &str) -> String {
         let mut result = String::from("#{");
         result.push_str(&Self::binary_byte_segments(s));
         result.push_str("}#");

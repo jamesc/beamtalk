@@ -22,6 +22,7 @@ pub mod language_service;
 pub mod lint;
 pub mod project;
 pub mod queries;
+pub mod repl;
 pub mod semantic_analysis;
 pub mod source_analysis;
 pub(crate) mod state_threading_selectors;
