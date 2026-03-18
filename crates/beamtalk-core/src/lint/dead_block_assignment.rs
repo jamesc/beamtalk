@@ -760,4 +760,38 @@ Object subclass: Foo
             "Expected no lints for destructure of local vars, got: {diags:?}"
         );
     }
+
+    // ── BT-1476: @expect dead_assignment suppression ─────────────────────────
+
+    /// `@expect dead_assignment` suppresses the dead block assignment lint.
+    #[test]
+    fn expect_dead_assignment_suppresses_lint() {
+        let src = "x := 1.\n@expect dead_assignment\ntrue ifTrue: [x := 2]";
+        let tokens = lex_with_eof(src);
+        let (module, _) = parse(tokens);
+        let mut diags = Vec::new();
+        DeadBlockAssignmentPass.check(&module, &mut diags);
+        // Apply @expect directives
+        crate::queries::diagnostic_provider::apply_expect_directives(&module, &mut diags);
+        let lint_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == crate::source_analysis::Severity::Lint)
+            .collect();
+        assert!(
+            lint_diags.is_empty(),
+            "@expect dead_assignment should suppress lint, got: {lint_diags:?}"
+        );
+    }
+
+    /// Lint has `DeadAssignment` category for `@expect` matching.
+    #[test]
+    fn lint_has_dead_assignment_category() {
+        let diags = lint("x := 1.\ntrue ifTrue: [x := 2]");
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].category,
+            Some(crate::source_analysis::DiagnosticCategory::DeadAssignment),
+            "Expected DeadAssignment category on lint diagnostic"
+        );
+    }
 }
