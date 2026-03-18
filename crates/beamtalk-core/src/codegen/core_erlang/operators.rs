@@ -9,6 +9,7 @@ use super::document::Document;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::Expression;
 use crate::docvec;
+use crate::source_analysis::Span;
 
 impl CoreErlangGenerator {
     /// Generates code for binary operators.
@@ -64,9 +65,10 @@ impl CoreErlangGenerator {
             "<=" => "=<",
             ">=" => ">=",
             _ => {
+                let right = &arguments[0];
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: format!("binary operator: {op}"),
-                    span: None,
+                    span: Some(Span::new(left.span().start(), right.span().end())),
                 });
             }
         };

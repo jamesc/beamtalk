@@ -573,19 +573,24 @@ fn byte_offset_to_line(source: &str, offset: u32) -> u32 {
 
 /// Compute 1-based column number for a byte offset in source text.
 ///
-/// Finds the last newline before `offset` and returns the distance from it.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "source files over 4GB (2^32 columns) are not supported"
-)]
+/// Counts Unicode characters (not bytes) from the start of the line,
+/// so columns are correct for multibyte UTF-8 source.
 fn byte_offset_to_col(source: &str, offset: u32) -> u32 {
     let offset_clamped = (offset as usize).min(source.len());
-    let bytes = &source.as_bytes()[..offset_clamped];
-    let last_newline = bytes.iter().rposition(|&b| b == b'\n');
-    match last_newline {
-        Some(pos) => (offset_clamped - pos) as u32,
-        None => offset_clamped as u32 + 1,
+    let line_start = source.as_bytes()[..offset_clamped]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |pos| pos + 1);
+
+    // Count Unicode scalar values from line_start to offset_clamped
+    let mut col = 1u32;
+    for (rel_byte, _) in source[line_start..].char_indices() {
+        if line_start + rel_byte >= offset_clamped {
+            break;
+        }
+        col = col.saturating_add(1);
     }
+    col
 }
 
 /// Format a `CodeGenError` with source-aware location info for MCP responses.
