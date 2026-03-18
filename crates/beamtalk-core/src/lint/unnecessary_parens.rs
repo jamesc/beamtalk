@@ -392,9 +392,8 @@ mod tests {
     /// and should not be flagged.
     #[test]
     fn parens_around_keyword_arg_not_flagged() {
-        let diags = lint(
-            "Object subclass: Foo\n  test: q => self assert: (q dequeue) equals: 42\n",
-        );
+        let diags =
+            lint("Object subclass: Foo\n  test: q => self assert: (q dequeue) equals: 42\n");
         assert!(
             diags.is_empty(),
             "keyword arg parens should not be flagged, got: {diags:?}"
