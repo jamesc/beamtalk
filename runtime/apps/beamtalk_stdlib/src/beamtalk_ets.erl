@@ -48,7 +48,7 @@
 -module(beamtalk_ets).
 
 %% Class methods — canonical colon forms (for EUnit tests and Beamtalk dispatch)
--export(['new:type:'/2, 'named:'/1]).
+-export(['new:type:'/2, 'named:'/1, 'exists:'/1, 'newOrExisting:type:'/2]).
 
 %% Instance methods — no-colon forms used by the FFI proxy
 %% The (Erlang beamtalk_ets) dispatch strips the first keyword from the selector
@@ -57,7 +57,7 @@
 -export([keys/1, tableSize/1, deleteTable/1]).
 
 %% FFI shims for class methods: `(Erlang beamtalk_ets) new: name type: t` → `new/2`
--export([new/2, named/1]).
+-export([new/2, named/1, exists/1, newOrExisting/2]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -127,6 +127,61 @@
     Error0 = beamtalk_error:new(type_error, 'Ets'),
     Error1 = beamtalk_error:with_selector(Error0, 'named:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Table name must be a Symbol">>),
+    beamtalk_error:raise(Error2).
+
+%% @doc Check whether a named ETS table exists.
+%%
+%% Returns `true` if a table with the given name exists, `false` otherwise.
+%% Raises `type_error` if the argument is not an atom.
+-spec 'exists:'(atom()) -> boolean().
+'exists:'(Name) when is_atom(Name) ->
+    ets:whereis(Name) =/= undefined;
+'exists:'(_) ->
+    Error0 = beamtalk_error:new(type_error, 'Ets'),
+    Error1 = beamtalk_error:with_selector(Error0, 'exists:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Table name must be a Symbol">>),
+    beamtalk_error:raise(Error2).
+
+%% @doc Create a named table or return the existing one.
+%%
+%% If a table with the given name already exists, returns an Ets instance
+%% wrapping it. Otherwise creates a new table with the specified type.
+%% Raises `type_error` if arguments are not atoms.
+-spec 'newOrExisting:type:'(atom(), atom()) -> map().
+'newOrExisting:type:'(Name, TableType) when is_atom(Name), is_atom(TableType) ->
+    EtsType = map_table_type(TableType),
+    try
+        ets:new(Name, [EtsType, named_table, public, {keypos, 1}]),
+        make_ets(Name)
+    catch
+        error:badarg ->
+            %% Table was created by another process between our check — adopt it.
+            case ets:whereis(Name) of
+                undefined ->
+                    %% Table doesn't exist either — genuinely invalid arguments.
+                    Error0 = beamtalk_error:new(already_exists, 'Ets'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'newOrExisting:type:'),
+                    Error2 = beamtalk_error:with_hint(
+                        Error1,
+                        <<"Failed to create or find table">>
+                    ),
+                    beamtalk_error:raise(Error2);
+                _Tid ->
+                    make_ets(Name)
+            end
+    end;
+'newOrExisting:type:'(Name, _TableType) when not is_atom(Name) ->
+    Error0 = beamtalk_error:new(type_error, 'Ets'),
+    Error1 = beamtalk_error:with_selector(Error0, 'newOrExisting:type:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Table name must be a Symbol">>),
+    beamtalk_error:raise(Error2);
+'newOrExisting:type:'(_Name, _TableType) ->
+    Error0 = beamtalk_error:new(type_error, 'Ets'),
+    Error1 = beamtalk_error:with_selector(Error0, 'newOrExisting:type:'),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        <<"Table type must be a Symbol (#set, #orderedSet, #bag, #duplicateBag)">>
+    ),
     beamtalk_error:raise(Error2).
 
 %%% ============================================================================
@@ -310,6 +365,14 @@ new(Name, TableType) -> 'new:type:'(Name, TableType).
 %% @doc FFI shim for named: — called via (Erlang beamtalk_ets) named: name.
 -spec named(atom()) -> map().
 named(Name) -> 'named:'(Name).
+
+%% @doc FFI shim for exists: — called via (Erlang beamtalk_ets) exists: name.
+-spec exists(atom()) -> boolean().
+exists(Name) -> 'exists:'(Name).
+
+%% @doc FFI shim for newOrExisting:type: — called via (Erlang beamtalk_ets) newOrExisting: name type: t.
+-spec newOrExisting(atom(), atom()) -> map().
+newOrExisting(Name, TableType) -> 'newOrExisting:type:'(Name, TableType).
 
 %%% ============================================================================
 %%% Internal Helpers

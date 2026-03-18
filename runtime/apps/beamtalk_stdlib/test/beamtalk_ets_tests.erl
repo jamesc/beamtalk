@@ -123,6 +123,92 @@ named_type_error_test() ->
     ).
 
 %%% ============================================================================
+%%% exists:/1
+%%% ============================================================================
+
+exists_true_test() ->
+    catch ets:delete(bt_ets_test_exists_true),
+    ets:new(bt_ets_test_exists_true, [set, named_table, public]),
+    try
+        ?assert(beamtalk_ets:'exists:'(bt_ets_test_exists_true))
+    after
+        ets:delete(bt_ets_test_exists_true)
+    end.
+
+exists_false_test() ->
+    ?assertNot(beamtalk_ets:'exists:'(bt_ets_test_no_such_exists_xyz)).
+
+exists_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
+        beamtalk_ets:'exists:'(<<"not_an_atom">>)
+    ).
+
+ffi_exists_shim_test() ->
+    ?assertNot(beamtalk_ets:exists(bt_ets_test_ffi_exists_xyz)).
+
+%%% ============================================================================
+%%% newOrExisting:type:/2
+%%% ============================================================================
+
+newOrExisting_creates_new_test() ->
+    catch ets:delete(bt_ets_test_new_or_existing_create),
+    try
+        Table = beamtalk_ets:'newOrExisting:type:'(bt_ets_test_new_or_existing_create, set),
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Ets', table := bt_ets_test_new_or_existing_create}, Table
+        ),
+        %% Verify the table actually exists
+        ?assertNotEqual(undefined, ets:whereis(bt_ets_test_new_or_existing_create))
+    after
+        catch ets:delete(bt_ets_test_new_or_existing_create)
+    end.
+
+newOrExisting_returns_existing_test() ->
+    catch ets:delete(bt_ets_test_new_or_existing_reuse),
+    ets:new(bt_ets_test_new_or_existing_reuse, [set, named_table, public]),
+    try
+        %% Insert data in the original table
+        ets:insert(bt_ets_test_new_or_existing_reuse, {<<"key">>, <<"value">>}),
+        %% newOrExisting should return the existing table, not create a new empty one
+        Table = beamtalk_ets:'newOrExisting:type:'(bt_ets_test_new_or_existing_reuse, set),
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Ets', table := bt_ets_test_new_or_existing_reuse}, Table
+        ),
+        %% Data should still be there
+        ?assertEqual(<<"value">>, beamtalk_ets:lookup(Table, <<"key">>))
+    after
+        ets:delete(bt_ets_test_new_or_existing_reuse)
+    end.
+
+newOrExisting_type_error_name_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
+        beamtalk_ets:'newOrExisting:type:'(<<"not_atom">>, set)
+    ).
+
+newOrExisting_type_error_type_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
+        beamtalk_ets:'newOrExisting:type:'(some_table, <<"set">>)
+    ).
+
+newOrExisting_invalid_type_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
+        beamtalk_ets:'newOrExisting:type:'(some_table, invalid_type)
+    ).
+
+ffi_newOrExisting_shim_test() ->
+    catch ets:delete(bt_ets_test_ffi_new_or_existing),
+    try
+        Table = beamtalk_ets:newOrExisting(bt_ets_test_ffi_new_or_existing, set),
+        ?assertMatch(#{'$beamtalk_class' := 'Ets', table := bt_ets_test_ffi_new_or_existing}, Table)
+    after
+        catch ets:delete(bt_ets_test_ffi_new_or_existing)
+    end.
+
+%%% ============================================================================
 %%% lookup/2
 %%% ============================================================================
 
