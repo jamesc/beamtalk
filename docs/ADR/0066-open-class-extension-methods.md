@@ -14,22 +14,36 @@ Integer >> double => self * 2
 Array class >> ofSize: n => Array new: n withAll: 0
 ```
 
-This feature is **already fully implemented** across the entire pipeline: parser (`StandaloneMethodDefinition` AST node), semantic analysis, codegen (runtime-patched via `beamtalk_extensions` ETS registry), REPL, and hot reload. The `>>` token also serves as a binary operator in expression context for method reflection (`Counter >> #increment` returns a `CompiledMethod`).
+This feature is **already partially implemented** across the pipeline: parser (`StandaloneMethodDefinition` AST node), semantic analysis, codegen, REPL, and hot reload. The `>>` token also serves as a binary operator in expression context for method reflection (`Counter >> #increment` returns a `CompiledMethod`).
 
 What was missing was:
 1. An ADR documenting the design decisions
 2. A file naming convention for extension method files
 3. Clear policy on sealed class extensions and conflict resolution
+4. **An architectural model for how extensions interact with the type system and cross-package builds**
 
-### Current Implementation
+### Current Implementation (ETS-only, being superseded)
+
+The current implementation uses a purely dynamic, ETS-based model:
 
 **Parser:** `ClassName [class] >> selector => body` is parsed as a `StandaloneMethodDefinition` containing the target class name, an `is_class_method` flag, and the method definition. Standalone methods are stored in `Module.method_definitions`, separate from class bodies.
 
 **Codegen:** Standalone methods are **not** compiled into the target class's static BEAM module. Instead, they are registered at load time via `beamtalk_extensions:register/4`, which stores them in an ETS table keyed by `{ClassName, Selector}`.
 
-**Dispatch:** When a message is not found in the target class's local method table, the dispatcher checks `beamtalk_extensions:lookup/2` before walking the class hierarchy. If an extension is found, it is called directly. This integrates extensions into the normal dispatch chain — they are not a separate mechanism.
+**Dispatch:** When a message is not found in the target class's local method table, the dispatcher checks `beamtalk_extensions:lookup/2` before walking the class hierarchy.
 
-**Conflict resolution:** Last-writer-wins. If two files register the same `{Class, Selector}` pair, the later registration overwrites the earlier one. A warning is logged when a different owner overwrites an existing extension. A separate `beamtalk_extension_conflicts` ETS table tracks conflict history for debugging.
+**Conflict resolution:** Last-writer-wins with warning logging.
+
+### The Problem with ETS-Only
+
+The purely dynamic model has fundamental limitations:
+
+1. **Type system blind spot:** Extension methods in ETS are invisible to the type checker. A typed call site cannot verify at compile time that an extension method exists. This makes extensions second-class citizens in the gradual type system (ADR 0025).
+2. **Runtime-only conflict detection:** Two packages defining `String >> json` is only detected at load time via a logged warning. In production deployments, log output during load may be silently discarded.
+3. **Cross-package opacity:** Package A cannot know at build time what extensions Package B adds. The full method surface of a class is unknowable until all packages are loaded.
+4. **No separate compilation story:** The target class is never modified — extensions live entirely in global mutable ETS state, which doesn't compose well with BEAM's module-based code loading.
+
+These are the same problems that led Elixir to introduce **protocol consolidation** — and the same solution applies to Beamtalk extensions.
 
 ## Decision
 
@@ -97,9 +111,60 @@ myapp/src/Actor+Logging.bt      // Actor >> logInfo: => ..., Actor >> logError: 
 **What goes where:**
 - Methods that are core to the class → `ClassName.bt` (class definition)
 - Methods that add a capability from another domain → `ClassName+Feature.bt` (extension file)
-- Ad-hoc REPL extensions → no file needed (registered in-memory)
+- Ad-hoc REPL extensions → no file needed (registered in-memory via ETS)
 
-### 3. Sealed Class Policy
+### 3. Compilation Model: Consolidation at Build Time, ETS for REPL
+
+Extensions operate in **two modes**, following the Elixir protocol consolidation model:
+
+**Consolidated mode (production builds via `just build`):**
+
+1. Each `+Feature.bt` file compiles to its own standalone BEAM module containing the extension functions
+2. At application build time, the compiler collects ALL `StandaloneMethodDefinition` nodes across all packages in the dependency graph
+3. It generates a **consolidated extension index** per target class — a static lookup table separate from the class's own BEAM module
+4. Duplicate `{Class, Selector}` registrations across packages are **compile errors**, not runtime warnings
+5. The type checker reads the consolidated index, making extensions visible to static analysis
+
+```
+Package build:      String+JSON.bt  → bt@string_json.beam (standalone module)
+                    Array+Sorting.bt → bt@array_sorting.beam (standalone module)
+Application build:  Consolidate all extensions → static extension dispatch index
+                    Detect conflicts across all packages → compile error
+                    Type checker reads consolidated index → extensions are typed
+```
+
+**Unconsolidated mode (REPL and dev mode):**
+
+Extensions are registered dynamically in the `beamtalk_extensions` ETS table, exactly as today. This preserves the interactive-first development experience — you can define `Integer >> double` in the REPL and use it immediately. Extensions defined this way are unchecked by the type system.
+
+```
+REPL:  Integer >> double => self * 2  → ETS registration (dynamic, unchecked)
+```
+
+**The key principle: extensions are static in production, dynamic in the REPL.** Same syntax, same semantics, different compilation strategy. This mirrors how Elixir handles protocol consolidation — `mix compile` consolidates for production, skips consolidation in dev for faster recompilation.
+
+**Dispatch in consolidated mode:**
+
+1. Local methods (defined in the class body)
+2. Consolidated extensions on that class (static lookup from the extension index)
+3. Inherited methods from superclass
+4. Consolidated extensions on superclass
+5. ... (continue up hierarchy to `Object`)
+6. Unconsolidated ETS extensions (fallback for REPL-defined extensions)
+7. `doesNotUnderstand:` fallback
+
+**Dispatch in unconsolidated mode (REPL):**
+
+1. Local methods (defined in the class body)
+2. ETS extension lookup on that class
+3. Inherited methods from superclass
+4. ETS extension lookup on superclass
+5. ... (continue up hierarchy to `Object`)
+6. `doesNotUnderstand:` fallback
+
+Local methods always take priority over extensions in both modes. An extension cannot override a method defined in the class body — it can only add new selectors or override inherited methods.
+
+### 4. Sealed Class Policy
 
 **Sealed classes CAN be extended.** "Sealed" means a class cannot be *subclassed*, not that it cannot receive new methods. Extensions are the **primary** mechanism for adding behaviour to sealed primitives like `Integer`, `String`, `Float`, `Boolean`, and `Array`.
 
@@ -111,56 +176,50 @@ Integer >> factorial =>
     ifFalse: [self * (self - 1) factorial]
 ```
 
-This follows Pharo's model where extension methods are regular methods in the class's logical method dictionary.
-
-### 4. Dispatch Priority
-
-Extension methods integrate into the standard hierarchy walk:
-
-1. Local methods (defined on the class in its `.bt` file)
-2. Extension methods on that class (via `beamtalk_extensions` ETS lookup)
-3. Inherited methods from superclass
-4. Extension methods on superclass
-5. ... (continue up hierarchy to `Object`)
-6. `doesNotUnderstand:` fallback
-
-Local methods always take priority over extensions. An extension cannot override a method defined in the class body — it can only add new selectors or override inherited methods.
+This follows Pharo's model where extension methods are regular methods in the class's logical method dictionary. In consolidated mode, extensions on sealed classes are part of the static extension index — no need to recompile the sealed class's own BEAM module.
 
 ### 5. Conflict Resolution
 
-**Last-writer-wins** with provenance tracking:
+**Consolidated mode (build time):** Duplicate `{Class, Selector}` registrations from different packages are **compile errors**. The compiler reports which packages conflict and which files define the duplicate:
 
-- When two extensions register the same `{Class, Selector}`, the later registration wins
-- A warning is logged via OTP logger: `Extension String>>json overwritten (was owned by string_json, now owned by my_json_lib)`
-- The `beamtalk_extension_conflicts` ETS bag table records every overwrite with `{Class, Selector, Owner, Timestamp}` for debugging
-- `beamtalk_extensions:conflicts/0` returns all selectors that have been registered by multiple owners
-
-**Provenance stores:** the owning module atom (derived from the BEAM module name of the file that defined the extension). This is queryable at runtime:
-```beamtalk
->> beamtalk_extensions list: #String
-=> #((#json, #string_json_lib), (#shout, #my_utils))
+```
+error[E0451]: extension conflict on String>>json
+  --> myapp/src/String+JSON.bt:3:1
+   |
+3  | String >> json => ...
+   | ^^^^^^^^^^^^^^^^ defined here
+   |
+  --> vendor/json_utils/src/String+Serialization.bt:7:1
+   |
+7  | String >> json => ...
+   | ^^^^^^^^^^^^^^^^ also defined here
+   |
+   = help: rename one of the extensions or remove the conflicting dependency
 ```
 
-**What to do when a conflict is detected:**
-1. Check `beamtalk_extensions:conflicts/0` to identify which packages collide
-2. Rename the conflicting selector to be more specific (e.g., `json` → `asJsonString`)
-3. Or control load order explicitly via `beamtalk.toml` dependency declarations
+This is a hard error — the build fails. No last-writer-wins ambiguity in production.
 
-**Limitations:** Last-writer-wins is appropriate for development and single-package deployments. For multi-package production systems, static conflict detection at build time (scanning all packages for duplicate `{Class, Selector}` pairs) would be preferable — this is deferred to future work.
+**Unconsolidated mode (REPL):** Last-writer-wins with provenance tracking, as currently implemented:
 
-This matches Pharo's behaviour. The community convention to avoid conflicts is to use descriptive method names specific to the feature being added, rather than generic names.
+- A warning is logged via OTP logger: `Extension String>>json overwritten (was owned by string_json, now owned by my_json_lib)`
+- The `beamtalk_extension_conflicts` ETS bag table records every overwrite with `{Class, Selector, Owner, Timestamp}`
+- `beamtalk_extensions:conflicts/0` returns all selectors that have been registered by multiple owners
+
+Last-writer-wins in the REPL is intentional — it supports the interactive workflow of iteratively redefining extensions during development.
 
 ### 6. Load Order
 
-Extensions are registered when their containing module's `on_load` callback fires (the `register_class/0` function generated by codegen). In compiled `.bt` files, this happens when the BEAM module is loaded by the VM. In the REPL, this happens immediately on evaluation. During hot reload, re-loading a file re-registers its extensions, overwriting previous registrations from the same owner.
+**Consolidated mode:** Extension dispatch order is determined at build time by the consolidated index. Load order is irrelevant — all extensions are known statically.
 
-Load order within a package follows the order specified in `beamtalk.toml`. Cross-package load order follows dependency declarations. Within these constraints, extension registration order is deterministic.
+**Unconsolidated mode:** Extensions are registered when their containing module's `on_load` callback fires (the `register_class/0` function generated by codegen). In the REPL, this happens immediately on evaluation. During hot reload, re-loading a file re-registers its extensions, overwriting previous registrations from the same owner.
 
 ### 7. ETS Table Lifecycle
 
-The `beamtalk_extensions` and `beamtalk_extension_conflicts` ETS tables are created by `beamtalk_extensions:init/0`, called during the `beamtalk_runtime` OTP application startup. Both tables are `public` and `named_table` with `read_concurrency` enabled. They are owned by the runtime supervisor process and survive individual process crashes. If the runtime application itself restarts, extensions are re-registered as modules are re-loaded by the VM.
+The `beamtalk_extensions` and `beamtalk_extension_conflicts` ETS tables are created by `beamtalk_extensions:init/0`, called during the `beamtalk_runtime` OTP application startup. Both tables are `public` and `named_table` with `read_concurrency` enabled. They are owned by the runtime supervisor process and survive individual process crashes.
 
-Extensions are node-local — in a distributed BEAM cluster, each node maintains its own extension registry. This matches the standard BEAM model where code loading is per-node.
+In consolidated mode, ETS serves only as a fallback for REPL-defined extensions that were added after build time. The consolidated extension index is the primary dispatch path.
+
+Extensions are node-local — in a distributed BEAM cluster, each node maintains its own extension registry and consolidated index. This matches the standard BEAM model where code loading is per-node.
 
 ## Prior Art
 
@@ -175,13 +234,15 @@ Extensions are node-local — in a distributed BEAM cluster, each node maintains
 | **Elixir** | Protocols (type-class-like) | Co-located with protocol | Compile error (duplicate impl) | Yes (all types) |
 
 **Key influences:**
-- **Pharo:** Semantic model — extensions are logically part of the class's method dictionary, not a separate mechanism. Last-writer-wins conflict resolution with community conventions to avoid collisions.
-- **Swift:** File naming convention — `Type+Feature.ext` is proven at massive ecosystem scale and is self-documenting.
-- **Ruby refinements:** Informed the decision NOT to add scoping — Beamtalk extensions are global like Pharo, not lexically scoped. Scoped extensions add complexity without clear benefit in a Smalltalk-style live environment.
+- **Pharo:** Semantic model — extensions are logically part of the class's method dictionary, not a separate mechanism.
+- **Swift:** File naming convention — `Type+Feature.ext` is proven at massive ecosystem scale. Compile-time conflict detection.
+- **Elixir protocol consolidation:** The two-mode compilation model — consolidated for production, unconsolidated for dev/REPL. This is the direct inspiration for Beamtalk's extension consolidation.
+- **C#:** Extensions are statically resolved at the call site — informed the principle that the type checker must see extensions at compile time.
 
 **Rejected influences:**
+- **Pharo's last-writer-wins in production:** Acceptable for an image-based system where the developer controls all loaded code. Unacceptable for a package ecosystem where transitive dependencies can silently conflict.
 - **Newspeak's "no extensions" stance:** Too restrictive for a language with sealed primitives — users need a way to add methods to `Integer` and `String`.
-- **C#/Kotlin compile-time resolution:** Beamtalk's live development model requires runtime dispatch, not static resolution.
+- **Ruby refinements (scoped extensions):** Scoping conflicts with the live development model — in a Smalltalk-style environment, all methods should be globally visible. If cross-package conflicts become a problem despite compile-time detection, scoped extensions could be revisited as an opt-in mechanism.
 
 ## User Impact
 
@@ -190,26 +251,31 @@ Extensions are node-local — in a distributed BEAM cluster, each node maintains
 - `ClassName+Feature.bt` file naming is self-documenting
 - Can discover extensions via `Integer methods` or `Integer >> #double` in the REPL
 - Ruby developers will recognize open-class semantics immediately
+- Conflicts are caught at build time with clear error messages, not silent runtime surprises
 
 **Smalltalk developer:**
 - Pharo-compatible semantics — extensions are first-class methods
 - `>>` is more explicit than Pharo's protocol-based approach (no hidden `*Package` naming)
 - File naming departs from Tonel's `.extension.st` but is more expressive
+- Build-time conflict detection is stricter than Pharo — a trade-off for package ecosystem safety
 
 **Erlang/BEAM developer:**
-- Extensions generate standard BEAM code — debuggable with `:observer`, `:recon`, `:dbg`
-- ETS-backed registry is a familiar BEAM pattern
-- Load-order semantics follow standard OTP module loading
+- Consolidated extensions generate standard BEAM code — debuggable with `:observer`, `:recon`, `:dbg`
+- Consolidation model is familiar from Elixir protocol consolidation
+- ETS fallback for REPL is a familiar BEAM pattern
 
 **Production operator:**
-- `beamtalk_extensions:conflicts/0` provides visibility into overwrites
-- Extensions are hot-reloadable — re-evaluating a file updates the registered function
-- No performance impact on local method dispatch; extension lookup adds one ETS read on the slow path
+- No ETS overhead for compiled extensions in consolidated mode
+- Conflicts are impossible in production — they're caught at build time
+- Extensions are hot-reloadable in unconsolidated mode (REPL/dev)
+- Extensions are node-local, consistent with BEAM code loading semantics
 
 **Tooling developer:**
 - `StandaloneMethodDefinition` AST node provides clean structure for LSP
+- Consolidated extension index gives the type checker full visibility into extension methods
 - File naming convention enables glob-based tooling (`*+*.bt` finds all extension files)
-- Extension registry is queryable: `beamtalk_extensions:list/1` returns all extensions on a class
+- LSP must maintain a secondary index of `(Class, Selector) → file location` for go-to-definition on extension methods
+- API documentation generation must aggregate across `ClassName+*.bt` files for the full method surface
 
 ## Steelman Analysis
 
@@ -222,10 +288,15 @@ Extensions are node-local — in a distributed BEAM cluster, each node maintains
 - **BEAM veteran**: "No special characters in filenames — plays safe with all filesystems and tools."
 - **Newcomer**: "Underscores are familiar from Python and Elixir — no new convention to learn."
 
+### ETS-only (no consolidation)
+- **Smalltalk purist**: "This is exactly how Pharo works — fully dynamic, fully live. Build-time consolidation adds C#-style ceremony to what should be a dynamic language."
+- **BEAM veteran**: "ETS is battle-tested. Adding a consolidation step is complexity that could have bugs. KISS."
+- **Language designer**: "Last-writer-wins is simpler to reason about than a two-mode system. The REPL and production should behave identically."
+
 ### Tension Points
-- Smalltalk purists prefer the Tonel convention (B) for familiarity, but acknowledge that single files per class become unwieldy for popular types like String
-- The `+` character in filenames (Option A) is unusual outside Swift, but is legal on all major filesystems and is visually distinctive
-- Language designers are split between A (more expressive) and B (simpler) — A wins because it scales better and avoids the "God extension file" problem
+- Smalltalk purists prefer fully dynamic extensions (matching Pharo), but this sacrifices type checker visibility and compile-time conflict detection — costs that compound as the package ecosystem grows
+- BEAM veterans see ETS as natural, but Elixir developers who've used protocol consolidation understand the value of static resolution for production
+- The two-mode model (consolidated vs. unconsolidated) adds complexity, but the same pattern is proven in Elixir and accepted by the BEAM community
 
 ## Alternatives Considered
 
@@ -241,8 +312,14 @@ Allow both `+Feature` and `.extension` patterns. Rejected because having two con
 ### No convention (freeform)
 Let developers name extension files however they want. Rejected because consistent naming enables tooling (glob patterns, IDE file browsers) and makes extensions discoverable across packages.
 
+### ETS-only (no consolidation)
+Keep extensions purely dynamic with ETS dispatch for all modes. Rejected because:
+1. The type checker cannot see ETS-registered methods — extensions would be permanently untyped
+2. Conflicts are detected only at runtime, which is too late for production deployments
+3. The Elixir ecosystem proved that protocol consolidation is the right model for BEAM — it gives production safety without sacrificing dev-time liveness
+
 ### Protocol/typeclass approach (Elixir-style)
-Instead of open classes, use protocols — `Serializable` protocol with per-type implementations. This avoids ETS global mutation and last-writer-wins conflicts entirely, and is statically analyzable. Rejected as a *replacement* for open classes, but acknowledged as **complementary** — many practical uses of `>>` (JSON serialization, formatting, logging) are protocol-shaped and would be better expressed as protocols once they exist.
+Instead of open classes, use protocols — `Serializable` protocol with per-type implementations. This avoids global mutation and last-writer-wins conflicts entirely, and is statically analyzable. Rejected as a *replacement* for open classes, but acknowledged as **complementary** — many practical uses of `>>` (JSON serialization, formatting, logging) are protocol-shaped and would be better expressed as protocols once they exist.
 
 The two mechanisms solve different axes of the expression problem:
 - **Open classes (`>>`):** Add new operations to a single type — `Integer >> factorial`. Natural as a message send (`5 factorial`), awkward as a protocol (a `Factorial` protocol with one implementor is ceremony for no benefit).
@@ -255,27 +332,30 @@ Beamtalk will add protocols (required for the gradual type system, ADR 0025). Wh
 ### Positive
 - Extensions provide the only way to add methods to sealed primitives, completing the object model
 - `ClassName+Feature.bt` naming is self-documenting and scales to large codebases
-- Runtime ETS registry enables hot reload of extensions without recompiling target classes
-- Conflict tracking via `beamtalk_extension_conflicts` provides debugging visibility
+- Build-time consolidation gives the type checker full visibility into extensions — they are first-class in the type system
+- Conflicts are compile errors in production, not silent runtime surprises
+- Zero ETS overhead for compiled extensions in consolidated mode
+- REPL retains full liveness — define `>>` interactively, use immediately
 - Dispatch integration means extensions participate in `respondsTo:`, `methods`, and reflection
 
 ### Negative
-- Last-writer-wins can silently break code when load order changes — mitigated by conflict logging and future static detection
-- Extensions are checked via ETS lookup on the slow dispatch path — minor performance cost vs. local methods
+- Two-mode compilation (consolidated vs. unconsolidated) adds complexity to the build pipeline
+- REPL-defined extensions remain untyped — the type checker only covers consolidated extensions
 - The `+` in filenames is unfamiliar to non-Swift developers — mitigated by clear documentation
-- LSP go-to-definition must maintain a secondary index of `(Class, Selector) → file location` for extensions defined in `+Feature` files, separate from the class body index
-- API documentation generation for a class must aggregate across all `ClassName+*.bt` files to present the full method surface — tooling cannot rely on the class definition file alone
-- Extension methods registered in ETS are invisible to static analysis and future type checking — a typed call site cannot verify at compile time that an extension method exists
+- LSP must maintain a secondary index for extension method locations, separate from class body index
+- API documentation generation must aggregate across `ClassName+*.bt` files for the full method surface
 
 ### Neutral
 - Extensions cannot add instance variables (state) to existing classes — this is by design, matching Swift/Kotlin/C# semantics. Extension methods that depend on target class state must use the class's public API.
 - The `>>` token is overloaded (definition syntax AND method reflection operator) — context disambiguates cleanly
-- Extensions are node-local in distributed BEAM — each node in a cluster has its own extension registry, consistent with per-node code loading
-- Test suites that register extensions share ETS state within the test node — tests should not assume a clean extension registry unless explicitly cleared
+- Extensions are node-local in distributed BEAM — each node has its own consolidated index and ETS fallback, consistent with per-node code loading
+- Test suites that register REPL-style extensions share ETS state within the test node — tests should not assume a clean extension registry unless explicitly cleared
 
 ## Implementation
 
-The feature is already implemented across all components:
+### Phase 1: Current (Implemented)
+
+ETS-only extension registration and dispatch — the existing implementation.
 
 | Component | File | Status |
 |-----------|------|--------|
@@ -283,28 +363,44 @@ The feature is already implemented across all components:
 | AST | `crates/beamtalk-core/src/ast.rs` (`StandaloneMethodDefinition`) | Implemented |
 | Semantic analysis | `crates/beamtalk-core/src/source_analysis/semantic_analysis/` | Implemented |
 | Codegen | `crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs` | Implemented |
-| Dispatch | `crates/beamtalk-core/src/codegen/core_erlang/gen_server/dispatch.rs` | Implemented |
+| Dispatch (ETS) | `crates/beamtalk-core/src/codegen/core_erlang/gen_server/dispatch.rs` | Implemented |
 | Runtime registry | `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` | Implemented |
 | REPL | Inline `>>` definitions and `:load` of extension files | Implemented |
 | Hot reload | Extension re-registration on file reload | Implemented |
 
-**Remaining work (BT-1473):**
+### Phase 2: Build-Time Consolidation
+
+Collect extensions across the project and generate a static extension index.
+
+| Component | Description | Status |
+|-----------|-------------|--------|
+| Extension collector | Scan all `StandaloneMethodDefinition` across project + dependencies | Not started |
+| Conflict detector | Report duplicate `{Class, Selector}` as compile errors | Not started |
+| Extension index codegen | Generate consolidated dispatch index per target class | Not started |
+| Dispatch (consolidated) | Check consolidated index before ETS fallback | Not started |
+
+### Phase 3: Type System Integration
+
+Make consolidated extensions visible to the gradual type checker.
+
+| Component | Description | Status |
+|-----------|-------------|--------|
+| Type checker reads extension index | Extensions contribute to a class's typed method surface | Not started |
+| Extension type annotations | `Integer >> factorial :: -> Integer => ...` | Not started |
+
+### Documentation (BT-1473)
 1. Add `>>` syntax section to `docs/beamtalk-language-features.md`
 2. Test and document sealed class extension behaviour explicitly
 3. Enforce `ClassName+Feature.bt` naming convention in documentation and examples
 
-## Known Limitations and Future Work
+## Known Limitations
 
-**Static conflict detection:** The current last-writer-wins model detects conflicts only at runtime (load time). A future compiler pass could scan all packages in `beamtalk.toml` and report duplicate `{Class, Selector}` registrations at build time, before deployment. This is the highest-priority follow-up.
+**Flat namespace assumption:** The extension index keys on bare class name atoms, assuming a flat namespace (ADR 0031). If Beamtalk later introduces namespaced classes, the index key format will need migration.
 
-**Scoped extensions:** Ruby refinements and C#/Kotlin import-based visibility demonstrate that scoped extensions can prevent cross-package conflicts. Beamtalk intentionally chose global extensions (matching Pharo) because scoping conflicts with the live development model — in a Smalltalk-style image, all methods are globally visible, and scoping would make REPL exploration unpredictable. If cross-package conflicts become a real problem in practice, scoped extensions could be revisited as an opt-in mechanism without changing the default.
-
-**Gradual typing interaction:** When Beamtalk's gradual type system (ADR 0025) matures, extension methods will need type signatures that the type checker can discover. This likely requires a compile-time extension manifest (generated from `+Feature.bt` files) that the type checker reads alongside the class definition. The runtime ETS registry alone is insufficient for static type checking.
-
-**Flat namespace assumption:** The ETS key `{ClassName, Selector}` uses bare atoms, assuming a flat class namespace (ADR 0031). If Beamtalk later introduces namespaced classes, the registry key format will need migration.
+**REPL extensions are untyped:** Extensions defined interactively in the REPL bypass consolidation and are invisible to the type checker. This is by design — the REPL is the "dynamic zone" of gradual typing — but means REPL-defined extensions won't get type error reporting until they are moved to a `+Feature.bt` file.
 
 ## References
 - Related issues: BT-1473
-- Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (object model, extension registry design), [ADR 0006](0006-unified-method-dispatch.md) (dispatch chain), [ADR 0025](0025-gradual-typing-and-protocols.md) (typing interaction), [ADR 0031](0031-flat-namespace-for-v01.md) (flat namespace assumption), [ADR 0032](0032-early-class-protocol.md) (flattened table removal)
+- Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (object model, extension registry design), [ADR 0006](0006-unified-method-dispatch.md) (dispatch chain), [ADR 0025](0025-gradual-typing-and-protocols.md) (typing interaction, protocol complement), [ADR 0031](0031-flat-namespace-for-v01.md) (flat namespace assumption), [ADR 0032](0032-early-class-protocol.md) (flattened table removal)
 - Implementation: `beamtalk_extensions.erl`, `StandaloneMethodDefinition` in `ast.rs`
-- Prior art: Pharo Tonel format, Swift extension file conventions
+- Prior art: Pharo Tonel format, Swift extension file conventions, Elixir protocol consolidation
