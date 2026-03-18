@@ -1,0 +1,194 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1480: State mutation test matrix — proves compiler handles all
+// control flow × nesting × mutation patterns for Actor state threading.
+// Each test exercises one specific pattern and asserts correct state.
+//
+// Also covers BT-1479 control-flow RHS patterns (P2-19 through P2-21).
+//
+// Test P2-16 (anySatisfy:/allSatisfy: + mutation) omitted — codegen bug
+// produces unbound State1 variable in dispatch. Filed as BT-1481.
+
+TestCase subclass: MutationMatrixTest
+
+  // ── P0: Known bug patterns (verify fixes) ──────────────────────────
+
+  // P0-1: collect: + ifTrue: + mutation (BT-1477)
+  testCollectIfTrueMutation =>
+    a := MutationMatrixActor spawn
+    count := a collectIfTrueMutation: #(1, -2, 3)
+    self assert: count equals: 2
+    self assert: a getLog equals: #(2, -4, 6)
+
+  // P0-2: select: + ifTrue: + mutation (BT-1477)
+  testSelectIfTrueMutation =>
+    a := MutationMatrixActor spawn
+    count := a selectIfTrueMutation: #(1, -2, 3, -4)
+    self assert: count equals: 4
+    self assert: a getLog equals: #(1, 3)
+
+  // P0-3: Sequential mutations across multiple statements
+  testSequentialMutations =>
+    a := MutationMatrixActor spawn
+    count := a sequentialMutations
+    self assert: count equals: 22
+    self assert: a getLog equals: #(11)
+
+  // P0-4: Mutation inside nested conditional blocks
+  testNestedConditionalMutation =>
+    a := MutationMatrixActor spawn
+    // Both true: inner mutation (100) + outer mutation (10) = 110
+    count := a nestedConditionalMutation: true and: true
+    self assert: count equals: 110
+    a reset
+    // Outer true, inner false: only outer mutation (10)
+    count := a nestedConditionalMutation: true and: false
+    self assert: count equals: 10
+    a reset
+    // Outer false: no mutation
+    count := a nestedConditionalMutation: false and: true
+    self assert: count equals: 0
+
+  // ── P1: High risk unexplored patterns ──────────────────────────────
+
+  // P1-5: collect: inside collect: + mutation
+  testNestedCollectMutation =>
+    a := MutationMatrixActor spawn
+    count := a nestedCollectMutation: #(#(1, 2), #(3, 4))
+    self assert: count equals: 4
+    self assert: a getLog equals: #(#(2, 4), #(6, 8))
+
+  // P1-6: do: inside collect: + mutation
+  testDoInsideCollectMutation =>
+    a := MutationMatrixActor spawn
+    count := a doInsideCollectMutation: #(#(1, 2), #(3, 4))
+    self assert: count equals: 10
+    self assert: a getLog equals: #(2, 2)
+
+  // P1-7: inject:into: + ifTrue: + mutation
+  testInjectIfTrueMutation =>
+    a := MutationMatrixActor spawn
+    count := a injectIfTrueMutation: #(1, -2, 3, -4, 5)
+    self assert: count equals: 3
+    self assert: a getLog equals: #(9)
+
+  // P1-8: detect:ifNone: + mutation before match (no match)
+  testDetectIfNoneMutationNoMatch =>
+    a := MutationMatrixActor spawn
+    count := a detectIfNoneMutation: #(1, 2, 3)
+    self assert: count equals: 99
+    self assert: a getLog equals: #(0)
+
+  // P1-8b: detect:ifNone: + mutation before match (with match)
+  testDetectIfNoneMutationWithMatch =>
+    a := MutationMatrixActor spawn
+    count := a detectIfNoneMutation: #(1, 20, 3)
+    self assert: count equals: 99
+    self assert: a getLog equals: #(20)
+
+  // P1-9: on:do: exception handler + mutation
+  testExceptionMutation =>
+    a := MutationMatrixActor spawn
+    count := a exceptionMutation
+    self assert: count equals: 0
+
+  // P1-10: Non-local return from inside collect: after mutation
+  testNonLocalReturnFromCollect =>
+    a := MutationMatrixActor spawn
+    result := a nonLocalReturnFromCollect: #(10, 20, 30, 40, 50)
+    self assert: result equals: 3
+    self assert: a getCounter equals: 3
+
+  // P1-11: Multiple field mutations in single collect: block
+  testMultiFieldMutation =>
+    a := MutationMatrixActor spawn
+    result := a multiFieldMutation: #(1, -2, 3)
+    self assert: result equals: #(2, -4, 6)
+    self assert: a getCounter equals: 3
+    self assert: a getLog equals: #(1, -2, 3)
+    self assert: a getFlag equals: true
+
+  // P1-12: ifTrue:ifFalse: inside do: with mutation
+  testIfTrueIfFalseInsideDo =>
+    a := MutationMatrixActor spawn
+    count := a ifTrueIfFalseInsideDo: #(3, -1, 5, -2)
+    self assert: count equals: 11
+
+  // ── P2: Edge cases ─────────────────────────────────────────────────
+
+  // P2-13: collect: + ifTrue: + mutation + non-local return
+  testCollectIfTrueNlr =>
+    a := MutationMatrixActor spawn
+    result := a collectIfTrueNlr: #(1, 2, 3, 4, 5)
+    self assert: result equals: 4
+    self assert: a getCounter equals: 4
+
+  // P2-14: 3-deep nesting: do: > collect: > ifTrue: + mutation
+  testThreeDeepNesting =>
+    a := MutationMatrixActor spawn
+    count := a threeDeepNesting: #(#(1, -2, 3), #(-4, 5))
+    self assert: count equals: 3
+
+  // P2-17: reject: + mutation in filter block
+  testRejectMutation =>
+    a := MutationMatrixActor spawn
+    count := a rejectMutation: #(1, -2, 3, -4)
+    self assert: count equals: 4
+    self assert: a getLog equals: #(1, 3)
+
+  // P2-18: Empty collection + mutation in iteration block
+  testEmptyCollectionMutation =>
+    a := MutationMatrixActor spawn
+    count := a emptyCollectionMutation
+    self assert: count equals: 42
+
+  // ── BT-1479: Control flow RHS patterns ─────────────────────────────
+
+  // P2-19: Field assign from conditional with mutation in RHS
+  testFieldAssignFromConditionalRhs =>
+    a := MutationMatrixActor spawn
+    count := a fieldAssignFromConditionalRhs: true
+    self assert: count equals: 42
+    self assert: a getFlag equals: true
+    a reset
+    count := a fieldAssignFromConditionalRhs: false
+    self assert: count equals: 0
+
+  // P2-20: Field assign from collect: with mutation in RHS
+  testFieldAssignFromCollectRhs =>
+    a := MutationMatrixActor spawn
+    count := a fieldAssignFromCollectRhs: #(1, 2, 3)
+    self assert: count equals: 3
+    self assert: a getLog equals: #(2, 4, 6)
+
+  // P2-21: fieldAt:put: inside conditional branch
+  testFieldAtPutInConditional =>
+    a := MutationMatrixActor spawn
+    a fieldAtPutInConditional: true
+    self assert: a getCounter equals: 99
+    a reset
+    a fieldAtPutInConditional: false
+    self assert: a getCounter equals: 0
+
+// ── BT-1481: Known codegen bugs (uncomment when fixed) ─────────────
+
+// P2-16: anySatisfy: block with mutation — unbound State1 (BT-1481)
+// testAnySatisfyMutation =>
+//   a := MutationMatrixActor spawn
+//   count := a anySatisfyMutation: #(1, 2, 3)
+//   self assert: a getFlag equals: false
+//   self assert: count equals: 3
+
+// P2-16b: allSatisfy: with a match
+// testAllSatisfyMutation =>
+//   a := MutationMatrixActor spawn
+//   count := a allSatisfyMutation: #(1, 2, 3)
+//   self assert: a getFlag equals: true
+//   self assert: count equals: 3
+
+// P2-22: Block value with mutation — unbound State1 (BT-1481)
+// testBlockValueMutation =>
+//   a := MutationMatrixActor spawn
+//   count := a blockValueMutation
+//   self assert: count equals: 42
