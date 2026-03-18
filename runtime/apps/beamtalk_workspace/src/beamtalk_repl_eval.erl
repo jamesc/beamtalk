@@ -15,7 +15,11 @@
 -include_lib("kernel/include/logger.hrl").
 
 -export([
-    do_eval/2, do_eval/3, do_eval_trace/2, do_show_codegen/2, handle_load/2, handle_load_source/3
+    do_eval/2, do_eval/3,
+    do_eval_trace/2,
+    do_show_codegen/2,
+    handle_load/2, handle_load/3,
+    handle_load_source/3
 ]).
 %% BT-845: ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
 -export([reload_class_file/1, reload_class_file/2]).
@@ -227,6 +231,12 @@ do_show_codegen(Expression, State) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load(Path, State) ->
     beamtalk_repl_loader:handle_load(Path, State).
+
+%% @doc Load a Beamtalk file with pre-built class indexes (BT-1543).
+-spec handle_load(string(), beamtalk_repl_state:state(), map()) ->
+    {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
+handle_load(Path, State, PrebuiltIndexes) ->
+    beamtalk_repl_loader:handle_load(Path, State, PrebuiltIndexes).
 
 %% @doc Load Beamtalk source from an inline binary string (no file path).
 -spec handle_load_source(binary(), string(), beamtalk_repl_state:state()) ->

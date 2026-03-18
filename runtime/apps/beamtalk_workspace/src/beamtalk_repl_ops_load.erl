@@ -372,12 +372,16 @@ topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->
 %% Accumulates in reverse to avoid quadratic ++ and reverses at the end.
 %% Per-file errors are returned as structured maps with path, kind, and message
 %% so callers can handle partial failures programmatically.
+%%
+%% BT-1543: Class indexes are built once before the batch and threaded through
+%% to each compilation, avoiding N redundant scans of the class registry.
 -spec load_files_sequential([string()], pid()) -> {[map()], [map()]}.
 load_files_sequential(Files, SessionPid) ->
+    PrebuiltIndexes = beamtalk_repl_compiler:build_class_indexes(),
     {RevClasses, RevErrors} =
         lists:foldl(
             fun(Path, {ClassesAcc, ErrorsAcc}) ->
-                case beamtalk_repl_shell:load_file(SessionPid, Path) of
+                case beamtalk_repl_shell:load_file(SessionPid, Path, PrebuiltIndexes) of
                     {ok, Classes} ->
                         {lists:reverse(Classes, ClassesAcc), ErrorsAcc};
                     {error, Reason} ->
