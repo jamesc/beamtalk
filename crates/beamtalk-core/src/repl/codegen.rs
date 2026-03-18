@@ -777,9 +777,15 @@ impl<'a> ReplAssembler<'a> {
         };
 
         // Generate element extractions using the (possibly unwrapped) RHS value.
+        // Wrap in push_scope/pop_scope so that the `bind_var` calls inside
+        // `generate_pattern_extractions_from_var` don't leak into the persistent
+        // REPL scope — otherwise later `lookup_var` would find the stale
+        // destructured binding instead of reading from the REPL state map.
+        self.generator.push_scope();
         let (extraction_docs, bound_pairs) = self
             .generator
             .generate_pattern_extractions_from_var(pattern, &rhs_var, "    let ", " in\n")?;
+        self.generator.pop_scope();
         docs.extend(extraction_docs);
 
         // Persist each bound variable to the REPL State map.
