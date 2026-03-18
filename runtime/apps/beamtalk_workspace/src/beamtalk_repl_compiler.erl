@@ -17,13 +17,15 @@
     compile_expression/3,
     compile_expression_trace/3,
     compile_file/4,
+    compile_file/5,
     compile_for_codegen/3,
     compile_file_for_codegen/2,
     compile_for_method_reload/2,
     format_formatted_diagnostics/1,
     is_internal_key/1,
     build_class_superclass_index/0,
-    build_class_module_index/0
+    build_class_module_index/0,
+    build_class_indexes/0
 ]).
 
 %% Exported for testing (only in test builds)
@@ -31,6 +33,7 @@
 -export([
     compile_expression_via_port/3,
     compile_file_via_port/4,
+    compile_file_via_port/5,
     apply_module_name_override/2,
     apply_source_path/2,
     assemble_class_result/5,
@@ -89,6 +92,15 @@ compile_expression_trace(Expression, ModuleName, Bindings) ->
     {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
 compile_file(Source, Path, StdlibMode, ModuleNameOverride) ->
     compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride).
+
+%% @doc Compile a Beamtalk file to bytecode with pre-built class indexes (BT-1543).
+%%
+%% Like `compile_file/4' but accepts pre-built class indexes to avoid
+%% redundant class registry scans during batch loads.
+-spec compile_file(string(), string(), boolean(), binary() | undefined, map()) ->
+    {ok, binary(), [#{name := string(), superclass := string()}], atom()} | {error, term()}.
+compile_file(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes) ->
+    compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes).
 
 %% @doc Compile a Beamtalk expression and return Core Erlang source (for show-codegen).
 %% Does NOT compile to bytecode.
@@ -222,6 +234,15 @@ build_class_module_index() ->
         #{},
         ClassPids
     ).
+
+%% @doc Build both class indexes as a single options map (BT-1543).
+%%
+%% Returns a map suitable for merging into compile options, containing
+%% `class_superclass_index' and/or `class_module_index' keys when non-empty.
+%% Intended to be built once before a batch of compilations.
+-spec build_class_indexes() -> map().
+build_class_indexes() ->
+    add_class_indexes(#{}).
 
 %% @doc Compile Beamtalk source and Core Erlang for method reload (BT-911).
 %%
@@ -363,6 +384,30 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->
     Options1 = apply_module_name_override(Options0, ModuleNameOverride),
     Options2 = apply_source_path(Options1, Path),
     Options = add_class_indexes(Options2),
+    wrap_compiler_errors(
+        fun() ->
+            case beamtalk_compiler:compile(SourceBin, Options) of
+                {ok, #{
+                    core_erlang := CoreErlang,
+                    module_name := ModNameBin,
+                    classes := Classes
+                }} ->
+                    ModuleName = binary_to_atom(ModNameBin, utf8),
+                    compile_file_core(CoreErlang, ModuleName, Classes);
+                {error, Diagnostics} ->
+                    {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
+            end
+        end,
+        wrapped
+    ).
+
+%% Compile file via beamtalk_compiler with pre-built class indexes (BT-1543).
+compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes) ->
+    SourceBin = list_to_binary(Source),
+    Options0 = #{stdlib_mode => StdlibMode},
+    Options1 = apply_module_name_override(Options0, ModuleNameOverride),
+    Options2 = apply_source_path(Options1, Path),
+    Options = maps:merge(Options2, PrebuiltIndexes),
     wrap_compiler_errors(
         fun() ->
             case beamtalk_compiler:compile(SourceBin, Options) of

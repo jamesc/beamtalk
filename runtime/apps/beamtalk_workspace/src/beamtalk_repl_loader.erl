@@ -15,6 +15,7 @@
 
 -export([
     handle_load/2,
+    handle_load/3,
     handle_load_source/3,
     load_class_module/3,
     reload_method_definition/4,
@@ -68,6 +69,39 @@ handle_load(Path, State) ->
                     case
                         beamtalk_repl_compiler:compile_file(
                             Source, Path, StdlibMode, ModuleNameOverride
+                        )
+                    of
+                        {ok, Binary, ClassNames, ModuleName} ->
+                            load_compiled_module(
+                                Binary, ClassNames, ModuleName, Source, Path, State
+                            );
+                        {error, Reason} ->
+                            {error, Reason, State}
+                    end
+            end
+    end.
+
+%% @doc Load a Beamtalk file with pre-built class indexes (BT-1543).
+%%
+%% Like `handle_load/2' but accepts pre-built class indexes to avoid
+%% redundant class registry scans during batch loads (e.g. :load dir).
+-spec handle_load(string(), beamtalk_repl_state:state(), map()) ->
+    {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
+handle_load(Path, State, PrebuiltIndexes) ->
+    case filelib:is_file(Path) of
+        false ->
+            {error, {file_not_found, Path}, State};
+        true ->
+            case file:read_file(Path) of
+                {error, Reason} ->
+                    {error, {read_error, Reason}, State};
+                {ok, SourceBin} ->
+                    Source = binary_to_list(SourceBin),
+                    StdlibMode = is_stdlib_path(Path),
+                    ModuleNameOverride = compute_package_module_name(Path),
+                    case
+                        beamtalk_repl_compiler:compile_file(
+                            Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes
                         )
                     of
                         {ok, Binary, ClassNames, ModuleName} ->
