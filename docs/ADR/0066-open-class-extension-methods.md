@@ -262,9 +262,9 @@ Extensions are node-local — in a distributed BEAM cluster, each node maintains
 - **Newcomer**: "Underscores are familiar from Python and Elixir — no new convention to learn."
 
 ### ETS-only with no compile-time analysis
-- **Smalltalk purist**: "This is exactly how Pharo works — fully dynamic, fully live. Compile-time analysis adds ceremony to what should be a dynamic language."
-- **BEAM veteran**: "ETS is battle-tested. Keep it simple — one dispatch mechanism, not a compile-time pass plus ETS."
-- **Language designer**: "Last-writer-wins is simpler to reason about. The REPL and production should behave identically."
+- **Smalltalk purist**: "This is exactly how Pharo works — fully dynamic, fully live. Pharo has thrived for decades without compile-time extension checking. Compile-time analysis adds ceremony to what should be a dynamic language."
+- **BEAM veteran**: "ETS is battle-tested. Adding a compile-time pass is more moving parts to break. If conflicts are a real problem, add a linter — don't bake it into the compiler."
+- **Language designer**: "The type system doesn't exist yet. Building compile-time infrastructure for a type checker that may be years away is premature — solve real problems now, not hypothetical future ones."
 
 ### Runtime consolidation (Elixir-style)
 - **Language designer**: "A static dispatch index would be faster than ETS for compiled code — even if ETS is O(1), a case clause is zero overhead."
