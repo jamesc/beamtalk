@@ -39,15 +39,15 @@ impl CoreErlangGenerator {
         &mut self,
         expression: &Expression,
     ) -> Result<Document<'static>> {
-        let previous_is_repl_mode = self.is_repl_mode;
+        let previous_is_repl_mode = self.is_repl_mode();
         self.context = CodeGenContext::Repl;
-        self.is_repl_mode = true;
+        self.set_is_repl_mode(true);
         // BT-374 / ADR 0010: REPL runs in workspace context
-        self.workspace_mode = true;
+        self.set_workspace_mode(true);
 
         let doc = self.generate_eval_module_body(expression)?;
 
-        self.is_repl_mode = previous_is_repl_mode;
+        self.set_is_repl_mode(previous_is_repl_mode);
         Ok(doc)
     }
 
@@ -61,10 +61,10 @@ impl CoreErlangGenerator {
         expressions: &[Expression],
         source_texts: &[String],
     ) -> Result<Document<'static>> {
-        let previous_is_repl_mode = self.is_repl_mode;
+        let previous_is_repl_mode = self.is_repl_mode();
         self.context = CodeGenContext::Repl;
-        self.is_repl_mode = true;
-        self.workspace_mode = true;
+        self.set_is_repl_mode(true);
+        self.set_workspace_mode(true);
 
         let doc = if expressions.len() == 1 {
             self.generate_repl_single_traced(&expressions[0], &source_texts[0])?
@@ -72,7 +72,7 @@ impl CoreErlangGenerator {
             self.generate_repl_multi_traced_body(expressions, source_texts)?
         };
 
-        self.is_repl_mode = previous_is_repl_mode;
+        self.set_is_repl_mode(previous_is_repl_mode);
         Ok(doc)
     }
 
@@ -322,14 +322,14 @@ impl CoreErlangGenerator {
             return self.generate_repl_module(&expressions[0]);
         }
 
-        let previous_is_repl_mode = self.is_repl_mode;
+        let previous_is_repl_mode = self.is_repl_mode();
         self.context = CodeGenContext::Repl;
-        self.is_repl_mode = true;
-        self.workspace_mode = true;
+        self.set_is_repl_mode(true);
+        self.set_workspace_mode(true);
 
         let doc = self.generate_repl_multi_module_body(expressions)?;
 
-        self.is_repl_mode = previous_is_repl_mode;
+        self.set_is_repl_mode(previous_is_repl_mode);
         Ok(doc)
     }
 
@@ -341,14 +341,14 @@ impl CoreErlangGenerator {
         &mut self,
         expression: &Expression,
     ) -> Result<Document<'static>> {
-        let previous_is_repl_mode = self.is_repl_mode;
+        let previous_is_repl_mode = self.is_repl_mode();
         self.context = CodeGenContext::Repl;
-        self.is_repl_mode = true;
-        self.workspace_mode = false;
+        self.set_is_repl_mode(true);
+        self.set_workspace_mode(false);
 
         let doc = self.generate_eval_module_body(expression)?;
 
-        self.is_repl_mode = previous_is_repl_mode;
+        self.set_is_repl_mode(previous_is_repl_mode);
         Ok(doc)
     }
 

@@ -161,10 +161,10 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &crate::ast::Expression,
     ) -> Result<(super::document::Document<'static>, bool)> {
-        self.repl_loop_mutated = false;
+        self.set_repl_loop_mutated(false);
         let doc = self.generate_expression(expr)?;
-        let mutated = self.repl_loop_mutated;
-        self.repl_loop_mutated = false;
+        let mutated = self.repl_loop_mutated();
+        self.set_repl_loop_mutated(false);
         Ok((doc, mutated))
     }
 
@@ -206,7 +206,7 @@ impl CoreErlangGenerator {
     /// - Module `"counter"` (no class identity) → `"Counter"`
     /// - Module `"bt@stdlib@string"` with class identity `"String"` → `"String"`
     pub(super) fn class_name(&self) -> String {
-        if let Some(ref identity) = self.class_identity {
+        if let Some(identity) = self.class_identity() {
             return identity.class_name().to_string();
         }
         // Fall back to deriving from module name (snake_case → CamelCase)
@@ -224,9 +224,7 @@ impl CoreErlangGenerator {
 
     /// Whether the current class is sealed (BT-403).
     pub(super) fn is_class_sealed(&self) -> bool {
-        self.class_identity
-            .as_ref()
-            .is_some_and(ClassIdentity::is_sealed)
+        self.class_identity().is_some_and(ClassIdentity::is_sealed)
     }
 
     /// Build the `beamtalk_source` Core Erlang attribute fragment (BT-845/BT-860).

@@ -11,7 +11,7 @@ use super::*;
 #[test]
 fn test_generate_primitive_selector_based() {
     let mut generator = CoreErlangGenerator::new("test");
-    generator.class_identity = Some(util::ClassIdentity::new("Integer"));
+    generator.set_class_identity(Some(util::ClassIdentity::new("Integer")));
     generator.current_method_params = vec!["Other".to_string()];
 
     let doc = generator
@@ -24,7 +24,7 @@ fn test_generate_primitive_selector_based() {
 #[test]
 fn test_generate_primitive_structural_intrinsic() {
     let mut generator = CoreErlangGenerator::new("test");
-    generator.class_identity = Some(util::ClassIdentity::new("Block"));
+    generator.set_class_identity(Some(util::ClassIdentity::new("Block")));
     generator.current_method_params = vec![];
 
     let doc = generator
@@ -39,7 +39,7 @@ fn test_generate_primitive_structural_intrinsic() {
 #[test]
 fn test_generate_primitive_multiple_params() {
     let mut generator = CoreErlangGenerator::new("test");
-    generator.class_identity = Some(util::ClassIdentity::new("Integer"));
+    generator.set_class_identity(Some(util::ClassIdentity::new("Integer")));
     generator.current_method_params = vec!["End".to_string(), "Block".to_string()];
 
     let doc = generator

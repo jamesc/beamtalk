@@ -43,7 +43,7 @@ impl CoreErlangGenerator {
         let class = module.classes.first().ok_or_else(|| {
             CodeGenError::Internal("supervisor module must have a class".to_string())
         })?;
-        self.class_identity = Some(ClassIdentity::new(&class.name.name));
+        self.set_class_identity(Some(ClassIdentity::new(&class.name.name)));
 
         match class.supervisor_kind.as_ref().ok_or_else(|| {
             CodeGenError::Internal("supervisor_kind must be set for supervisor module".to_string())

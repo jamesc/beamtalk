@@ -358,9 +358,9 @@ impl CoreErlangGenerator {
         field: &Identifier,
     ) -> Result<Document<'static>> {
         // BT-412: Class methods access class variables directly from ClassVars map
-        if self.in_class_method {
+        if self.in_class_method() {
             if let Expression::Identifier(recv_id) = receiver {
-                if recv_id.name == "self" && self.class_var_names.contains(field.name.as_str()) {
+                if recv_id.name == "self" && self.class_var_names().contains(field.name.as_str()) {
                     let cv = self.current_class_var();
                     return Ok(docvec![
                         "call 'maps':'get'('",
@@ -445,8 +445,8 @@ impl CoreErlangGenerator {
         // BT-412: Class methods assign to class variables via ClassVars map threading.
         // The generated code leaves `let ClassVarsN = ...` open — the caller (sequential
         // expression handler) must provide the continuation.
-        if self.in_class_method {
-            if self.class_var_names.contains(field_name) {
+        if self.in_class_method() {
+            if self.class_var_names().contains(field_name) {
                 let val_var = self.fresh_temp_var("Val");
                 let current_cv = self.current_class_var();
                 let val_doc = self.expression_doc(value)?;

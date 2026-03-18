@@ -135,7 +135,7 @@ impl CoreErlangGenerator {
 
         let nlr_token_var = if needs_nlr {
             let token_var = self.fresh_temp_var("NlrToken");
-            self.current_nlr_token = Some(token_var.clone());
+            self.set_current_nlr_token(Some(token_var.clone()));
             Some(token_var)
         } else {
             None
@@ -145,14 +145,14 @@ impl CoreErlangGenerator {
         let method_body_doc = match self.generate_method_definition_body_with_reply(method) {
             Ok(doc) => doc,
             Err(e) => {
-                self.current_nlr_token = None;
+                self.set_current_nlr_token(None);
                 self.pop_scope();
                 self.current_method_selector = None;
                 return Err(e);
             }
         };
 
-        self.current_nlr_token = None;
+        self.set_current_nlr_token(None);
 
         // BT-761/BT-764: If NLR was detected, wrap body in a letrec function with
         // try/catch via the shared helper. letrec creates a genuine separate
@@ -1286,7 +1286,7 @@ impl CoreErlangGenerator {
                 method_docs_doc,
                 meta_doc,
                 is_non_constructible,
-                self.stdlib_mode,
+                self.stdlib_mode(),
             );
             class_docs.push(class_doc);
         }
@@ -1597,14 +1597,14 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
     ) -> Result<Document<'static>> {
         // BT-412: Populate class variable names for field access validation
-        self.class_var_names = class
+        *self.class_var_names_mut() = class
             .class_variables
             .iter()
             .map(|cv| cv.name.name.to_string())
             .collect();
 
         // BT-412: Populate class method selectors for self-send routing
-        self.class_method_selectors = class
+        *self.class_method_selectors_mut() = class
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
@@ -1614,9 +1614,10 @@ impl CoreErlangGenerator {
         // BT-996: Populate auto-generated keyword constructor selector for Value subclass: classes.
         // This allows `ClassName slot: value` inside a class method to route to the correct
         // class-side constructor instead of falling through to the instance-side getter.
-        self.class_slot_constructor_selector =
+        self.set_class_slot_constructor_selector(
             crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class)
-                .and_then(|auto| auto.keyword_constructor);
+                .and_then(|auto| auto.keyword_constructor),
+        );
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -1633,14 +1634,14 @@ impl CoreErlangGenerator {
             self.push_scope();
             self.current_method_params.clear();
             self.reset_state_version();
-            self.class_var_version = 0;
-            self.class_var_mutated = false;
+            self.set_class_var_version(0);
+            self.set_class_var_mutated(false);
             // BT-1435: Track current method selector for Logger intrinsic metadata.
             self.current_method_selector = Some(selector_name.to_string());
 
             // Bind ClassSelf as 'self' in scope
             self.bind_var("self", "ClassSelf");
-            self.in_class_method = true;
+            self.set_in_class_method(true);
 
             // Collect parameter names (mutates scope via fresh_var)
             let param_vars: Vec<String> = method
@@ -1660,7 +1661,7 @@ impl CoreErlangGenerator {
 
             let nlr_token_var = if needs_nlr {
                 let token_var = self.fresh_temp_var("NlrToken");
-                self.current_nlr_token = Some(token_var.clone());
+                self.set_current_nlr_token(Some(token_var.clone()));
                 Some(token_var)
             } else {
                 None
@@ -1668,7 +1669,7 @@ impl CoreErlangGenerator {
 
             // Generate body as Document and keep it in the Document pipeline (BT-875).
             let body_doc: Document<'static> = if method.body.is_empty() {
-                self.current_nlr_token = None;
+                self.set_current_nlr_token(None);
                 // Empty class method body returns self (ClassSelf)
                 docvec!["ClassSelf"]
             } else {
@@ -1676,20 +1677,20 @@ impl CoreErlangGenerator {
                     match self.generate_class_method_body(method, &class.class_variables) {
                         Ok(doc) => doc,
                         Err(e) => {
-                            self.current_nlr_token = None;
+                            self.set_current_nlr_token(None);
                             self.pop_scope();
-                            self.in_class_method = false;
+                            self.set_in_class_method(false);
                             self.current_method_selector = None;
                             return Err(e);
                         }
                     };
-                self.current_nlr_token = None;
+                self.set_current_nlr_token(None);
                 // BT-1202: Use self.class_var_mutated (not just whether class vars are declared)
                 // to preserve the {class_var_result, ...} contract. The normal path only wraps
                 // in class_var_result when class vars were actually mutated; the NLR path must
                 // match. class_var_mutated is set by generate_class_method_body when it sees a
                 // class var assignment.
-                let returns_class_var_result = self.class_var_mutated;
+                let returns_class_var_result = self.class_var_mutated();
                 if let Some(ref token_var) = nlr_token_var {
                     // BT-1202: Wrap body in try/catch to catch NLR throws from ^ inside blocks.
                     self.wrap_class_method_body_with_nlr_catch(
@@ -1724,12 +1725,12 @@ impl CoreErlangGenerator {
             docs.push(doc);
 
             self.pop_scope();
-            self.in_class_method = false;
+            self.set_in_class_method(false);
             self.current_method_selector = None;
         }
-        self.class_var_names.clear();
-        self.class_method_selectors.clear();
-        self.class_slot_constructor_selector = None;
+        self.class_var_names_mut().clear();
+        self.class_method_selectors_mut().clear();
+        self.set_class_slot_constructor_selector(None);
         Ok(Document::Vec(docs))
     }
 
@@ -1779,7 +1780,7 @@ impl CoreErlangGenerator {
         if has_class_vars {
             let result_var = self.fresh_temp_var("Ret");
             let value_str = self.expression_doc(value)?;
-            if self.class_var_mutated {
+            if self.class_var_mutated() {
                 let final_cv = self.current_class_var();
                 Ok(docvec![
                     "let ",
@@ -1851,7 +1852,7 @@ impl CoreErlangGenerator {
             // produced by THIS expression, not by a previous field assignment.
             let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
             if let Some(open_scope_result) = open_scope {
-                if self.class_var_mutated {
+                if self.class_var_mutated() {
                     let final_cv = self.current_class_var();
                     Ok(docvec![
                         expr_str,
@@ -1868,7 +1869,7 @@ impl CoreErlangGenerator {
                 } else {
                     Ok(docvec![expr_str, Document::String(open_scope_result)])
                 }
-            } else if self.class_var_mutated {
+            } else if self.class_var_mutated() {
                 let final_cv = self.current_class_var();
                 Ok(docvec![
                     "let ",

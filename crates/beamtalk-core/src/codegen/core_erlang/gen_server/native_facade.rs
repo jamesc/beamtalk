@@ -652,7 +652,7 @@ impl CoreErlangGenerator {
                         ",",
                         line(),
                         "'isConstructible' => 'false'",
-                        if self.stdlib_mode {
+                        if self.stdlib_mode() {
                             docvec![",", line(), "'stdlibMode' => 'true'"]
                         } else {
                             Document::Nil

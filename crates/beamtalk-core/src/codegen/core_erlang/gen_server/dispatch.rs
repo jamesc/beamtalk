@@ -322,7 +322,7 @@ impl CoreErlangGenerator {
 
         let nlr_token_var = if needs_nlr {
             let token_var = self.fresh_temp_var("NlrToken");
-            self.current_nlr_token = Some(token_var.clone());
+            self.set_current_nlr_token(Some(token_var.clone()));
             Some(token_var)
         } else {
             None
@@ -331,12 +331,12 @@ impl CoreErlangGenerator {
         let body_doc = match self.generate_method_body_with_reply(block) {
             Ok(doc) => doc,
             Err(e) => {
-                self.current_nlr_token = None;
+                self.set_current_nlr_token(None);
                 self.pop_scope();
                 return Err(e);
             }
         };
-        self.current_nlr_token = None;
+        self.set_current_nlr_token(None);
 
         // BT-761/BT-764: Wrap body in letrec function with try/catch via shared helper.
         // BT-774: Compose at Document level without intermediate string rendering.

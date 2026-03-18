@@ -216,7 +216,7 @@ impl CoreErlangGenerator {
         docs.push(self.generate_has_method(module)?);
 
         // BT-403: Generate sealed method standalone functions
-        if !self.sealed_method_selectors.is_empty() {
+        if !self.sealed_method_selectors().is_empty() {
             docs.push(self.generate_sealed_method_functions_doc(module)?);
         }
 
@@ -284,19 +284,19 @@ impl CoreErlangGenerator {
     /// BT-403: Include sealed/abstract flags and collect sealed method selectors.
     pub(in crate::codegen::core_erlang) fn setup_class_identity(&mut self, module: &Module) {
         if let Some(class) = module.classes.first() {
-            self.class_identity = Some(ClassIdentity::from_class_def(
+            self.set_class_identity(Some(ClassIdentity::from_class_def(
                 &class.name.name,
                 class.is_sealed,
                 class.is_abstract,
-            ));
+            )));
 
             // Collect sealed method selectors for direct-call optimization.
             // Only sealed classes benefit: the dispatch fast path checks is_class_sealed().
-            self.sealed_method_selectors.clear();
+            self.sealed_method_selectors_mut().clear();
             if class.is_sealed {
                 for method in &class.methods {
                     if method.kind == MethodKind::Primary {
-                        self.sealed_method_selectors
+                        self.sealed_method_selectors_mut()
                             .insert(method.selector.name().to_string());
                     }
                 }
@@ -307,7 +307,7 @@ impl CoreErlangGenerator {
     /// Builds the export fragment for sealed method standalone functions (BT-403).
     fn build_sealed_export_doc(&self, module: &Module) -> Document<'static> {
         // Sort selectors for deterministic output across builds
-        let mut selectors: Vec<String> = self.sealed_method_selectors.iter().cloned().collect();
+        let mut selectors: Vec<String> = self.sealed_method_selectors().iter().cloned().collect();
         selectors.sort();
         let mut parts: Vec<Document<'static>> = Vec::new();
         for sel in selectors {
@@ -413,7 +413,7 @@ impl CoreErlangGenerator {
                 continue;
             }
             let selector_name = method.selector.name().to_string();
-            if !self.sealed_method_selectors.contains(&selector_name) {
+            if !self.sealed_method_selectors().contains(&selector_name) {
                 continue;
             }
 
@@ -444,7 +444,7 @@ impl CoreErlangGenerator {
 
             let nlr_token_var = if needs_nlr {
                 let token_var = self.fresh_temp_var("NlrToken");
-                self.current_nlr_token = Some(token_var.clone());
+                self.set_current_nlr_token(Some(token_var.clone()));
                 Some(token_var)
             } else {
                 None
@@ -453,7 +453,7 @@ impl CoreErlangGenerator {
             // Generate method body with reply tuple (reuse existing codegen)
             let method_body_doc = self.generate_method_definition_body_with_reply(method)?;
 
-            self.current_nlr_token = None;
+            self.set_current_nlr_token(None);
 
             // BT-761/BT-764: Sealed methods are standalone functions (not inside case arms),
             // so the try/catch can be placed directly at function level (no letrec needed).
