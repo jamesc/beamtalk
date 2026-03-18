@@ -411,6 +411,21 @@ Make extensions visible to the gradual type checker via the metadata from Phase 
 
 **ETS is global mutable state:** All extensions share a single ETS table per node. Test isolation requires explicit cleanup between test suites that register extensions. This is inherent to the Pharo-style open class model.
 
+## Implementation Tracking
+
+**Epic:** [BT-1513](https://linear.app/beamtalk/issue/BT-1513)
+
+| Phase | Issue | Title | Size | Status |
+|-------|-------|-------|------|--------|
+| 1b | [BT-1512](https://linear.app/beamtalk/issue/BT-1512) | Fix extension state threading — ETS dispatch discards mutations | S | Backlog |
+| 2 | [BT-1473](https://linear.app/beamtalk/issue/BT-1473) | Document `>>` syntax in language features docs | M | In Review |
+| 2 | [BT-1514](https://linear.app/beamtalk/issue/BT-1514) | Test sealed class extensions via ETS dispatch path | S | Backlog |
+| 3 | [BT-1515](https://linear.app/beamtalk/issue/BT-1515) | Extension collector — scan declarations across project | M | Backlog |
+| 3 | [BT-1516](https://linear.app/beamtalk/issue/BT-1516) | Compile-time conflict detection for duplicate extensions | S | Backlog |
+| 3 | [BT-1517](https://linear.app/beamtalk/issue/BT-1517) | Emit extension method type metadata for the type checker | M | Backlog |
+| 4 | [BT-1518](https://linear.app/beamtalk/issue/BT-1518) | Type checker reads extension metadata — typed method surface | M | Backlog |
+| 4 | [BT-1519](https://linear.app/beamtalk/issue/BT-1519) | Extension type annotation syntax — return types on `>>` | M | Backlog |
+
 ## References
 - Related issues: BT-1473, [BT-1512](https://linear.app/beamtalk/issue/BT-1512) (extension state threading bug)
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (object model, extension registry design), [ADR 0006](0006-unified-method-dispatch.md) (dispatch chain), [ADR 0025](0025-gradual-typing-and-protocols.md) (typing interaction, protocol complement), [ADR 0031](0031-flat-namespace-for-v01.md) (flat namespace assumption), [ADR 0032](0032-early-class-protocol.md) (flattened table removal)
