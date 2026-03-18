@@ -450,7 +450,7 @@ Rejected because mixed mutability within a single class is confusing and doesn't
 - Both keywords parse to `StateDeclaration` in the AST (internal representation unchanged)
 - Add a `declared_keyword` field to `StateDeclaration` to track which keyword was used
 - **ClassKind propagation:** Currently `ClassKind::from_superclass_name` only recognises the literal names `"Actor"` and `"Value"` — so `Collection subclass: Set` gets `ClassKind::Object` even if Collection inherits from Value. The semantic analysis phase must resolve ClassKind by walking the class hierarchy: if any ancestor is Value, the subclass is Value; if any ancestor is Actor, the subclass is Actor. This is required for Collection subclasses (Set, Bag, Interval) and TestCase subclasses to inherit the correct kind.
-- **Affected:** `crates/beamtalk-core/src/parser/`, `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs`
+- **Affected:** `crates/beamtalk-core/src/source_analysis/parser/`, `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs`
 
 ### Phase 2: Compiler warnings (deprecation period)
 - Warn when `state:` is used on `Value subclass:` ("use field: instead")
