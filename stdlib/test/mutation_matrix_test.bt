@@ -197,6 +197,7 @@ TestCase subclass: MutationMatrixTest
   // Most tests below remain commented out — they expose state threading bugs
   // where the compiler loses mutated state across block-accepting selectors.
   // List high-risk cases P3-1..P3-4 are enabled (BT-1486).
+  // Dictionary cases P3-10..P3-11 are enabled (BT-1488).
   // String cases P3-12..P3-15 are enabled (BT-1489).
   // Uncomment additional cases when the corresponding codegen fixes land.
 
@@ -286,17 +287,19 @@ TestCase subclass: MutationMatrixTest
 
   // ── Dictionary ────────────────────────────────────────────────────────
 
-  // P3-10: Dictionary do: with field mutation in iteration block (BT-1485)
-  // testDictDoMutation =>
-  //   a := MutationMatrixActor spawn
-  //   count := a dictDoMutation: #{#a => 10, #b => 20}
-  //   self assert: count equals: 30
+  // P3-10: Dictionary do: with field mutation in iteration block (BT-1488)
+  testDictDoMutation =>
+    a := MutationMatrixActor spawn
+    count := a dictDoMutation: #{#a => 10, #b => 20}
+    self assert: count equals: 30
 
-  // P3-11: Dictionary doWithKey: with field mutation (BT-1485)
-  // testDictDoWithKeyMutation =>
-  //   a := MutationMatrixActor spawn
-  //   count := a dictDoWithKeyMutation: #{#a => 10, #b => 20}
-  //   self assert: count equals: 30
+  // P3-11: Dictionary doWithKey: with field mutation (BT-1488)
+  // Verifies both counter and log mutations are threaded through doWithKey:
+  testDictDoWithKeyMutation =>
+    a := MutationMatrixActor spawn
+    count := a dictDoWithKeyMutation: #{#a => 10, #b => 20}
+    self assert: count equals: 30
+    self assert: (a getLog size) equals: 2
 
   // ── String ────────────────────────────────────────────────────────────
 

@@ -133,6 +133,12 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
+        // Special case: Dictionary iteration messages (do:, doWithKey:, keysAndValuesDo:)
+        // Must come before list messages so dictionary-specific selectors are handled correctly.
+        if let Some(doc) = self.try_generate_dict_message(receiver, selector, arguments)? {
+            return Ok(doc);
+        }
+
         // Special case: List iteration messages (do:, collect:, select:, reject:, inject:into:)
         // These are structural intrinsics that require inline code generation for proper
         // state threading when used inside actor methods with field mutations.
