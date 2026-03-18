@@ -341,6 +341,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
             type_annotation: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            declared_keyword: DeclaredKeyword::default(),
             span: Span::new(0, 10),
         }],
         methods: vec![],

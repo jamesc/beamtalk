@@ -2497,7 +2497,9 @@ impl CoreErlangGenerator {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{ClassDefinition, ClassKind, Identifier, Literal, Module, StateDeclaration};
+    use crate::ast::{
+        ClassDefinition, ClassKind, DeclaredKeyword, Identifier, Literal, Module, StateDeclaration,
+    };
     use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::codegen::core_erlang::value_type_codegen::{
         AutoSlotMethods, compute_auto_slot_methods,
@@ -2517,6 +2519,7 @@ mod tests {
                 default_value: Some(crate::ast::Expression::Literal(Literal::Integer(0), s())),
                 comments: crate::ast::CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: s(),
             })
             .collect();

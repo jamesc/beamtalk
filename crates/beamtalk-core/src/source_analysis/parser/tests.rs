@@ -3,6 +3,7 @@
 
 //! Tests for the Beamtalk recursive descent parser.
 use super::*;
+use crate::ast::DeclaredKeyword;
 use crate::source_analysis::lex_with_eof;
 
 /// Helper to parse a string and check for errors.
@@ -5114,5 +5115,72 @@ fn binary_segment_conflicting_signedness_specifiers_error() {
             .message
             .contains("Conflicting binary segment signedness specifier")),
         "Expected conflict diagnostic, got: {diagnostics:?}"
+    );
+}
+
+// --- field: keyword tests (BT-1527) ---
+
+#[test]
+fn field_declaration_basic() {
+    let source = "Object subclass: Foo\n  field: x\n";
+    let module = parse_ok(source);
+    assert_eq!(module.classes.len(), 1);
+    assert_eq!(module.classes[0].state.len(), 1);
+    let decl = &module.classes[0].state[0];
+    assert_eq!(decl.name.name, "x");
+    assert_eq!(decl.declared_keyword, DeclaredKeyword::Field);
+}
+
+#[test]
+fn field_declaration_with_default() {
+    let source = "Object subclass: Foo\n  field: count = 0\n";
+    let module = parse_ok(source);
+    let decl = &module.classes[0].state[0];
+    assert_eq!(decl.name.name, "count");
+    assert_eq!(decl.declared_keyword, DeclaredKeyword::Field);
+    assert!(decl.default_value.is_some());
+}
+
+#[test]
+fn field_declaration_with_type() {
+    let source = "Object subclass: Foo\n  field: count :: Integer\n";
+    let module = parse_ok(source);
+    let decl = &module.classes[0].state[0];
+    assert_eq!(decl.name.name, "count");
+    assert_eq!(decl.declared_keyword, DeclaredKeyword::Field);
+    assert!(decl.type_annotation.is_some());
+}
+
+#[test]
+fn field_declaration_with_type_and_default() {
+    let source = "Object subclass: Foo\n  field: count :: Integer = 42\n";
+    let module = parse_ok(source);
+    let decl = &module.classes[0].state[0];
+    assert_eq!(decl.name.name, "count");
+    assert_eq!(decl.declared_keyword, DeclaredKeyword::Field);
+    assert!(decl.type_annotation.is_some());
+    assert!(decl.default_value.is_some());
+}
+
+#[test]
+fn state_declaration_has_state_keyword() {
+    let source = "Object subclass: Foo\n  state: x = 0\n";
+    let module = parse_ok(source);
+    let decl = &module.classes[0].state[0];
+    assert_eq!(decl.declared_keyword, DeclaredKeyword::State);
+}
+
+#[test]
+fn mixed_state_and_field_declarations() {
+    let source = "Object subclass: Foo\n  state: x = 0\n  field: y = 1\n";
+    let module = parse_ok(source);
+    assert_eq!(module.classes[0].state.len(), 2);
+    assert_eq!(
+        module.classes[0].state[0].declared_keyword,
+        DeclaredKeyword::State
+    );
+    assert_eq!(
+        module.classes[0].state[1].declared_keyword,
+        DeclaredKeyword::Field
     );
 }

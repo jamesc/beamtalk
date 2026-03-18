@@ -398,9 +398,9 @@ mod tests {
     use super::test_helpers::test_span;
     use super::*;
     use crate::ast::{
-        Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, Expression,
-        ExpressionStatement, Identifier, Literal, MatchArm, MessageSelector, MethodDefinition,
-        Pattern, StateDeclaration, StringSegment,
+        Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword,
+        Expression, ExpressionStatement, Identifier, Literal, MatchArm, MessageSelector,
+        MethodDefinition, Pattern, StateDeclaration, StringSegment,
     };
     use crate::source_analysis::{Severity, Span};
 
@@ -1102,8 +1102,8 @@ mod tests {
         //   getValue => self.value
 
         use crate::ast::{
-            ClassDefinition, ClassKind, CommentAttachment, MessageSelector, MethodDefinition,
-            MethodKind, StateDeclaration,
+            ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword, MessageSelector,
+            MethodDefinition, MethodKind, StateDeclaration,
         };
 
         let get_value_method = MethodDefinition {
@@ -1128,6 +1128,7 @@ mod tests {
             default_value: Some(Expression::Literal(Literal::Integer(0), test_span())),
             comments: CommentAttachment::default(),
             doc_comment: None,
+            declared_keyword: DeclaredKeyword::default(),
             span: test_span(),
         };
 
@@ -1499,8 +1500,8 @@ mod tests {
     #[test]
     fn test_analyse_hierarchy_includes_user_classes() {
         use crate::ast::{
-            ClassDefinition, ClassKind, CommentAttachment, MethodDefinition, MethodKind,
-            StateDeclaration,
+            ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword, MethodDefinition,
+            MethodKind, StateDeclaration,
         };
 
         let class = ClassDefinition {
@@ -1517,6 +1518,7 @@ mod tests {
                 default_value: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: test_span(),
             }],
             methods: vec![MethodDefinition {
@@ -1951,6 +1953,7 @@ mod tests {
                 default_value: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: test_span(),
             }],
             methods: vec![MethodDefinition {
@@ -2016,6 +2019,7 @@ mod tests {
                 default_value: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: test_span(),
             }],
             methods: vec![MethodDefinition {

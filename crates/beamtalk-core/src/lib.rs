@@ -33,8 +33,8 @@ pub mod unparse;
 /// Re-export commonly used types.
 pub mod prelude {
     pub use crate::ast::{
-        ClassDefinition, Expression, Identifier, Literal, MethodDefinition, Module,
-        StateDeclaration, TypeAnnotation,
+        ClassDefinition, DeclaredKeyword, Expression, Identifier, Literal, MethodDefinition,
+        Module, StateDeclaration, TypeAnnotation,
     };
     pub use crate::language_service::{
         Completion, CompletionKind, HoverInfo, LanguageService, Location, Position, ProjectIndex,
