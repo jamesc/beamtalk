@@ -24,7 +24,7 @@
 
 use super::document::Document;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
-use crate::ast::{Block, Expression, Literal, MessageSelector};
+use crate::ast::{Block, Expression, MessageSelector};
 use crate::docvec;
 
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
@@ -453,11 +453,13 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        // String has its own @primitive implementations (collect:, select:, etc.)
-        // that delegate to beamtalk_string, not lists:map/filter.
-        if matches!(receiver, Expression::Literal(Literal::String(_), _)) {
-            return Ok(None);
-        }
+        // BT-1489: String receivers are no longer skipped here. The
+        // non-mutating simple-list-op path already falls back to
+        // `beamtalk_primitive:send(recv, selector, [Body])` for non-list
+        // receivers (which dispatches to beamtalk_string helpers). The
+        // mutating foldl paths now add an `is_binary` result wrapper so
+        // collect:/select:/reject: return a binary string when the
+        // receiver was a string.
 
         match selector {
             MessageSelector::Keyword(parts) => {

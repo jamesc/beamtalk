@@ -236,10 +236,12 @@ Actor subclass: MutationMatrixActor
   // Most methods below remain commented out — they produce unbound State
   // variables in codegen due to missing state threading for these selectors.
   // List high-risk cases P3-1..P3-6 are enabled (BT-1486).
+  // String cases P3-12..P3-15 are enabled (BT-1489).
   // Uncomment additional cases when their corresponding codegen fixes land.
 
   // ── List (high risk) ──────────────────────────────────────────────────
 
+<<<<<<< HEAD
   // P3-1: detect: with field mutation in predicate block (BT-1486)
   detectMutation: items =>
     result := items
@@ -281,92 +283,109 @@ Actor subclass: MutationMatrixActor
     self.log := result
     self.counter
 
-// ── List (medium risk) ────────────────────────────────────────────────
+  // ── List (medium risk) ────────────────────────────────────────────────
 
-// P3-5: takeWhile: with field mutation in predicate block
-// takeWhileMutation: items =>
-//   result := items
-//     takeWhile: [:x |
-//       self.counter := self.counter + 1
-//       x < 10
-//     ]
-//   self.log := result
-//   self.counter
+  // P3-5: takeWhile: with field mutation in predicate block
+  // takeWhileMutation: items =>
+  //   result := items
+  //     takeWhile: [:x |
+  //       self.counter := self.counter + 1
+  //       x < 10
+  //     ]
+  //   self.log := result
+  //   self.counter
 
-// P3-6: dropWhile: with field mutation in predicate block
-// dropWhileMutation: items =>
-//   result := items
-//     dropWhile: [:x |
-//       self.counter := self.counter + 1
-//       x < 10
-//     ]
-//   self.log := result
-//   self.counter
+  // P3-6: dropWhile: with field mutation in predicate block
+  // dropWhileMutation: items =>
+  //   result := items
+  //     dropWhile: [:x |
+  //       self.counter := self.counter + 1
+  //       x < 10
+  //     ]
+  //   self.log := result
+  //   self.counter
 
-// P3-7: groupBy: with field mutation in key block
-// groupByMutation: items =>
-//   _result := items
-//     groupBy: [:x |
-//       self.counter := self.counter + 1
-//       x > 0
-//     ]
-//   self.counter
+  // P3-7: groupBy: with field mutation in key block
+  // groupByMutation: items =>
+  //   _result := items
+  //     groupBy: [:x |
+  //       self.counter := self.counter + 1
+  //       x > 0
+  //     ]
+  //   self.counter
 
-// P3-8: partition: with field mutation in predicate block
-// partitionMutation: items =>
-//   result := items
-//     partition: [:x |
-//       self.counter := self.counter + 1
-//       x > 0
-//     ]
-//   self.log := result
-//   self.counter
+  // P3-8: partition: with field mutation in predicate block
+  // partitionMutation: items =>
+  //   result := items
+  //     partition: [:x |
+  //       self.counter := self.counter + 1
+  //       x > 0
+  //     ]
+  //   self.log := result
+  //   self.counter
 
-// P3-9: sort: with field mutation in comparator block
-// sortMutation: items =>
-//   result := items
-//     sort: [:a :b |
-//       self.counter := self.counter + 1
-//       a < b
-//     ]
-//   self.log := result
-//   self.counter
+  // P3-9: sort: with field mutation in comparator block
+  // sortMutation: items =>
+  //   result := items
+  //     sort: [:a :b |
+  //       self.counter := self.counter + 1
+  //       a < b
+  //     ]
+  //   self.log := result
+  //   self.counter
 
-// ── Dictionary ────────────────────────────────────────────────────────
+  // ── Dictionary ────────────────────────────────────────────────────────
 
-// P3-10: Dictionary do: with field mutation in iteration block
-// dictDoMutation: dict =>
-//   dict
-//     do: [:v |
-//       self.counter := self.counter + v
-//     ]
-//   self.counter
+  // P3-10: Dictionary do: with field mutation in iteration block
+  // dictDoMutation: dict =>
+  //   dict
+  //     do: [:v |
+  //       self.counter := self.counter + v
+  //     ]
+  //   self.counter
 
-// P3-11: Dictionary doWithKey: with field mutation in iteration block
-// dictDoWithKeyMutation: dict =>
-//   dict
-//     doWithKey: [:k :v |
-//       self.counter := self.counter + v
-//       self.log := self.log ++ #(k)
-//     ]
-//   self.counter
+  // P3-11: Dictionary doWithKey: with field mutation in iteration block
+  // dictDoWithKeyMutation: dict =>
+  //   dict
+  //     doWithKey: [:k :v |
+  //       self.counter := self.counter + v
+  //       self.log := self.log ++ #(k)
+  //     ]
+  //   self.counter
 
-// ── String ────────────────────────────────────────────────────────────
+  // ── String ────────────────────────────────────────────────────────────
 
-// P3-12: String do: with field mutation in iteration block
-// stringDoMutation: str =>
-//   str
-//     do: [:ch |
-//       self.counter := self.counter + 1
-//     ]
-//   self.counter
+  // P3-12: String do: with field mutation in iteration block
+  stringDoMutation: str =>
+    str do: [:ch | self.counter := self.counter + 1]
+    self.counter
 
-// P3-13: String collect: with field mutation in mapping block
-// stringCollectMutation: str =>
-//   result := str
-//     collect: [:ch |
-//       self.counter := self.counter + 1
-//       ch
-//     ]
-//   self.log := #(result)
-//   self.counter
+  // P3-13: String collect: with field mutation in mapping block
+  stringCollectMutation: str =>
+    result := str
+      collect: [:ch |
+        self.counter := self.counter + 1
+        ch
+      ]
+    self.log := #(result)
+    self.counter
+
+  // P3-14: String select: with field mutation in predicate block
+  stringSelectMutation: str =>
+    result := str
+      select: [:ch |
+        self.counter := self.counter + 1
+        ch /= "b"
+      ]
+    self.log := #(result)
+    self.counter
+
+  // P3-15: String reject: with field mutation in predicate block
+  stringRejectMutation: str =>
+    result := str
+      reject: [:ch |
+        self.counter := self.counter + 1
+        ch == "b"
+      ]
+    self.log := #(result)
+    self.counter
