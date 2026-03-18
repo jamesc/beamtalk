@@ -109,10 +109,13 @@ TestCase subclass: ExtensionSealedTest
       selector: #meaningOfLife
       fun: extFun
       owner: #test
-    // Class-side ETS extensions may not be dispatched yet; catch DNU
-    result := [
-      Integer perform: #meaningOfLife
-    ] on: Error do: [:e | #not_dispatched]
+    // Class-side ETS extensions may not be dispatched yet; catch DNU specifically
+    result := [Integer perform: #meaningOfLife]
+      on: Exception
+      do: [:e |
+        self assert: e selector equals: #meaningOfLife
+        #not_dispatched
+      ]
     Erlang ets delete: #beamtalk_extensions key: #(#'Integer class', #meaningOfLife)
     // Class-side dispatch does not currently check extensions in ETS —
     // verify the DNU is caught gracefully. When wired up, change to assert: 42.
