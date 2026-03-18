@@ -631,6 +631,7 @@ pub fn write_core_erlang_with_bindings(
     class_module_index: &std::collections::HashMap<String, String>,
     class_superclass_index: &std::collections::HashMap<String, String>,
     source_path: Option<&str>,
+    pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
 ) -> Result<()> {
     if !is_valid_module_name(module_name) {
         miette::bail!(
@@ -648,7 +649,8 @@ pub fn write_core_erlang_with_bindings(
             .with_stdlib_mode(stdlib_mode)
             .with_class_module_index(class_module_index.clone())
             .with_class_superclass_index(class_superclass_index.clone())
-            .with_source_path_opt(source_path),
+            .with_source_path_opt(source_path)
+            .with_class_hierarchy(pre_loaded_classes),
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
@@ -692,6 +694,7 @@ pub fn compile_source(
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        &[],
     )
 }
 
@@ -704,7 +707,11 @@ pub fn compile_source(
 ///
 /// Returns an error if reading, parsing, or code generation fails,
 /// or if any diagnostic has error severity.
-#[allow(clippy::implicit_hasher)]
+#[allow(
+    clippy::implicit_hasher,
+    clippy::too_many_arguments,
+    clippy::too_many_lines
+)]
 #[instrument(skip_all, fields(path = %source_path, module = module_name))]
 pub fn compile_source_with_bindings(
     source_path: &Utf8Path,
@@ -714,6 +721,7 @@ pub fn compile_source_with_bindings(
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
     class_module_index: &std::collections::HashMap<String, String>,
     class_superclass_index: &std::collections::HashMap<String, String>,
+    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 ) -> Result<()> {
     use crate::diagnostic::CompileDiagnostic;
 
@@ -738,7 +746,25 @@ pub fn compile_source_with_bindings(
     // Run semantic analysis (BT-401: sealed enforcement, undefined vars, etc.)
     // Also includes single-class-per-file validation (BT-349)
     // BT-791: Pass options so stdlib_mode gates sealed-superclass exemptions.
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options(&module, options);
+    // BT-1523: Inject cross-file class metadata so the type checker can resolve
+    // methods from parent classes defined in other files. Filter out classes
+    // from the current file to avoid duplicates (they'll be added by build()).
+    let current_file_classes: std::collections::HashSet<&str> = module
+        .classes
+        .iter()
+        .map(|c| c.name.name.as_str())
+        .collect();
+    let cross_file_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
+        pre_loaded_classes
+            .iter()
+            .filter(|ci| !current_file_classes.contains(ci.name.as_str()))
+            .cloned()
+            .collect();
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        options,
+        cross_file_classes.clone(),
+    );
     diagnostics.extend(analysis_result.diagnostics);
 
     // BT-738: Warn when user code shadows a stdlib class name.
@@ -835,6 +861,7 @@ pub fn compile_source_with_bindings(
         class_module_index,
         class_superclass_index,
         embed_source_path,
+        cross_file_classes,
     )
     .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
 
