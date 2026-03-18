@@ -174,15 +174,20 @@ impl<'a> ReplAssembler<'a> {
         expression: &Expression,
     ) -> Result<Document<'static>> {
         let previous_is_repl_mode = self.generator.is_repl_mode();
+        let previous_context = self.generator.context;
+        let previous_workspace_mode = self.generator.workspace_mode();
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
         // BT-374 / ADR 0010: REPL runs in workspace context
         self.generator.set_workspace_mode(true);
 
-        let doc = self.generate_eval_module_body(expression)?;
+        // BT-1482: Restore generator state unconditionally, then propagate error.
+        let result = self.generate_eval_module_body(expression);
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
-        Ok(doc)
+        self.generator.set_workspace_mode(previous_workspace_mode);
+        self.generator.context = previous_context;
+        result
     }
 
     /// Generates a REPL evaluation module in trace mode (BT-1238).
@@ -196,18 +201,23 @@ impl<'a> ReplAssembler<'a> {
         source_texts: &[String],
     ) -> Result<Document<'static>> {
         let previous_is_repl_mode = self.generator.is_repl_mode();
+        let previous_context = self.generator.context;
+        let previous_workspace_mode = self.generator.workspace_mode();
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
         self.generator.set_workspace_mode(true);
 
-        let doc = if expressions.len() == 1 {
-            self.generate_repl_single_traced(&expressions[0], &source_texts[0])?
+        // BT-1482: Restore generator state unconditionally, then propagate error.
+        let result = if expressions.len() == 1 {
+            self.generate_repl_single_traced(&expressions[0], &source_texts[0])
         } else {
-            self.generate_repl_multi_traced_body(expressions, source_texts)?
+            self.generate_repl_multi_traced_body(expressions, source_texts)
         };
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
-        Ok(doc)
+        self.generator.set_workspace_mode(previous_workspace_mode);
+        self.generator.context = previous_context;
+        result
     }
 
     /// Single-expression trace body.
@@ -219,6 +229,21 @@ impl<'a> ReplAssembler<'a> {
         self.generator.push_scope();
         self.generator.bind_var("__bindings__", "Bindings");
 
+        // BT-1482: Delegate to inner method so pop_scope() runs unconditionally.
+        let result = self.generate_repl_single_traced_inner(expression, source_text);
+        self.generator.pop_scope();
+        result
+    }
+
+    /// Inner implementation for single-expression trace body (BT-1482).
+    ///
+    /// Separated from [`generate_repl_single_traced`] so that `pop_scope()`
+    /// runs unconditionally regardless of whether this returns `Ok` or `Err`.
+    fn generate_repl_single_traced_inner(
+        &mut self,
+        expression: &Expression,
+        source_text: &str,
+    ) -> Result<Document<'static>> {
         // DestructureAssignment: generate binding chain + state updates, then build module.
         if let Expression::DestructureAssignment { pattern, value, .. } = expression {
             let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
@@ -246,7 +271,6 @@ impl<'a> ReplAssembler<'a> {
                 "}\n",
             ]);
             parts.push(Document::Str("end\n"));
-            self.generator.pop_scope();
             return Ok(Document::Vec(parts));
         }
 
@@ -287,7 +311,6 @@ impl<'a> ReplAssembler<'a> {
             "end\n",
         ];
 
-        self.generator.pop_scope();
         Ok(doc)
     }
 
@@ -300,6 +323,18 @@ impl<'a> ReplAssembler<'a> {
         self.generator.push_scope();
         self.generator.bind_var("__bindings__", "Bindings");
 
+        // BT-1482: Delegate to inner method so pop_scope() runs unconditionally.
+        let result = self.generate_repl_multi_traced_body_inner(expressions, source_texts);
+        self.generator.pop_scope();
+        result
+    }
+
+    /// Inner implementation for multi-expression trace body (BT-1482).
+    fn generate_repl_multi_traced_body_inner(
+        &mut self,
+        expressions: &[Expression],
+        source_texts: &[String],
+    ) -> Result<Document<'static>> {
         let n = expressions.len();
         let mut body_parts: Vec<Document<'static>> = Vec::new();
         let mut step_pairs: Vec<(String, Document<'static>)> = Vec::new();
@@ -336,7 +371,6 @@ impl<'a> ReplAssembler<'a> {
         all_parts.push(trace_return);
         all_parts.push(Document::Str("\nend\n"));
 
-        self.generator.pop_scope();
         Ok(Document::Vec(all_parts))
     }
 
@@ -440,14 +474,19 @@ impl<'a> ReplAssembler<'a> {
         }
 
         let previous_is_repl_mode = self.generator.is_repl_mode();
+        let previous_context = self.generator.context;
+        let previous_workspace_mode = self.generator.workspace_mode();
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
         self.generator.set_workspace_mode(true);
 
-        let doc = self.generate_repl_multi_module_body(expressions)?;
+        // BT-1482: Restore generator state unconditionally, then propagate error.
+        let result = self.generate_repl_multi_module_body(expressions);
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
-        Ok(doc)
+        self.generator.set_workspace_mode(previous_workspace_mode);
+        self.generator.context = previous_context;
+        result
     }
 
     /// Generates a test evaluation module (no workspace bindings).
@@ -459,14 +498,19 @@ impl<'a> ReplAssembler<'a> {
         expression: &Expression,
     ) -> Result<Document<'static>> {
         let previous_is_repl_mode = self.generator.is_repl_mode();
+        let previous_context = self.generator.context;
+        let previous_workspace_mode = self.generator.workspace_mode();
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
         self.generator.set_workspace_mode(false);
 
-        let doc = self.generate_eval_module_body(expression)?;
+        // BT-1482: Restore generator state unconditionally, then propagate error.
+        let result = self.generate_eval_module_body(expression);
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
-        Ok(doc)
+        self.generator.set_workspace_mode(previous_workspace_mode);
+        self.generator.context = previous_context;
+        result
     }
 
     /// Common eval module body shared by REPL and test codegen.
@@ -475,6 +519,17 @@ impl<'a> ReplAssembler<'a> {
         self.generator.push_scope();
         self.generator.bind_var("__bindings__", "Bindings");
 
+        // BT-1482: Delegate to inner method so pop_scope() runs unconditionally.
+        let result = self.generate_eval_module_body_inner(expression);
+        self.generator.pop_scope();
+        result
+    }
+
+    /// Inner implementation for eval module body (BT-1482).
+    fn generate_eval_module_body_inner(
+        &mut self,
+        expression: &Expression,
+    ) -> Result<Document<'static>> {
         // DestructureAssignment: generate binding chain + state updates, then build module.
         if let Expression::DestructureAssignment { pattern, value, .. } = expression {
             let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
@@ -499,7 +554,6 @@ impl<'a> ReplAssembler<'a> {
                 "}\n",
             ]);
             parts.push(Document::Str("end\n"));
-            self.generator.pop_scope();
             return Ok(Document::Vec(parts));
         }
 
@@ -546,8 +600,6 @@ impl<'a> ReplAssembler<'a> {
             "end\n",
         ];
 
-        self.generator.pop_scope();
-
         Ok(doc)
     }
 
@@ -559,6 +611,17 @@ impl<'a> ReplAssembler<'a> {
         self.generator.push_scope();
         self.generator.bind_var("__bindings__", "Bindings");
 
+        // BT-1482: Delegate to inner method so pop_scope() runs unconditionally.
+        let result = self.generate_repl_multi_module_body_inner(expressions);
+        self.generator.pop_scope();
+        result
+    }
+
+    /// Inner implementation for multi-expression eval module body (BT-1482).
+    fn generate_repl_multi_module_body_inner(
+        &mut self,
+        expressions: &[Expression],
+    ) -> Result<Document<'static>> {
         let n = expressions.len();
         let mut body_parts: Vec<Document<'static>> = Vec::new();
 
@@ -587,8 +650,6 @@ impl<'a> ReplAssembler<'a> {
         all_parts.push(Document::Str(" in\n    "));
         all_parts.push(return_tuple);
         all_parts.push(Document::Str("\nend\n"));
-
-        self.generator.pop_scope();
 
         Ok(Document::Vec(all_parts))
     }
