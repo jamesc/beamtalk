@@ -233,9 +233,10 @@ Actor subclass: MutationMatrixActor
     self.counter
 
   // ── BT-1485: Remaining block-accepting selectors ─────────────────────
-  // All methods below are commented out — they produce unbound State
+  // Most methods below remain commented out — they produce unbound State
   // variables in codegen due to missing state threading for these selectors.
-  // Uncomment each when the corresponding codegen fix lands.
+  // String cases P3-12..P3-15 are enabled (BT-1489).
+  // Uncomment additional cases when their corresponding codegen fixes land.
 
   // ── List (high risk) ──────────────────────────────────────────────────
 
