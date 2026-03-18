@@ -263,6 +263,16 @@ fn analyse_full(
             .add_from_beam_meta(pre_loaded_classes);
     }
 
+    // ADR 0066 Phase 4: Register extension methods into the class hierarchy
+    // so the type checker sees them as part of each class's method surface.
+    // Extension methods defined via `ClassName >> selector => ...` are collected
+    // from the current module and added to the hierarchy before type checking.
+    if !module.method_definitions.is_empty() {
+        let mut ext_index = crate::compilation::extension_index::ExtensionIndex::new();
+        ext_index.add_module(module, std::path::Path::new("<current>"));
+        result.class_hierarchy.register_extensions(&ext_index);
+    }
+
     // Phase 1: Name Resolution
     let mut name_resolver = NameResolver::new();
     name_resolver.define_known_vars(known_vars, module.span);
@@ -3698,5 +3708,118 @@ mod tests {
         let result_new = analyse_with_known_vars_and_classes(&module, &[], vec![]);
         // Same number of diagnostics (both should be empty for valid source)
         assert_eq!(result_base.diagnostics.len(), result_new.diagnostics.len());
+    }
+
+    // --- Extension method integration with type checker (BT-1518) ---
+
+    #[test]
+    fn extension_method_suppresses_dnu_in_analyse_pipeline() {
+        // Extension method `Integer >> factorial` defined in same file.
+        // `42 factorial` should NOT produce a DNU warning.
+        let src = r"
+            Integer >> factorial => 1.
+            42 factorial.
+        ";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+        let result = analyse_with_known_vars(&module, &[]);
+        let dnu: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "Extension method 'factorial' should be visible to type checker, got: {dnu:?}"
+        );
+    }
+
+    #[test]
+    fn extension_method_return_type_flows_through_pipeline() {
+        // Extension `String >> shout -> String => ...`
+        // `"hello" shout size` should resolve: shout returns String, size is on String.
+        let src = r#"
+            String >> shout -> String => "HELLO".
+            "hello" shout size.
+        "#;
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+        let result = analyse_with_known_vars(&module, &[]);
+        let dnu: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "Return type from annotated extension should propagate, got: {dnu:?}"
+        );
+    }
+
+    #[test]
+    fn extension_method_unannotated_no_false_errors() {
+        // Extension `Integer >> fancy => ...` with no return type.
+        // `42 fancy nonExistent` should NOT warn because fancy returns Dynamic.
+        let src = r"
+            Integer >> fancy => 1.
+            42 fancy nonExistent.
+        ";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+        let result = analyse_with_known_vars(&module, &[]);
+        let dnu: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "Unannotated extension returns Dynamic — no false type errors, got: {dnu:?}"
+        );
+    }
+
+    #[test]
+    fn missing_method_still_warns_with_extensions() {
+        // Even with extensions registered, truly missing methods should still warn.
+        let src = r"
+            Integer >> factorial => 1.
+            42 totallyBogus.
+        ";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+        let result = analyse_with_known_vars(&module, &[]);
+        let dnu: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            dnu.len(),
+            1,
+            "Missing method should still produce DNU warning"
+        );
+        assert!(dnu[0].message.contains("totallyBogus"));
+    }
+
+    #[test]
+    fn class_side_extension_suppresses_dnu_in_pipeline() {
+        // Extension `String class >> fromJson: s :: String -> String => ...`
+        // `String fromJson: "{}"` should NOT produce a DNU warning.
+        let src = r#"
+            String class >> fromJson: s :: String -> String => s.
+            String fromJson: "{}".
+        "#;
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+        let result = analyse_with_known_vars(&module, &[]);
+        let dnu: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "Class-side extension should suppress DNU, got: {dnu:?}"
+        );
     }
 }

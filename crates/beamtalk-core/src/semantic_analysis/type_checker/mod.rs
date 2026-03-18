@@ -3381,4 +3381,246 @@ Object subclass: Foo
             "`y` must be bound as Dynamic"
         );
     }
+
+    // --- Extension method type checking tests (BT-1518) ---
+
+    /// Helper to build a hierarchy with an extension method registered.
+    fn hierarchy_with_extension(
+        class_name: &str,
+        selector: &str,
+        arity: usize,
+        param_types: Vec<Option<EcoString>>,
+        return_type: Option<EcoString>,
+    ) -> ClassHierarchy {
+        use crate::compilation::extension_index::{
+            ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
+        };
+        use std::path::PathBuf;
+
+        let mut h = ClassHierarchy::with_builtins();
+        let mut index = ExtensionIndex::new();
+        let key = ExtensionKey {
+            class_name: class_name.into(),
+            side: MethodSide::Instance,
+            selector: selector.into(),
+        };
+        index.entries_mut().insert(
+            key,
+            vec![ExtensionLocation {
+                file_path: PathBuf::from("test.bt"),
+                span: span(),
+                type_info: ExtensionTypeInfo {
+                    arity,
+                    param_types,
+                    return_type,
+                },
+            }],
+        );
+        h.register_extensions(&index);
+        h
+    }
+
+    #[test]
+    fn extension_method_no_dnu_warning() {
+        // `"hello" shout` where `String >> shout` is defined as an extension.
+        // Should NOT produce "does not understand" warning.
+        let hierarchy =
+            hierarchy_with_extension("String", "shout", 0, vec![], Some("String".into()));
+        let module = make_module(vec![msg_send(
+            str_lit("hello"),
+            MessageSelector::Unary("shout".into()),
+            vec![],
+        )]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "Extension method 'shout' should be recognised, got: {dnu:?}"
+        );
+    }
+
+    #[test]
+    fn extension_method_return_type_propagates() {
+        // `"hello" shout` returns String (from extension annotation).
+        // Sending `size` on the result should not warn.
+        let hierarchy =
+            hierarchy_with_extension("String", "shout", 0, vec![], Some("String".into()));
+        let module = make_module(vec![msg_send(
+            msg_send(
+                str_lit("hello"),
+                MessageSelector::Unary("shout".into()),
+                vec![],
+            ),
+            MessageSelector::Unary("size".into()),
+            vec![],
+        )]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "Chained send on extension return type should resolve, got: {dnu:?}"
+        );
+    }
+
+    #[test]
+    fn extension_method_unannotated_returns_dynamic() {
+        // `"hello" shout` with no return type annotation returns Dynamic.
+        // Sending any message on the result should not warn (Dynamic = no checking).
+        let hierarchy = hierarchy_with_extension(
+            "String",
+            "shout",
+            0,
+            vec![],
+            None, // unannotated → Dynamic
+        );
+        let module = make_module(vec![msg_send(
+            msg_send(
+                str_lit("hello"),
+                MessageSelector::Unary("shout".into()),
+                vec![],
+            ),
+            MessageSelector::Unary("nonexistentMethod".into()),
+            vec![],
+        )]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "Unannotated extension returns Dynamic — no false type errors, got: {dnu:?}"
+        );
+    }
+
+    #[test]
+    fn missing_extension_still_warns() {
+        // `"hello" nonExistent` — no extension defined, should still warn.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let module = make_module(vec![msg_send(
+            str_lit("hello"),
+            MessageSelector::Unary("nonExistent".into()),
+            vec![],
+        )]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            dnu.len(),
+            1,
+            "Missing extension should still produce DNU warning"
+        );
+    }
+
+    #[test]
+    fn extension_method_class_side_no_warning() {
+        // `String fromJson: "..."` where `String class >> fromJson:` is an extension.
+        use crate::compilation::extension_index::{
+            ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
+        };
+        use std::path::PathBuf;
+
+        let mut h = ClassHierarchy::with_builtins();
+        let mut index = ExtensionIndex::new();
+        let key = ExtensionKey {
+            class_name: "String".into(),
+            side: MethodSide::Class,
+            selector: "fromJson:".into(),
+        };
+        index.entries_mut().insert(
+            key,
+            vec![ExtensionLocation {
+                file_path: PathBuf::from("test.bt"),
+                span: span(),
+                type_info: ExtensionTypeInfo {
+                    arity: 1,
+                    param_types: vec![Some("String".into())],
+                    return_type: Some("String".into()),
+                },
+            }],
+        );
+        h.register_extensions(&index);
+
+        let module = make_module(vec![msg_send(
+            class_ref("String"),
+            MessageSelector::Keyword(vec![KeywordPart::new("fromJson:", span())]),
+            vec![str_lit("{}")],
+        )]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &h);
+        let dnu: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "Class-side extension should be recognised, got: {dnu:?}"
+        );
+    }
+
+    #[test]
+    fn extension_method_argument_type_checking() {
+        // `42 addString: "hello"` where `Integer >> addString: s :: String -> Integer`
+        // Sending with wrong arg type should warn.
+        let hierarchy = hierarchy_with_extension(
+            "Integer",
+            "addString:",
+            1,
+            vec![Some("String".into())],
+            Some("Integer".into()),
+        );
+        // Correct arg type — no warning
+        let module = make_module(vec![msg_send(
+            int_lit(42),
+            MessageSelector::Keyword(vec![KeywordPart::new("addString:", span())]),
+            vec![str_lit("hello")],
+        )]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let arg_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects"))
+            .collect();
+        assert!(
+            arg_warnings.is_empty(),
+            "Correct argument type should not warn, got: {arg_warnings:?}"
+        );
+
+        // Wrong arg type — should warn
+        let module2 = make_module(vec![msg_send(
+            int_lit(42),
+            MessageSelector::Keyword(vec![KeywordPart::new("addString:", span())]),
+            vec![int_lit(99)],
+        )]);
+        let mut checker2 = TypeChecker::new();
+        checker2.check_module(&module2, &hierarchy);
+        let arg_warnings2: Vec<_> = checker2
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects String"))
+            .collect();
+        assert_eq!(
+            arg_warnings2.len(),
+            1,
+            "Wrong argument type to extension should warn"
+        );
+    }
 }
