@@ -201,8 +201,12 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        // Self-sends with ! in actor context: direct dispatch, discard result
-        if self.context == CodeGenContext::Actor {
+        // Self-sends with ! in actor context: direct dispatch, discard result.
+        // BT-1475: Only use direct safe_dispatch when NOT inside a block (block_depth == 0).
+        // Blocks may execute in a different process (Timer callbacks, cross-actor callbacks),
+        // so self-cast sends inside blocks must route through the actor mailbox via
+        // beamtalk_message_dispatch:cast/3 to reach the actor's gen_server process.
+        if self.context == CodeGenContext::Actor && self.block_depth == 0 {
             if let Expression::Identifier(id) = receiver {
                 if id.name == "self" {
                     return self.generate_self_cast_send(selector, arguments);
@@ -210,7 +214,8 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Non-self cast sends: route through beamtalk_message_dispatch:cast/3
+        // Non-self cast sends (and self-casts inside blocks): route through
+        // beamtalk_message_dispatch:cast/3
         self.generate_runtime_cast(receiver, selector, arguments)
     }
 
@@ -2253,6 +2258,34 @@ mod tests {
         assert!(
             output.contains("'ok'"),
             "actor self cast should return 'ok'. Got: {output}"
+        );
+    }
+
+    /// BT-1475: Self-cast inside a block must route through the actor mailbox,
+    /// not call `safe_dispatch` directly, because the block may execute in a
+    /// different process (Timer callback, cross-actor callback).
+    #[test]
+    fn test_generate_cast_send_actor_self_in_block_uses_mailbox() {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.context = crate::codegen::core_erlang::CodeGenContext::Actor;
+        generator.block_depth = 1; // Simulate being inside a block
+        let receiver = Expression::Identifier(Identifier::new("self", s()));
+        let selector = MessageSelector::Unary("bump".into());
+        let doc = generator
+            .generate_cast_send(&receiver, &selector, &[])
+            .unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("beamtalk_message_dispatch"),
+            "self cast inside block should route through mailbox. Got: {output}"
+        );
+        assert!(
+            output.contains("cast"),
+            "self cast inside block should use cast dispatch. Got: {output}"
+        );
+        assert!(
+            !output.contains("safe_dispatch"),
+            "self cast inside block must NOT use safe_dispatch. Got: {output}"
         );
     }
 }

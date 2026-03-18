@@ -187,7 +187,6 @@ impl CoreErlangGenerator {
     /// - Methods are synchronous functions operating on maps
     /// - No state threading (value types are immutable)
     /// - Methods return new instances rather than mutating
-    #[allow(clippy::too_many_lines)] // large orchestration function — sub-routines handle details
     pub(super) fn generate_value_type_module(
         &mut self,
         module: &Module,
@@ -226,114 +225,18 @@ impl CoreErlangGenerator {
         // This is `None` for `ClassKind::Object` and `ClassKind::Actor`.
         let auto_methods = compute_auto_slot_methods(class);
 
-        // Collect method exports
-        let mut exports = Vec::new();
-        // new/0 is always needed: either the default constructor or a delegating one
-        if !has_explicit_new {
-            exports.push("'new'/0".to_string());
-        }
-        // new/1 (the keyword new: constructor, or the auto-generated initializer) is
-        // suppressed if the class explicitly defines either new: (keyword, which emits
-        // 'new'/1 itself) OR unary new (which also emits 'new'/1 via Self parameter).
-        if !has_explicit_new_with && !has_explicit_new {
-            exports.push("'new'/1".to_string());
-        }
-
-        // Add instance method exports (each takes Self as first parameter)
-        for method in &class.methods {
-            // All methods in a class are instance methods in Beamtalk
-            // MethodKind indicates the method type (currently only Primary)
-            let arity = method.parameters.len() + 1; // +1 for Self parameter
-            let mangled = method.selector.to_erlang_atom();
-            exports.push(format!("'{mangled}'/{arity}"));
-        }
-
-        // BT-923: Auto-generated getter and with*: setter exports for Value subclass:
-        if let Some(ref auto) = auto_methods {
-            for field in &auto.getters {
-                exports.push(format!("'{field}'/1"));
-            }
-            for field in &auto.setters {
-                let with_sel = AutoSlotMethods::with_star_selector(field);
-                exports.push(format!("'{with_sel}'/2"));
-            }
-            if let Some(ref kw_sel) = auto.keyword_constructor {
-                let num_slots = class.state.len();
-                let arity = num_slots + 2; // ClassSelf + ClassVars + N slot args
-                // BT-1408: Hash long keyword constructor atoms to stay within Erlang's
-                // 255-char atom limit.
-                let safe_fn = super::selector_mangler::safe_class_method_fn_name(kw_sel);
-                exports.push(format!("'{safe_fn}'/{arity}"));
-            }
-        }
-
-        // All value types export dispatch/3 and has_method/1
-        // for runtime dispatch via superclass delegation chain
-        exports.push("'dispatch'/3".to_string());
-        // BT-446: All value types also export dispatch/4 for actor hierarchy walk.
-        // The dispatch service checks function_exported(Module, dispatch, 4) and
-        // skips modules that only have dispatch/3.
-        exports.push("'dispatch'/4".to_string());
-        exports.push("'has_method'/1".to_string());
-
-        // All classes export superclass/0 for reflection
-        exports.push("'superclass'/0".to_string());
-
-        // BT-246: Value types register with class system for dynamic dispatch
-        exports.push("'register_class'/0".to_string());
-
-        // BT-942: Static reflection metadata for zero-process queries
-        exports.push("'__beamtalk_meta'/0".to_string());
-
-        // BT-411: Class method exports
-        for method in &class.class_methods {
-            if method.kind == MethodKind::Primary {
-                let arity = method.parameters.len() + 2; // +2 for ClassSelf + ClassVars
-                exports.push(format!("'class_{}'/{arity}", method.selector.name()));
-            }
-        }
+        // Collect all function exports for the module header.
+        let exports = Self::build_value_type_exports(
+            class,
+            auto_methods.as_ref(),
+            has_explicit_new,
+            has_explicit_new_with,
+        );
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
-        // BT-586: Generate spec attributes from type annotations
-        let spec_attrs = spec_codegen::generate_class_specs(class, true);
-        let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
-            .map_or(Document::Nil, |s| docvec![",\n     ", s]);
-
-        // BT-1156: Generate -type t() alias for Value classes with state: declarations.
-        // Also emit -export_type([t/0]) so other Erlang modules can reference Module:t().
-        let class_name_for_type = self.class_name();
-        let type_alias_opt = spec_codegen::generate_type_alias(class, &class_name_for_type);
-        let export_type_suffix: Document<'static> = if type_alias_opt.is_some() {
-            Document::Str(",\n     'export_type' = [{'t', 0}]")
-        } else {
-            Document::Nil
-        };
-        let type_alias_suffix: Document<'static> =
-            type_alias_opt.map_or(Document::Nil, |s| docvec![",\n     ", s]);
-
-        // BT-745: Build beamtalk_class attribute for dependency-ordered bootstrap
-        let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
-
-        // BT-845/BT-860: Build beamtalk_source attribute when source_path is set.
-        let source_path_attr = self.source_path_attr();
-        // BT-940: Build 'file' attribute so BEAM stacktraces show the .bt source file.
-        let file_attr = self.file_attr();
-
-        // Module header
-        let module_name = self.module_name.clone();
-        docs.push(docvec![
-            format!("module '{}' [{}]\n", module_name, exports.join(", ")),
-            "  attributes ['on_load' = [{'register_class', 0}]",
-            beamtalk_class_attr,
-            file_attr,
-            source_path_attr,
-            type_alias_suffix,
-            export_type_suffix,
-            spec_suffix,
-            "]\n",
-            "\n",
-        ]);
+        // Module header with all attributes
+        docs.push(self.build_value_type_module_header(module, class, &exports));
 
         // Generate new/0 - creates instance with default field values
         if !has_explicit_new {
@@ -428,6 +331,127 @@ impl CoreErlangGenerator {
         docs.push(Document::Str("end\n"));
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Builds the export list for a value type module header.
+    ///
+    /// Includes constructors (`new/0`, `new/1`), instance methods, auto-generated
+    /// slot methods (`dispatch/3`, `has_method/1`, `superclass/0`, `register_class/0`), and class methods.
+    fn build_value_type_exports(
+        class: &ClassDefinition,
+        auto_methods: Option<&AutoSlotMethods>,
+        has_explicit_new: bool,
+        has_explicit_new_with: bool,
+    ) -> Vec<String> {
+        let mut exports = Vec::new();
+        // new/0 is always needed: either the default constructor or a delegating one
+        if !has_explicit_new {
+            exports.push("'new'/0".to_string());
+        }
+        // new/1 (the keyword new: constructor, or the auto-generated initializer) is
+        // suppressed if the class explicitly defines either new: (keyword, which emits
+        // 'new'/1 itself) OR unary new (which also emits 'new'/1 via Self parameter).
+        if !has_explicit_new_with && !has_explicit_new {
+            exports.push("'new'/1".to_string());
+        }
+
+        // Add instance method exports (each takes Self as first parameter)
+        for method in &class.methods {
+            let arity = method.parameters.len() + 1; // +1 for Self parameter
+            let mangled = method.selector.to_erlang_atom();
+            exports.push(format!("'{mangled}'/{arity}"));
+        }
+
+        // BT-923: Auto-generated getter and with*: setter exports for Value subclass:
+        if let Some(auto) = auto_methods {
+            for field in &auto.getters {
+                exports.push(format!("'{field}'/1"));
+            }
+            for field in &auto.setters {
+                let with_sel = AutoSlotMethods::with_star_selector(field);
+                exports.push(format!("'{with_sel}'/2"));
+            }
+            if let Some(ref kw_sel) = auto.keyword_constructor {
+                let num_slots = class.state.len();
+                let arity = num_slots + 2; // ClassSelf + ClassVars + N slot args
+                // BT-1408: Hash long keyword constructor atoms to stay within Erlang's 255-char atom limit.
+                let safe_fn = super::selector_mangler::safe_class_method_fn_name(kw_sel);
+                exports.push(format!("'{safe_fn}'/{arity}"));
+            }
+        }
+
+        // All value types export dispatch/3 and has_method/1
+        // for runtime dispatch via superclass delegation chain
+        exports.push("'dispatch'/3".to_string());
+        // BT-446: All value types also export dispatch/4 for actor hierarchy walk.
+        exports.push("'dispatch'/4".to_string());
+        exports.push("'has_method'/1".to_string());
+
+        // All classes export superclass/0 for reflection
+        exports.push("'superclass'/0".to_string());
+
+        // BT-246: Value types register with class system for dynamic dispatch
+        exports.push("'register_class'/0".to_string());
+
+        // BT-942: Static reflection metadata for zero-process queries
+        exports.push("'__beamtalk_meta'/0".to_string());
+
+        // BT-411: Class method exports
+        for method in &class.class_methods {
+            if method.kind == MethodKind::Primary {
+                let arity = method.parameters.len() + 2; // +2 for ClassSelf + ClassVars
+                exports.push(format!("'class_{}'/{arity}", method.selector.name()));
+            }
+        }
+
+        exports
+    }
+
+    /// Builds the Core Erlang `module 'Name' [...] attributes [...]` header document.
+    ///
+    /// Assembles spec attributes, type aliases, and source-path metadata into a single
+    /// module-header document, including `on_load` and `beamtalk_class` annotations.
+    fn build_value_type_module_header(
+        &mut self,
+        module: &Module,
+        class: &ClassDefinition,
+        exports: &[String],
+    ) -> Document<'static> {
+        // BT-586: Generate spec attributes from type annotations
+        let spec_attrs = spec_codegen::generate_class_specs(class, true);
+        let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
+            .map_or(Document::Nil, |s| docvec![",\n     ", s]);
+
+        // BT-1156: Generate -type t() alias for Value classes with state: declarations.
+        let class_name_for_type = self.class_name();
+        let type_alias_opt = spec_codegen::generate_type_alias(class, &class_name_for_type);
+        let export_type_suffix: Document<'static> = if type_alias_opt.is_some() {
+            Document::Str(",\n     'export_type' = [{'t', 0}]")
+        } else {
+            Document::Nil
+        };
+        let type_alias_suffix: Document<'static> =
+            type_alias_opt.map_or(Document::Nil, |s| docvec![",\n     ", s]);
+
+        // BT-745: Build beamtalk_class attribute for dependency-ordered bootstrap
+        let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
+        // BT-845/BT-860/BT-940: Source-path and file attributes for stacktraces
+        let source_path_attr = self.source_path_attr();
+        let file_attr = self.file_attr();
+
+        let module_name = self.module_name.clone();
+        docvec![
+            format!("module '{}' [{}]\n", module_name, exports.join(", ")),
+            "  attributes ['on_load' = [{'register_class', 0}]",
+            beamtalk_class_attr,
+            file_attr,
+            source_path_attr,
+            type_alias_suffix,
+            export_type_suffix,
+            spec_suffix,
+            "]\n",
+            "\n",
+        ]
     }
 
     /// Generates the `new/0` function for a value type.
@@ -1479,7 +1503,6 @@ impl CoreErlangGenerator {
     /// - After the case, variables are rebound via `element/N` extraction
     ///
     /// This makes the updated locals visible to all subsequent method body expressions.
-    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_vt_conditional_open(
         &mut self,
         expr: &Expression,
@@ -1523,108 +1546,23 @@ impl CoreErlangGenerator {
             " in ",
         ]);
 
-        // Helper: generate a branch body that inlines the block and returns
-        // the final values of all captured mutations as a tuple (or single value).
-        let generate_branch = |codegen: &mut Self,
-                               block: &crate::ast::Block|
-         -> Result<Document<'static>> {
-            codegen.push_scope();
-            let body = super::util::collect_body_exprs(&block.body);
-
-            let mut parts: Vec<Document<'static>> = Vec::new();
-            for body_expr in &body {
-                if Self::is_local_var_assignment(body_expr) {
-                    if let Expression::Assignment { target, value, .. } = body_expr {
-                        if let Expression::Identifier(id) = target.as_ref() {
-                            let core_var = codegen
-                                .lookup_var(&id.name)
-                                .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                            let val_doc = codegen.expression_doc(value)?;
-                            parts.push(docvec![
-                                "let ",
-                                Document::String(core_var.clone()),
-                                " = ",
-                                val_doc,
-                                " in ",
-                            ]);
-                            codegen.bind_var(&id.name, &core_var);
-                        }
-                    }
-                } else {
-                    let tmp = codegen.fresh_temp_var("seq");
-                    let doc = codegen.expression_doc(body_expr)?;
-                    parts.push(docvec!["let ", Document::String(tmp), " = ", doc, " in ",]);
-                }
-            }
-
-            // Return the final values of all captured mutations
-            let return_doc = if all_mutations.len() == 1 {
-                let var = &all_mutations[0];
-                let core_var = codegen
-                    .lookup_var(var)
-                    .cloned()
-                    .unwrap_or_else(|| Self::to_core_erlang_var(var));
-                Document::String(core_var)
-            } else {
-                let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{")];
-                for (i, var) in all_mutations.iter().enumerate() {
-                    if i > 0 {
-                        tuple_parts.push(Document::Str(", "));
-                    }
-                    let core_var = codegen
-                        .lookup_var(var)
-                        .cloned()
-                        .unwrap_or_else(|| Self::to_core_erlang_var(var));
-                    tuple_parts.push(Document::String(core_var));
-                }
-                tuple_parts.push(Document::Str("}"));
-                Document::Vec(tuple_parts)
-            };
-            parts.push(return_doc);
-            codegen.pop_scope();
-            Ok(Document::Vec(parts))
-        };
-
-        // Helper: generate a pass-through branch that returns original values unchanged.
-        let generate_passthrough = |cg: &Self| -> Document<'static> {
-            if all_mutations.len() == 1 {
-                let var = &all_mutations[0];
-                let core_var = cg
-                    .lookup_var(var)
-                    .cloned()
-                    .unwrap_or_else(|| Self::to_core_erlang_var(var));
-                Document::String(core_var)
-            } else {
-                let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{")];
-                for (i, var) in all_mutations.iter().enumerate() {
-                    if i > 0 {
-                        tuple_parts.push(Document::Str(", "));
-                    }
-                    let core_var = cg
-                        .lookup_var(var)
-                        .cloned()
-                        .unwrap_or_else(|| Self::to_core_erlang_var(var));
-                    tuple_parts.push(Document::String(core_var));
-                }
-                tuple_parts.push(Document::Str("}"));
-                Document::Vec(tuple_parts)
-            }
-        };
-
         // Generate the true and false branch documents based on the selector.
         let (true_branch, false_branch) = match selector_name.as_str() {
             "ifTrue:" => {
                 let Expression::Block(block) = &arguments[0] else {
                     return Ok(Document::Nil);
                 };
-                (generate_branch(self, block)?, generate_passthrough(self))
+                let tb = self.generate_vt_conditional_branch(block, &all_mutations)?;
+                let fb = self.generate_vt_conditional_passthrough(&all_mutations);
+                (tb, fb)
             }
             "ifFalse:" => {
                 let Expression::Block(block) = &arguments[0] else {
                     return Ok(Document::Nil);
                 };
-                let passthrough = generate_passthrough(self);
-                (passthrough, generate_branch(self, block)?)
+                let passthrough = self.generate_vt_conditional_passthrough(&all_mutations);
+                let fb = self.generate_vt_conditional_branch(block, &all_mutations)?;
+                (passthrough, fb)
             }
             "ifTrue:ifFalse:" => {
                 let Expression::Block(true_block) = &arguments[0] else {
@@ -1633,10 +1571,9 @@ impl CoreErlangGenerator {
                 let Expression::Block(false_block) = &arguments[1] else {
                     return Ok(Document::Nil);
                 };
-                (
-                    generate_branch(self, true_block)?,
-                    generate_branch(self, false_block)?,
-                )
+                let tb = self.generate_vt_conditional_branch(true_block, &all_mutations)?;
+                let fb = self.generate_vt_conditional_branch(false_block, &all_mutations)?;
+                (tb, fb)
             }
             _ => return Ok(Document::Vec(docs)),
         };
@@ -1655,6 +1592,108 @@ impl CoreErlangGenerator {
             " end in ",
         ]);
 
+        self.rebind_vt_conditional_mutations(&mut docs, &all_mutations, &result_var);
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// Generates a branch body for a VT conditional that inlines the block and returns
+    /// the final values of all captured mutations as a value or tuple.
+    fn generate_vt_conditional_branch(
+        &mut self,
+        block: &crate::ast::Block,
+        all_mutations: &[String],
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+        let result = self.build_vt_conditional_branch_parts(block, all_mutations);
+        self.pop_scope();
+        result
+    }
+
+    /// Inner implementation for `generate_vt_conditional_branch`.
+    ///
+    /// Separated so that `push_scope`/`pop_scope` always bracket the fallible
+    /// work regardless of whether `?` propagates an error.
+    fn build_vt_conditional_branch_parts(
+        &mut self,
+        block: &crate::ast::Block,
+        all_mutations: &[String],
+    ) -> Result<Document<'static>> {
+        let body = super::util::collect_body_exprs(&block.body);
+
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for body_expr in &body {
+            if Self::is_local_var_assignment(body_expr) {
+                if let Expression::Assignment { target, value, .. } = body_expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let core_var = self
+                            .lookup_var(&id.name)
+                            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                        let val_doc = self.expression_doc(value)?;
+                        parts.push(docvec![
+                            "let ",
+                            Document::String(core_var.clone()),
+                            " = ",
+                            val_doc,
+                            " in ",
+                        ]);
+                        self.bind_var(&id.name, &core_var);
+                    }
+                }
+            } else {
+                let tmp = self.fresh_temp_var("seq");
+                let doc = self.expression_doc(body_expr)?;
+                parts.push(docvec!["let ", Document::String(tmp), " = ", doc, " in ",]);
+            }
+        }
+
+        // Return the final values of all captured mutations
+        let return_doc = Self::build_vt_mutation_return(self, all_mutations);
+        parts.push(return_doc);
+        Ok(Document::Vec(parts))
+    }
+
+    /// Generates a pass-through branch that returns the current (pre-branch) values of
+    /// all captured mutations, leaving them unchanged.
+    fn generate_vt_conditional_passthrough(&self, all_mutations: &[String]) -> Document<'static> {
+        Self::build_vt_mutation_return(self, all_mutations)
+    }
+
+    /// Builds a return expression for the current values of `all_mutations`:
+    /// a single variable if there is one mutation, or a tuple if there are multiple.
+    fn build_vt_mutation_return(cg: &Self, all_mutations: &[String]) -> Document<'static> {
+        if all_mutations.len() == 1 {
+            let var = &all_mutations[0];
+            let core_var = cg
+                .lookup_var(var)
+                .cloned()
+                .unwrap_or_else(|| Self::to_core_erlang_var(var));
+            Document::String(core_var)
+        } else {
+            let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{")];
+            for (i, var) in all_mutations.iter().enumerate() {
+                if i > 0 {
+                    tuple_parts.push(Document::Str(", "));
+                }
+                let core_var = cg
+                    .lookup_var(var)
+                    .cloned()
+                    .unwrap_or_else(|| Self::to_core_erlang_var(var));
+                tuple_parts.push(Document::String(core_var));
+            }
+            tuple_parts.push(Document::Str("}"));
+            Document::Vec(tuple_parts)
+        }
+    }
+
+    /// Appends `let VAR = <result_var>` or `let VAR = element(N, <result_var>)` bindings
+    /// to `docs`, updating the scope so subsequent expressions see the new variable names.
+    fn rebind_vt_conditional_mutations(
+        &mut self,
+        docs: &mut Vec<Document<'static>>,
+        all_mutations: &[String],
+        result_var: &str,
+    ) {
         if all_mutations.len() == 1 {
             // Single variable: case returns the value directly
             let var = &all_mutations[0];
@@ -1664,7 +1703,7 @@ impl CoreErlangGenerator {
                 "let ",
                 Document::String(core_var),
                 " = ",
-                Document::String(result_var),
+                Document::String(result_var.to_string()),
                 " in ",
             ]);
         } else {
@@ -1678,13 +1717,11 @@ impl CoreErlangGenerator {
                     " = call 'erlang':'element'(",
                     Document::String((i + 1).to_string()),
                     ", ",
-                    Document::String(result_var.clone()),
+                    Document::String(result_var.to_string()),
                     ") in ",
                 ]);
             }
         }
-
-        Ok(Document::Vec(docs))
     }
 
     /// Returns true if the class is a non-instantiable primitive type.
@@ -1787,7 +1824,6 @@ impl CoreErlangGenerator {
     /// BT-447: For classes with zero instance methods (e.g., File), generates a
     /// minimal stub that handles only `class` and `respondsTo:`, delegating
     /// everything else to the superclass.
-    #[allow(clippy::too_many_lines)] // one arm per primitive selector
     fn generate_primitive_dispatch(
         &mut self,
         class: &ClassDefinition,
@@ -1810,68 +1846,14 @@ impl CoreErlangGenerator {
             .semantic_facts
             .class_facts(&class_name)
             .is_some_and(|cf| cf.has_instance_method("asString"));
-        let as_string_branch: Document<'static> = if has_as_string {
-            Document::Vec(Vec::new())
-        } else {
-            let default_str = match class_name.as_str() {
-                "True" => "true",
-                "False" => "false",
-                "UndefinedObject" => "nil",
-                "Block" => "a Block",
-                _ => "",
-            };
-            if default_str.is_empty() {
-                Document::Vec(Vec::new())
-            } else {
-                let binary = Self::core_erlang_binary(default_str);
-                docvec![
-                    "        <'asString'> when 'true' ->\n",
-                    format!("            {binary}\n"),
-                ]
-            }
-        };
+        let as_string_branch = Self::generate_dispatch_as_string_branch(&class_name, has_as_string);
 
         // BT-924: User-defined value objects (ClassKind::Value) store slots in the
         // underlying map and support read-only reflection via fieldAt: and fieldNames.
         // Stdlib primitive types (ClassKind::Object) have no map slots — block both.
         let is_value_class = class.class_kind == ClassKind::Value;
-
-        // fieldNames arm — returns actual slot names for value objects, empty for primitives
-        let field_names_branch: Document<'static> = if is_value_class {
-            docvec![
-                "        <'fieldNames'> when 'true' ->\n",
-                "            call 'beamtalk_reflection':'field_names'(Self)\n",
-            ]
-        } else {
-            docvec![
-                "        <'fieldNames'> when 'true' ->\n",
-                "            []\n",
-            ]
-        };
-
-        // fieldAt: arm — reads from map for value objects, raises error for primitives
-        let field_at_branch: Document<'static> = if is_value_class {
-            docvec![
-                "        <'fieldAt:'> when 'true' ->\n",
-                "            let <FaName> = call 'erlang':'hd'(Args) in\n",
-                "            call 'beamtalk_reflection':'read_field'(FaName, Self)\n",
-            ]
-        } else {
-            let iva_hint = Self::core_erlang_binary(&format!(
-                "{class_name}s are immutable and have no fields."
-            ));
-            docvec![
-                "        <'fieldAt:'> when 'true' ->\n",
-                "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '",
-                Document::String(class_name.clone()),
-                "') in\n",
-                "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'fieldAt:') in\n",
-                "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, ",
-                Document::String(iva_hint),
-                ") in\n",
-                "            call 'beamtalk_error':'raise'(IvaErr2)\n",
-            ]
-        };
+        let (field_names_branch, field_at_branch) =
+            Self::generate_dispatch_reflection_branches(&class_name, is_value_class);
 
         // fieldAt:put: hint — suggest with*: for value objects, assignment for primitives
         let immutable_hint = if is_value_class {
@@ -1885,63 +1867,7 @@ impl CoreErlangGenerator {
         };
 
         // Route each class-defined method to its individual function
-        let mut method_branches: Vec<Document<'static>> = Vec::new();
-        for method in &class.methods {
-            let mangled = method.selector.to_erlang_atom();
-            method_branches.push(Document::String(format!(
-                "        <'{mangled}'> when 'true' ->\n"
-            )));
-
-            // BT-854: Methods with NLR return {Result, State} tuple — unwrap via case.
-            let has_nlr = self
-                .semantic_facts
-                .has_block_nlr_or_walk(&method.span, &method.body);
-
-            // Build the method call arguments: (Self) or (Self, DispArg0, DispArg1, ...)
-            if !method.parameters.is_empty() {
-                // Extract args from Args list: hd(Args), hd(tl(Args)), ...
-                for (i, _param) in method.parameters.iter().enumerate() {
-                    let arg_var = format!("DispArg{i}");
-                    let mut access = "Args".to_string();
-                    for _ in 0..i {
-                        access = format!("call 'erlang':'tl'({access})");
-                    }
-                    method_branches.push(docvec![
-                        "            let <",
-                        arg_var,
-                        "> = call 'erlang':'hd'(",
-                        Document::String(access),
-                        ") in\n",
-                    ]);
-                }
-            }
-
-            // Build the call expression: call 'mod':'method'(Self, DispArg0, ...)
-            let mut call_args: Vec<Document<'static>> = vec![Document::Str("Self")];
-            for i in 0..method.parameters.len() {
-                call_args.push(Document::String(format!(", DispArg{i}")));
-            }
-            let call_doc = docvec![
-                "call '",
-                mod_name.clone(),
-                "':'",
-                mangled.clone(),
-                "'(",
-                Document::Vec(call_args),
-                ")",
-            ];
-
-            if has_nlr {
-                // BT-854: Unwrap {Result, State} tuple from NLR-capable method
-                method_branches.push(docvec![
-                    "            case ",
-                    call_doc,
-                    " of <{DispR, _DispS}> when 'true' -> DispR end\n",
-                ]);
-            } else {
-                method_branches.push(docvec!["            ", call_doc, "\n"]);
-            }
-        }
+        let method_branches = self.generate_dispatch_method_branches(class, &mod_name);
 
         // Default case: extension fallback, then superclass delegation
         let not_found_branch: Document<'static> = if let Some(ref super_mod) = superclass_mod {
@@ -2026,6 +1952,148 @@ impl CoreErlangGenerator {
         ];
 
         Ok(doc)
+    }
+
+    /// Generates the `asString` dispatch arm if the class does not define it itself.
+    ///
+    /// Returns `Document::Nil` (empty vec) when the class already provides `asString`,
+    /// or when there is no built-in default for the class name.
+    fn generate_dispatch_as_string_branch(
+        class_name: &str,
+        has_as_string: bool,
+    ) -> Document<'static> {
+        if has_as_string {
+            return Document::Vec(Vec::new());
+        }
+        let default_str = match class_name {
+            "True" => "true",
+            "False" => "false",
+            "UndefinedObject" => "nil",
+            "Block" => "a Block",
+            _ => "",
+        };
+        if default_str.is_empty() {
+            Document::Vec(Vec::new())
+        } else {
+            let binary = Self::core_erlang_binary(default_str);
+            docvec![
+                "        <'asString'> when 'true' ->\n",
+                format!("            {binary}\n"),
+            ]
+        }
+    }
+
+    /// Generates the `fieldNames` and `fieldAt:` dispatch arms.
+    ///
+    /// Value objects (`ClassKind::Value`) support reflective field access via
+    /// `beamtalk_reflection`. Primitive types raise an immutable-value error.
+    fn generate_dispatch_reflection_branches(
+        class_name: &str,
+        is_value_class: bool,
+    ) -> (Document<'static>, Document<'static>) {
+        let field_names_branch: Document<'static> = if is_value_class {
+            docvec![
+                "        <'fieldNames'> when 'true' ->\n",
+                "            call 'beamtalk_reflection':'field_names'(Self)\n",
+            ]
+        } else {
+            docvec![
+                "        <'fieldNames'> when 'true' ->\n",
+                "            []\n",
+            ]
+        };
+
+        let field_at_branch: Document<'static> = if is_value_class {
+            docvec![
+                "        <'fieldAt:'> when 'true' ->\n",
+                "            let <FaName> = call 'erlang':'hd'(Args) in\n",
+                "            call 'beamtalk_reflection':'read_field'(FaName, Self)\n",
+            ]
+        } else {
+            let iva_hint = Self::core_erlang_binary(&format!(
+                "{class_name}s are immutable and have no fields."
+            ));
+            docvec![
+                "        <'fieldAt:'> when 'true' ->\n",
+                "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '",
+                Document::String(class_name.to_string()),
+                "') in\n",
+                "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'fieldAt:') in\n",
+                "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, ",
+                Document::String(iva_hint),
+                ") in\n",
+                "            call 'beamtalk_error':'raise'(IvaErr2)\n",
+            ]
+        };
+
+        (field_names_branch, field_at_branch)
+    }
+
+    /// Generates dispatch case arms for all class-defined instance methods.
+    ///
+    /// Each arm routes to the module-level function for that method, unwrapping
+    /// `{Result, State}` tuples for NLR-capable methods (BT-854).
+    fn generate_dispatch_method_branches(
+        &self,
+        class: &ClassDefinition,
+        mod_name: &str,
+    ) -> Vec<Document<'static>> {
+        let mut method_branches: Vec<Document<'static>> = Vec::new();
+        for method in &class.methods {
+            let mangled = method.selector.to_erlang_atom();
+            method_branches.push(Document::String(format!(
+                "        <'{mangled}'> when 'true' ->\n"
+            )));
+
+            // BT-854: Methods with NLR return {Result, State} tuple — unwrap via case.
+            let has_nlr = self
+                .semantic_facts
+                .has_block_nlr_or_walk(&method.span, &method.body);
+
+            // Build the method call arguments: (Self) or (Self, DispArg0, DispArg1, ...)
+            if !method.parameters.is_empty() {
+                // Extract args from Args list: hd(Args), hd(tl(Args)), ...
+                for (i, _param) in method.parameters.iter().enumerate() {
+                    let arg_var = format!("DispArg{i}");
+                    let mut access = "Args".to_string();
+                    for _ in 0..i {
+                        access = format!("call 'erlang':'tl'({access})");
+                    }
+                    method_branches.push(docvec![
+                        "            let <",
+                        arg_var,
+                        "> = call 'erlang':'hd'(",
+                        Document::String(access),
+                        ") in\n",
+                    ]);
+                }
+            }
+
+            // Build the call expression: call 'mod':'method'(Self, DispArg0, ...)
+            let mut call_args: Vec<Document<'static>> = vec![Document::Str("Self")];
+            for i in 0..method.parameters.len() {
+                call_args.push(Document::String(format!(", DispArg{i}")));
+            }
+            let call_doc = docvec![
+                Document::String(format!("call '{mod_name}':'")),
+                Document::String(mangled.clone()),
+                Document::Str("'("),
+                Document::Vec(call_args),
+                Document::Str(")"),
+            ];
+
+            if has_nlr {
+                // BT-854: Unwrap {Result, State} tuple from NLR-capable method
+                method_branches.push(docvec![
+                    "            case ",
+                    call_doc,
+                    " of <{DispR, _DispS}> when 'true' -> DispR end\n",
+                ]);
+            } else {
+                method_branches.push(docvec!["            ", call_doc, "\n"]);
+            }
+        }
+        method_branches
     }
 
     /// Generates the `dispatch/4` function for a value type (BT-446).
