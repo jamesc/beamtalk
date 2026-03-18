@@ -43,7 +43,7 @@ Actor subclass: MutationMatrixActor
     self.log := result
     self.counter
 
-  // P0-3: Sequential mutations mid-method with state (BT-1421)
+  // P0-3: Sequential mutations across multiple statements
   sequentialMutations =>
     self.counter := 10
     self.counter := self.counter + 1
@@ -51,9 +51,13 @@ Actor subclass: MutationMatrixActor
     self.counter := self.counter * 2
     self.counter
 
-  // P0-4: Block capture of self across process (BT-1475)
-  blockCaptureAcrossProcess =>
-    self.counter := 42
+  // P0-4: Mutation inside nested conditional blocks
+  nestedConditionalMutation: outer and: inner =>
+    outer
+      ifTrue: [
+        inner ifTrue: [self.counter := self.counter + 100]
+        self.counter := self.counter + 10
+      ]
     self.counter
 
   // ── P1: High risk unexplored patterns ───────────────────────────────

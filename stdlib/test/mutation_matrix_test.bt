@@ -26,18 +26,27 @@ TestCase subclass: MutationMatrixTest
     self assert: count equals: 4
     self assert: a getLog equals: #(1, 3)
 
-  // P0-3: Sequential mutations mid-method with state (BT-1421)
+  // P0-3: Sequential mutations across multiple statements
   testSequentialMutations =>
     a := MutationMatrixActor spawn
     count := a sequentialMutations
     self assert: count equals: 22
     self assert: a getLog equals: #(11)
 
-  // P0-4: Block capture of self across process (BT-1475)
-  testBlockCaptureAcrossProcess =>
+  // P0-4: Mutation inside nested conditional blocks
+  testNestedConditionalMutation =>
     a := MutationMatrixActor spawn
-    count := a blockCaptureAcrossProcess
-    self assert: count equals: 42
+    // Both true: inner mutation (100) + outer mutation (10) = 110
+    count := a nestedConditionalMutation: true and: true
+    self assert: count equals: 110
+    a reset
+    // Outer true, inner false: only outer mutation (10)
+    count := a nestedConditionalMutation: true and: false
+    self assert: count equals: 10
+    a reset
+    // Outer false: no mutation
+    count := a nestedConditionalMutation: false and: true
+    self assert: count equals: 0
 
   // ── P1: High risk unexplored patterns ──────────────────────────────
 
