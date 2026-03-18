@@ -313,9 +313,14 @@ impl ClassHierarchy {
     /// BT-1528: After all entries are inserted, walks the ancestor chain for
     /// each new class to resolve `is_value` correctly for indirect subclasses.
     pub fn add_external_superclasses(&mut self, index: &std::collections::HashMap<String, String>) {
+        // BT-1545: Track which classes are newly inserted so the is_value
+        // fixup loop only walks them and their descendants, not everything.
+        let mut newly_inserted: HashSet<EcoString> = HashSet::new();
+
         for (class_name, superclass_name) in index {
             if !self.classes.contains_key(class_name.as_str()) {
                 let eco_name = EcoString::from(class_name.as_str());
+                newly_inserted.insert(eco_name.clone());
                 self.classes.insert(
                     eco_name,
                     ClassInfo {
@@ -337,11 +342,39 @@ impl ClassHierarchy {
             }
         }
 
+        if newly_inserted.is_empty() {
+            return;
+        }
+
         // BT-1528: Fix is_value for indirect Value subclasses now that all
         // entries are in the hierarchy and superclass_chain can walk them.
-        // Also check existing classes whose ancestors may now be resolvable.
-        let all_class_names: Vec<EcoString> = self.classes.keys().cloned().collect();
-        for class_name in &all_class_names {
+        // BT-1545: Only check newly-inserted classes and existing classes
+        // whose direct superclass is newly inserted (transitively). Use a
+        // worklist to find all affected descendants without walking every
+        // class in the hierarchy.
+        let mut to_check: Vec<EcoString> = newly_inserted.iter().cloned().collect();
+
+        // Find existing classes whose direct superclass is newly inserted,
+        // and transitively their descendants too.
+        let mut visited: HashSet<EcoString> = newly_inserted.clone();
+        let mut i = 0;
+        while i < to_check.len() {
+            let parent = to_check[i].clone();
+            i += 1;
+            // Find all classes whose direct superclass is `parent`.
+            for (name, info) in &self.classes {
+                if !visited.contains(name) {
+                    if let Some(ref sup) = info.superclass {
+                        if sup == &parent {
+                            visited.insert(name.clone());
+                            to_check.push(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        for class_name in &to_check {
             let is_value = self.is_value_subclass(class_name.as_str());
             if let Some(info) = self.classes.get_mut(class_name.as_str()) {
                 if is_value && !info.is_value {
