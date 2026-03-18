@@ -695,6 +695,7 @@ pub fn compile_source(
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &[],
+        None,
     )
 }
 
@@ -713,7 +714,7 @@ pub fn compile_source(
     clippy::too_many_lines
 )]
 #[instrument(skip_all, fields(path = %source_path, module = module_name))]
-pub fn compile_source_with_bindings(
+pub(crate) fn compile_source_with_bindings(
     source_path: &Utf8Path,
     module_name: &str,
     core_output: &Utf8Path,
@@ -722,19 +723,29 @@ pub fn compile_source_with_bindings(
     class_module_index: &std::collections::HashMap<String, String>,
     class_superclass_index: &std::collections::HashMap<String, String>,
     pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    cached_ast: Option<crate::commands::build::CachedAst>,
 ) -> Result<()> {
     use crate::diagnostic::CompileDiagnostic;
 
     debug!("Compiling module '{}' with bindings", module_name);
 
-    // Read source file
-    let source = std::fs::read_to_string(source_path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read file '{source_path}'"))?;
+    // BT-1544: Reuse pre-parsed source + AST from Pass 1 when available,
+    // otherwise read and parse from disk (single-file mode, REPL, etc.).
+    let (source, module, mut diagnostics) = if let Some(cached) = cached_ast {
+        debug!("Using cached AST from Pass 1 for '{}'", source_path);
+        // Reuse parse diagnostics from Pass 1 so syntax errors are still reported.
+        (cached.source, cached.module, cached.diagnostics)
+    } else {
+        // Read source file
+        let source = std::fs::read_to_string(source_path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to read file '{source_path}'"))?;
 
-    // Lex and parse
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, mut diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        // Lex and parse
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        (source, module, diagnostics)
+    };
 
     // Run @primitive validation (ADR 0007)
     let primitive_diags =

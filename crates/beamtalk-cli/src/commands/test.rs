@@ -417,6 +417,7 @@ fn generate_core_file(
         class_module_index,
         class_superclass_index,
         &[],
+        None,
     )
     .wrap_err_with(|| format!("Failed to compile '{source_path}'"))?;
 
@@ -1144,7 +1145,7 @@ fn initialize_pipeline(
         let src_dir = pkg_root.join("src");
         if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
             let source_root = src_dir.exists().then_some(src_dir);
-            if let Ok((pkg_class_map, pkg_super_map, _class_infos)) =
+            if let Ok((pkg_class_map, pkg_super_map, _class_infos, _cached_asts)) =
                 super::build::build_class_module_index(
                     &src_files,
                     source_root.as_deref(),

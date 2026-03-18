@@ -77,11 +77,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     // This allows later files to resolve cross-file class references (including
     // classes in package subdirectories) during code generation.
     let mut file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
-    let (class_module_index, class_superclass_index, all_class_infos) =
+    let (class_module_index, class_superclass_index, all_class_infos, cached_asts) =
         if let Some(ref pkg) = pkg_manifest {
             build_class_module_index(&source_files, source_root.as_deref(), &pkg.name)?
         } else {
-            (HashMap::new(), HashMap::new(), Vec::new())
+            (HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
         };
 
     for file in &source_files {
@@ -113,9 +113,12 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     }
 
     // Pass 2: compile each file with the full class → module index.
+    // BT-1544: Reuse cached ASTs from Pass 1 to avoid re-reading and re-parsing.
+    let mut cached_asts = cached_asts;
     let mut core_files = Vec::new();
     let mut module_names = Vec::new();
     for (file, module_name, core_file) in &file_module_pairs {
+        let cached = cached_asts.remove(file);
         compile_file(
             file,
             module_name,
@@ -124,6 +127,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
             &class_module_index,
             &class_superclass_index,
             &all_class_infos,
+            cached,
         )?;
         core_files.push(core_file.clone());
         module_names.push(module_name.clone());
@@ -460,6 +464,10 @@ fn compute_relative_module(file: &Utf8Path, source_root: Option<&Utf8Path>) -> R
 }
 
 /// Compile a single `.bt` source file to Core Erlang, printing progress.
+///
+/// When `cached_ast` is `Some`, reuses the pre-parsed source and `Module` from
+/// Pass 1 instead of re-reading and re-parsing the file (BT-1544).
+#[allow(clippy::too_many_arguments)]
 fn compile_file(
     path: &Utf8Path,
     module_name: &str,
@@ -468,6 +476,7 @@ fn compile_file(
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
     pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    cached_ast: Option<CachedAst>,
 ) -> Result<()> {
     debug!("Compiling {path}");
 
@@ -480,6 +489,7 @@ fn compile_file(
         class_module_index,
         class_superclass_index,
         pre_loaded_classes,
+        cached_ast,
     )?;
 
     debug!("Generated Core Erlang: {core_file}");
@@ -487,9 +497,18 @@ fn compile_file(
     Ok(())
 }
 
+/// Cached AST from Pass 1 — holds the source text, parsed `Module`, and any
+/// parse diagnostics so Pass 2 can skip re-reading and re-parsing the same file.
+#[derive(Debug)]
+pub(crate) struct CachedAst {
+    pub(crate) source: String,
+    pub(crate) module: beamtalk_core::ast::Module,
+    pub(crate) diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
+}
+
 /// Build class indexes from a set of source files.
 ///
-/// Returns three indexes:
+/// Returns four items:
 /// 1. **Class module index:** Maps class names to compiled module names
 ///    (e.g. `"SchemeEnv"` → `"bt@sicp_example@scheme@env"`).
 /// 2. **Class superclass index:** Maps class names to their direct superclass names
@@ -498,8 +517,10 @@ fn compile_file(
 /// 3. **Class infos:** Full `ClassInfo` entries extracted from all source files.
 ///    BT-1523: Injected into the type checker's hierarchy during Pass 2 so
 ///    cross-file method resolution works without reading BEAM files.
+/// 4. **Cached ASTs:** BT-1544: Maps file paths to their parsed `Module` + source
+///    text so Pass 2 can reuse them instead of re-reading and re-parsing.
 #[allow(clippy::type_complexity)]
-pub fn build_class_module_index(
+pub(crate) fn build_class_module_index(
     source_files: &[Utf8PathBuf],
     source_root: Option<&Utf8Path>,
     pkg_name: &str,
@@ -507,10 +528,12 @@ pub fn build_class_module_index(
     HashMap<String, String>,
     HashMap<String, String>,
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    HashMap<Utf8PathBuf, CachedAst>,
 )> {
     let mut module_index = HashMap::new();
     let mut superclass_index = HashMap::new();
     let mut all_class_infos = Vec::new();
+    let mut cached_asts: HashMap<Utf8PathBuf, CachedAst> = HashMap::new();
 
     for file in source_files {
         let relative_module = compute_relative_module(file, source_root)?;
@@ -563,9 +586,19 @@ pub fn build_class_module_index(
                 superclass_index.remove(&class_name);
             }
         }
+
+        // BT-1544: Cache the parsed AST so Pass 2 doesn't re-read/re-parse.
+        cached_asts.insert(
+            file.clone(),
+            CachedAst {
+                source,
+                module,
+                diagnostics,
+            },
+        );
     }
 
-    Ok((module_index, superclass_index, all_class_infos))
+    Ok((module_index, superclass_index, all_class_infos, cached_asts))
 }
 
 #[cfg(test)]
@@ -662,6 +695,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &[],
+            None,
         );
         assert!(result.is_ok());
         assert!(core_file.exists());
@@ -683,6 +717,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &[],
+            None,
         );
         assert!(result.is_err());
     }
@@ -1046,7 +1081,7 @@ mod tests {
         let nonexistent = Utf8PathBuf::from("/nonexistent/no_such_file.bt");
         let result = build_class_module_index(&[nonexistent], None, "my_app");
         assert!(result.is_ok());
-        let (module_index, superclass_index, _class_infos) = result.unwrap();
+        let (module_index, superclass_index, _class_infos, _cached_asts) = result.unwrap();
         assert!(module_index.is_empty());
         assert!(superclass_index.is_empty());
     }
@@ -1084,7 +1119,7 @@ mod tests {
         );
 
         let source_files = vec![observer_path.join("event_bus.bt")];
-        let (index, _superclass, _class_infos) =
+        let (index, _superclass, _class_infos, _cached_asts) =
             build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
 
         assert_eq!(
@@ -1124,7 +1159,7 @@ mod tests {
         fs::create_dir_all(&build_dir).unwrap();
 
         let source_files = vec![observer_path.join("event_bus.bt"), src_path.join("main.bt")];
-        let (class_module_index, class_superclass_index, all_class_infos) =
+        let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
             build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
 
         // Build the class index — EventBus should map to observer subdir module
@@ -1145,6 +1180,7 @@ mod tests {
             &class_module_index,
             &class_superclass_index,
             &all_class_infos,
+            None,
         )
         .unwrap();
 
@@ -1192,7 +1228,7 @@ mod tests {
             src_path.join("counter.bt"),
             src_path.join("inheriting_counter.bt"),
         ];
-        let (class_module_index, class_superclass_index, all_class_infos) =
+        let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
             build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
 
         // Verify ClassInfo extraction captured Counter's methods
@@ -1224,6 +1260,7 @@ mod tests {
             &class_module_index,
             &class_superclass_index,
             &all_class_infos,
+            None,
         )
         .expect("Cross-file inheritance should compile without errors");
 
