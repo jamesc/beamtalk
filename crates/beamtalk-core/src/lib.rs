@@ -17,6 +17,7 @@
 pub mod ast;
 pub(crate) mod ast_walker;
 pub mod codegen;
+pub mod compilation;
 pub mod erlang;
 pub mod language_service;
 pub mod lint;
