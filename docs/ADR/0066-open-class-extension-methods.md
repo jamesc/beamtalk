@@ -89,7 +89,7 @@ Error: Expected class name before '>>' (got Integer literal)
 
 Extension method files follow the **Swift-style** naming convention:
 
-```
+```text
 stdlib/src/String+JSON.bt       // String >> json => ..., String >> fromJson: => ...
 stdlib/src/Array+Sorting.bt     // Array >> sortBy: => ..., Array >> sorted => ...
 myapp/src/Integer+Roman.bt      // Integer >> asRoman => ...
@@ -133,10 +133,10 @@ An extension cannot override a method defined in the class body — it can only 
 A compile-time analysis pass runs during `just build` to provide static guarantees without changing the runtime:
 
 1. The compiler scans all `StandaloneMethodDefinition` nodes across the project and its dependencies
-2. Duplicate `{Class, Selector}` registrations — from any source, same-package or cross-package — are **compile errors**
+2. Duplicate `{Class, Side, Selector}` registrations — from any source, same-package or cross-package — are **compile errors**. Instance-side and class-side methods are distinct: `String >> json` and `String class >> json` do not conflict (they target different BEAM modules — the class and its metaclass respectively)
 3. Extension declarations are written to a **type metadata file** that the gradual type checker reads, making extensions part of a class's typed method surface
 
-```
+```text
 error[E0451]: extension conflict on String>>json
   --> myapp/src/String+JSON.bt:3:1
    |
@@ -386,7 +386,7 @@ Add a build-time pass that collects extension declarations for conflict detectio
 | Component | Description | Status |
 |-----------|-------------|--------|
 | Extension collector | Scan all `StandaloneMethodDefinition` across project + dependencies | Not started |
-| Conflict detector | Report duplicate `{Class, Selector}` as compile errors | Not started |
+| Conflict detector | Report duplicate `{Class, Side, Selector}` as compile errors | Not started |
 | Type metadata emitter | Write extension declarations to metadata for the type checker | Not started |
 
 ### Phase 3: Type System Integration
