@@ -1194,7 +1194,7 @@ impl CoreErlangGenerator {
                         has_mutations,
                     );
                 }
-            } else if matches!(kind, BodyKind::FoldlDo)
+            } else if !matches!(kind, BodyKind::Letrec)
                 && (self.control_flow_has_mutations(expr)
                     || Self::inline_conditional_writes_threaded(
                         expr,
@@ -1202,8 +1202,11 @@ impl CoreErlangGenerator {
                         &self.semantic_facts,
                     ))
             {
-                // BT-1053: Inline conditional with local mutations returns {Result, NewStateAcc}.
+                // BT-1053/BT-1477: Inline conditional with mutations returns {Result, NewStateAcc}.
                 // Unpack element(2) so subsequent iterations see the updated StateAcc.
+                // This applies to ALL foldl body kinds (do:, collect:, select:, reject:,
+                // inject:into:), not just do: — otherwise mutations inside conditionals
+                // nested within collect:/select:/etc. are silently lost.
                 has_mutations = true;
                 let tuple_var = self.fresh_temp_var("CondResult");
                 let doc = self.generate_expression(expr)?;
@@ -1216,11 +1219,66 @@ impl CoreErlangGenerator {
                     " in let ",
                     Document::String(new_state.clone()),
                     " = call 'erlang':'element'(2, ",
-                    Document::String(tuple_var),
+                    Document::String(tuple_var.clone()),
                     ") in ",
                 ]);
                 if is_last {
-                    docs.push(Document::String(self.current_state_var()));
+                    match kind {
+                        BodyKind::FoldlDo => {
+                            // do: discards the result value, returns state only
+                            docs.push(Document::String(self.current_state_var()));
+                        }
+                        BodyKind::FoldlCollect => {
+                            // collect: needs the result value for the list
+                            let result_var = self.fresh_temp_var("CondVal");
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(result_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(tuple_var),
+                                ") in {[",
+                                Document::String(result_var),
+                                " | AccList], ",
+                                Document::String(self.current_state_var()),
+                                "}",
+                            ]);
+                        }
+                        BodyKind::FoldlFilter { .. } => {
+                            // select:/reject: — bind predicate result for the case expression
+                            if let Some(pv) = pred_var.as_ref() {
+                                let result_var = self.fresh_temp_var("CondVal");
+                                docs.push(docvec![
+                                    "let ",
+                                    Document::String(result_var.clone()),
+                                    " = call 'erlang':'element'(1, ",
+                                    Document::String(tuple_var),
+                                    ") in let ",
+                                    Document::String(pv.clone()),
+                                    " = ",
+                                    Document::String(result_var),
+                                    " in ",
+                                ]);
+                            }
+                        }
+                        BodyKind::FoldlInject => {
+                            // inject:into: — result is the new accumulator
+                            let result_var = self.fresh_temp_var("CondVal");
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(result_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                Document::String(tuple_var),
+                                ") in {",
+                                Document::String(result_var),
+                                ", ",
+                                Document::String(self.current_state_var()),
+                                "}",
+                            ]);
+                        }
+                        BodyKind::Letrec => {
+                            unreachable!("Letrec excluded by guard above");
+                        }
+                    }
                 }
             } else {
                 // Non-assignment expression: handling depends on BodyKind.

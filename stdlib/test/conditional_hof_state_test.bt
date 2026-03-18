@@ -1,0 +1,120 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1477: Tests state threading composition between conditional blocks
+// and HOF blocks — verifies that self.field := mutations persist correctly
+// in all nested combinations
+
+TestCase subclass: ConditionalHofStateTest
+
+  // --- ifTrue: wrapping do: ---
+  testIfTrueDoIncrementTrue =>
+    a := ConditionalHofStateActor spawn
+    // flag=true, list=#(1, 2, 3) => count = 0 + 1 + 2 + 3 = 6
+    self assert: (a conditionalDoIncrement: true with: #(1, 2, 3)) equals: 6
+
+  testIfTrueDoIncrementFalse =>
+    a := ConditionalHofStateActor spawn
+    // flag=false => count unchanged = 0
+    self assert: (a conditionalDoIncrement: false with: #(1, 2, 3)) equals: 0
+
+  testIfTrueDoIncrementAccumulates =>
+    a := ConditionalHofStateActor spawn
+    a conditionalDoIncrement: true with: #(1, 2, 3)
+    // Second call: count = 6 + 4 + 5 = 15
+    self assert: (a conditionalDoIncrement: true with: #(4, 5)) equals: 15
+
+  // --- ifFalse: wrapping do: ---
+  testIfFalseDoDecrementFalse =>
+    a := ConditionalHofStateActor spawn
+    // flag=false => count = 0 - 1 - 2 - 3 = -6
+    self assert: (a conditionalDoDecrement: false with: #(1, 2, 3)) equals: -6
+
+  testIfFalseDoDecrementTrue =>
+    a := ConditionalHofStateActor spawn
+    // flag=true => count unchanged = 0
+    self assert: (a conditionalDoDecrement: true with: #(1, 2, 3)) equals: 0
+
+  // --- ifTrue:ifFalse: wrapping do: ---
+  testIfTrueIfFalseDoTrue =>
+    a := ConditionalHofStateActor spawn
+    // flag=true => count = 0 + 1 + 2 + 3 = 6
+    self assert: (a conditionalDoToggle: true with: #(1, 2, 3)) equals: 6
+
+  testIfTrueIfFalseDoFalse =>
+    a := ConditionalHofStateActor spawn
+    // flag=false => count = 0 - 1 - 2 - 3 = -6
+    self assert: (a conditionalDoToggle: false with: #(1, 2, 3)) equals: -6
+
+  // --- do: wrapping ifTrue: ---
+  testDoWithConditionalMutation =>
+    a := ConditionalHofStateActor spawn
+    // Only positives are added: 3 + 1 + 5 = 9
+    self assert: (a doWithConditionalMutation: #(3, -2, 1, -4, 5)) equals: 9
+
+  testDoWithConditionalMutationAllNegative =>
+    a := ConditionalHofStateActor spawn
+    // No positives => count = 0
+    self assert: (a doWithConditionalMutation: #(-1, -2, -3)) equals: 0
+
+  // --- collect: wrapping ifTrue: ---
+  testCollectWithConditionalMutation =>
+    a := ConditionalHofStateActor spawn
+    // 3 positive items (3, 1, 5), count += 1 for each = 3
+    self assert: (a collectWithConditionalMutation: #(3, -2, 1, -4, 5)) equals: 3
+
+  // --- ifTrue: wrapping collect: ---
+  testConditionalCollectTrue =>
+    a := ConditionalHofStateActor spawn
+    result := a conditionalCollect: true with: #(1, 2, 3)
+    self assert: result equals: #(2, 4, 6)
+
+  testConditionalCollectFalse =>
+    a := ConditionalHofStateActor spawn
+    result := a conditionalCollect: false with: #(1, 2, 3)
+    // items unchanged (empty array)
+    self assert: result equals: #()
+
+  // --- Triple nesting: ifTrue: wrapping do: wrapping ifTrue: ---
+  testTripleNestedTrue =>
+    a := ConditionalHofStateActor spawn
+    // flag=true, list=#(3, -2, 1) => only positives: 3 + 1 = 4
+    self assert: (a tripleNested: true with: #(3, -2, 1)) equals: 4
+
+  testTripleNestedFalse =>
+    a := ConditionalHofStateActor spawn
+    // flag=false => count unchanged = 0
+    self assert: (a tripleNested: false with: #(3, -2, 1)) equals: 0
+
+  // --- select: wrapping ifTrue: ---
+  testSelectWithConditionalMutation =>
+    a := ConditionalHofStateActor spawn
+    // 3 positive items (3, 1, 5), count += 1 for each = 3
+    self assert: (a selectWithConditionalMutation: #(3, -2, 1, -4, 5)) equals: 3
+    self assert: a getItems equals: #(3, 1, 5)
+
+  // --- reject: wrapping ifTrue: ---
+  testRejectWithConditionalMutation =>
+    a := ConditionalHofStateActor spawn
+    // 2 negative items (-2, -4), count += 1 for each = 2
+    self assert: (a rejectWithConditionalMutation: #(3, -2, 1, -4, 5)) equals: 2
+    self assert: a getItems equals: #(3, 1, 5)
+
+  // --- inject:into: wrapping ifTrue: ---
+  testInjectWithConditionalMutation =>
+    a := ConditionalHofStateActor spawn
+    // Sum of positives: 3 + 1 + 5 = 9, count = 3 (three positives)
+    result := a injectWithConditionalMutation: #(3, -2, 1, -4, 5)
+    self assert: result equals: 9
+    self assert: a getCount equals: 3
+
+  // --- collect: with ifTrue:ifFalse: as last expression ---
+  testCollectConditionalLast =>
+    a := ConditionalHofStateActor spawn
+    result := a collectConditionalLast: #(3, -2, 1)
+    // Positives get *10 and count++; negatives pass through
+    self assert: result equals: #(30, -2, 10)
+    // Count should be 2 (two positive items triggered count++)
+    self assert: a getCount equals: 2
+    // Items should persist correctly across calls
+    self assert: a getItems equals: #(30, -2, 10)
