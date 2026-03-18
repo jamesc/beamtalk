@@ -85,7 +85,13 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             }
         }
 
-        total_lint_count += lint_diags.len();
+        // Only count actual lint diagnostics toward the failure threshold.
+        // apply_expect_directives may inject Severity::Warning for stale @expect
+        // annotations — those should be displayed but not fail the command.
+        total_lint_count += lint_diags
+            .iter()
+            .filter(|d| d.severity == Severity::Lint)
+            .count();
     }
 
     if total_lint_count > 0 {
