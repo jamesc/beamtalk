@@ -304,6 +304,7 @@ fn compile_stdlib_file(
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &[],
+        None,
     )
 }
 
