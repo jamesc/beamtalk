@@ -445,11 +445,30 @@ impl CoreErlangGenerator {
                             " = call 'erlang':'element'(1, ",
                             Document::String(tuple_var.clone()),
                             ") in let ",
-                            Document::String(next_state),
+                            Document::String(next_state.clone()),
                             " = call 'erlang':'element'(2, ",
                             Document::String(tuple_var),
                             ") in ",
                         ]);
+                        // Rebind threaded __local__ vars from the updated state
+                        // so subsequent expressions in this branch see fresh values.
+                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
+                            for var in &threaded_vars {
+                                let tv_core = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                                docs.push(docvec![
+                                    "let ",
+                                    Document::String(tv_core.clone()),
+                                    " = call 'maps':'get'('",
+                                    Document::String(Self::local_state_key(var)),
+                                    "', ",
+                                    Document::String(next_state.clone()),
+                                    ") in ",
+                                ]);
+                                self.bind_var(var, &tv_core);
+                            }
+                        }
                         let binding_docs =
                             self.generate_destructure_bindings_from_var(pattern, &actual_val)?;
                         for d in binding_docs {
