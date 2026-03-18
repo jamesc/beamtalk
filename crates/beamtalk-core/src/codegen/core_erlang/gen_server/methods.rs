@@ -30,6 +30,10 @@ pub(in crate::codegen::core_erlang) enum BodyExprKind {
     FieldAssignment,
     /// `self.field := expr` where the RHS is control flow with mutations (BT-1477).
     FieldAssignmentControlFlow,
+    /// `self fieldAt: name put: expr` where the RHS is control flow with field mutations.
+    SelfFieldAtPutControlFlow,
+    /// `{a, b} := expr` where the RHS is control flow with field mutations.
+    DestructureAssignmentControlFlow,
     /// `var := expr` where the RHS is a Tier 2 `value:` call.
     LocalAssignTier2,
     /// `var := expr` where the RHS is control flow with field mutations.
@@ -131,7 +135,7 @@ impl CoreErlangGenerator {
 
         let nlr_token_var = if needs_nlr {
             let token_var = self.fresh_temp_var("NlrToken");
-            self.current_nlr_token = Some(token_var.clone());
+            self.set_current_nlr_token(Some(token_var.clone()));
             Some(token_var)
         } else {
             None
@@ -141,14 +145,14 @@ impl CoreErlangGenerator {
         let method_body_doc = match self.generate_method_definition_body_with_reply(method) {
             Ok(doc) => doc,
             Err(e) => {
-                self.current_nlr_token = None;
+                self.set_current_nlr_token(None);
                 self.pop_scope();
                 self.current_method_selector = None;
                 return Err(e);
             }
         };
 
-        self.current_nlr_token = None;
+        self.set_current_nlr_token(None);
 
         // BT-761/BT-764: If NLR was detected, wrap body in a letrec function with
         // try/catch via the shared helper. letrec creates a genuine separate
@@ -254,8 +258,13 @@ impl CoreErlangGenerator {
             return BodyExprKind::EarlyReturn;
         }
 
-        // self fieldAt: name put: val
+        // self fieldAt: name put: val — sub-classify by RHS for control flow with mutations
         if self.is_self_field_at_put(expr) {
+            if let Expression::MessageSend { arguments, .. } = expr {
+                if arguments.len() >= 2 && self.control_flow_has_mutations(&arguments[1]) {
+                    return BodyExprKind::SelfFieldAtPutControlFlow;
+                }
+            }
             return BodyExprKind::SelfFieldAtPut;
         }
 
@@ -286,8 +295,11 @@ impl CoreErlangGenerator {
             return BodyExprKind::LocalAssignPure;
         }
 
-        // {a, b} := expr
-        if matches!(expr, Expression::DestructureAssignment { .. }) {
+        // {a, b} := expr — sub-classify by RHS for control flow with mutations
+        if let Expression::DestructureAssignment { value, .. } = expr {
+            if self.control_flow_has_mutations(value) {
+                return BodyExprKind::DestructureAssignmentControlFlow;
+            }
             return BodyExprKind::DestructureAssignment;
         }
 
@@ -576,6 +588,131 @@ impl CoreErlangGenerator {
                                 ]);
                             }
                         }
+                    }
+                }
+                // BT-1479: self fieldAt: name put: expr where RHS is control flow returning {Value, State}
+                BodyExprKind::SelfFieldAtPutControlFlow => {
+                    if let Expression::MessageSend { arguments, .. } = expr {
+                        let name_var = self.fresh_temp_var("Name");
+                        let name_code = self.expression_doc(&arguments[0])?;
+                        let tuple_var = self.fresh_temp_var("CfTuple");
+                        let val_var = self.fresh_temp_var("CfVal");
+                        let val_code = self.expression_doc(&arguments[1])?;
+                        let rhs_state = self.fresh_temp_var("CfState");
+                        let field_state = self.next_state_var();
+                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+                            "let ",
+                            Document::String(name_var.clone()),
+                            " = ",
+                            name_code,
+                            " in let ",
+                            Document::String(tuple_var.clone()),
+                            " = ",
+                            val_code,
+                            " in let ",
+                            Document::String(val_var.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            Document::String(tuple_var.clone()),
+                            ") in let ",
+                            Document::String(rhs_state.clone()),
+                            " = call 'erlang':'element'(2, ",
+                            Document::String(tuple_var),
+                            ") in let ",
+                            Document::String(field_state.clone()),
+                            " = call 'maps':'put'(",
+                            Document::String(name_var),
+                            ", ",
+                            Document::String(val_var.clone()),
+                            ", ",
+                            Document::String(rhs_state),
+                            ") in ",
+                        ]];
+                        if let Some(threaded_vars) =
+                            self.get_control_flow_threaded_vars(&arguments[1])
+                        {
+                            for var in &threaded_vars {
+                                let tv_core = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                                doc_parts.push(docvec![
+                                    "let ",
+                                    Document::String(tv_core),
+                                    " = call 'maps':'get'('",
+                                    Document::String(Self::local_state_key(var)),
+                                    "', ",
+                                    Document::String(field_state.clone()),
+                                    ") in ",
+                                ]);
+                            }
+                        }
+                        docs.push(Document::Vec(doc_parts));
+                        if is_last {
+                            docs.push(docvec![
+                                "{'reply', ",
+                                Document::String(val_var),
+                                ", ",
+                                Document::String(field_state),
+                                "}",
+                            ]);
+                        }
+                    }
+                }
+                // BT-1479: {a, b} := expr where RHS is control flow returning {Value, State}
+                BodyExprKind::DestructureAssignmentControlFlow => {
+                    if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                        // Evaluate RHS (returns {Value, State} tuple)
+                        let tuple_var = self.fresh_temp_var("CfTuple");
+                        let actual_val = self.fresh_temp_var("CfVal");
+                        let value_str = self.expression_doc(value)?;
+                        let new_state = self.peek_next_state_var();
+                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+                            "let ",
+                            Document::String(tuple_var.clone()),
+                            " = ",
+                            value_str,
+                            " in let ",
+                            Document::String(actual_val.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            Document::String(tuple_var.clone()),
+                            ") in let ",
+                            Document::String(new_state.clone()),
+                            " = call 'erlang':'element'(2, ",
+                            Document::String(tuple_var),
+                            ") in ",
+                        ]];
+                        let _ = self.next_state_var();
+                        // Extract threaded locals
+                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
+                            for var in &threaded_vars {
+                                let tv_core = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                                doc_parts.push(docvec![
+                                    "let ",
+                                    Document::String(tv_core),
+                                    " = call 'maps':'get'('",
+                                    Document::String(Self::local_state_key(var)),
+                                    "', ",
+                                    Document::String(new_state.clone()),
+                                    ") in ",
+                                ]);
+                            }
+                        }
+                        docs.push(Document::Vec(doc_parts));
+                        // Now destructure the unpacked value
+                        let binding_docs =
+                            self.generate_destructure_bindings_from_var(pattern, &actual_val)?;
+                        for d in binding_docs {
+                            docs.push(d);
+                        }
+                    }
+                    if is_last {
+                        let post_state = self.current_state_var();
+                        docs.push(docvec![
+                            "{'reply', 'nil', ",
+                            Document::String(post_state),
+                            "}",
+                        ]);
                     }
                 }
                 BodyExprKind::LocalAssignTier2 => {
@@ -1149,7 +1286,7 @@ impl CoreErlangGenerator {
                 method_docs_doc,
                 meta_doc,
                 is_non_constructible,
-                self.stdlib_mode,
+                self.stdlib_mode(),
             );
             class_docs.push(class_doc);
         }
@@ -1460,14 +1597,14 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
     ) -> Result<Document<'static>> {
         // BT-412: Populate class variable names for field access validation
-        self.class_var_names = class
+        *self.class_var_names_mut() = class
             .class_variables
             .iter()
             .map(|cv| cv.name.name.to_string())
             .collect();
 
         // BT-412: Populate class method selectors for self-send routing
-        self.class_method_selectors = class
+        *self.class_method_selectors_mut() = class
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
@@ -1477,9 +1614,10 @@ impl CoreErlangGenerator {
         // BT-996: Populate auto-generated keyword constructor selector for Value subclass: classes.
         // This allows `ClassName slot: value` inside a class method to route to the correct
         // class-side constructor instead of falling through to the instance-side getter.
-        self.class_slot_constructor_selector =
+        self.set_class_slot_constructor_selector(
             crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class)
-                .and_then(|auto| auto.keyword_constructor);
+                .and_then(|auto| auto.keyword_constructor),
+        );
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -1496,14 +1634,14 @@ impl CoreErlangGenerator {
             self.push_scope();
             self.current_method_params.clear();
             self.reset_state_version();
-            self.class_var_version = 0;
-            self.class_var_mutated = false;
+            self.set_class_var_version(0);
+            self.set_class_var_mutated(false);
             // BT-1435: Track current method selector for Logger intrinsic metadata.
             self.current_method_selector = Some(selector_name.to_string());
 
             // Bind ClassSelf as 'self' in scope
             self.bind_var("self", "ClassSelf");
-            self.in_class_method = true;
+            self.set_in_class_method(true);
 
             // Collect parameter names (mutates scope via fresh_var)
             let param_vars: Vec<String> = method
@@ -1523,7 +1661,7 @@ impl CoreErlangGenerator {
 
             let nlr_token_var = if needs_nlr {
                 let token_var = self.fresh_temp_var("NlrToken");
-                self.current_nlr_token = Some(token_var.clone());
+                self.set_current_nlr_token(Some(token_var.clone()));
                 Some(token_var)
             } else {
                 None
@@ -1531,7 +1669,7 @@ impl CoreErlangGenerator {
 
             // Generate body as Document and keep it in the Document pipeline (BT-875).
             let body_doc: Document<'static> = if method.body.is_empty() {
-                self.current_nlr_token = None;
+                self.set_current_nlr_token(None);
                 // Empty class method body returns self (ClassSelf)
                 docvec!["ClassSelf"]
             } else {
@@ -1539,20 +1677,20 @@ impl CoreErlangGenerator {
                     match self.generate_class_method_body(method, &class.class_variables) {
                         Ok(doc) => doc,
                         Err(e) => {
-                            self.current_nlr_token = None;
+                            self.set_current_nlr_token(None);
                             self.pop_scope();
-                            self.in_class_method = false;
+                            self.set_in_class_method(false);
                             self.current_method_selector = None;
                             return Err(e);
                         }
                     };
-                self.current_nlr_token = None;
+                self.set_current_nlr_token(None);
                 // BT-1202: Use self.class_var_mutated (not just whether class vars are declared)
                 // to preserve the {class_var_result, ...} contract. The normal path only wraps
                 // in class_var_result when class vars were actually mutated; the NLR path must
                 // match. class_var_mutated is set by generate_class_method_body when it sees a
                 // class var assignment.
-                let returns_class_var_result = self.class_var_mutated;
+                let returns_class_var_result = self.class_var_mutated();
                 if let Some(ref token_var) = nlr_token_var {
                     // BT-1202: Wrap body in try/catch to catch NLR throws from ^ inside blocks.
                     self.wrap_class_method_body_with_nlr_catch(
@@ -1587,12 +1725,12 @@ impl CoreErlangGenerator {
             docs.push(doc);
 
             self.pop_scope();
-            self.in_class_method = false;
+            self.set_in_class_method(false);
             self.current_method_selector = None;
         }
-        self.class_var_names.clear();
-        self.class_method_selectors.clear();
-        self.class_slot_constructor_selector = None;
+        self.class_var_names_mut().clear();
+        self.class_method_selectors_mut().clear();
+        self.set_class_slot_constructor_selector(None);
         Ok(Document::Vec(docs))
     }
 
@@ -1642,7 +1780,7 @@ impl CoreErlangGenerator {
         if has_class_vars {
             let result_var = self.fresh_temp_var("Ret");
             let value_str = self.expression_doc(value)?;
-            if self.class_var_mutated {
+            if self.class_var_mutated() {
                 let final_cv = self.current_class_var();
                 Ok(docvec![
                     "let ",
@@ -1714,7 +1852,7 @@ impl CoreErlangGenerator {
             // produced by THIS expression, not by a previous field assignment.
             let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
             if let Some(open_scope_result) = open_scope {
-                if self.class_var_mutated {
+                if self.class_var_mutated() {
                     let final_cv = self.current_class_var();
                     Ok(docvec![
                         expr_str,
@@ -1731,7 +1869,7 @@ impl CoreErlangGenerator {
                 } else {
                     Ok(docvec![expr_str, Document::String(open_scope_result)])
                 }
-            } else if self.class_var_mutated {
+            } else if self.class_var_mutated() {
                 let final_cv = self.current_class_var();
                 Ok(docvec![
                     "let ",

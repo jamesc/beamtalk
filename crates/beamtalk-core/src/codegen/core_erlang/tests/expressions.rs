@@ -257,7 +257,7 @@ fn test_class_name_derived_from_module() {
 #[test]
 fn test_class_name_from_identity_overrides_module() {
     let mut generator = CoreErlangGenerator::new("bt@stdlib@string");
-    generator.class_identity = Some(util::ClassIdentity::new("String"));
+    generator.set_class_identity(Some(util::ClassIdentity::new("String")));
     assert_eq!(generator.class_name(), "String");
 }
 

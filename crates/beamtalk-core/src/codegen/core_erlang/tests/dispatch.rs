@@ -421,10 +421,14 @@ fn test_bt906_class_module_index_overrides_heuristic_for_spawn() {
     // resolve `EventBus` → `bt@my_pkg@event_bus` (heuristic, no subdirectory).
     // With the index, it must use the explicit entry `bt@gang_of_four@observer@event_bus`.
     let mut generator = CoreErlangGenerator::new("bt@my_pkg@main");
-    generator.class_module_index.insert(
-        "EventBus".to_string(),
-        "bt@gang_of_four@observer@event_bus".to_string(),
-    );
+    {
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "EventBus".to_string(),
+            "bt@gang_of_four@observer@event_bus".to_string(),
+        );
+        generator.set_class_module_index(index);
+    }
 
     let receiver = Expression::ClassReference {
         name: Identifier::new("EventBus", Span::new(0, 8)),

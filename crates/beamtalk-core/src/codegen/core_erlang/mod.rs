@@ -98,7 +98,6 @@ mod intrinsics;
 mod operators;
 pub mod primitive_bindings;
 mod primitives;
-mod repl_codegen;
 pub mod selector_mangler;
 mod spec_codegen;
 mod state_codegen;
@@ -121,16 +120,32 @@ use std::fmt;
 use thiserror::Error;
 use variable_context::VariableContext;
 
+/// Display wrapper for `Option<Span>` in error messages.
+///
+/// Renders `" at offset N"` when a span is present, or empty string when `None`.
+/// Consumers with source text (REPL, MCP) should use the raw `Span` for richer
+/// formatting (Miette highlighting, "line N, col C", etc.).
+struct DisplayOptionalSpan<'a>(&'a Option<Span>);
+
+impl fmt::Display for DisplayOptionalSpan<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(s) => write!(f, " at offset {}", s.start()),
+            None => Ok(()),
+        }
+    }
+}
+
 /// Errors that can occur during code generation.
 #[derive(Debug, Error)]
 pub enum CodeGenError {
     /// Unsupported language feature.
-    #[error("unsupported feature: {feature} at {location}")]
+    #[error("unsupported feature: {feature}{}", DisplayOptionalSpan(.span))]
     UnsupportedFeature {
         /// The feature that is not yet supported.
         feature: String,
-        /// Source location.
-        location: String,
+        /// Source span for rich error rendering (Miette / MCP).
+        span: Option<Span>,
     },
 
     /// Internal code generation error.
@@ -214,6 +229,20 @@ pub enum CodeGenError {
         /// Method-specific fix suggestion.
         hint: String,
     },
+}
+
+impl CodeGenError {
+    /// Returns the source span associated with this error, if any.
+    ///
+    /// Consumers with source text can use this for rich error formatting:
+    /// - REPL: Miette source highlighting
+    /// - MCP: "line N, col C" format
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            CodeGenError::UnsupportedFeature { span, .. } => *span,
+            _ => None,
+        }
+    }
 }
 
 /// Result type for code generation operations.
@@ -477,9 +506,9 @@ pub fn generate_module_with_warnings(
         CoreErlangGenerator::new(&options.module_name)
     };
     generator.source_text = options.source_text;
-    generator.workspace_mode = options.workspace_mode;
-    generator.stdlib_mode = options.stdlib_mode;
-    generator.class_module_index = options.class_module_index;
+    generator.set_workspace_mode(options.workspace_mode);
+    generator.set_stdlib_mode(options.stdlib_mode);
+    generator.set_class_module_index(options.class_module_index);
     generator.source_path = options.source_path;
     // BT-1343: Override codegen diagnostics flag if explicitly set in options.
     if let Some(enabled) = options.codegen_diagnostics {
@@ -535,79 +564,57 @@ pub fn generate_module_with_warnings(
     })
 }
 
+// ── REPL / test expression generation (BT-1462) ────────────────────────
+//
+// These functions delegate to `crate::repl::codegen`, which owns the
+// REPL-specific module assembly logic. They are kept here as thin
+// re-exports for backward compatibility with existing callers.
+
 /// Generates Core Erlang for a REPL expression.
 ///
-/// This creates a simple module that evaluates a single expression and
-/// returns its value. Used by the REPL for interactive evaluation.
-///
-/// The generated module has an `eval/1` function that takes a bindings map
-/// and returns the expression result.
-///
-/// # Arguments
-///
-/// * `expression` - The Beamtalk expression AST to evaluate
-/// * `module_name` - Unique module name (e.g., `repl_eval_42`)
+/// Delegates to [`crate::repl::codegen::generate_repl_expression`].
 ///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> Result<String> {
-    let mut generator = CoreErlangGenerator::new(module_name);
-    let doc = generator.generate_repl_module(expression)?;
-    Ok(doc.to_pretty_string())
+    crate::repl::codegen::generate_repl_expression(expression, module_name)
 }
 
 /// Generates Core Erlang for multiple REPL expressions (BT-780).
 ///
-/// Like [`generate_repl_expression`] but accepts a slice of expressions,
-/// generating a single `eval/1` that evaluates all of them in sequence
-/// and threads the bindings State between identifier assignments.
-///
-/// For a single expression, delegates to [`generate_repl_expression`].
+/// Delegates to [`crate::repl::codegen::generate_repl_expressions`].
 ///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_repl_expressions(expressions: &[Expression], module_name: &str) -> Result<String> {
-    generate_repl_expressions_with_index(expressions, module_name, std::collections::HashMap::new())
+    crate::repl::codegen::generate_repl_expressions(expressions, module_name)
 }
 
 /// Generates Core Erlang for multiple REPL expressions with a class module index.
 ///
-/// Like [`generate_repl_expressions`] but accepts a `class_module_index` that maps
-/// class names to their compiled module names (e.g. `"Counter"` → `"bt@getting_started@counter"`).
-/// This is needed in workspace/package mode so that `compiled_module_name` resolves
-/// class references correctly instead of falling back to the heuristic prefix.
+/// Delegates to [`crate::repl::codegen::generate_repl_expressions_with_index`].
 ///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
-#[allow(clippy::implicit_hasher)] // concrete HashMap matches internal generator field type
+#[allow(clippy::implicit_hasher)]
 pub fn generate_repl_expressions_with_index(
     expressions: &[Expression],
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
 ) -> Result<String> {
-    if expressions.is_empty() {
-        return Err(CodeGenError::UnsupportedFeature {
-            feature: "empty expression list".to_string(),
-            location: module_name.to_string(),
-        });
-    }
-    let mut generator = CoreErlangGenerator::new(module_name);
-    generator.class_module_index = class_module_index;
-    let doc = generator.generate_repl_module_multi(expressions)?;
-    Ok(doc.to_pretty_string())
+    crate::repl::codegen::generate_repl_expressions_with_index(
+        expressions,
+        module_name,
+        class_module_index,
+    )
 }
 
 /// Generates Core Erlang for trace mode eval (BT-1238).
 ///
-/// Generates a single `eval/1` module that returns
-/// `{[{<<"source0">>, Value0}, ...], FinalState}` instead of `{Result, FinalState}`,
-/// giving the Erlang runtime a value for every top-level statement in one call.
-/// Source texts are extracted from the input using expression spans.
-///
-/// Intended for the `eval` MCP tool's `trace: true` mode.
+/// Delegates to [`crate::repl::codegen::generate_repl_expressions_traced`].
 ///
 /// # Errors
 ///
@@ -619,41 +626,23 @@ pub fn generate_repl_expressions_traced(
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
 ) -> Result<String> {
-    if expressions.is_empty() {
-        return Err(CodeGenError::UnsupportedFeature {
-            feature: "empty expression list".to_string(),
-            location: module_name.to_string(),
-        });
-    }
-    let source_texts: Vec<String> = expressions
-        .iter()
-        .map(|expr| {
-            let span = expr.span();
-            let start = span.start() as usize;
-            let end = span.end() as usize;
-            source.get(start..end).unwrap_or("").trim().to_string()
-        })
-        .collect();
-
-    let mut generator = CoreErlangGenerator::new(module_name);
-    generator.class_module_index = class_module_index;
-    let doc = generator.generate_repl_module_multi_traced(expressions, &source_texts)?;
-    Ok(doc.to_pretty_string())
+    crate::repl::codegen::generate_repl_expressions_traced(
+        expressions,
+        source,
+        module_name,
+        class_module_index,
+    )
 }
 
 /// Generates Core Erlang for a test expression (no workspace bindings).
 ///
-/// Like [`generate_repl_expression`] but with `workspace_mode = false`,
-/// suitable for compiled tests that don't need REPL/workspace context.
-/// Used by `beamtalk test-stdlib` (ADR 0014 Phase 1).
+/// Delegates to [`crate::repl::codegen::generate_test_expression`].
 ///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_test_expression(expression: &Expression, module_name: &str) -> Result<String> {
-    let mut generator = CoreErlangGenerator::new(module_name);
-    let doc = generator.generate_test_module(expression)?;
-    Ok(doc.to_pretty_string())
+    crate::repl::codegen::generate_test_expression(expression, module_name)
 }
 
 /// Generates Core Erlang code with default module name `bt_module`.
@@ -674,7 +663,7 @@ pub fn generate(module: &Module) -> Result<String> {
 /// - **`ValueType`**: Plain maps with immutable semantics, sync function calls
 /// - **Repl**: Interactive evaluation with bindings map
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CodeGenContext {
+pub(crate) enum CodeGenContext {
     /// Generating code for an actor class (`gen_server` with async messaging).
     ///
     /// - Field access: `call 'maps':'get'('field', State)`
@@ -805,6 +794,136 @@ impl NlrValueTypeCatchVars {
     }
 }
 
+/// BT-1461: REPL-specific codegen state.
+///
+/// Groups fields that are only relevant when generating REPL evaluation code.
+/// Wrapped as `Option<ReplContext>` on the generator — `Some` when in REPL mode,
+/// `None` during batch compilation. Accessor methods on `CoreErlangGenerator`
+/// provide defaults when the context is absent.
+#[derive(Debug, Clone)]
+pub(crate) struct ReplContext {
+    /// BT-153: Whether we're generating REPL code (vs module code).
+    /// In REPL mode, local variable assignments should update bindings.
+    pub is_repl_mode: bool,
+    /// BT-245/BT-1448: Internal flag for REPL mutation-threaded expressions.
+    ///
+    /// Set deep inside `generate_expression` when mutation-threaded control flow
+    /// (loops, conditionals, exception handlers, inline value calls) produces a
+    /// `{Result, State}` tuple that the REPL must unpack.
+    ///
+    /// External callers should use `expression_doc_with_repl_mutation_tracking()`
+    /// instead of reading this field directly.
+    pub repl_loop_mutated: bool,
+    /// BT-374 / ADR 0010 / ADR 0019: Whether workspace bindings are available.
+    /// When true (REPL/workspace context), class references resolve through
+    /// session bindings or class registry. When false (batch compile),
+    /// class references go directly to the class registry.
+    pub workspace_mode: bool,
+}
+
+impl ReplContext {
+    /// Creates a new `ReplContext` with default values.
+    pub(crate) fn new() -> Self {
+        Self {
+            is_repl_mode: false,
+            repl_loop_mutated: false,
+            workspace_mode: false,
+        }
+    }
+}
+
+/// BT-1461: Class/actor-specific codegen state.
+///
+/// Groups fields that are only relevant when compiling a class definition
+/// (actor or value type). Wrapped as `Option<ClassContext>` on the generator —
+/// `Some` when a class is being compiled, `None` for standalone REPL expressions.
+#[derive(Debug, Clone)]
+pub(super) struct ClassContext {
+    /// Identity of the class currently being compiled (if any).
+    /// Set from the AST class definition at the start of module generation.
+    class_identity: Option<util::ClassIdentity>,
+    /// BT-412: Names of class variables in the current class.
+    /// Used to distinguish class variable access from instance field access in class methods.
+    pub class_var_names: std::collections::HashSet<String>,
+    /// BT-412: Selector names of class methods in the current class.
+    /// Used to route self-sends to class method functions vs module exports.
+    pub class_method_selectors: std::collections::HashSet<String>,
+    /// BT-412: State version counter for class variable threading.
+    pub class_var_version: usize,
+    /// BT-412: Whether class variables were mutated in the current method.
+    pub class_var_mutated: bool,
+    /// Class name → compiled module name index for resolving cross-file class references.
+    ///
+    /// Populated from `CodegenOptions::class_module_index` before generation begins.
+    /// Used by `compiled_module_name` to resolve subdirectory classes correctly.
+    pub class_module_index: std::collections::HashMap<String, String>,
+    /// BT-403: Selectors of sealed methods in the current class.
+    /// Used to generate standalone functions and direct call dispatch.
+    pub sealed_method_selectors: std::collections::HashSet<String>,
+    /// BT-996: Auto-generated keyword constructor selector for Value subclass: classes.
+    /// E.g. `"symName:"` for a single-slot class, `"x:y:"` for two slots.
+    /// Set during class method codegen to route `ClassName slot: value` to the correct
+    /// class-side constructor instead of the instance-side getter.
+    pub class_slot_constructor_selector: Option<String>,
+    /// BT-426: Whether we're currently generating a class-side method body.
+    /// When true, field access/assignment should produce a compile error.
+    pub in_class_method: bool,
+    /// BT-791: Whether this module is being compiled in stdlib mode.
+    /// When true, `generate_register_class` emits `stdlibMode => true` in the builder
+    /// state so the runtime can bypass the sealed-superclass check for stdlib loading.
+    pub stdlib_mode: bool,
+}
+
+impl ClassContext {
+    /// Creates a new `ClassContext` with default values.
+    fn new() -> Self {
+        Self {
+            class_identity: None,
+            class_var_names: std::collections::HashSet::new(),
+            class_method_selectors: std::collections::HashSet::new(),
+            class_var_version: 0,
+            class_var_mutated: false,
+            class_module_index: std::collections::HashMap::new(),
+            sealed_method_selectors: std::collections::HashSet::new(),
+            class_slot_constructor_selector: None,
+            in_class_method: false,
+            stdlib_mode: false,
+        }
+    }
+}
+
+/// BT-1461: Value-type-specific codegen state.
+///
+/// Groups fields that are only relevant when compiling value type (non-actor)
+/// class methods. Wrapped as `Option<ValueTypeContext>` on the generator —
+/// `Some` when compiling value type code, `None` otherwise.
+#[derive(Debug, Clone)]
+pub(super) struct ValueTypeContext {
+    /// BT-833: Self-threading version counter for value type field assignments.
+    ///
+    /// Mirrors `state_threading` for value types. Each field assignment increments
+    /// this counter: `Self` → `Self1` → `Self2` → ... so that `self` in expression
+    /// position always resolves to the latest immutable snapshot.
+    pub self_version: usize,
+    /// BT-754: Core Erlang variable name holding the non-local return token for the current
+    /// value type method, or `None` when no NLR infrastructure is active.
+    ///
+    /// Set by `generate_value_type_method` when the method body contains blocks with `^`.
+    /// When set, `generate_expression` for `Expression::Return` generates a throw instead
+    /// of a plain value, causing the return to escape from the enclosing block closure.
+    pub current_nlr_token: Option<String>,
+}
+
+impl ValueTypeContext {
+    /// Creates a new `ValueTypeContext` with default values.
+    fn new() -> Self {
+        Self {
+            self_version: 0,
+            current_nlr_token: None,
+        }
+    }
+}
+
 /// Core Erlang code generator.
 ///
 /// This is the main code generator that coordinates compilation of Beamtalk
@@ -822,13 +941,24 @@ impl NlrValueTypeCatchVars {
 /// - [`gen_server`] - OTP `gen_server` scaffolding
 /// - [`intrinsics`] - Compiler intrinsics (block, `ProtoObject`, `Object`, list iteration)
 /// - [`operators`] - Binary operator code generation
+///
+/// # Context Structs (BT-1461)
+///
+/// Fields are organized into context-specific groups to reduce the cognitive
+/// load of the god object:
+/// - [`ReplContext`] — REPL-specific state (`is_repl_mode`, `workspace_mode`, etc.)
+/// - [`ClassContext`] — Class/actor-specific state (`class_identity`, `class_var_*`, etc.)
+/// - [`ValueTypeContext`] — Value-type-specific state (`self_version`, `current_nlr_token`)
+///
+/// Each context is `Option<T>` on the generator, set only when relevant.
+/// Accessor methods provide safe defaults when the context is absent.
 #[expect(
     clippy::struct_excessive_bools,
     reason = "Generator flags are context switches, not configuration"
 )]
-pub(super) struct CoreErlangGenerator {
+pub(crate) struct CoreErlangGenerator {
     /// The module name being generated.
-    module_name: String,
+    pub(crate) module_name: String,
     /// Variable binding and scope management.
     var_context: VariableContext,
     /// State threading for field assignments.
@@ -867,12 +997,9 @@ pub(super) struct CoreErlangGenerator {
     /// new variable name so subsequent reads see the updated value.
     /// Empty when not in full-extract mode.
     hybrid_mutated_fields: std::collections::HashSet<String>,
-    /// BT-153: Whether we're generating REPL code (vs module code).
-    /// In REPL mode, local variable assignments should update bindings.
-    is_repl_mode: bool,
     /// BT-213: Code generation context (`Actor`, `ValueType`, or `Repl`).
     /// Determines variable naming and method dispatch strategy.
-    context: CodeGenContext,
+    pub(crate) context: CodeGenContext,
     /// BT-1475: Nesting depth of block (closure) bodies.
     /// When > 0, self-cast sends in Actor context must route through the
     /// actor mailbox (`beamtalk_message_dispatch:cast/3`) instead of calling
@@ -885,42 +1012,9 @@ pub(super) struct CoreErlangGenerator {
     /// Used by `generate_primitive()` for method body compilation via static methods.
     #[allow(dead_code)] // stored for future call-site optimization with static typing
     primitive_bindings: PrimitiveBindingTable,
-    /// Identity of the class currently being compiled (if any).
-    /// Set from the AST class definition at the start of module generation.
-    class_identity: Option<util::ClassIdentity>,
     /// BT-295: Parameters of the current method being compiled (if any).
     /// Used by `Expression::Primitive` to generate dispatch argument lists.
     current_method_params: Vec<String>,
-    /// BT-403: Selectors of sealed methods in the current class.
-    /// Used to generate standalone functions and direct call dispatch.
-    sealed_method_selectors: std::collections::HashSet<String>,
-    /// BT-374 / ADR 0010 / ADR 0019: Whether workspace bindings are available.
-    /// When true (REPL/workspace context), class references resolve through
-    /// session bindings or class registry. When false (batch compile),
-    /// class references go directly to the class registry.
-    workspace_mode: bool,
-    /// BT-791: Whether this module is being compiled in stdlib mode.
-    /// When true, `generate_register_class` emits `stdlibMode => true` in the builder
-    /// state so the runtime can bypass the sealed-superclass check for stdlib loading.
-    stdlib_mode: bool,
-    /// BT-426: Whether we're currently generating a class-side method body.
-    /// When true, field access/assignment should produce a compile error.
-    in_class_method: bool,
-    /// BT-412: Names of class variables in the current class.
-    /// Used to distinguish class variable access from instance field access in class methods.
-    class_var_names: std::collections::HashSet<String>,
-    /// BT-412: Selector names of class methods in the current class.
-    /// Used to route self-sends to class method functions vs module exports.
-    class_method_selectors: std::collections::HashSet<String>,
-    /// BT-996: Auto-generated keyword constructor selector for Value subclass: classes.
-    /// E.g. `"symName:"` for a single-slot class, `"x:y:"` for two slots.
-    /// Set during class method codegen to route `ClassName slot: value` to the correct
-    /// class-side constructor instead of the instance-side getter.
-    class_slot_constructor_selector: Option<String>,
-    /// BT-412: State version counter for class variable threading.
-    class_var_version: usize,
-    /// BT-412: Whether class variables were mutated in the current method.
-    class_var_mutated: bool,
     /// BT-412/BT-1448: Internal side-channel for open-scope expression results.
     ///
     /// Set deep inside `generate_expression` when a class var assignment, class method
@@ -933,33 +1027,6 @@ pub(super) struct CoreErlangGenerator {
     /// (`generate_field_assignment_open`, `generate_self_field_at_put_open`,
     /// `generate_local_var_assignment_in_loop`) return the result variable explicitly.
     last_open_scope_result: Option<String>,
-    /// BT-245/BT-1448: Internal flag for REPL mutation-threaded expressions.
-    ///
-    /// Set deep inside `generate_expression` when mutation-threaded control flow
-    /// (loops, conditionals, exception handlers, inline value calls) produces a
-    /// `{Result, State}` tuple that the REPL must unpack.
-    ///
-    /// External callers should use `expression_doc_with_repl_mutation_tracking()`
-    /// instead of reading this field directly.
-    repl_loop_mutated: bool,
-    /// BT-754: Core Erlang variable name holding the non-local return token for the current
-    /// value type method, or `None` when no NLR infrastructure is active.
-    ///
-    /// Set by `generate_value_type_method` when the method body contains blocks with `^`.
-    /// When set, `generate_expression` for `Expression::Return` generates a throw instead
-    /// of a plain value, causing the return to escape from the enclosing block closure.
-    current_nlr_token: Option<String>,
-    /// BT-833: Self-threading version counter for value type field assignments.
-    ///
-    /// Mirrors `state_threading` for value types. Each field assignment increments
-    /// this counter: `Self` → `Self1` → `Self2` → ... so that `self` in expression
-    /// position always resolves to the latest immutable snapshot.
-    self_version: usize,
-    /// Class name → compiled module name index for resolving cross-file class references.
-    ///
-    /// Populated from `CodegenOptions::class_module_index` before generation begins.
-    /// Used by `compiled_module_name` to resolve subdirectory classes correctly.
-    class_module_index: std::collections::HashMap<String, String>,
     /// BT-845/BT-860: Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     source_path: Option<String>,
@@ -980,7 +1047,7 @@ pub(super) struct CoreErlangGenerator {
     /// Collected during generation and returned to callers via
     /// [`generate_module_with_warnings`]. Examples include stateful blocks
     /// passed to Erlang call sites where mutations will be silently dropped.
-    pub(super) codegen_warnings: Vec<Diagnostic>,
+    pub(crate) codegen_warnings: Vec<Diagnostic>,
     /// BT-1288: Pre-computed semantic facts from the pre-codegen analysis pass.
     /// Used for block profile lookups and dispatch classification.
     pub(super) semantic_facts: crate::semantic_analysis::SemanticFacts,
@@ -997,11 +1064,17 @@ pub(super) struct CoreErlangGenerator {
     /// When true, `generate_handle_info` dispatches to `handleInfo:` with
     /// log-and-continue error semantics instead of the default ignore-all stub.
     is_server_subclass: bool,
+    /// BT-1461: REPL-specific codegen state. `Some` when in REPL mode.
+    repl_context: Option<ReplContext>,
+    /// BT-1461: Class/actor-specific codegen state. `Some` when compiling a class.
+    class_context: Option<ClassContext>,
+    /// BT-1461: Value-type-specific codegen state. `Some` when compiling value types.
+    value_type_context: Option<ValueTypeContext>,
 }
 
 impl CoreErlangGenerator {
     /// Creates a new code generator for the given module name.
-    fn new(module_name: &str) -> Self {
+    pub(crate) fn new(module_name: &str) -> Self {
         Self {
             module_name: module_name.to_string(),
             var_context: VariableContext::new(),
@@ -1012,27 +1085,12 @@ impl CoreErlangGenerator {
             direct_params_list_op_result: None,
             hybrid_readonly_field_params: std::collections::HashMap::new(),
             hybrid_mutated_fields: std::collections::HashSet::new(),
-            is_repl_mode: false,
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
             source_text: None,
             primitive_bindings: PrimitiveBindingTable::new(),
-            class_identity: None,
             current_method_params: Vec::new(),
-            sealed_method_selectors: std::collections::HashSet::new(),
-            workspace_mode: false,
-            stdlib_mode: false,
-            in_class_method: false,
-            class_var_names: std::collections::HashSet::new(),
-            class_method_selectors: std::collections::HashSet::new(),
-            class_slot_constructor_selector: None,
-            class_var_version: 0,
-            class_var_mutated: false,
             last_open_scope_result: None,
-            repl_loop_mutated: false,
-            current_nlr_token: None,
-            self_version: 0,
-            class_module_index: std::collections::HashMap::new(),
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_method_info: std::collections::HashMap::new(),
@@ -1043,7 +1101,225 @@ impl CoreErlangGenerator {
             warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
             current_method_selector: None,
             is_server_subclass: false,
+            repl_context: Some(ReplContext::new()),
+            class_context: Some(ClassContext::new()),
+            value_type_context: Some(ValueTypeContext::new()),
         }
+    }
+
+    // ── BT-1461: Context accessor methods ──────────────────────────────
+    //
+    // These methods provide convenient access to context-specific fields,
+    // returning safe defaults when the context is absent.
+
+    /// Returns `true` if REPL mode is active.
+    pub(crate) fn is_repl_mode(&self) -> bool {
+        self.repl_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.is_repl_mode)
+    }
+
+    /// Sets the REPL mode flag, initialising the context if absent.
+    pub(crate) fn set_is_repl_mode(&mut self, value: bool) {
+        self.repl_context_mut().is_repl_mode = value;
+    }
+
+    /// Returns `true` if REPL loop mutation tracking has been flagged.
+    pub(super) fn repl_loop_mutated(&self) -> bool {
+        self.repl_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.repl_loop_mutated)
+    }
+
+    /// Sets the REPL loop mutated flag, initialising the context if absent.
+    pub(super) fn set_repl_loop_mutated(&mut self, value: bool) {
+        self.repl_context_mut().repl_loop_mutated = value;
+    }
+
+    /// Returns `true` if workspace mode is active.
+    pub(super) fn workspace_mode(&self) -> bool {
+        self.repl_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.workspace_mode)
+    }
+
+    /// Sets workspace mode, initialising the context if absent.
+    pub(crate) fn set_workspace_mode(&mut self, value: bool) {
+        self.repl_context_mut().workspace_mode = value;
+    }
+
+    /// Returns a mutable reference to the REPL context, creating it if absent.
+    fn repl_context_mut(&mut self) -> &mut ReplContext {
+        self.repl_context.get_or_insert_with(ReplContext::new)
+    }
+
+    /// Returns a reference to the class identity, if any.
+    pub(in crate::codegen::core_erlang) fn class_identity(&self) -> Option<&util::ClassIdentity> {
+        self.class_context
+            .as_ref()
+            .and_then(|ctx| ctx.class_identity.as_ref())
+    }
+
+    /// Sets the class identity, initialising the context if absent.
+    pub(in crate::codegen::core_erlang) fn set_class_identity(
+        &mut self,
+        identity: Option<util::ClassIdentity>,
+    ) {
+        self.class_context_mut().class_identity = identity;
+    }
+
+    /// Returns a reference to the class variable names set.
+    pub(super) fn class_var_names(&self) -> &std::collections::HashSet<String> {
+        static EMPTY: std::sync::LazyLock<std::collections::HashSet<String>> =
+            std::sync::LazyLock::new(std::collections::HashSet::new);
+        self.class_context
+            .as_ref()
+            .map_or(&*EMPTY, |ctx| &ctx.class_var_names)
+    }
+
+    /// Returns a mutable reference to the class variable names set.
+    pub(super) fn class_var_names_mut(&mut self) -> &mut std::collections::HashSet<String> {
+        &mut self.class_context_mut().class_var_names
+    }
+
+    /// Returns a reference to the class method selectors set.
+    pub(super) fn class_method_selectors(&self) -> &std::collections::HashSet<String> {
+        static EMPTY: std::sync::LazyLock<std::collections::HashSet<String>> =
+            std::sync::LazyLock::new(std::collections::HashSet::new);
+        self.class_context
+            .as_ref()
+            .map_or(&*EMPTY, |ctx| &ctx.class_method_selectors)
+    }
+
+    /// Returns a mutable reference to the class method selectors set.
+    pub(super) fn class_method_selectors_mut(&mut self) -> &mut std::collections::HashSet<String> {
+        &mut self.class_context_mut().class_method_selectors
+    }
+
+    /// Returns the class variable version counter.
+    pub(super) fn class_var_version(&self) -> usize {
+        self.class_context
+            .as_ref()
+            .map_or(0, |ctx| ctx.class_var_version)
+    }
+
+    /// Sets the class variable version counter.
+    pub(super) fn set_class_var_version(&mut self, version: usize) {
+        self.class_context_mut().class_var_version = version;
+    }
+
+    /// Returns whether class variables were mutated in the current method.
+    pub(super) fn class_var_mutated(&self) -> bool {
+        self.class_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.class_var_mutated)
+    }
+
+    /// Sets the class variable mutated flag.
+    pub(super) fn set_class_var_mutated(&mut self, value: bool) {
+        self.class_context_mut().class_var_mutated = value;
+    }
+
+    /// Returns a reference to the class module index.
+    pub(super) fn class_module_index(&self) -> &std::collections::HashMap<String, String> {
+        static EMPTY: std::sync::LazyLock<std::collections::HashMap<String, String>> =
+            std::sync::LazyLock::new(std::collections::HashMap::new);
+        self.class_context
+            .as_ref()
+            .map_or(&*EMPTY, |ctx| &ctx.class_module_index)
+    }
+
+    /// Sets the class module index, initialising the context if absent.
+    pub(crate) fn set_class_module_index(
+        &mut self,
+        index: std::collections::HashMap<String, String>,
+    ) {
+        self.class_context_mut().class_module_index = index;
+    }
+
+    /// Returns a reference to the sealed method selectors set.
+    pub(super) fn sealed_method_selectors(&self) -> &std::collections::HashSet<String> {
+        static EMPTY: std::sync::LazyLock<std::collections::HashSet<String>> =
+            std::sync::LazyLock::new(std::collections::HashSet::new);
+        self.class_context
+            .as_ref()
+            .map_or(&*EMPTY, |ctx| &ctx.sealed_method_selectors)
+    }
+
+    /// Returns a mutable reference to the sealed method selectors set.
+    pub(super) fn sealed_method_selectors_mut(&mut self) -> &mut std::collections::HashSet<String> {
+        &mut self.class_context_mut().sealed_method_selectors
+    }
+
+    /// Returns the class slot constructor selector, if any.
+    pub(super) fn class_slot_constructor_selector(&self) -> Option<&String> {
+        self.class_context
+            .as_ref()
+            .and_then(|ctx| ctx.class_slot_constructor_selector.as_ref())
+    }
+
+    /// Sets the class slot constructor selector.
+    pub(super) fn set_class_slot_constructor_selector(&mut self, sel: Option<String>) {
+        self.class_context_mut().class_slot_constructor_selector = sel;
+    }
+
+    /// Returns whether we're in a class method body.
+    pub(super) fn in_class_method(&self) -> bool {
+        self.class_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.in_class_method)
+    }
+
+    /// Sets the in-class-method flag.
+    pub(super) fn set_in_class_method(&mut self, value: bool) {
+        self.class_context_mut().in_class_method = value;
+    }
+
+    /// Returns whether stdlib mode is active.
+    pub(super) fn stdlib_mode(&self) -> bool {
+        self.class_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.stdlib_mode)
+    }
+
+    /// Sets stdlib mode.
+    pub(super) fn set_stdlib_mode(&mut self, value: bool) {
+        self.class_context_mut().stdlib_mode = value;
+    }
+
+    /// Returns a mutable reference to the class context, creating it if absent.
+    fn class_context_mut(&mut self) -> &mut ClassContext {
+        self.class_context.get_or_insert_with(ClassContext::new)
+    }
+
+    /// Returns the value type self-version counter.
+    pub(super) fn self_version(&self) -> usize {
+        self.value_type_context
+            .as_ref()
+            .map_or(0, |ctx| ctx.self_version)
+    }
+
+    /// Sets the value type self-version counter.
+    pub(super) fn set_self_version(&mut self, version: usize) {
+        self.value_type_context_mut().self_version = version;
+    }
+
+    /// Returns the current NLR token variable name, if any.
+    pub(super) fn current_nlr_token(&self) -> Option<&String> {
+        self.value_type_context
+            .as_ref()
+            .and_then(|ctx| ctx.current_nlr_token.as_ref())
+    }
+
+    /// Sets the current NLR token variable name.
+    pub(super) fn set_current_nlr_token(&mut self, token: Option<String>) {
+        self.value_type_context_mut().current_nlr_token = token;
+    }
+
+    /// Returns a mutable reference to the value type context, creating it if absent.
+    fn value_type_context_mut(&mut self) -> &mut ValueTypeContext {
+        self.value_type_context
+            .get_or_insert_with(ValueTypeContext::new)
     }
 
     /// Creates a new code generator with a primitive binding table.
@@ -1054,12 +1330,12 @@ impl CoreErlangGenerator {
     }
 
     /// Pushes a new scope for variable bindings.
-    fn push_scope(&mut self) {
+    pub(crate) fn push_scope(&mut self) {
         self.var_context.push_scope();
     }
 
     /// Pops the current scope, discarding its bindings.
-    fn pop_scope(&mut self) {
+    pub(crate) fn pop_scope(&mut self) {
         self.var_context.pop_scope();
     }
 
@@ -1069,7 +1345,7 @@ impl CoreErlangGenerator {
     }
 
     /// Binds an identifier to a Core Erlang variable name in the current scope.
-    fn bind_var(&mut self, name: &str, core_var: &str) {
+    pub(crate) fn bind_var(&mut self, name: &str, core_var: &str) {
         self.var_context.bind(name, core_var);
     }
 
@@ -1081,7 +1357,7 @@ impl CoreErlangGenerator {
     ///
     /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc` or `StateAccN`.
     /// Otherwise returns `State` or `StateN`.
-    pub(super) fn current_state_var(&self) -> String {
+    pub(crate) fn current_state_var(&self) -> String {
         if self.in_hybrid_loop {
             // Hybrid-params loop: use State* naming (State is an explicit fun parameter)
             self.state_threading.current_var()
@@ -1103,7 +1379,7 @@ impl CoreErlangGenerator {
     /// When inside a hybrid-params loop (`in_hybrid_loop = true`) or normal context,
     /// returns `State1`, `State2`, etc.
     /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc1`, etc.
-    pub(super) fn next_state_var(&mut self) -> String {
+    pub(crate) fn next_state_var(&mut self) -> String {
         let next_var = self.state_threading.next_var();
         if self.in_hybrid_loop || !self.in_loop_body {
             // Hybrid mode or normal context: use State* naming
@@ -1168,18 +1444,20 @@ impl CoreErlangGenerator {
 
     /// BT-412: Returns the current class variable state variable name.
     fn current_class_var(&self) -> String {
-        if self.class_var_version == 0 {
+        let version = self.class_var_version();
+        if version == 0 {
             "ClassVars".to_string()
         } else {
-            format!("ClassVars{}", self.class_var_version)
+            format!("ClassVars{version}")
         }
     }
 
     /// BT-412: Increments class var version and returns the new variable name.
     fn next_class_var(&mut self) -> String {
-        self.class_var_version += 1;
-        self.class_var_mutated = true;
-        format!("ClassVars{}", self.class_var_version)
+        let new_version = self.class_var_version() + 1;
+        self.set_class_var_version(new_version);
+        self.set_class_var_mutated(true);
+        format!("ClassVars{new_version}")
     }
 
     /// BT-833: Returns the current Self variable name for value type Self-threading.
@@ -1187,17 +1465,19 @@ impl CoreErlangGenerator {
     /// Version 0 → `"Self"` (the original method parameter).
     /// Version N → `"Self{N}"` (after N field assignments have threaded a new snapshot).
     pub(super) fn current_self_var(&self) -> String {
-        if self.self_version == 0 {
+        let version = self.self_version();
+        if version == 0 {
             "Self".to_string()
         } else {
-            format!("Self{}", self.self_version)
+            format!("Self{version}")
         }
     }
 
     /// BT-833: Increments the Self version and returns the new variable name.
     pub(super) fn next_self_var(&mut self) -> String {
-        self.self_version += 1;
-        format!("Self{}", self.self_version)
+        let new_version = self.self_version() + 1;
+        self.set_self_version(new_version);
+        format!("Self{new_version}")
     }
 
     /// BT-855: Records a structured diagnostic warning for the current module.
@@ -1271,7 +1551,7 @@ impl CoreErlangGenerator {
 
     /// BT-833: Resets the Self version to 0 (call at the start of each value type method).
     pub(super) fn reset_self_version(&mut self) {
-        self.self_version = 0;
+        self.set_self_version(0);
     }
 
     /// BT-940: Converts a byte-offset `Span` to a 1-based line number.
@@ -1291,17 +1571,6 @@ impl CoreErlangGenerator {
         )]
         let line = newline_count as u32 + 1;
         Some(line)
-    }
-
-    /// Convert a span to a human-readable location string for error messages.
-    ///
-    /// Returns `"line N"` when source text is available, falling back to
-    /// `"offset N"` so callers never produce a raw Rust debug `Span { start, end }`.
-    pub(super) fn span_location(&self, span: Span) -> String {
-        match self.span_to_line(span) {
-            Some(line) => format!("line {line}"),
-            None => format!("offset {}", span.start()),
-        }
     }
 
     /// BT-940: Wraps a Document with a Core Erlang line annotation.
@@ -1331,10 +1600,10 @@ impl CoreErlangGenerator {
         &self,
         analysis: &block_analysis::BlockMutationAnalysis,
     ) -> bool {
-        if self.is_repl_mode {
+        if self.is_repl_mode() {
             // REPL: both local vars and fields need threading
             analysis.has_mutations()
-        } else if self.in_class_method {
+        } else if self.in_class_method() {
             // BT-1346: Class methods have no actor State variable — field writes and
             // self-sends must NOT trigger state threading.
             // BT-1414: However, captured local variable mutations (outer vars both read
@@ -1795,7 +2064,7 @@ impl CoreErlangGenerator {
                 // as a message receiver (e.g., `super increment`)
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "'super' must be used with a message send".to_string(),
-                    location: self.span_location(expr.span()),
+                    span: Some(expr.span()),
                 })
             }
             Expression::Block(block) => self.generate_block(block),
@@ -1848,7 +2117,7 @@ impl CoreErlangGenerator {
                     // only mutate their own state, not the state of other objects.
                     return Err(CodeGenError::UnsupportedFeature {
                         feature: "field assignment to non-self receiver".to_string(),
-                        location: self.span_location(target.span()),
+                        span: Some(target.span()),
                     });
                 }
                 // For identifier assignments (e.g., local variables in REPL like `x := 1`),
@@ -1861,7 +2130,7 @@ impl CoreErlangGenerator {
                 // BT-754: If inside a block with NLR infrastructure active, generate a throw
                 // so the return escapes from the block closure back to the enclosing method.
                 // Otherwise (at method body level, or no NLR), just emit the value.
-                if let Some(nlr_token) = self.current_nlr_token.clone() {
+                if let Some(nlr_token) = self.current_nlr_token().cloned() {
                     // BT-1343: Emit diagnostic for NLR throw/catch generation.
                     self.emit_codegen_diagnostic(
                         {
@@ -1881,7 +2150,7 @@ impl CoreErlangGenerator {
                     // methods use the latest Self{N} snapshot so field mutations
                     // accumulated before the ^ are preserved.
                     // BT-1202: Class methods use the current ClassVars snapshot.
-                    let state = if self.in_class_method {
+                    let state = if self.in_class_method() {
                         self.current_class_var()
                     } else if self.context == CodeGenContext::Actor {
                         self.current_state_var()
@@ -1930,17 +2199,17 @@ impl CoreErlangGenerator {
                 // it appeared in a pure expression position, which is not supported.
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "destructuring assignment in expression position".to_string(),
-                    location: self.span_location(*span),
+                    span: Some(*span),
                 })
             }
             Expression::Error { message, span, .. } => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression error: {message}"),
-                location: self.span_location(*span),
+                span: Some(*span),
             }),
             Expression::ExpectDirective { .. } => Ok(Document::Nil),
             Expression::Spread { name, .. } => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("spread expression: {}", name.name),
-                location: self.span_location(name.span),
+                span: Some(name.span),
             }),
         }
     }
@@ -1954,7 +2223,7 @@ impl CoreErlangGenerator {
     fn generate_class_reference(&mut self, class_name: &str) -> Result<Document<'static>> {
         // ADR 0019 Phase 3: Only check bindings in REPL top-level context.
         // Actor methods compiled in workspace mode should NOT check REPL bindings.
-        if self.workspace_mode && self.context == CodeGenContext::Repl {
+        if self.workspace_mode() && self.context == CodeGenContext::Repl {
             let class_pid_var = self.fresh_var("ClassPid");
             let class_mod_var = self.fresh_var("ClassModName");
             let state_var = self.current_state_var();
@@ -1975,7 +2244,7 @@ impl CoreErlangGenerator {
                 ),
                 "end end",
             ])
-        } else if self.workspace_mode {
+        } else if self.workspace_mode() {
             // Actor/ValueType methods in workspace mode: try class lookup.
             // ADR 0019 Phase 4: No persistent_term fallback — use class registry only.
             let class_pid_var = self.fresh_var("ClassPid");
@@ -2346,8 +2615,7 @@ impl CoreErlangGenerator {
         span: crate::source_analysis::Span,
     ) -> Result<Document<'static>> {
         let class_name = self
-            .class_identity
-            .as_ref()
+            .class_identity()
             .map(|id| id.class_name().to_string())
             .ok_or_else(|| {
                 CodeGenError::Internal(format!(
@@ -2406,7 +2674,7 @@ impl CoreErlangGenerator {
 
         let params_str = self.current_method_params.join(", ");
         // BT-677: In class methods, self is bound to ClassSelf, not Self
-        let self_var = if self.in_class_method {
+        let self_var = if self.in_class_method() {
             "ClassSelf"
         } else {
             "Self"

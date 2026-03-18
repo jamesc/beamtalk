@@ -600,17 +600,17 @@ impl CoreErlangGenerator {
             // the current class, use direct dispatch (same as `self` sends) to avoid
             // deadlock. The class actor is already processing the outer call, so
             // routing through class_send would deadlock on gen_server:call.
-            if self.in_class_method && name.name == self.class_name() {
+            if self.in_class_method() && name.name == self.class_name() {
                 let doc = self.generate_class_method_self_send(selector, arguments)?;
                 return Ok(Some(doc));
             }
-            if self.workspace_mode && self.context == CodeGenContext::Repl {
+            if self.workspace_mode() && self.context == CodeGenContext::Repl {
                 // REPL top-level: check session bindings first
                 let doc =
                     self.generate_binding_aware_class_send(&name.name, selector, arguments)?;
                 return Ok(Some(doc));
             }
-            if self.workspace_mode {
+            if self.workspace_mode() {
                 // Actor/ValueType methods in workspace mode: try class_send,
                 // fall back to workspace binding for convenience names
                 let doc = self.generate_workspace_class_send(&name.name, selector, arguments)?;
@@ -656,7 +656,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        if !self.in_class_method {
+        if !self.in_class_method() {
             return Ok(None);
         }
         if let Expression::Identifier(id) = receiver {
@@ -680,7 +680,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
 
-        if self.class_method_selectors.contains(&selector_atom) {
+        if self.class_method_selectors().contains(&selector_atom) {
             // Route to class_<selector>(ClassSelf, ClassVars, ...)
             let call_result = self.fresh_temp_var("CMR");
             let cv = self.current_class_var();
@@ -724,8 +724,8 @@ impl CoreErlangGenerator {
         // The constructor returns a plain map (not a `class_var_result` tuple), so no
         // class-var threading boilerplate is needed.
         if self
-            .class_slot_constructor_selector
-            .as_deref()
+            .class_slot_constructor_selector()
+            .map(String::as_str)
             .is_some_and(|kw| kw == selector_atom)
         {
             let module = self.module_name.clone();
@@ -908,7 +908,7 @@ impl CoreErlangGenerator {
             // Build the dispatch call (varies by sealed optimization level)
             let call_doc = if self.is_class_sealed() {
                 let selector_name = selector.name().to_string();
-                if self.sealed_method_selectors.contains(&selector_name) {
+                if self.sealed_method_selectors().contains(&selector_name) {
                     // Level 1: Direct __sealed_ call
                     let self_var = self.fresh_temp_var("SealedSelf");
                     let module = self.module_name.clone();
@@ -986,7 +986,7 @@ impl CoreErlangGenerator {
         let selector_name = selector.name().to_string();
 
         // Level 1: Direct call to standalone sealed method function
-        if self.sealed_method_selectors.contains(&selector_name) {
+        if self.sealed_method_selectors().contains(&selector_name) {
             return self.generate_direct_sealed_call(&selector_name, arguments);
         }
 
@@ -1073,7 +1073,7 @@ impl CoreErlangGenerator {
 
     /// Checks if an expression is a class variable assignment (`self.classVar := value`).
     pub(super) fn is_class_var_assignment(&self, expr: &Expression) -> bool {
-        if !self.in_class_method {
+        if !self.in_class_method() {
             return false;
         }
         if let Expression::Assignment { target, .. } = expr {
@@ -1083,7 +1083,7 @@ impl CoreErlangGenerator {
             {
                 if let Expression::Identifier(recv_id) = receiver.as_ref() {
                     return recv_id.name == "self"
-                        && self.class_var_names.contains(field.name.as_str());
+                        && self.class_var_names().contains(field.name.as_str());
                 }
             }
         }
@@ -1094,7 +1094,7 @@ impl CoreErlangGenerator {
     /// These need special scoping in class method bodies because they may
     /// update `ClassVars` via `let ClassVarsN = ... in` which must not be wrapped.
     pub(super) fn is_class_method_self_send(&self, expr: &Expression) -> bool {
-        if !self.in_class_method || self.class_method_selectors.is_empty() {
+        if !self.in_class_method() || self.class_method_selectors().is_empty() {
             return false;
         }
         if let Expression::MessageSend {
@@ -1104,7 +1104,7 @@ impl CoreErlangGenerator {
             if let Expression::Identifier(id) = receiver.as_ref() {
                 if id.name == "self" {
                     let sel_atom = selector.to_erlang_atom();
-                    return self.class_method_selectors.contains(&sel_atom);
+                    return self.class_method_selectors().contains(&sel_atom);
                 }
             }
         }
@@ -2061,7 +2061,7 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         if self.is_class_sealed() {
             let selector_name = selector.name().to_string();
-            if self.sealed_method_selectors.contains(&selector_name) {
+            if self.sealed_method_selectors().contains(&selector_name) {
                 let self_var = self.fresh_temp_var("SealedSelf");
                 let comma = if no_args { "" } else { ", " };
                 docvec![

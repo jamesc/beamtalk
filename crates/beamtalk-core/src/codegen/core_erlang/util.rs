@@ -128,7 +128,7 @@ impl CoreErlangGenerator {
     /// Returns the expression as a `Document` for direct composition via `docvec!`.
     ///
     /// ADR 0018: Simple forwarding to `generate_expression`.
-    pub(super) fn expression_doc(
+    pub(crate) fn expression_doc(
         &mut self,
         expr: &Expression,
     ) -> Result<super::document::Document<'static>> {
@@ -157,14 +157,14 @@ impl CoreErlangGenerator {
     /// value calls set `repl_loop_mutated` deep in the call stack. REPL codegen needs to
     /// know whether the expression returned a `{Result, State}` tuple that must be unpacked.
     /// This method encapsulates the side-channel into an explicit return value.
-    pub(super) fn expression_doc_with_repl_mutation_tracking(
+    pub(crate) fn expression_doc_with_repl_mutation_tracking(
         &mut self,
         expr: &crate::ast::Expression,
     ) -> Result<(super::document::Document<'static>, bool)> {
-        self.repl_loop_mutated = false;
+        self.set_repl_loop_mutated(false);
         let doc = self.generate_expression(expr)?;
-        let mutated = self.repl_loop_mutated;
-        self.repl_loop_mutated = false;
+        let mutated = self.repl_loop_mutated();
+        self.set_repl_loop_mutated(false);
         Ok((doc, mutated))
     }
 
@@ -183,7 +183,7 @@ impl CoreErlangGenerator {
     ///
     /// Use this for internal codegen temporaries (loop variables, function bindings,
     /// etc.) that should never shadow or be confused with user identifiers.
-    pub(super) fn fresh_temp_var(&mut self, base: &str) -> String {
+    pub(crate) fn fresh_temp_var(&mut self, base: &str) -> String {
         self.var_context.fresh_var(base)
     }
 
@@ -206,7 +206,7 @@ impl CoreErlangGenerator {
     /// - Module `"counter"` (no class identity) → `"Counter"`
     /// - Module `"bt@stdlib@string"` with class identity `"String"` → `"String"`
     pub(super) fn class_name(&self) -> String {
-        if let Some(ref identity) = self.class_identity {
+        if let Some(identity) = self.class_identity() {
             return identity.class_name().to_string();
         }
         // Fall back to deriving from module name (snake_case → CamelCase)
@@ -224,9 +224,7 @@ impl CoreErlangGenerator {
 
     /// Whether the current class is sealed (BT-403).
     pub(super) fn is_class_sealed(&self) -> bool {
-        self.class_identity
-            .as_ref()
-            .is_some_and(ClassIdentity::is_sealed)
+        self.class_identity().is_some_and(ClassIdentity::is_sealed)
     }
 
     /// Build the `beamtalk_source` Core Erlang attribute fragment (BT-845/BT-860).
