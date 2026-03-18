@@ -1353,29 +1353,30 @@ impl CoreErlangGenerator {
         }
 
         // BT-1481: FoldlBoolPredicate — update boolean accumulator based on predicate result.
+        // Match only 'true'/'false' explicitly (consistent with FoldlFilter and lists:any/all).
         if let BodyKind::FoldlBoolPredicate { is_all } = kind {
             if let Some(pv) = &pred_var {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     if *is_all {
-                        // allSatisfy: pred=false → set BoolAcc to false; else keep BoolAcc
+                        // allSatisfy: pred=false → set BoolAcc to false; pred=true → keep
                         docs.push(docvec![
                             "case ",
                             Document::String(pv.clone()),
                             " of <'false'> when 'true' -> {'false', ",
                             vars_doc.clone(),
-                            "} <_> when 'true' -> {BoolAcc, ",
+                            "} <'true'> when 'true' -> {BoolAcc, ",
                             vars_doc,
                             "} end",
                         ]);
                     } else {
-                        // anySatisfy: pred=true → set BoolAcc to true; else keep BoolAcc
+                        // anySatisfy: pred=true → set BoolAcc to true; pred=false → keep
                         docs.push(docvec![
                             "case ",
                             Document::String(pv.clone()),
                             " of <'true'> when 'true' -> {'true', ",
                             vars_doc.clone(),
-                            "} <_> when 'true' -> {BoolAcc, ",
+                            "} <'false'> when 'true' -> {BoolAcc, ",
                             vars_doc,
                             "} end",
                         ]);
@@ -1392,7 +1393,7 @@ impl CoreErlangGenerator {
                             Document::String(pv.clone()),
                             " of <'false'> when 'true' -> {'false', ",
                             Document::String(final_state.clone()),
-                            "} <_> when 'true' -> {BoolAcc, ",
+                            "} <'true'> when 'true' -> {BoolAcc, ",
                             Document::String(final_state),
                             "} end",
                         ]);
@@ -1402,7 +1403,7 @@ impl CoreErlangGenerator {
                             Document::String(pv.clone()),
                             " of <'true'> when 'true' -> {'true', ",
                             Document::String(final_state.clone()),
-                            "} <_> when 'true' -> {BoolAcc, ",
+                            "} <'false'> when 'true' -> {BoolAcc, ",
                             Document::String(final_state),
                             "} end",
                         ]);
@@ -2730,7 +2731,7 @@ impl CoreErlangGenerator {
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
         let body_block = match sel.as_str() {
-            "do:" | "collect:" | "select:" | "reject:" => {
+            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:" => {
                 if let Some(Expression::Block(block)) = arguments.first() {
                     block
                 } else {
@@ -2770,7 +2771,7 @@ impl CoreErlangGenerator {
     }
 
     /// BT-1329: Returns `true` if `expr` is a list op (do:, collect:, select:, reject:,
-    /// inject:into:) whose block captures and mutates outer-scope locals but whose inner
+    /// anySatisfy:, allSatisfy:, inject:into:) whose block captures and mutates outer-scope locals but whose inner
     /// block is NOT eligible for tuple-acc optimization.
     ///
     /// When this returns `true`, the list op would fall back to map-accumulator mode which
@@ -2793,7 +2794,7 @@ impl CoreErlangGenerator {
 
         // Identify list ops and their body block argument
         let body_block = match sel.as_str() {
-            "do:" | "collect:" | "select:" | "reject:" => {
+            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:" => {
                 if let Some(Expression::Block(block)) = arguments.first() {
                     block
                 } else {
