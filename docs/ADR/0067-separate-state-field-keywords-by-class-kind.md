@@ -22,7 +22,7 @@ c value              // => 0   — c was not rebound to the updated snapshot
 
 The assignment `self.count := self.count + 1` compiles and runs — `increment` returns an updated snapshot, but callers must rebind (e.g., `c := c increment`). Without rebinding, `c` still references the original value. Object subclasses have no process to persist state automatically, and the returns-new-self semantics are implicit, making it easy to silently lose updates.
 
-ADR 0042 established the two-category object model (immutable Value, mutable Actor) but left `Object subclass:` in an ambiguous middle ground. A codebase audit found 21 `Object subclass:` files with `state:` declarations in the stdlib (all in test fixtures and examples). More critically, the same footgun appears in real-world Beamtalk applications:
+ADR 0042 established the two-category object model (immutable Value, mutable Actor) but left `Object subclass:` in an ambiguous middle ground. A codebase audit found 21 `Object subclass:` files with `state:` declarations across the repository — 8 in stdlib test fixtures, 7 in e2e test fixtures, and 6 in example projects. More critically, the same footgun appears in real-world Beamtalk applications:
 
 **Symphony** (agent orchestration platform) has 5 `Object subclass:` classes with `state:` declarations — `WorkspaceManager`, `LinearClient`, `Config`, `CandidateFilter`, `PromptRenderer` — all configured once and used immutably. Every one should be a `Value subclass:`. Any mutation would silently fail.
 
@@ -541,8 +541,11 @@ TestCase subclass: CounterTest
 **Collection reclassification** (1 file):
 `stdlib/src/Collection.bt`: `abstract typed Object subclass:` → `abstract typed Value subclass:` (enables subclasses Set, Bag, Interval to use `field:`)
 
-**Stdlib Value subclasses** needing `state:` → `field:` rename (12 files):
-Result, Interval, Set, Bag, HTTPRequest, HTTPResponse, HTTPRoute, HTTPRouter, SupervisionSpec, ValuePoint, InspectPair + Collection subclasses
+**Stdlib Value subclasses** needing `state:` → `field:` rename (8 files):
+Result, HTTPRequest, HTTPResponse, HTTPRoute, HTTPRouter, SupervisionSpec (stdlib/src), ValuePoint, InspectPair (stdlib/test/fixtures)
+
+**Collection subclasses** needing `state:` → `field:` after Collection reclassification (3 files):
+Set, Bag, Interval (currently `Collection subclass:`, will inherit Value kind after BT-1532)
 
 **Doc comment update:**
 `stdlib/src/Value.bt`: doc comment example uses `state: x = 0` — update to `field: x = 0`
