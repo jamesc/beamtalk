@@ -416,6 +416,7 @@ fn generate_core_file(
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
         class_module_index,
         class_superclass_index,
+        &[],
     )
     .wrap_err_with(|| format!("Failed to compile '{source_path}'"))?;
 
@@ -1143,11 +1144,13 @@ fn initialize_pipeline(
         let src_dir = pkg_root.join("src");
         if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
             let source_root = src_dir.exists().then_some(src_dir);
-            if let Ok((pkg_class_map, pkg_super_map)) = super::build::build_class_module_index(
-                &src_files,
-                source_root.as_deref(),
-                &pkg.name,
-            ) {
+            if let Ok((pkg_class_map, pkg_super_map, _class_infos)) =
+                super::build::build_class_module_index(
+                    &src_files,
+                    source_root.as_deref(),
+                    &pkg.name,
+                )
+            {
                 pkg_class_indexes.insert(
                     pkg_root.clone(),
                     (pkg_class_map.clone(), pkg_super_map.clone()),

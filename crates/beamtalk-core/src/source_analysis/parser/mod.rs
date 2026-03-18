@@ -1117,6 +1117,10 @@ impl Parser {
                     Some(TokenKind::Arrow) => {
                         return self.is_return_type_then_fat_arrow(offset);
                     }
+                    // ADR 0066 Phase 4: `:: -> Type =>` extension type annotation
+                    Some(TokenKind::DoubleColon) => {
+                        return self.is_return_type_then_fat_arrow(offset + 1);
+                    }
                     _ => return false,
                 }
             }
@@ -1138,6 +1142,10 @@ impl Parser {
                 Some(TokenKind::Arrow) => {
                     return self.is_return_type_then_fat_arrow(offset);
                 }
+                // ADR 0066 Phase 4: `:: -> Type =>` extension type annotation
+                Some(TokenKind::DoubleColon) => {
+                    return self.is_return_type_then_fat_arrow(offset + 1);
+                }
                 Some(TokenKind::Colon) => {
                     // Typed parameter: `paramName : Type`
                     offset += 1; // skip `:`
@@ -1158,6 +1166,10 @@ impl Parser {
                         Some(TokenKind::Keyword(_)) => {} // More keyword parts, continue loop
                         Some(TokenKind::Arrow) => {
                             return self.is_return_type_then_fat_arrow(offset);
+                        }
+                        // ADR 0066 Phase 4: `:: -> Type =>` extension type annotation
+                        Some(TokenKind::DoubleColon) => {
+                            return self.is_return_type_then_fat_arrow(offset + 1);
                         }
                         _ => return false,
                     }

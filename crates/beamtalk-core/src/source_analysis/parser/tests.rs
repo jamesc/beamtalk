@@ -4063,6 +4063,120 @@ fn standalone_method_definition_keyword_union_typed_param_lookahead() {
     );
 }
 
+// --- BT-1519: Extension type annotation syntax (:: -> ReturnType) ---
+
+#[test]
+fn standalone_method_unary_return_type_arrow() {
+    // Standard syntax: `Integer >> factorial -> Integer =>` already works
+    let module = parse_ok("Integer >> factorial -> Integer => 1");
+    assert_eq!(module.method_definitions.len(), 1);
+    let method_def = &module.method_definitions[0];
+    assert_eq!(method_def.class_name.name.as_str(), "Integer");
+    assert_eq!(method_def.method.selector.name().as_str(), "factorial");
+    assert!(
+        method_def.method.return_type.is_some(),
+        "should have return type"
+    );
+    match method_def.method.return_type.as_ref().unwrap() {
+        crate::ast::TypeAnnotation::Simple(ident) => assert_eq!(ident.name.as_str(), "Integer"),
+        other => panic!("expected Simple type annotation, got: {other:?}"),
+    }
+}
+
+#[test]
+fn standalone_method_unary_return_type_double_colon_arrow() {
+    // Extension-style: `Integer >> factorial :: -> Integer =>`
+    let module = parse_ok("Integer >> factorial :: -> Integer => 1");
+    assert_eq!(module.method_definitions.len(), 1);
+    let method_def = &module.method_definitions[0];
+    assert_eq!(method_def.class_name.name.as_str(), "Integer");
+    assert_eq!(method_def.method.selector.name().as_str(), "factorial");
+    assert!(
+        method_def.method.return_type.is_some(),
+        "should have return type with :: -> syntax"
+    );
+    match method_def.method.return_type.as_ref().unwrap() {
+        crate::ast::TypeAnnotation::Simple(ident) => assert_eq!(ident.name.as_str(), "Integer"),
+        other => panic!("expected Simple type annotation, got: {other:?}"),
+    }
+}
+
+#[test]
+fn standalone_method_keyword_return_type_double_colon_arrow() {
+    // `String >> split: sep :: String :: -> Array =>`
+    // The first `:: String` is the param type, the second `:: -> Array` is the return type.
+    let module = parse_ok("String >> split: sep :: String :: -> Array => self");
+    assert_eq!(module.method_definitions.len(), 1);
+    let method_def = &module.method_definitions[0];
+    assert_eq!(method_def.method.selector.name().as_str(), "split:");
+    assert_eq!(method_def.method.parameters.len(), 1);
+    assert!(method_def.method.parameters[0].type_annotation.is_some());
+    assert!(
+        method_def.method.return_type.is_some(),
+        "should have return type with :: -> syntax on keyword method"
+    );
+    match method_def.method.return_type.as_ref().unwrap() {
+        crate::ast::TypeAnnotation::Simple(ident) => assert_eq!(ident.name.as_str(), "Array"),
+        other => panic!("expected Simple type annotation, got: {other:?}"),
+    }
+}
+
+#[test]
+fn standalone_method_binary_return_type_double_colon_arrow() {
+    // `Point >> + other :: Point :: -> Point =>`
+    let module = parse_ok("Point >> + other :: Point :: -> Point => self");
+    assert_eq!(module.method_definitions.len(), 1);
+    let method_def = &module.method_definitions[0];
+    assert_eq!(method_def.method.selector.name().as_str(), "+");
+    assert_eq!(method_def.method.parameters.len(), 1);
+    assert!(method_def.method.parameters[0].type_annotation.is_some());
+    assert!(
+        method_def.method.return_type.is_some(),
+        "should have return type with :: -> syntax on binary method"
+    );
+    match method_def.method.return_type.as_ref().unwrap() {
+        crate::ast::TypeAnnotation::Simple(ident) => assert_eq!(ident.name.as_str(), "Point"),
+        other => panic!("expected Simple type annotation, got: {other:?}"),
+    }
+}
+
+#[test]
+fn standalone_method_class_side_return_type_double_colon_arrow() {
+    // `String class >> fromJson :: -> String =>`
+    let module = parse_ok("String class >> fromJson :: -> String => self");
+    assert_eq!(module.method_definitions.len(), 1);
+    let method_def = &module.method_definitions[0];
+    assert_eq!(method_def.class_name.name.as_str(), "String");
+    assert!(method_def.is_class_method);
+    assert_eq!(method_def.method.selector.name().as_str(), "fromJson");
+    assert!(
+        method_def.method.return_type.is_some(),
+        "class-side extension should have return type with :: -> syntax"
+    );
+    match method_def.method.return_type.as_ref().unwrap() {
+        crate::ast::TypeAnnotation::Simple(ident) => assert_eq!(ident.name.as_str(), "String"),
+        other => panic!("expected Simple type annotation, got: {other:?}"),
+    }
+}
+
+#[test]
+fn standalone_method_return_type_union_double_colon_arrow() {
+    // `Array >> first :: -> Integer | Nil =>`
+    let module = parse_ok("Array >> first :: -> Integer | Nil => self");
+    assert_eq!(module.method_definitions.len(), 1);
+    let method_def = &module.method_definitions[0];
+    assert!(
+        method_def.method.return_type.is_some(),
+        "should have union return type with :: -> syntax"
+    );
+    match method_def.method.return_type.as_ref().unwrap() {
+        crate::ast::TypeAnnotation::Union { types, .. } => {
+            assert_eq!(types.len(), 2);
+        }
+        other => panic!("expected Union type annotation, got: {other:?}"),
+    }
+}
+
 #[test]
 fn method_lookup_not_confused_with_method_definition() {
     // Counter >> #increment is method lookup, not method definition

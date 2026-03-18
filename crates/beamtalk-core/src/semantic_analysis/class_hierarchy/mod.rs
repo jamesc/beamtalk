@@ -117,6 +117,89 @@ impl ClassInfo {
     pub fn can_be_subclassed(&self) -> bool {
         !self.is_sealed
     }
+
+    /// Build a `ClassInfo` from a parsed `ClassDefinition` AST node.
+    ///
+    /// Shared by `extract_class_infos` and `add_module_classes` to avoid
+    /// duplicating the field-mapping logic.
+    fn from_class_definition(class: &ClassDefinition) -> Self {
+        let mut instance_methods: Vec<MethodInfo> = class
+            .methods
+            .iter()
+            .map(|m| MethodInfo {
+                selector: m.selector.name(),
+                arity: m.selector.arity(),
+                kind: m.kind,
+                defined_in: class.name.name.clone(),
+                is_sealed: m.is_sealed,
+                spawns_block: false,
+                return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
+                param_types: m
+                    .parameters
+                    .iter()
+                    .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                    .collect(),
+                doc: m.doc_comment.clone().map(Into::into),
+            })
+            .collect();
+
+        let mut class_methods: Vec<MethodInfo> = class
+            .class_methods
+            .iter()
+            .map(|m| MethodInfo {
+                selector: m.selector.name(),
+                arity: m.selector.arity(),
+                kind: m.kind,
+                defined_in: class.name.name.clone(),
+                is_sealed: m.is_sealed,
+                spawns_block: false,
+                return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
+                param_types: m
+                    .parameters
+                    .iter()
+                    .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                    .collect(),
+                doc: m.doc_comment.clone().map(Into::into),
+            })
+            .collect();
+
+        // BT-923: For `Value subclass:` classes, synthesize auto-generated slot
+        // methods so the type checker and cross-file consumers can resolve them.
+        if class.class_kind == ClassKind::Value {
+            ClassHierarchy::add_value_auto_methods(
+                class,
+                &mut instance_methods,
+                &mut class_methods,
+            );
+        }
+
+        Self {
+            name: class.name.name.clone(),
+            superclass: class.superclass.as_ref().map(|s| s.name.clone()),
+            is_sealed: class.is_sealed,
+            is_abstract: class.is_abstract,
+            is_typed: class.is_typed,
+            is_value: class.class_kind == ClassKind::Value,
+            is_native: class.backing_module.is_some(),
+            state: class.state.iter().map(|s| s.name.name.clone()).collect(),
+            state_types: class
+                .state
+                .iter()
+                .filter_map(|s| {
+                    s.type_annotation
+                        .as_ref()
+                        .map(|ty| (s.name.name.clone(), ty.type_name()))
+                })
+                .collect(),
+            methods: instance_methods,
+            class_methods,
+            class_variables: class
+                .class_variables
+                .iter()
+                .map(|cv| cv.name.name.clone())
+                .collect(),
+        }
+    }
 }
 
 /// Static class hierarchy built during semantic analysis.
@@ -263,6 +346,21 @@ impl ClassHierarchy {
         }
     }
 
+    /// Extract `ClassInfo` entries from a parsed module without diagnostics.
+    ///
+    /// BT-1523: Same ClassInfo-building logic as `add_module_classes` Pass 1,
+    /// but without duplicate-method checks or inserting into a hierarchy.
+    /// Used by the build's Pass 1 to collect class metadata from all source files
+    /// for cross-file hierarchy resolution in Pass 2.
+    #[must_use]
+    pub fn extract_class_infos(module: &Module) -> Vec<ClassInfo> {
+        module
+            .classes
+            .iter()
+            .map(ClassInfo::from_class_definition)
+            .collect()
+    }
+
     /// Registers extension methods from the [`ExtensionIndex`] into the hierarchy.
     ///
     /// Each extension entry is converted to a [`MethodInfo`] and appended to the
@@ -395,6 +493,39 @@ impl ClassHierarchy {
         self.classes
             .get(class_name)
             .is_some_and(|info| info.is_native)
+    }
+
+    /// Returns true if any ancestor in the class's superclass chain is not in
+    /// the hierarchy (defined in a separately-compiled file).
+    ///
+    /// Walks the full chain transitively: `GrandChild → Child → (external Parent)`
+    /// returns true for `GrandChild` even though `Child` is known locally.
+    ///
+    /// When true, the type checker cannot know the full method set and should
+    /// suppress "does not understand" hints for selectors that might be inherited.
+    #[must_use]
+    pub fn has_cross_file_parent(&self, class_name: &str) -> bool {
+        let mut current = class_name;
+        let mut visited = HashSet::new();
+
+        while let Some(info) = self.classes.get(current) {
+            let Some(ref superclass) = info.superclass else {
+                return false; // Reached root — fully known chain
+            };
+
+            if !visited.insert(current.to_string()) {
+                return false; // Cycle guard
+            }
+
+            // First unknown ancestor means the chain is cross-file/incomplete.
+            if !self.classes.contains_key(superclass.as_str()) {
+                return true;
+            }
+
+            current = superclass.as_str();
+        }
+
+        false
     }
 
     /// Returns true if the named class is Value or a subclass of Value (ADR 0042).
@@ -1124,80 +1255,7 @@ impl ClassHierarchy {
                 &mut diagnostics,
             );
 
-            let mut instance_methods: Vec<MethodInfo> = class
-                .methods
-                .iter()
-                .map(|m| MethodInfo {
-                    selector: m.selector.name(),
-                    arity: m.selector.arity(),
-                    kind: m.kind,
-                    defined_in: class.name.name.clone(),
-                    is_sealed: m.is_sealed,
-                    spawns_block: false,
-                    return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
-                    param_types: m
-                        .parameters
-                        .iter()
-                        .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
-                        .collect(),
-                    doc: m.doc_comment.clone().map(Into::into),
-                })
-                .collect();
-
-            let mut class_methods: Vec<MethodInfo> = class
-                .class_methods
-                .iter()
-                .map(|m| MethodInfo {
-                    selector: m.selector.name(),
-                    arity: m.selector.arity(),
-                    kind: m.kind,
-                    defined_in: class.name.name.clone(),
-                    is_sealed: m.is_sealed,
-                    spawns_block: false,
-                    return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
-                    param_types: m
-                        .parameters
-                        .iter()
-                        .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
-                        .collect(),
-                    doc: m.doc_comment.clone().map(Into::into),
-                })
-                .collect();
-
-            // BT-923: For `Value subclass:` classes, synthesize auto-generated slot
-            // methods in the hierarchy so the type checker can resolve them before
-            // codegen runs.  Mirrors the logic in `value_type_codegen::compute_auto_slot_methods`.
-            if class.class_kind == ClassKind::Value {
-                Self::add_value_auto_methods(class, &mut instance_methods, &mut class_methods);
-            }
-
-            let class_info = ClassInfo {
-                name: class.name.name.clone(),
-                superclass: class.superclass.as_ref().map(|s| s.name.clone()),
-                is_sealed: class.is_sealed,
-                is_abstract: class.is_abstract,
-                is_typed: class.is_typed,
-                is_value: class.class_kind == ClassKind::Value,
-                is_native: class.backing_module.is_some(),
-                state: class.state.iter().map(|s| s.name.name.clone()).collect(),
-                state_types: class
-                    .state
-                    .iter()
-                    .filter_map(|s| {
-                        s.type_annotation
-                            .as_ref()
-                            .map(|ty| (s.name.name.clone(), ty.type_name()))
-                    })
-                    .collect(),
-                methods: instance_methods,
-                class_methods,
-                class_variables: class
-                    .class_variables
-                    .iter()
-                    .map(|cv| cv.name.name.clone())
-                    .collect(),
-            };
-
+            let class_info = ClassInfo::from_class_definition(class);
             self.classes.insert(class.name.name.clone(), class_info);
         }
 
@@ -3486,6 +3544,32 @@ mod tests {
             h.get_class("Integer").unwrap().methods.len(),
             original_method_count
         );
+    }
+
+    // --- extract_class_infos tests (BT-1523) ---
+
+    #[test]
+    fn extract_class_infos_from_empty_module() {
+        let module = Module::new(vec![], crate::source_analysis::Span::default());
+        let infos = ClassHierarchy::extract_class_infos(&module);
+        assert!(infos.is_empty());
+    }
+
+    #[test]
+    fn extract_class_infos_captures_methods_and_state() {
+        let source = "Actor subclass: Counter\n  state: count :: Integer = 0\n  increment => self.count := self.count + 1\n  getValue => self.count\n";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, _) = crate::source_analysis::parse(tokens);
+
+        let infos = ClassHierarchy::extract_class_infos(&module);
+        assert_eq!(infos.len(), 1);
+
+        let info = &infos[0];
+        assert_eq!(info.name.as_str(), "Counter");
+        assert_eq!(info.superclass.as_deref(), Some("Actor"));
+        assert!(info.state.iter().any(|s| s == "count"));
+        assert!(info.methods.iter().any(|m| m.selector == "increment"));
+        assert!(info.methods.iter().any(|m| m.selector == "getValue"));
     }
 
     // --- Extension method registration tests (BT-1517) ---

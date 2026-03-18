@@ -226,6 +226,25 @@ pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -
     )
 }
 
+/// Analyse a module with compiler options and pre-loaded class entries.
+///
+/// BT-1523: Used by the build pipeline to inject cross-file class metadata
+/// from Pass 1 into Pass 2's semantic analysis, enabling proper method
+/// resolution across files.
+pub fn analyse_with_options_and_classes(
+    module: &Module,
+    options: &crate::CompilerOptions,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+) -> AnalysisResult {
+    analyse_full(
+        module,
+        &[],
+        options.stdlib_mode,
+        options.skip_module_expression_lint,
+        pre_loaded_classes,
+    )
+}
+
 /// Analyse a module with pre-defined variables and pre-loaded class entries
 /// from BEAM metadata (ADR 0050 Phase 4).
 ///
@@ -3799,6 +3818,29 @@ mod tests {
             "Missing method should still produce DNU warning"
         );
         assert!(dnu[0].message.contains("totallyBogus"));
+    }
+
+    #[test]
+    fn extension_double_colon_return_type_flows_through_pipeline() {
+        // BT-1519: Extension `Integer >> double :: -> Integer => self * 2`
+        // `42 double + 1` should not produce a DNU warning because
+        // `double` returns `Integer`, and `Integer` understands `+`.
+        let src = r"
+            Integer >> double :: -> Integer => self * 2.
+            42 double + 1.
+        ";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+        let result = analyse_with_known_vars(&module, &[]);
+        let dnu: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "Return type from :: -> annotated extension should propagate, got: {dnu:?}"
+        );
     }
 
     #[test]

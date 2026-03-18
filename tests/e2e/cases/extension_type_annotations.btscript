@@ -1,0 +1,51 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1519: Extension type annotation syntax — :: -> ReturnType on >> definitions
+//
+// Tests that extensions with the `:: -> ReturnType` annotation syntax parse,
+// compile, and execute correctly. The `:: ->` form is an alternative to the
+// standard `-> ReturnType` for extension methods, providing a visual separator
+// between selector and return type.
+
+// ===========================================================================
+// Setup: define a simple class to extend
+// ===========================================================================
+
+Object subclass: Greeter
+  state: name = "World"
+  greet => "Hello, " ++ self.name
+// => Greeter
+
+// ===========================================================================
+// Unary extension with :: -> return type
+// ===========================================================================
+
+Greeter >> shout :: -> String => self greet uppercase
+// => _
+
+g := Greeter new
+// => _
+
+g shout
+// => HELLO, WORLD
+
+// ===========================================================================
+// Keyword extension with param type + :: -> return type
+// ===========================================================================
+
+Greeter >> greetWith: prefix :: String :: -> String => prefix ++ self.name
+// => _
+
+g greetWith: "Hi, "
+// => Hi, World
+
+// ===========================================================================
+// Standard -> return type on extension (for comparison)
+// ===========================================================================
+
+Greeter >> reversed -> String => self greet reverse
+// => _
+
+g reversed
+// => dlroW ,olleH

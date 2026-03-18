@@ -467,4 +467,42 @@ mod tests {
         assert_eq!(locs[0].type_info.param_types, vec![Some("Integer".into())]);
         assert_eq!(locs[0].type_info.return_type.as_deref(), Some("Integer"));
     }
+
+    // --- BT-1519: Extension type annotation syntax (:: -> ReturnType) ---
+
+    #[test]
+    fn type_info_unary_double_colon_return_type() {
+        // `Integer >> factorial :: -> Integer =>` — the `:: ->` extension syntax
+        let module = parse_bt("Integer >> factorial :: -> Integer => 1\n");
+        let mut index = ExtensionIndex::new();
+        index.add_module(&module, Path::new("Integer+Factorial.bt"));
+
+        let key = ExtensionKey {
+            class_name: "Integer".into(),
+            side: MethodSide::Instance,
+            selector: "factorial".into(),
+        };
+        let locs = index.lookup(&key).unwrap();
+        assert_eq!(locs[0].type_info.arity, 0);
+        assert!(locs[0].type_info.param_types.is_empty());
+        assert_eq!(locs[0].type_info.return_type.as_deref(), Some("Integer"));
+    }
+
+    #[test]
+    fn type_info_keyword_double_colon_return_type() {
+        // `String >> split: sep :: String :: -> Array =>` — param type + extension return type
+        let module = parse_bt("String >> split: sep :: String :: -> Array => self\n");
+        let mut index = ExtensionIndex::new();
+        index.add_module(&module, Path::new("String+Split.bt"));
+
+        let key = ExtensionKey {
+            class_name: "String".into(),
+            side: MethodSide::Instance,
+            selector: "split:".into(),
+        };
+        let locs = index.lookup(&key).unwrap();
+        assert_eq!(locs[0].type_info.arity, 1);
+        assert_eq!(locs[0].type_info.param_types, vec![Some("String".into())]);
+        assert_eq!(locs[0].type_info.return_type.as_deref(), Some("Array"));
+    }
 }

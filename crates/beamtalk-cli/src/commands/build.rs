@@ -17,6 +17,7 @@ use super::manifest;
 /// Build beamtalk source files.
 ///
 /// This command compiles .bt files to .beam bytecode via Core Erlang.
+#[allow(clippy::too_many_lines)]
 #[instrument(skip_all, fields(path = %path))]
 pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()> {
     info!("Starting build");
@@ -76,11 +77,12 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     // This allows later files to resolve cross-file class references (including
     // classes in package subdirectories) during code generation.
     let mut file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
-    let (class_module_index, class_superclass_index) = if let Some(ref pkg) = pkg_manifest {
-        build_class_module_index(&source_files, source_root.as_deref(), &pkg.name)?
-    } else {
-        (HashMap::new(), HashMap::new())
-    };
+    let (class_module_index, class_superclass_index, all_class_infos) =
+        if let Some(ref pkg) = pkg_manifest {
+            build_class_module_index(&source_files, source_root.as_deref(), &pkg.name)?
+        } else {
+            (HashMap::new(), HashMap::new(), Vec::new())
+        };
 
     for file in &source_files {
         let stem = file
@@ -121,6 +123,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
             options,
             &class_module_index,
             &class_superclass_index,
+            &all_class_infos,
         )?;
         core_files.push(core_file.clone());
         module_names.push(module_name.clone());
@@ -464,6 +467,7 @@ fn compile_file(
     options: &beamtalk_core::CompilerOptions,
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
+    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 ) -> Result<()> {
     debug!("Compiling {path}");
 
@@ -475,6 +479,7 @@ fn compile_file(
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
         class_module_index,
         class_superclass_index,
+        pre_loaded_classes,
     )?;
 
     debug!("Generated Core Erlang: {core_file}");
@@ -484,19 +489,28 @@ fn compile_file(
 
 /// Build class indexes from a set of source files.
 ///
-/// Returns two indexes:
+/// Returns three indexes:
 /// 1. **Class module index:** Maps class names to compiled module names
 ///    (e.g. `"SchemeEnv"` → `"bt@sicp_example@scheme@env"`).
 /// 2. **Class superclass index:** Maps class names to their direct superclass names
 ///    (e.g. `"MyChild"` → `"MyParent"`). Used by BT-894 to resolve cross-file
 ///    inheritance so the compiler can determine value-object vs actor codegen.
+/// 3. **Class infos:** Full `ClassInfo` entries extracted from all source files.
+///    BT-1523: Injected into the type checker's hierarchy during Pass 2 so
+///    cross-file method resolution works without reading BEAM files.
+#[allow(clippy::type_complexity)]
 pub fn build_class_module_index(
     source_files: &[Utf8PathBuf],
     source_root: Option<&Utf8Path>,
     pkg_name: &str,
-) -> Result<(HashMap<String, String>, HashMap<String, String>)> {
+) -> Result<(
+    HashMap<String, String>,
+    HashMap<String, String>,
+    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+)> {
     let mut module_index = HashMap::new();
     let mut superclass_index = HashMap::new();
+    let mut all_class_infos = Vec::new();
 
     for file in source_files {
         let relative_module = compute_relative_module(file, source_root)?;
@@ -523,6 +537,11 @@ pub fn build_class_module_index(
             );
         }
 
+        // BT-1523: Extract full ClassInfo for cross-file hierarchy resolution.
+        let class_infos =
+            beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module);
+        all_class_infos.extend(class_infos);
+
         for class in &module.classes {
             let class_name = class.name.name.to_string();
             if let Some(existing) = module_index.get(&class_name) {
@@ -546,7 +565,7 @@ pub fn build_class_module_index(
         }
     }
 
-    Ok((module_index, superclass_index))
+    Ok((module_index, superclass_index, all_class_infos))
 }
 
 #[cfg(test)]
@@ -642,6 +661,7 @@ mod tests {
             &default_options(),
             &HashMap::new(),
             &HashMap::new(),
+            &[],
         );
         assert!(result.is_ok());
         assert!(core_file.exists());
@@ -662,6 +682,7 @@ mod tests {
             &default_options(),
             &HashMap::new(),
             &HashMap::new(),
+            &[],
         );
         assert!(result.is_err());
     }
@@ -1025,7 +1046,7 @@ mod tests {
         let nonexistent = Utf8PathBuf::from("/nonexistent/no_such_file.bt");
         let result = build_class_module_index(&[nonexistent], None, "my_app");
         assert!(result.is_ok());
-        let (module_index, superclass_index) = result.unwrap();
+        let (module_index, superclass_index, _class_infos) = result.unwrap();
         assert!(module_index.is_empty());
         assert!(superclass_index.is_empty());
     }
@@ -1063,7 +1084,7 @@ mod tests {
         );
 
         let source_files = vec![observer_path.join("event_bus.bt")];
-        let (index, _superclass) =
+        let (index, _superclass, _class_infos) =
             build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
 
         assert_eq!(
@@ -1103,7 +1124,7 @@ mod tests {
         fs::create_dir_all(&build_dir).unwrap();
 
         let source_files = vec![observer_path.join("event_bus.bt"), src_path.join("main.bt")];
-        let (class_module_index, class_superclass_index) =
+        let (class_module_index, class_superclass_index, all_class_infos) =
             build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
 
         // Build the class index — EventBus should map to observer subdir module
@@ -1123,6 +1144,7 @@ mod tests {
             &options,
             &class_module_index,
             &class_superclass_index,
+            &all_class_infos,
         )
         .unwrap();
 
@@ -1137,6 +1159,75 @@ mod tests {
             !core_content.contains("'bt@gang_of_four@event_bus'"),
             "Should NOT use heuristic module name that drops observer@ segment. Generated:\n{core_content}"
         );
+    }
+
+    /// BT-1523: Verify cross-file class hierarchy resolution.
+    ///
+    /// When `InheritingCounter` (file 2) subclasses `Counter` (file 1) and calls
+    /// `self getValue`, the type checker should NOT emit a DNU warning because
+    /// `getValue` is inherited from `Counter` via the cross-file `ClassInfo` injection.
+    #[test]
+    fn test_cross_file_inheritance_no_false_dnu_warning() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        // File 1: Counter with getValue method and count state
+        write_test_file(
+            &src_path.join("counter.bt"),
+            "Actor subclass: Counter\n  state: count = 0\n  getValue => self.count\n  increment => self.count := self.count + 1\n",
+        );
+
+        // File 2: InheritingCounter that calls inherited getValue
+        write_test_file(
+            &src_path.join("inheriting_counter.bt"),
+            "Counter subclass: InheritingCounter\n  getDoubled => self getValue * 2\n",
+        );
+
+        let build_dir = project_path.join("_build/dev/ebin");
+        fs::create_dir_all(&build_dir).unwrap();
+
+        let source_files = vec![
+            src_path.join("counter.bt"),
+            src_path.join("inheriting_counter.bt"),
+        ];
+        let (class_module_index, class_superclass_index, all_class_infos) =
+            build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
+
+        // Verify ClassInfo extraction captured Counter's methods
+        assert!(
+            all_class_infos.iter().any(|ci| ci.name == "Counter"),
+            "Pass 1 should extract ClassInfo for Counter"
+        );
+        let counter_info = all_class_infos
+            .iter()
+            .find(|ci| ci.name == "Counter")
+            .unwrap();
+        assert!(
+            counter_info
+                .methods
+                .iter()
+                .any(|m| m.selector == "getValue"),
+            "Counter ClassInfo should include getValue method"
+        );
+
+        // Compile InheritingCounter with cross-file class infos — should succeed
+        // (no false DNU error for getValue which is inherited from Counter)
+        let core_file = build_dir.join("bt@test_pkg@inheriting_counter.core");
+        let options = default_options();
+        compile_file(
+            &src_path.join("inheriting_counter.bt"),
+            "bt@test_pkg@inheriting_counter",
+            &core_file,
+            &options,
+            &class_module_index,
+            &class_superclass_index,
+            &all_class_infos,
+        )
+        .expect("Cross-file inheritance should compile without errors");
+
+        assert!(core_file.exists());
     }
 
     #[test]
