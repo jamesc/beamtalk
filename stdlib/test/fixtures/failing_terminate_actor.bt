@@ -8,4 +8,4 @@ Actor subclass: FailingTerminateActor
 
   getValue => self.value
 
-  terminate: _reason => Error new signal: "terminate failed on purpose"
+  terminate: _reason => Error signal: "terminate failed on purpose"

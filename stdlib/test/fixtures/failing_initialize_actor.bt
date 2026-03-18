@@ -6,6 +6,6 @@
 Actor subclass: FailingInitializeActor
   state: value = 0
 
-  initialize => Error new signal: "initialize failed on purpose"
+  initialize => Error signal: "initialize failed on purpose"
 
   getValue => self.value

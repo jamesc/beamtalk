@@ -43,7 +43,7 @@ Object subclass: Actor
   /// Counter new   // => ERROR: instantiation_error
   /// ```
   class sealed new =>
-    InstantiationError new signal: "Actors must use spawn, not new"
+    InstantiationError signal: "Actors must use spawn, not new"
 
   /// Raises an InstantiationError — actors must use `spawnWith:`, not `new:`.
   ///
@@ -52,7 +52,7 @@ Object subclass: Actor
   /// Counter new: #{}   // => ERROR: instantiation_error
   /// ```
   class sealed new: _initArgs =>
-    InstantiationError new signal: "Actors must use spawnWith:, not new:"
+    InstantiationError signal: "Actors must use spawnWith:, not new:"
 
   // === Supervision defaults ===
 
