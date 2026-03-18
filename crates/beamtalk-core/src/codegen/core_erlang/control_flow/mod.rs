@@ -311,10 +311,10 @@ impl ThreadingPlan {
         allow_direct_params: bool,
         allow_tuple_acc: bool,
     ) -> Self {
-        if generator.is_repl_mode {
-            generator.repl_loop_mutated = true;
+        if generator.is_repl_mode() {
+            generator.set_repl_loop_mutated(true);
         }
-        let key_style = if generator.is_repl_mode {
+        let key_style = if generator.is_repl_mode() {
             KeyStyle::ReplPlain
         } else {
             KeyStyle::LocalPrefixed
@@ -2236,7 +2236,7 @@ impl CoreErlangGenerator {
         body: &crate::ast::Block,
         condition: Option<&Expression>,
     ) -> Vec<String> {
-        if self.is_repl_mode {
+        if self.is_repl_mode() {
             return Vec::new();
         }
 
@@ -2360,7 +2360,7 @@ impl CoreErlangGenerator {
         is_last: bool,
         threaded: &[String],
     ) -> Result<Option<Document<'static>>> {
-        if is_last || self.is_repl_mode {
+        if is_last || self.is_repl_mode() {
             return Ok(None);
         }
         let Expression::Assignment { target, value, .. } = expr else {
@@ -2484,7 +2484,7 @@ impl CoreErlangGenerator {
                 // This ensures reads (`maps:get('x', StateAcc)`) match writes
                 // (`maps:put('x', ..., StateAcc)`), allowing mutations to accumulate
                 // correctly across loop iterations.
-                let state_key = if self.is_repl_mode {
+                let state_key = if self.is_repl_mode() {
                     id.name.clone()
                 } else {
                     Self::local_state_key(&id.name).into()

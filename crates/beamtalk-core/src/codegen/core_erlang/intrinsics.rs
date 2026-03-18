@@ -836,8 +836,8 @@ impl CoreErlangGenerator {
 
         let (branch_doc, _) = self.with_branch_context(|this| {
             // Set repl_loop_mutated so the REPL module unpacks the {Result, State} tuple
-            if this.is_repl_mode {
-                this.repl_loop_mutated = true;
+            if this.is_repl_mode() {
+                this.set_repl_loop_mutated(true);
             }
             this.generate_conditional_branch_inline(block)
         })?;
@@ -1700,8 +1700,8 @@ impl CoreErlangGenerator {
                         || (self.in_loop_body && !analysis.local_writes.is_empty());
                     if needs_threading {
                         // BT-1392: Set repl_loop_mutated so the REPL unpacks {Result, State}
-                        if self.is_repl_mode {
-                            self.repl_loop_mutated = true;
+                        if self.is_repl_mode() {
+                            self.set_repl_loop_mutated(true);
                         }
                         let doc = self.generate_if_true_with_mutations(receiver, block)?;
                         return Ok(Some(doc));
@@ -1714,8 +1714,8 @@ impl CoreErlangGenerator {
                     let needs_threading = self.needs_mutation_threading(&analysis)
                         || (self.in_loop_body && !analysis.local_writes.is_empty());
                     if needs_threading {
-                        if self.is_repl_mode {
-                            self.repl_loop_mutated = true;
+                        if self.is_repl_mode() {
+                            self.set_repl_loop_mutated(true);
                         }
                         let doc = self.generate_if_false_with_mutations(receiver, block)?;
                         return Ok(Some(doc));
@@ -1734,8 +1734,8 @@ impl CoreErlangGenerator {
                             && (!true_analysis.local_writes.is_empty()
                                 || !false_analysis.local_writes.is_empty()));
                     if needs_threading {
-                        if self.is_repl_mode {
-                            self.repl_loop_mutated = true;
+                        if self.is_repl_mode() {
+                            self.set_repl_loop_mutated(true);
                         }
                         let doc = self.generate_if_true_if_false_with_mutations(
                             receiver,

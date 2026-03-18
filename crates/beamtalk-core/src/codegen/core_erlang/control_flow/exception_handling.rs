@@ -204,8 +204,8 @@ impl CoreErlangGenerator {
         ex_class: &Expression,
         handler_block: &Block,
     ) -> Result<Document<'static>> {
-        if self.is_repl_mode {
-            self.repl_loop_mutated = true;
+        if self.is_repl_mode() {
+            self.set_repl_loop_mutated(true);
         }
 
         let ex_class_var = self.fresh_temp_var("ExClass");
@@ -411,8 +411,8 @@ impl CoreErlangGenerator {
         receiver_block: &Block,
         cleanup_block: &Block,
     ) -> Result<Document<'static>> {
-        if self.is_repl_mode {
-            self.repl_loop_mutated = true;
+        if self.is_repl_mode() {
+            self.set_repl_loop_mutated(true);
         }
 
         let type_var = self.fresh_temp_var("Type");

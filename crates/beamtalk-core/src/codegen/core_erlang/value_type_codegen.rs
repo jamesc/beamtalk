@@ -201,7 +201,7 @@ impl CoreErlangGenerator {
 
         // Set class identity early so that class_name() returns the AST
         // class name rather than deriving from the module name.
-        self.class_identity = Some(ClassIdentity::new(&class.name.name));
+        self.set_class_identity(Some(ClassIdentity::new(&class.name.name)));
 
         // Check if the class explicitly defines new/new: methods
         // (e.g., Object.bt defines `new => @primitive basicNew`)
@@ -1082,7 +1082,7 @@ impl CoreErlangGenerator {
 
         let nlr_token_var = if needs_nlr {
             let token_var = self.fresh_temp_var("NlrToken");
-            self.current_nlr_token = Some(token_var.clone());
+            self.set_current_nlr_token(Some(token_var.clone()));
             Some(token_var)
         } else {
             None
@@ -1108,7 +1108,7 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
         self.current_method_selector = None;
-        self.current_nlr_token = None;
+        self.set_current_nlr_token(None);
 
         // BT-940: Annotate the `fun` expression (not just the body) with source line.
         // Annotating only the body would create invalid double-annotation when the body
@@ -1307,7 +1307,7 @@ impl CoreErlangGenerator {
     ) -> bool {
         // BT-1414: Allow class methods regardless of module context (Actor classes
         // have context=Actor but class methods still need local-map threading).
-        if !self.in_class_method && !matches!(self.context, CodeGenContext::ValueType) {
+        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
         if let Expression::MessageSend {
@@ -1446,7 +1446,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        if !self.in_class_method && !matches!(self.context, CodeGenContext::ValueType) {
+        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
         if let Expression::MessageSend {
@@ -1779,7 +1779,7 @@ impl CoreErlangGenerator {
     ///    (package prefix extracted from `self.module_name`)
     /// 4. User-defined classes without package context → `bt@{snake_case}` (legacy)
     pub fn compiled_module_name(&self, class_name: &str) -> String {
-        if let Some(module) = self.class_module_index.get(class_name) {
+        if let Some(module) = self.class_module_index().get(class_name) {
             return module.clone();
         }
         let snake = super::util::to_module_name(class_name);
