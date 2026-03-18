@@ -221,8 +221,8 @@ test_extension_priority() ->
     ok = ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
 
-    TestFun = fun(_Args, State) ->
-        %% Return a test value
+    TestFun = fun(_Args, _Self, State) ->
+        %% BT-1512: Return {Result, NewState}
         {extension_called, State}
     end,
 
@@ -242,7 +242,7 @@ test_extension_priority() ->
     catch ets:delete(beamtalk_extensions, {'Counter', testExtension}),
 
     %% Should invoke the extension
-    ?assertMatch({reply, {extension_called, _}, _}, Result).
+    ?assertMatch({reply, extension_called, _}, Result).
 
 %% Test that all dispatch error returns are proper 2-tuples {error, #beamtalk_error{}}
 %% This validates the normalization in invoke_method that converts
@@ -347,7 +347,7 @@ test_extension_error_propagation() ->
     ok = beamtalk_extensions:init(),
 
     %% Register an extension that throws
-    CrashFun = fun(_Args, _State) ->
+    CrashFun = fun(_Args, _Self, _State) ->
         error(extension_test_crash)
     end,
 
@@ -374,7 +374,7 @@ test_responds_to_extension_method() ->
     ok = ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
 
-    TestFun = fun(_Args, _State) -> ok end,
+    TestFun = fun(_Args, _Self, State0) -> {ok, State0} end,
     ok = beamtalk_extensions:register('Counter', extTestMethod, TestFun, test_owner),
 
     try
@@ -491,8 +491,9 @@ test_super_finds_extension_on_superclass() ->
     ok = beamtalk_extensions:init(),
 
     %% Register an extension method on Actor (Counter's superclass)
-    TestFun = fun(_Args, State) ->
-        {super_extension_called, State}
+    TestFun = fun(_Args, _Self, State0) ->
+        %% BT-1512: Return {Result, NewState}
+        {super_extension_called, State0}
     end,
 
     ok = beamtalk_extensions:register('Actor', superExtTest, TestFun, test_owner),
@@ -509,10 +510,66 @@ test_super_finds_extension_on_superclass() ->
         Result = beamtalk_dispatch:super(superExtTest, [], Self, State, 'Counter'),
 
         %% Should invoke the extension registered on Actor
-        ?assertMatch({reply, {super_extension_called, _}, _}, Result)
+        ?assertMatch({reply, super_extension_called, _}, Result)
     after
         %% Clean up extension (ignore any error if it's already gone)
         catch ets:delete(beamtalk_extensions, {'Actor', superExtTest})
+    end.
+
+%%% ============================================================================
+%%% BT-1512: Extension method state threading tests
+%%% ============================================================================
+
+%% Test: arity-3 (actor) extension threads state correctly via runtime dispatch
+test_extension_state_threading() ->
+    ok = ensure_counter_loaded(),
+    ok = beamtalk_extensions:init(),
+
+    %% Register an arity-3 extension that mutates state
+    TestFun = fun(_Args, _Self, State) ->
+        OldVal = maps:get('value', State, 0),
+        {OldVal + 100, maps:put('value', OldVal + 100, State)}
+    end,
+
+    ok = beamtalk_extensions:register('Counter', addHundred, TestFun, test_owner),
+
+    State = #{
+        '$beamtalk_class' => 'Counter',
+        'value' => 42
+    },
+    Self = make_ref(),
+
+    try
+        Result = beamtalk_dispatch:lookup(addHundred, [], Self, State, 'Counter'),
+        %% State should be threaded: value 42 + 100 = 142
+        ?assertMatch({reply, 142, #{'value' := 142}}, Result)
+    after
+        catch ets:delete(beamtalk_extensions, {'Counter', addHundred})
+    end.
+
+%% Test: arity-2 (value-type) extension works via runtime dispatch path
+test_value_type_extension_via_runtime_dispatch() ->
+    ok = beamtalk_extensions:init(),
+
+    %% Register an arity-2 extension (value-type style)
+    TestFun = fun(_Args, Self) ->
+        %% Self is the receiver; just return a derived value
+        {value_ext_called, Self}
+    end,
+
+    ok = beamtalk_extensions:register('Integer', testValExt, TestFun, test_owner),
+
+    State = #{
+        '$beamtalk_class' => 'Integer'
+    },
+    Self = 42,
+
+    try
+        Result = beamtalk_dispatch:lookup(testValExt, [], Self, State, 'Integer'),
+        %% Arity-2 path: original State is preserved
+        ?assertMatch({reply, {value_ext_called, 42}, _}, Result)
+    after
+        catch ets:delete(beamtalk_extensions, {'Integer', testValExt})
     end.
 
 %%% ============================================================================
