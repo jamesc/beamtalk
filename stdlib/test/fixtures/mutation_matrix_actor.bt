@@ -232,53 +232,53 @@ Actor subclass: MutationMatrixActor
     _result := [self.counter := self.counter + 42] value
     self.counter
 
-// ── BT-1485: Remaining block-accepting selectors ─────────────────────
-// All methods below are commented out — they produce unbound State
-// variables in codegen due to missing state threading for these selectors.
-// Uncomment each when the corresponding codegen fix lands.
+  // ── BT-1485: Remaining block-accepting selectors ─────────────────────
+  // All methods below are commented out — they produce unbound State
+  // variables in codegen due to missing state threading for these selectors.
+  // Uncomment each when the corresponding codegen fix lands.
 
-// ── List (high risk) ──────────────────────────────────────────────────
+  // ── List (high risk) ──────────────────────────────────────────────────
 
-// P3-1: detect: with field mutation in predicate block
-// detectMutation: items =>
-//   result := items
-//     detect: [:x |
-//       self.counter := self.counter + 1
-//       x > 10
-//     ]
-//   self.log := #(result)
-//   self.counter
+  // P3-1: detect: with field mutation in predicate block (BT-1486)
+  detectMutation: items =>
+    result := items
+      detect: [:x |
+        self.counter := self.counter + 1
+        x > 10
+      ]
+    self.log := #(result)
+    self.counter
 
-// P3-2: detect:ifNone: with field mutation in predicate block
-// detectIfNonePredicateMutation: items =>
-//   result := items
-//     detect: [:x |
-//       self.counter := self.counter + 1
-//       x > 10
-//     ]
-//     ifNone: [-1]
-//   self.log := #(result)
-//   self.counter
+  // P3-2: detect:ifNone: with field mutation in predicate block (BT-1486)
+  detectIfNonePredicateMutation: items =>
+    result := items
+      detect: [:x |
+        self.counter := self.counter + 1
+        x > 10
+      ]
+      ifNone: [-1]
+    self.log := #(result)
+    self.counter
 
-// P3-3: count: with field mutation in predicate block
-// countMutation: items =>
-//   result := items
-//     count: [:x |
-//       self.counter := self.counter + 1
-//       x > 0
-//     ]
-//   self.log := #(result)
-//   self.counter
+  // P3-3: count: with field mutation in predicate block (BT-1486)
+  countMutation: items =>
+    result := items
+      count: [:x |
+        self.counter := self.counter + 1
+        x > 0
+      ]
+    self.log := #(result)
+    self.counter
 
-// P3-4: flatMap: with field mutation in mapping block
-// flatMapMutation: items =>
-//   result := items
-//     flatMap: [:x |
-//       self.counter := self.counter + 1
-//       #(x, x * 10)
-//     ]
-//   self.log := result
-//   self.counter
+  // P3-4: flatMap: with field mutation in mapping block (BT-1486)
+  flatMapMutation: items =>
+    result := items
+      flatMap: [:x |
+        self.counter := self.counter + 1
+        #(x, x * 10)
+      ]
+    self.log := result
+    self.counter
 
 // ── List (medium risk) ────────────────────────────────────────────────
 

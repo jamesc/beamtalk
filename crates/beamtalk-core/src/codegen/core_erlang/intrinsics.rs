@@ -442,6 +442,10 @@ impl CoreErlangGenerator {
     /// - `reject:` (1 arg block) → filter out elements
     /// - `anySatisfy:` (1 arg block) → boolean predicate (any match)
     /// - `allSatisfy:` (1 arg block) → boolean predicate (all match)
+    /// - `detect:` (1 arg block) → find first matching element
+    /// - `detect:ifNone:` (1 arg block + 0 arg block) → find first or default
+    /// - `count:` (1 arg block) → count matching elements
+    /// - `flatMap:` (1 arg block) → map and flatten
     /// - `inject:into:` (2 args) → fold with accumulator
     pub(in crate::codegen::core_erlang) fn try_generate_list_message(
         &mut self,
@@ -489,24 +493,25 @@ impl CoreErlangGenerator {
                             self.generate_list_inject(receiver, &arguments[0], &arguments[1])?;
                         Ok(Some(doc))
                     }
-                    // BT-493: Validate detect:ifNone: block arities even though it
-                    // dispatches at runtime (detect: 1-arg, ifNone: 0-arg)
+                    "detect:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_detect(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
                     "detect:ifNone:" if arguments.len() == 2 => {
-                        validate_block_arity_exact(
+                        let doc = self.generate_list_detect_if_none(
+                            receiver,
                             &arguments[0],
-                            1,
-                            "detect:ifNone:",
-                            "Fix: The detect block must take one argument (each element):\n\
-                             \x20 list detect: [:item | item > 0] ifNone: ['not found']",
-                        )?;
-                        validate_block_arity_exact(
                             &arguments[1],
-                            0,
-                            "detect:ifNone:",
-                            "Fix: The ifNone block must take no arguments:\n\
-                             \x20 list detect: [:item | item > 0] ifNone: ['not found']",
                         )?;
-                        Ok(None)
+                        Ok(Some(doc))
+                    }
+                    "count:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_count(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
+                    "flatMap:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_flat_map(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
                     _ => Ok(None),
                 }

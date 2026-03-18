@@ -962,6 +962,19 @@ pub(super) enum BodyKind {
         /// When `false`, semantics = `anySatisfy:` (start `false`, set `true` on match).
         is_all: bool,
     },
+
+    /// BT-1486: Foldl `detect:` / `detect:ifNone:` body: last expression becomes a predicate;
+    /// a `case` expression updates the found-item accumulator on first match.
+    /// Accumulator is `{FoundItem, FoundFlag, StateAcc{N}}`.
+    FoldlDetect {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1486: Foldl `count:` body: last expression becomes a predicate;
+    /// a `case` expression increments the count accumulator on match.
+    /// Accumulator is `{Count, StateAcc{N}}`.
+    FoldlCount,
 }
 
 // ─── CountedLoopFrame ─────────────────────────────────────────────────────────
@@ -1116,10 +1129,13 @@ impl CoreErlangGenerator {
         let mut has_mutations = false;
         let mut has_plain_lets = false;
 
-        // For FoldlFilter, allocate a pred_var upfront.
+        // For predicate-based body kinds, allocate a pred_var upfront.
         let pred_var: Option<String> = if matches!(
             kind,
-            BodyKind::FoldlFilter { .. } | BodyKind::FoldlBoolPredicate { .. }
+            BodyKind::FoldlFilter { .. }
+                | BodyKind::FoldlBoolPredicate { .. }
+                | BodyKind::FoldlDetect { .. }
+                | BodyKind::FoldlCount
         ) {
             Some(self.fresh_temp_var("Pred"))
         } else {
@@ -1255,8 +1271,11 @@ impl CoreErlangGenerator {
                                 "}",
                             ]);
                         }
-                        BodyKind::FoldlFilter { .. } | BodyKind::FoldlBoolPredicate { .. } => {
-                            // select:/reject:/anySatisfy:/allSatisfy: — bind predicate result
+                        BodyKind::FoldlFilter { .. }
+                        | BodyKind::FoldlBoolPredicate { .. }
+                        | BodyKind::FoldlDetect { .. }
+                        | BodyKind::FoldlCount => {
+                            // predicate-based selectors — bind predicate result
                             if let Some(pv) = pred_var.as_ref() {
                                 let result_var = self.fresh_temp_var("CondVal");
                                 docs.push(docvec![
@@ -1412,6 +1431,83 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-1486: FoldlDetect — update found-item accumulator on first match.
+        // Accumulator is {FoundItem, FoundFlag, StateVars...}.
+        // Only update FoundItem when pred=true AND FoundFlag='false' (first match only).
+        if let BodyKind::FoldlDetect { item_var } = kind {
+            if let Some(pv) = &pred_var {
+                if plan.use_tuple_acc {
+                    let vars_doc = plan.current_vars_doc(self);
+                    docs.push(docvec![
+                        "case ",
+                        Document::String(pv.clone()),
+                        " of <'true'> when 'true' -> case FoundFlag of <'false'> when 'true' -> {",
+                        Document::String(item_var.clone()),
+                        ", 'true', ",
+                        vars_doc.clone(),
+                        "} <'true'> when 'true' -> {FoundItem, 'true', ",
+                        vars_doc.clone(),
+                        "} end <'false'> when 'true' -> {FoundItem, FoundFlag, ",
+                        vars_doc,
+                        "} end",
+                    ]);
+                } else {
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    docs.push(docvec![
+                        "case ",
+                        Document::String(pv.clone()),
+                        " of <'true'> when 'true' -> case FoundFlag of <'false'> when 'true' -> {",
+                        Document::String(item_var.clone()),
+                        ", 'true', ",
+                        Document::String(final_state.clone()),
+                        "} <'true'> when 'true' -> {FoundItem, 'true', ",
+                        Document::String(final_state.clone()),
+                        "} end <'false'> when 'true' -> {FoundItem, FoundFlag, ",
+                        Document::String(final_state),
+                        "} end",
+                    ]);
+                }
+            }
+        }
+
+        // BT-1486: FoldlCount — increment count accumulator on predicate match.
+        // Accumulator is {Count, StateVars...}.
+        if matches!(kind, BodyKind::FoldlCount) {
+            if let Some(pv) = &pred_var {
+                if plan.use_tuple_acc {
+                    let vars_doc = plan.current_vars_doc(self);
+                    docs.push(docvec![
+                        "case ",
+                        Document::String(pv.clone()),
+                        " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {CountAcc, ",
+                        vars_doc,
+                        "} end",
+                    ]);
+                } else {
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    docs.push(docvec![
+                        "case ",
+                        Document::String(pv.clone()),
+                        " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
+                        Document::String(final_state.clone()),
+                        "} <'false'> when 'true' -> {CountAcc, ",
+                        Document::String(final_state),
+                        "} end",
+                    ]);
+                }
+            }
+        }
+
         let final_state_version = self.state_version();
         Ok((Document::Vec(docs), final_state_version))
     }
@@ -1438,7 +1534,10 @@ impl CoreErlangGenerator {
                     "}",
                 ]);
             }
-            BodyKind::FoldlFilter { .. } | BodyKind::FoldlBoolPredicate { .. } => {
+            BodyKind::FoldlFilter { .. }
+            | BodyKind::FoldlBoolPredicate { .. }
+            | BodyKind::FoldlDetect { .. }
+            | BodyKind::FoldlCount => {
                 if let Some(pv) = pred_var {
                     docs.push(docvec!["let ", Document::String(pv.clone()), " = _Val in ",]);
                 }
@@ -1482,7 +1581,10 @@ impl CoreErlangGenerator {
                     "}",
                 ]);
             }
-            BodyKind::FoldlFilter { .. } | BodyKind::FoldlBoolPredicate { .. } => {
+            BodyKind::FoldlFilter { .. }
+            | BodyKind::FoldlBoolPredicate { .. }
+            | BodyKind::FoldlDetect { .. }
+            | BodyKind::FoldlCount => {
                 if let Some(pv) = pred_var {
                     docs.push(docvec![
                         "let ",
@@ -1540,7 +1642,10 @@ impl CoreErlangGenerator {
                         "}",
                     ]);
                 }
-                BodyKind::FoldlFilter { .. } | BodyKind::FoldlBoolPredicate { .. } => {
+                BodyKind::FoldlFilter { .. }
+                | BodyKind::FoldlBoolPredicate { .. }
+                | BodyKind::FoldlDetect { .. }
+                | BodyKind::FoldlCount => {
                     if let Some(pv) = pred_var {
                         docs.push(docvec![
                             " let ",
@@ -1577,7 +1682,10 @@ impl CoreErlangGenerator {
                     "}",
                 ]);
             }
-            BodyKind::FoldlFilter { .. } | BodyKind::FoldlBoolPredicate { .. } => {
+            BodyKind::FoldlFilter { .. }
+            | BodyKind::FoldlBoolPredicate { .. }
+            | BodyKind::FoldlDetect { .. }
+            | BodyKind::FoldlCount => {
                 if let Some(pv) = pred_var {
                     docs.push(docvec![
                         " let ",
@@ -1618,7 +1726,10 @@ impl CoreErlangGenerator {
                 };
                 docs.push(docvec!["{['nil' | AccList], ", Document::String(fs), "}",]);
             }
-            BodyKind::FoldlFilter { .. } | BodyKind::FoldlBoolPredicate { .. } => {
+            BodyKind::FoldlFilter { .. }
+            | BodyKind::FoldlBoolPredicate { .. }
+            | BodyKind::FoldlDetect { .. }
+            | BodyKind::FoldlCount => {
                 if let Some(pv) = pred_var {
                     docs.push(docvec![
                         "let ",
@@ -1754,7 +1865,10 @@ impl CoreErlangGenerator {
                     docs.push(Document::Str(" in "));
                 }
             }
-            BodyKind::FoldlFilter { .. } | BodyKind::FoldlBoolPredicate { .. } => {
+            BodyKind::FoldlFilter { .. }
+            | BodyKind::FoldlBoolPredicate { .. }
+            | BodyKind::FoldlDetect { .. }
+            | BodyKind::FoldlCount => {
                 if !is_last {
                     docs.push(Document::Str("let _ = "));
                 }
