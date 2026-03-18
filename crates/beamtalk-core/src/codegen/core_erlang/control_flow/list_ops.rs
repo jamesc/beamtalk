@@ -252,6 +252,8 @@ impl CoreErlangGenerator {
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
+        // BT-1489: Save recv var for is_binary check after foldl (String-aware result).
+        let recv_var_for_str_check = list_var.clone();
         let recv_code = self.expression_doc(receiver)?;
         let safe_list_var = self.fresh_temp_var("temp");
         let lambda_var = self.fresh_temp_var("temp");
@@ -308,10 +310,16 @@ impl CoreErlangGenerator {
 
             // Extract each updated local var from tuple positions 2..N.
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
+
+            // BT-1489: String-aware result wrapping — if the original receiver
+            // was a binary (String), convert the reversed list back to a binary.
+            let (str_binding, str_result) =
+                self.generate_string_aware_result_binding(&recv_var_for_str_check, &final_list);
+
             if self.in_direct_params_loop {
                 // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
-                self.direct_params_list_op_result = Some(final_list.clone());
+                self.direct_params_list_op_result = Some(str_result);
                 docs.push(docvec![
                     " in let ",
                     Document::String(fold_result.clone()),
@@ -330,6 +338,8 @@ impl CoreErlangGenerator {
                     " = call 'lists':'reverse'(",
                     Document::String(rev_list),
                     ") in ",
+                    str_binding.clone(),
+                    " in ",
                     extract_doc,
                 ]);
             } else {
@@ -353,10 +363,12 @@ impl CoreErlangGenerator {
                     " = call 'lists':'reverse'(",
                     Document::String(rev_list),
                     ") in ",
+                    str_binding.clone(),
+                    " in ",
                     extract_doc,
                     repack_doc,
                     "{",
-                    Document::String(final_list),
+                    Document::String(str_result),
                     ", ",
                     Document::String(stateacc),
                     "}",
@@ -400,15 +412,24 @@ impl CoreErlangGenerator {
         let final_list = self.fresh_temp_var("FinalList");
         let state_out = self.fresh_temp_var("StOut");
 
-        let mut post_code = format!(
+        // BT-1489: String-aware result wrapping for map-acc path.
+        let (str_binding_doc, str_result) =
+            self.generate_string_aware_result_binding(&recv_var_for_str_check, &final_list);
+
+        let pre_str = format!(
             " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {{[], {init_state}}}, {safe_list_var}) \
              in let {rev_list} = call 'erlang':'element'(1, {fold_result}) \
-             in let {final_list} = call 'lists':'reverse'({rev_list}) \
-             in let {state_out} = call 'erlang':'element'(2, {fold_result}) in "
+             in let {final_list} = call 'lists':'reverse'({rev_list}) in "
         );
-        post_code.push_str(&plan.generate_extract_suffix(&state_out, self));
-        let _ = write!(post_code, "{{{final_list}, {state_out}}}");
-        docs.push(Document::String(post_code));
+        let mut post_str =
+            format!(" in let {state_out} = call 'erlang':'element'(2, {fold_result}) in ");
+        post_str.push_str(&plan.generate_extract_suffix(&state_out, self));
+        let _ = write!(post_str, "{{{str_result}, {state_out}}}");
+        docs.push(docvec![
+            Document::String(pre_str),
+            str_binding_doc,
+            Document::String(post_str),
+        ]);
 
         Ok(Document::Vec(docs))
     }
@@ -501,6 +522,8 @@ impl CoreErlangGenerator {
         self.emit_loop_convention_diagnostic(&plan, body.span);
 
         let list_var = self.fresh_temp_var("temp");
+        // BT-1489: Save recv var for is_binary check after foldl (String-aware result).
+        let recv_var_for_str_check = list_var.clone();
         let recv_code = self.expression_doc(receiver)?;
         let safe_list_var = self.fresh_temp_var("temp");
         let lambda_var = self.fresh_temp_var("temp");
@@ -561,10 +584,15 @@ impl CoreErlangGenerator {
 
             // Extract each updated local var from tuple positions 2..N.
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
+
+            // BT-1489: String-aware result wrapping for filter ops.
+            let (str_binding, str_result) =
+                self.generate_string_aware_result_binding(&recv_var_for_str_check, &final_list);
+
             if self.in_direct_params_loop {
                 // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
                 // escape to the outer scope. Store the result var for the caller.
-                self.direct_params_list_op_result = Some(final_list.clone());
+                self.direct_params_list_op_result = Some(str_result);
                 docs.push(docvec![
                     " in let ",
                     Document::String(fold_result.clone()),
@@ -583,6 +611,8 @@ impl CoreErlangGenerator {
                     " = call 'lists':'reverse'(",
                     Document::String(rev_list),
                     ") in ",
+                    str_binding.clone(),
+                    " in ",
                     extract_doc,
                 ]);
             } else {
@@ -606,10 +636,12 @@ impl CoreErlangGenerator {
                     " = call 'lists':'reverse'(",
                     Document::String(rev_list),
                     ") in ",
+                    str_binding.clone(),
+                    " in ",
                     extract_doc,
                     repack_doc,
                     "{",
-                    Document::String(final_list),
+                    Document::String(str_result),
                     ", ",
                     Document::String(stateacc),
                     "}",
@@ -659,15 +691,24 @@ impl CoreErlangGenerator {
         let final_list = self.fresh_temp_var("FinalList");
         let state_out = self.fresh_temp_var("StOut");
 
-        let mut post_code = format!(
+        // BT-1489: String-aware result wrapping for map-acc filter path.
+        let (str_binding_doc, str_result) =
+            self.generate_string_aware_result_binding(&recv_var_for_str_check, &final_list);
+
+        let pre_str = format!(
             " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {{[], {init_state}}}, {safe_list_var}) \
              in let {rev_list} = call 'erlang':'element'(1, {fold_result}) \
-             in let {final_list} = call 'lists':'reverse'({rev_list}) \
-             in let {state_out} = call 'erlang':'element'(2, {fold_result}) in "
+             in let {final_list} = call 'lists':'reverse'({rev_list}) in "
         );
-        post_code.push_str(&plan.generate_extract_suffix(&state_out, self));
-        let _ = write!(post_code, "{{{final_list}, {state_out}}}");
-        docs.push(Document::String(post_code));
+        let mut post_str =
+            format!(" in let {state_out} = call 'erlang':'element'(2, {fold_result}) in ");
+        post_str.push_str(&plan.generate_extract_suffix(&state_out, self));
+        let _ = write!(post_str, "{{{str_result}, {state_out}}}");
+        docs.push(docvec![
+            Document::String(pre_str),
+            str_binding_doc,
+            Document::String(post_str),
+        ]);
 
         Ok(Document::Vec(docs))
     }
@@ -1362,6 +1403,42 @@ impl CoreErlangGenerator {
 
         Ok(Document::Vec(docs))
     }
+
+    /// BT-1489: Generates a `let` binding that converts a list result to a
+    /// binary string when the original receiver was a binary (String).
+    ///
+    /// Returns `(binding_code, result_var)` where `binding_code` is:
+    /// ```text
+    /// let <out_var> = case call 'erlang':'is_binary'(<recv_var>) of
+    ///   <'true'> when 'true' -> call 'erlang':'iolist_to_binary'(<list_var>)
+    ///   <'false'> when 'true' -> <list_var>
+    /// end
+    /// ```
+    ///
+    /// Note: does NOT include a trailing ` in ` — callers chain with ` in `.
+    ///
+    /// This allows `collect:`, `select:`, and `reject:` to return a binary
+    /// string when the receiver is a String, while still returning a list
+    /// when the receiver is a List.
+    fn generate_string_aware_result_binding(
+        &mut self,
+        recv_var: &str,
+        list_var: &str,
+    ) -> (Document<'static>, String) {
+        let out_var = self.fresh_temp_var("StrAwareResult");
+        let binding = docvec![
+            "let ",
+            Document::String(out_var.clone()),
+            " = case call 'erlang':'is_binary'(",
+            Document::String(recv_var.to_string()),
+            ") of <'true'> when 'true' -> call 'erlang':'iolist_to_binary'(",
+            Document::String(list_var.to_string()),
+            ") <'false'> when 'true' -> ",
+            Document::String(list_var.to_string()),
+            " end"
+        ];
+        (binding, out_var)
+    }
 }
 
 #[cfg(test)]
@@ -1734,6 +1811,37 @@ mod tests {
         assert!(
             code.contains("'erlang':'element'(2,"),
             "select: tuple acc should use element(2, ...) for first threaded var. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_collect_with_mutation_has_string_aware_result() {
+        // BT-1489: collect: with mutations should emit is_binary guard so String
+        // receivers get iolist_to_binary applied to the result list.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items collect: [:x | self.n := self.n + 1. x]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("'erlang':'is_binary'("),
+            "BT-1489: collect: with mutations should check is_binary on receiver. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'erlang':'iolist_to_binary'("),
+            "BT-1489: collect: with mutations should call iolist_to_binary for string receivers. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_select_with_mutation_has_string_aware_result() {
+        // BT-1489: select: with mutations should emit is_binary guard.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items select: [:x | self.n := self.n + 1. x > 0]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("'erlang':'is_binary'("),
+            "BT-1489: select: with mutations should check is_binary on receiver. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'erlang':'iolist_to_binary'("),
+            "BT-1489: select: with mutations should call iolist_to_binary for string receivers. Got:\n{code}"
         );
     }
 }
