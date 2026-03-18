@@ -714,7 +714,7 @@ pub fn compile_source(
     clippy::too_many_lines
 )]
 #[instrument(skip_all, fields(path = %source_path, module = module_name))]
-pub fn compile_source_with_bindings(
+pub(crate) fn compile_source_with_bindings(
     source_path: &Utf8Path,
     module_name: &str,
     core_output: &Utf8Path,

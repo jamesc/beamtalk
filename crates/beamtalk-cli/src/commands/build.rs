@@ -500,10 +500,10 @@ fn compile_file(
 /// Cached AST from Pass 1 — holds the source text, parsed `Module`, and any
 /// parse diagnostics so Pass 2 can skip re-reading and re-parsing the same file.
 #[derive(Debug)]
-pub struct CachedAst {
-    pub source: String,
-    pub module: beamtalk_core::ast::Module,
-    pub diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
+pub(crate) struct CachedAst {
+    pub(crate) source: String,
+    pub(crate) module: beamtalk_core::ast::Module,
+    pub(crate) diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
 }
 
 /// Build class indexes from a set of source files.
@@ -520,7 +520,7 @@ pub struct CachedAst {
 /// 4. **Cached ASTs:** BT-1544: Maps file paths to their parsed `Module` + source
 ///    text so Pass 2 can reuse them instead of re-reading and re-parsing.
 #[allow(clippy::type_complexity)]
-pub fn build_class_module_index(
+pub(crate) fn build_class_module_index(
     source_files: &[Utf8PathBuf],
     source_root: Option<&Utf8Path>,
     pkg_name: &str,
