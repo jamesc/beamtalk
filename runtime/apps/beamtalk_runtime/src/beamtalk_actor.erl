@@ -271,12 +271,15 @@ await_initialize(Pid) ->
             ok
     catch
         exit:{noproc, _} ->
-            %% Process already dead — grab the reason from the DOWN message
+            %% Process already dead — grab the reason from the DOWN message.
+            %% Receive BEFORE demonitor so the DOWN isn't flushed.
+            Result =
+                receive
+                    {'DOWN', MonRef, process, Pid, Reason} -> {error, Reason}
+                after 0 -> {error, noproc}
+                end,
             erlang:demonitor(MonRef, [flush]),
-            receive
-                {'DOWN', MonRef, process, Pid, Reason} -> {error, Reason}
-            after 0 -> {error, noproc}
-            end;
+            Result;
         exit:{{Reason, _CallInfo}, _} ->
             %% gen_server stop reason wrapped by sys
             erlang:demonitor(MonRef, [flush]),
