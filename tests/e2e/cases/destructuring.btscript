@@ -171,3 +171,30 @@ q
 
 m
 // => 2
+
+:clear
+// => ok
+
+// ===========================================================================
+// REASSIGNMENT AFTER DESTRUCTURING (BT-1483)
+//
+// Destructured bindings must not leak into the persistent REPL scope.
+// After `a := 99`, reading `a` must return 99, not the stale value from
+// the destructured pattern.
+// ===========================================================================
+
+#[a] := #[1, 2]. a := 99. a
+// => 99
+
+:clear
+// => ok
+
+// Same bug across turns — reassignment in a later turn must override.
+#(x, y) := #(10, 20)
+// => [10,20]
+
+x := 99
+// => 99
+
+x
+// => 99
