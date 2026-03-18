@@ -215,7 +215,7 @@ impl CoreErlangGenerator {
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "super used alone (must be in message send like 'super method: arg')"
                         .to_string(),
-                    location: self.span_location(id.span),
+                    span: Some(id.span),
                 })
             }
             _ => {
@@ -376,7 +376,7 @@ impl CoreErlangGenerator {
                     "cannot access instance field '{}' in a class method",
                     field.name
                 ),
-                location: self.span_location(field.span),
+                span: Some(field.span),
             });
         }
         // For now, assume receiver is 'self' and access from State/Self
@@ -411,17 +411,13 @@ impl CoreErlangGenerator {
             Expression::Identifier(id) => id.name.to_string(),
             _ => "receiver".to_string(),
         };
-        let location = match self.span_to_line(receiver.span()) {
-            Some(line) => format!("line {line}"),
-            None => format!("offset {}", receiver.span().start()),
-        };
         Err(CodeGenError::UnsupportedFeature {
             feature: format!(
                 "field access on a non-self receiver — use a getter method instead: \
                 `{receiver_desc} {field_name}` rather than `{receiver_desc}.{field_name}`",
                 field_name = field.name
             ),
-            location,
+            span: Some(receiver.span()),
         })
     }
 
@@ -478,7 +474,7 @@ impl CoreErlangGenerator {
                 feature: format!(
                     "cannot assign to instance field '{field_name}' in a class method"
                 ),
-                location: "class method body".to_string(),
+                span: Some(value.span()),
             });
         }
         // BT-833: Value type field assignment — Self-threading (immutable update).
@@ -1187,7 +1183,7 @@ impl CoreErlangGenerator {
             if matches!(selector, MessageSelector::Binary(_)) {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "binary selectors in cascades".to_string(),
-                    location: "cascade message with binary selector".to_string(),
+                    span: Some(underlying_receiver.span()),
                 });
             }
 
@@ -1403,7 +1399,7 @@ impl CoreErlangGenerator {
             }
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: "Unsupported destructuring pattern kind".to_string(),
-                location: "generate_block_body_slice".to_string(),
+                span: Some(value.span()),
             }),
         }
     }
@@ -1480,7 +1476,7 @@ impl CoreErlangGenerator {
                 _ => {
                     return Err(CodeGenError::UnsupportedFeature {
                         feature: "Nested patterns in array destructuring".to_string(),
-                        location: self.span_location(elem.span()),
+                        span: Some(elem.span()),
                     });
                 }
             }
@@ -1585,7 +1581,7 @@ impl CoreErlangGenerator {
             // Multi-var case not supported yet
             Err(CodeGenError::UnsupportedFeature {
                 feature: "Multiple threaded variables in control flow".to_string(),
-                location: "generate_block_body_slice".to_string(),
+                span: Some(expr.span()),
             })
         }
     }
@@ -1680,7 +1676,7 @@ impl CoreErlangGenerator {
             _ => {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Unsupported destructuring pattern kind".to_string(),
-                    location: self.span_location(pattern.span()),
+                    span: Some(pattern.span()),
                 });
             }
         };
@@ -1770,7 +1766,7 @@ impl CoreErlangGenerator {
                         _ => {
                             return Err(CodeGenError::UnsupportedFeature {
                                 feature: "Nested patterns in array destructuring".to_string(),
-                                location: self.span_location(elem.span()),
+                                span: Some(elem.span()),
                             });
                         }
                     }
@@ -1870,7 +1866,7 @@ impl CoreErlangGenerator {
                         _ => {
                             return Err(CodeGenError::UnsupportedFeature {
                                 feature: "Nested patterns in tuple destructuring".to_string(),
-                                location: self.span_location(elem.span()),
+                                span: Some(elem.span()),
                             });
                         }
                     }
@@ -1899,7 +1895,7 @@ impl CoreErlangGenerator {
                         _ => {
                             return Err(CodeGenError::UnsupportedFeature {
                                 feature: "Nested patterns in map destructuring".to_string(),
-                                location: self.span_location(pair.value.span()),
+                                span: Some(pair.value.span()),
                             });
                         }
                     }
@@ -1908,7 +1904,7 @@ impl CoreErlangGenerator {
             _ => {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Unsupported destructuring pattern kind".to_string(),
-                    location: self.span_location(pattern.span()),
+                    span: Some(pattern.span()),
                 });
             }
         }
@@ -1956,7 +1952,7 @@ impl CoreErlangGenerator {
         if arms.is_empty() {
             return Err(CodeGenError::UnsupportedFeature {
                 feature: "match expression with no arms".to_string(),
-                location: self.span_location(value.span()),
+                span: Some(value.span()),
             });
         }
 
@@ -1974,7 +1970,7 @@ impl CoreErlangGenerator {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "List-syntax pattern `#(...)` in match: arm is not yet supported"
                         .to_string(),
-                    location: self.span_location(*span),
+                    span: Some(*span),
                 });
             }
             // Rest patterns in match arms are not yet supported (BT-1251 only adds
@@ -1987,7 +1983,7 @@ impl CoreErlangGenerator {
             {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Rest pattern `...` in match: arm is not yet supported".to_string(),
-                    location: self.span_location(*span),
+                    span: Some(*span),
                 });
             }
         }
@@ -2436,7 +2432,7 @@ impl CoreErlangGenerator {
             }
             elem => Err(CodeGenError::UnsupportedFeature {
                 feature: "Unsupported pattern in Array match arm element".to_string(),
-                location: self.span_location(elem.span()),
+                span: Some(elem.span()),
             }),
         }
     }
@@ -2484,7 +2480,7 @@ impl CoreErlangGenerator {
                 // `generate_array_match_arm` and never reach this path.
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "Array pattern nested inside a composite native pattern (tuple/list) is not supported".to_string(),
-                    location: self.span_location(pattern.span()),
+                    span: Some(pattern.span()),
                 })
             }
             Pattern::List { elements, tail, .. } => {
@@ -2570,7 +2566,7 @@ impl CoreErlangGenerator {
                      Only stdlib sealed types (e.g. Result) support constructor patterns in this release.",
                     class.name, selector, class.name, selector
                 ),
-                location: self.span_location(span),
+                span: Some(span),
             }
         })?;
 
@@ -2584,7 +2580,7 @@ impl CoreErlangGenerator {
                     keywords.len(),
                     fields.binding_fields.len()
                 ),
-                location: self.span_location(span),
+                span: Some(span),
             });
         }
 
@@ -2732,7 +2728,7 @@ impl CoreErlangGenerator {
                     _ => {
                         return Err(CodeGenError::UnsupportedFeature {
                             feature: format!("operator '{op}' in guard expression"),
-                            location: self.span_location(expr.span()),
+                            span: Some(expr.span()),
                         });
                     }
                 };
@@ -2749,7 +2745,7 @@ impl CoreErlangGenerator {
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: "complex guard expression (only comparisons and arithmetic allowed)"
                     .to_string(),
-                location: self.span_location(expr.span()),
+                span: Some(expr.span()),
             }),
         }
     }

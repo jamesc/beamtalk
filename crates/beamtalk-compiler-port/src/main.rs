@@ -571,6 +571,49 @@ fn byte_offset_to_line(source: &str, offset: u32) -> u32 {
     newlines.saturating_add(1)
 }
 
+/// Compute 1-based column number for a byte offset in source text.
+///
+/// Counts Unicode characters (not bytes) from the start of the line,
+/// so columns are correct for multibyte UTF-8 source.
+fn byte_offset_to_col(source: &str, offset: u32) -> u32 {
+    let offset_clamped = (offset as usize).min(source.len());
+    let line_start = source.as_bytes()[..offset_clamped]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |pos| pos + 1);
+
+    // Count Unicode scalar values from line_start to offset_clamped
+    let mut col = 1u32;
+    for (rel_byte, _) in source[line_start..].char_indices() {
+        if line_start + rel_byte >= offset_clamped {
+            break;
+        }
+        col = col.saturating_add(1);
+    }
+    col
+}
+
+/// Format a `CodeGenError` with source-aware location info for MCP responses.
+///
+/// When the error carries a `Span`, formats the location as `"line N, col C"`
+/// using the source text. Falls back to the default `Display` format otherwise.
+fn format_codegen_error(e: &beamtalk_core::erlang::CodeGenError, source: &str) -> String {
+    use beamtalk_core::erlang::CodeGenError;
+    match e {
+        CodeGenError::UnsupportedFeature {
+            feature,
+            span: Some(span),
+        } => {
+            let line = byte_offset_to_line(source, span.start());
+            let col = byte_offset_to_col(source, span.start());
+            format!(
+                "Code generation failed: unsupported feature: {feature} at line {line}, col {col}"
+            )
+        }
+        _ => format!("Code generation failed: {e}"),
+    }
+}
+
 /// Build a response map for compile-time diagnostic errors.
 /// Each diagnostic entry includes `message`, `line` (1-based), and optionally `hint`.
 fn diagnostic_error_response(
@@ -754,7 +797,7 @@ fn handle_compile_expression(request: &Map) -> Term {
         class_module_index,
     ) {
         Ok(code) => ok_response(&code, &warnings),
-        Err(e) => error_response(&[format!("Code generation failed: {e}")]),
+        Err(e) => error_response(&[format_codegen_error(&e, &source)]),
     }
 }
 
@@ -833,7 +876,7 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
         class_module_index,
     ) {
         Ok(code) => ok_response(&code, &warnings),
-        Err(e) => error_response(&[format!("Code generation failed: {e}")]),
+        Err(e) => error_response(&[format_codegen_error(&e, &source)]),
     }
 }
 
@@ -904,9 +947,7 @@ fn handle_inline_class_definition(
         ) {
             Ok(code) => Some(code),
             Err(e) => {
-                return error_response(&[format!(
-                    "Trailing expression code generation failed: {e}"
-                )]);
+                return error_response(&[format_codegen_error(&e, source)]);
             }
         }
     };
@@ -927,7 +968,7 @@ fn handle_inline_class_definition(
             trailing_core_erlang.as_deref(),
             &warnings,
         ),
-        Err(e) => error_response(&[format!("Code generation failed: {e}")]),
+        Err(e) => error_response(&[format_codegen_error(&e, source)]),
     }
 }
 
@@ -1079,7 +1120,7 @@ fn handle_compile(request: &Map) -> Term {
             .with_source_path_opt(source_path.as_deref()),
     ) {
         Ok(code) => compile_ok_response(&code, &module_name, &classes, &warning_msgs),
-        Err(e) => error_response(&[format!("Code generation failed: {e}")]),
+        Err(e) => error_response(&[format_codegen_error(&e, &source)]),
     }
 }
 
