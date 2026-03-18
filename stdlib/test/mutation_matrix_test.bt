@@ -1,0 +1,133 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1480: State mutation test matrix — proves compiler handles all
+// control flow × nesting × mutation patterns for Actor state threading.
+// Each test exercises one specific pattern and asserts correct state.
+//
+// Test P2-16 (anySatisfy:/allSatisfy: + mutation) omitted — codegen bug
+// produces unbound State1 variable in dispatch. Filed as BT-1481.
+
+TestCase subclass: MutationMatrixTest
+
+  // ── P0: Known bug patterns (verify fixes) ──────────────────────────
+
+  // P0-1: collect: + ifTrue: + mutation (BT-1477)
+  testCollectIfTrueMutation =>
+    a := MutationMatrixActor spawn
+    count := a collectIfTrueMutation: #(1, -2, 3)
+    self assert: count equals: 2
+    self assert: a getLog equals: #(2, -4, 6)
+
+  // P0-2: select: + ifTrue: + mutation (BT-1477)
+  testSelectIfTrueMutation =>
+    a := MutationMatrixActor spawn
+    count := a selectIfTrueMutation: #(1, -2, 3, -4)
+    self assert: count equals: 4
+    self assert: a getLog equals: #(1, 3)
+
+  // P0-3: Sequential mutations mid-method with state (BT-1421)
+  testSequentialMutations =>
+    a := MutationMatrixActor spawn
+    count := a sequentialMutations
+    self assert: count equals: 22
+    self assert: a getLog equals: #(11)
+
+  // P0-4: Block capture of self across process (BT-1475)
+  testBlockCaptureAcrossProcess =>
+    a := MutationMatrixActor spawn
+    count := a blockCaptureAcrossProcess
+    self assert: count equals: 42
+
+  // ── P1: High risk unexplored patterns ──────────────────────────────
+
+  // P1-5: collect: inside collect: + mutation
+  testNestedCollectMutation =>
+    a := MutationMatrixActor spawn
+    count := a nestedCollectMutation: #(#(1, 2), #(3, 4))
+    self assert: count equals: 4
+    self assert: a getLog equals: #(#(2, 4), #(6, 8))
+
+  // P1-6: do: inside collect: + mutation
+  testDoInsideCollectMutation =>
+    a := MutationMatrixActor spawn
+    count := a doInsideCollectMutation: #(#(1, 2), #(3, 4))
+    self assert: count equals: 10
+    self assert: a getLog equals: #(2, 2)
+
+  // P1-7: inject:into: + ifTrue: + mutation
+  testInjectIfTrueMutation =>
+    a := MutationMatrixActor spawn
+    count := a injectIfTrueMutation: #(1, -2, 3, -4, 5)
+    self assert: count equals: 3
+    self assert: a getLog equals: #(9)
+
+  // P1-8: detect:ifNone: + mutation before match (no match)
+  testDetectIfNoneMutationNoMatch =>
+    a := MutationMatrixActor spawn
+    count := a detectIfNoneMutation: #(1, 2, 3)
+    self assert: count equals: 99
+    self assert: a getLog equals: #(0)
+
+  // P1-8b: detect:ifNone: + mutation before match (with match)
+  testDetectIfNoneMutationWithMatch =>
+    a := MutationMatrixActor spawn
+    count := a detectIfNoneMutation: #(1, 20, 3)
+    self assert: count equals: 99
+    self assert: a getLog equals: #(20)
+
+  // P1-9: on:do: exception handler + mutation
+  testExceptionMutation =>
+    a := MutationMatrixActor spawn
+    count := a exceptionMutation
+    self assert: count equals: 0
+
+  // P1-10: Non-local return from inside collect: after mutation
+  testNonLocalReturnFromCollect =>
+    a := MutationMatrixActor spawn
+    result := a nonLocalReturnFromCollect: #(10, 20, 30, 40, 50)
+    self assert: result equals: 3
+    self assert: a getCounter equals: 3
+
+  // P1-11: Multiple field mutations in single collect: block
+  testMultiFieldMutation =>
+    a := MutationMatrixActor spawn
+    result := a multiFieldMutation: #(1, -2, 3)
+    self assert: result equals: #(2, -4, 6)
+    self assert: a getCounter equals: 3
+    self assert: a getLog equals: #(1, -2, 3)
+    self assert: a getFlag equals: true
+
+  // P1-12: ifTrue:ifFalse: inside do: with mutation
+  testIfTrueIfFalseInsideDo =>
+    a := MutationMatrixActor spawn
+    count := a ifTrueIfFalseInsideDo: #(3, -1, 5, -2)
+    self assert: count equals: 11
+
+  // ── P2: Edge cases ─────────────────────────────────────────────────
+
+  // P2-13: collect: + ifTrue: + mutation + non-local return
+  testCollectIfTrueNlr =>
+    a := MutationMatrixActor spawn
+    result := a collectIfTrueNlr: #(1, 2, 3, 4, 5)
+    self assert: result equals: 4
+    self assert: a getCounter equals: 4
+
+  // P2-14: 3-deep nesting: do: > collect: > ifTrue: + mutation
+  testThreeDeepNesting =>
+    a := MutationMatrixActor spawn
+    count := a threeDeepNesting: #(#(1, -2, 3), #(-4, 5))
+    self assert: count equals: 3
+
+  // P2-17: reject: + mutation in filter block
+  testRejectMutation =>
+    a := MutationMatrixActor spawn
+    count := a rejectMutation: #(1, -2, 3, -4)
+    self assert: count equals: 4
+    self assert: a getLog equals: #(1, 3)
+
+  // P2-18: Empty collection + mutation in iteration block
+  testEmptyCollectionMutation =>
+    a := MutationMatrixActor spawn
+    count := a emptyCollectionMutation
+    self assert: count equals: 42

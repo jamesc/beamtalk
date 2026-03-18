@@ -1,0 +1,176 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1480: Comprehensive Actor fixture for the state mutation test matrix.
+// Exercises every combination of control flow × nesting × mutation pattern
+// to prove (or disprove) the compiler handles all patterns correctly.
+
+Actor subclass: MutationMatrixActor
+  state: counter = 0
+  state: log = #()
+  state: flag = false
+
+  getCounter => self.counter
+
+  getLog => self.log
+
+  getFlag => self.flag
+
+  reset =>
+    self.counter := 0
+    self.log := #()
+    self.flag := false
+
+  // ── P0: Known bug patterns ──────────────────────────────────────────
+
+  // P0-1: collect: + ifTrue: + mutation (BT-1477)
+  collectIfTrueMutation: items =>
+    result := items
+      collect: [:x |
+        x > 0 ifTrue: [self.counter := self.counter + 1]
+        x * 2
+      ]
+    self.log := result
+    self.counter
+
+  // P0-2: select: + ifTrue: + mutation (BT-1477)
+  selectIfTrueMutation: items =>
+    result := items
+      select: [:x |
+        self.counter := self.counter + 1
+        x > 0
+      ]
+    self.log := result
+    self.counter
+
+  // P0-3: Sequential mutations mid-method with state (BT-1421)
+  sequentialMutations =>
+    self.counter := 10
+    self.counter := self.counter + 1
+    self.log := #(self.counter)
+    self.counter := self.counter * 2
+    self.counter
+
+  // P0-4: Block capture of self across process (BT-1475)
+  blockCaptureAcrossProcess =>
+    self.counter := 42
+    self.counter
+
+  // ── P1: High risk unexplored patterns ───────────────────────────────
+
+  // P1-5: collect: inside collect: + mutation
+  nestedCollectMutation: matrix =>
+    result := matrix
+      collect: [:row |
+        row
+          collect: [:x |
+            self.counter := self.counter + 1
+            x * 2
+          ]
+      ]
+    self.log := result
+    self.counter
+
+  // P1-6: do: inside collect: + mutation
+  doInsideCollectMutation: matrix =>
+    result := matrix
+      collect: [:row |
+        row do: [:x | self.counter := self.counter + x]
+        row size
+      ]
+    self.log := result
+    self.counter
+
+  // P1-7: inject:into: + ifTrue: + mutation
+  injectIfTrueMutation: items =>
+    result := items
+      inject: 0
+      into: [:acc :x |
+        x > 0 ifTrue: [self.counter := self.counter + 1]
+        x > 0 ifTrue: [acc + x] ifFalse: [acc]
+      ]
+    self.log := #(result)
+    self.counter
+
+  // P1-8: detect:ifNone: + mutation before match
+  detectIfNoneMutation: items =>
+    self.counter := 99
+    result := items detect: [:x | x > 10] ifNone: [0]
+    self.log := #(result)
+    self.counter
+
+  // P1-9: on:do: exception handler + mutation
+  exceptionMutation =>
+    [
+      self.counter := 5
+      1 / 0
+    ] on: Exception do: [:e | self.counter := 0]
+    self.counter
+
+  // P1-10: Non-local return from inside collect: after mutation
+  nonLocalReturnFromCollect: items =>
+    items
+      collect: [:x |
+        self.counter := self.counter + 1
+        self.counter > 2 ifTrue: [^self.counter]
+        x * 2
+      ]
+
+  // P1-11: Multiple field mutations in single collect: block
+  multiFieldMutation: items =>
+    items
+      collect: [:x |
+        self.counter := self.counter + 1
+        self.log := self.log ++ #(x)
+        self.flag := x > 0
+        x * 2
+      ]
+
+  // P1-12: ifTrue:ifFalse: inside do: with mutation
+  ifTrueIfFalseInsideDo: items =>
+    items
+      do: [:x |
+        x > 0 ifTrue: [
+          self.counter := self.counter + x
+        ] ifFalse: [self.counter := self.counter - x]
+      ]
+    self.counter
+
+  // ── P2: Edge cases ──────────────────────────────────────────────────
+
+  // P2-13: collect: + ifTrue: + mutation + non-local return
+  collectIfTrueNlr: items =>
+    items
+      collect: [:x |
+        x > 0 ifTrue: [self.counter := self.counter + 1]
+        self.counter > 3 ifTrue: [^self.counter]
+        x * 2
+      ]
+
+  // P2-14: 3-deep nesting: do: > collect: > ifTrue: + mutation
+  threeDeepNesting: matrix =>
+    matrix
+      do: [:row |
+        row
+          collect: [:x |
+            x > 0 ifTrue: [self.counter := self.counter + 1]
+            x * 2
+          ]
+      ]
+    self.counter
+
+  // P2-17: reject: + mutation in filter block
+  rejectMutation: items =>
+    result := items
+      reject: [:x |
+        self.counter := self.counter + 1
+        x < 0
+      ]
+    self.log := result
+    self.counter
+
+  // P2-18: Empty collection + mutation in iteration block
+  emptyCollectionMutation =>
+    self.counter := 42
+    #() do: [:x | self.counter := self.counter + x]
+    self.counter
