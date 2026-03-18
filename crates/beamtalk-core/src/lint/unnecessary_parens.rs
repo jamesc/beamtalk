@@ -105,6 +105,35 @@ fn check_receiver(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
+/// Like `check_expr`, but skips the unnecessary-parens diagnostic for a
+/// top-level `Parenthesized` node used as a keyword message argument when
+/// the inner expression is a message send or field access.
+///
+/// Parentheses like `self assert: (obj size) equals: 1` or
+/// `self assert: (self.queue dequeue) equals: "first"` visually delimit
+/// the argument boundary and aid readability. Flagging them creates noisy
+/// output that forces users to extract temporaries for no benefit (BT-1522).
+///
+/// Parens around bare literals/identifiers (`self assert: (42)`) are still
+/// flagged since they add no clarity.
+fn check_keyword_arg(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    if let Expression::Parenthesized { expression, .. } = expr {
+        let inner_is_send_or_access = matches!(
+            expression.as_ref(),
+            Expression::MessageSend { .. } | Expression::FieldAccess { .. }
+        );
+        if inner_is_send_or_access {
+            // Skip the parens lint — they serve a readability purpose
+            check_expr(expression, diagnostics);
+        } else {
+            // Parens around literals, identifiers, etc. are still unnecessary
+            check_expr(expr, diagnostics);
+        }
+    } else {
+        check_expr(expr, diagnostics);
+    }
+}
+
 /// Recursively inspects `expr`, emitting a lint for each `Parenthesized`
 /// node whose inner expression is always-unnecessary.
 fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
@@ -121,12 +150,23 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 
         Expression::MessageSend {
             receiver,
+            selector,
             arguments,
             ..
         } => {
             check_receiver(receiver, diagnostics);
+            // BT-1522: For keyword message arguments, parens around unary sends
+            // and field accesses serve a readability purpose — e.g.
+            // `self assert: (self.queue dequeue) equals: "first"`.
+            // Skip the top-level parens check for keyword args (same pattern as
+            // check_receiver), but still recurse into inner expressions.
+            let is_keyword = matches!(selector, MessageSelector::Keyword(_));
             for arg in arguments {
-                check_expr(arg, diagnostics);
+                if is_keyword {
+                    check_keyword_arg(arg, diagnostics);
+                } else {
+                    check_expr(arg, diagnostics);
+                }
             }
         }
 
@@ -345,6 +385,44 @@ mod tests {
             "parens around map value should be flagged, got: {diags:?}"
         );
         assert_eq!(diags[0].severity, Severity::Lint);
+    }
+
+    /// BT-1522: Parentheses around keyword message arguments (e.g.
+    /// `self assert: (self.queue dequeue) equals: "first"`) serve readability
+    /// and should not be flagged.
+    #[test]
+    fn parens_around_keyword_arg_not_flagged() {
+        let diags = lint(
+            "Object subclass: Foo\n  test: q => self assert: (q dequeue) equals: 42\n",
+        );
+        assert!(
+            diags.is_empty(),
+            "keyword arg parens should not be flagged, got: {diags:?}"
+        );
+    }
+
+    /// BT-1522: Parens around field access in keyword arg position.
+    #[test]
+    fn parens_around_field_access_in_keyword_arg_not_flagged() {
+        let diags = lint(
+            "Object subclass: Foo\n  state: x = 0\n  test => self assert: (self.x) equals: 0\n",
+        );
+        assert!(
+            diags.is_empty(),
+            "field access parens in keyword arg should not be flagged, got: {diags:?}"
+        );
+    }
+
+    /// Parens around unary args should still be flagged (not keyword context).
+    #[test]
+    fn parens_around_unary_arg_still_flagged() {
+        // Unary message: `arr add: (x)` — `(x)` is unnecessary (identifier).
+        let diags = lint("Object subclass: Foo\n  value: arr => arr do: (42)\n");
+        assert_eq!(
+            diags.len(),
+            1,
+            "parens around literal in keyword arg should still be flagged, got: {diags:?}"
+        );
     }
 
     /// BT-957: Parentheses around a message receiver (e.g. `(x builder) add: 1`)
