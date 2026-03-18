@@ -413,18 +413,31 @@ continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth) ->
 %% @doc Invoke an extension method.
 %%
 %% Extension methods are stored as closures in the extension registry.
-%% They are invoked with apply(Fun, [Args, Value]) where Value is the receiver.
+%% Supports two signatures based on the target class type:
 %%
-%% ## Note
+%% - Actor extensions: fun(Args, Self, State) -> {Result, NewState}
+%%   State mutations are threaded back to the gen_server.
+%% - Value-type extensions: fun(Args, Self) -> Result
+%%   No state threading (value types have no mutable state).
 %%
-%% Extensions return results directly, not {reply, Result, NewState} tuples.
-%% This is because extensions operate on value types (Integer, String) which
-%% have no mutable state. For actors, extensions would need to be wrapped.
+%% BT-1512: The arity is checked at call time to support both signatures
+%% from a single dispatch path.
 -spec invoke_extension(fun(), args(), bt_self(), state()) -> dispatch_result().
-invoke_extension(Fun, Args, _Self, State) ->
+invoke_extension(Fun, Args, Self, State) ->
     try
-        Result = apply(Fun, [Args, State]),
-        {reply, Result, State}
+        {arity, Arity} = erlang:fun_info(Fun, arity),
+        case Arity of
+            3 ->
+                %% Actor extension: fun(Args, Self, State) -> {Result, NewState}
+                {Result, NewState} = apply(Fun, [Args, Self, State]),
+                {reply, Result, NewState};
+            2 ->
+                %% Value-type extension: fun(Args, Self) -> Result
+                Result = apply(Fun, [Args, Self]),
+                {reply, Result, State};
+            _ ->
+                error({bad_extension_arity, Arity})
+        end
     catch
         error:Reason:Stacktrace ->
             ?LOG_ERROR("Extension method threw error", #{

@@ -466,9 +466,15 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![
                             line(),
-                            "let ExtResult = apply ExtFun(Args, Self) in",
+                            "%% BT-1512: Pass State to extension, unwrap {Result, NewState}",
                             line(),
-                            "{'reply', ExtResult, State}",
+                            "let ExtReply = apply ExtFun(Args, Self, State) in",
+                            line(),
+                            "let ExtResult = call 'erlang':'element'(1, ExtReply) in",
+                            line(),
+                            "let ExtState = call 'erlang':'element'(2, ExtReply) in",
+                            line(),
+                            "{'reply', ExtResult, ExtState}",
                         ]
                     ),
                     line(),
