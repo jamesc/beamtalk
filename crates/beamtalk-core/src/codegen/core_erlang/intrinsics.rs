@@ -516,6 +516,62 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-1488: Dictionary iteration intrinsics — `do:`, `doWithKey:`, `keysAndValuesDo:`.
+    ///
+    /// These are structural intrinsics for dictionary iteration that require inline
+    /// code generation for proper state threading when used inside actor methods with
+    /// field mutations.
+    ///
+    /// For `do:`, this handler only fires when the receiver is a `MapLiteral` expression
+    /// (dictionary literal syntax `#{...}`). Non-literal receivers fall through to the
+    /// list `do:` handler, which handles non-list collections via `beamtalk_collection:to_list`.
+    ///
+    /// For `doWithKey:` and `keysAndValuesDo:`, these are dictionary-specific selectors
+    /// that always require dictionary-specific codegen.
+    ///
+    /// - Returns `Ok(Some(doc))` if dictionary-specific code was generated
+    /// - Returns `Ok(None)` if the message should be handled by another handler
+    pub(in crate::codegen::core_erlang) fn try_generate_dict_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        match selector {
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    // For `do:`, only intercept when receiver is a dictionary literal.
+                    // Non-literal receivers are handled by the list `do:` handler.
+                    "do:"
+                        if arguments.len() == 1
+                            && matches!(receiver, Expression::MapLiteral { .. }) =>
+                    {
+                        let doc = self.generate_dict_do(receiver, &arguments[0])?;
+                        // If generate_dict_do returned Nil, no mutations were found;
+                        // fall through to runtime dispatch.
+                        if matches!(doc, Document::Nil) {
+                            Ok(None)
+                        } else {
+                            Ok(Some(doc))
+                        }
+                    }
+                    "doWithKey:" | "keysAndValuesDo:" if arguments.len() == 1 => {
+                        let doc = self.generate_dict_do_with_key(receiver, &arguments[0])?;
+                        if matches!(doc, Document::Nil) {
+                            Ok(None)
+                        } else {
+                            Ok(Some(doc))
+                        }
+                    }
+                    _ => Ok(None),
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// Generates a block value call: `let _Fun = <receiver> in apply _Fun (Args...)`.
     ///
     /// In Core Erlang, we bind the receiver to a variable first to ensure proper

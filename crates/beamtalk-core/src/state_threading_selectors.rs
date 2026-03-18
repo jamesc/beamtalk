@@ -26,6 +26,8 @@ pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
             | "anySatisfy:"
             | "allSatisfy:"
             | "inject:into:"
+            | "doWithKey:"
+            | "keysAndValuesDo:"
             | "on:do:"
             | "ensure:"
             | "ifTrue:"
@@ -72,6 +74,8 @@ mod tests {
         assert!(is_state_threading_keyword_selector("do:"));
         assert!(is_state_threading_keyword_selector("on:do:"));
         assert!(is_state_threading_keyword_selector("ifTrue:"));
+        assert!(is_state_threading_keyword_selector("doWithKey:"));
+        assert!(is_state_threading_keyword_selector("keysAndValuesDo:"));
         assert!(!is_state_threading_keyword_selector("perform:"));
     }
 

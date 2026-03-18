@@ -14,16 +14,19 @@
 //! # Supported Constructs
 //!
 //! - **List iteration**: `do:`, `collect:`, `select:`, `reject:`, `inject:into:`
+//! - **Dictionary iteration**: `do:`, `doWithKey:`
 //! - **While loops**: `whileTrue:`, `whileFalse:`
 //! - **Counted loops**: `repeat`, `timesRepeat:`, `to:do:`, `to:by:do:`
 //!
 //! Submodules organize the code by domain:
 //! - [`list_ops`] — List iteration constructs
+//! - [`dict_ops`] — Dictionary iteration constructs
 //! - [`while_loops`] — While loop constructs
 //! - [`counted_loops`] — Counted loop constructs
 
 mod conditionals;
 mod counted_loops;
+mod dict_ops;
 mod exception_handling;
 mod list_ops;
 mod while_loops;
