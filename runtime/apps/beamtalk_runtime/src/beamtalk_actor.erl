@@ -310,17 +310,23 @@ safe_spawn(Module, InitArgs) ->
                     erlang:process_flag(trap_exit, OldTrap),
                     {ok, Pid};
                 {error, Reason} ->
-                    erlang:process_flag(trap_exit, OldTrap),
-                    %% Flush the EXIT message from the dead process
+                    %% Kill process if still alive (timeout case: initialize
+                    %% still running but we gave up waiting). Then flush EXIT
+                    %% BEFORE restoring trap_exit to avoid a fatal signal.
+                    exit(Pid, kill),
                     receive
                         {'EXIT', Pid, _} -> ok
-                    after 0 -> ok
+                    after 1000 -> ok
                     end,
+                    erlang:process_flag(trap_exit, OldTrap),
                     {error, Reason}
             end;
         {error, Reason} ->
             erlang:process_flag(trap_exit, OldTrap),
-            {error, Reason}
+            {error, Reason};
+        ignore ->
+            erlang:process_flag(trap_exit, OldTrap),
+            {error, ignore}
     end.
 
 %%% Message Send Helpers
