@@ -305,7 +305,7 @@ impl CoreErlangGenerator {
                             let rhs_doc = self.expression_doc(value)?;
                             let rhs_state = self.fresh_temp_var("CfState");
                             let new_state = self.next_state_var();
-                            docs.push(docvec![
+                            let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                                 "let ",
                                 Document::String(tuple_var.clone()),
                                 " = ",
@@ -319,7 +319,7 @@ impl CoreErlangGenerator {
                                 " = call 'erlang':'element'(2, ",
                                 Document::String(tuple_var),
                                 ") in let ",
-                                Document::String(new_state),
+                                Document::String(new_state.clone()),
                                 " = call 'maps':'put'('",
                                 Document::String(field.name.to_string()),
                                 "', ",
@@ -327,7 +327,29 @@ impl CoreErlangGenerator {
                                 ", ",
                                 Document::String(rhs_state),
                                 ") in ",
-                            ]);
+                            ]];
+                            // Rebind threaded __local__ vars from the updated state
+                            // so subsequent expressions in this branch see fresh values.
+                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
+                            {
+                                for var in &threaded_vars {
+                                    let tv_core = self.lookup_var(var).map_or_else(
+                                        || Self::to_core_erlang_var(var),
+                                        String::clone,
+                                    );
+                                    doc_parts.push(docvec![
+                                        "let ",
+                                        Document::String(tv_core.clone()),
+                                        " = call 'maps':'get'('",
+                                        Document::String(Self::local_state_key(var)),
+                                        "', ",
+                                        Document::String(new_state.clone()),
+                                        ") in ",
+                                    ]);
+                                    self.bind_var(var, &tv_core);
+                                }
+                            }
+                            docs.push(Document::Vec(doc_parts));
                             if is_last {
                                 last_result = Some(val_var);
                             }
