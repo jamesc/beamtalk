@@ -1189,6 +1189,54 @@ Actor subclass: Counter
 
 ---
 
+## Extension Methods (Open Classes)
+
+The `>>` syntax adds methods to existing classes without redefining them (ADR 0066).
+Extensions work on any class including built-in value types.
+
+```beamtalk
+// Instance method
+String >> shout => self uppercase ++ "!"
+
+// Class-side method
+String class >> fromJson: s => // ...parse JSON string
+
+// Keyword method with typed parameter
+Array >> chunksOf: n :: Integer => // ...split into n-sized chunks
+
+// Binary method
+Point >> + other :: Point => Point x: self x + other x y: self y + other y
+```
+
+### Type annotations on extensions
+
+Extensions support the same `-> ReturnType` annotation as regular methods.
+Additionally, extensions accept `:: -> ReturnType` as a visual separator between
+the selector and return type — especially useful on unary methods where there
+are no parameters to carry `::` annotations.
+
+```beamtalk
+// Standard return type syntax (same as inside a class)
+String >> reversed -> String => self reverse
+
+// Extension-style: `:: ->` separates selector from return type
+Integer >> factorial :: -> Integer =>
+  self <= 1
+    ifTrue: [1]
+    ifFalse: [self * (self - 1) factorial]
+
+String >> words :: -> Array => self split: " "
+
+// Typed parameters with :: -> return type
+Map >> at: key :: String put: value :: Integer :: -> Map => // ...
+```
+
+Both forms are equivalent — the return type flows to the type checker identically.
+The `:: ->` form is preferred for unary extensions; the `->` form is preferred
+when parameters already have `::` annotations (to avoid consecutive `::` tokens).
+
+---
+
 ## Workspace and Reflection API
 
 Beamtalk exposes workspace operations and system reflection as typed message sends

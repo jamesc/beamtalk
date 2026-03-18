@@ -395,8 +395,8 @@ Make extensions visible to the gradual type checker via the metadata from Phase 
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| Type checker reads extension metadata | Extensions contribute to a class's typed method surface | Not started |
-| Extension type annotations | `Integer >> factorial :: -> Integer => ...` | Not started |
+| Type checker reads extension metadata | Extensions contribute to a class's typed method surface | Done (BT-1518) |
+| Extension type annotations | `Integer >> factorial :: -> Integer => ...` | Done (BT-1519) |
 
 ### Documentation (BT-1473)
 1. Add `>>` syntax section to `docs/beamtalk-language-features.md`
