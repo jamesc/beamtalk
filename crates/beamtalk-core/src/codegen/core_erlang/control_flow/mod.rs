@@ -978,6 +978,47 @@ pub(super) enum BodyKind {
     /// a `case` expression increments the count accumulator on match.
     /// Accumulator is `{Count, StateAcc{N}}`.
     FoldlCount,
+
+    /// BT-1487: Foldl `takeWhile:` body: last expression becomes a predicate;
+    /// a `case` expression includes the item only while the predicate holds.
+    /// Once the predicate returns false, all subsequent elements are excluded.
+    /// Accumulator is `{ResultList, StillTaking, StateVars...}`.
+    FoldlTakeWhile {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1487: Foldl `dropWhile:` body: last expression becomes a predicate;
+    /// a `case` expression drops elements while the predicate holds.
+    /// Once the predicate returns false, all subsequent elements are included.
+    /// Accumulator is `{ResultList, StillDropping, StateVars...}`.
+    FoldlDropWhile {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1487: Foldl `partition:` body: last expression becomes a predicate;
+    /// a `case` expression routes the item to one of two lists.
+    /// Accumulator is `{MatchList, NoMatchList, StateVars...}`.
+    FoldlPartition {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1487: Foldl `groupBy:` body: last expression is the key function result;
+    /// each element is grouped by its key into a map.
+    /// Accumulator is `{Map, StateVars...}`.
+    FoldlGroupBy {
+        /// The item variable (element being iterated).
+        item_var: String,
+    },
+
+    /// BT-1487: `sort:` with state threading via process dictionary.
+    /// The comparator block's state mutations are threaded through the process dictionary.
+    /// Not constructed directly — sort: generates its own body inline. Listed for
+    /// exhaustive match coverage in body-kind dispatchers.
+    #[allow(dead_code)]
+    FoldlSort,
 }
 
 // ─── CountedLoopFrame ─────────────────────────────────────────────────────────
@@ -1139,6 +1180,10 @@ impl CoreErlangGenerator {
                 | BodyKind::FoldlBoolPredicate { .. }
                 | BodyKind::FoldlDetect { .. }
                 | BodyKind::FoldlCount
+                | BodyKind::FoldlTakeWhile { .. }
+                | BodyKind::FoldlDropWhile { .. }
+                | BodyKind::FoldlPartition { .. }
+                | BodyKind::FoldlGroupBy { .. }
         ) {
             Some(self.fresh_temp_var("Pred"))
         } else {
@@ -1277,7 +1322,11 @@ impl CoreErlangGenerator {
                         BodyKind::FoldlFilter { .. }
                         | BodyKind::FoldlBoolPredicate { .. }
                         | BodyKind::FoldlDetect { .. }
-                        | BodyKind::FoldlCount => {
+                        | BodyKind::FoldlCount
+                        | BodyKind::FoldlTakeWhile { .. }
+                        | BodyKind::FoldlDropWhile { .. }
+                        | BodyKind::FoldlPartition { .. }
+                        | BodyKind::FoldlGroupBy { .. } => {
                             // predicate-based selectors — bind predicate result
                             if let Some(pv) = pred_var.as_ref() {
                                 let result_var = self.fresh_temp_var("CondVal");
@@ -1311,6 +1360,9 @@ impl CoreErlangGenerator {
                         }
                         BodyKind::Letrec => {
                             unreachable!("Letrec excluded by guard above");
+                        }
+                        BodyKind::FoldlSort => {
+                            unreachable!("FoldlSort does not use generate_threaded_loop_body");
                         }
                     }
                 }
@@ -1511,6 +1563,213 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-1487: FoldlTakeWhile — include item while predicate holds.
+        // Once predicate returns false, StillTaking flips to false and all subsequent
+        // elements are excluded. Accumulator: {ResultList, StillTaking, StateVars...}.
+        if let BodyKind::FoldlTakeWhile { item_var } = kind {
+            if let Some(pv) = &pred_var {
+                if plan.use_tuple_acc {
+                    let vars_doc = plan.current_vars_doc(self);
+                    docs.push(docvec![
+                        "case StillTaking of \
+                         <'false'> when 'true' -> {AccList, 'false', ",
+                        vars_doc.clone(),
+                        "} <'true'> when 'true' -> case ",
+                        Document::String(pv.clone()),
+                        " of <'true'> when 'true' -> {[",
+                        Document::String(item_var.clone()),
+                        " | AccList], 'true', ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {AccList, 'false', ",
+                        vars_doc,
+                        "} end end",
+                    ]);
+                } else {
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    docs.push(docvec![
+                        "case StillTaking of \
+                         <'false'> when 'true' -> {AccList, 'false', ",
+                        Document::String(final_state.clone()),
+                        "} <'true'> when 'true' -> case ",
+                        Document::String(pv.clone()),
+                        " of <'true'> when 'true' -> {[",
+                        Document::String(item_var.clone()),
+                        " | AccList], 'true', ",
+                        Document::String(final_state.clone()),
+                        "} <'false'> when 'true' -> {AccList, 'false', ",
+                        Document::String(final_state),
+                        "} end end",
+                    ]);
+                }
+            }
+        }
+
+        // BT-1487: FoldlDropWhile — drop items while predicate holds.
+        // Once predicate returns false, StillDropping flips to false and all subsequent
+        // elements are included. Accumulator: {ResultList, StillDropping, StateVars...}.
+        if let BodyKind::FoldlDropWhile { item_var } = kind {
+            if let Some(pv) = &pred_var {
+                if plan.use_tuple_acc {
+                    let vars_doc = plan.current_vars_doc(self);
+                    docs.push(docvec![
+                        "case StillDropping of \
+                         <'false'> when 'true' -> {[",
+                        Document::String(item_var.clone()),
+                        " | AccList], 'false', ",
+                        vars_doc.clone(),
+                        "} <'true'> when 'true' -> case ",
+                        Document::String(pv.clone()),
+                        " of <'true'> when 'true' -> {AccList, 'true', ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {[",
+                        Document::String(item_var.clone()),
+                        " | AccList], 'false', ",
+                        vars_doc,
+                        "} end end",
+                    ]);
+                } else {
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    docs.push(docvec![
+                        "case StillDropping of \
+                         <'false'> when 'true' -> {[",
+                        Document::String(item_var.clone()),
+                        " | AccList], 'false', ",
+                        Document::String(final_state.clone()),
+                        "} <'true'> when 'true' -> case ",
+                        Document::String(pv.clone()),
+                        " of <'true'> when 'true' -> {AccList, 'true', ",
+                        Document::String(final_state.clone()),
+                        "} <'false'> when 'true' -> {[",
+                        Document::String(item_var.clone()),
+                        " | AccList], 'false', ",
+                        Document::String(final_state),
+                        "} end end",
+                    ]);
+                }
+            }
+        }
+
+        // BT-1487: FoldlPartition — route item to one of two lists based on predicate.
+        // Accumulator: {MatchList, NoMatchList, StateVars...}.
+        if let BodyKind::FoldlPartition { item_var } = kind {
+            if let Some(pv) = &pred_var {
+                if plan.use_tuple_acc {
+                    let vars_doc = plan.current_vars_doc(self);
+                    docs.push(docvec![
+                        "case ",
+                        Document::String(pv.clone()),
+                        " of <'true'> when 'true' -> {[",
+                        Document::String(item_var.clone()),
+                        " | MatchList], NoMatchList, ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {MatchList, [",
+                        Document::String(item_var.clone()),
+                        " | NoMatchList], ",
+                        vars_doc,
+                        "} end",
+                    ]);
+                } else {
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    docs.push(docvec![
+                        "case ",
+                        Document::String(pv.clone()),
+                        " of <'true'> when 'true' -> {[",
+                        Document::String(item_var.clone()),
+                        " | MatchList], NoMatchList, ",
+                        Document::String(final_state.clone()),
+                        "} <'false'> when 'true' -> {MatchList, [",
+                        Document::String(item_var.clone()),
+                        " | NoMatchList], ",
+                        Document::String(final_state),
+                        "} end",
+                    ]);
+                }
+            }
+        }
+
+        // BT-1487: FoldlGroupBy — group item by key.
+        // The pred_var holds the key result. Each element is added to the key's list in a map.
+        // Accumulator: {Map, StateVars...}.
+        if let BodyKind::FoldlGroupBy { item_var } = kind {
+            if let Some(pv) = &pred_var {
+                // Use maps:get/3 to get current list for key (default []), prepend item, put back.
+                let key_var = pv;
+                if plan.use_tuple_acc {
+                    let vars_doc = plan.current_vars_doc(self);
+                    let existing_var = self.fresh_temp_var("ExistingList");
+                    let new_list_var = self.fresh_temp_var("NewList");
+                    let new_map_var = self.fresh_temp_var("NewMap");
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(existing_var.clone()),
+                        " = call 'maps':'get'(",
+                        Document::String(key_var.clone()),
+                        ", GroupMap, []) in let ",
+                        Document::String(new_list_var.clone()),
+                        " = [",
+                        Document::String(item_var.clone()),
+                        " | ",
+                        Document::String(existing_var),
+                        "] in let ",
+                        Document::String(new_map_var.clone()),
+                        " = call 'maps':'put'(",
+                        Document::String(key_var.clone()),
+                        ", ",
+                        Document::String(new_list_var),
+                        ", GroupMap) in {",
+                        Document::String(new_map_var),
+                        ", ",
+                        vars_doc,
+                        "}",
+                    ]);
+                } else {
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    let existing_var = self.fresh_temp_var("ExistingList");
+                    let new_list_var = self.fresh_temp_var("NewList");
+                    let new_map_var = self.fresh_temp_var("NewMap");
+                    docs.push(docvec![
+                        "let ",
+                        Document::String(existing_var.clone()),
+                        " = call 'maps':'get'(",
+                        Document::String(key_var.clone()),
+                        ", GroupMap, []) in let ",
+                        Document::String(new_list_var.clone()),
+                        " = [",
+                        Document::String(item_var.clone()),
+                        " | ",
+                        Document::String(existing_var),
+                        "] in let ",
+                        Document::String(new_map_var.clone()),
+                        " = call 'maps':'put'(",
+                        Document::String(key_var.clone()),
+                        ", ",
+                        Document::String(new_list_var),
+                        ", GroupMap) in {",
+                        Document::String(new_map_var),
+                        ", ",
+                        Document::String(final_state),
+                        "}",
+                    ]);
+                }
+            }
+        }
+
         let final_state_version = self.state_version();
         Ok((Document::Vec(docs), final_state_version))
     }
@@ -1540,7 +1799,11 @@ impl CoreErlangGenerator {
             BodyKind::FoldlFilter { .. }
             | BodyKind::FoldlBoolPredicate { .. }
             | BodyKind::FoldlDetect { .. }
-            | BodyKind::FoldlCount => {
+            | BodyKind::FoldlCount
+            | BodyKind::FoldlTakeWhile { .. }
+            | BodyKind::FoldlDropWhile { .. }
+            | BodyKind::FoldlPartition { .. }
+            | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
                     docs.push(docvec!["let ", Document::String(pv.clone()), " = _Val in ",]);
                 }
@@ -1551,6 +1814,10 @@ impl CoreErlangGenerator {
                     Document::String(self.current_state_var()),
                     "}",
                 ]);
+            }
+            BodyKind::FoldlSort => {
+                // sort: uses process dictionary, not generate_threaded_loop_body.
+                unreachable!("FoldlSort does not use generate_threaded_loop_body");
             }
         }
     }
@@ -1587,7 +1854,11 @@ impl CoreErlangGenerator {
             BodyKind::FoldlFilter { .. }
             | BodyKind::FoldlBoolPredicate { .. }
             | BodyKind::FoldlDetect { .. }
-            | BodyKind::FoldlCount => {
+            | BodyKind::FoldlCount
+            | BodyKind::FoldlTakeWhile { .. }
+            | BodyKind::FoldlDropWhile { .. }
+            | BodyKind::FoldlPartition { .. }
+            | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
                     docs.push(docvec![
                         "let ",
@@ -1612,6 +1883,9 @@ impl CoreErlangGenerator {
                     Document::String(fs),
                     "}",
                 ]);
+            }
+            BodyKind::FoldlSort => {
+                unreachable!("FoldlSort does not use generate_threaded_loop_body");
             }
         }
     }
@@ -1648,7 +1922,11 @@ impl CoreErlangGenerator {
                 BodyKind::FoldlFilter { .. }
                 | BodyKind::FoldlBoolPredicate { .. }
                 | BodyKind::FoldlDetect { .. }
-                | BodyKind::FoldlCount => {
+                | BodyKind::FoldlCount
+                | BodyKind::FoldlTakeWhile { .. }
+                | BodyKind::FoldlDropWhile { .. }
+                | BodyKind::FoldlPartition { .. }
+                | BodyKind::FoldlGroupBy { .. } => {
                     if let Some(pv) = pred_var {
                         docs.push(docvec![
                             " let ",
@@ -1667,6 +1945,9 @@ impl CoreErlangGenerator {
                         vars_doc,
                         "}",
                     ]);
+                }
+                BodyKind::FoldlSort => {
+                    unreachable!("FoldlSort does not use generate_threaded_loop_body");
                 }
             }
             return;
@@ -1688,7 +1969,11 @@ impl CoreErlangGenerator {
             BodyKind::FoldlFilter { .. }
             | BodyKind::FoldlBoolPredicate { .. }
             | BodyKind::FoldlDetect { .. }
-            | BodyKind::FoldlCount => {
+            | BodyKind::FoldlCount
+            | BodyKind::FoldlTakeWhile { .. }
+            | BodyKind::FoldlDropWhile { .. }
+            | BodyKind::FoldlPartition { .. }
+            | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
                     docs.push(docvec![
                         " let ",
@@ -1703,6 +1988,9 @@ impl CoreErlangGenerator {
                     Document::String(self.current_state_var()),
                     "}",
                 ]);
+            }
+            BodyKind::FoldlSort => {
+                unreachable!("FoldlSort does not use generate_threaded_loop_body");
             }
         }
     }
@@ -1732,7 +2020,11 @@ impl CoreErlangGenerator {
             BodyKind::FoldlFilter { .. }
             | BodyKind::FoldlBoolPredicate { .. }
             | BodyKind::FoldlDetect { .. }
-            | BodyKind::FoldlCount => {
+            | BodyKind::FoldlCount
+            | BodyKind::FoldlTakeWhile { .. }
+            | BodyKind::FoldlDropWhile { .. }
+            | BodyKind::FoldlPartition { .. }
+            | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
                     docs.push(docvec![
                         "let ",
@@ -1748,6 +2040,9 @@ impl CoreErlangGenerator {
                     "StateAcc".to_string()
                 };
                 docs.push(docvec!["{'nil', ", Document::String(fs), "}"]);
+            }
+            BodyKind::FoldlSort => {
+                unreachable!("FoldlSort does not use generate_threaded_loop_body");
             }
         }
     }
@@ -1871,7 +2166,11 @@ impl CoreErlangGenerator {
             BodyKind::FoldlFilter { .. }
             | BodyKind::FoldlBoolPredicate { .. }
             | BodyKind::FoldlDetect { .. }
-            | BodyKind::FoldlCount => {
+            | BodyKind::FoldlCount
+            | BodyKind::FoldlTakeWhile { .. }
+            | BodyKind::FoldlDropWhile { .. }
+            | BodyKind::FoldlPartition { .. }
+            | BodyKind::FoldlGroupBy { .. } => {
                 if !is_last {
                     docs.push(Document::Str("let _ = "));
                 }
@@ -1936,6 +2235,9 @@ impl CoreErlangGenerator {
                     docs.push(doc);
                     docs.push(Document::Str(" in "));
                 }
+            }
+            BodyKind::FoldlSort => {
+                unreachable!("FoldlSort does not use generate_threaded_loop_body");
             }
         }
         Ok(())

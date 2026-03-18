@@ -285,54 +285,54 @@ Actor subclass: MutationMatrixActor
 
   // ── List (medium risk) ────────────────────────────────────────────────
 
-  // P3-5: takeWhile: with field mutation in predicate block
-  // takeWhileMutation: items =>
-  //   result := items
-  //     takeWhile: [:x |
-  //       self.counter := self.counter + 1
-  //       x < 10
-  //     ]
-  //   self.log := result
-  //   self.counter
+  // P3-5: takeWhile: with field mutation in predicate block (BT-1487)
+  takeWhileMutation: items =>
+    result := items
+      takeWhile: [:x |
+        self.counter := self.counter + 1
+        x < 10
+      ]
+    self.log := result
+    self.counter
 
-  // P3-6: dropWhile: with field mutation in predicate block
-  // dropWhileMutation: items =>
-  //   result := items
-  //     dropWhile: [:x |
-  //       self.counter := self.counter + 1
-  //       x < 10
-  //     ]
-  //   self.log := result
-  //   self.counter
+  // P3-6: dropWhile: with field mutation in predicate block (BT-1487)
+  dropWhileMutation: items =>
+    result := items
+      dropWhile: [:x |
+        self.counter := self.counter + 1
+        x < 10
+      ]
+    self.log := result
+    self.counter
 
-  // P3-7: groupBy: with field mutation in key block
-  // groupByMutation: items =>
-  //   _result := items
-  //     groupBy: [:x |
-  //       self.counter := self.counter + 1
-  //       x > 0
-  //     ]
-  //   self.counter
+  // P3-7: groupBy: with field mutation in key block (BT-1487)
+  groupByMutation: items =>
+    _result := items
+      groupBy: [:x |
+        self.counter := self.counter + 1
+        x > 0
+      ]
+    self.counter
 
-  // P3-8: partition: with field mutation in predicate block
-  // partitionMutation: items =>
-  //   result := items
-  //     partition: [:x |
-  //       self.counter := self.counter + 1
-  //       x > 0
-  //     ]
-  //   self.log := result
-  //   self.counter
+  // P3-8: partition: with field mutation in predicate block (BT-1487)
+  partitionMutation: items =>
+    result := items
+      partition: [:x |
+        self.counter := self.counter + 1
+        x > 0
+      ]
+    self.log := result
+    self.counter
 
-  // P3-9: sort: with field mutation in comparator block
-  // sortMutation: items =>
-  //   result := items
-  //     sort: [:a :b |
-  //       self.counter := self.counter + 1
-  //       a < b
-  //     ]
-  //   self.log := result
-  //   self.counter
+  // P3-9: sort: with field mutation in comparator block (BT-1487)
+  sortMutation: items =>
+    result := items
+      sort: [:a :b |
+        self.counter := self.counter + 1
+        a < b
+      ]
+    self.log := result
+    self.counter
 
   // ── Dictionary ────────────────────────────────────────────────────────
 

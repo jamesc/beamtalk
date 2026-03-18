@@ -98,13 +98,15 @@ impl MethodValidatorRegistry {
             "allSatisfy:",
             "groupBy:",
             "partition:",
+            "takeWhile:",
+            "dropWhile:",
         ] {
             self.validators
                 .insert(selector, Box::new(BlockArityValidator::new(1, 0)));
         }
 
         // Block arity validators (2-parameter block at arg 0)
-        for selector in &["eachWithIndex:", "sortWith:", "keysAndValuesDo:"] {
+        for selector in &["eachWithIndex:", "sortWith:", "sort:", "keysAndValuesDo:"] {
             self.validators
                 .insert(selector, Box::new(BlockArityValidator::new(2, 0)));
         }
@@ -406,7 +408,7 @@ fn block_arity_hint(selector: &str, expected: usize) -> String {
     match (selector, expected) {
         (
             "do:" | "collect:" | "select:" | "reject:" | "detect:" | "anySatisfy:" | "allSatisfy:"
-            | "groupBy:" | "partition:",
+            | "groupBy:" | "partition:" | "takeWhile:" | "dropWhile:",
             1,
         ) => {
             format!("Use a 1-parameter block: list {selector} [:item | ...]")
@@ -414,7 +416,7 @@ fn block_arity_hint(selector: &str, expected: usize) -> String {
         ("eachWithIndex:", 2) => {
             "Use a 2-parameter block: list eachWithIndex: [:item :index | ...]".into()
         }
-        ("sortWith:", 2) => "Use a 2-parameter block: list sortWith: [:a :b | ...]".into(),
+        ("sortWith:" | "sort:", 2) => "Use a 2-parameter block: list sort: [:a :b | a < b]".into(),
         ("inject:into:", 2) => {
             "Use a 2-parameter block: list inject: 0 into: [:acc :item | ...]".into()
         }
@@ -1302,6 +1304,9 @@ mod tests {
             "allSatisfy:",
             "groupBy:",
             "partition:",
+            "takeWhile:",
+            "dropWhile:",
+            "sort:",
             "eachWithIndex:",
             "sortWith:",
             "keysAndValuesDo:",
