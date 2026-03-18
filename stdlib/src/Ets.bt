@@ -67,6 +67,33 @@ Object subclass: Ets
   /// ```
   class sealed named: name :: Symbol -> Ets => (Erlang beamtalk_ets) named: name
 
+  /// Check whether a named ETS table exists.
+  ///
+  /// Returns `true` if a table with the given name exists, `false` otherwise.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Ets exists: #myCache    // => false
+  /// Ets new: #myCache type: #set
+  /// Ets exists: #myCache    // => true
+  /// ```
+  class sealed exists: name :: Symbol -> Boolean =>
+    (Erlang beamtalk_ets) exists: name
+
+  /// Create a named table or return the existing one.
+  ///
+  /// If a table with the given name already exists, returns an `Ets` instance
+  /// wrapping it. Otherwise creates a new table with the specified type.
+  /// This is useful in setUp/tearDown cycles where the previous owner may
+  /// still be alive.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// table := Ets newOrExisting: #events type: #set
+  /// ```
+  class sealed newOrExisting: name :: Symbol type: tableType :: Symbol -> Ets =>
+    (Erlang beamtalk_ets) newOrExisting: name type: tableType
+
   /// Look up a key. Returns the value, or `nil` if the key is absent.
   ///
   /// For `#bag` and `#duplicateBag` tables with multiple entries per key,
