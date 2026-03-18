@@ -3679,7 +3679,10 @@ mod tests {
         let actor_errors: Vec<_> = result
             .diagnostics
             .iter()
-            .filter(|d| d.message.contains("must use `spawn`"))
+            .filter(|d| {
+                d.message.contains("must use `spawn`")
+                    && d.severity == crate::source_analysis::Severity::Error
+            })
             .collect();
 
         assert_eq!(

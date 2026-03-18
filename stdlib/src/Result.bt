@@ -77,7 +77,7 @@ sealed Value subclass: Result
   /// ```beamtalk
   /// Result tryDo: [42]                          // => Result ok: 42
   /// Result tryDo: [Exception signal: "oops"]   // => Result error: <Exception>
-  /// Result tryDo: [File readAll: "missing.txt"] // => Result error: <IOError>
+  /// Result tryDo: [(File readAll: "missing.txt") unwrap] // => Result error: <Exception>
   /// ```
   class sealed tryDo: block :: Block -> Result =>
     (Erlang beamtalk_result) tryDo: block

@@ -379,6 +379,7 @@ mod tests {
             d.message.contains("Actor subclass")
                 && d.message.contains("spawn")
                 && d.message.contains("new:")
+                && d.severity == crate::source_analysis::Severity::Error
         });
         assert!(has_error, "Expected actor new: error, got: {diagnostics:?}");
     }
@@ -550,9 +551,11 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
-        let has_error = diagnostics
-            .iter()
-            .any(|d| d.message.contains("Actor subclass") && d.message.contains("spawn"));
+        let has_error = diagnostics.iter().any(|d| {
+            d.message.contains("Actor subclass")
+                && d.message.contains("spawn")
+                && d.severity == crate::source_analysis::Severity::Error
+        });
         assert!(
             has_error,
             "Expected actor new error inside method, got: {diagnostics:?}"
