@@ -666,7 +666,7 @@
         "concatenate",
         "string join"
       ],
-      "source": "// Instance method\nString >> shout => self upperCase ++ \"!\"\n\n// Class-side method\nString class >> fromJson: s => // ...parse JSON string\n\n// Keyword method with typed parameter\nArray >> chunksOf: n :: Integer => // ...split into n-sized chunks\n\n// Binary method\nPoint >> + other :: Point => Point x: self x + other x y: self y + other y",
+      "source": "// Instance method\nString >> shout => self uppercase ++ \"!\"\n\n// Class-side method\nString class >> fromJson: s => // ...parse JSON string\n\n// Keyword method with typed parameter\nArray >> chunksOf: n :: Integer => // ...split into n-sized chunks\n\n// Binary method\nPoint >> + other :: Point => Point x: self x + other x y: self y + other y",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -687,7 +687,7 @@
         "process",
         "unless"
       ],
-      "source": "// Standard return type syntax (same as inside a class)\nString >> reversed -> String => self asList reversed join: \"\"\n\n// Extension-style: `:: ->` separates selector from return type\nInteger >> factorial :: -> Integer =>\n  self <= 1\n    ifTrue: [1]\n    ifFalse: [self * (self - 1) factorial]\n\nString >> words :: -> Array => self split: \" \"\n\n// Typed parameters with :: -> return type\nMap >> at: key :: String put: value :: Integer :: -> Map => // ...",
+      "source": "// Standard return type syntax (same as inside a class)\nString >> reversed -> String => self reverse\n\n// Extension-style: `:: ->` separates selector from return type\nInteger >> factorial :: -> Integer =>\n  self <= 1\n    ifTrue: [1]\n    ifFalse: [self * (self - 1) factorial]\n\nString >> words :: -> Array => self split: \" \"\n\n// Typed parameters with :: -> return type\nMap >> at: key :: String put: value :: Integer :: -> Map => // ...",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -9159,6 +9159,40 @@
       "explanation": "BT-1432: Tests early return (^) with super/tier2/self-dispatch values in Actor methods. These return tuples that must be unpacked correctly by the early return handler."
     },
     {
+      "id": "stdlib-test-actor-inherited-selfsend-test",
+      "title": "ActorInheritedSelfsendTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ActorInheritedSelfsendTest",
+        "TestCase",
+        "actor_inherited_selfsend_test",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "set",
+        "subclassing",
+        "testAccessInheritedStateField",
+        "testDirectSelfsendToInherited",
+        "testInheritedSelfsendWithOwnState",
+        "testSelfsendToInheritedInBlock",
+        "transform"
+      ],
+      "source": "// Tests for actor self-sends to inherited methods (cross-file inheritance).\n// InheritingCounter extends Counter (defined in separate file) and\n// self-sends to getValue/increment which are defined on Counter.\n\nTestCase subclass: ActorInheritedSelfsendTest\n\n  // #1: Direct self-send to inherited method\n  testDirectSelfsendToInherited =>\n    c := InheritingCounter spawn\n    c increment\n    c increment\n    self assert: c getValueViaSelfsend equals: 2\n\n  // #1: Self-send to inherited method inside collect: block\n  testSelfsendToInheritedInBlock =>\n    c := InheritingCounter spawn\n    result := c collectWithInheritedSend: #(1, 2, 3)\n    self assert: result equals: #(1, 2, 3)\n\n  // #1+#2: Self-send to inherited method + own state mutation\n  testInheritedSelfsendWithOwnState =>\n    c := InheritingCounter spawn\n    c incrementAndLog\n    c incrementAndLog\n    c incrementAndLog\n    self assert: c getValue equals: 3\n\n  // #2: Access inherited state field directly via self.value\n  testAccessInheritedStateField =>\n    c := InheritingCounter spawn\n    c increment\n    c increment\n    c increment\n    self assert: c getValueDirect equals: 3",
+      "explanation": "Tests for actor self-sends to inherited methods (cross-file inheritance). InheritingCounter extends Counter (defined in separate file) and self-sends to getValue/increment which are defined on Counter."
+    },
+    {
       "id": "stdlib-test-actor-initialize-test",
       "title": "ActorInitializeTest",
       "category": "stdlib-tests",
@@ -14170,6 +14204,52 @@
       ],
       "source": "// BT-1226: Actor fixture for ifNotNil: with state mutation threading.\n// Exercises the exact issue pattern: ifNotNil: [:v | self.field := ...] in actor method.\n\nActor subclass: IfNotNilMutActor\n  state: running = #{}\n\n  addEntry: key withValue: val => self.running := self.running at: key put: val\n\n  // Exact issue pattern: receiver reads state, block mutates state\n  update: id =>\n    (self.running at: id ifAbsent: [\n      nil\n    ]) ifNotNil: [:entry | self.running := self.running at: id put: (entry + 1)]\n    self.running\n\n  // 0-arg ifNotNil: block with state mutation\n  touch: id =>\n    (self.running at: id ifAbsent: [\n      nil\n    ]) ifNotNil: [self.running := self.running at: id put: 99]\n    self.running\n\n  // Returns the ifNotNil: expression result (entry + 1) as the branch value,\n  // AND mutates state. Tests that both {Result, State} elements are correct.\n  incrementAndReturnNewValue: id =>\n    (self.running at: id ifAbsent: [nil])\n      ifNotNil: [:entry |\n        self.running := self.running at: id put: (entry + 1)\n        entry + 1\n      ]",
       "explanation": "BT-1226: Actor fixture for ifNotNil: with state mutation threading. Exercises the exact issue pattern: ifNotNil: [:v | self.field := ...] in actor method."
+    },
+    {
+      "id": "stdlib-test-fixtures-inheriting-counter",
+      "title": "InheritingCounter",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Counter",
+        "InheritingCounter",
+        "anonymous function",
+        "append",
+        "assign",
+        "assignment",
+        "async",
+        "callback",
+        "closure",
+        "collectWithInheritedSend:",
+        "concat",
+        "concatenate",
+        "concurrent",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "getValueDirect",
+        "getValueViaSelfsend",
+        "incrementAndLog",
+        "inherit",
+        "inheritance",
+        "inheriting_counter",
+        "instance variable",
+        "lambda",
+        "map",
+        "mapping",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "property",
+        "set",
+        "string join",
+        "subclassing",
+        "transform"
+      ],
+      "source": "// Fixture for testing actor self-sends to inherited methods.\n// InheritingCounter extends Counter (separate file) and self-sends\n// to getValue (inherited) both directly and inside blocks.\n\nCounter subclass: InheritingCounter\n  state: log = #()\n\n  // Direct self-send to inherited method\n  getValueViaSelfsend => self getValue\n\n  // Self-send to inherited method inside collect: block\n  collectWithInheritedSend: items =>\n    items\n      collect: [:item |\n        self increment\n        self getValue\n      ]\n\n  // Self-send to inherited method + own state mutation\n  incrementAndLog =>\n    self increment\n    self.log := self.log ++ #(self getValue)\n    self getValue\n\n  // Access inherited state field directly\n  getValueDirect => self.value",
+      "explanation": "Fixture for testing actor self-sends to inherited methods. InheritingCounter extends Counter (separate file) and self-sends to getValue (inherited) both directly and inside blocks."
     },
     {
       "id": "stdlib-test-fixtures-initialize-counter",
