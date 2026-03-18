@@ -1722,7 +1722,8 @@ super_with_init_args_test() ->
 %% Test: Extension method dispatches on compiled Actor
 extension_method_on_compiled_actor_test() ->
     beamtalk_extensions:init(),
-    ExtFun = fun([], _Self) -> 42 end,
+    %% BT-1512: Extension funs take (Args, Self, State) and return {Result, NewState}
+    ExtFun = fun([], _Self, State) -> {42, State} end,
     beamtalk_extensions:register('Counter', testExtension, ExtFun, test_owner),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
@@ -1737,7 +1738,7 @@ extension_method_on_compiled_actor_test() ->
 %% Test: Extension method receives Args correctly
 extension_method_with_args_test() ->
     beamtalk_extensions:init(),
-    ExtFun = fun([N], _Self) -> N * 10 end,
+    ExtFun = fun([N], _Self, State) -> {N * 10, State} end,
     beamtalk_extensions:register('Counter', 'scaleBy:', ExtFun, test_owner),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
@@ -1752,7 +1753,7 @@ extension_method_with_args_test() ->
 %% Test: Extension doesn't interfere with regular methods
 extension_coexists_with_regular_methods_test() ->
     beamtalk_extensions:init(),
-    ExtFun = fun([], _Self) -> extended end,
+    ExtFun = fun([], _Self, State) -> {extended, State} end,
     beamtalk_extensions:register('Counter', myExtension, ExtFun, test_owner),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
@@ -1776,10 +1777,37 @@ unregistered_extension_gives_dnu_test() ->
         gen_server:stop(Pid)
     end.
 
+%% Test: BT-1512 — Extension method correctly threads state mutations
+extension_method_state_threading_test() ->
+    beamtalk_extensions:init(),
+    %% Extension that mutates the 'value' field in State
+    ExtFun = fun([], _Self, State) ->
+        OldValue = maps:get('value', State, 0),
+        NewState = maps:put('value', OldValue + 100, State),
+        {OldValue + 100, NewState}
+    end,
+    beamtalk_extensions:register('Counter', 'addHundred', ExtFun, test_owner),
+    Object = 'bt@counter':spawn(),
+    Pid = element(4, Object),
+    try
+        %% Initial value is 0
+        {ok, 0} = gen_server:call(Pid, {getValue, []}),
+        %% Extension mutates state: value becomes 100
+        {ok, 100} = gen_server:call(Pid, {'addHundred', []}),
+        %% State mutation persisted: getValue should return 100
+        {ok, 100} = gen_server:call(Pid, {getValue, []}),
+        %% Call extension again: value becomes 200
+        {ok, 200} = gen_server:call(Pid, {'addHundred', []}),
+        {ok, 200} = gen_server:call(Pid, {getValue, []})
+    after
+        gen_server:stop(Pid),
+        ets:delete(beamtalk_extensions, {'Counter', 'addHundred'})
+    end.
+
 %% Test: Extension that throws propagates error through safe_dispatch
 extension_error_propagation_test() ->
     beamtalk_extensions:init(),
-    CrashFun = fun([], _Self) -> error(extension_crash) end,
+    CrashFun = fun([], _Self, _State) -> error(extension_crash) end,
     beamtalk_extensions:register('Counter', crashMethod, CrashFun, test_owner),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),

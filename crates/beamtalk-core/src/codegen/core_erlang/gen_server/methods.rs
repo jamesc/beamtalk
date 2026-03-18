@@ -2141,22 +2141,27 @@ impl CoreErlangGenerator {
             return false;
         }
 
-        // Standard check: analyse the last argument block.
-        if let Some(Expression::Block(block)) = arguments.last() {
-            let analysis = self
-                .semantic_facts
-                .block_profile(&block.span)
-                .cloned()
-                .unwrap_or_else(|| block_analysis::analyze_block(block));
-            if self.needs_mutation_threading(&analysis) {
-                return true;
-            }
-            // BT-1329: Also check for nested list ops with cross-scope mutations.
-            // `analyze_block` doesn't propagate local_writes from nested blocks,
-            // so variables mutated inside do:/collect:/inject:/select:/reject: blocks
-            // are invisible to the standard `needs_mutation_threading` check.
-            if self.body_has_list_op_cross_scope_mutations(block) {
-                return true;
+        // Standard check: analyse argument blocks for mutations.
+        // BT-1486: Check ALL block arguments, not just the last one.
+        // For selectors like `detect:ifNone:`, the mutation-bearing block is the
+        // first argument (predicate), not the last (ifNone handler).
+        for arg in arguments {
+            if let Expression::Block(block) = arg {
+                let analysis = self
+                    .semantic_facts
+                    .block_profile(&block.span)
+                    .cloned()
+                    .unwrap_or_else(|| block_analysis::analyze_block(block));
+                if self.needs_mutation_threading(&analysis) {
+                    return true;
+                }
+                // BT-1329: Also check for nested list ops with cross-scope mutations.
+                // `analyze_block` doesn't propagate local_writes from nested blocks,
+                // so variables mutated inside do:/collect:/inject:/select:/reject: blocks
+                // are invisible to the standard `needs_mutation_threading` check.
+                if self.body_has_list_op_cross_scope_mutations(block) {
+                    return true;
+                }
             }
         }
 

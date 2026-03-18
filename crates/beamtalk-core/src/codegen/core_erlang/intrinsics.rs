@@ -24,7 +24,7 @@
 
 use super::document::Document;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
-use crate::ast::{Block, Expression, Literal, MessageSelector};
+use crate::ast::{Block, Expression, MessageSelector};
 use crate::docvec;
 
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
@@ -442,6 +442,10 @@ impl CoreErlangGenerator {
     /// - `reject:` (1 arg block) → filter out elements
     /// - `anySatisfy:` (1 arg block) → boolean predicate (any match)
     /// - `allSatisfy:` (1 arg block) → boolean predicate (all match)
+    /// - `detect:` (1 arg block) → find first matching element
+    /// - `detect:ifNone:` (1 arg block + 0 arg block) → find first or default
+    /// - `count:` (1 arg block) → count matching elements
+    /// - `flatMap:` (1 arg block) → map and flatten
     /// - `inject:into:` (2 args) → fold with accumulator
     pub(in crate::codegen::core_erlang) fn try_generate_list_message(
         &mut self,
@@ -449,11 +453,13 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        // String has its own @primitive implementations (collect:, select:, etc.)
-        // that delegate to beamtalk_string, not lists:map/filter.
-        if matches!(receiver, Expression::Literal(Literal::String(_), _)) {
-            return Ok(None);
-        }
+        // BT-1489: String receivers are no longer skipped here. The
+        // non-mutating simple-list-op path already falls back to
+        // `beamtalk_primitive:send(recv, selector, [Body])` for non-list
+        // receivers (which dispatches to beamtalk_string helpers). The
+        // mutating foldl paths now add an `is_binary` result wrapper so
+        // collect:/select:/reject: return a binary string when the
+        // receiver was a string.
 
         match selector {
             MessageSelector::Keyword(parts) => {
@@ -489,24 +495,25 @@ impl CoreErlangGenerator {
                             self.generate_list_inject(receiver, &arguments[0], &arguments[1])?;
                         Ok(Some(doc))
                     }
-                    // BT-493: Validate detect:ifNone: block arities even though it
-                    // dispatches at runtime (detect: 1-arg, ifNone: 0-arg)
+                    "detect:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_detect(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
                     "detect:ifNone:" if arguments.len() == 2 => {
-                        validate_block_arity_exact(
+                        let doc = self.generate_list_detect_if_none(
+                            receiver,
                             &arguments[0],
-                            1,
-                            "detect:ifNone:",
-                            "Fix: The detect block must take one argument (each element):\n\
-                             \x20 list detect: [:item | item > 0] ifNone: ['not found']",
-                        )?;
-                        validate_block_arity_exact(
                             &arguments[1],
-                            0,
-                            "detect:ifNone:",
-                            "Fix: The ifNone block must take no arguments:\n\
-                             \x20 list detect: [:item | item > 0] ifNone: ['not found']",
                         )?;
-                        Ok(None)
+                        Ok(Some(doc))
+                    }
+                    "count:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_count(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
+                    "flatMap:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_flat_map(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
                     _ => Ok(None),
                 }

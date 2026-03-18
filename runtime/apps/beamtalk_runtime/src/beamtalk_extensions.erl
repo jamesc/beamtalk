@@ -32,8 +32,12 @@
 %%% ## Usage Examples
 %%%
 %%% ```erlang
-%%% %% Register an extension
-%%% Fun = fun(Args, Value) -> ... end,
+%%% %% Register an extension (actor classes — state-threading signature)
+%%% Fun = fun(Args, Self, State) -> {Result, NewState} end,
+%%% beamtalk_extensions:register('Counter', 'doubled', Fun, mylib).
+%%%
+%%% %% Register an extension (value types — no state)
+%%% Fun = fun(Args, Self) -> Result end,
 %%% beamtalk_extensions:register('String', 'json', Fun, mylib).
 %%%
 %%% %% Lookup an extension
@@ -110,7 +114,8 @@ init() ->
 %% Parameters:
 %% - Class: The class atom (e.g., 'Integer', 'String')
 %% - Selector: The method selector atom (e.g., 'json', 'trim')
-%% - Fun: The method function (signature: fun(Args, Value) -> Result)
+%% - Fun: The method function (actor: fun(Args, Self, State) -> {Result, NewState};
+%%         value type: fun(Args, Self) -> Result)
 %% - Owner: The registering library/package atom (e.g., 'mylib', 'stdlib')
 %%
 %% Examples:

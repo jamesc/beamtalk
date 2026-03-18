@@ -149,8 +149,11 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_ca
             in
             case ExtLookup of
                 <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                    let ExtResult = apply ExtFun(Args, Self) in
-                    {'reply', ExtResult, State}
+                    %% BT-1512: Pass State to extension, unwrap {Result, NewState}
+                    let ExtReply = apply ExtFun(Args, Self, State) in
+                    let ExtResult = call 'erlang':'element'(1, ExtReply) in
+                    let ExtState = call 'erlang':'element'(2, ExtReply) in
+                    {'reply', ExtResult, ExtState}
                 <'not_found'> when 'true' ->
                     %% ADR 0006: Try hierarchy walk before DNU
                     case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'EmptyActor') of

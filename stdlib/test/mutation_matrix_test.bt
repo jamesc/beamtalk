@@ -194,55 +194,59 @@ TestCase subclass: MutationMatrixTest
     self assert: count equals: 42
 
   // ── BT-1485: Remaining block-accepting selectors ─────────────────────
-  // All tests below are commented out — they expose state threading bugs
+  // Most tests below remain commented out — they expose state threading bugs
   // where the compiler loses mutated state across block-accepting selectors.
-  // Uncomment each when the corresponding codegen fix lands.
+  // List high-risk cases P3-1..P3-4 are enabled (BT-1486).
+  // Dictionary cases P3-10..P3-11 are enabled (BT-1488).
+  // String cases P3-12..P3-15 are enabled (BT-1489).
+  // Uncomment additional cases when the corresponding codegen fixes land.
 
   // ── List (high risk) ──────────────────────────────────────────────────
 
-  // P3-1: detect: with field mutation in predicate block (BT-1485)
+  // P3-1: detect: with field mutation in predicate block (BT-1486)
   // Mutation in the predicate block should persist after detect: returns.
-  // testDetectMutation =>
-  //   a := MutationMatrixActor spawn
-  //   count := a detectMutation: #(1, 20, 3)
-  //   self assert: count equals: 3
-  //   self assert: a getLog equals: #(20)
+  testDetectMutation =>
+    a := MutationMatrixActor spawn
+    count := a detectMutation: #(1, 20, 3)
+    self assert: count equals: 3
+    self assert: a getLog equals: #(20)
 
-  // P3-1b: detect: with no match (returns nil) + mutation (BT-1485)
-  // testDetectMutationNoMatch =>
-  //   a := MutationMatrixActor spawn
-  //   count := a detectMutation: #(1, 2, 3)
-  //   self assert: count equals: 3
-  //   self assert: a getLog equals: #(nil)
+  // P3-1b: detect: with no match (returns nil) + mutation (BT-1486)
+  testDetectMutationNoMatch =>
+    a := MutationMatrixActor spawn
+    count := a detectMutation: #(1, 2, 3)
+    self assert: count equals: 3
+    self assert: a getLog equals: #(nil)
 
-  // P3-2: detect:ifNone: with field mutation in predicate block (BT-1485)
+  // P3-2: detect:ifNone: with field mutation in predicate block (BT-1486)
   // Unlike P1-8 which mutates *before* detect:ifNone:, this mutates *inside* the predicate.
-  // testDetectIfNonePredicateMutation =>
-  //   a := MutationMatrixActor spawn
-  //   count := a detectIfNonePredicateMutation: #(1, 20, 3)
-  //   self assert: count equals: 2
-  //   self assert: a getLog equals: #(20)
+  // All elements are processed (no short-circuit) to ensure mutations are applied.
+  testDetectIfNonePredicateMutation =>
+    a := MutationMatrixActor spawn
+    count := a detectIfNonePredicateMutation: #(1, 20, 3)
+    self assert: count equals: 3
+    self assert: a getLog equals: #(20)
 
-  // P3-2b: detect:ifNone: with mutation in predicate, no match (BT-1485)
-  // testDetectIfNonePredicateMutationNoMatch =>
-  //   a := MutationMatrixActor spawn
-  //   count := a detectIfNonePredicateMutation: #(1, 2, 3)
-  //   self assert: count equals: 3
-  //   self assert: a getLog equals: #(-1)
+  // P3-2b: detect:ifNone: with mutation in predicate, no match (BT-1486)
+  testDetectIfNonePredicateMutationNoMatch =>
+    a := MutationMatrixActor spawn
+    count := a detectIfNonePredicateMutation: #(1, 2, 3)
+    self assert: count equals: 3
+    self assert: a getLog equals: #(-1)
 
-  // P3-3: count: with field mutation in predicate block (BT-1485)
-  // testCountMutation =>
-  //   a := MutationMatrixActor spawn
-  //   count := a countMutation: #(1, -2, 3)
-  //   self assert: count equals: 3
-  //   self assert: a getLog equals: #(2)
+  // P3-3: count: with field mutation in predicate block (BT-1486)
+  testCountMutation =>
+    a := MutationMatrixActor spawn
+    count := a countMutation: #(1, -2, 3)
+    self assert: count equals: 3
+    self assert: a getLog equals: #(2)
 
-  // P3-4: flatMap: with field mutation in mapping block (BT-1485)
-  // testFlatMapMutation =>
-  //   a := MutationMatrixActor spawn
-  //   count := a flatMapMutation: #(1, 2, 3)
-  //   self assert: count equals: 3
-  //   self assert: a getLog equals: #(1, 10, 2, 20, 3, 30)
+  // P3-4: flatMap: with field mutation in mapping block (BT-1486)
+  testFlatMapMutation =>
+    a := MutationMatrixActor spawn
+    count := a flatMapMutation: #(1, 2, 3)
+    self assert: count equals: 3
+    self assert: a getLog equals: #(1, 10, 2, 20, 3, 30)
 
   // ── List (medium risk) ────────────────────────────────────────────────
 
@@ -290,22 +294,38 @@ TestCase subclass: MutationMatrixTest
     self assert: count equals: 30
 
   // P3-11: Dictionary doWithKey: with field mutation (BT-1488)
+  // Verifies both counter and log mutations are threaded through doWithKey:
   testDictDoWithKeyMutation =>
     a := MutationMatrixActor spawn
     count := a dictDoWithKeyMutation: #{#a => 10, #b => 20}
     self assert: count equals: 30
+    self assert: (a getLog size) equals: 2
 
-// ── String ────────────────────────────────────────────────────────────
+  // ── String ────────────────────────────────────────────────────────────
 
-// P3-12: String do: with field mutation in iteration block (BT-1485)
-// testStringDoMutation =>
-//   a := MutationMatrixActor spawn
-//   count := a stringDoMutation: "abc"
-//   self assert: count equals: 3
+  // P3-12: String do: with field mutation in iteration block (BT-1489)
+  testStringDoMutation =>
+    a := MutationMatrixActor spawn
+    count := a stringDoMutation: "abc"
+    self assert: count equals: 3
 
-// P3-13: String collect: with field mutation in mapping block (BT-1485)
-// testStringCollectMutation =>
-//   a := MutationMatrixActor spawn
-//   count := a stringCollectMutation: "abc"
-//   self assert: count equals: 3
-//   self assert: a getLog equals: #("abc")
+  // P3-13: String collect: with field mutation in mapping block (BT-1489)
+  testStringCollectMutation =>
+    a := MutationMatrixActor spawn
+    count := a stringCollectMutation: "abc"
+    self assert: count equals: 3
+    self assert: a getLog equals: #("abc")
+
+  // P3-14: String select: with field mutation in predicate block (BT-1489)
+  testStringSelectMutation =>
+    a := MutationMatrixActor spawn
+    count := a stringSelectMutation: "abc"
+    self assert: count equals: 3
+    self assert: a getLog equals: #("ac")
+
+  // P3-15: String reject: with field mutation in predicate block (BT-1489)
+  testStringRejectMutation =>
+    a := MutationMatrixActor spawn
+    count := a stringRejectMutation: "abc"
+    self assert: count equals: 3
+    self assert: a getLog equals: #("ac")

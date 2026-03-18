@@ -25,6 +25,10 @@ pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
             | "reject:"
             | "anySatisfy:"
             | "allSatisfy:"
+            | "detect:"
+            | "detect:ifNone:"
+            | "count:"
+            | "flatMap:"
             | "inject:into:"
             | "doWithKey:"
             | "keysAndValuesDo:"
@@ -76,6 +80,11 @@ mod tests {
         assert!(is_state_threading_keyword_selector("ifTrue:"));
         assert!(is_state_threading_keyword_selector("doWithKey:"));
         assert!(is_state_threading_keyword_selector("keysAndValuesDo:"));
+        // BT-1486: New block-accepting selectors
+        assert!(is_state_threading_keyword_selector("detect:"));
+        assert!(is_state_threading_keyword_selector("detect:ifNone:"));
+        assert!(is_state_threading_keyword_selector("count:"));
+        assert!(is_state_threading_keyword_selector("flatMap:"));
         assert!(!is_state_threading_keyword_selector("perform:"));
     }
 
