@@ -1100,15 +1100,19 @@ impl CoreErlangGenerator {
         // If filtering leaves no executable expressions, emit a safe fallback to
         // avoid generating an empty Core Erlang function body which would be
         // syntactically invalid (e.g., `fun (...) ->\n\n`).
-        let body_parts = if body.is_empty() {
-            self.generate_vt_empty_body(has_nlr)
+        // BT-1482: Capture result so we can clean up scope/NLR unconditionally,
+        // then propagate error afterwards.
+        let body_result = if body.is_empty() {
+            Ok(self.generate_vt_empty_body(has_nlr))
         } else {
-            self.generate_vt_body_exprs(&body, has_nlr)?
+            self.generate_vt_body_exprs(&body, has_nlr)
         };
 
         self.pop_scope();
         self.current_method_selector = None;
         self.set_current_nlr_token(None);
+
+        let body_parts = body_result?;
 
         // BT-940: Annotate the `fun` expression (not just the body) with source line.
         // Annotating only the body would create invalid double-annotation when the body

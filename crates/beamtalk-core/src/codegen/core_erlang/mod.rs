@@ -1137,7 +1137,7 @@ impl CoreErlangGenerator {
     }
 
     /// Returns `true` if workspace mode is active.
-    pub(super) fn workspace_mode(&self) -> bool {
+    pub(crate) fn workspace_mode(&self) -> bool {
         self.repl_context
             .as_ref()
             .is_some_and(|ctx| ctx.workspace_mode)

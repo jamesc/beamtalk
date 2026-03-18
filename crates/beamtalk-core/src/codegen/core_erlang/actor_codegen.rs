@@ -451,9 +451,20 @@ impl CoreErlangGenerator {
             };
 
             // Generate method body with reply tuple (reuse existing codegen)
-            let method_body_doc = self.generate_method_definition_body_with_reply(method)?;
+            // BT-1482: Capture result so we can clean up NLR token and scope
+            // unconditionally, then propagate error afterwards.
+            let method_body_result = self.generate_method_definition_body_with_reply(method);
 
             self.set_current_nlr_token(None);
+
+            // If codegen failed, pop scope before propagating the error.
+            let method_body_doc = match method_body_result {
+                Ok(doc) => doc,
+                Err(e) => {
+                    self.pop_scope();
+                    return Err(e);
+                }
+            };
 
             // BT-761/BT-764: Sealed methods are standalone functions (not inside case arms),
             // so the try/catch can be placed directly at function level (no letrec needed).
