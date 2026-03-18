@@ -29,6 +29,11 @@ pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
             | "detect:ifNone:"
             | "count:"
             | "flatMap:"
+            | "takeWhile:"
+            | "dropWhile:"
+            | "groupBy:"
+            | "partition:"
+            | "sort:"
             | "inject:into:"
             | "doWithKey:"
             | "keysAndValuesDo:"
@@ -85,6 +90,12 @@ mod tests {
         assert!(is_state_threading_keyword_selector("detect:ifNone:"));
         assert!(is_state_threading_keyword_selector("count:"));
         assert!(is_state_threading_keyword_selector("flatMap:"));
+        // BT-1487: Medium-risk list selectors
+        assert!(is_state_threading_keyword_selector("takeWhile:"));
+        assert!(is_state_threading_keyword_selector("dropWhile:"));
+        assert!(is_state_threading_keyword_selector("groupBy:"));
+        assert!(is_state_threading_keyword_selector("partition:"));
+        assert!(is_state_threading_keyword_selector("sort:"));
         assert!(!is_state_threading_keyword_selector("perform:"));
     }
 

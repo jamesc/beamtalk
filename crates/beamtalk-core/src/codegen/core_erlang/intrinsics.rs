@@ -515,6 +515,27 @@ impl CoreErlangGenerator {
                         let doc = self.generate_list_flat_map(receiver, &arguments[0])?;
                         Ok(Some(doc))
                     }
+                    // BT-1487: Medium-risk list selectors
+                    "takeWhile:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_take_while(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
+                    "dropWhile:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_drop_while(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
+                    "groupBy:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_group_by(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
+                    "partition:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_partition(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
+                    "sort:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_sort(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
                     _ => Ok(None),
                 }
             }

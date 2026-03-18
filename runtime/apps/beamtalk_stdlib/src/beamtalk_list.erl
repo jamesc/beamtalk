@@ -24,7 +24,8 @@
     take/2,
     drop/2,
     sort_with/2,
-    from_to/3
+    from_to/3,
+    reverse_group_values/1
 ]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -305,6 +306,15 @@ safe_nthtail(N, [_ | T]) -> safe_nthtail(N - 1, T).
 zip_to_pairs([], _) -> [];
 zip_to_pairs(_, []) -> [];
 zip_to_pairs([H1 | T1], [H2 | T2]) -> [[H1, H2] | zip_to_pairs(T1, T2)].
+
+%% @doc BT-1487: Reverse the value lists in a groupBy result map.
+%%
+%% During foldl-based groupBy with state threading, elements are prepended
+%% to each group (building reversed lists). This reverses them to restore
+%% the original order.
+-spec reverse_group_values(map()) -> map().
+reverse_group_values(Map) when is_map(Map) ->
+    maps:map(fun(_Key, Values) -> lists:reverse(Values) end, Map).
 
 %% @doc Return a human-readable description of a value for error messages.
 %%
