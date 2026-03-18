@@ -664,6 +664,79 @@ signal_atom_kind_test() ->
             ?assertEqual('Exception', Inner#beamtalk_error.class)
     end.
 
+%%% ===================================================================
+%%% class_signal_message/2 and class_signal/1 tests (BT-1524)
+%%% ===================================================================
+
+class_signal_message_with_beamtalk_object_test() ->
+    ClassSelf = #beamtalk_object{
+        class = 'MyCustomError class',
+        class_mod = 'bt@stdlib@my_custom_error',
+        pid = self()
+    },
+    try
+        beamtalk_exception_handler:class_signal_message(<<"test msg">>, ClassSelf),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual('MyCustomError', Inner#beamtalk_error.class),
+            ?assertEqual(signal, Inner#beamtalk_error.kind),
+            ?assertEqual(<<"test msg">>, Inner#beamtalk_error.message)
+    end.
+
+class_signal_message_without_class_suffix_test() ->
+    %% Class tag without " class" suffix should also work
+    ClassSelf = #beamtalk_object{
+        class = 'Exception',
+        class_mod = 'bt@stdlib@exception',
+        pid = self()
+    },
+    try
+        beamtalk_exception_handler:class_signal_message(<<"oops">>, ClassSelf),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual('Exception', Inner#beamtalk_error.class),
+            ?assertEqual(<<"oops">>, Inner#beamtalk_error.message)
+    end.
+
+class_signal_message_fallback_test() ->
+    %% Non-beamtalk_object falls back to 'Exception'
+    try
+        beamtalk_exception_handler:class_signal_message(<<"fallback">>, not_an_object),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual('Exception', Inner#beamtalk_error.class),
+            ?assertEqual(<<"fallback">>, Inner#beamtalk_error.message)
+    end.
+
+class_signal_with_beamtalk_object_test() ->
+    ClassSelf = #beamtalk_object{
+        class = 'RuntimeError class',
+        class_mod = 'bt@stdlib@runtime_error',
+        pid = self()
+    },
+    try
+        beamtalk_exception_handler:class_signal(ClassSelf),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual('RuntimeError', Inner#beamtalk_error.class),
+            ?assertEqual(signal, Inner#beamtalk_error.kind),
+            ?assertEqual(<<"RuntimeError">>, Inner#beamtalk_error.message)
+    end.
+
+class_signal_fallback_test() ->
+    try
+        beamtalk_exception_handler:class_signal(not_an_object),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual('Exception', Inner#beamtalk_error.class),
+            ?assertEqual(<<"Exception">>, Inner#beamtalk_error.message)
+    end.
+
 %% @private Setup class system for hierarchy tests
 setup_class_system() ->
     case whereis(pg) of

@@ -47,6 +47,8 @@
     signal_message/1,
     signal_message/2,
     signal_from_class/1,
+    class_signal/1,
+    class_signal_message/2,
     kind_to_class/1,
     class_to_kind/1,
     is_exception_class/1
@@ -437,3 +439,26 @@ signal_from_class(ClassName) ->
         details = #{}
     },
     beamtalk_error:raise(Error).
+
+%% @doc Class-side signal: raise an exception with message from a class object.
+%%
+%% BT-1524: Called by `Exception signal: "msg"` or `MyCustomError signal: "msg"`.
+%% Extracts the class name from the ClassSelf record and delegates to signal_message/2.
+-spec class_signal_message(term(), #beamtalk_object{}) -> no_return().
+class_signal_message(Message, #beamtalk_object{class = ClassTag}) ->
+    ClassName = strip_class_suffix(ClassTag),
+    signal_message(Message, ClassName);
+class_signal_message(Message, _ClassSelf) ->
+    %% Fallback: if ClassSelf is not a beamtalk_object, signal as generic Exception
+    signal_message(Message, 'Exception').
+
+%% @doc Class-side signal: raise an exception from a class object (no message).
+%%
+%% BT-1524: Called by `Exception signal` or `MyCustomError signal`.
+%% Extracts the class name from the ClassSelf record and delegates to signal_from_class/1.
+-spec class_signal(#beamtalk_object{}) -> no_return().
+class_signal(#beamtalk_object{class = ClassTag}) ->
+    ClassName = strip_class_suffix(ClassTag),
+    signal_from_class(ClassName);
+class_signal(_ClassSelf) ->
+    signal_from_class('Exception').
