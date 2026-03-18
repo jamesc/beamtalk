@@ -149,16 +149,16 @@
 %% Raises `type_error` if arguments are not atoms.
 -spec 'newOrExisting:type:'(atom(), atom()) -> map().
 'newOrExisting:type:'(Name, TableType) when is_atom(Name), is_atom(TableType) ->
-    EtsType = map_table_type(TableType),
+    EtsType = map_table_type_for('newOrExisting:type:', TableType),
     try
         ets:new(Name, [EtsType, named_table, public, {keypos, 1}]),
         make_ets(Name)
     catch
         error:badarg ->
-            %% Table was created by another process between our check — adopt it.
+            %% Table was created by another process concurrently — adopt it.
             case ets:whereis(Name) of
                 undefined ->
-                    %% Table doesn't exist either — genuinely invalid arguments.
+                    %% Table vanished between ets:new and ets:whereis — re-raise.
                     Error0 = beamtalk_error:new(already_exists, 'Ets'),
                     Error1 = beamtalk_error:with_selector(Error0, 'newOrExisting:type:'),
                     Error2 = beamtalk_error:with_hint(
@@ -408,17 +408,23 @@ make_ets(Name) ->
 %% Beamtalk uses camelCase symbols matching the Smalltalk convention.
 %% OTP uses snake_case atoms.
 -spec map_table_type(atom()) -> set | ordered_set | bag | duplicate_bag.
-map_table_type(set) ->
+map_table_type(TableType) ->
+    map_table_type_for('new:type:', TableType).
+
+%% @private
+%% @doc Map Beamtalk table type symbols to OTP ets type atoms, with caller selector for errors.
+-spec map_table_type_for(atom(), atom()) -> set | ordered_set | bag | duplicate_bag.
+map_table_type_for(_Selector, set) ->
     set;
-map_table_type(orderedSet) ->
+map_table_type_for(_Selector, orderedSet) ->
     ordered_set;
-map_table_type(bag) ->
+map_table_type_for(_Selector, bag) ->
     bag;
-map_table_type(duplicateBag) ->
+map_table_type_for(_Selector, duplicateBag) ->
     duplicate_bag;
-map_table_type(Other) ->
+map_table_type_for(Selector, Other) ->
     Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'new:type:'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_details(Error1, #{type => Other}),
     Error3 = beamtalk_error:with_hint(
         Error2,

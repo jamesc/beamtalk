@@ -195,7 +195,12 @@ newOrExisting_type_error_type_test() ->
 
 newOrExisting_invalid_type_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'Ets', selector = 'newOrExisting:type:'
+            }
+        },
         beamtalk_ets:'newOrExisting:type:'(some_table, invalid_type)
     ).
 
