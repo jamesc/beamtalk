@@ -23,7 +23,7 @@
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
 use super::document::Document;
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression, Literal, MessageSelector};
 use crate::docvec;
 
@@ -209,6 +209,14 @@ impl CoreErlangGenerator {
             let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
             return Ok(Some(doc));
         }
+        // BT-1481: Block literal with field mutations (actor state threading).
+        if let Expression::Block(block) = receiver {
+            let analysis = block_analysis::analyze_block(block);
+            if self.needs_mutation_threading(&analysis) {
+                let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
+                return Ok(Some(doc));
+            }
+        }
         let doc = if matches!(receiver, Expression::Block { .. }) {
             self.generate_block_value_call(receiver, &[])?
         } else {
@@ -293,6 +301,14 @@ impl CoreErlangGenerator {
         {
             let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
             return Ok(Some(doc));
+        }
+        // BT-1481: Block literal with field mutations (actor state threading)
+        if let Expression::Block(block) = receiver {
+            let analysis = block_analysis::analyze_block(block);
+            if self.needs_mutation_threading(&analysis) {
+                let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
+                return Ok(Some(doc));
+            }
         }
         // Fast path: block literal receiver -> fast inline apply
         if matches!(receiver, Expression::Block(_)) {
@@ -424,6 +440,8 @@ impl CoreErlangGenerator {
     /// - `collect:` (1 arg block) → map to new list
     /// - `select:` (1 arg block) → filter elements
     /// - `reject:` (1 arg block) → filter out elements
+    /// - `anySatisfy:` (1 arg block) → boolean predicate (any match)
+    /// - `allSatisfy:` (1 arg block) → boolean predicate (all match)
     /// - `inject:into:` (2 args) → fold with accumulator
     pub(in crate::codegen::core_erlang) fn try_generate_list_message(
         &mut self,
@@ -456,6 +474,14 @@ impl CoreErlangGenerator {
                     }
                     "reject:" if arguments.len() == 1 => {
                         let doc = self.generate_list_reject(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
+                    "anySatisfy:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_any_satisfy(receiver, &arguments[0])?;
+                        Ok(Some(doc))
+                    }
+                    "allSatisfy:" if arguments.len() == 1 => {
+                        let doc = self.generate_list_all_satisfy(receiver, &arguments[0])?;
                         Ok(Some(doc))
                     }
                     "inject:into:" if arguments.len() == 2 => {

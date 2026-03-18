@@ -2039,6 +2039,13 @@ impl CoreErlangGenerator {
                     {
                         return true;
                     }
+                    // BT-1481: Block literal with field mutations (actor state threading)
+                    if self.context != super::super::CodeGenContext::ValueType {
+                        let analysis = super::super::block_analysis::analyze_block(block);
+                        if self.needs_mutation_threading(&analysis) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
