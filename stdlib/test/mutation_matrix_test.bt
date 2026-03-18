@@ -194,9 +194,10 @@ TestCase subclass: MutationMatrixTest
     self assert: count equals: 42
 
   // ── BT-1485: Remaining block-accepting selectors ─────────────────────
-  // All tests below are commented out — they expose state threading bugs
+  // Most tests below remain commented out — they expose state threading bugs
   // where the compiler loses mutated state across block-accepting selectors.
-  // Uncomment each when the corresponding codegen fix lands.
+  // List high-risk cases P3-1..P3-6 are enabled (BT-1486).
+  // Uncomment additional cases when the corresponding codegen fixes land.
 
   // ── List (high risk) ──────────────────────────────────────────────────
 
