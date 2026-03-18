@@ -35,6 +35,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: Span::new(0, 0),
             },
             StateDeclaration {
@@ -43,6 +44,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
                 default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: Span::new(0, 0),
             },
         ],

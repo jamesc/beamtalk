@@ -88,10 +88,11 @@ pub struct ClassInfo {
     /// Whether this class has the explicit `typed` modifier.
     /// Use `ClassHierarchy::is_typed()` to check inherited typed status.
     pub is_typed: bool,
-    /// Whether this class is a direct `Value subclass:` declaration (ADR 0042).
+    /// Whether this class is a Value subclass (ADR 0042, BT-1528).
     ///
-    /// `true` only for classes whose direct superclass is `Value`. To check
-    /// the full inheritance chain, use [`ClassHierarchy::is_value_subclass`].
+    /// `true` for classes that directly or indirectly inherit from `Value`.
+    /// Initially set from the direct superclass name, then corrected by
+    /// [`ClassHierarchy::propagate_class_kind`] after the full hierarchy is built.
     pub is_value: bool,
     /// Whether this class is a native Actor (declared with `native:` keyword, ADR 0056).
     ///
@@ -308,17 +309,22 @@ impl ClassHierarchy {
     /// stub `ClassInfo` with just the name and superclass. This allows
     /// `superclass_chain` to resolve the full inheritance chain for classes
     /// whose parents are defined in other files.
+    ///
+    /// BT-1528: After all entries are inserted, walks the ancestor chain for
+    /// each new class to resolve `is_value` correctly for indirect subclasses.
     pub fn add_external_superclasses(&mut self, index: &std::collections::HashMap<String, String>) {
         for (class_name, superclass_name) in index {
             if !self.classes.contains_key(class_name.as_str()) {
+                let eco_name = EcoString::from(class_name.as_str());
                 self.classes.insert(
-                    EcoString::from(class_name.as_str()),
+                    eco_name,
                     ClassInfo {
                         name: EcoString::from(class_name.as_str()),
                         superclass: Some(EcoString::from(superclass_name.as_str())),
                         is_sealed: false,
                         is_abstract: false,
                         is_typed: false,
+                        // Temporarily set from direct superclass; fixed below.
                         is_value: superclass_name == "Value",
                         is_native: false,
                         state: Vec::new(),
@@ -328,6 +334,19 @@ impl ClassHierarchy {
                         class_variables: Vec::new(),
                     },
                 );
+            }
+        }
+
+        // BT-1528: Fix is_value for indirect Value subclasses now that all
+        // entries are in the hierarchy and superclass_chain can walk them.
+        // Also check existing classes whose ancestors may now be resolvable.
+        let all_class_names: Vec<EcoString> = self.classes.keys().cloned().collect();
+        for class_name in &all_class_names {
+            let is_value = self.is_value_subclass(class_name.as_str());
+            if let Some(info) = self.classes.get_mut(class_name.as_str()) {
+                if is_value && !info.is_value {
+                    info.is_value = true;
+                }
             }
         }
     }
@@ -540,6 +559,58 @@ impl ClassHierarchy {
         self.superclass_chain(class_name)
             .iter()
             .any(|s| s.as_str() == "Value")
+    }
+
+    /// Resolve the `ClassKind` for a class by walking its ancestor chain (BT-1528).
+    ///
+    /// Returns `ClassKind::Actor` if any ancestor is Actor, `ClassKind::Value` if
+    /// any ancestor is Value, or `ClassKind::Object` otherwise.
+    ///
+    /// This supersedes `ClassKind::from_superclass_name` which only checks the
+    /// direct superclass literal.
+    #[must_use]
+    pub fn resolve_class_kind(&self, class_name: &str) -> ClassKind {
+        if self.is_actor_subclass(class_name) {
+            ClassKind::Actor
+        } else if self.is_value_subclass(class_name) {
+            ClassKind::Value
+        } else {
+            ClassKind::Object
+        }
+    }
+
+    /// BT-1528: After all classes in a module are registered, propagate `is_value`
+    /// by walking each class's ancestor chain. Classes that indirectly inherit
+    /// from Value (e.g. `Value subclass: MyBase` then `MyBase subclass: MyChild`)
+    /// get their `is_value` flag corrected and their auto-slot methods
+    /// synthesized.
+    fn propagate_class_kind(&mut self, module: &Module) {
+        // Collect names of classes that need is_value = true but don't have it yet.
+        let classes_to_fix: Vec<EcoString> = module
+            .classes
+            .iter()
+            .filter(|class| {
+                class.class_kind != ClassKind::Value
+                    && self.is_value_subclass(class.name.name.as_str())
+            })
+            .map(|class| class.name.name.clone())
+            .collect();
+
+        for class_name in &classes_to_fix {
+            if let Some(info) = self.classes.get_mut(class_name.as_str()) {
+                info.is_value = true;
+            }
+        }
+
+        // Synthesize auto-slot methods for newly-discovered Value subclasses.
+        // We need the AST `ClassDefinition` for slot info, so look it up.
+        for class in &module.classes {
+            if classes_to_fix.contains(&class.name.name) {
+                if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
+                    Self::add_value_auto_methods(class, &mut info.methods, &mut info.class_methods);
+                }
+            }
+        }
     }
 
     /// Returns true if `class_name` is a numeric type (Integer, Float, Number,
@@ -1259,6 +1330,12 @@ impl ClassHierarchy {
             self.classes.insert(class.name.name.clone(), class_info);
         }
 
+        // Pass 1.5 (BT-1528): Propagate ClassKind through the hierarchy.
+        // Classes whose direct superclass is not "Actor"/"Value" but whose
+        // ancestors include Actor or Value need their is_value flag corrected
+        // and auto-slot methods synthesized.
+        self.propagate_class_kind(module);
+
         // Pass 2: All classes in this module are now registered. Run sealed
         // superclass and method-override checks so ancestor lookups are
         // deterministic regardless of class definition order within the module.
@@ -1371,8 +1448,8 @@ mod tests {
     use super::builtins::builtin_method;
     use super::*;
     use crate::ast::{
-        ClassDefinition, ClassKind, CommentAttachment, Identifier, MethodDefinition,
-        ParameterDefinition, StateDeclaration, TypeAnnotation,
+        ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword, Identifier,
+        MethodDefinition, ParameterDefinition, StateDeclaration, TypeAnnotation,
     };
     use crate::semantic_analysis::test_helpers::test_span;
     use crate::source_analysis::Span;
@@ -1716,6 +1793,7 @@ mod tests {
                 default_value: None,
                 comments: CommentAttachment::default(),
                 doc_comment: None,
+                declared_keyword: DeclaredKeyword::default(),
                 span: test_span(),
             }],
             methods: vec![MethodDefinition {
@@ -3791,6 +3869,254 @@ mod tests {
         assert!(
             h.resolves_selector("String", "toJson"),
             "extension should be resolvable via resolves_selector"
+        );
+    }
+
+    // --- BT-1528: ClassKind hierarchy propagation tests ---
+
+    #[test]
+    fn resolve_class_kind_for_direct_value_subclass() {
+        let mut h = ClassHierarchy::with_builtins();
+        let mut index = HashMap::new();
+        index.insert("Point".to_string(), "Value".to_string());
+        h.add_external_superclasses(&index);
+        assert_eq!(h.resolve_class_kind("Point"), ClassKind::Value);
+    }
+
+    #[test]
+    fn resolve_class_kind_for_indirect_value_subclass() {
+        let mut h = ClassHierarchy::with_builtins();
+        let mut index = HashMap::new();
+        // MyValueBase inherits from Value, MyValueChild inherits from MyValueBase
+        index.insert("MyValueBase".to_string(), "Value".to_string());
+        index.insert("MyValueChild".to_string(), "MyValueBase".to_string());
+        h.add_external_superclasses(&index);
+        assert_eq!(h.resolve_class_kind("MyValueChild"), ClassKind::Value);
+        assert!(h.is_value_subclass("MyValueChild"));
+    }
+
+    #[test]
+    fn resolve_class_kind_for_direct_actor_subclass() {
+        let mut h = ClassHierarchy::with_builtins();
+        let mut index = HashMap::new();
+        index.insert("Counter".to_string(), "Actor".to_string());
+        h.add_external_superclasses(&index);
+        assert_eq!(h.resolve_class_kind("Counter"), ClassKind::Actor);
+    }
+
+    #[test]
+    fn resolve_class_kind_for_indirect_actor_subclass() {
+        let mut h = ClassHierarchy::with_builtins();
+        let mut index = HashMap::new();
+        index.insert("MyActor".to_string(), "Actor".to_string());
+        index.insert("SpecialActor".to_string(), "MyActor".to_string());
+        h.add_external_superclasses(&index);
+        assert_eq!(h.resolve_class_kind("SpecialActor"), ClassKind::Actor);
+    }
+
+    #[test]
+    fn resolve_class_kind_supervisor_stays_object() {
+        // Supervisor inherits from Object (not Actor, not Value)
+        let h = ClassHierarchy::with_builtins();
+        assert_eq!(h.resolve_class_kind("Supervisor"), ClassKind::Object);
+    }
+
+    #[test]
+    fn indirect_value_subclass_sets_is_value_in_hierarchy() {
+        // MyValueBase inherits from Value, MyValueChild inherits from MyValueBase.
+        // MyValueChild should get is_value = true even though its direct superclass
+        // is MyValueBase, not Value.
+        let module = Module {
+            classes: vec![
+                make_user_class("MyValueBase", "Value"),
+                make_user_class("MyValueChild", "MyValueBase"),
+            ],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let (Ok(h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+
+        let base_info = h
+            .get_class("MyValueBase")
+            .expect("MyValueBase should exist");
+        assert!(
+            base_info.is_value,
+            "MyValueBase (direct Value subclass) should have is_value = true"
+        );
+
+        let child_info = h
+            .get_class("MyValueChild")
+            .expect("MyValueChild should exist");
+        assert!(
+            child_info.is_value,
+            "MyValueChild (indirect Value subclass via MyValueBase) should have is_value = true"
+        );
+    }
+
+    #[test]
+    fn indirect_value_subclass_gets_auto_methods() {
+        // MyValueChild inherits from MyValueBase which inherits from Value.
+        // MyValueChild should get auto-slot methods synthesized.
+        let module = Module {
+            classes: vec![
+                make_user_class("MyValueBase", "Value"),
+                make_user_class("MyValueChild", "MyValueBase"),
+            ],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let (Ok(h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+
+        let child_info = h
+            .get_class("MyValueChild")
+            .expect("MyValueChild should exist");
+        // make_user_class gives a "count" state field, so we expect an auto-getter
+        assert!(
+            child_info
+                .methods
+                .iter()
+                .any(|m| m.selector.as_str() == "count"),
+            "MyValueChild should have auto-generated 'count' getter"
+        );
+        assert!(
+            child_info
+                .methods
+                .iter()
+                .any(|m| m.selector.as_str() == "withCount:"),
+            "MyValueChild should have auto-generated 'withCount:' setter"
+        );
+    }
+
+    #[test]
+    fn testcase_indirect_value_subclass() {
+        // TestCase inherits from Value, MyTest inherits from TestCase.
+        // MyTest should get is_value = true.
+        let module = Module {
+            classes: vec![
+                make_user_class("TestCase", "Value"),
+                make_user_class("MyTest", "TestCase"),
+            ],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let (Ok(h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+
+        assert!(
+            h.is_value_subclass("MyTest"),
+            "MyTest should be a Value subclass"
+        );
+        let info = h.get_class("MyTest").expect("MyTest should exist");
+        assert!(info.is_value, "MyTest should have is_value = true");
+    }
+
+    #[test]
+    fn supervisor_subclass_stays_object() {
+        // Supervisor inherits from Object. WebApp inherits from Supervisor.
+        // WebApp should remain ClassKind::Object.
+        let module = Module {
+            classes: vec![make_user_class("WebApp", "Supervisor")],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let (Ok(h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+
+        let info = h.get_class("WebApp").expect("WebApp should exist");
+        assert!(
+            !info.is_value,
+            "WebApp (Supervisor subclass) should not have is_value"
+        );
+        assert_eq!(
+            h.resolve_class_kind("WebApp"),
+            ClassKind::Object,
+            "WebApp should resolve to ClassKind::Object"
+        );
+    }
+
+    #[test]
+    fn cross_file_indirect_value_subclass() {
+        // Simulate: File A defines MyValueBase as Value subclass (external).
+        // File B defines MyChild as MyValueBase subclass (in module).
+        let module = Module {
+            classes: vec![make_user_class("MyChild", "MyValueBase")],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+
+        // At this point, MyValueBase is unknown, so MyChild has is_value = false
+        let info_before = h.get_class("MyChild").expect("MyChild should exist");
+        assert!(
+            !info_before.is_value,
+            "MyChild should not have is_value before external info"
+        );
+
+        // Add external superclass info: MyValueBase inherits from Value
+        let mut external = HashMap::new();
+        external.insert("MyValueBase".to_string(), "Value".to_string());
+        h.add_external_superclasses(&external);
+
+        // Now MyChild should resolve as a Value subclass through the hierarchy
+        assert!(
+            h.is_value_subclass("MyChild"),
+            "MyChild should be detected as Value subclass after cross-file info added"
+        );
+        // The is_value flag should also be propagated
+        let info_after = h.get_class("MyChild").expect("MyChild should exist");
+        assert!(
+            info_after.is_value,
+            "MyChild should have is_value = true after external info added"
+        );
+    }
+
+    #[test]
+    fn add_external_superclasses_indirect_value_is_value() {
+        // Both classes are added via external index:
+        // MyValueBase -> Value, MyValueChild -> MyValueBase
+        let mut h = ClassHierarchy::with_builtins();
+        let mut index = HashMap::new();
+        index.insert("MyValueBase".to_string(), "Value".to_string());
+        index.insert("MyValueChild".to_string(), "MyValueBase".to_string());
+        h.add_external_superclasses(&index);
+
+        let base_info = h
+            .get_class("MyValueBase")
+            .expect("MyValueBase should exist");
+        assert!(
+            base_info.is_value,
+            "MyValueBase should have is_value = true"
+        );
+
+        let child_info = h
+            .get_class("MyValueChild")
+            .expect("MyValueChild should exist");
+        assert!(
+            child_info.is_value,
+            "MyValueChild (indirect Value subclass) should have is_value = true via external superclasses"
         );
     }
 }

@@ -475,6 +475,10 @@ const SYNONYMS: &[(&str, &[&str])] = &[
         &["instance variable", "field", "property", "member"],
     ),
     (
+        "field:",
+        &["instance variable", "field", "property", "member"],
+    ),
+    (
         "respondsTo:",
         &["duck typing", "protocol", "interface", "method check"],
     ),
