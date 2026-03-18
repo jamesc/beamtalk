@@ -10,7 +10,7 @@
 //! into an index keyed by `(ClassName, MethodSide, Selector)`. The index feeds
 //! the conflict detector and type metadata emitter in subsequent compilation passes.
 
-use crate::ast::Module;
+use crate::ast::{Module, TypeAnnotation};
 use crate::source_analysis::Span;
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -48,6 +48,24 @@ pub struct ExtensionLocation {
     pub file_path: PathBuf,
     /// The span of the `StandaloneMethodDefinition` within the file.
     pub span: Span,
+    /// Type signature extracted from the method definition.
+    pub type_info: ExtensionTypeInfo,
+}
+
+/// Type signature metadata for an extension method.
+///
+/// Extracted from the `StandaloneMethodDefinition` AST at collection time.
+/// Used by the type checker to see extension methods as part of a class's
+/// typed method surface. Unannotated parameters and return types are `None`,
+/// representing `Dynamic` in the gradual type system.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionTypeInfo {
+    /// Number of arguments (0 for unary, 1 for binary, N for keyword).
+    pub arity: usize,
+    /// Parameter type annotations. `None` elements mean the parameter is untyped (Dynamic).
+    pub param_types: Vec<Option<EcoString>>,
+    /// Return type annotation. `None` means untyped (Dynamic).
+    pub return_type: Option<EcoString>,
 }
 
 /// An index of all extension method definitions across a project.
@@ -85,9 +103,24 @@ impl ExtensionIndex {
                 },
                 selector: defn.method.selector.name(),
             };
+            let type_info = ExtensionTypeInfo {
+                arity: defn.method.selector.arity(),
+                param_types: defn
+                    .method
+                    .parameters
+                    .iter()
+                    .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                    .collect(),
+                return_type: defn
+                    .method
+                    .return_type
+                    .as_ref()
+                    .map(TypeAnnotation::type_name),
+            };
             let location = ExtensionLocation {
                 file_path: file_path.to_path_buf(),
                 span: defn.span,
+                type_info,
             };
             self.entries.entry(key).or_default().push(location);
         }
@@ -97,6 +130,14 @@ impl ExtensionIndex {
     #[must_use]
     pub fn entries(&self) -> &HashMap<ExtensionKey, Vec<ExtensionLocation>> {
         &self.entries
+    }
+
+    /// Returns a mutable reference to the entries map.
+    ///
+    /// Only available in tests — used to construct indexes without parsing source files.
+    #[cfg(test)]
+    pub fn entries_mut(&mut self) -> &mut HashMap<ExtensionKey, Vec<ExtensionLocation>> {
+        &mut self.entries
     }
 
     /// Looks up all definitions for the given extension key.
@@ -335,5 +376,95 @@ mod tests {
             selector: "missing".into(),
         };
         assert!(index.lookup(&key).is_none());
+    }
+
+    // --- Type info collection tests (BT-1517) ---
+
+    #[test]
+    fn type_info_unary_method_no_annotations() {
+        let module = parse_bt("String >> shout => self\n");
+        let mut index = ExtensionIndex::new();
+        index.add_module(&module, Path::new("String+Shout.bt"));
+
+        let key = ExtensionKey {
+            class_name: "String".into(),
+            side: MethodSide::Instance,
+            selector: "shout".into(),
+        };
+        let locs = index.lookup(&key).unwrap();
+        assert_eq!(locs[0].type_info.arity, 0);
+        assert!(locs[0].type_info.param_types.is_empty());
+        assert!(
+            locs[0].type_info.return_type.is_none(),
+            "unannotated = Dynamic"
+        );
+    }
+
+    #[test]
+    fn type_info_keyword_method_with_param_types() {
+        let module = parse_bt("Array >> chunksOf: n :: Integer => self\n");
+        let mut index = ExtensionIndex::new();
+        index.add_module(&module, Path::new("Array+Chunking.bt"));
+
+        let key = ExtensionKey {
+            class_name: "Array".into(),
+            side: MethodSide::Instance,
+            selector: "chunksOf:".into(),
+        };
+        let locs = index.lookup(&key).unwrap();
+        assert_eq!(locs[0].type_info.arity, 1);
+        assert_eq!(locs[0].type_info.param_types, vec![Some("Integer".into())]);
+    }
+
+    #[test]
+    fn type_info_keyword_method_with_return_type() {
+        let module = parse_bt("String >> reversed -> String => self\n");
+        let mut index = ExtensionIndex::new();
+        index.add_module(&module, Path::new("String+Reverse.bt"));
+
+        let key = ExtensionKey {
+            class_name: "String".into(),
+            side: MethodSide::Instance,
+            selector: "reversed".into(),
+        };
+        let locs = index.lookup(&key).unwrap();
+        assert_eq!(locs[0].type_info.arity, 0);
+        assert_eq!(locs[0].type_info.return_type.as_deref(), Some("String"));
+    }
+
+    #[test]
+    fn type_info_mixed_annotated_params() {
+        let module = parse_bt("Map >> at: key :: String put: value => self\n");
+        let mut index = ExtensionIndex::new();
+        index.add_module(&module, Path::new("Map+AtPut.bt"));
+
+        let key = ExtensionKey {
+            class_name: "Map".into(),
+            side: MethodSide::Instance,
+            selector: "at:put:".into(),
+        };
+        let locs = index.lookup(&key).unwrap();
+        assert_eq!(locs[0].type_info.arity, 2);
+        assert_eq!(
+            locs[0].type_info.param_types,
+            vec![Some("String".into()), None]
+        );
+    }
+
+    #[test]
+    fn type_info_binary_method() {
+        let module = parse_bt("Integer >> + other :: Integer -> Integer => self\n");
+        let mut index = ExtensionIndex::new();
+        index.add_module(&module, Path::new("Integer+Add.bt"));
+
+        let key = ExtensionKey {
+            class_name: "Integer".into(),
+            side: MethodSide::Instance,
+            selector: "+".into(),
+        };
+        let locs = index.lookup(&key).unwrap();
+        assert_eq!(locs[0].type_info.arity, 1);
+        assert_eq!(locs[0].type_info.param_types, vec![Some("Integer".into())]);
+        assert_eq!(locs[0].type_info.return_type.as_deref(), Some("Integer"));
     }
 }
