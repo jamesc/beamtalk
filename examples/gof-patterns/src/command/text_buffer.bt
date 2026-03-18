@@ -8,8 +8,8 @@
 /// TextBuffer holds text content. Commands operate on it by calling insertAt:text:
 /// and deleteFrom:length:. Because value objects are immutable, both methods return
 /// a new TextBuffer — CommandHistory stores the successive snapshots.
-Object subclass: TextBuffer
-  state: text = ""
+Value subclass: TextBuffer
+  field: text = ""
 
   /// Create a buffer pre-populated with the given string.
   class withText: t => self new: #{#text => t}

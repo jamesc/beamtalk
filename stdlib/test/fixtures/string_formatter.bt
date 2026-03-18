@@ -4,9 +4,9 @@
 // BT-892: Value object fixture for testing inject:into: with self sends
 // Self sends in value-object blocks should NOT trigger state threading
 
-Object subclass: StringFormatter
-  state: prefix = ""
-  state: suffix = ""
+Value subclass: StringFormatter
+  field: prefix = ""
+  field: suffix = ""
 
   prefix => self.prefix
 

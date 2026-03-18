@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Point - a simple value type for testing BT-213
-// Value types inherit from Object and use "new", not "spawn"
 
-Object subclass: Point
-  state: x = 0
-  state: y = 0
+Value subclass: Point
+  field: x = 0
+  field: y = 0
 
   // Get x coordinate
   getX => self.x

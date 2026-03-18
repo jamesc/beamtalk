@@ -3,7 +3,7 @@
 
 // Alpha - simple value type for directory load testing (BT-784)
 
-Object subclass: Alpha
-  state: value = 1
+Value subclass: Alpha
+  field: value = 1
 
   getValue => self.value

@@ -73,7 +73,7 @@ cls := Beamtalk classNamed: #Point
 // => Point
 
 cls superclass
-// => Object
+// => Value
 
 // ---------------------------------------------------------------------------
 // Dynamic name call

@@ -3,7 +3,7 @@
 
 // Beta - simple value type for directory load testing (BT-784)
 
-Object subclass: Beta
-  state: value = 2
+Value subclass: Beta
+  field: value = 2
 
   getValue => self.value

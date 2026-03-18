@@ -4,8 +4,8 @@
 // Base value-object class for BT-908 fixture.
 // Defines a class method (wrap:) that subclasses should inherit correctly.
 
-Object subclass: Beverage
-  state: value = nil
+Value subclass: Beverage
+  field: value = nil
 
   class wrap: anObject => self new: #{#value => anObject}
 

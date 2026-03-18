@@ -17,8 +17,8 @@
 ///
 ///   byLen := Sorter withStrategy: [:a :b | a length < b length].
 ///   byLen sort: #("banana", "fig", "apple").           // smallest first
-Object subclass: Sorter
-  state: strategy = nil
+Value subclass: Sorter
+  field: strategy = nil
 
   /// Create a Sorter with a custom two-argument comparison block.
   /// The block returns true when its first argument should come before the second.

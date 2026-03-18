@@ -12,21 +12,19 @@
 ///             withText: "Click here";
 ///             build.
 ///   el render   // => "<a href="https://example.com">Click here</a>"
-Object subclass: HtmlBuilder
-  state: element = nil
+Value subclass: HtmlBuilder
+  field: element = nil
 
   /// Begin building a new element with the given tag name.
   class buildTag: t => self new: #{#element => (HtmlElement tag: t)}
 
   /// Add an HTML attribute to the element under construction.
   withAttr: key value: val =>
-    self.element := self.element attribute: key value: val
-    self
+    self withElement: (self.element attribute: key value: val)
 
   /// Set the text content of the element under construction.
   withText: t =>
-    self.element := self.element text: t
-    self
+    self withElement: (self.element text: t)
 
   /// Finalise construction and return the built HtmlElement.
   build => self.element

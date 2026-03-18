@@ -1,10 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-854/BT-857: Tests NLR state threading for value types
-// Verifies that 4-tuple NLR throws ({$bt_nlr, Token, Value, State})
-// work correctly and that the {Result, State} method return format
-// is properly unwrapped by dispatch/3
+// BT-854/BT-857: Tests NLR (non-local return) for value types
+// Verifies that ^ inside blocks works correctly for Value subclass fixtures
 
 TestCase subclass: NlrStateThreadingTest
 
@@ -15,13 +13,13 @@ TestCase subclass: NlrStateThreadingTest
     self assert: result equals: 3
 
   testFindFirstNoMatchReturnsNil =>
-    // Normal (non-NLR) path: method returns nil via {nil, Self{N}}
+    // Normal (non-NLR) path: method returns nil
     obj := NlrFieldMutation new
     result := obj findFirst: 100 in: #(1, 2, 3)
     self assert: result equals: nil
 
   testFindAndReturnSelfUpdatesField =>
-    // ^self returns the updated Self with field mutations from before the block
+    // findAndReturnSelf: uses withLastQuery: then returns updated via ^
     obj := NlrFieldMutation new
     updated := obj findAndReturnSelf: 3 in: #(1, 2, 3, 4, 5)
     self assert: updated lastQuery equals: 3
@@ -40,18 +38,17 @@ TestCase subclass: NlrStateThreadingTest
 
   testFindNoneNlrNeverFires =>
     // Method has NLR infrastructure but ^ never fires
-    // Tests the normal {Result, Self{N}} tuple return path
     obj := NlrFieldMutation new
     result := obj findNone: #(1, 2, 3)
     self assert: result equals: nil
 
   testFindAndReturnSelfNoMatchReturnsSelf =>
-    // Normal (non-NLR) path: findAndReturnSelf:in: returns self at end of method
+    // Normal (non-NLR) path: findAndReturnSelf:in: returns updated at end of method
     obj := NlrFieldMutation new
     updated := obj findAndReturnSelf: 100 in: #(1, 2, 3)
     self assert: updated lastQuery equals: 100
 
-  // BT-857: anySatisfy: — field mutation before ^ is preserved after early return
+  // BT-857: anySatisfy: — early return via ^
   testAnySatisfyReturnsTrueOnMatch =>
     // anySatisfy:in: uses ^ to short-circuit and return true when match found
     obj := NlrFieldMutation new
@@ -64,41 +61,31 @@ TestCase subclass: NlrStateThreadingTest
     result := obj anySatisfy: [:x | x > 100] in: #(1, 2, 3)
     self assert: result equals: false
 
-  // BT-857: ^ inside nested HOM — state preserved through multiple frames
+  // BT-857: ^ inside nested HOM — NLR propagates through multiple frames
   //
-  // findViaSingleHOM:in: and findViaNestedHOM:in: return `^self` (updated self)
-  // when a match is found, or `self` when no match. This allows the caller
-  // to verify visitCount on the returned object, demonstrating that field
-  // mutations made before ^ are preserved through the NLR 4-tuple
-  //
-  // Note on anySatisfy: field mutation tests: for value types, `obj lastQuery`
-  // reflects the original object (not updated in place after a method call that
-  // doesn't return self). The anySatisfy: tests below verify only the return value;
-  // field mutation preservation is demonstrated by the findViaSingleHOM: tests
+  // findViaSingleHOM:in: and findViaNestedHOM:in: use withVisitCount: to create
+  // an updated instance, then return it via ^ through nested HOM frames.
+  // The caller verifies visitCount on the returned object.
   testFindViaSingleHOMPreservesFieldMutation =>
-    // NLR propagates through one HOM frame; visitCount (set to 1 before block) is
-    // preserved in the returned self. Block uses ^self to return updated self
+    // NLR propagates through one HOM frame; visitCount set to 1 via withVisitCount:
     obj := NlrNestedHom new
     result := obj findViaSingleHOM: 3 in: #(1, 2, 3, 4, 5)
     self assert: result visitCount equals: 1
 
   testFindViaNestedHOMPreservesFieldMutation =>
-    // NLR propagates through two HOM frames; visitCount (set to 2 before block) is
-    // preserved in the returned self
+    // NLR propagates through two HOM frames; visitCount set to 2 via withVisitCount:
     obj := NlrNestedHom new
     result := obj findViaNestedHOM: 3 in: #(1, 2, 3, 4, 5)
     self assert: result visitCount equals: 2
 
   testFindViaSingleHOMNoMatchPreservesFieldMutation =>
-    // Non-NLR path through one HOM: ^ never fires, method returns self
-    // visitCount is still 1 (set in method body, preserved in returned self)
+    // Non-NLR path through one HOM: ^ never fires, method returns updated
     obj := NlrNestedHom new
     result := obj findViaSingleHOM: 99 in: #(1, 2, 3)
     self assert: result visitCount equals: 1
 
   testFindViaNestedHOMNoMatchPreservesFieldMutation =>
-    // Non-NLR path through two nested HOMs: ^ never fires, method returns self
-    // visitCount is still 2 (set in method body, preserved in returned self)
+    // Non-NLR path through two nested HOMs: ^ never fires, method returns updated
     obj := NlrNestedHom new
     result := obj findViaNestedHOM: 99 in: #(1, 2, 3)
     self assert: result visitCount equals: 2

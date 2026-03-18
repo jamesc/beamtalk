@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Message value type fixture for E2E tests (BT-568)
-// Demonstrates: value types (Object subclass), immutable data, new: initialization
+// Demonstrates: value types (Value subclass), immutable data, new: initialization
 
-Object subclass: Message
-  state: text = ""
-  state: sender = "Anonymous"
+Value subclass: Message
+  field: text = ""
+  field: sender = "Anonymous"
 
   getText => self.text
 

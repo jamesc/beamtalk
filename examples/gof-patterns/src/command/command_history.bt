@@ -12,9 +12,9 @@
 ///   h buffer text    // => "hello world"
 ///   h := h undo.
 ///   h buffer text    // => "hello"
-Object subclass: CommandHistory
-  state: buffer = nil
-  state: history = #()  // stack of prior buffer snapshots
+Value subclass: CommandHistory
+  field: buffer = nil
+  field: history = #()  // stack of prior buffer snapshots
 
   /// Create a history whose initial buffer state is aBuffer.
   class on: aBuffer => self new: #{#buffer => aBuffer}
@@ -22,16 +22,12 @@ Object subclass: CommandHistory
   /// Execute a command, save the current buffer as a snapshot, update the buffer.
   execute: command =>
     nextBuffer := command execute: self.buffer
-    self.history := self.history add: self.buffer
-    self.buffer := nextBuffer
-    self
+    (self withHistory: (self.history add: self.buffer)) withBuffer: nextBuffer
 
   /// Restore the most recent snapshot, removing it from the stack.
   undo =>
     self.history isEmpty ifTrue: [^self]
-    self.buffer := self.history last
-    self.history := self.history take: self.history size - 1
-    self
+    (self withBuffer: self.history last) withHistory: (self.history take: self.history size - 1)
 
   /// Return the current buffer state.
   buffer => self.buffer
