@@ -948,6 +948,7 @@ impl ExpectCategory {
             "type",
             "unused",
             "self_capture",
+            "dead_assignment",
             "deprecation",
             "all",
         ]
