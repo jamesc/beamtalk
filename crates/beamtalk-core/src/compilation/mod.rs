@@ -13,5 +13,6 @@
 pub mod extension_index;
 
 pub use extension_index::{
-    ExtensionIndex, ExtensionKey, ExtensionLocation, MethodSide, collect_extensions,
+    ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
+    collect_extensions,
 };

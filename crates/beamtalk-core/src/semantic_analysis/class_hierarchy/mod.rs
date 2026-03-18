@@ -16,6 +16,7 @@
 use crate::ast::{
     ClassDefinition, ClassKind, Expression, Literal, MethodKind, Module, TypeAnnotation,
 };
+use crate::compilation::extension_index::{ExtensionIndex, MethodSide};
 use crate::semantic_analysis::SemanticError;
 use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
@@ -258,6 +259,56 @@ impl ClassHierarchy {
         for info in classes {
             if !Self::is_builtin_class(&info.name) {
                 self.classes.entry(info.name.clone()).or_insert(info);
+            }
+        }
+    }
+
+    /// Registers extension methods from the [`ExtensionIndex`] into the hierarchy.
+    ///
+    /// Each extension entry is converted to a [`MethodInfo`] and appended to the
+    /// target class's instance or class method list. Unannotated parameters and
+    /// return types remain `None` (Dynamic in the gradual type system), so the
+    /// type checker will skip validation for those positions while still knowing
+    /// the method exists.
+    ///
+    /// Extensions targeting classes not present in the hierarchy are silently
+    /// skipped — they will be caught by the conflict detector or reported as
+    /// errors elsewhere.
+    ///
+    /// For duplicate extensions (same key, multiple locations), only the first
+    /// definition is registered. The conflict detector handles reporting errors
+    /// for duplicates.
+    pub fn register_extensions(&mut self, index: &ExtensionIndex) {
+        for (key, locations) in index.entries() {
+            // Only register the first definition; conflicts are handled separately.
+            let Some(first) = locations.first() else {
+                continue;
+            };
+
+            let method_info = MethodInfo {
+                selector: key.selector.clone(),
+                arity: first.type_info.arity,
+                kind: MethodKind::Primary,
+                defined_in: key.class_name.clone(),
+                is_sealed: false,
+                spawns_block: false,
+                return_type: first.type_info.return_type.clone(),
+                param_types: first.type_info.param_types.clone(),
+                doc: None,
+            };
+
+            if let Some(class_info) = self.classes.get_mut(key.class_name.as_str()) {
+                let methods = match key.side {
+                    MethodSide::Instance => &mut class_info.methods,
+                    MethodSide::Class => &mut class_info.class_methods,
+                };
+
+                // Don't add if a method with the same selector already exists
+                // (the class's own definition takes precedence over extensions).
+                let already_exists = methods.iter().any(|m| m.selector == key.selector);
+                if !already_exists {
+                    methods.push(method_info);
+                }
             }
         }
     }
@@ -3434,6 +3485,225 @@ mod tests {
         assert_eq!(
             h.get_class("Integer").unwrap().methods.len(),
             original_method_count
+        );
+    }
+
+    // --- Extension method registration tests (BT-1517) ---
+
+    #[test]
+    fn register_extensions_adds_instance_method() {
+        use crate::compilation::extension_index::{
+            ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
+        };
+        use std::path::PathBuf;
+
+        let mut h = ClassHierarchy::with_builtins();
+        let original_count = h.all_methods("String").len();
+
+        let mut index = ExtensionIndex::new();
+        let key = ExtensionKey {
+            class_name: "String".into(),
+            side: MethodSide::Instance,
+            selector: "shout".into(),
+        };
+        index.entries_mut().insert(
+            key,
+            vec![ExtensionLocation {
+                file_path: PathBuf::from("String+Shout.bt"),
+                span: test_span(),
+                type_info: ExtensionTypeInfo {
+                    arity: 0,
+                    param_types: vec![],
+                    return_type: Some("String".into()),
+                },
+            }],
+        );
+        h.register_extensions(&index);
+
+        let methods = h.all_methods("String");
+        assert_eq!(methods.len(), original_count + 1);
+        let ext = methods.iter().find(|m| m.selector == "shout").unwrap();
+        assert_eq!(ext.arity, 0);
+        assert_eq!(ext.return_type.as_deref(), Some("String"));
+        assert_eq!(ext.defined_in.as_str(), "String");
+    }
+
+    #[test]
+    fn register_extensions_adds_class_method() {
+        use crate::compilation::extension_index::{
+            ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
+        };
+        use std::path::PathBuf;
+
+        let mut h = ClassHierarchy::with_builtins();
+        let original_count = h.all_class_methods("String").len();
+
+        let mut index = ExtensionIndex::new();
+        let key = ExtensionKey {
+            class_name: "String".into(),
+            side: MethodSide::Class,
+            selector: "fromJson:".into(),
+        };
+        index.entries_mut().insert(
+            key,
+            vec![ExtensionLocation {
+                file_path: PathBuf::from("String+JSON.bt"),
+                span: test_span(),
+                type_info: ExtensionTypeInfo {
+                    arity: 1,
+                    param_types: vec![Some("String".into())],
+                    return_type: Some("String".into()),
+                },
+            }],
+        );
+        h.register_extensions(&index);
+
+        let methods = h.all_class_methods("String");
+        assert_eq!(methods.len(), original_count + 1);
+        let ext = methods.iter().find(|m| m.selector == "fromJson:").unwrap();
+        assert_eq!(ext.arity, 1);
+        assert_eq!(ext.param_types, vec![Some("String".into())]);
+    }
+
+    #[test]
+    fn register_extensions_unannotated_uses_dynamic() {
+        use crate::compilation::extension_index::{
+            ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
+        };
+        use std::path::PathBuf;
+
+        let mut h = ClassHierarchy::with_builtins();
+
+        let mut index = ExtensionIndex::new();
+        let key = ExtensionKey {
+            class_name: "Array".into(),
+            side: MethodSide::Instance,
+            selector: "shuffle".into(),
+        };
+        index.entries_mut().insert(
+            key,
+            vec![ExtensionLocation {
+                file_path: PathBuf::from("Array+Shuffle.bt"),
+                span: test_span(),
+                type_info: ExtensionTypeInfo {
+                    arity: 0,
+                    param_types: vec![],
+                    return_type: None,
+                },
+            }],
+        );
+        h.register_extensions(&index);
+
+        let ext = h
+            .find_method("Array", "shuffle")
+            .expect("extension should be resolvable");
+        assert!(ext.return_type.is_none(), "unannotated = Dynamic");
+    }
+
+    #[test]
+    fn register_extensions_skips_unknown_class() {
+        use crate::compilation::extension_index::{
+            ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
+        };
+        use std::path::PathBuf;
+
+        let mut h = ClassHierarchy::with_builtins();
+
+        let mut index = ExtensionIndex::new();
+        let key = ExtensionKey {
+            class_name: "NonexistentClass".into(),
+            side: MethodSide::Instance,
+            selector: "doStuff".into(),
+        };
+        index.entries_mut().insert(
+            key,
+            vec![ExtensionLocation {
+                file_path: PathBuf::from("Nonexistent+Stuff.bt"),
+                span: test_span(),
+                type_info: ExtensionTypeInfo {
+                    arity: 0,
+                    param_types: vec![],
+                    return_type: None,
+                },
+            }],
+        );
+        // Should not panic
+        h.register_extensions(&index);
+        assert!(!h.has_class("NonexistentClass"));
+    }
+
+    #[test]
+    fn register_extensions_does_not_override_existing_method() {
+        use crate::compilation::extension_index::{
+            ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
+        };
+        use std::path::PathBuf;
+
+        let mut h = ClassHierarchy::with_builtins();
+        // "size" already exists on String
+        let original = h.find_method("String", "size").unwrap();
+
+        let mut index = ExtensionIndex::new();
+        let key = ExtensionKey {
+            class_name: "String".into(),
+            side: MethodSide::Instance,
+            selector: "size".into(),
+        };
+        index.entries_mut().insert(
+            key,
+            vec![ExtensionLocation {
+                file_path: PathBuf::from("String+Size.bt"),
+                span: test_span(),
+                type_info: ExtensionTypeInfo {
+                    arity: 0,
+                    param_types: vec![],
+                    return_type: Some("Integer".into()),
+                },
+            }],
+        );
+        h.register_extensions(&index);
+
+        // Original method should be unchanged
+        let after = h.find_method("String", "size").unwrap();
+        assert_eq!(after.defined_in, original.defined_in);
+    }
+
+    #[test]
+    fn register_extensions_resolves_selector() {
+        use crate::compilation::extension_index::{
+            ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
+        };
+        use std::path::PathBuf;
+
+        let mut h = ClassHierarchy::with_builtins();
+        assert!(
+            !h.resolves_selector("String", "toJson"),
+            "precondition: toJson doesn't exist"
+        );
+
+        let mut index = ExtensionIndex::new();
+        let key = ExtensionKey {
+            class_name: "String".into(),
+            side: MethodSide::Instance,
+            selector: "toJson".into(),
+        };
+        index.entries_mut().insert(
+            key,
+            vec![ExtensionLocation {
+                file_path: PathBuf::from("String+JSON.bt"),
+                span: test_span(),
+                type_info: ExtensionTypeInfo {
+                    arity: 0,
+                    param_types: vec![],
+                    return_type: Some("String".into()),
+                },
+            }],
+        );
+        h.register_extensions(&index);
+
+        assert!(
+            h.resolves_selector("String", "toJson"),
+            "extension should be resolvable via resolves_selector"
         );
     }
 }
