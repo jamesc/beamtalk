@@ -37,6 +37,16 @@ impl LintPass for CascadeCandidatePass {
         // because only the last send's result would be asserted. Only check
         // method bodies and standalone method definitions.
         for class in &module.classes {
+            // Skip TestCase subclasses — test methods naturally have many
+            // consecutive sends to the same actor/object for setup and
+            // assertion, and cascading would change return semantics.
+            if class
+                .superclass
+                .as_ref()
+                .is_some_and(|s| s.name == "TestCase")
+            {
+                continue;
+            }
             for method in class.methods.iter().chain(class.class_methods.iter()) {
                 check_sequence(&method.body, diagnostics);
             }
@@ -361,6 +371,19 @@ mod tests {
         assert!(
             diags.is_empty(),
             "@expect should break the run, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_case_subclass_not_flagged() {
+        // TestCase subclasses have many consecutive sends to actors for setup —
+        // these should not trigger the cascade lint.
+        let diags = lint(
+            "TestCase subclass: MyTest\n  testSomething =>\n    actor setX: 1\n    actor setY: 2\n    actor start\n",
+        );
+        assert!(
+            diags.is_empty(),
+            "TestCase methods should NOT be flagged, got: {diags:?}"
         );
     }
 

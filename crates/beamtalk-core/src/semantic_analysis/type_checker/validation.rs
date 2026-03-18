@@ -95,6 +95,12 @@ impl TypeChecker {
             return;
         }
 
+        // Cross-file inheritance: if the parent class is not in the hierarchy,
+        // we can't know the full method set — suppress false-positive DNU hints.
+        if hierarchy.has_cross_file_parent(class_name) {
+            return;
+        }
+
         if !hierarchy.resolves_selector(class_name, selector) {
             self.emit_unknown_selector_warning(class_name, selector, span, hierarchy, false);
         }

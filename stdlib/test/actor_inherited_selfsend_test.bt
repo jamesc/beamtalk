@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for actor self-sends to inherited methods (cross-file inheritance).
+// InheritingCounter extends Counter (defined in separate file) and
+// self-sends to getValue/increment which are defined on Counter.
+
+TestCase subclass: ActorInheritedSelfsendTest
+
+  // #1: Direct self-send to inherited method
+  testDirectSelfsendToInherited =>
+    c := InheritingCounter spawn
+    c increment
+    c increment
+    self assert: c getValueViaSelfsend equals: 2
+
+  // #1: Self-send to inherited method inside collect: block
+  testSelfsendToInheritedInBlock =>
+    c := InheritingCounter spawn
+    result := c collectWithInheritedSend: #(1, 2, 3)
+    self assert: result equals: #(1, 2, 3)
+
+  // #1+#2: Self-send to inherited method + own state mutation
+  testInheritedSelfsendWithOwnState =>
+    c := InheritingCounter spawn
+    c incrementAndLog
+    c incrementAndLog
+    c incrementAndLog
+    self assert: c getValue equals: 3
+
+  // #2: Access inherited state field directly via self.value
+  testAccessInheritedStateField =>
+    c := InheritingCounter spawn
+    c increment
+    c increment
+    c increment
+    self assert: c getValueDirect equals: 3

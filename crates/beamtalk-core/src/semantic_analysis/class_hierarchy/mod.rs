@@ -397,6 +397,39 @@ impl ClassHierarchy {
             .is_some_and(|info| info.is_native)
     }
 
+    /// Returns true if any ancestor in the class's superclass chain is not in
+    /// the hierarchy (defined in a separately-compiled file).
+    ///
+    /// Walks the full chain transitively: `GrandChild → Child → (external Parent)`
+    /// returns true for `GrandChild` even though `Child` is known locally.
+    ///
+    /// When true, the type checker cannot know the full method set and should
+    /// suppress "does not understand" hints for selectors that might be inherited.
+    #[must_use]
+    pub fn has_cross_file_parent(&self, class_name: &str) -> bool {
+        let mut current = class_name;
+        let mut visited = HashSet::new();
+
+        while let Some(info) = self.classes.get(current) {
+            let Some(ref superclass) = info.superclass else {
+                return false; // Reached root — fully known chain
+            };
+
+            if !visited.insert(current.to_string()) {
+                return false; // Cycle guard
+            }
+
+            // First unknown ancestor means the chain is cross-file/incomplete.
+            if !self.classes.contains_key(superclass.as_str()) {
+                return true;
+            }
+
+            current = superclass.as_str();
+        }
+
+        false
+    }
+
     /// Returns true if the named class is Value or a subclass of Value (ADR 0042).
     ///
     /// Value subclasses use immutable value semantics — `self.slot :=` is a
