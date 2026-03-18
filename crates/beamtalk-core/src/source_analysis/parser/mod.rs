@@ -372,6 +372,8 @@ pub enum DiagnosticCategory {
     SelfCapture,
     /// Dead assignment in block closure (BT-1476).
     DeadAssignment,
+    /// Duplicate extension method conflict (BT-1516).
+    ExtensionConflict,
 }
 
 /// A diagnostic message (error, warning, or hint).
