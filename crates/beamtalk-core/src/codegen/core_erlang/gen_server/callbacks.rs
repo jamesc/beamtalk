@@ -5,8 +5,9 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Generates the standard OTP callbacks: `init/1`, `handle_cast/2`,
-//! `handle_call/3`, `handle_info/2`, `code_change/3`, and `terminate/2`.
+//! Generates the standard OTP callbacks: `init/1`, `handle_continue/2`,
+//! `handle_cast/2`, `handle_call/3`, `handle_info/2`, `code_change/3`,
+//! and `terminate/2`.
 
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
@@ -98,7 +99,7 @@ impl CoreErlangGenerator {
         // When has_initialize is true, we wrap the dispatch in a guard that
         // checks __skip_initialize__ in InitArgs, so parent helpers skip it.
         let init_return = if has_initialize {
-            Self::init_initialize_guarded_doc(&module_name)
+            Self::init_initialize_guarded_doc()
         } else {
             Document::Str("in {'ok', FinalState}")
         };
@@ -231,19 +232,20 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-1417: Generate the guarded initialize dispatch block for init/1.
+    /// BT-1417/BT-1541: Generate the guarded initialize dispatch block for init/1.
     ///
     /// Checks `__skip_initialize__` in `InitArgs` — when a child's init calls
     /// us as a parent state helper, it sets this flag to prevent double dispatch.
     /// When called as the outermost init (by OTP), the flag is absent and
-    /// initialize runs.
+    /// initialize is deferred to `handle_continue`.
     ///
-    /// After building `FinalState`, dispatches `initialize` via `safe_dispatch`.
-    /// Strips `__skip_initialize__` from the final state to keep it out of
-    /// the actor's visible state.
-    fn init_initialize_guarded_doc(module_name: &str) -> Document<'static> {
+    /// BT-1541: Uses OTP's `handle_continue` pattern instead of dispatching
+    /// initialize inline. This ensures the `gen_server` message loop is running
+    /// when initialize executes, so self-sends don't deadlock. OTP guarantees
+    /// no messages arrive before `handle_continue` runs.
+    fn init_initialize_guarded_doc() -> Document<'static> {
         docvec![
-            "%% BT-1417: Dispatch initialize unless called as a parent helper",
+            "%% BT-1417/BT-1541: Defer initialize to handle_continue unless called as a parent helper",
             line(),
             "in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
             nest(
@@ -267,27 +269,12 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![
                             line(),
-                            // Strip the flag from state before dispatch
+                            // Strip the flag from state before returning
                             "let CleanState1 = call 'maps':'remove'('__skip_initialize__', FinalState) in",
                             line(),
-                            docvec![
-                                "case call '",
-                                Document::String(module_name.to_string()),
-                                "':'safe_dispatch'('initialize', [], CleanState1) of",
-                            ],
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "<{'reply', _InitResult, InitNewState}> when 'true' ->",
-                                    nest(INDENT, docvec![line(), "{'ok', InitNewState}"]),
-                                    line(),
-                                    "<{'error', InitError, _InitErrState}> when 'true' ->",
-                                    nest(INDENT, docvec![line(), "{'stop', InitError}"]),
-                                ]
-                            ),
-                            line(),
-                            "end",
+                            // BT-1541: Return {ok, State, {continue, initialize}} to defer
+                            // initialize dispatch to handle_continue where the loop is running
+                            "{'ok', CleanState1, {'continue', 'initialize'}}",
                         ]
                     ),
                 ]
@@ -295,6 +282,90 @@ impl CoreErlangGenerator {
             line(),
             "end",
         ]
+    }
+
+    /// Generates the `handle_continue/2` callback (BT-1541).
+    ///
+    /// Dispatches `initialize` via `safe_dispatch` when the continuation token
+    /// `{continue, initialize}` arrives. This runs after `init/1` returns, so
+    /// the `gen_server` message loop is active and self-sends work without deadlock.
+    ///
+    /// OTP guarantees no other messages are processed before `handle_continue`.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'handle_continue'/2 = fun (Continue, State) ->
+    ///     case Continue of
+    ///         <'initialize'> when 'true' ->
+    ///             case call 'module':'safe_dispatch'('initialize', [], State) of
+    ///                 <{'reply', _InitResult, InitNewState}> when 'true' ->
+    ///                     {'noreply', InitNewState}
+    ///                 <{'error', InitError, _InitErrState}> when 'true' ->
+    ///                     {'stop', InitError, State}
+    ///             end
+    ///         <_> when 'true' -> {'noreply', State}
+    ///     end
+    /// ```
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
+    pub(in crate::codegen::core_erlang) fn generate_handle_continue(
+        &self,
+    ) -> Result<Document<'static>> {
+        let module_name = self.module_name.clone();
+        let doc = docvec![
+            "'handle_continue'/2 = fun (Continue, State) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "case Continue of",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "<'initialize'> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    docvec![
+                                        "case call '",
+                                        Document::String(module_name),
+                                        "':'safe_dispatch'('initialize', [], State) of",
+                                    ],
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "<{'reply', _InitResult, InitNewState}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![line(), "{'noreply', InitNewState}"]
+                                            ),
+                                            line(),
+                                            "<{'error', InitError, _InitErrState}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![line(), "{'stop', InitError, State}"]
+                                            ),
+                                        ]
+                                    ),
+                                    line(),
+                                    "end",
+                                ]
+                            ),
+                            line(),
+                            "<_> when 'true' -> {'noreply', State}",
+                        ]
+                    ),
+                    line(),
+                    "end",
+                ]
+            ),
+            "\n",
+            "\n",
+        ];
+        Ok(doc)
     }
 
     /// Generates the `handle_cast/2` callback for async message sends.
