@@ -121,16 +121,32 @@ use std::fmt;
 use thiserror::Error;
 use variable_context::VariableContext;
 
+/// Display wrapper for `Option<Span>` in error messages.
+///
+/// Renders `" at offset N"` when a span is present, or empty string when `None`.
+/// Consumers with source text (REPL, MCP) should use the raw `Span` for richer
+/// formatting (Miette highlighting, "line N, col C", etc.).
+struct DisplayOptionalSpan<'a>(&'a Option<Span>);
+
+impl fmt::Display for DisplayOptionalSpan<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(s) => write!(f, " at offset {}", s.start()),
+            None => Ok(()),
+        }
+    }
+}
+
 /// Errors that can occur during code generation.
 #[derive(Debug, Error)]
 pub enum CodeGenError {
     /// Unsupported language feature.
-    #[error("unsupported feature: {feature} at {location}")]
+    #[error("unsupported feature: {feature}{}", DisplayOptionalSpan(.span))]
     UnsupportedFeature {
         /// The feature that is not yet supported.
         feature: String,
-        /// Source location.
-        location: String,
+        /// Source span for rich error rendering (Miette / MCP).
+        span: Option<Span>,
     },
 
     /// Internal code generation error.
@@ -214,6 +230,20 @@ pub enum CodeGenError {
         /// Method-specific fix suggestion.
         hint: String,
     },
+}
+
+impl CodeGenError {
+    /// Returns the source span associated with this error, if any.
+    ///
+    /// Consumers with source text can use this for rich error formatting:
+    /// - REPL: Miette source highlighting
+    /// - MCP: "line N, col C" format
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            CodeGenError::UnsupportedFeature { span, .. } => *span,
+            _ => None,
+        }
+    }
 }
 
 /// Result type for code generation operations.
@@ -591,7 +621,7 @@ pub fn generate_repl_expressions_with_index(
     if expressions.is_empty() {
         return Err(CodeGenError::UnsupportedFeature {
             feature: "empty expression list".to_string(),
-            location: module_name.to_string(),
+            span: None,
         });
     }
     let mut generator = CoreErlangGenerator::new(module_name);
@@ -622,7 +652,7 @@ pub fn generate_repl_expressions_traced(
     if expressions.is_empty() {
         return Err(CodeGenError::UnsupportedFeature {
             feature: "empty expression list".to_string(),
-            location: module_name.to_string(),
+            span: None,
         });
     }
     let source_texts: Vec<String> = expressions
@@ -1293,17 +1323,6 @@ impl CoreErlangGenerator {
         Some(line)
     }
 
-    /// Convert a span to a human-readable location string for error messages.
-    ///
-    /// Returns `"line N"` when source text is available, falling back to
-    /// `"offset N"` so callers never produce a raw Rust debug `Span { start, end }`.
-    pub(super) fn span_location(&self, span: Span) -> String {
-        match self.span_to_line(span) {
-            Some(line) => format!("line {line}"),
-            None => format!("offset {}", span.start()),
-        }
-    }
-
     /// BT-940: Wraps a Document with a Core Erlang line annotation.
     ///
     /// Produces `( Doc -| [{'line', N}] )` which `erlc` preserves into BEAM
@@ -1795,7 +1814,7 @@ impl CoreErlangGenerator {
                 // as a message receiver (e.g., `super increment`)
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "'super' must be used with a message send".to_string(),
-                    location: self.span_location(expr.span()),
+                    span: Some(expr.span()),
                 })
             }
             Expression::Block(block) => self.generate_block(block),
@@ -1848,7 +1867,7 @@ impl CoreErlangGenerator {
                     // only mutate their own state, not the state of other objects.
                     return Err(CodeGenError::UnsupportedFeature {
                         feature: "field assignment to non-self receiver".to_string(),
-                        location: self.span_location(target.span()),
+                        span: Some(target.span()),
                     });
                 }
                 // For identifier assignments (e.g., local variables in REPL like `x := 1`),
@@ -1930,17 +1949,17 @@ impl CoreErlangGenerator {
                 // it appeared in a pure expression position, which is not supported.
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "destructuring assignment in expression position".to_string(),
-                    location: self.span_location(*span),
+                    span: Some(*span),
                 })
             }
             Expression::Error { message, span, .. } => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression error: {message}"),
-                location: self.span_location(*span),
+                span: Some(*span),
             }),
             Expression::ExpectDirective { .. } => Ok(Document::Nil),
             Expression::Spread { name, .. } => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("spread expression: {}", name.name),
-                location: self.span_location(name.span),
+                span: Some(name.span),
             }),
         }
     }
