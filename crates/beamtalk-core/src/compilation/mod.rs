@@ -10,8 +10,12 @@
 //! these passes coordinate cross-file concerns like extension method indexing
 //! and conflict detection.
 
+pub mod extension_conflicts;
 pub mod extension_index;
 
+pub use extension_conflicts::{
+    ExtensionConflict, conflict_diagnostics, detect_extension_conflicts, shadowing_diagnostics,
+};
 pub use extension_index::{
     ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
     collect_extensions,
