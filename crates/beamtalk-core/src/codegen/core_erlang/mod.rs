@@ -98,7 +98,6 @@ mod intrinsics;
 mod operators;
 pub mod primitive_bindings;
 mod primitives;
-mod repl_codegen;
 pub mod selector_mangler;
 mod spec_codegen;
 mod state_codegen;
@@ -565,79 +564,57 @@ pub fn generate_module_with_warnings(
     })
 }
 
+// ── REPL / test expression generation (BT-1462) ────────────────────────
+//
+// These functions delegate to `crate::repl::codegen`, which owns the
+// REPL-specific module assembly logic. They are kept here as thin
+// re-exports for backward compatibility with existing callers.
+
 /// Generates Core Erlang for a REPL expression.
 ///
-/// This creates a simple module that evaluates a single expression and
-/// returns its value. Used by the REPL for interactive evaluation.
-///
-/// The generated module has an `eval/1` function that takes a bindings map
-/// and returns the expression result.
-///
-/// # Arguments
-///
-/// * `expression` - The Beamtalk expression AST to evaluate
-/// * `module_name` - Unique module name (e.g., `repl_eval_42`)
+/// Delegates to [`crate::repl::codegen::generate_repl_expression`].
 ///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> Result<String> {
-    let mut generator = CoreErlangGenerator::new(module_name);
-    let doc = generator.generate_repl_module(expression)?;
-    Ok(doc.to_pretty_string())
+    crate::repl::codegen::generate_repl_expression(expression, module_name)
 }
 
 /// Generates Core Erlang for multiple REPL expressions (BT-780).
 ///
-/// Like [`generate_repl_expression`] but accepts a slice of expressions,
-/// generating a single `eval/1` that evaluates all of them in sequence
-/// and threads the bindings State between identifier assignments.
-///
-/// For a single expression, delegates to [`generate_repl_expression`].
+/// Delegates to [`crate::repl::codegen::generate_repl_expressions`].
 ///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_repl_expressions(expressions: &[Expression], module_name: &str) -> Result<String> {
-    generate_repl_expressions_with_index(expressions, module_name, std::collections::HashMap::new())
+    crate::repl::codegen::generate_repl_expressions(expressions, module_name)
 }
 
 /// Generates Core Erlang for multiple REPL expressions with a class module index.
 ///
-/// Like [`generate_repl_expressions`] but accepts a `class_module_index` that maps
-/// class names to their compiled module names (e.g. `"Counter"` → `"bt@getting_started@counter"`).
-/// This is needed in workspace/package mode so that `compiled_module_name` resolves
-/// class references correctly instead of falling back to the heuristic prefix.
+/// Delegates to [`crate::repl::codegen::generate_repl_expressions_with_index`].
 ///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
-#[allow(clippy::implicit_hasher)] // concrete HashMap matches internal generator field type
+#[allow(clippy::implicit_hasher)]
 pub fn generate_repl_expressions_with_index(
     expressions: &[Expression],
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
 ) -> Result<String> {
-    if expressions.is_empty() {
-        return Err(CodeGenError::UnsupportedFeature {
-            feature: "empty expression list".to_string(),
-            span: None,
-        });
-    }
-    let mut generator = CoreErlangGenerator::new(module_name);
-    generator.set_class_module_index(class_module_index);
-    let doc = generator.generate_repl_module_multi(expressions)?;
-    Ok(doc.to_pretty_string())
+    crate::repl::codegen::generate_repl_expressions_with_index(
+        expressions,
+        module_name,
+        class_module_index,
+    )
 }
 
 /// Generates Core Erlang for trace mode eval (BT-1238).
 ///
-/// Generates a single `eval/1` module that returns
-/// `{[{<<"source0">>, Value0}, ...], FinalState}` instead of `{Result, FinalState}`,
-/// giving the Erlang runtime a value for every top-level statement in one call.
-/// Source texts are extracted from the input using expression spans.
-///
-/// Intended for the `eval` MCP tool's `trace: true` mode.
+/// Delegates to [`crate::repl::codegen::generate_repl_expressions_traced`].
 ///
 /// # Errors
 ///
@@ -649,41 +626,23 @@ pub fn generate_repl_expressions_traced(
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
 ) -> Result<String> {
-    if expressions.is_empty() {
-        return Err(CodeGenError::UnsupportedFeature {
-            feature: "empty expression list".to_string(),
-            span: None,
-        });
-    }
-    let source_texts: Vec<String> = expressions
-        .iter()
-        .map(|expr| {
-            let span = expr.span();
-            let start = span.start() as usize;
-            let end = span.end() as usize;
-            source.get(start..end).unwrap_or("").trim().to_string()
-        })
-        .collect();
-
-    let mut generator = CoreErlangGenerator::new(module_name);
-    generator.set_class_module_index(class_module_index);
-    let doc = generator.generate_repl_module_multi_traced(expressions, &source_texts)?;
-    Ok(doc.to_pretty_string())
+    crate::repl::codegen::generate_repl_expressions_traced(
+        expressions,
+        source,
+        module_name,
+        class_module_index,
+    )
 }
 
 /// Generates Core Erlang for a test expression (no workspace bindings).
 ///
-/// Like [`generate_repl_expression`] but with `workspace_mode = false`,
-/// suitable for compiled tests that don't need REPL/workspace context.
-/// Used by `beamtalk test-stdlib` (ADR 0014 Phase 1).
+/// Delegates to [`crate::repl::codegen::generate_test_expression`].
 ///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_test_expression(expression: &Expression, module_name: &str) -> Result<String> {
-    let mut generator = CoreErlangGenerator::new(module_name);
-    let doc = generator.generate_test_module(expression)?;
-    Ok(doc.to_pretty_string())
+    crate::repl::codegen::generate_test_expression(expression, module_name)
 }
 
 /// Generates Core Erlang code with default module name `bt_module`.
@@ -704,7 +663,7 @@ pub fn generate(module: &Module) -> Result<String> {
 /// - **`ValueType`**: Plain maps with immutable semantics, sync function calls
 /// - **Repl**: Interactive evaluation with bindings map
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CodeGenContext {
+pub(crate) enum CodeGenContext {
     /// Generating code for an actor class (`gen_server` with async messaging).
     ///
     /// - Field access: `call 'maps':'get'('field', State)`
@@ -842,7 +801,7 @@ impl NlrValueTypeCatchVars {
 /// `None` during batch compilation. Accessor methods on `CoreErlangGenerator`
 /// provide defaults when the context is absent.
 #[derive(Debug, Clone)]
-pub(super) struct ReplContext {
+pub(crate) struct ReplContext {
     /// BT-153: Whether we're generating REPL code (vs module code).
     /// In REPL mode, local variable assignments should update bindings.
     pub is_repl_mode: bool,
@@ -864,7 +823,7 @@ pub(super) struct ReplContext {
 
 impl ReplContext {
     /// Creates a new `ReplContext` with default values.
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             is_repl_mode: false,
             repl_loop_mutated: false,
@@ -997,9 +956,9 @@ impl ValueTypeContext {
     clippy::struct_excessive_bools,
     reason = "Generator flags are context switches, not configuration"
 )]
-pub(super) struct CoreErlangGenerator {
+pub(crate) struct CoreErlangGenerator {
     /// The module name being generated.
-    module_name: String,
+    pub(crate) module_name: String,
     /// Variable binding and scope management.
     var_context: VariableContext,
     /// State threading for field assignments.
@@ -1040,7 +999,7 @@ pub(super) struct CoreErlangGenerator {
     hybrid_mutated_fields: std::collections::HashSet<String>,
     /// BT-213: Code generation context (`Actor`, `ValueType`, or `Repl`).
     /// Determines variable naming and method dispatch strategy.
-    context: CodeGenContext,
+    pub(crate) context: CodeGenContext,
     /// BT-1475: Nesting depth of block (closure) bodies.
     /// When > 0, self-cast sends in Actor context must route through the
     /// actor mailbox (`beamtalk_message_dispatch:cast/3`) instead of calling
@@ -1088,7 +1047,7 @@ pub(super) struct CoreErlangGenerator {
     /// Collected during generation and returned to callers via
     /// [`generate_module_with_warnings`]. Examples include stateful blocks
     /// passed to Erlang call sites where mutations will be silently dropped.
-    pub(super) codegen_warnings: Vec<Diagnostic>,
+    pub(crate) codegen_warnings: Vec<Diagnostic>,
     /// BT-1288: Pre-computed semantic facts from the pre-codegen analysis pass.
     /// Used for block profile lookups and dispatch classification.
     pub(super) semantic_facts: crate::semantic_analysis::SemanticFacts,
@@ -1115,7 +1074,7 @@ pub(super) struct CoreErlangGenerator {
 
 impl CoreErlangGenerator {
     /// Creates a new code generator for the given module name.
-    fn new(module_name: &str) -> Self {
+    pub(crate) fn new(module_name: &str) -> Self {
         Self {
             module_name: module_name.to_string(),
             var_context: VariableContext::new(),
@@ -1154,14 +1113,14 @@ impl CoreErlangGenerator {
     // returning safe defaults when the context is absent.
 
     /// Returns `true` if REPL mode is active.
-    pub(super) fn is_repl_mode(&self) -> bool {
+    pub(crate) fn is_repl_mode(&self) -> bool {
         self.repl_context
             .as_ref()
             .is_some_and(|ctx| ctx.is_repl_mode)
     }
 
     /// Sets the REPL mode flag, initialising the context if absent.
-    pub(super) fn set_is_repl_mode(&mut self, value: bool) {
+    pub(crate) fn set_is_repl_mode(&mut self, value: bool) {
         self.repl_context_mut().is_repl_mode = value;
     }
 
@@ -1185,7 +1144,7 @@ impl CoreErlangGenerator {
     }
 
     /// Sets workspace mode, initialising the context if absent.
-    pub(super) fn set_workspace_mode(&mut self, value: bool) {
+    pub(crate) fn set_workspace_mode(&mut self, value: bool) {
         self.repl_context_mut().workspace_mode = value;
     }
 
@@ -1271,7 +1230,7 @@ impl CoreErlangGenerator {
     }
 
     /// Sets the class module index, initialising the context if absent.
-    pub(super) fn set_class_module_index(
+    pub(crate) fn set_class_module_index(
         &mut self,
         index: std::collections::HashMap<String, String>,
     ) {
@@ -1371,12 +1330,12 @@ impl CoreErlangGenerator {
     }
 
     /// Pushes a new scope for variable bindings.
-    fn push_scope(&mut self) {
+    pub(crate) fn push_scope(&mut self) {
         self.var_context.push_scope();
     }
 
     /// Pops the current scope, discarding its bindings.
-    fn pop_scope(&mut self) {
+    pub(crate) fn pop_scope(&mut self) {
         self.var_context.pop_scope();
     }
 
@@ -1386,7 +1345,7 @@ impl CoreErlangGenerator {
     }
 
     /// Binds an identifier to a Core Erlang variable name in the current scope.
-    fn bind_var(&mut self, name: &str, core_var: &str) {
+    pub(crate) fn bind_var(&mut self, name: &str, core_var: &str) {
         self.var_context.bind(name, core_var);
     }
 
@@ -1398,7 +1357,7 @@ impl CoreErlangGenerator {
     ///
     /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc` or `StateAccN`.
     /// Otherwise returns `State` or `StateN`.
-    pub(super) fn current_state_var(&self) -> String {
+    pub(crate) fn current_state_var(&self) -> String {
         if self.in_hybrid_loop {
             // Hybrid-params loop: use State* naming (State is an explicit fun parameter)
             self.state_threading.current_var()
@@ -1420,7 +1379,7 @@ impl CoreErlangGenerator {
     /// When inside a hybrid-params loop (`in_hybrid_loop = true`) or normal context,
     /// returns `State1`, `State2`, etc.
     /// When inside a normal loop body (`in_loop_body = true`), returns `StateAcc1`, etc.
-    pub(super) fn next_state_var(&mut self) -> String {
+    pub(crate) fn next_state_var(&mut self) -> String {
         let next_var = self.state_threading.next_var();
         if self.in_hybrid_loop || !self.in_loop_body {
             // Hybrid mode or normal context: use State* naming
