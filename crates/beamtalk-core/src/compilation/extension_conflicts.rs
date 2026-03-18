@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Extension method conflict detection — compile-time duplicate checking.
+//! Extension method conflict detection — compile-time duplicate checking (ADR 0066).
 //!
 //! **DDD Context:** Compilation
 //!
