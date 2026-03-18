@@ -346,6 +346,24 @@ impl ClassHierarchy {
             .is_some_and(|info| info.is_native)
     }
 
+    /// Returns true if the class has a superclass that is not in the hierarchy
+    /// (defined in a separately-compiled file).
+    ///
+    /// When true, the type checker cannot know the full method set and should
+    /// suppress "does not understand" hints for selectors that might be inherited.
+    #[must_use]
+    pub fn has_cross_file_parent(&self, class_name: &str) -> bool {
+        let Some(info) = self.classes.get(class_name) else {
+            return false;
+        };
+        let Some(ref superclass) = info.superclass else {
+            return false;
+        };
+        // If the superclass is not in the hierarchy, it's cross-file.
+        // Builtins (Object, Actor, Value, ProtoObject) are always present.
+        !self.classes.contains_key(superclass.as_str())
+    }
+
     /// Returns true if the named class is Value or a subclass of Value (ADR 0042).
     ///
     /// Value subclasses use immutable value semantics — `self.slot :=` is a

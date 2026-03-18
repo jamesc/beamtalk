@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for testing actor self-sends to inherited methods.
+// InheritingCounter extends Counter (separate file) and self-sends
+// to getValue (inherited) both directly and inside blocks.
+
+Counter subclass: InheritingCounter
+  state: log = #()
+
+  // Direct self-send to inherited method
+  getValueViaSelfsend => self getValue
+
+  // Self-send to inherited method inside collect: block
+  collectWithInheritedSend: items =>
+    items
+      collect: [:item |
+        self increment
+        self getValue
+      ]
+
+  // Self-send to inherited method + own state mutation
+  incrementAndLog =>
+    self increment
+    self.log := self.log ++ #(self getValue)
+    self getValue
+
+  // Access inherited state field directly
+  getValueDirect => self.value
