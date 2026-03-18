@@ -361,6 +361,21 @@ impl Parser {
     pub(super) fn is_fat_arrow_or_return_type(&self, offset: usize) -> bool {
         matches!(self.peek_at(offset), Some(TokenKind::FatArrow))
             || self.is_return_type_then_fat_arrow(offset)
+            // ADR 0066 Phase 4: `:: -> Type =>` extension type annotation syntax
+            || self.is_double_colon_return_type_then_fat_arrow(offset)
+    }
+
+    /// Checks if there's a `:: -> Type =>` pattern at the given offset.
+    ///
+    /// This is the extension-style type annotation syntax (ADR 0066 Phase 4),
+    /// used primarily on unary extension methods where there's no parameter to
+    /// carry a `::` annotation: `Integer >> factorial :: -> Integer =>`.
+    fn is_double_colon_return_type_then_fat_arrow(&self, offset: usize) -> bool {
+        if !matches!(self.peek_at(offset), Some(TokenKind::DoubleColon)) {
+            return false;
+        }
+        // After `::`, delegate to the standard `-> Type =>` check
+        self.is_return_type_then_fat_arrow(offset + 1)
     }
 
     /// Checks if there's a `-> Type =>` or `-> Type | Type =>` pattern at the given offset.
@@ -584,8 +599,24 @@ impl Parser {
         }
     }
 
-    /// Parses an optional `-> ReturnType` annotation before `=>`.
+    /// Parses an optional return type annotation before `=>`.
+    ///
+    /// Accepts two forms:
+    /// - `-> ReturnType` (standard: `factorial -> Integer =>`)
+    /// - `:: -> ReturnType` (extension-style: `Integer >> factorial :: -> Integer =>`)
+    ///
+    /// The `:: ->` form (ADR 0066 Phase 4) provides a clear visual separator
+    /// between the selector and return type, especially useful on unary
+    /// extension methods where there are no parameters to carry `::` annotations.
     fn parse_optional_return_type(&mut self) -> Option<TypeAnnotation> {
+        // Handle `:: -> Type` syntax (ADR 0066: extension type annotations)
+        if matches!(self.current_kind(), TokenKind::DoubleColon)
+            && matches!(self.peek_at(1), Some(TokenKind::Arrow))
+        {
+            self.advance(); // consume `::`
+            self.advance(); // consume `->`
+            return Some(self.parse_type_annotation());
+        }
         if matches!(self.current_kind(), TokenKind::Arrow) {
             self.advance(); // consume `->`
             Some(self.parse_type_annotation())

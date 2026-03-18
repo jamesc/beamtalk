@@ -3802,6 +3802,29 @@ mod tests {
     }
 
     #[test]
+    fn extension_double_colon_return_type_flows_through_pipeline() {
+        // BT-1519: Extension `Integer >> double :: -> Integer => self * 2`
+        // `42 double + 1` should not produce a DNU warning because
+        // `double` returns `Integer`, and `Integer` understands `+`.
+        let src = r"
+            Integer >> double :: -> Integer => self * 2.
+            42 double + 1.
+        ";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+        let result = analyse_with_known_vars(&module, &[]);
+        let dnu: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "Return type from :: -> annotated extension should propagate, got: {dnu:?}"
+        );
+    }
+
+    #[test]
     fn class_side_extension_suppresses_dnu_in_pipeline() {
         // Extension `String class >> fromJson: s :: String -> String => ...`
         // `String fromJson: "{}"` should NOT produce a DNU warning.
