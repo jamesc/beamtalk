@@ -23,8 +23,8 @@ mod supervision_validators;
 pub use class_validators::check_stdlib_name_shadowing;
 pub(crate) use class_validators::{
     check_abstract_instantiation, check_actor_new_usage, check_cast_on_value_type,
-    check_class_variable_access, check_new_field_names, check_value_nil_return,
-    check_value_slot_assignment,
+    check_class_variable_access, check_data_keyword_class_kind, check_new_field_names,
+    check_value_nil_return, check_value_slot_assignment,
 };
 pub(crate) use lint_validators::{
     check_effect_free_statements, check_empty_method_bodies, check_literal_boolean_condition,

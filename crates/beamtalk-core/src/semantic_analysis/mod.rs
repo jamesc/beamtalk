@@ -370,6 +370,14 @@ fn analyse_full(
         &mut result.diagnostics,
     );
 
+    // BT-1529: Warn on data keyword / class-kind mismatch (ADR 0067 Phase 2)
+    validators::check_data_keyword_class_kind(
+        module,
+        &result.class_hierarchy,
+        stdlib_mode,
+        &mut result.diagnostics,
+    );
+
     // BT-1299: Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
     validators::check_match_exhaustiveness(module, &mut result.diagnostics);
 

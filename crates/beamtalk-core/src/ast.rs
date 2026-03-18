@@ -904,6 +904,8 @@ pub enum ExpectCategory {
     SelfCapture,
     /// Suppress dead-block-assignment warnings (BT-1476).
     DeadAssignment,
+    /// Suppress deprecation warnings — wrong keyword/class-kind (BT-1529).
+    Deprecation,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -918,6 +920,7 @@ impl ExpectCategory {
             "unused" => Some(Self::Unused),
             "self_capture" => Some(Self::SelfCapture),
             "dead_assignment" => Some(Self::DeadAssignment),
+            "deprecation" => Some(Self::Deprecation),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -932,6 +935,7 @@ impl ExpectCategory {
             Self::Unused => "unused",
             Self::SelfCapture => "self_capture",
             Self::DeadAssignment => "dead_assignment",
+            Self::Deprecation => "deprecation",
             Self::All => "all",
         }
     }
@@ -939,7 +943,15 @@ impl ExpectCategory {
     /// Returns the list of all valid category name strings, for use in error messages.
     #[must_use]
     pub const fn valid_names() -> &'static [&'static str] {
-        &["dnu", "type", "unused", "self_capture", "all"]
+        &[
+            "dnu",
+            "type",
+            "unused",
+            "self_capture",
+            "dead_assignment",
+            "deprecation",
+            "all",
+        ]
     }
 }
 

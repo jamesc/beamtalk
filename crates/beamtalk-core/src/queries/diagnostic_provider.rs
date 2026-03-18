@@ -194,6 +194,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::DeadAssignment,
                     Some(DiagnosticCategory::DeadAssignment)
                 )
+                | (
+                    ExpectCategory::Deprecation,
+                    Some(DiagnosticCategory::Deprecation)
+                )
         )
 }
 
