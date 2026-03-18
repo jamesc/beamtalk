@@ -66,7 +66,7 @@ impl CoreErlangGenerator {
             _ => {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: format!("binary operator: {op}"),
-                    location: "unknown".to_string(),
+                    span: None,
                 });
             }
         };
