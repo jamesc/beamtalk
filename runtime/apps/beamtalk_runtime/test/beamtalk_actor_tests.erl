@@ -1687,3 +1687,38 @@ async_send_kill_isAlive_false_immediately_after_test() ->
     AliveFuture = beamtalk_future:new(),
     beamtalk_actor:async_send(Counter, isAlive, [], AliveFuture),
     ?assertEqual(false, beamtalk_future:await(AliveFuture)).
+
+%%% BT-1541: await_initialize / safe_spawn tests
+
+await_initialize_alive_process_test() ->
+    %% await_initialize returns ok for a healthy gen_server
+    {ok, Pid} = test_counter:start(0),
+    ?assertEqual(ok, beamtalk_actor:await_initialize(Pid)),
+    gen_server:stop(Pid).
+
+await_initialize_dead_process_test() ->
+    %% await_initialize returns {error, _} for a dead process
+    {ok, Pid} = test_counter:start(0),
+    gen_server:stop(Pid),
+    timer:sleep(10),
+    ?assertMatch({error, _}, beamtalk_actor:await_initialize(Pid)).
+
+safe_spawn_success_test() ->
+    %% safe_spawn returns {ok, Pid} for a healthy module
+    {ok, Pid} = beamtalk_actor:safe_spawn(test_counter, #{init_count => 0}),
+    ?assert(is_process_alive(Pid)),
+    gen_server:stop(Pid).
+
+safe_spawn_restores_trap_exit_test() ->
+    %% safe_spawn restores the original trap_exit flag
+    OldTrap = process_flag(trap_exit, false),
+    try
+        {ok, Pid} = beamtalk_actor:safe_spawn(test_counter, #{init_count => 0}),
+        try
+            ?assertEqual(false, process_flag(trap_exit, false))
+        after
+            catch gen_server:stop(Pid)
+        end
+    after
+        process_flag(trap_exit, OldTrap)
+    end.

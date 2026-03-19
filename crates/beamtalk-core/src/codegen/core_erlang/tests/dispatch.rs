@@ -271,24 +271,19 @@ fn test_generate_spawn_function() {
     assert!(code.contains("'spawn'/0"));
     assert!(code.contains("'spawn'/1"));
 
-    // Check that spawn/0 function exists and calls gen_server:start_link with empty map
+    // Check that spawn/0 function exists and calls safe_spawn with empty map
     assert!(code.contains("'spawn'/0 = fun () ->"));
-    assert!(code.contains("call 'gen_server':'start_link'('counter', ~{}~, [])"));
 
     // Check that spawn/1 function exists and calls gen_server:start_link with InitArgs
     assert!(code.contains("'spawn'/1 = fun (InitArgs) ->"));
-    assert!(code.contains("call 'gen_server':'start_link'('counter', InitArgs, [])"));
+    // BT-1541: spawn/1 also uses safe_spawn
+    assert!(code.contains("call 'beamtalk_actor':'safe_spawn'('counter', InitArgs)"));
 
-    // BT-1417: spawn wraps start_link in trap_exit to handle initialize failures
+    // BT-1541: spawn uses safe_spawn for trap_exit + initialize sync
     assert!(
-        code.contains("call 'erlang':'process_flag'('trap_exit', 'true')"),
-        "spawn/0 must set trap_exit before start_link. Got: {code}"
+        code.contains("call 'beamtalk_actor':'safe_spawn'('counter', ~{}~)"),
+        "spawn/0 must use safe_spawn. Got: {code}"
     );
-    assert!(
-        code.contains("call 'erlang':'process_flag'('trap_exit', _OldTrap)"),
-        "spawn/0 must restore trap_exit after start_link. Got: {code}"
-    );
-    assert!(code.contains("case _SpawnResult of"));
     assert!(code.contains("<{'ok', Pid}> when 'true' ->"));
 
     // Check that it returns a #beamtalk_object{} record (class='Counter', class_mod='counter', pid=Pid)
@@ -299,7 +294,9 @@ fn test_generate_spawn_function() {
 
     // Check that it handles errors
     assert!(code.contains("<{'error', Reason}> when 'true' ->"));
-    assert!(code.contains("call 'beamtalk_error':'raise'(SpawnErr1)"));
+    // BT-1541: Error now includes hint with actual Reason
+    assert!(code.contains("call 'beamtalk_error':'with_hint'(SpawnErr1, Reason)"));
+    assert!(code.contains("call 'beamtalk_error':'raise'(SpawnErr2)"));
 
     // class_name/0 replaces $beamtalk_class in init state: correct after hot-reload
     assert!(
@@ -378,20 +375,20 @@ fn test_bt897_subdirectory_module_name_consistency() {
         "Module declaration should use full path-qualified name. Got:\n{code}"
     );
 
-    // gen_server:start_link must use the full name
+    // BT-1541: safe_spawn must use the full name
     assert!(
         code.contains(&format!(
-            "call 'gen_server':'start_link'('{full_name}', ~{{}}~, [])"
+            "call 'beamtalk_actor':'safe_spawn'('{full_name}', ~{{}}~)"
         )),
-        "gen_server:start_link in spawn/0 should use full module name, not '{simplified_name}'. Got:\n{code}"
+        "safe_spawn in spawn/0 should use full module name, not '{simplified_name}'. Got:\n{code}"
     );
 
-    // gen_server:start_link in spawn/1 must also use full name
+    // safe_spawn in spawn/1 must also use full name
     assert!(
         code.contains(&format!(
-            "call 'gen_server':'start_link'('{full_name}', InitArgs, [])"
+            "call 'beamtalk_actor':'safe_spawn'('{full_name}', InitArgs)"
         )),
-        "gen_server:start_link in spawn/1 should use full module name. Got:\n{code}"
+        "safe_spawn in spawn/1 should use full module name. Got:\n{code}"
     );
 
     // init/1 method_table call must use the full name

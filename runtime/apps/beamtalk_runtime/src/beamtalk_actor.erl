@@ -158,6 +158,7 @@
 
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
+-export([await_initialize/1, safe_spawn/2]).
 
 %% Message send helpers (lifecycle-aware wrappers)
 -export([async_send/4, sync_send/3, cast_send/3]).
@@ -248,6 +249,80 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
             end;
         undefined ->
             ok
+    end.
+
+%% @doc BT-1541: Wait for handle_continue to finish after start_link.
+%%
+%% When an actor has an `initialize` method, init/1 returns
+%% {ok, State, {continue, initialize}} and the actual dispatch happens
+%% in handle_continue/2. This means start_link returns {ok, Pid} BEFORE
+%% initialize has run. This function synchronizes by sending a system
+%% message (sys:get_state) which OTP guarantees is processed after
+%% handle_continue.
+%%
+%% Returns `ok` if the process is still alive after initialization,
+%% or `{error, Reason}` if it crashed during handle_continue.
+-spec await_initialize(pid()) -> ok | {error, term()}.
+await_initialize(Pid) ->
+    MonRef = erlang:monitor(process, Pid),
+    try sys:get_state(Pid, 5000) of
+        _State ->
+            erlang:demonitor(MonRef, [flush]),
+            ok
+    catch
+        exit:{noproc, _} ->
+            %% Process already dead — wait for the DOWN message unconditionally.
+            %% The monitor was set before sys:get_state, so DOWN is guaranteed.
+            receive
+                {'DOWN', MonRef, process, Pid, Reason} -> {error, Reason}
+            end;
+        exit:{{Reason, _CallInfo}, _} ->
+            %% gen_server stop reason wrapped by sys
+            erlang:demonitor(MonRef, [flush]),
+            {error, Reason};
+        exit:{Reason, _} ->
+            erlang:demonitor(MonRef, [flush]),
+            {error, Reason}
+    end.
+
+%% @doc BT-1541: Spawn an actor with trap_exit + initialize synchronization.
+%%
+%% Handles the full spawn sequence:
+%% 1. Trap exits so a failed start_link or handle_continue doesn't kill caller
+%% 2. Call gen_server:start_link
+%% 3. If start_link succeeds, wait for handle_continue (initialize) to complete
+%% 4. Restore trap_exit and return {ok, Pid} or {error, Reason}
+%%
+%% This consolidates the trap_exit/await_initialize logic so generated spawn
+%% functions stay simple.
+-spec safe_spawn(module(), map()) -> {ok, pid()} | {error, term()}.
+safe_spawn(Module, InitArgs) ->
+    OldTrap = erlang:process_flag(trap_exit, true),
+    Result = gen_server:start_link(Module, InitArgs, []),
+    case Result of
+        {ok, Pid} ->
+            case await_initialize(Pid) of
+                ok ->
+                    erlang:process_flag(trap_exit, OldTrap),
+                    {ok, Pid};
+                {error, Reason} ->
+                    %% Kill process if still alive (timeout case: initialize
+                    %% still running but we gave up waiting). Then flush EXIT
+                    %% BEFORE restoring trap_exit to avoid a fatal signal.
+                    exit(Pid, kill),
+                    %% Wait unconditionally — EXIT is guaranteed after kill
+                    receive
+                        {'EXIT', Pid, _} -> ok
+                    end,
+                    erlang:process_flag(trap_exit, OldTrap),
+                    {error, Reason}
+            end;
+        {error, Reason} ->
+            erlang:process_flag(trap_exit, OldTrap),
+            {error, Reason};
+        ignore ->
+            erlang:process_flag(trap_exit, OldTrap),
+            {error, ignore}
     end.
 
 %%% Message Send Helpers
