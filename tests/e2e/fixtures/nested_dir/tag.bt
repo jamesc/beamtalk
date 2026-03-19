@@ -5,7 +5,7 @@
 // Used by load_nested_directory.bt to verify that root-level classes still
 // load correctly when a directory also contains subdirectory files.
 
-Object subclass: Tag
-  state: id = 42
+Value subclass: Tag
+  field: id = 42
 
   id => self.id

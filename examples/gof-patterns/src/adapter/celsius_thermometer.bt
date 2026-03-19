@@ -8,8 +8,8 @@
 ///
 /// CelsiusThermometer is an existing class whose interface we cannot change.
 /// It speaks only Celsius. CelsiusToFahrenheitAdapter wraps it to speak Fahrenheit.
-Object subclass: CelsiusThermometer
-  state: celsius = 0.0
+Value subclass: CelsiusThermometer
+  field: celsius = 0.0
 
   /// Create a thermometer whose reading is degrees Celsius.
   class withCelsius: degrees => self new: #{#celsius => degrees}

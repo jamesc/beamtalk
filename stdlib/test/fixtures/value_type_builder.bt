@@ -1,22 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ValueTypeBuilder - demonstrates immutable-update semantics via Self-threading (BT-833)
-// Field assignments produce new Self snapshots rather than mutating in place
+// ValueTypeBuilder - demonstrates immutable-update semantics via with*: (BT-833)
+// Value types auto-generate withX:/withY: setters that return new instances
 
-Object subclass: ValueTypeBuilder
-  state: x = 0
-  state: y = 0
-
-  // Fluent setter: assigns one field and returns updated self
-  withX: newX =>
-    self.x := newX
-    self
-
-  // Fluent setter: assigns one field and returns updated self
-  withY: newY =>
-    self.y := newY
-    self
+Value subclass: ValueTypeBuilder
+  field: x = 0
+  field: y = 0
 
   // Setter that assigns multiple fields sequentially (BT-833: sequential threading)
   setX: newX y: newY => (self withX: newX) withY: newY

@@ -4,8 +4,8 @@
 // BT-773: Test fixture for class method self vs explicit class name dispatch
 // BT-1201: class method assigning result of self classMethod call to a local var
 
-Object subclass: ClassSelfDispatch
-  state: x = 0
+Value subclass: ClassSelfDispatch
+  field: x = 0
 
   class makeSelf: v => self new: #{#x => v}
 

@@ -6,23 +6,21 @@
 ///
 /// HtmlElement is an immutable value object. Its state is assembled step-by-step
 /// by HtmlBuilder. Callers never construct HtmlElement directly.
-Object subclass: HtmlElement
-  state: tag = "div"
-  state: attributes = #{}
-  state: content = ""
+Value subclass: HtmlElement
+  field: tag = "div"
+  field: attributes = #{}
+  field: content = ""
 
   /// Begin with the given HTML tag name and empty attributes and content.
   class tag: t => self new: #{#tag => t}
 
   /// Return a new element with the given attribute added.
   attribute: key value: val =>
-    self.attributes := self.attributes at: key put: val
-    self
+    self withAttributes: (self.attributes at: key put: val)
 
   /// Return a new element with the text content replaced.
   text: t =>
-    self.content := t
-    self
+    self withContent: t
 
   /// Render to an HTML string.
   render =>
