@@ -412,6 +412,51 @@ impl BeamtalkMcp {
 
         let mut parts = Vec::new();
 
+        if !errors.is_empty() {
+            // Lead with failure summary so agents detect errors immediately.
+            parts.push(Content::text(format!(
+                "Load completed with errors: {} succeeded, {} failed",
+                classes.len(),
+                errors.len()
+            )));
+
+            // Report each failure with path, line, message, and hint.
+            for e in &errors {
+                let msg = match e {
+                    serde_json::Value::Object(map) => {
+                        let path = map.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                        let line = map.get("line").and_then(|v| v.as_u64());
+                        let message = map
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown error");
+                        let hint = map.get("hint").and_then(|v| v.as_str());
+                        let mut s = match (path.is_empty(), line) {
+                            (true, _) => message.to_string(),
+                            (false, Some(l)) => format!("{path}:{l}: {message}"),
+                            (false, None) => format!("{path}: {message}"),
+                        };
+                        if let Some(h) = hint {
+                            s.push_str(&format!(" (hint: {h})"));
+                        }
+                        s
+                    }
+                    serde_json::Value::String(s) => s.clone(),
+                    _ => e.to_string(),
+                };
+                parts.push(Content::text(format!("FAILED: {msg}")));
+            }
+
+            if !classes.is_empty() {
+                parts.push(Content::text(format!(
+                    "Loaded classes: {}",
+                    classes.join(", ")
+                )));
+            }
+
+            return Ok(CallToolResult::error(parts));
+        }
+
         if classes.is_empty() {
             parts.push(Content::text("No classes loaded"));
         } else {
@@ -419,33 +464,6 @@ impl BeamtalkMcp {
                 "Loaded classes: {}",
                 classes.join(", ")
             )));
-        }
-
-        for e in &errors {
-            // Each error is a structured map with path, kind, message (and optional hint).
-            let msg = match e {
-                serde_json::Value::Object(map) => {
-                    let path = map.get("path").and_then(|v| v.as_str()).unwrap_or("");
-                    let message = map
-                        .get("message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown error");
-                    if path.is_empty() {
-                        message.to_string()
-                    } else {
-                        format!("{path}: {message}")
-                    }
-                }
-                serde_json::Value::String(s) => s.clone(),
-                _ => e.to_string(),
-            };
-            parts.push(Content::text(format!("Error: {msg}")));
-        }
-
-        // Partial loads (some files succeeded, some failed) are still reported as
-        // errors so MCP clients that inspect is_error see the failure.
-        if !errors.is_empty() {
-            return Ok(CallToolResult::error(parts));
         }
 
         timer.mark_ok();
