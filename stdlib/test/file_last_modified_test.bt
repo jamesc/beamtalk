@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// File lastModified: tests
+
+TestCase subclass: FileLastModifiedTest
+
+  testLastModifiedReturnsDateTime =>
+    File writeAll: "target/bt-test-tmp/lastmod_test.txt" contents: "hello"
+    result := File lastModified: "target/bt-test-tmp/lastmod_test.txt"
+    self assert: result isOk
+    self assert: result unwrap class equals: DateTime
+
+  testLastModifiedFileNotFound =>
+    result := File lastModified: "target/bt-test-tmp/no_such_lastmod_xyz.txt"
+    self assert: result isError
+    self assert: (result error printString includesSubstring: "file not found")
+
+  testLastModifiedTypeError =>
+    @expect type
+    self should: [File lastModified: 42] raise: #type_error

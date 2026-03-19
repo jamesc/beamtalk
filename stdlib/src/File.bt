@@ -128,6 +128,18 @@ Object subclass: File
   class sealed open: path :: String do: block :: Block -> Result =>
     (Erlang beamtalk_file) open: path do: block
 
+  /// Get the last modification time of a file (class method).
+  ///
+  /// Returns `Result ok: DateTime` on success, or `Result error: err` if the
+  /// file does not exist.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// File lastModified: "test.txt"  // => Result ok: a DateTime(...)
+  /// ```
+  class sealed lastModified: path :: String -> Result =>
+    (Erlang beamtalk_file) lastModified: path
+
   /// Test if a path refers to a directory (class method).
   ///
   /// ## Examples

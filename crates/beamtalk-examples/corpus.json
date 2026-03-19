@@ -12132,6 +12132,34 @@
       "explanation": "File I/O tests"
     },
     {
+      "id": "stdlib-test-file-last-modified-test",
+      "title": "FileLastModifiedTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "FileLastModifiedTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "file_last_modified_test",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "string conversion",
+        "subclassing",
+        "testLastModifiedFileNotFound",
+        "testLastModifiedReturnsDateTime",
+        "testLastModifiedTypeError",
+        "toString",
+        "to_string"
+      ],
+      "source": "// File lastModified: tests\n\nTestCase subclass: FileLastModifiedTest\n\n  testLastModifiedReturnsDateTime =>\n    File writeAll: \"target/bt-test-tmp/lastmod_test.txt\" contents: \"hello\"\n    result := File lastModified: \"target/bt-test-tmp/lastmod_test.txt\"\n    self assert: result isOk\n    self assert: result unwrap class equals: DateTime\n\n  testLastModifiedFileNotFound =>\n    result := File lastModified: \"target/bt-test-tmp/no_such_lastmod_xyz.txt\"\n    self assert: result isError\n    self assert: (result error printString includesSubstring: \"file not found\")\n\n  testLastModifiedTypeError =>\n    @expect type\n    self should: [File lastModified: 42] raise: #type_error",
+      "explanation": "File lastModified: tests"
+    },
+    {
       "id": "stdlib-test-file-stream-test",
       "title": "FileStreamTest",
       "category": "stdlib-tests",

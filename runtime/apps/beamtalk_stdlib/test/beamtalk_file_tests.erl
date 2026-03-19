@@ -1316,6 +1316,66 @@ absolutePath_type_error_test() ->
     ).
 
 %%% ============================================================================
+%%% lastModified:/1
+%%% ============================================================================
+
+lastModified_success_test() ->
+    with_temp_file("_bt_eunit_lastmod.txt", <<"data">>, fun() ->
+        R = beamtalk_file:'lastModified:'(<<"_bt_eunit_lastmod.txt">>),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := true,
+                'okValue' := #{'$beamtalk_class' := 'DateTime'}
+            },
+            R
+        ),
+        #{'okValue' := DT} = R,
+        %% Year should be reasonable (2020+)
+        ?assert(maps:get(year, DT) >= 2020)
+    end).
+
+lastModified_file_not_found_test() ->
+    R = beamtalk_file:'lastModified:'(<<"_bt_eunit_no_such_lastmod.txt">>),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = file_not_found, class = 'File', selector = 'lastModified:'
+                }
+            }
+        },
+        R
+    ).
+
+lastModified_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'lastModified:'
+            }
+        },
+        beamtalk_file:'lastModified:'(42)
+    ).
+
+ffi_shim_lastModified_test() ->
+    with_temp_file("_bt_shim_lastmod.txt", <<"x">>, fun() ->
+        R = beamtalk_file:lastModified(<<"_bt_shim_lastmod.txt">>),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := true,
+                'okValue' := #{'$beamtalk_class' := 'DateTime'}
+            },
+            R
+        )
+    end).
+
+%%% ============================================================================
 %%% cwd/0
 %%% ============================================================================
 
