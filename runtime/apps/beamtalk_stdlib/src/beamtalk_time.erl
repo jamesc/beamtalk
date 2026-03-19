@@ -12,18 +12,24 @@
 %%%
 %%% | Selector  | Description                              |
 %%% |-----------|------------------------------------------|
+%%% | `nowS`    | Current time in seconds                  |
 %%% | `nowMs`   | Current time in milliseconds             |
 %%% | `nowUs`   | Current time in microseconds             |
 
 -module(beamtalk_time).
 
--export([nowMs/0, nowUs/0]).
+-export([nowS/0, nowMs/0, nowUs/0]).
 
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
+
+%% @doc Current time in seconds since the Unix epoch.
+-spec nowS() -> integer().
+nowS() ->
+    erlang:system_time(second).
 
 %% @doc Current time in milliseconds since the Unix epoch.
 -spec nowMs() -> integer().

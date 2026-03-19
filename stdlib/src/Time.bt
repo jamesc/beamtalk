@@ -8,10 +8,21 @@
 ///
 /// ## Examples
 /// ```beamtalk
+/// Time nowS    // => _
 /// Time nowMs   // => _
 /// Time nowUs   // => _
 /// ```
 sealed Object subclass: Time
+
+  /// Current time in seconds since the Unix epoch.
+  ///
+  /// Wraps `erlang:system_time(second)`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Time nowS   // => _
+  /// ```
+  class sealed nowS -> Integer => (Erlang beamtalk_time) nowS
 
   /// Current time in milliseconds since the Unix epoch.
   ///
