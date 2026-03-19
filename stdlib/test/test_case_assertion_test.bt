@@ -9,7 +9,8 @@ TestCase subclass: TestCaseAssertionTest
 
   testLifecycleAndBasicAssertions =>
     testCase := TestCase new
-    self assert: testCase setUp equals: nil
+    // setUp returns self (the instance), not nil — functional setUp pattern (BT-1533)
+    self assert: (testCase setUp class) equals: TestCase
     self assert: testCase tearDown equals: nil
     // Test assert: with true condition
     self assert: (TestCase new assert: true) equals: nil
@@ -25,8 +26,8 @@ TestCase subclass: TestCaseAssertionTest
     self assert: (TestCase new assert: -5 equals: -5) equals: nil
     // Test deny: with false condition
     self assert: (TestCase new deny: false) equals: nil
-    // Test that TestCase is a proper Object subclass
-    self assert: TestCase superclass equals: Object
+    // Test that TestCase is a Value subclass (BT-1533: migrated from Object)
+    self assert: TestCase superclass equals: Value
     testInstance := TestCase new
     self assert: testInstance class equals: TestCase
     // Test that multiple instances can be created
@@ -34,7 +35,7 @@ TestCase subclass: TestCaseAssertionTest
     self assert: tc2 class equals: TestCase
     // Test lifecycle methods can be called on different instances
     tc3 := TestCase new
-    self assert: tc3 setUp equals: nil
+    self assert: (tc3 setUp class) equals: TestCase
     self assert: tc3 tearDown equals: nil
 
   testAssertionFailureTests =>
