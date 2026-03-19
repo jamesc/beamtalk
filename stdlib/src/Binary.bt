@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Binary — serialization and byte-level operations.
+///
+/// Provides class methods for serializing Beamtalk values to binary
+/// format and deserializing them back, as well as byte-size queries
+/// and iolist flattening.
+///
+/// ## Examples
+/// ```beamtalk
+/// bin := Binary serialize: 42
+/// Binary deserialize: bin             // => 42
+/// Binary size: "hello"               // => 5
+/// Binary fromIolist: #("hello", " ", "world")
+/// // => _
+/// ```
+sealed Object subclass: Binary
+
+  /// Serialize any value to a binary (class method).
+  ///
+  /// Converts a Beamtalk value to its binary representation using
+  /// Erlang's external term format.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary serialize: 42) class name   // => "Binary"
+  /// ```
+  class sealed serialize: term :: Object -> Binary =>
+    (Erlang beamtalk_binary) serialize: term
+
+  /// Deserialize a binary back to the original value (class method).
+  ///
+  /// Uses safe mode to prevent atom table exhaustion from untrusted
+  /// input. Atoms not already in the atom table will cause an error.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Binary deserialize: (Binary serialize: #(1, 2, 3))
+  /// // => _
+  /// ```
+  class sealed deserialize: binary :: Object -> Object =>
+    (Erlang beamtalk_binary) deserialize: binary
+
+  /// Return the byte size of a binary (class method).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Binary size: "hello"   // => 5
+  /// Binary size: ""        // => 0
+  /// ```
+  class sealed size: binary :: Object -> Integer =>
+    (Erlang beamtalk_binary) size: binary
+
+  /// Convert an iolist to a flat binary (class method).
+  ///
+  /// An iolist is a (possibly nested) list of binaries and integers
+  /// (0-255). This flattens it into a single binary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Binary fromIolist: #("hello", " ", "world")
+  /// // => _
+  /// ```
+  class sealed fromIolist: iolist :: Object -> Binary =>
+    (Erlang beamtalk_binary) fromIolist: iolist
