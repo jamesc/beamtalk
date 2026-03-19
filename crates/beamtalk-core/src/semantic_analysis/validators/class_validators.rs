@@ -627,67 +627,6 @@ fn report_self_slot_assignment(
     }
 }
 
-/// Collects child expression references from an expression node.
-pub(super) fn child_expressions(expr: &Expression) -> Vec<&Expression> {
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            let mut children = vec![receiver.as_ref()];
-            children.extend(arguments.iter());
-            children
-        }
-        Expression::Block(block) => block.body.iter().map(|s| &s.expression).collect(),
-        Expression::Assignment { target, value, .. } => vec![target.as_ref(), value.as_ref()],
-        Expression::Return { value, .. } => vec![value.as_ref()],
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            let mut children = vec![receiver.as_ref()];
-            for msg in messages {
-                children.extend(msg.arguments.iter());
-            }
-            children
-        }
-        Expression::Parenthesized { expression, .. } => vec![expression.as_ref()],
-        Expression::FieldAccess { receiver, .. } => vec![receiver.as_ref()],
-        Expression::Match { value, arms, .. } => {
-            let mut children = vec![value.as_ref()];
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    children.push(guard);
-                }
-                children.push(&arm.body);
-            }
-            children
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            pairs.iter().flat_map(|p| [&p.key, &p.value]).collect()
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            let mut children: Vec<&Expression> = elements.iter().collect();
-            if let Some(t) = tail {
-                children.push(t.as_ref());
-            }
-            children
-        }
-        Expression::ArrayLiteral { elements, .. } => elements.iter().collect(),
-        Expression::StringInterpolation { segments, .. } => segments
-            .iter()
-            .filter_map(|seg| {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
-                    Some(e)
-                } else {
-                    None
-                }
-            })
-            .collect(),
-        _ => vec![],
-    }
-}
-
 /// Checks a single expression node for `self.slot :=` patterns.
 ///
 /// Called via [`walk_expression`] from [`check_value_slot_assignment`]; the

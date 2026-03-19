@@ -270,6 +270,65 @@ format_stdlib_domain_test() ->
     ?assertEqual(<<"beamtalk.stdlib">>, maps:get(<<"domain">>, Decoded)).
 
 %%====================================================================
+%% Extra Metadata Tests
+%%====================================================================
+
+format_includes_extra_metadata_test() ->
+    Event = #{
+        level => error,
+        msg => {string, "handler crashed"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            reason => badarg,
+            error_class => error
+        }
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"badarg">>, maps:get(<<"reason">>, Decoded)),
+    ?assertEqual(<<"error">>, maps:get(<<"error_class">>, Decoded)).
+
+format_includes_stacktrace_metadata_test() ->
+    Stack = [{my_mod, my_fun, 2, [{file, "my_mod.erl"}, {line, 42}]}],
+    Event = #{
+        level => error,
+        msg => {string, "crashed"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            stacktrace => Stack
+        }
+    },
+    Decoded = decode_event(Event),
+    StackBin = maps:get(<<"stacktrace">>, Decoded),
+    ?assert(is_binary(StackBin)),
+    ?assert(binary:match(StackBin, <<"my_mod">>) =/= nomatch).
+
+format_handles_unicode_format_args_test() ->
+    %% Unicode arrows (→) in format strings previously crashed iolist_to_binary
+    Event = #{
+        level => notice,
+        msg => {"Migrate: load-file ~ts ~ts", [<<226, 134, 146>>, <<"reload">>]},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assert(is_binary(maps:get(<<"msg">>, Decoded))).
+
+format_extra_meta_excludes_standard_keys_test() ->
+    Event = #{
+        level => info,
+        msg => {string, "test"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            gl => self(),
+            file => "test.erl",
+            line => 10
+        }
+    },
+    Decoded = decode_event(Event),
+    ?assertNot(maps:is_key(<<"gl">>, Decoded)),
+    ?assertNot(maps:is_key(<<"file">>, Decoded)),
+    ?assertNot(maps:is_key(<<"line">>, Decoded)).
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 

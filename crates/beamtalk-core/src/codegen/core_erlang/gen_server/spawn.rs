@@ -77,25 +77,18 @@ impl CoreErlangGenerator {
             "', Pid}",
         ];
 
+        // BT-1541: Use safe_spawn which handles trap_exit + await_initialize
         let doc = docvec![
             "'spawn'/0 = fun () ->",
             nest(
                 INDENT,
                 docvec![
                     line(),
-                    // BT-1417: Trap exits so that initialize failures in init/1
-                    // don't kill the caller. Restore after start_link returns.
-                    "let _OldTrap = call 'erlang':'process_flag'('trap_exit', 'true') in",
-                    line(),
                     docvec![
-                        "let _SpawnResult = call 'gen_server':'start_link'('",
+                        "case call 'beamtalk_actor':'safe_spawn'('",
                         Document::String(module_name.clone()),
-                        "', ~{}~, []) in",
+                        "', ~{}~) of",
                     ],
-                    line(),
-                    "let _ = call 'erlang':'process_flag'('trap_exit', _OldTrap) in",
-                    line(),
-                    "case _SpawnResult of",
                     nest(
                         INDENT,
                         docvec![
@@ -125,7 +118,10 @@ impl CoreErlangGenerator {
                                     line(),
                                     "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in",
                                     line(),
-                                    "call 'beamtalk_error':'raise'(SpawnErr1)",
+                                    // BT-1541: Include the actual error reason in the hint
+                                    "let SpawnErr2 = call 'beamtalk_error':'with_hint'(SpawnErr1, Reason) in",
+                                    line(),
+                                    "call 'beamtalk_error':'raise'(SpawnErr2)",
                                 ]
                             ),
                         ]
@@ -224,24 +220,17 @@ impl CoreErlangGenerator {
                                 ]
                             ),
                             line(),
+                            // BT-1541: Use safe_spawn which handles trap_exit + await_initialize
                             "<'true'> when 'true' ->",
                             nest(
                                 INDENT,
                                 docvec![
                                     line(),
-                                    // BT-1417: Trap exits so that initialize failures in init/1
-                                    // don't kill the caller. Restore after start_link returns.
-                                    "let _OldTrap1 = call 'erlang':'process_flag'('trap_exit', 'true') in",
-                                    line(),
                                     docvec![
-                                        "let _SpawnResult1 = call 'gen_server':'start_link'('",
+                                        "case call 'beamtalk_actor':'safe_spawn'('",
                                         Document::String(module_name.clone()),
-                                        "', InitArgs, []) in",
+                                        "', InitArgs) of",
                                     ],
-                                    line(),
-                                    "let _ = call 'erlang':'process_flag'('trap_exit', _OldTrap1) in",
-                                    line(),
-                                    "case _SpawnResult1 of",
                                     nest(
                                         INDENT,
                                         docvec![
@@ -271,7 +260,10 @@ impl CoreErlangGenerator {
                                                     line(),
                                                     "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in",
                                                     line(),
-                                                    "call 'beamtalk_error':'raise'(SpawnErr1)",
+                                                    // BT-1541: Include the actual error reason in the hint
+                                                    "let SpawnErr2 = call 'beamtalk_error':'with_hint'(SpawnErr1, Reason) in",
+                                                    line(),
+                                                    "call 'beamtalk_error':'raise'(SpawnErr2)",
                                                 ]
                                             ),
                                         ]

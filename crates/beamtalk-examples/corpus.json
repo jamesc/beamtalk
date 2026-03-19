@@ -1004,14 +1004,11 @@
         "assign",
         "assignment",
         "beamtalk-language-features",
-        "map",
-        "mapping",
         "mutate",
         "mutation",
-        "set",
-        "transform"
+        "set"
       ],
-      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect self_capture\nself.items collect: [:x | self process: x]  // self-capture hint suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
+      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1025,36 +1022,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-73",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Actor",
-        "Processor",
-        "actor",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "extends",
-        "field",
-        "gen_server",
-        "genserver",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "map",
-        "mapping",
-        "member",
-        "process",
-        "property",
-        "subclassing",
-        "transform"
-      ],
-      "source": "Actor subclass: Processor\n  state: items = #()\n  process =>\n    @expect self_capture\n    self.items collect: [:x | self transform: x]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-76",
+      "id": "docs-beamtalk-language-features-block-75",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1077,7 +1045,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-77",
+      "id": "docs-beamtalk-language-features-block-76",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1087,7 +1055,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-78",
+      "id": "docs-beamtalk-language-features-block-77",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1097,7 +1065,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-79",
+      "id": "docs-beamtalk-language-features-block-78",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1138,7 +1106,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-81",
+      "id": "docs-beamtalk-language-features-block-80",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1153,7 +1121,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-82",
+      "id": "docs-beamtalk-language-features-block-81",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1163,7 +1131,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-84",
+      "id": "docs-beamtalk-language-features-block-83",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1176,7 +1144,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-85",
+      "id": "docs-beamtalk-language-features-block-84",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1199,7 +1167,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-86",
+      "id": "docs-beamtalk-language-features-block-85",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1222,7 +1190,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-87",
+      "id": "docs-beamtalk-language-features-block-86",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -12342,7 +12310,7 @@
         "transform",
         "where"
       ],
-      "source": "// BT-904: Actor fixture for testing self-sends inside collect:/select:/reject:\n// blocks. Self-sends in actor blocks need state threading because they may\n// mutate actor state\n\nActor subclass: ActorCollectCounter\n  state: count = 0\n\n  getCount => self.count\n\n  // Helper: increments count and returns formatted item\n  processItem: item =>\n    self.count := self.count + 1\n    item * 2\n\n  // collect: with self-send — needs state threading.\n  // @expect all: this fixture intentionally sends `self` inside a collection block to\n  // test BT-904 state threading. The compiler correctly warns that re-entering the Actor\n  // gen_server via `calling_self` from within a HOF block can deadlock; we suppress it\n  // here because the deadlock risk is the exact behaviour under test.\n  doubleAll: items =>\n    @expect all\n    items collect: [:item | self processItem: item]\n\n  // select: with self-send — same intentional pattern as doubleAll: above.\n  selectPositive: items =>\n    @expect all\n    items select: [:item | self checkPositive: item]\n\n  // reject: with self-send — same intentional pattern as doubleAll: above.\n  rejectNegative: items =>\n    @expect all\n    items reject: [:item | self checkNegative: item]\n\n  // collect: with field assignment in block — direct field mutation\n  doubleAllWithFieldMutation: items =>\n    items\n      collect: [:item |\n        self.count := self.count + 1\n        item * 2\n      ]\n\n  // collect: as last expression (no ^) — uses last-expression handler.\n  // Same intentional self-capture pattern as doubleAll:.\n  doubleAllImplicit: items =>\n    @expect all\n    items collect: [:item | self processItem: item]\n\n  // do: with self-send — already works (has state threading).\n  // Same intentional self-capture pattern as doubleAll:.\n  countAll: items =>\n    @expect all\n    items do: [:item | self processItem: item]\n    self.count\n\n  // Helper for select:\n  checkPositive: item =>\n    self.count := self.count + 1\n    item > 0\n\n  // Helper for reject:\n  checkNegative: item =>\n    self.count := self.count + 1\n    item < 0",
+      "source": "// BT-904: Actor fixture for testing self-sends inside collect:/select:/reject:\n// blocks. Self-sends in actor blocks need state threading because they may\n// mutate actor state\n\nActor subclass: ActorCollectCounter\n  state: count = 0\n\n  getCount => self.count\n\n  // Helper: increments count and returns formatted item\n  processItem: item =>\n    self.count := self.count + 1\n    item * 2\n\n  // collect: with self-send — safe in blocks (BT-953 lint removed as false positive).\n  doubleAll: items => items collect: [:item | self processItem: item]\n\n  // select: with self-send — same intentional pattern as doubleAll: above.\n  selectPositive: items => items select: [:item | self checkPositive: item]\n\n  // reject: with self-send — same intentional pattern as doubleAll: above.\n  rejectNegative: items => items reject: [:item | self checkNegative: item]\n\n  // collect: with field assignment in block — direct field mutation\n  doubleAllWithFieldMutation: items =>\n    items\n      collect: [:item |\n        self.count := self.count + 1\n        item * 2\n      ]\n\n  // collect: as last expression (no ^) — uses last-expression handler.\n  // Self-sends in blocks are safe (BT-953 lint removed).\n  doubleAllImplicit: items => items collect: [:item | self processItem: item]\n\n  // do: with self-send — already works (has state threading).\n  countAll: items =>\n    items do: [:item | self processItem: item]\n    self.count\n\n  // Helper for select:\n  checkPositive: item =>\n    self.count := self.count + 1\n    item > 0\n\n  // Helper for reject:\n  checkNegative: item =>\n    self.count := self.count + 1\n    item < 0",
       "explanation": "BT-904: Actor fixture for testing self-sends inside collect:/select:/reject: blocks. Self-sends in actor blocks need state threading because they may mutate actor state"
     },
     {

@@ -347,12 +347,6 @@ fn analyse_full(
     validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
     // BT-950: Warn on redundant assignment (x := x)
     validators::check_redundant_assignment(module, &mut result.diagnostics);
-    // BT-953: Hint on self capture in collection HOF blocks (deadlock risk)
-    validators::check_self_capture_in_actor_block(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
     // BT-955: Warn on literal boolean conditions (always true / always false)
     validators::check_literal_boolean_condition(module, &mut result.diagnostics);
     // BT-1052: Error on -> Nil return type on Value instance methods

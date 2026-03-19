@@ -101,7 +101,8 @@ impl CoreErlangGenerator {
         };
 
         let base_exports: Document<'static> = docvec![
-            "'start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
+            "'start_link'/1, 'start_link'/2, 'init'/1, 'handle_continue'/2, \
+             'handle_cast'/2, 'handle_call'/3, \
              'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4",
             dispatch_3_export,
             ", 'safe_dispatch'/3, \
@@ -199,6 +200,8 @@ impl CoreErlangGenerator {
         if is_abstract {
             push_fn(self.generate_abstract_callbacks_doc())?;
         } else {
+            // BT-1541: handle_continue dispatches initialize after the loop starts
+            push_fn(self.generate_handle_continue()?)?;
             push_fn(self.generate_handle_cast()?)?;
             push_fn(self.generate_handle_call()?)?;
             push_fn(self.generate_handle_info()?)?;
@@ -359,6 +362,9 @@ impl CoreErlangGenerator {
     fn generate_abstract_callbacks_doc(&self) -> Document<'static> {
         let module_name = &self.module_name;
         docvec![
+            // handle_continue - never called for abstract classes
+            "'handle_continue'/2 = fun (_Continue, State) -> {'noreply', State}",
+            "\n\n",
             // handle_cast - never called for abstract classes
             "'handle_cast'/2 = fun (_Msg, State) -> {'noreply', State}",
             "\n\n",

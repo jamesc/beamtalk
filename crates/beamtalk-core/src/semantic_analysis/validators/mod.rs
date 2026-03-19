@@ -28,7 +28,7 @@ pub(crate) use class_validators::{
 };
 pub(crate) use lint_validators::{
     check_effect_free_statements, check_empty_method_bodies, check_literal_boolean_condition,
-    check_redundant_assignment, check_self_capture_in_actor_block,
+    check_redundant_assignment,
 };
 pub(crate) use match_validators::check_match_exhaustiveness;
 pub(crate) use native_validators::{check_native_delegate_return_type, check_native_state_fields};

@@ -116,9 +116,12 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
                         Response ->
                             handle_response(Response)
                     catch
-                        error:badarg ->
+                        error:badarg:Stack ->
                             ?LOG_ERROR("Compiler port decode error", #{
-                                domain => [beamtalk, runtime], port => Port
+                                domain => [beamtalk, runtime],
+                                port => Port,
+                                response_size => byte_size(ResponseBin),
+                                stacktrace => Stack
                             }),
                             {error, [#{message => <<"Compiler port response is malformed">>}]}
                     end;
@@ -134,8 +137,10 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
                 {error, [#{message => <<"Compiler port timed out">>}]}
             end
     catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available", #{domain => [beamtalk, runtime], port => Port}),
+        error:badarg:Stack ->
+            ?LOG_ERROR("Compiler port not available", #{
+                domain => [beamtalk, runtime], port => Port, stacktrace => Stack
+            }),
             {error, [#{message => <<"Compiler port is not available">>}]}
     end.
 
