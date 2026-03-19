@@ -152,58 +152,114 @@ Actor subclass: ResourceActor
 
 Both hooks are optional — actors without them work normally.
 
-### Value Types vs Actors
+### Three Class Kinds (ADR 0067)
 
-Beamtalk distinguishes between **value types** (immutable data) and **actors** (concurrent processes):
+Beamtalk has three class kinds with distinct data keywords and construction protocols:
+
+| Class Kind | Data Keyword | Semantics | Construction | Instance Process |
+|------------|-------------|-----------|--------------|-----------------|
+| **Value** | `field:` | Immutable data slots, `self.slot :=` is compile error | `new` / `new:` / keyword ctor | No |
+| **Actor** | `state:` (permitted, not required) | Mutable process state, `self.slot :=` persists via gen_server | `spawn` / `spawnWith:` | Yes |
+| **Object** | *(none)* | Methods only, no instance data, not instantiable | *(none)* | No |
 
 ```beamtalk
-// Value type - immutable data, no process (ADR 0042)
+// Value — immutable data, no process (ADR 0042)
 Value subclass: Point
-  state: x = 0
-  state: y = 0
+  field: x = 0
+  field: y = 0
 
   // Methods return new instances (immutable)
   plus: other => Point new: #{x => (self.x + other x), y => (self.y + other y)}
   printString => "Point({self.x}, {self.y})"
 
-// Actor - process with mailbox
+// Actor — process with mailbox
 Actor subclass: Counter
   state: count = 0
 
   // Methods mutate state via message passing
   increment => self.count := self.count + 1
   getCount => self.count
-```
 
-`Object subclass:` also produces a value type (legacy form). Prefer `Value subclass:` for new code to make intent explicit.
+// Object — class methods only, not instantiable
+Object subclass: MathHelper
+  class factorial: n =>
+    n <= 1
+      ifTrue: [1]
+      ifFalse: [n * (self factorial: n - 1)]
+```
 
 **Key differences:**
 
-| Aspect | Value Types (`Value subclass:` / `Object subclass:`) | Actors (`Actor subclass:`) |
-|--------|------------------------------------------------------|----------------------------|
-| Instantiation | `Point new` or `Point new: #{x => 5}` | `Counter spawn` or `Counter spawnWith: #{count => 0}` |
-| Runtime | Plain Erlang map/record | BEAM process (gen_server) |
-| Mutation | Immutable - methods return new instances | Mutable - methods modify state |
-| Message passing | N/A (direct function calls) | Sync messages (gen_server:call) |
-| Concurrency | Copied when sent between processes | Process isolation, mailbox queuing |
-| Use cases | Data structures, coordinates, money | Services, stateful entities, concurrent tasks |
+| Aspect | Value (`Value subclass:`) | Actor (`Actor subclass:`) | Object (`Object subclass:`) |
+|--------|--------------------------|---------------------------|----------------------------|
+| Data keyword | `field:` | `state:` | *(none — compile error)* |
+| Instantiation | `Point new` or `Point x: 3 y: 4` | `Counter spawn` or `Counter spawnWith: #{count => 0}` | Not instantiable |
+| Runtime | Plain Erlang map | BEAM process (gen_server) | Class methods only |
+| Mutation | Immutable — methods return new instances | Mutable — methods modify state | N/A |
+| Message passing | N/A (direct function calls) | Sync messages (gen_server:call) | N/A |
+| Equality | Structural (by value) | Identity (by process) | N/A |
+| Use cases | Data structures, coordinates, money | Services, stateful entities, concurrent tasks | FFI namespaces, protocol providers, abstract bases |
 
 **Class hierarchy:**
 ```text
-ProtoObject (minimal - identity, DNU)
-  └─ Object (reflection + new)
+ProtoObject (minimal — identity, DNU)
+  └─ Object (protocol provider — reflection, equality, error handling)
        ├─ Integer, String (primitives)
-       ├─ Value (immutable value objects)
-       │    └─ Point, Color (value types)
-       └─ Actor (process-based + spawn)
+       ├─ Value (immutable value objects — field:)
+       │    ├─ Point, Color (value types)
+       │    ├─ Collection (abstract)
+       │    │    └─ Set, Bag, Interval
+       │    └─ TestCase (BUnit test base)
+       └─ Actor (process-based — state: + spawn)
             └─ Counter, Server (actors)
 ```
 
 **Why this matters:**
+- **Clarity**: The data keyword tells you the mutability contract — `field:` = fixed, `state:` = changeable — without looking up the class hierarchy
+- **Safety**: Using the wrong keyword is a compile error, not a silent runtime footgun
 - **Performance**: Value types avoid process overhead for simple data
-- **Semantics**: Clear distinction between data and concurrent entities
-- **BEAM interop**: Maps naturally to Erlang records/maps vs gen_server processes
-- **Idiomatic code**: Use value types for data, actors for behavior
+- **BEAM alignment**: `field:` maps to Erlang maps, `state:` maps to gen_server state
+
+### Object's Three Roles
+
+`Object subclass:` cannot have instance data (`field:` or `state:` is a compile error). Object serves three purposes:
+
+1. **Protocol provider** — common methods inherited by all Value and Actor subclasses: `isNil`, `respondsTo:`, `printString`, `hash`, `error:`, `yourself`
+2. **FFI namespace** — zero-overhead class-method wrappers around Erlang modules and OTP primitives (e.g., `Json`, `System`, `File`, `Ets`, `Random`). No instances, no process
+3. **Abstract extension point** — framework contracts designed for subclassing, where subclasses define methods but hold no data (e.g., `Supervisor`, `DynamicSupervisor`)
+
+```beamtalk
+// FFI namespace — wraps Erlang modules as class methods
+Object subclass: Json
+  class parse: str => // ... Erlang FFI
+  class stringify: obj => // ... Erlang FFI
+
+// Abstract extension point — designed for subclassing
+abstract Object subclass: Supervisor
+  class children => self subclassResponsibility
+```
+
+### Wrong Keyword Errors
+
+The compiler enforces keyword/class-kind rules with clear error messages:
+
+```beamtalk
+// state: on a Value — compile error
+Value subclass: BadValue
+  state: x = 0
+// error: use 'field:' for Value subclass data declarations, not 'state:'
+
+// field: on an Actor — compile error
+Actor subclass: BadActor
+  field: x = 0
+// error: use 'state:' for Actor subclass data declarations, not 'field:'
+
+// Any data declaration on an Object — compile error
+Object subclass: BadObject
+  state: x = 0
+// error: Object subclass cannot have instance data declarations;
+//   use 'Value subclass:' for immutable data or 'Actor subclass:' for mutable state
+```
 
 ### Class Modifiers
 
@@ -265,7 +321,7 @@ Direct slot mutation is illegal in value types:
 ```beamtalk
 // Compile error — rejected before the code runs:
 // Value subclass: BadPoint
-//   state: x = 0
+//   field: x = 0
 //   badSetX: v => self.x := v   ← error: Cannot assign to slot
 
 // Runtime error:
@@ -524,7 +580,7 @@ collect: block :: Block -> Self =>
 - Type mismatch diagnostics are warnings, never compile-stopping errors.
 - Invalid annotation forms (e.g., `Self` in parameter position) are errors.
 - `typed` classes require parameter/return annotations on non-primitive methods.
-- State annotations (`state: value :: Integer = 0`) are checked for defaults and `self.field := ...` assignments.
+- Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
@@ -1476,12 +1532,14 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 
 | Smalltalk/Newspeak Concept | Beamtalk/BEAM Mapping |
 |----------------------------|----------------------|
-| Object (value type) | Plain Erlang map (no process) |
-| Actor | BEAM process (gen_server) with state map |
+| Value object | `Value subclass:` with `field:` — plain Erlang map (no process) |
+| Actor | `Actor subclass:` with `state:` — BEAM process (gen_server) |
+| Module/utility class | `Object subclass:` — class methods only, not instantiable |
 | Class | Module + constructor function |
-| Instance variable | Process state map field |
+| Instance variable (immutable) | `field:` — value map field |
+| Instance variable (mutable) | `state:` — gen_server state map field |
 | Field access (`self.x`) | `maps:get('x', State)` |
-| Field write (`self.x := v`) | `maps:put('x', v, State)` |
+| Field write (`self.x := v`) | `maps:put('x', v, State)` (Actor only; compile error on Value) |
 | `.` message send | `gen_server:call` — sync, blocks for result |
 | `!` message send | `gen_server:cast` — async fire-and-forget |
 | Block | Erlang fun (closure) |
@@ -1568,7 +1626,7 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 | **Behaviour** | Shared behaviour protocol |
 | **CompiledMethod** | Method introspection |
 | **StackFrame** | Stack trace inspection |
-| **TestCase**, **TestResult**, **TestRunner** | BUnit test framework ([ADR 0014](ADR/0014-beamtalk-test-framework.md)) |
+| **TestCase**, **TestResult**, **TestRunner** | BUnit test framework — TestCase is a Value subclass with functional setUp ([ADR 0014](ADR/0014-beamtalk-test-framework.md)) |
 
 ### Interval — Arithmetic Sequences
 
@@ -2020,6 +2078,44 @@ c increment
 #### Counter Lifecycle
 
 Each `AtomicCounter` owns its own named ETS table. When `delete` is called, the table is destroyed and the counter is stale. Any subsequent operations on a deleted counter raise `stale_counter`.
+
+---
+
+### TestCase — BUnit Testing
+
+`TestCase` is a `Value subclass:` — setUp returns a new self with fields set (functional pattern), matching Erlang's EUnit and Elixir's ExUnit. The test runner threads the setUp return value to each test method. Each test gets a fresh copy, so tests cannot corrupt state for each other.
+
+```beamtalk
+TestCase subclass: CounterTest
+  field: counter = nil
+
+  setUp => self withCounter: (Counter spawn)
+
+  testIncrement =>
+    self.counter increment.
+    self assert: (self.counter getValue) equals: 1
+```
+
+For multiple fields, `with*:` calls chain via cascades:
+
+```beamtalk
+TestCase subclass: IntegrationTest
+  field: db = nil
+  field: cache = nil
+
+  setUp =>
+    self withDb: (DB connect);
+         withCache: (Cache spawn)
+
+  testLookup =>
+    self.cache at: "key" put: "value".
+    self assert: (self.cache at: "key") equals: "value"
+```
+
+**Key points:**
+- Declare test instance variables with `field:` (not `state:`) since TestCase is a Value subclass
+- `setUp` returns a new self via `with*:` methods instead of using `self.x :=` assignment
+- Each test method receives the setUp'd value as `self` — mutations to actor references work normally, but `self` itself is immutable
 
 ---
 
