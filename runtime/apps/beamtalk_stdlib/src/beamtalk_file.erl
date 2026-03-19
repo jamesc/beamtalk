@@ -597,7 +597,16 @@ handle_has_method(_) -> false.
             Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
             Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
             beamtalk_result:from_tagged_tuple({error, Error3});
-        {{Y, Mo, D}, {H, Mi, S}} ->
+        LocalTime ->
+            %% filelib:last_modified/1 returns local time; convert to UTC
+            %% for consistency with DateTime now (which uses calendar:universal_time).
+            {{Y, Mo, D}, {H, Mi, S}} =
+                case calendar:local_time_to_universal_time_dst(LocalTime) of
+                    [UtcTime] -> UtcTime;
+                    [_DstTime, StdTime] -> StdTime;
+                    %% fallback: keep local time if conversion fails
+                    [] -> LocalTime
+                end,
             DT = beamtalk_datetime:'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S),
             beamtalk_result:from_tagged_tuple({ok, DT})
     end;
