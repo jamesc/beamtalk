@@ -7,7 +7,7 @@
 %%%
 %%% Tests getEnv:/1, getEnv:default:/2, setEnv:value:/2, unsetEnv:/1,
 %%% osPlatform/0, osFamily/0, architecture/0, hostname/0, erlangVersion/0,
-%%% pid/0, and type error paths.
+%%% pid/0, uniqueId/0, and type error paths.
 
 -module(beamtalk_system_tests).
 
@@ -223,3 +223,19 @@ get_env_shim_default_set_variable_test() ->
 get_env_shim_default_unset_returns_default_test() ->
     os:unsetenv("BT_TEST_UNSET_SHIM2"),
     ?assertEqual(<<"fallback">>, beamtalk_system:getEnv(<<"BT_TEST_UNSET_SHIM2">>, <<"fallback">>)).
+
+%%% ============================================================================
+%%% uniqueId/0
+%%% ============================================================================
+
+unique_id_returns_positive_integer_test() ->
+    V = beamtalk_system:uniqueId(),
+    ?assert(is_integer(V)),
+    ?assert(V > 0).
+
+unique_id_monotonic_test() ->
+    A = beamtalk_system:uniqueId(),
+    B = beamtalk_system:uniqueId(),
+    C = beamtalk_system:uniqueId(),
+    ?assert(B > A),
+    ?assert(C > B).

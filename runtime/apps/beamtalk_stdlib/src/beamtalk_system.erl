@@ -22,13 +22,14 @@
 %%% | `hostname`          | Machine hostname                         |
 %%% | `erlangVersion`     | OTP version string                       |
 %%% | `pid`               | OS process ID                            |
+%%% | `uniqueId`          | Unique positive monotonic integer         |
 
 -module(beamtalk_system).
 
 -export(['getEnv:'/1, 'getEnv:default:'/2]).
 -export(['setEnv:value:'/2, 'unsetEnv:'/1]).
 -export([osPlatform/0, osFamily/0, architecture/0, hostname/0]).
--export([erlangVersion/0, pid/0]).
+-export([erlangVersion/0, pid/0, uniqueId/0]).
 -export([getEnv/1, getEnv/2]).
 -export([setEnv/2, unsetEnv/1]).
 
@@ -154,6 +155,12 @@ erlangVersion() ->
 -spec pid() -> integer().
 pid() ->
     list_to_integer(os:getpid()).
+
+%% @doc Return a unique positive monotonic integer.
+%% Each call returns a value strictly greater than any previous call.
+-spec uniqueId() -> pos_integer().
+uniqueId() ->
+    erlang:unique_integer([positive, monotonic]).
 
 %% @doc Shims for (Erlang beamtalk_system) FFI dispatch.
 %% The Erlang FFI proxy (beamtalk_erlang_proxy) maps any keyword selector to
