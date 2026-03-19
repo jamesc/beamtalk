@@ -88,7 +88,6 @@ ProtoObject subclass: Object
   /// ## Examples
   /// ```beamtalk
   /// 42 printString            // => "42"
-  /// "hello" printString       // => "'hello'"
   /// ```
   printString -> String => "a " ++ self class printString
 
