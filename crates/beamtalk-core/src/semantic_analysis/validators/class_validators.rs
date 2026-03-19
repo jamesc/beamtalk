@@ -217,10 +217,7 @@ pub(crate) fn check_object_new_usage(
 /// Only fires for classes known in the hierarchy (unknown classes get DNU instead).
 fn is_object_new_error(class_name: &str, selector: &str, hierarchy: &ClassHierarchy) -> bool {
     (selector == "new" || selector == "new:")
-        && !matches!(
-            class_name,
-            "Object" | "Value" | "Actor" | "ProtoObject" | "Metaclass" | "self" | "super"
-        )
+        && !matches!(class_name, "self" | "super")
         && hierarchy.has_class(class_name)
         && hierarchy.resolve_class_kind(class_name) == ClassKind::Object
         && !hierarchy.has_own_class_method(class_name, selector)

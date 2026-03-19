@@ -87,7 +87,8 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Point new printString    // => "Point(x: 0, y: 0)"
+  /// 42 printString            // => "42"
+  /// "hello" printString       // => "'hello'"
   /// ```
   printString -> String => "a " ++ self class printString
 
@@ -139,7 +140,7 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Point new fieldNames    // => #(#x, #y)
+  /// 42 fieldNames             // => #()
   /// ```
   sealed fieldNames -> List => @intrinsic fieldNames
 

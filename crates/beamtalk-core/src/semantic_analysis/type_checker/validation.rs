@@ -43,7 +43,7 @@ impl TypeChecker {
             // fallthrough), so the type checker must model the same path.
             //
             // Factory selectors (spawn, new, etc.) are defined as instance methods on
-            // Actor/Object but routed class-side by beamtalk_class_dispatch.erl.
+            // Actor/Value but routed class-side by beamtalk_class_dispatch.erl.
             // Only these specific selectors bypass the Class chain check.
             let is_factory_selector = matches!(selector, "spawn" | "spawnWith:" | "new" | "new:");
             let has_class_chain_method = hierarchy.resolves_selector("Class", selector)
