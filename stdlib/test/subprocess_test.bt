@@ -8,9 +8,9 @@
 // Interactive stdin-echo tests use beamtalk-exec --cat on Windows for line-buffered output.
 
 TestCase subclass: SubprocessTest
-  state: isUnix = false
+  field: isUnix = false
 
-  setUp => self.isUnix := System osFamily == "unix"
+  setUp => self withIsUnix: (System osFamily == "unix")
 
   // --- Platform command helpers ---
   echoExe => self.isUnix ifTrue: ["/bin/echo"] ifFalse: ["cmd"]

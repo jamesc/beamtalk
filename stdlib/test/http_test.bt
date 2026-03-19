@@ -20,12 +20,12 @@
 // at type-erasure boundaries (BT-1273).
 
 TestCase subclass: HttpTest
-  state: baseUrl = ""
+  field: baseUrl = ""
 
   // Start the local test server and record the base URL.
   setUp =>
     port := (Erlang beamtalk_http_test_server) start
-    self.baseUrl := "http://localhost:" ++ port asString
+    self withBaseUrl: ("http://localhost:" ++ port asString)
 
   // Stop the local test server after each test.
   tearDown => (Erlang beamtalk_http_test_server) stop

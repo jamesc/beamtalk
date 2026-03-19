@@ -8,13 +8,12 @@
 // this return value to each test method. Each test gets a fresh
 // setUp'd instance — tests are isolated.
 //
-// Note: uses `self.slot :=` syntax which returns a new self (value
-// semantics). BT-1534 will migrate to `self withSlot:` syntax.
+// Note: uses `self withSlot:` functional update syntax (value semantics).
 
 TestCase subclass: FunctionalSetupTest
-  state: value = 0
+  field: value = 0
 
-  setUp => self.value := 99
+  setUp => self withValue: 99
 
   testFieldFromFunctionalSetUp =>
     // Field should reflect value set in setUp

@@ -7,7 +7,7 @@
 // registration. Exercises the validate/2 logic in beamtalk_class_builder.erl
 
 TestCase subclass: ClassBuilderTest
-  state: cls = nil
+  field: cls = nil
 
   tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
 

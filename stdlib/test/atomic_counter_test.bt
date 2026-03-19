@@ -4,19 +4,17 @@
 // BUnit tests for AtomicCounter class (BT-1250)
 
 TestCase subclass: AtomicCounterTest
-  state: counter = nil
+  field: counter = nil
 
   setUp =>
     // Defensively clean up any leftover table from a crashed previous run
     [
       (AtomicCounter named: #atomicCounterBUnitTest) delete
     ] on: Error do: [:e | nil]
-    self.counter := AtomicCounter new: #atomicCounterBUnitTest
-    self
+    self withCounter: (AtomicCounter new: #atomicCounterBUnitTest)
 
   tearDown =>
     self.counter isNil ifFalse: [[self.counter delete] on: Error do: [:e | nil]]
-    self.counter := nil
 
   testStartsAtZero => self assert: self.counter value equals: 0
 
@@ -67,11 +65,10 @@ TestCase subclass: AtomicCounterTest
 
   testDeleteMakesCounterStale =>
     self.counter delete
-    self.counter := nil
     // Creating a fresh counter with the same name succeeds
     fresh := AtomicCounter new: #atomicCounterBUnitTest
     self assert: fresh value equals: 0
-    self.counter := fresh
+    fresh delete
 
   testIncrementAndDecrementCombined =>
     self.counter incrementBy: 10

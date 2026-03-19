@@ -16,7 +16,7 @@
 //   - printString
 
 TestCase subclass: HTTPRouterTest
-  state: srv = nil
+  field: srv = nil
 
   tearDown => self.srv isNil ifFalse: [self.srv stop]
 
