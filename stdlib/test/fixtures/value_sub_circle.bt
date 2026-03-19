@@ -11,7 +11,9 @@ ValueBaseShape subclass: ValueSubCircle
 
   // Class-side factory using new:
   class withRadius: r =>
-    // DNU false positive — new: is on Value ancestor, resolved at runtime
+    // DNU false positive: new: is on Value ancestor, resolved via cross-file hierarchy
+    // at runtime. Fixture compilation doesn't inject sibling fixture class infos to
+    // avoid cascading DNU warnings across unrelated fixtures (e.g. >> operator).
     @expect dnu
     self new: #{#radius => r}
 

@@ -4351,15 +4351,28 @@ mod tests {
         );
     }
 
-    /// BT-1559: Cross-file Value sub-subclass should find `new:` via hierarchy walk.
+    /// BT-1559: Cross-file Value sub-subclass should find `new:` via hierarchy walk
+    /// and `propagate_cross_file_class_kind` should synthesize auto-slot methods.
     ///
     /// Simulates: file1 has `Value subclass: Base`, file2 has `Base subclass: Child`.
     /// When Child's file is compiled, Base is injected via `add_from_beam_meta`.
-    /// `find_class_method("Child", "new:")` should walk Child → Base → Value → found.
     #[test]
     fn cross_file_value_sub_subclass_finds_new() {
         // Build hierarchy from a module containing only Child (extends Base)
-        let child_class = make_user_class("Child", "Base");
+        // Give Child a field so auto-slot methods can be verified.
+        let mut child_class = make_user_class("Child", "Base");
+        child_class.state.push(crate::ast::StateDeclaration {
+            name: crate::ast::Identifier {
+                name: EcoString::from("count"),
+                span: test_span(),
+            },
+            default_value: None,
+            type_annotation: None,
+            declared_keyword: crate::ast::DeclaredKeyword::Field,
+            comments: crate::ast::CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        });
         let module = Module {
             classes: vec![child_class],
             method_definitions: vec![],
@@ -4388,6 +4401,28 @@ mod tests {
             class_variables: vec![],
         };
         h.add_from_beam_meta(vec![base_info]);
+
+        // Before propagation, Child should NOT be marked as Value
+        let child_before = h.get_class("Child").unwrap();
+        assert!(
+            !child_before.is_value,
+            "Child should not be is_value before propagation"
+        );
+
+        // Run cross-file propagation
+        h.propagate_cross_file_class_kind();
+
+        // After propagation, Child should be marked as Value with auto-slot methods
+        let child = h.get_class("Child").unwrap();
+        assert!(child.is_value, "Child should be is_value after propagation");
+        assert!(
+            child.methods.iter().any(|m| m.selector == "count"),
+            "Child should have auto-generated 'count' getter"
+        );
+        assert!(
+            child.methods.iter().any(|m| m.selector == "withCount:"),
+            "Child should have auto-generated 'withCount:' setter"
+        );
 
         // find_class_method should walk: Child → Base → Value and find new:
         let result = h.find_class_method("Child", "new:");
