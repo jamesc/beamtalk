@@ -35,7 +35,7 @@ TestCase subclass: ClassMethodConditionalSelfCallTest
     self assert: (ClassMethodConditionalSelfCall triggerWithMutation: 5) equals: 5
 
   testTriggerWithMutationSkipped =>
-    // Counter not incremented when condition is false.
+    // Condition is false, self-call does not fire — returns x.
     self assert: (ClassMethodConditionalSelfCall triggerWithMutation: -1) equals: -1
 
   testTriggerFullWithCachedValue =>
