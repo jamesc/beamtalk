@@ -60,3 +60,25 @@ sealed Object subclass: Pid
   /// pid isAlive            // => true
   /// ```
   isAlive -> Boolean => @primitive "isAlive"
+
+  /// Forcefully terminate the process (erlang:exit(Pid, kill)).
+  ///
+  /// The kill signal cannot be trapped by the target process.
+  /// Returns true unconditionally (Erlang semantics).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pid kill               // => true
+  /// ```
+  kill -> Boolean => @primitive "kill"
+
+  /// Send an exit signal with the given reason to the process.
+  ///
+  /// The target process will terminate unless it is trapping exits.
+  /// Returns true unconditionally (Erlang semantics).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pid exit: #shutdown    // => true
+  /// ```
+  exit: reason -> Boolean => @primitive "exit:"

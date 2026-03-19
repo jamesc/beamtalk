@@ -21,25 +21,32 @@ pub(crate) fn generate_opaque_bif(
     selector: &str,
     params: &[String],
     to_string_fn: &'static str,
-    extra_selector: fn(&str) -> Option<Document<'static>>,
+    extra_selector: fn(&str, &[String]) -> Option<Document<'static>>,
 ) -> Option<Document<'static>> {
     match selector {
         "=:=" => binary_bif("=:=", params),
         "/=" => binary_bif("/=", params),
         "asString" => Some(Document::Str(to_string_fn)),
         "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
-        _ => extra_selector(selector),
+        _ => extra_selector(selector, params),
     }
 }
 
-pub(crate) fn pid_extra(selector: &str) -> Option<Document<'static>> {
+pub(crate) fn pid_extra(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         "isAlive" => Some(Document::Str("call 'erlang':'is_process_alive'(Self)")),
+        // BT-1553: forced process termination (erlang:exit(Pid, kill))
+        "kill" => Some(Document::Str("call 'erlang':'exit'(Self, 'kill')")),
+        // BT-1553: exit with arbitrary reason (erlang:exit(Pid, Reason))
+        "exit:" => {
+            let p0 = param(params, 0, "_Reason");
+            Some(docvec!["call 'erlang':'exit'(Self, ", p0.to_string(), ")"])
+        }
         _ => None,
     }
 }
 
-pub(crate) fn reference_extra(selector: &str) -> Option<Document<'static>> {
+pub(crate) fn reference_extra(selector: &str, _params: &[String]) -> Option<Document<'static>> {
     match selector {
         // BT-1442: demonitor cancels a monitor created by Actor>>monitor
         "demonitor" => Some(Document::Str("call 'erlang':'demonitor'(Self)")),
@@ -47,7 +54,7 @@ pub(crate) fn reference_extra(selector: &str) -> Option<Document<'static>> {
     }
 }
 
-pub(crate) fn no_extra(_selector: &str) -> Option<Document<'static>> {
+pub(crate) fn no_extra(_selector: &str, _params: &[String]) -> Option<Document<'static>> {
     None
 }
 

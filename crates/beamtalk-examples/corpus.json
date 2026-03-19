@@ -17913,6 +17913,35 @@
       "explanation": "BT-406: Tests the match: expression — literal arms (integer, symbol, string), wildcard arms, variable capture, guards (when:), and multi-arm dispatch"
     },
     {
+      "id": "stdlib-test-pid-test",
+      "title": "PidTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "PidTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "branch",
+        "conditional",
+        "extends",
+        "if",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "pid_test",
+        "set",
+        "subclassing",
+        "testExitReturnValue",
+        "testExitWithReasonTerminatesProcess",
+        "testKillReturnValue",
+        "testKillTerminatesProcess"
+      ],
+      "source": "// BT-1553: Tests for Pid kill and exit: methods\n\nTestCase subclass: PidTest\n\n  testKillTerminatesProcess =>\n    // Spawn a process that sleeps forever\n    pid := Erlang erlang\n      spawn: #timer\n      module: #sleep\n      args: #(#infinity)\n    self assert: pid isAlive\n    // Unlink so the kill signal doesn't propagate to the test process\n    Erlang erlang unlink: pid\n    pid kill\n    // Poll until dead\n    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]\n    self deny: pid isAlive\n\n  testExitWithReasonTerminatesProcess =>\n    // Spawn a process that sleeps forever\n    pid := Erlang erlang\n      spawn: #timer\n      module: #sleep\n      args: #(#infinity)\n    self assert: pid isAlive\n    Erlang erlang unlink: pid\n    pid exit: #shutdown\n    // Poll until dead\n    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]\n    self deny: pid isAlive\n\n  testKillReturnValue =>\n    pid := Erlang erlang\n      spawn: #timer\n      module: #sleep\n      args: #(#infinity)\n    Erlang erlang unlink: pid\n    result := pid kill\n    self assert: result equals: true\n    // Wait for process to terminate\n    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]\n    self deny: pid isAlive\n\n  testExitReturnValue =>\n    pid := Erlang erlang\n      spawn: #timer\n      module: #sleep\n      args: #(#infinity)\n    Erlang erlang unlink: pid\n    result := pid exit: #shutdown\n    self assert: result equals: true\n    // Wait for process to terminate\n    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]\n    self deny: pid isAlive",
+      "explanation": "BT-1553: Tests for Pid kill and exit: methods"
+    },
+    {
       "id": "stdlib-test-protoobject-actors-test",
       "title": "ProtoobjectActorsTest",
       "category": "stdlib-tests",

@@ -1,0 +1,57 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1553: Tests for Pid kill and exit: methods
+
+TestCase subclass: PidTest
+
+  testKillTerminatesProcess =>
+    // Spawn a process that sleeps forever
+    pid := Erlang erlang
+      spawn: #timer
+      module: #sleep
+      args: #(#infinity)
+    self assert: pid isAlive
+    // Unlink so the kill signal doesn't propagate to the test process
+    Erlang erlang unlink: pid
+    pid kill
+    // Poll until dead
+    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]
+    self deny: pid isAlive
+
+  testExitWithReasonTerminatesProcess =>
+    // Spawn a process that sleeps forever
+    pid := Erlang erlang
+      spawn: #timer
+      module: #sleep
+      args: #(#infinity)
+    self assert: pid isAlive
+    Erlang erlang unlink: pid
+    pid exit: #shutdown
+    // Poll until dead
+    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]
+    self deny: pid isAlive
+
+  testKillReturnValue =>
+    pid := Erlang erlang
+      spawn: #timer
+      module: #sleep
+      args: #(#infinity)
+    Erlang erlang unlink: pid
+    result := pid kill
+    self assert: result equals: true
+    // Wait for process to terminate
+    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]
+    self deny: pid isAlive
+
+  testExitReturnValue =>
+    pid := Erlang erlang
+      spawn: #timer
+      module: #sleep
+      args: #(#infinity)
+    Erlang erlang unlink: pid
+    result := pid exit: #shutdown
+    self assert: result equals: true
+    // Wait for process to terminate
+    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]
+    self deny: pid isAlive

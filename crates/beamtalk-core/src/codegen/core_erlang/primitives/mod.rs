@@ -509,6 +509,39 @@ mod tests {
         assert_eq!(result, Some("call 'erlang':'<'(Self, Other)".to_string()));
     }
 
+    // Pid primitive tests (BT-1553)
+
+    #[test]
+    fn test_pid_is_alive() {
+        let result = doc_to_string(generate_primitive_bif("Pid", "isAlive", &[]));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'is_process_alive'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_pid_kill() {
+        let result = doc_to_string(generate_primitive_bif("Pid", "kill", &[]));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'exit'(Self, 'kill')".to_string())
+        );
+    }
+
+    #[test]
+    fn test_pid_exit() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Pid",
+            "exit:",
+            &["Reason".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'exit'(Self, Reason)".to_string())
+        );
+    }
+
     // Integer character predicate tests (BT-339)
 
     #[test]
