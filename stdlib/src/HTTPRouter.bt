@@ -55,11 +55,11 @@
 /// ```
 sealed Value subclass: HTTPRouter
   /// Compiled route table (opaque Erlang term, internal).
-  state: compiledRoutes = nil
+  field: compiledRoutes = nil
   /// Custom not-found handler (internal).
-  state: notFoundHandler = nil
+  field: notFoundHandler = nil
   /// Number of routes in this router.
-  state: routeCount :: Integer = 0
+  field: routeCount :: Integer = 0
 
   /// Build a router using a builder block.
   ///

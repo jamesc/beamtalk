@@ -6,23 +6,23 @@
 // constructor atom exceeded Erlang's 255-char atom limit.
 
 Value subclass: ValueManyFields
-  state: codexInputTokens = 0
-  state: codexOutputTokens = 0
-  state: codexModelName = ""
-  state: codexCachedTokens = 0
-  state: codexReasoning = ""
-  state: codexReasoningEffort = ""
-  state: codexMaxOutputTokens = 0
-  state: codexSystemFingerprint = ""
-  state: codexServiceTier = ""
-  state: operationTokens = 0
-  state: operationCost = 0
-  state: operationDuration = 0
-  state: apiCallCount = 0
-  state: errorCount = 0
-  state: retryCount = 0
-  state: totalLatency = 0
-  state: averageLatency = 0
-  state: peakMemoryUsage = 0
-  state: networkBandwidth = 0
-  state: concurrentRequests = 0
+  field: codexInputTokens = 0
+  field: codexOutputTokens = 0
+  field: codexModelName = ""
+  field: codexCachedTokens = 0
+  field: codexReasoning = ""
+  field: codexReasoningEffort = ""
+  field: codexMaxOutputTokens = 0
+  field: codexSystemFingerprint = ""
+  field: codexServiceTier = ""
+  field: operationTokens = 0
+  field: operationCost = 0
+  field: operationDuration = 0
+  field: apiCallCount = 0
+  field: errorCount = 0
+  field: retryCount = 0
+  field: totalLatency = 0
+  field: averageLatency = 0
+  field: peakMemoryUsage = 0
+  field: networkBandwidth = 0
+  field: concurrentRequests = 0

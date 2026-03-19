@@ -28,17 +28,17 @@
 /// ```
 sealed Value subclass: HTTPRequest
   /// HTTP method (e.g. "GET", "POST", "PUT", "DELETE").
-  state: method :: String = ""
+  field: method :: String = ""
   /// Request path (e.g. "/api/users").
-  state: path :: String = "/"
+  field: path :: String = "/"
   /// Request headers as a List of [name, value] binary pairs.
-  state: headers :: List = #()
+  field: headers :: List = #()
   /// Request body as a String.
-  state: body :: String = ""
+  field: body :: String = ""
   /// Query parameters as a Dictionary.
-  state: queryParams :: Dictionary = #{}
+  field: queryParams :: Dictionary = #{}
   /// Path parameters extracted by HTTPRouter (e.g. `:id` → "42").
-  state: params :: Dictionary = #{}
+  field: params :: Dictionary = #{}
 
   /// Return the value of a named path parameter.
   ///

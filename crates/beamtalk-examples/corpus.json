@@ -14286,7 +14286,7 @@
         "subclassing",
         "value"
       ],
-      "source": "// Fixture for BT-1167: Value subclass with left/right fields.\n// Used to test that inspect recursively inspects nested value objects.\n\nValue subclass: InspectPair\n  state: left = nil\n  state: right = nil",
+      "source": "// Fixture for BT-1167: Value subclass with left/right fields.\n// Used to test that inspect recursively inspects nested value objects.\n\nValue subclass: InspectPair\n  field: left = nil\n  field: right = nil",
       "explanation": "Fixture for BT-1167: Value subclass with left/right fields. Used to test that inspect recursively inspects nested value objects."
     },
     {
@@ -14728,7 +14728,7 @@
         "subclassing",
         "value"
       ],
-      "source": "// Fixture for BT-1167: Value subclass with a String state field.\n// Used to test that inspect quotes string field values.\n\nValue subclass: NamedItem\n  state: name = \"\"",
+      "source": "// Fixture for BT-1167: Value subclass with a String state field.\n// Used to test that inspect quotes string field values.\n\nValue subclass: NamedItem\n  field: name = \"\"",
       "explanation": "Fixture for BT-1167: Value subclass with a String state field. Used to test that inspect quotes string field values."
     },
     {
@@ -15687,7 +15687,7 @@
         "tagged_value",
         "value"
       ],
-      "source": "// TaggedValue — BT-996 fixture: single-slot Value subclass whose factory method\n// uses `ClassName slot: value` syntax inside a class method body.\n//\n// This exercises the BT-996 bug fix: `TaggedValue tag: t` inside `class fromTag:` must\n// dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter.\n\nValue subclass: TaggedValue\n  state: tag = \"\"\n\n  class fromTag: t => TaggedValue tag: t",
+      "source": "// TaggedValue — BT-996 fixture: single-slot Value subclass whose factory method\n// uses `ClassName slot: value` syntax inside a class method body.\n//\n// This exercises the BT-996 bug fix: `TaggedValue tag: t` inside `class fromTag:` must\n// dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter.\n\nValue subclass: TaggedValue\n  field: tag = \"\"\n\n  class fromTag: t => TaggedValue tag: t",
       "explanation": "TaggedValue — BT-996 fixture: single-slot Value subclass whose factory method uses `ClassName slot: value` syntax inside a class method body.  This exercises the BT-996 bug fix: `TaggedValue tag: t` inside `class fromTag:` must dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter."
     },
     {
@@ -16078,7 +16078,7 @@
         "value",
         "value_many_fields"
       ],
-      "source": "// BT-1408: Regression test — Value subclass with 20+ long camelCase field names.\n// Previously failed with core_scan_error because the auto-generated keyword\n// constructor atom exceeded Erlang's 255-char atom limit.\n\nValue subclass: ValueManyFields\n  state: codexInputTokens = 0\n  state: codexOutputTokens = 0\n  state: codexModelName = \"\"\n  state: codexCachedTokens = 0\n  state: codexReasoning = \"\"\n  state: codexReasoningEffort = \"\"\n  state: codexMaxOutputTokens = 0\n  state: codexSystemFingerprint = \"\"\n  state: codexServiceTier = \"\"\n  state: operationTokens = 0\n  state: operationCost = 0\n  state: operationDuration = 0\n  state: apiCallCount = 0\n  state: errorCount = 0\n  state: retryCount = 0\n  state: totalLatency = 0\n  state: averageLatency = 0\n  state: peakMemoryUsage = 0\n  state: networkBandwidth = 0\n  state: concurrentRequests = 0",
+      "source": "// BT-1408: Regression test — Value subclass with 20+ long camelCase field names.\n// Previously failed with core_scan_error because the auto-generated keyword\n// constructor atom exceeded Erlang's 255-char atom limit.\n\nValue subclass: ValueManyFields\n  field: codexInputTokens = 0\n  field: codexOutputTokens = 0\n  field: codexModelName = \"\"\n  field: codexCachedTokens = 0\n  field: codexReasoning = \"\"\n  field: codexReasoningEffort = \"\"\n  field: codexMaxOutputTokens = 0\n  field: codexSystemFingerprint = \"\"\n  field: codexServiceTier = \"\"\n  field: operationTokens = 0\n  field: operationCost = 0\n  field: operationDuration = 0\n  field: apiCallCount = 0\n  field: errorCount = 0\n  field: retryCount = 0\n  field: totalLatency = 0\n  field: averageLatency = 0\n  field: peakMemoryUsage = 0\n  field: networkBandwidth = 0\n  field: concurrentRequests = 0",
       "explanation": "BT-1408: Regression test — Value subclass with 20+ long camelCase field names. Previously failed with core_scan_error because the auto-generated keyword constructor atom exceeded Erlang's 255-char atom limit."
     },
     {
@@ -16100,7 +16100,7 @@
         "value",
         "value_point"
       ],
-      "source": "// ValuePoint — a Point class declared with `Value subclass:` (BT-923)\n// Tests auto-generated getters, with*: setters, and keyword constructor\n\nValue subclass: ValuePoint\n  state: x = 0\n  state: y = 0\n\n  // User-defined method: distance squared from origin\n  distanceSquared => (self.x * self.x) + (self.y * self.y)",
+      "source": "// ValuePoint — a Point class declared with `Value subclass:` (BT-923)\n// Tests auto-generated getters, with*: setters, and keyword constructor\n\nValue subclass: ValuePoint\n  field: x = 0\n  field: y = 0\n\n  // User-defined method: distance squared from origin\n  distanceSquared => (self.x * self.x) + (self.y * self.y)",
       "explanation": "ValuePoint — a Point class declared with `Value subclass:` (BT-923) Tests auto-generated getters, with*: setters, and keyword constructor"
     },
     {

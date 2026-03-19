@@ -26,11 +26,11 @@
 /// ```
 sealed Value subclass: HTTPRoute
   /// HTTP method (e.g. "GET", "POST").
-  state: method :: String = ""
+  field: method :: String = ""
   /// Path pattern (e.g. "/users/:id").
-  state: path :: String = "/"
+  field: path :: String = "/"
   /// Handler block receiving an HTTPRequest.
-  state: handler = nil
+  field: handler = nil
 
   /// Create a GET route.
   class get: path :: String handler: handler -> HTTPRoute =>

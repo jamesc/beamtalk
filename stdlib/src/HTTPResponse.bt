@@ -24,11 +24,11 @@
 /// ```
 sealed Value subclass: HTTPResponse
   /// HTTP status code (e.g. 200, 404, 500).
-  state: status :: Integer = 0
+  field: status :: Integer = 0
   /// Response headers as a List of [name, value] binary pairs.
-  state: headers :: List = #()
+  field: headers :: List = #()
   /// Response body as a String.
-  state: body :: String = ""
+  field: body :: String = ""
 
   /// True if the status code is in the 2xx success range.
   ///

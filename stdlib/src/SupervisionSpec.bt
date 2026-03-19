@@ -8,7 +8,7 @@
 /// override methods. Use it in `Supervisor subclass:` `children` methods when
 /// you need per-child overrides for id, restart policy, or startup args.
 ///
-/// The auto-generated API (from `state:` declarations) includes:
+/// The auto-generated API (from `field:` declarations) includes:
 /// - Getters: `id`, `actorClass`, `restart`, `args`, `shutdown`
 /// - Single-field fluent: `withId:`, `withActorClass:`, `withRestart:`, `withArgs:`, `withShutdown:`
 /// - Keyword constructor: `id:actorClass:restart:args:shutdown:`
@@ -32,23 +32,23 @@
 /// ```
 Value subclass: SupervisionSpec
   /// Child id override — nil uses the actor class name as the OTP child id.
-  state: id = nil
+  field: id = nil
   /// The actor class being supervised.
-  state: actorClass = nil
+  field: actorClass = nil
   /// OTP restart policy — `#permanent`, `#transient`, or `#temporary`.
   ///
   /// Defaults to `#temporary`. Set to the actor's `supervisionPolicy` when
   /// created via `ActorClass supervisionSpec`.
-  state: restart :: Symbol = #temporary
+  field: restart :: Symbol = #temporary
   /// Optional initialization arguments passed via `spawnWith:`.
   ///
   /// nil means no args (use `spawn`); any non-nil value is passed to `spawnWith:`.
-  state: args = nil
+  field: args = nil
   /// Custom shutdown timeout in milliseconds, or nil to use the computed default.
   ///
   /// When nil, workers use 5000ms and supervisors use `#infinity`.
   /// Set via `withShutdown:` to override the default for graceful drain/cleanup.
-  state: shutdown = nil
+  field: shutdown = nil
 
   // === Multi-keyword fluent overrides ===
   // (Single-field variants withId:, withRestart:, withArgs: are auto-generated.)
