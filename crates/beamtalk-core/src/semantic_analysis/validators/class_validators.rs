@@ -165,7 +165,8 @@ fn visit_actor_new(
                         ),
                         *span,
                     )
-                    .with_hint("Actors are processes — use spawn/spawnWith: instead of new/new:"),
+                    .with_hint("Actors are processes — use spawn/spawnWith: instead of new/new:")
+                    .with_category(DiagnosticCategory::ActorNew),
                 );
             }
         }
@@ -191,7 +192,8 @@ fn visit_actor_new(
                         )
                         .with_hint(
                             "Actors are processes — use spawn/spawnWith: instead of new/new:",
-                        ),
+                        )
+                        .with_category(DiagnosticCategory::ActorNew),
                     );
                 }
             }

@@ -401,6 +401,7 @@ fn compile_fixtures_directory(
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
     warnings_as_errors: bool,
+    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 ) -> Result<Vec<String>> {
     if !fixtures_dir.is_dir() {
         return Ok(Vec::new());
@@ -440,6 +441,7 @@ fn compile_fixtures_directory(
             class_module_index,
             class_superclass_index,
             warnings_as_errors,
+            pre_loaded_classes,
         )
         .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
         core_files.push(core_file);
@@ -464,6 +466,7 @@ fn compile_fixture(
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
     warnings_as_errors: bool,
+    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 ) -> Result<String> {
     let module_name = fixture_module_name(fixture_path)?;
 
@@ -474,6 +477,7 @@ fn compile_fixture(
         class_module_index,
         class_superclass_index,
         warnings_as_errors,
+        pre_loaded_classes,
     )
     .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
 
@@ -542,6 +546,7 @@ fn generate_core_file(
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
     warnings_as_errors: bool,
+    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 ) -> Result<Utf8PathBuf> {
     let core_file = output_dir.join(format!("{module_name}.core"));
 
@@ -561,7 +566,7 @@ fn generate_core_file(
         &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
         class_module_index,
         class_superclass_index,
-        &[],
+        pre_loaded_classes,
         None,
     )
     .wrap_err_with(|| format!("Failed to compile '{source_path}'"))?;
@@ -915,6 +920,7 @@ fn discover_and_compile_doc_tests(
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
     warnings_as_errors: bool,
+    pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 ) -> Result<Vec<CompiledDocTestResult>> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
@@ -935,6 +941,7 @@ fn discover_and_compile_doc_tests(
         class_module_index,
         class_superclass_index,
         warnings_as_errors,
+        pre_loaded_classes,
     )
     .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
 
@@ -1160,6 +1167,8 @@ struct TestPipeline {
     class_module_index: HashMap<String, String>,
     /// Merged class-name to superclass-name index across all packages.
     class_superclass_index: HashMap<String, String>,
+    /// BT-1559: Cross-file class metadata for type checker hierarchy resolution.
+    all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     /// Fixture class-name to module-name index.
     fixture_class_index: HashMap<String, String>,
     /// Module names of pre-compiled fixtures (from `fixtures/` directory).
@@ -1286,11 +1295,13 @@ fn initialize_pipeline(
     let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
     let mut class_module_index: HashMap<String, String> = HashMap::new();
     let mut class_superclass_index: HashMap<String, String> = HashMap::new();
+    let mut all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
+        Vec::new();
     for (pkg_root, pkg) in &discovered_packages {
         let src_dir = pkg_root.join("src");
         if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
             let source_root = src_dir.exists().then_some(src_dir);
-            if let Ok((pkg_class_map, pkg_super_map, _class_infos, _cached_asts)) =
+            if let Ok((pkg_class_map, pkg_super_map, class_infos, _cached_asts)) =
                 super::build::build_class_module_index(
                     &src_files,
                     source_root.as_deref(),
@@ -1303,6 +1314,8 @@ fn initialize_pipeline(
                 );
                 class_module_index.extend(pkg_class_map);
                 class_superclass_index.extend(pkg_super_map);
+                // BT-1559: Collect cross-file class metadata for type checker resolution.
+                all_class_infos.extend(class_infos);
             }
         }
     }
@@ -1317,6 +1330,7 @@ fn initialize_pipeline(
         pkg_class_indexes,
         class_module_index,
         class_superclass_index,
+        all_class_infos,
         fixture_class_index: HashMap::new(),
         precompiled_modules: HashSet::new(),
         all_fixture_modules: Vec::new(),
@@ -1362,6 +1376,7 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         &pipeline.class_module_index,
         &pipeline.class_superclass_index,
         pipeline.warnings_as_errors,
+        &pipeline.all_class_infos,
     )?;
     for module_name in &precompiled {
         pipeline.precompiled_modules.insert(module_name.clone());
@@ -1486,6 +1501,7 @@ fn compile_single_test_file(
             &file_class_index,
             &file_super_index,
             pipeline.warnings_as_errors,
+            &pipeline.all_class_infos,
         )
         .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
         pending_test_cores.push(core_file);
@@ -1514,6 +1530,7 @@ fn compile_single_test_file(
         &file_class_index,
         &file_super_index,
         pipeline.warnings_as_errors,
+        &pipeline.all_class_infos,
     )?;
     for dr in doc_results {
         pipeline.all_erl_files.push(dr.erl_file);
@@ -1596,6 +1613,7 @@ fn resolve_load_directives(
             file_class_index,
             file_super_index,
             pipeline.warnings_as_errors,
+            &pipeline.all_class_infos,
         )?;
         pipeline.all_fixture_modules.push(module_name);
     }

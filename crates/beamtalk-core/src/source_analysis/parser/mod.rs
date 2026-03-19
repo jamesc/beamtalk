@@ -376,6 +376,8 @@ pub enum DiagnosticCategory {
     ///
     /// Excluded from `--warnings-as-errors` to allow gradual migration.
     Deprecation,
+    /// Actor-new error (BT-1559) — using `new`/`new:` on an Actor subclass.
+    ActorNew,
 }
 
 /// A diagnostic message (error, warning, or hint).

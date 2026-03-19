@@ -3,8 +3,8 @@
 
 /// Factory Method Pattern — RectangleFactory (concrete creator)
 ShapeFactory subclass: RectangleFactory
-  state: width = 1.0
-  state: height = 1.0
+  field: width = 1.0
+  field: height = 1.0
 
   /// Create a factory configured to produce rectangles with the given dimensions.
   class width: w height: h => self new: #{#width => w, #height => h}

@@ -3,7 +3,7 @@
 
 /// Adapter Pattern — FahrenheitThermometer (target interface)
 /// The interface that client code expects: readings in both Fahrenheit and Celsius.
-Object subclass: FahrenheitThermometer
+Value subclass: FahrenheitThermometer
 
   /// Return the current temperature in degrees Fahrenheit.
   readFahrenheit => self subclassResponsibility

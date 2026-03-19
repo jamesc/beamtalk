@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1559: Abstract base for Value sub-subclass inheritance tests.
+// Direct Value subclass with one field. Concrete children inherit this field
+// and add their own, exercising the sub-subclass constructor chain.
+
+Value subclass: ValueBaseShape
+  field: color = "black"

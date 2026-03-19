@@ -646,7 +646,7 @@ impl ClassHierarchy {
     /// from Value (e.g. `Value subclass: MyBase` then `MyBase subclass: MyChild`)
     /// get their `is_value` flag corrected and their auto-slot methods
     /// synthesized.
-    fn propagate_class_kind(&mut self, module: &Module) {
+    pub(crate) fn propagate_class_kind(&mut self, module: &Module) {
         // Collect names of classes that need is_value = true but don't have it yet.
         let classes_to_fix: Vec<EcoString> = module
             .classes
@@ -671,6 +671,175 @@ impl ClassHierarchy {
                 if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
                     Self::add_value_auto_methods(class, &mut info.methods, &mut info.class_methods);
                 }
+            }
+        }
+    }
+
+    /// BT-1559: Re-propagate `is_value` for ALL classes in the hierarchy,
+    /// including cross-file classes injected via `add_from_beam_meta`.
+    ///
+    /// Unlike `propagate_class_kind` which only processes the current module's
+    /// AST classes, this method uses the already-stored `ClassInfo::state` to
+    /// synthesize auto-slot methods for newly-discovered Value subclasses.
+    pub(crate) fn propagate_cross_file_class_kind(&mut self) {
+        // Pass 1: Collect all classes that need is_value fixup.
+        let classes_to_fix: Vec<EcoString> = self
+            .classes
+            .iter()
+            .filter(|(_, info)| {
+                !info.is_value && self.ancestors_include_value(info.superclass.as_ref())
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        if classes_to_fix.is_empty() {
+            return;
+        }
+
+        // Pass 2: Set is_value flag.
+        for class_name in &classes_to_fix {
+            if let Some(info) = self.classes.get_mut(class_name.as_str()) {
+                info.is_value = true;
+            }
+        }
+
+        // Pass 3: Synthesize auto-slot methods from stored state fields.
+        // We don't have the AST, so we build synthetic slot info from ClassInfo.
+        for class_name in &classes_to_fix {
+            // Extract state and existing selectors without holding a mutable borrow.
+            let slot_data: Option<Vec<(EcoString, Option<EcoString>)>> =
+                self.classes.get(class_name.as_str()).map(|info| {
+                    info.state
+                        .iter()
+                        .map(|s| {
+                            let ty = info.state_types.get(s).cloned();
+                            (s.clone(), ty)
+                        })
+                        .collect()
+                });
+            let existing_instance: Option<HashSet<EcoString>> = self
+                .classes
+                .get(class_name.as_str())
+                .map(|info| info.methods.iter().map(|m| m.selector.clone()).collect());
+            let existing_class: Option<HashSet<EcoString>> =
+                self.classes.get(class_name.as_str()).map(|info| {
+                    info.class_methods
+                        .iter()
+                        .map(|m| m.selector.clone())
+                        .collect()
+                });
+
+            if let (Some(slots), Some(inst_sels), Some(cls_sels)) =
+                (slot_data, existing_instance, existing_class)
+            {
+                let info = self.classes.get_mut(class_name.as_str()).unwrap();
+                Self::synthesize_auto_methods_from_state(
+                    class_name,
+                    &slots,
+                    &inst_sels,
+                    &cls_sels,
+                    &mut info.methods,
+                    &mut info.class_methods,
+                );
+            }
+        }
+    }
+
+    /// Check if the superclass chain includes Value.
+    fn ancestors_include_value(&self, superclass: Option<&EcoString>) -> bool {
+        let mut current = superclass.map(ToString::to_string);
+        let mut visited = HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if name == "Value" {
+                return true;
+            }
+            current = self
+                .classes
+                .get(name.as_str())
+                .and_then(|info| info.superclass.as_ref().map(ToString::to_string));
+        }
+        false
+    }
+
+    /// Synthesize auto-generated slot methods from `ClassInfo` state fields.
+    ///
+    /// This is the `ClassInfo`-only equivalent of `add_value_auto_methods` which
+    /// works from the AST `ClassDefinition`.
+    fn synthesize_auto_methods_from_state(
+        class_name: &EcoString,
+        slots: &[(EcoString, Option<EcoString>)],
+        existing_instance_selectors: &HashSet<EcoString>,
+        existing_class_selectors: &HashSet<EcoString>,
+        instance_methods: &mut Vec<MethodInfo>,
+        class_methods: &mut Vec<MethodInfo>,
+    ) {
+        for (slot_name, slot_type) in slots {
+            // Auto-getter
+            if !existing_instance_selectors.contains(slot_name) {
+                instance_methods.push(MethodInfo {
+                    selector: slot_name.clone(),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: class_name.clone(),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: slot_type.clone(),
+                    param_types: vec![],
+                    doc: Some(EcoString::from("*(compiler-generated)*")),
+                });
+            }
+
+            // Auto with*: setter
+            let with_sel = {
+                let mut chars = slot_name.chars();
+                match chars.next() {
+                    None => EcoString::from("with:"),
+                    Some(first) => {
+                        let cap: String = first.to_uppercase().collect();
+                        EcoString::from(format!("with{}{}:", cap, chars.as_str()))
+                    }
+                }
+            };
+            if !existing_instance_selectors.contains(&with_sel) {
+                instance_methods.push(MethodInfo {
+                    selector: with_sel,
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: class_name.clone(),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(class_name.clone()),
+                    param_types: vec![None],
+                    doc: Some(EcoString::from("*(compiler-generated)*")),
+                });
+            }
+        }
+
+        // Keyword constructor (class method)
+        if !slots.is_empty() {
+            let kw_sel: EcoString = {
+                let mut s = String::new();
+                for (name, _) in slots {
+                    s.push_str(name);
+                    s.push(':');
+                }
+                EcoString::from(s)
+            };
+            if !existing_class_selectors.contains(&kw_sel) {
+                class_methods.push(MethodInfo {
+                    selector: kw_sel,
+                    arity: slots.len(),
+                    kind: MethodKind::Primary,
+                    defined_in: class_name.clone(),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(class_name.clone()),
+                    param_types: vec![None; slots.len()],
+                    doc: Some(EcoString::from("*(compiler-generated)*")),
+                });
             }
         }
     }
@@ -4180,5 +4349,87 @@ mod tests {
             child_info.is_value,
             "MyValueChild (indirect Value subclass) should have is_value = true via external superclasses"
         );
+    }
+
+    /// BT-1559: Cross-file Value sub-subclass should find `new:` via hierarchy walk
+    /// and `propagate_cross_file_class_kind` should synthesize auto-slot methods.
+    ///
+    /// Simulates: file1 has `Value subclass: Base`, file2 has `Base subclass: Child`.
+    /// When Child's file is compiled, Base is injected via `add_from_beam_meta`.
+    #[test]
+    fn cross_file_value_sub_subclass_finds_new() {
+        // Build hierarchy from a module containing only Child (extends Base)
+        // Give Child a field so auto-slot methods can be verified.
+        let mut child_class = make_user_class("Child", "Base");
+        child_class.state.push(crate::ast::StateDeclaration {
+            name: crate::ast::Identifier {
+                name: EcoString::from("count"),
+                span: test_span(),
+            },
+            default_value: None,
+            type_annotation: None,
+            declared_keyword: crate::ast::DeclaredKeyword::Field,
+            comments: crate::ast::CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        });
+        let module = Module {
+            classes: vec![child_class],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+
+        // Inject cross-file Base class (from another file: Value subclass: Base)
+        let base_info = ClassInfo {
+            name: EcoString::from("Base"),
+            superclass: Some(EcoString::from("Value")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec![EcoString::from("x")],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+        };
+        h.add_from_beam_meta(vec![base_info]);
+
+        // Before propagation, Child should NOT be marked as Value
+        let child_before = h.get_class("Child").unwrap();
+        assert!(
+            !child_before.is_value,
+            "Child should not be is_value before propagation"
+        );
+
+        // Run cross-file propagation
+        h.propagate_cross_file_class_kind();
+
+        // After propagation, Child should be marked as Value with auto-slot methods
+        let child = h.get_class("Child").unwrap();
+        assert!(child.is_value, "Child should be is_value after propagation");
+        assert!(
+            child.methods.iter().any(|m| m.selector == "count"),
+            "Child should have auto-generated 'count' getter"
+        );
+        assert!(
+            child.methods.iter().any(|m| m.selector == "withCount:"),
+            "Child should have auto-generated 'withCount:' setter"
+        );
+
+        // find_class_method should walk: Child → Base → Value and find new:
+        let result = h.find_class_method("Child", "new:");
+        assert!(
+            result.is_some(),
+            "find_class_method('Child', 'new:') should find new: on Value via Base"
+        );
+        assert_eq!(result.unwrap().defined_in.as_str(), "Value");
     }
 }
