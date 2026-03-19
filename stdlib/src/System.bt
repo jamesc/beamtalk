@@ -20,6 +20,8 @@
 /// // => _
 /// System pid
 /// // => _
+/// System uniqueId
+/// // => _
 /// ```
 sealed Object subclass: System
 
@@ -130,3 +132,15 @@ sealed Object subclass: System
   /// // => _
   /// ```
   class sealed pid -> Integer => (Erlang beamtalk_system) pid
+
+  /// Return a unique positive monotonic integer.
+  ///
+  /// Each call returns a value strictly greater than any previous call
+  /// within this VM instance. Useful for generating unique IDs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System uniqueId
+  /// // => _
+  /// ```
+  class sealed uniqueId -> Integer => (Erlang beamtalk_system) uniqueId

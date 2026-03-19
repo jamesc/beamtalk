@@ -70,3 +70,13 @@ TestCase subclass: SystemTest
     // --- error cases ---
     @expect type
     self should: [System getEnv: "PATH" default: 42] raise: #type_error
+
+  testUniqueId =>
+    // uniqueId returns a positive integer
+    self assert: (System uniqueId class =:= Integer)
+    // uniqueId is positive
+    self assert: (System uniqueId > 0)
+    // uniqueId is monotonically increasing
+    id1 := System uniqueId
+    id2 := System uniqueId
+    self assert: (id2 > id1)
