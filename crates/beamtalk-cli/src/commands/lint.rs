@@ -12,7 +12,7 @@
 
 use crate::commands::build::collect_source_files_from_dir;
 use crate::diagnostic::CompileDiagnostic;
-use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use miette::{IntoDiagnostic, Result};
 
@@ -55,6 +55,14 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             .filter(|d| d.severity == Severity::Lint)
             .collect();
         lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
+
+        // BT-1547: Run semantic analysis to collect DNU hint diagnostics.
+        // Without these, `@expect type` annotations that suppress DNU hints
+        // during `beamtalk build` would be reported as stale by lint.
+        let analysis_result = beamtalk_core::semantic_analysis::analyse(&module);
+        lint_diags.extend(analysis_result.diagnostics.into_iter().filter(|d| {
+            d.severity == Severity::Hint && d.category == Some(DiagnosticCategory::Dnu)
+        }));
 
         // BT-1476: Apply @expect directives to suppress matching lint diagnostics.
         // Note: apply_expect_directives may inject Severity::Warning for stale
@@ -126,5 +134,93 @@ impl std::str::FromStr for OutputFormat {
                 "unknown format '{other}': expected 'text' or 'json'"
             )),
         }
+    }
+}
+
+/// Collect lint diagnostics for a single source string without printing.
+///
+/// Returns the diagnostics after applying `@expect` directives. Used by tests
+/// to inspect the diagnostic set without side-effects.
+#[cfg(test)]
+fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+    let tokens = lex_with_eof(source);
+    let (module, parse_diags) = parse(tokens);
+
+    let mut lint_diags: Vec<_> = parse_diags
+        .into_iter()
+        .filter(|d| d.severity == Severity::Lint)
+        .collect();
+    lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
+
+    // BT-1547: Include DNU hint diagnostics from semantic analysis.
+    let analysis_result = beamtalk_core::semantic_analysis::analyse(&module);
+    lint_diags.extend(
+        analysis_result.diagnostics.into_iter().filter(|d| {
+            d.severity == Severity::Hint && d.category == Some(DiagnosticCategory::Dnu)
+        }),
+    );
+
+    beamtalk_core::queries::diagnostic_provider::apply_expect_directives(&module, &mut lint_diags);
+
+    lint_diags
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expect_type_suppresses_dnu_hint_in_lint() {
+        // BT-1547: @expect type must not be reported as stale when it
+        // suppresses a real DNU hint from semantic analysis.
+        let source = r#"Object subclass: LintTest
+
+  class demo =>
+    r := Result ok: #{"key" => "value"}
+    data := r unwrap
+    @expect type
+    val := data at: "key"
+    val
+"#;
+        let diags = collect_lint_diagnostics(source);
+        let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
+        assert!(
+            !stale,
+            "@expect type should not be stale when DNU hint is present, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn dnu_hint_shown_without_expect_type() {
+        // Without @expect type, the DNU hint should appear in lint output.
+        let source = r#"Object subclass: LintTest2
+
+  class demo =>
+    r := Result ok: #{"key" => "value"}
+    data := r unwrap
+    val := data at: "key"
+    val
+"#;
+        let diags = collect_lint_diagnostics(source);
+        let has_dnu = diags
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            has_dnu,
+            "DNU hint should be present in lint diagnostics, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn expect_type_still_stale_without_dnu() {
+        // @expect type on an expression with no DNU or type diagnostic
+        // should still be reported as stale.
+        let source = "Object subclass: StaleTest\n\n  class demo =>\n    @expect type\n    42\n";
+        let diags = collect_lint_diagnostics(source);
+        let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
+        assert!(
+            stale,
+            "@expect type on `42` must emit stale warning, got: {diags:?}"
+        );
     }
 }
