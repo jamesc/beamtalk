@@ -404,7 +404,6 @@ pub(crate) fn check_effect_free_statements(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic_analysis::ClassHierarchy;
     use crate::source_analysis::Severity;
     use crate::source_analysis::lex_with_eof;
     use crate::source_analysis::parse;
