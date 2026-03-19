@@ -296,9 +296,9 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                             {reply, {error, Error}, ClassVars};
                         false ->
                             %% undef was raised inside the method body, not at dispatch.
-                            ?LOG_ERROR(
-                                "Class method ~p:~p raised undef internally: ~p",
-                                [ClassName, Selector, ST],
+                            ?LOG_DEBUG(
+                                "Class method ~p:~p raised undef internally",
+                                [ClassName, Selector],
                                 #{
                                     class => ClassName,
                                     selector => Selector,
@@ -309,9 +309,9 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                             {reply, {error, undef}, ClassVars}
                     end;
                 ErrClass:Error:ST ->
-                    ?LOG_ERROR(
-                        "Class method ~p:~p failed: ~p:~p",
-                        [ClassName, Selector, ErrClass, Error],
+                    ?LOG_DEBUG(
+                        "Class method ~p:~p failed",
+                        [ClassName, Selector],
                         #{
                             class => ClassName,
                             selector => Selector,

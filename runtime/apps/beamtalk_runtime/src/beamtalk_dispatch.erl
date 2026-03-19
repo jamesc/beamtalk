@@ -340,7 +340,7 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                                 {error, Error, _State} -> {error, Error}
                             catch
                                 Type:Reason:Stack ->
-                                    ?LOG_ERROR("Erlang error in beamtalk_object_ops:dispatch", #{
+                                    ?LOG_DEBUG("Erlang error in beamtalk_object_ops:dispatch", #{
                                         error_class => Type,
                                         reason => Reason,
                                         selector => Selector,
@@ -366,7 +366,7 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                                 end
                             catch
                                 Type:Reason:Stack ->
-                                    ?LOG_ERROR("Erlang error in compiled dispatch", #{
+                                    ?LOG_DEBUG("Erlang error in compiled dispatch", #{
                                         error_class => Type,
                                         module => ModuleName,
                                         selector => Selector,
