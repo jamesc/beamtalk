@@ -1213,6 +1213,37 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
+      "id": "docs-beamtalk-language-features-block-87",
+      "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "DatabaseTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "setUp",
+        "setUpOnce",
+        "subclassing",
+        "tearDownOnce",
+        "testInsert",
+        "testQuery"
+      ],
+      "source": "TestCase subclass: DatabaseTest\n  field: conn = nil\n\n  setUpOnce => Database connect: \"test_db\"\n  tearDownOnce => self suiteFixture close\n\n  setUp => self withConn: self suiteFixture\n\n  testQuery =>\n    result := self.conn query: \"SELECT 1\"\n    self assert: result equals: 1\n\n  testInsert =>\n    self.conn execute: \"INSERT INTO t VALUES (1)\"\n    self assert: (self.conn query: \"SELECT count(*) FROM t\") equals: 1",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
       "id": "docs-beamtalk-language-features-block-9",
       "title": "Immutability enforcement (beamtalk-language-features)",
       "category": "language-reference",
@@ -18544,6 +18575,74 @@
       ],
       "source": "// E2E tests for Set (unique element collections using ordsets) (BT-73)\n\nTestCase subclass: SetTest\n\n  testCreationClass =>\n    Set new\n    self assert: (Set new) class equals: Set\n\n  testIsemptySize =>\n    self assert: (Set new) isEmpty\n    self assert: (Set new) size equals: 0\n\n  testAddIncludes =>\n    s := (Set new) add: 1\n    self assert: (s includes: 1)\n    self deny: (s includes: 2)\n    self assert: s size equals: 1\n\n  testAddDeduplication =>\n    s := (Set new) add: 1\n    s2 := (s add: 2) add: 1\n    self assert: s2 size equals: 2\n    self assert: (s2 includes: 1)\n    self assert: (s2 includes: 2)\n\n  testRemove =>\n    s2 := ((Set new) add: 1) add: 2\n    s3 := s2 remove: 1\n    self deny: (s3 includes: 1)\n    self assert: (s3 includes: 2)\n    self assert: s3 size equals: 1\n\n  testFromList =>\n    colors := Set new fromList: #(#red, #green, #blue)\n    self assert: colors size equals: 3\n    self assert: (colors includes: #red)\n    self deny: (colors includes: #yellow)\n\n  testUnion =>\n    a := Set new fromList: #(1, 2, 3)\n    b := Set new fromList: #(3, 4, 5)\n    u := a union: b\n    self assert: u size equals: 5\n    self assert: (u includes: 1)\n    self assert: (u includes: 5)\n\n  testIntersection =>\n    a := Set new fromList: #(1, 2, 3)\n    b := Set new fromList: #(3, 4, 5)\n    i := a intersection: b\n    self assert: i size equals: 1\n    self assert: (i includes: 3)\n    self deny: (i includes: 1)\n\n  testDifference =>\n    a := Set new fromList: #(1, 2, 3)\n    b := Set new fromList: #(3, 4, 5)\n    d := a difference: b\n    self assert: d size equals: 2\n    self assert: (d includes: 1)\n    self deny: (d includes: 3)\n\n  testIssubsetof =>\n    small := Set new fromList: #(1, 2)\n    big := Set new fromList: #(1, 2, 3)\n    self assert: (small isSubsetOf: big)\n    self deny: (big isSubsetOf: small)\n\n  testAslist =>\n    self assert: ((Set new) fromList: #(3, 1, 2)) asList equals: #(1, 2, 3)\n\n  testIteration =>\n    self assert: (((Set new) fromList: #(1, 2, 3)) do: [:x | nil]) equals: nil\n    // Block receives each element — inject:into: verifies correct values are passed\n    self assert: (((Set new) fromList: #(1, 2, 3)) inject: 0 into: [:sum :x |\n      sum + x\n    ]) equals: 6\n\n  testRespondstoMethodReflection =>\n    s4 := (Set new) add: 1\n    self assert: (s4 respondsTo: #size)\n    self assert: (s4 respondsTo: #includes:)\n    self deny: (s4 respondsTo: #nonExistent)\n\n  testPrintstring =>\n    self assert: (((Set new) fromList: #(1, 2, 3)) printString) notNil\n    self assert: ((Set new) printString) notNil",
       "explanation": "E2E tests for Set (unique element collections using ordsets) (BT-73)"
+    },
+    {
+      "id": "stdlib-test-setup-once-default-test",
+      "title": "SetupOnceDefaultTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "SetupOnceDefaultTest",
+        "TestCase",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "setup_once_default_test",
+        "subclassing",
+        "testNormalTestsStillWork",
+        "testSuiteFixtureIsNilByDefault"
+      ],
+      "source": "// BT-1549: Tests that default no-op setUpOnce/tearDownOnce work\n// when not overridden by the subclass.\n\nTestCase subclass: SetupOnceDefaultTest\n\n  testSuiteFixtureIsNilByDefault => self assert: self suiteFixture equals: nil\n\n  testNormalTestsStillWork => self assert: (1 + 1) equals: 2",
+      "explanation": "BT-1549: Tests that default no-op setUpOnce/tearDownOnce work when not overridden by the subclass."
+    },
+    {
+      "id": "stdlib-test-setup-once-test",
+      "title": "SetupOnceTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "SetupOnceTest",
+        "TestCase",
+        "constructor",
+        "create",
+        "extends",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "object",
+        "setUpOnce",
+        "setup_once_test",
+        "subclassing",
+        "testFixtureHasExpectedValue",
+        "testFixtureIsAccessible",
+        "testFixtureIsConsistentAcrossTests"
+      ],
+      "source": "// BT-1549: Tests suite-level setUpOnce lifecycle hook.\n// setUpOnce runs once before all tests, returning a fixture accessible\n// via self suiteFixture (message send).\n\nTestCase subclass: SetupOnceTest\n\n  setUpOnce =>\n    // Return a dictionary as the shared fixture\n    Dictionary new: #{#sharedKey => \"sharedValue\", #counter => 0}\n\n  testFixtureIsAccessible =>\n    // suiteFixture should contain the dictionary from setUpOnce\n    self deny: (self suiteFixture == nil)\n\n  testFixtureHasExpectedValue =>\n    self assert: (self suiteFixture at: #sharedKey) equals: \"sharedValue\"\n\n  testFixtureIsConsistentAcrossTests =>\n    // Each test sees the same fixture value\n    self assert: (self suiteFixture at: #counter) equals: 0",
+      "explanation": "BT-1549: Tests suite-level setUpOnce lifecycle hook. setUpOnce runs once before all tests, returning a fixture accessible via self suiteFixture (message send)."
+    },
+    {
+      "id": "stdlib-test-setup-once-with-setup-test",
+      "title": "SetupOnceWithSetupTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "SetupOnceWithSetupTest",
+        "TestCase",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "property",
+        "setUp",
+        "setUpOnce",
+        "setup_once_with_setup_test",
+        "subclassing",
+        "testBothFixturesAvailable",
+        "testIsolationPreserved"
+      ],
+      "source": "// BT-1549: Tests that setUpOnce coexists with per-test setUp.\n\nTestCase subclass: SetupOnceWithSetupTest\n  field: perTestValue = 0\n\n  setUpOnce => #{#suite => \"fixture\"}\n\n  setUp => self withPerTestValue: 42\n\n  testBothFixturesAvailable =>\n    // Per-test setUp state\n    self assert: self.perTestValue equals: 42\n    // Suite-level fixture\n    self assert: (self suiteFixture at: #suite) equals: \"fixture\"\n\n  testIsolationPreserved =>\n    // Each test gets a fresh setUp instance\n    self assert: self.perTestValue equals: 42\n    // But shares the suite fixture\n    self assert: (self suiteFixture at: #suite) equals: \"fixture\"",
+      "explanation": "BT-1549: Tests that setUpOnce coexists with per-test setUp."
     },
     {
       "id": "stdlib-test-setup-return-value-test",

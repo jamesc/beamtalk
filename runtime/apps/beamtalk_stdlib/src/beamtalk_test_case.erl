@@ -28,6 +28,8 @@
     spawn_test_execution/6,
     %% BT-762: Exported for beamtalk_test_runner
     run_test_method/4,
+    run_test_method/5,
+    run_suite_lifecycle/5,
     structure_results/3,
     resolve_module/1,
     %% BT-1293: Exported for testing
@@ -35,7 +37,7 @@
 ]).
 
 %% FFI shims for (Erlang beamtalk_test_case) dispatch
--export([should/2, runAll/1, runClass/2, skipTest/1]).
+-export([should/2, runAll/1, runClass/2, skipTest/1, suiteFixture/1]).
 
 %% @doc Assert that a block raises an error of the specified kind.
 %%
@@ -150,11 +152,19 @@ execute_tests(runAll, _Args, ClassName, Module, FlatMethods) ->
             );
         _ ->
             StartTime = erlang:monotonic_time(millisecond),
-            Results = lists:map(
-                fun(Method) ->
-                    run_test_method(ClassName, Module, Method, FlatMethods)
-                end,
-                TestMethods
+            Results = run_suite_lifecycle(
+                ClassName,
+                Module,
+                FlatMethods,
+                TestMethods,
+                fun(SuiteFixture) ->
+                    lists:map(
+                        fun(Method) ->
+                            run_test_method(ClassName, Module, Method, FlatMethods, SuiteFixture)
+                        end,
+                        TestMethods
+                    )
+                end
             ),
             EndTime = erlang:monotonic_time(millisecond),
             Duration = (EndTime - StartTime) / 1000.0,
@@ -170,10 +180,18 @@ execute_tests('run:', [TestMethodName], ClassName, Module, FlatMethods) ->
             );
         true ->
             StartTime = erlang:monotonic_time(millisecond),
-            Result = run_test_method(ClassName, Module, TestMethodName, FlatMethods),
+            Results = run_suite_lifecycle(
+                ClassName,
+                Module,
+                FlatMethods,
+                [TestMethodName],
+                fun(SuiteFixture) ->
+                    [run_test_method(ClassName, Module, TestMethodName, FlatMethods, SuiteFixture)]
+                end
+            ),
             EndTime = erlang:monotonic_time(millisecond),
             Duration = (EndTime - StartTime) / 1000.0,
-            format_results([Result], Duration)
+            format_results(Results, Duration)
     end.
 
 %% @doc Run all test methods (BT-440 — BIF fallback path).
@@ -193,11 +211,19 @@ run_all(ClassName) ->
             );
         _ ->
             StartTime = erlang:monotonic_time(millisecond),
-            Results = lists:map(
-                fun(Method) ->
-                    run_test_method(ClassName, Module, Method, none)
-                end,
-                TestMethods
+            Results = run_suite_lifecycle(
+                ClassName,
+                Module,
+                none,
+                TestMethods,
+                fun(SuiteFixture) ->
+                    lists:map(
+                        fun(Method) ->
+                            run_test_method(ClassName, Module, Method, none, SuiteFixture)
+                        end,
+                        TestMethods
+                    )
+                end
             ),
             EndTime = erlang:monotonic_time(millisecond),
             Duration = (EndTime - StartTime) / 1000.0,
@@ -210,10 +236,18 @@ run_all(ClassName) ->
 run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     Module = resolve_module(ClassName),
     StartTime = erlang:monotonic_time(millisecond),
-    Result = run_test_method(ClassName, Module, TestMethodName, none),
+    Results = run_suite_lifecycle(
+        ClassName,
+        Module,
+        none,
+        [TestMethodName],
+        fun(SuiteFixture) ->
+            [run_test_method(ClassName, Module, TestMethodName, none, SuiteFixture)]
+        end
+    ),
     EndTime = erlang:monotonic_time(millisecond),
     Duration = (EndTime - StartTime) / 1000.0,
-    format_results([Result], Duration).
+    format_results(Results, Duration).
 
 %% @doc Run all tests for a class and return structured results (BT-699).
 %%
@@ -247,11 +281,19 @@ run_all_structured(ClassName) ->
             };
         _ ->
             StartTime = erlang:monotonic_time(millisecond),
-            Results = lists:map(
-                fun(Method) ->
-                    run_test_method(ClassName, Module, Method, none)
-                end,
-                TestMethods
+            Results = run_suite_lifecycle(
+                ClassName,
+                Module,
+                none,
+                TestMethods,
+                fun(SuiteFixture) ->
+                    lists:map(
+                        fun(Method) ->
+                            run_test_method(ClassName, Module, Method, none, SuiteFixture)
+                        end,
+                        TestMethods
+                    )
+                end
             ),
             EndTime = erlang:monotonic_time(millisecond),
             Duration = (EndTime - StartTime) / 1000.0,
@@ -274,10 +316,18 @@ run_all_structured(ClassName) ->
 run_single_structured(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     Module = resolve_module(ClassName),
     StartTime = erlang:monotonic_time(millisecond),
-    Result = run_test_method(ClassName, Module, TestMethodName, none),
+    Results = run_suite_lifecycle(
+        ClassName,
+        Module,
+        none,
+        [TestMethodName],
+        fun(SuiteFixture) ->
+            [run_test_method(ClassName, Module, TestMethodName, none, SuiteFixture)]
+        end
+    ),
     EndTime = erlang:monotonic_time(millisecond),
     Duration = (EndTime - StartTime) / 1000.0,
-    structure_results(ClassName, [Result], Duration).
+    structure_results(ClassName, Results, Duration).
 
 %% @doc Find all loaded TestCase subclasses (BT-699).
 %%
@@ -536,7 +586,16 @@ class_name_to_snake([H | T], _PrevLower, Acc) ->
 %% tearDown always runs, even if the test fails.
 -spec run_test_method(atom(), atom(), atom(), map() | none) ->
     {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
-run_test_method(_ClassName, Module, MethodName, FlatMethods) ->
+run_test_method(ClassName, Module, MethodName, FlatMethods) ->
+    run_test_method(ClassName, Module, MethodName, FlatMethods, nil).
+
+%% @doc Run a single test method with setUp/tearDown lifecycle and suite fixture (BT-1549).
+%%
+%% Like run_test_method/4 but injects `suiteFixture => SuiteFixture` into the
+%% instance map after setUp, so test methods can access `self.suiteFixture`.
+-spec run_test_method(atom(), atom(), atom(), map() | none, term()) ->
+    {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
+run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
     try
         Instance = Module:new(),
         {HasSetUp, HasTearDown} = check_lifecycle_methods(Module, FlatMethods),
@@ -546,7 +605,7 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods) ->
         %% class. If setUp ends with an untaken conditional (e.g. false ifTrue: [...]),
         %% it returns false/nil rather than self — using that as the receiver would
         %% corrupt all test method dispatches with a DNU error.
-        SetUpInstance =
+        SetUpInstance0 =
             case HasSetUp of
                 true ->
                     SetUpResult = Module:dispatch(setUp, [], Instance),
@@ -557,6 +616,8 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods) ->
                 false ->
                     Instance
             end,
+        %% BT-1549: Inject suite fixture so test methods can access self.suiteFixture
+        SetUpInstance = inject_suite_fixture(SetUpInstance0, SuiteFixture),
         TestResult =
             try
                 Module:dispatch(MethodName, [], SetUpInstance),
@@ -646,6 +707,84 @@ is_valid_setUp_result(Instance, Result) when is_map(Instance), is_map(Result) ->
     end;
 is_valid_setUp_result(_Instance, _Result) ->
     false.
+
+%% @doc Inject suite fixture into instance map (BT-1549).
+%%
+%% Adds `suiteFixture => Value` to the instance so test methods and tearDown
+%% can access it via `self.suiteFixture`. Always injects (even nil) so access
+%% never crashes with badkey.
+-spec inject_suite_fixture(map(), term()) -> map().
+inject_suite_fixture(Instance, SuiteFixture) when is_map(Instance) ->
+    Instance#{suiteFixture => SuiteFixture};
+inject_suite_fixture(Instance, _SuiteFixture) ->
+    Instance.
+
+%% @doc Run a batch of tests wrapped with setUpOnce/tearDownOnce lifecycle (BT-1549).
+%%
+%% 1. Creates temp instance, dispatches setUpOnce, captures return as Fixture
+%% 2. Calls TestFun(Fixture) which returns [{pass|fail|skip, ...}]
+%% 3. In `after`: creates temp instance, injects fixture, dispatches tearDownOnce
+%%
+%% If setUpOnce fails, all test methods are failed with "setUpOnce failed: ..." message.
+-spec run_suite_lifecycle(
+    atom(),
+    atom(),
+    map() | none,
+    [atom()],
+    fun((term()) -> [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}])
+) ->
+    [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}].
+run_suite_lifecycle(_ClassName, Module, FlatMethods, TestMethods, TestFun) ->
+    {HasSetUpOnce, HasTearDownOnce} = check_suite_lifecycle_methods(Module, FlatMethods),
+    case HasSetUpOnce orelse HasTearDownOnce of
+        false ->
+            %% No suite lifecycle — skip overhead
+            TestFun(nil);
+        true ->
+            try
+                Fixture =
+                    case HasSetUpOnce of
+                        true ->
+                            TempInstance = Module:new(),
+                            Module:dispatch(setUpOnce, [], TempInstance);
+                        false ->
+                            nil
+                    end,
+                try
+                    TestFun(Fixture)
+                after
+                    run_teardown_once(Module, Fixture, HasTearDownOnce)
+                end
+            catch
+                Class:Reason:ST ->
+                    %% setUpOnce failed — fail ALL tests in this class
+                    ErrorMsg =
+                        <<"setUpOnce failed: ", (format_test_error(Class, Reason, ST))/binary>>,
+                    [{fail, M, ErrorMsg} || M <- TestMethods]
+            end
+    end.
+
+%% @doc Check for setUpOnce/tearDownOnce methods (BT-1549).
+-spec check_suite_lifecycle_methods(atom(), map() | none) -> {boolean(), boolean()}.
+check_suite_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
+    {maps:is_key(setUpOnce, FlatMethods), maps:is_key(tearDownOnce, FlatMethods)};
+check_suite_lifecycle_methods(Module, none) ->
+    Exports = Module:module_info(exports),
+    {lists:keymember(setUpOnce, 1, Exports), lists:keymember(tearDownOnce, 1, Exports)}.
+
+%% @doc Run tearDownOnce, swallowing errors to avoid masking test results (BT-1549).
+-spec run_teardown_once(atom(), term(), boolean()) -> ok.
+run_teardown_once(Module, Fixture, true) ->
+    try
+        Instance = Module:new(),
+        WithFixture = inject_suite_fixture(Instance, Fixture),
+        Module:dispatch(tearDownOnce, [], WithFixture)
+    catch
+        _:_ -> ok
+    end,
+    ok;
+run_teardown_once(_Module, _Fixture, false) ->
+    ok.
 
 %% @doc Format test results for REPL display.
 -spec format_results(
@@ -791,6 +930,16 @@ skipTest(Reason) when is_atom(Reason) ->
     skipTest(atom_to_binary(Reason, utf8));
 skipTest(Reason) ->
     skipTest(iolist_to_binary(io_lib:format("~p", [Reason]))).
+
+%% suiteFixture: → suiteFixture/1 (BT-1549)
+%%
+%% Returns the suite fixture from the instance map, or nil if not present.
+%% The BUnit runner injects `suiteFixture => Value` into the instance map
+%% before test methods run, so this returns the setUpOnce return value.
+suiteFixture(Self) when is_map(Self) ->
+    maps:get(suiteFixture, Self, nil);
+suiteFixture(_Self) ->
+    nil.
 
 %% Extract the bare class name atom from a class reference tuple.
 %% Element 2 of the tuple is 'ClassName class'; strip trailing " class" (6 chars).

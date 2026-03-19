@@ -2098,6 +2098,39 @@ TestCase subclass: IntegrationTest
 - `setUp` returns a new self via `with*:` methods instead of using `self.x :=` assignment
 - Each test method receives the setUp'd value as `self` — mutations to actor references work normally, but `self` itself is immutable
 
+#### Suite-Level Setup — setUpOnce / tearDownOnce
+
+For expensive fixtures shared across all tests in a class (database connections, ETS tables, supervisor trees), override `setUpOnce` and `tearDownOnce`. These run once per class, not once per test.
+
+`setUpOnce` returns a fixture value accessible in each test method via `self suiteFixture`:
+
+```beamtalk
+TestCase subclass: DatabaseTest
+  field: conn = nil
+
+  setUpOnce => Database connect: "test_db"
+  tearDownOnce => self suiteFixture close
+
+  setUp => self withConn: self suiteFixture
+
+  testQuery =>
+    result := self.conn query: "SELECT 1"
+    self assert: result equals: 1
+
+  testInsert =>
+    self.conn execute: "INSERT INTO t VALUES (1)"
+    self assert: (self.conn query: "SELECT count(*) FROM t") equals: 1
+```
+
+**Lifecycle order:** `setUpOnce → (setUp → test → tearDown)* → tearDownOnce`
+
+**Key points:**
+- `setUpOnce` returns the fixture value (any type). The default returns `nil`.
+- `tearDownOnce` accesses the fixture via `self suiteFixture` for cleanup.
+- `tearDownOnce` runs even if tests fail.
+- If `setUpOnce` raises an error, all tests in the class fail with a clear message.
+- Per-test `setUp`/`tearDown` still run for each test, providing both shared and per-test state.
+
 ---
 
 See [Tooling](beamtalk-tooling.md) for CLI tools, REPL, VS Code extension, and testing framework.

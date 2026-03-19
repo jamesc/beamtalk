@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1549: Tests that default no-op setUpOnce/tearDownOnce work
+// when not overridden by the subclass.
+
+TestCase subclass: SetupOnceDefaultTest
+
+  testSuiteFixtureIsNilByDefault => self assert: self suiteFixture equals: nil
+
+  testNormalTestsStillWork => self assert: (1 + 1) equals: 2
