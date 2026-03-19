@@ -42,10 +42,11 @@ impl TypeChecker {
             // At runtime, class objects dispatch through this chain (ADR 0032 Phase 0
             // fallthrough), so the type checker must model the same path.
             //
-            // Factory selectors (spawn, new, etc.) are defined as instance methods on
-            // Actor/Value but routed class-side by beamtalk_class_dispatch.erl.
-            // Only these specific selectors bypass the Class chain check.
-            let is_factory_selector = matches!(selector, "spawn" | "spawnWith:" | "new" | "new:");
+            // BT-1548: spawn/spawnWith: are still instance methods on Actor but routed
+            // class-side by beamtalk_class_dispatch.erl — they need the bypass.
+            // new/new: are now proper class methods on Value (BT-1548) and found
+            // via find_class_method through the hierarchy, so no bypass needed.
+            let is_factory_selector = matches!(selector, "spawn" | "spawnWith:");
             let has_class_chain_method = hierarchy.resolves_selector("Class", selector)
                 || (is_factory_selector && hierarchy.resolves_selector(class_name, selector));
             if !has_class_chain_method {

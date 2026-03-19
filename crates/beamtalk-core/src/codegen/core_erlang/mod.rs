@@ -2634,6 +2634,37 @@ impl CoreErlangGenerator {
             return Ok(self.generate_class_builder_register());
         }
 
+        // BT-1548: basicNew/basicNewWith intrinsics in class method context.
+        // When Value defines `class sealed new => @intrinsic basicNew`, the class
+        // method body needs to call class_self_new (which routes through handle_new
+        // to the target class's auto-generated new/0 via the process dictionary).
+        if !is_quoted && self.in_class_method() {
+            match name {
+                "basicNew" => {
+                    return Ok(docvec![
+                        "call 'beamtalk_class_instantiation':'class_self_new'(",
+                        "call 'erlang':'get'('beamtalk_class_name'), ",
+                        "call 'erlang':'get'('beamtalk_class_module'), [])",
+                    ]);
+                }
+                "basicNewWith" => {
+                    let param = self
+                        .current_method_params
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "InitArgs".to_string());
+                    return Ok(docvec![
+                        "call 'beamtalk_class_instantiation':'class_self_new'(",
+                        "call 'erlang':'get'('beamtalk_class_name'), ",
+                        "call 'erlang':'get'('beamtalk_class_module'), [",
+                        Document::String(param),
+                        "])",
+                    ]);
+                }
+                _ => {}
+            }
+        }
+
         // BT-1478: Logger intrinsics — generate inline logger:log/3 calls.
         // These are the method bodies for Logger.bt's @intrinsic declarations.
         // Direct `Logger warn:` calls are intercepted at the call site by

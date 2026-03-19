@@ -529,6 +529,15 @@ impl CoreErlangGenerator {
         });
 
         if let Some(prim_name) = prim_name {
+            // BT-1548: basicNew intrinsic = standard value constructor.
+            // Generate the normal auto-generated new/0 (map constructor) instead
+            // of trying to inline a BIF. The class_new/2 function (generated
+            // separately by generate_class_method_functions) handles class-side
+            // dispatch via class_self_new.
+            if prim_name.as_str() == "basicNew" {
+                return self.generate_value_type_new(class);
+            }
+
             // Original path: inline the BIF call for the @primitive.
             let bif_doc = super::primitives::generate_primitive_bif(&class_name, &prim_name, &[])
                 .ok_or_else(|| {
