@@ -75,7 +75,7 @@ format_time(_) ->
 %% {Key, Value} pairs extracted from structured OTP reports.
 -spec format_msg_structured(term(), map()) -> {binary(), [{binary(), term()}]}.
 format_msg_structured({string, Msg}, _Meta) ->
-    {iolist_to_binary(Msg), []};
+    {safe_to_binary(Msg), []};
 format_msg_structured({report, Report}, Meta) when is_map(Report) ->
     %% Try to decompose structured OTP reports into fields
     case extract_report_fields(Report, Meta) of
@@ -95,11 +95,11 @@ format_msg_structured({Format, Args}, _Meta) ->
 -spec extract_report_fields(map(), map()) ->
     {binary(), [{binary(), term()}]} | undefined.
 extract_report_fields(#{label := {gen_server, terminate}, name := Name, reason := Reason}, _Meta) ->
-    Msg = iolist_to_binary(io_lib:format("gen_server ~tp terminated", [Name])),
+    Msg = safe_to_binary(io_lib:format("gen_server ~tp terminated", [Name])),
     Fields = [
         {<<"report_type">>, <<"gen_server_terminate">>},
-        {<<"name">>, iolist_to_binary(io_lib:format("~tp", [Name]))},
-        {<<"reason">>, iolist_to_binary(io_lib:format("~tp", [Reason]))}
+        {<<"name">>, safe_to_binary(io_lib:format("~tp", [Name]))},
+        {<<"reason">>, safe_to_binary(io_lib:format("~tp", [Reason]))}
     ],
     {Msg, Fields};
 extract_report_fields(
@@ -110,20 +110,20 @@ extract_report_fields(
             L when is_list(L) -> proplists:get_value(id, L, unknown);
             _ -> unknown
         end,
-    Msg = iolist_to_binary(io_lib:format("supervisor ~tp started child ~tp", [Sup, ChildId])),
+    Msg = safe_to_binary(io_lib:format("supervisor ~tp started child ~tp", [Sup, ChildId])),
     Fields = [
         {<<"report_type">>, <<"supervisor_progress">>},
-        {<<"name">>, iolist_to_binary(io_lib:format("~tp", [Sup]))}
+        {<<"name">>, safe_to_binary(io_lib:format("~tp", [Sup]))}
     ],
     {Msg, Fields};
 extract_report_fields(
     #{label := {supervisor, child_terminated}, supervisor := Sup, reason := Reason}, _Meta
 ) ->
-    Msg = iolist_to_binary(io_lib:format("supervisor ~tp child terminated: ~tp", [Sup, Reason])),
+    Msg = safe_to_binary(io_lib:format("supervisor ~tp child terminated: ~tp", [Sup, Reason])),
     Fields = [
         {<<"report_type">>, <<"supervisor_child_terminated">>},
-        {<<"name">>, iolist_to_binary(io_lib:format("~tp", [Sup]))},
-        {<<"reason">>, iolist_to_binary(io_lib:format("~tp", [Reason]))}
+        {<<"name">>, safe_to_binary(io_lib:format("~tp", [Sup]))},
+        {<<"reason">>, safe_to_binary(io_lib:format("~tp", [Reason]))}
     ],
     {Msg, Fields};
 extract_report_fields(#{label := {proc_lib, crash}, report := CrashInfo}, _Meta) when
@@ -131,10 +131,10 @@ extract_report_fields(#{label := {proc_lib, crash}, report := CrashInfo}, _Meta)
 ->
     Reason = proplists:get_value(error_info, CrashInfo, unknown),
     InitCall = proplists:get_value(initial_call, CrashInfo, unknown),
-    Msg = iolist_to_binary(io_lib:format("process crash: ~tp", [Reason])),
+    Msg = safe_to_binary(io_lib:format("process crash: ~tp", [Reason])),
     Fields = [
         {<<"report_type">>, <<"proc_lib_crash">>},
-        {<<"initial_call">>, iolist_to_binary(io_lib:format("~tp", [InitCall]))}
+        {<<"initial_call">>, safe_to_binary(io_lib:format("~tp", [InitCall]))}
     ],
     {Msg, Fields};
 extract_report_fields(_Report, _Meta) ->
@@ -145,12 +145,12 @@ extract_report_fields(_Report, _Meta) ->
 format_report_fallback(Report, Meta) ->
     case maps:get(report_cb, Meta, undefined) of
         undefined ->
-            iolist_to_binary(io_lib:format("~tp", [Report]));
+            safe_to_binary(io_lib:format("~tp", [Report]));
         Fun when is_function(Fun, 1) ->
             {Format, Args} = Fun(Report),
-            iolist_to_binary(io_lib:format(Format, Args));
+            safe_to_binary(io_lib:format(Format, Args));
         Fun when is_function(Fun, 2) ->
-            iolist_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
+            safe_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
     end.
 
 %% @doc Format the domain metadata as a dot-separated binary.

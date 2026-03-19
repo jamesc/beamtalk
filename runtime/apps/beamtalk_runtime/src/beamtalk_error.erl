@@ -24,7 +24,8 @@
     with_details/2,
     format/1,
     raise/1,
-    generate_message/3
+    generate_message/3,
+    format_reason/2
 ]).
 
 %% Type definition for error record
@@ -267,3 +268,16 @@ maybe_enrich_dnu_hint(#beamtalk_error{class = Class, selector = Selector} = Erro
     end;
 maybe_enrich_dnu_hint(Error) ->
     Error.
+
+%% @doc Format an exception class + reason as a compact human-readable binary.
+%%
+%% Extracts the message from #beamtalk_error{} records and Exception wrappers
+%% instead of dumping raw Erlang tuples. Used by debug-level logging in
+%% dispatch catch blocks to avoid verbose ~tp output.
+-spec format_reason(atom(), term()) -> binary().
+format_reason(_ErrClass, #beamtalk_error{kind = Kind, class = Class, message = Msg}) ->
+    iolist_to_binary(io_lib:format("~s (~s:~s)", [Msg, Class, Kind]));
+format_reason(_ErrClass, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) ->
+    format_reason(error, Err);
+format_reason(ErrClass, Reason) ->
+    iolist_to_binary(io_lib:format("~p:~tp", [ErrClass, Reason])).
