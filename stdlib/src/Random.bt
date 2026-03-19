@@ -29,7 +29,7 @@
 /// rng := Random seed: 42
 /// rng next                     // => deterministic value
 /// ```
-sealed Object subclass: Random
+sealed Value subclass: Random
 
   /// Use 'Random seed: integer' for a seeded instance, or 'Random new' for a random seed.
   class new: _ =>
