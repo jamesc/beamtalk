@@ -900,8 +900,6 @@ pub enum ExpectCategory {
     Type,
     /// Suppress unused-variable warnings.
     Unused,
-    /// Suppress self-capture-in-actor-block hints.
-    SelfCapture,
     /// Suppress dead-block-assignment warnings (BT-1476).
     DeadAssignment,
     /// Suppress deprecation warnings — wrong keyword/class-kind (BT-1529).
@@ -918,7 +916,6 @@ impl ExpectCategory {
             "dnu" => Some(Self::Dnu),
             "type" => Some(Self::Type),
             "unused" => Some(Self::Unused),
-            "self_capture" => Some(Self::SelfCapture),
             "dead_assignment" => Some(Self::DeadAssignment),
             "deprecation" => Some(Self::Deprecation),
             "all" => Some(Self::All),
@@ -933,7 +930,6 @@ impl ExpectCategory {
             Self::Dnu => "dnu",
             Self::Type => "type",
             Self::Unused => "unused",
-            Self::SelfCapture => "self_capture",
             Self::DeadAssignment => "dead_assignment",
             Self::Deprecation => "deprecation",
             Self::All => "all",
@@ -947,7 +943,6 @@ impl ExpectCategory {
             "dnu",
             "type",
             "unused",
-            "self_capture",
             "dead_assignment",
             "deprecation",
             "all",

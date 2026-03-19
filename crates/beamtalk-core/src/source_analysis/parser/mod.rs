@@ -368,8 +368,6 @@ pub enum DiagnosticCategory {
     EmptyBody,
     /// Style/redundancy lint (BT-959).
     Lint,
-    /// Self-capture-in-actor-block hint (BT-1302).
-    SelfCapture,
     /// Dead assignment in block closure (BT-1476).
     DeadAssignment,
     /// Duplicate extension method conflict (BT-1516).

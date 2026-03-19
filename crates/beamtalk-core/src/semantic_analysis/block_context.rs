@@ -84,13 +84,12 @@ pub(crate) fn is_literal_block(expr: &Expression) -> bool {
 
 /// Identifies selectors that iterate over a collection using a block.
 ///
-/// These are the higher-order methods where `self` captures inside literal blocks
-/// can deadlock via the `calling_self` re-entrancy mechanism (BT-953). Unlike
-/// `is_control_flow_selector`, this function excludes conditional selectors
-/// (`ifTrue:`, `ifFalse:`, etc.) that are safe for `self` captures.
+/// Unlike `is_control_flow_selector`, this function excludes conditional selectors
+/// (`ifTrue:`, `ifFalse:`, etc.) and only covers collection iteration HOFs.
 ///
 /// Returns `true` if the argument at the given index is a block passed into
-/// collection iteration — a position where `self` captures are dangerous.
+/// collection iteration.
+#[allow(dead_code)]
 pub(crate) fn is_collection_hof_selector(selector: &str, arg_index: usize) -> bool {
     match selector {
         "collect:" | "do:" | "select:" | "reject:" | "detect:" => arg_index == 0,
@@ -174,6 +173,7 @@ pub(crate) fn selector_to_string(selector: &MessageSelector) -> String {
 /// // self myHOM: myBlock
 /// // → Passed → Tier 2 stateful calling convention
 /// ```
+#[allow(dead_code)]
 pub(crate) fn classify_block(
     block_span: Span,
     parent_expr: &Expression,
