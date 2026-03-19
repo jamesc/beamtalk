@@ -229,11 +229,21 @@ run_class_by_name(ClassName) ->
             make_test_result(0, 0, 0, 0, 0.0, []);
         _ ->
             StartTime = erlang:monotonic_time(millisecond),
-            Results = lists:map(
-                fun(Method) ->
-                    beamtalk_test_case:run_test_method(ClassName, Module, Method, FlatMethods)
-                end,
-                TestMethods
+            Results = beamtalk_test_case:run_suite_lifecycle(
+                ClassName,
+                Module,
+                FlatMethods,
+                TestMethods,
+                fun(SuiteFixture) ->
+                    lists:map(
+                        fun(Method) ->
+                            beamtalk_test_case:run_test_method(
+                                ClassName, Module, Method, FlatMethods, SuiteFixture
+                            )
+                        end,
+                        TestMethods
+                    )
+                end
             ),
             EndTime = erlang:monotonic_time(millisecond),
             Duration = (EndTime - StartTime) / 1000.0,
@@ -246,10 +256,22 @@ run_class_by_name(ClassName) ->
 run_method_by_name(ClassName, TestName) ->
     {_TestMethods, FlatMethods, Module} = discover_methods_via_registry(ClassName),
     StartTime = erlang:monotonic_time(millisecond),
-    Result = beamtalk_test_case:run_test_method(ClassName, Module, TestName, FlatMethods),
+    Results = beamtalk_test_case:run_suite_lifecycle(
+        ClassName,
+        Module,
+        FlatMethods,
+        [TestName],
+        fun(SuiteFixture) ->
+            [
+                beamtalk_test_case:run_test_method(
+                    ClassName, Module, TestName, FlatMethods, SuiteFixture
+                )
+            ]
+        end
+    ),
     EndTime = erlang:monotonic_time(millisecond),
     Duration = (EndTime - StartTime) / 1000.0,
-    Structured = beamtalk_test_case:structure_results(ClassName, [Result], Duration),
+    Structured = beamtalk_test_case:structure_results(ClassName, Results, Duration),
     structured_to_test_result(Structured).
 
 %% @doc Discover methods and module via class registry gen_server.

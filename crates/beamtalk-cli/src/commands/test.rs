@@ -34,6 +34,7 @@ type PkgClassIndexes = HashMap<Utf8PathBuf, (HashMap<String, String>, HashMap<St
 
 /// Metadata about a `TestCase` subclass discovered in a `.bt` file.
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct TestCaseClass {
     /// Class name (e.g., `CounterTest`).
     pub(crate) class_name: String,
@@ -48,6 +49,10 @@ pub(crate) struct TestCaseClass {
     pub(crate) has_setup: bool,
     /// Whether a `tearDown` method is defined.
     pub(crate) has_teardown: bool,
+    /// Whether a `setUpOnce` method is defined (BT-1549).
+    pub(crate) has_setup_once: bool,
+    /// Whether a `tearDownOnce` method is defined (BT-1549).
+    pub(crate) has_teardown_once: bool,
 }
 
 /// Discover `TestCase` subclasses in a `.bt` file by parsing the AST.
@@ -102,6 +107,8 @@ pub(crate) fn discover_test_classes(
         let mut test_methods = Vec::new();
         let mut has_setup = false;
         let mut has_teardown = false;
+        let mut has_setup_once = false;
+        let mut has_teardown_once = false;
 
         for method in &class.methods {
             let selector_name = method.selector.name();
@@ -111,6 +118,10 @@ pub(crate) fn discover_test_classes(
                 has_setup = true;
             } else if selector_name == "tearDown" {
                 has_teardown = true;
+            } else if selector_name == "setUpOnce" {
+                has_setup_once = true;
+            } else if selector_name == "tearDownOnce" {
+                has_teardown_once = true;
             }
         }
 
@@ -122,6 +133,8 @@ pub(crate) fn discover_test_classes(
                 test_methods,
                 has_setup,
                 has_teardown,
+                has_setup_once,
+                has_teardown_once,
             });
         }
     }
@@ -143,6 +156,7 @@ pub(crate) fn discover_test_classes(
 pub(crate) fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> String {
     let eunit_module = format!("{}_tests", test_class.module_name);
     let bt_module = &test_class.module_name;
+    let has_suite_lifecycle = test_class.has_setup_once || test_class.has_teardown_once;
 
     let mut erl = String::new();
 
@@ -154,6 +168,19 @@ pub(crate) fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &s
         class = test_class.class_name,
     );
 
+    if has_suite_lifecycle {
+        // BT-1549: Use EUnit {setup, Setup, Cleanup, Instantiator} fixture pattern
+        // to run setUpOnce once before all tests and tearDownOnce once after.
+        generate_eunit_suite_wrapper(&mut erl, test_class, bt_module);
+    } else {
+        generate_eunit_per_test_wrapper(&mut erl, test_class, bt_module);
+    }
+
+    erl
+}
+
+/// Generate `EUnit` wrapper with per-test functions (original pattern, no setUpOnce).
+fn generate_eunit_per_test_wrapper(erl: &mut String, test_class: &TestCaseClass, bt_module: &str) {
     for method_name in &test_class.test_methods {
         // EUnit test generator name: method_name + _test_ (trailing underscore)
         // Using _test_ generator form with {timeout, 30, ...} to allow tests that
@@ -236,8 +263,126 @@ pub(crate) fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &s
 
         erl.push('\n');
     }
+}
 
-    erl
+/// Generate `EUnit` wrapper using `{setup, Setup, Cleanup, Instantiator}` fixture
+/// pattern for classes with setUpOnce/tearDownOnce (BT-1549).
+fn generate_eunit_suite_wrapper(erl: &mut String, test_class: &TestCaseClass, bt_module: &str) {
+    let has_setup = test_class.has_setup;
+    let has_teardown = test_class.has_teardown;
+    let has_setup_once = test_class.has_setup_once;
+    let has_teardown_once = test_class.has_teardown_once;
+
+    // Single EUnit test generator that wraps all tests in a {setup, ...} fixture
+    let _ = writeln!(erl, "'suite_test_'() ->");
+    let _ = writeln!(erl, "    {{setup,");
+
+    // Setup function: runs setUpOnce, returns Fixture
+    if has_setup_once {
+        let _ = writeln!(
+            erl,
+            "     fun() -> '{bt_module}':dispatch(setUpOnce, [], '{bt_module}':new()) end,"
+        );
+    } else {
+        let _ = writeln!(erl, "     fun() -> nil end,");
+    }
+
+    // Cleanup function: runs tearDownOnce with fixture injected
+    if has_teardown_once {
+        let _ = writeln!(erl, "     fun(Fixture) ->");
+        let _ = writeln!(erl, "         try");
+        let _ = writeln!(
+            erl,
+            "             Inst = ('{bt_module}':new())#{{suiteFixture => Fixture}},"
+        );
+        let _ = writeln!(
+            erl,
+            "             '{bt_module}':dispatch(tearDownOnce, [], Inst)"
+        );
+        let _ = writeln!(erl, "         catch _:_ -> ok");
+        let _ = writeln!(erl, "         end");
+        let _ = writeln!(erl, "     end,");
+    } else {
+        let _ = writeln!(erl, "     fun(_Fixture) -> ok end,");
+    }
+
+    // Instantiator: returns list of test descriptors, each with Fixture injected
+    let _ = writeln!(erl, "     fun(Fixture) -> [");
+
+    for (i, method_name) in test_class.test_methods.iter().enumerate() {
+        let comma = if i + 1 < test_class.test_methods.len() {
+            ","
+        } else {
+            ""
+        };
+
+        let _ = writeln!(erl, "         {{\"{method_name}\", {{timeout, 30, fun() ->");
+        let _ = writeln!(erl, "             Instance = '{bt_module}':new(),");
+
+        // setUp
+        let instance_var = if has_setup {
+            let _ = writeln!(
+                erl,
+                "             SetUpResult = '{bt_module}':dispatch('setUp', [], Instance),"
+            );
+            let _ = writeln!(
+                erl,
+                "             Instance1 = case beamtalk_test_case:is_valid_setUp_result(Instance, SetUpResult) of"
+            );
+            let _ = writeln!(erl, "                 true -> SetUpResult;");
+            let _ = writeln!(erl, "                 false -> Instance");
+            let _ = writeln!(erl, "             end,");
+            "Instance1"
+        } else {
+            "Instance"
+        };
+
+        // Inject suite fixture
+        let _ = writeln!(
+            erl,
+            "             {instance_var}F = {instance_var}#{{suiteFixture => Fixture}},"
+        );
+        let fixture_var = format!("{instance_var}F");
+
+        // Run test + tearDown
+        if has_teardown {
+            let _ = writeln!(erl, "             try");
+            let _ = writeln!(
+                erl,
+                "                 '{bt_module}':dispatch('{method_name}', [], {fixture_var})"
+            );
+            let _ = writeln!(erl, "             catch");
+            let _ = writeln!(erl, "                 throw:{{bunit_skip, _}} -> ok;");
+            let _ = writeln!(
+                erl,
+                "                 error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok"
+            );
+            let _ = writeln!(erl, "             after");
+            let _ = writeln!(
+                erl,
+                "                 '{bt_module}':dispatch('tearDown', [], {fixture_var})"
+            );
+            let _ = writeln!(erl, "             end");
+        } else {
+            let _ = writeln!(erl, "             try");
+            let _ = writeln!(
+                erl,
+                "                 '{bt_module}':dispatch('{method_name}', [], {fixture_var})"
+            );
+            let _ = writeln!(erl, "             catch");
+            let _ = writeln!(erl, "                 throw:{{bunit_skip, _}} -> ok;");
+            let _ = writeln!(
+                erl,
+                "                 error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok"
+            );
+            let _ = writeln!(erl, "             end");
+        }
+
+        let _ = writeln!(erl, "         end}}}}{comma}");
+    }
+
+    let _ = writeln!(erl, "     ] end");
+    let _ = writeln!(erl, "    }}.");
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1680,6 +1825,8 @@ mod tests {
             test_methods: vec!["testIncrement".to_string()],
             has_setup: false,
             has_teardown: false,
+            has_setup_once: false,
+            has_teardown_once: false,
         };
 
         let wrapper = generate_eunit_wrapper(&test_class, "test/counter_test.bt");
@@ -1987,6 +2134,8 @@ mod tests {
             test_methods: vec!["testA".to_string(), "testB".to_string()],
             has_setup: true,
             has_teardown: true,
+            has_setup_once: false,
+            has_teardown_once: false,
         };
 
         let wrapper = generate_eunit_wrapper(&test_class, "test/my_test.bt");

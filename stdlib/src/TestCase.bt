@@ -57,6 +57,33 @@ Value subclass: TestCase
   /// Override in subclasses to release resources or reset state.
   tearDown => nil
 
+  /// Prepare a suite-level fixture. Called once before all tests in this class.
+  /// Override to create expensive resources shared across tests.
+  /// The return value is accessible via `self suiteFixture` in each test method.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// setUpOnce => Database connect: "test_db"
+  /// ```
+  setUpOnce => nil
+
+  /// Clean up the suite-level fixture. Called once after all tests complete.
+  /// Override to release resources created in `setUpOnce`.
+  /// Access the fixture via `self suiteFixture`.
+  /// Runs even if tests fail.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tearDownOnce => self suiteFixture close
+  /// ```
+  tearDownOnce => nil
+
+  /// Access the suite-level fixture set by `setUpOnce`.
+  /// Returns nil when no setUpOnce fixture has been set.
+  /// The test runner injects the fixture value into the instance map
+  /// before each test method runs.
+  suiteFixture => (Erlang beamtalk_test_case) suiteFixture: self
+
   /// Assert that `condition` is true, failing the test if it is false.
   ///
   /// ## Examples
