@@ -4,16 +4,12 @@
 // BUnit tests for Ets class (BT-1189)
 
 TestCase subclass: EtsTest
-  state: table = nil
+  field: table = nil
 
-  setUp =>
-    self.table := Ets new: #etsTest type: #set
-    self
+  setUp => self withTable: (Ets new: #etsTest type: #set)
 
   tearDown =>
-    // Guard: testDelete sets self.table to nil after destroying it
     self.table isNil ifFalse: [[self.table delete] on: Error do: [:e | nil]]
-    self.table := nil
 
   testInsertAndLookup =>
     self.table at: "key" put: "value"
@@ -77,7 +73,6 @@ TestCase subclass: EtsTest
 
   testDelete =>
     self.table delete
-    self.table := nil
     // Table is gone — creating a fresh one with the same name succeeds
     fresh := Ets new: #etsTest type: #set
     self assert: fresh size equals: 0

@@ -4,13 +4,13 @@
 // BUnit tests for docs/learning/18-file-io.md
 
 TestCase subclass: Ch18FileIO
-  state: tmpDir = "target/bt-doctest-tmp/ch18"
-  state: nl = ""
+  field: tmpDir = "target/bt-doctest-tmp/ch18"
+  field: nl = ""
 
   setUp =>
-    self.nl := String fromCodePoint: 10
-    File mkdirAll: self.tmpDir
-    self
+    updated := self withNl: (String fromCodePoint: 10)
+    File mkdirAll: updated tmpDir
+    updated
 
   tearDown =>
     File deleteAll: self.tmpDir

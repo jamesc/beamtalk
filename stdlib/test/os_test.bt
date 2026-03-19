@@ -4,9 +4,9 @@
 // Stdlib tests for OS class (BT-1244, BT-1247)
 
 TestCase subclass: OSTest
-  state: isUnix = false
+  field: isUnix = false
 
-  setUp => self.isUnix := System osFamily == "unix"
+  setUp => self withIsUnix: (System osFamily == "unix")
 
   testRunReturnsString =>
     // echo is a shell builtin on both Unix and Windows
