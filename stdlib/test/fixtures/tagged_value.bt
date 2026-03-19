@@ -8,6 +8,6 @@
 // dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter.
 
 Value subclass: TaggedValue
-  state: tag = ""
+  field: tag = ""
 
   class fromTag: t => TaggedValue tag: t

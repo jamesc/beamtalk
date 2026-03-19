@@ -2506,15 +2506,12 @@
         "TestCase",
         "assign",
         "assignment",
-        "constructor",
-        "create",
         "extends",
         "for each",
         "for-each",
         "forEach",
         "inherit",
         "inheritance",
-        "instantiate",
         "iterate",
         "iteration",
         "loop",
@@ -2529,7 +2526,7 @@
         "testNonMatchingClassDoesNotCatch",
         "testSignalCustomError"
       ],
-      "source": "TestCase subclass: Ch12CustomErrors\n\n  testSignalCustomError =>\n    result := [\n      ValidationError new signal: \"bad input\"\n    ] on: ValidationError do: [:e | e message]\n    self assert: result equals: \"bad input\"\n\n  testCatchByParentClass =>\n    result := [\n      ValidationError new signal: \"oops\"\n    ] on: Error do: [:e | \"caught by Error\"]\n    self assert: result equals: \"caught by Error\"\n\n  testCatchByRootException =>\n    result := [\n      ValidationError new signal: \"oops\"\n    ] on: Exception do: [:e | \"caught by Exception\"]\n    self assert: result equals: \"caught by Exception\"\n\n  testNonMatchingClassDoesNotCatch =>\n    result := [\n      [ValidationError new signal: \"no\"] on: TypeError do: [:e | \"wrong\"]\n    ] on: Exception do: [:e | \"correct\"]\n    self assert: result equals: \"correct\"\n\n  testExceptionClassPreserved =>\n    result := [\n      ValidationError new signal: \"test\"\n    ] on: Exception do: [:e | e class]\n    self assert: result equals: ValidationError",
+      "source": "TestCase subclass: Ch12CustomErrors\n\n  testSignalCustomError =>\n    result := [\n      ValidationError signal: \"bad input\"\n    ] on: ValidationError do: [:e | e message]\n    self assert: result equals: \"bad input\"\n\n  testCatchByParentClass =>\n    result := [\n      ValidationError signal: \"oops\"\n    ] on: Error do: [:e | \"caught by Error\"]\n    self assert: result equals: \"caught by Error\"\n\n  testCatchByRootException =>\n    result := [\n      ValidationError signal: \"oops\"\n    ] on: Exception do: [:e | \"caught by Exception\"]\n    self assert: result equals: \"caught by Exception\"\n\n  testNonMatchingClassDoesNotCatch =>\n    result := [\n      [ValidationError signal: \"no\"] on: TypeError do: [:e | \"wrong\"]\n    ] on: Exception do: [:e | \"correct\"]\n    self assert: result equals: \"correct\"\n\n  testExceptionClassPreserved =>\n    result := [\n      ValidationError signal: \"test\"\n    ] on: Exception do: [:e | e class]\n    self assert: result equals: ValidationError",
       "explanation": "Code example from docs/learning/12-error-handling.md"
     },
     {
@@ -4798,15 +4795,12 @@
         "assign",
         "assignment",
         "ch12custom_errors",
-        "constructor",
-        "create",
         "extends",
         "for each",
         "for-each",
         "forEach",
         "inherit",
         "inheritance",
-        "instantiate",
         "iterate",
         "iteration",
         "loop",
@@ -4821,7 +4815,7 @@
         "testNonMatchingClassDoesNotCatch",
         "testSignalCustomError"
       ],
-      "source": "// BUnit tests for docs/learning/12-error-handling.md (custom exceptions)\n\nTestCase subclass: Ch12CustomErrors\n\n  testSignalCustomError =>\n    result := [\n      ValidationError new signal: \"bad input\"\n    ] on: ValidationError do: [:e | e message]\n    self assert: result equals: \"bad input\"\n\n  testCatchByParentClass =>\n    result := [\n      ValidationError new signal: \"oops\"\n    ] on: Error do: [:e | \"caught by Error\"]\n    self assert: result equals: \"caught by Error\"\n\n  testCatchByRootException =>\n    result := [\n      ValidationError new signal: \"oops\"\n    ] on: Exception do: [:e | \"caught by Exception\"]\n    self assert: result equals: \"caught by Exception\"\n\n  testNonMatchingClassDoesNotCatch =>\n    result := [\n      [ValidationError new signal: \"no\"] on: TypeError do: [:e | \"wrong\"]\n    ] on: Exception do: [:e | \"correct\"]\n    self assert: result equals: \"correct\"\n\n  testExceptionClassPreserved =>\n    result := [\n      ValidationError new signal: \"test\"\n    ] on: Exception do: [:e | e class]\n    self assert: result equals: ValidationError",
+      "source": "// BUnit tests for docs/learning/12-error-handling.md (custom exceptions)\n\nTestCase subclass: Ch12CustomErrors\n\n  testSignalCustomError =>\n    result := [\n      ValidationError signal: \"bad input\"\n    ] on: ValidationError do: [:e | e message]\n    self assert: result equals: \"bad input\"\n\n  testCatchByParentClass =>\n    result := [\n      ValidationError signal: \"oops\"\n    ] on: Error do: [:e | \"caught by Error\"]\n    self assert: result equals: \"caught by Error\"\n\n  testCatchByRootException =>\n    result := [\n      ValidationError signal: \"oops\"\n    ] on: Exception do: [:e | \"caught by Exception\"]\n    self assert: result equals: \"caught by Exception\"\n\n  testNonMatchingClassDoesNotCatch =>\n    result := [\n      [ValidationError signal: \"no\"] on: TypeError do: [:e | \"wrong\"]\n    ] on: Exception do: [:e | \"correct\"]\n    self assert: result equals: \"correct\"\n\n  testExceptionClassPreserved =>\n    result := [\n      ValidationError signal: \"test\"\n    ] on: Exception do: [:e | e class]\n    self assert: result equals: ValidationError",
       "explanation": "BUnit tests for docs/learning/12-error-handling.md (custom exceptions)"
     },
     {
@@ -11156,8 +11150,6 @@
         "TestCase",
         "assign",
         "assignment",
-        "constructor",
-        "create",
         "custom_exceptions_test",
         "extends",
         "for each",
@@ -11165,7 +11157,6 @@
         "forEach",
         "inherit",
         "inheritance",
-        "instantiate",
         "iterate",
         "iteration",
         "loop",
@@ -11188,7 +11179,7 @@
         "testSignalPreservesKind",
         "testSignalPreservesMessage"
       ],
-      "source": "// Tests for user-defined error subclasses - migrated from bootstrap/custom_exceptions.bt (BT-827)\n\nTestCase subclass: CustomExceptionsTest\n\n  testSignalFromCustomErrorRaisesWithCorrectClass =>\n    result := [\n      MyCustomError new signal: \"oops\"\n    ] on: Exception do: [:e | e class]\n    self assert: result equals: MyCustomError\n\n  testSignalNoArgsOnCustomErrorRaisesWithClassName =>\n    result := [MyCustomError new signal] on: Exception do: [:e | e class]\n    self assert: result equals: MyCustomError\n\n  testSignalNoArgsMessageIsClassName =>\n    result := [MyCustomError new signal] on: Exception do: [:e | e message]\n    self assert: result equals: \"MyCustomError\"\n\n  testSignalPreservesMessage =>\n    result := [\n      MyCustomError new signal: \"custom message\"\n    ] on: Exception do: [:e | e message]\n    self assert: result equals: \"custom message\"\n\n  testSignalPreservesKind =>\n    result := [MyCustomError new signal: \"test\"] on: Exception do: [:e | e kind]\n    self assert: result equals: #signal\n\n  testCatchByExactClass =>\n    // on: MyCustomError do: catches MyCustomError\n    result := [\n      MyCustomError new signal: \"caught\"\n    ] on: MyCustomError do: [:e | e message]\n    self assert: result equals: \"caught\"\n\n  testCatchByParentClass =>\n    // on: Error do: catches MyCustomError (Error is superclass)\n    result := [\n      MyCustomError new signal: \"err\"\n    ] on: Error do: [:e | \"caught by Error\"]\n    self assert: result equals: \"caught by Error\"\n\n  testCatchByRootException =>\n    // on: Exception do: catches MyCustomError (Exception is root)\n    result := [\n      MyCustomError new signal: \"exc\"\n    ] on: Exception do: [:e | \"caught by Exception\"]\n    self assert: result equals: \"caught by Exception\"\n\n  testNonMatchingClassTypeError =>\n    // on: TypeError do: does NOT catch MyCustomError\n    result := [\n      [MyCustomError new signal: \"no\"] on: TypeError do: [:e | \"wrong\"]\n    ] on: Exception do: [:e | \"correct\"]\n    self assert: result equals: \"correct\"\n\n  testNonMatchingClassRuntimeError =>\n    // on: RuntimeError do: does NOT catch MyCustomError\n    result := [\n      [MyCustomError new signal: \"no\"] on: RuntimeError do: [:e | \"wrong\"]\n    ] on: Exception do: [:e | \"correct\"]\n    self assert: result equals: \"correct\"\n\n  testBuiltInDoesNotUnderstandStillWorks =>\n    // Built-in does_not_understand still maps to RuntimeError\n    @expect dnu\n    result := [42 noSuchMethod] on: RuntimeError do: [:e | e class]\n    self assert: result equals: RuntimeError\n\n  testBuiltInDivisionByZero =>\n    // Built-in division by zero raises an exception\n    result := [1 / 0] on: Exception do: [:e | \"caught\"]\n    self assert: result equals: \"caught\"\n\n  testReSignalingCaughtCustomException =>\n    // Re-signaling a caught custom exception preserves its class\n    result := [\n      [\n        MyCustomError new signal: \"re-test\"\n      ] on: MyCustomError do: [:e | e signal: \"forwarded\"]\n    ] on: MyCustomError do: [:e | e message]\n    self assert: result equals: \"forwarded\"",
+      "source": "// Tests for user-defined error subclasses - migrated from bootstrap/custom_exceptions.bt (BT-827)\n\nTestCase subclass: CustomExceptionsTest\n\n  testSignalFromCustomErrorRaisesWithCorrectClass =>\n    result := [MyCustomError signal: \"oops\"] on: Exception do: [:e | e class]\n    self assert: result equals: MyCustomError\n\n  testSignalNoArgsOnCustomErrorRaisesWithClassName =>\n    result := [MyCustomError signal] on: Exception do: [:e | e class]\n    self assert: result equals: MyCustomError\n\n  testSignalNoArgsMessageIsClassName =>\n    result := [MyCustomError signal] on: Exception do: [:e | e message]\n    self assert: result equals: \"MyCustomError\"\n\n  testSignalPreservesMessage =>\n    result := [\n      MyCustomError signal: \"custom message\"\n    ] on: Exception do: [:e | e message]\n    self assert: result equals: \"custom message\"\n\n  testSignalPreservesKind =>\n    result := [MyCustomError signal: \"test\"] on: Exception do: [:e | e kind]\n    self assert: result equals: #signal\n\n  testCatchByExactClass =>\n    // on: MyCustomError do: catches MyCustomError\n    result := [\n      MyCustomError signal: \"caught\"\n    ] on: MyCustomError do: [:e | e message]\n    self assert: result equals: \"caught\"\n\n  testCatchByParentClass =>\n    // on: Error do: catches MyCustomError (Error is superclass)\n    result := [\n      MyCustomError signal: \"err\"\n    ] on: Error do: [:e | \"caught by Error\"]\n    self assert: result equals: \"caught by Error\"\n\n  testCatchByRootException =>\n    // on: Exception do: catches MyCustomError (Exception is root)\n    result := [\n      MyCustomError signal: \"exc\"\n    ] on: Exception do: [:e | \"caught by Exception\"]\n    self assert: result equals: \"caught by Exception\"\n\n  testNonMatchingClassTypeError =>\n    // on: TypeError do: does NOT catch MyCustomError\n    result := [\n      [MyCustomError signal: \"no\"] on: TypeError do: [:e | \"wrong\"]\n    ] on: Exception do: [:e | \"correct\"]\n    self assert: result equals: \"correct\"\n\n  testNonMatchingClassRuntimeError =>\n    // on: RuntimeError do: does NOT catch MyCustomError\n    result := [\n      [MyCustomError signal: \"no\"] on: RuntimeError do: [:e | \"wrong\"]\n    ] on: Exception do: [:e | \"correct\"]\n    self assert: result equals: \"correct\"\n\n  testBuiltInDoesNotUnderstandStillWorks =>\n    // Built-in does_not_understand still maps to RuntimeError\n    @expect dnu\n    result := [42 noSuchMethod] on: RuntimeError do: [:e | e class]\n    self assert: result equals: RuntimeError\n\n  testBuiltInDivisionByZero =>\n    // Built-in division by zero raises an exception\n    result := [1 / 0] on: Exception do: [:e | \"caught\"]\n    self assert: result equals: \"caught\"\n\n  testReSignalingCaughtCustomException =>\n    // Re-signaling a caught custom exception preserves its class\n    result := [\n      [\n        MyCustomError signal: \"re-test\"\n      ] on: MyCustomError do: [:e | e signal: \"forwarded\"]\n    ] on: MyCustomError do: [:e | e message]\n    self assert: result equals: \"forwarded\"",
       "explanation": "Tests for user-defined error subclasses - migrated from bootstrap/custom_exceptions.bt (BT-827)"
     },
     {
@@ -13812,8 +13803,6 @@
         "assignment",
         "branch",
         "conditional",
-        "constructor",
-        "create",
         "extends",
         "failing_handle_info_server",
         "field",
@@ -13824,7 +13813,6 @@
         "inherit",
         "inheritance",
         "instance variable",
-        "instantiate",
         "member",
         "mutate",
         "mutation",
@@ -13835,7 +13823,7 @@
         "subclassing",
         "unless"
       ],
-      "source": "// BT-1457: Server subclass that raises an error in handleInfo: (error recovery testing)\n\nServer subclass: FailingHandleInfoServer\n  state: count = 0\n\n  handleInfo: msg =>\n    msg == #crash ifTrue: [\n      Error new signal: \"deliberate handleInfo: error\"\n    ] ifFalse: [self.count := self.count + 1]\n\n  getCount => self.count",
+      "source": "// BT-1457: Server subclass that raises an error in handleInfo: (error recovery testing)\n\nServer subclass: FailingHandleInfoServer\n  state: count = 0\n\n  handleInfo: msg =>\n    msg == #crash ifTrue: [\n      Error signal: \"deliberate handleInfo: error\"\n    ] ifFalse: [self.count := self.count + 1]\n\n  getCount => self.count",
       "explanation": "BT-1457: Server subclass that raises an error in handleInfo: (error recovery testing)"
     },
     {
@@ -13848,8 +13836,6 @@
         "actor",
         "async",
         "concurrent",
-        "constructor",
-        "create",
         "extends",
         "failing_initialize_actor",
         "field",
@@ -13860,13 +13846,12 @@
         "inheritance",
         "initialize",
         "instance variable",
-        "instantiate",
         "member",
         "process",
         "property",
         "subclassing"
       ],
-      "source": "// Fixture for actor_initialize_test.bt — actor whose initialize raises an error\n\nActor subclass: FailingInitializeActor\n  state: value = 0\n\n  initialize => Error new signal: \"initialize failed on purpose\"\n\n  getValue => self.value",
+      "source": "// Fixture for actor_initialize_test.bt — actor whose initialize raises an error\n\nActor subclass: FailingInitializeActor\n  state: value = 0\n\n  initialize => Error signal: \"initialize failed on purpose\"\n\n  getValue => self.value",
       "explanation": "Fixture for actor_initialize_test.bt — actor whose initialize raises an error"
     },
     {
@@ -13879,8 +13864,6 @@
         "actor",
         "async",
         "concurrent",
-        "constructor",
-        "create",
         "extends",
         "failing_terminate_actor",
         "field",
@@ -13890,14 +13873,13 @@
         "inherit",
         "inheritance",
         "instance variable",
-        "instantiate",
         "member",
         "process",
         "property",
         "subclassing",
         "terminate:"
       ],
-      "source": "// Fixture for actor_terminate_test.bt — actor whose terminate: raises an error\n\nActor subclass: FailingTerminateActor\n  state: value = 0\n\n  getValue => self.value\n\n  terminate: _reason => Error new signal: \"terminate failed on purpose\"",
+      "source": "// Fixture for actor_terminate_test.bt — actor whose terminate: raises an error\n\nActor subclass: FailingTerminateActor\n  state: value = 0\n\n  getValue => self.value\n\n  terminate: _reason => Error signal: \"terminate failed on purpose\"",
       "explanation": "Fixture for actor_terminate_test.bt — actor whose terminate: raises an error"
     },
     {
@@ -14304,7 +14286,7 @@
         "subclassing",
         "value"
       ],
-      "source": "// Fixture for BT-1167: Value subclass with left/right fields.\n// Used to test that inspect recursively inspects nested value objects.\n\nValue subclass: InspectPair\n  state: left = nil\n  state: right = nil",
+      "source": "// Fixture for BT-1167: Value subclass with left/right fields.\n// Used to test that inspect recursively inspects nested value objects.\n\nValue subclass: InspectPair\n  field: left = nil\n  field: right = nil",
       "explanation": "Fixture for BT-1167: Value subclass with left/right fields. Used to test that inspect recursively inspects nested value objects."
     },
     {
@@ -14746,7 +14728,7 @@
         "subclassing",
         "value"
       ],
-      "source": "// Fixture for BT-1167: Value subclass with a String state field.\n// Used to test that inspect quotes string field values.\n\nValue subclass: NamedItem\n  state: name = \"\"",
+      "source": "// Fixture for BT-1167: Value subclass with a String state field.\n// Used to test that inspect quotes string field values.\n\nValue subclass: NamedItem\n  field: name = \"\"",
       "explanation": "Fixture for BT-1167: Value subclass with a String state field. Used to test that inspect quotes string field values."
     },
     {
@@ -15705,7 +15687,7 @@
         "tagged_value",
         "value"
       ],
-      "source": "// TaggedValue — BT-996 fixture: single-slot Value subclass whose factory method\n// uses `ClassName slot: value` syntax inside a class method body.\n//\n// This exercises the BT-996 bug fix: `TaggedValue tag: t` inside `class fromTag:` must\n// dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter.\n\nValue subclass: TaggedValue\n  state: tag = \"\"\n\n  class fromTag: t => TaggedValue tag: t",
+      "source": "// TaggedValue — BT-996 fixture: single-slot Value subclass whose factory method\n// uses `ClassName slot: value` syntax inside a class method body.\n//\n// This exercises the BT-996 bug fix: `TaggedValue tag: t` inside `class fromTag:` must\n// dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter.\n\nValue subclass: TaggedValue\n  field: tag = \"\"\n\n  class fromTag: t => TaggedValue tag: t",
       "explanation": "TaggedValue — BT-996 fixture: single-slot Value subclass whose factory method uses `ClassName slot: value` syntax inside a class method body.  This exercises the BT-996 bug fix: `TaggedValue tag: t` inside `class fromTag:` must dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter."
     },
     {
@@ -16096,7 +16078,7 @@
         "value",
         "value_many_fields"
       ],
-      "source": "// BT-1408: Regression test — Value subclass with 20+ long camelCase field names.\n// Previously failed with core_scan_error because the auto-generated keyword\n// constructor atom exceeded Erlang's 255-char atom limit.\n\nValue subclass: ValueManyFields\n  state: codexInputTokens = 0\n  state: codexOutputTokens = 0\n  state: codexModelName = \"\"\n  state: codexCachedTokens = 0\n  state: codexReasoning = \"\"\n  state: codexReasoningEffort = \"\"\n  state: codexMaxOutputTokens = 0\n  state: codexSystemFingerprint = \"\"\n  state: codexServiceTier = \"\"\n  state: operationTokens = 0\n  state: operationCost = 0\n  state: operationDuration = 0\n  state: apiCallCount = 0\n  state: errorCount = 0\n  state: retryCount = 0\n  state: totalLatency = 0\n  state: averageLatency = 0\n  state: peakMemoryUsage = 0\n  state: networkBandwidth = 0\n  state: concurrentRequests = 0",
+      "source": "// BT-1408: Regression test — Value subclass with 20+ long camelCase field names.\n// Previously failed with core_scan_error because the auto-generated keyword\n// constructor atom exceeded Erlang's 255-char atom limit.\n\nValue subclass: ValueManyFields\n  field: codexInputTokens = 0\n  field: codexOutputTokens = 0\n  field: codexModelName = \"\"\n  field: codexCachedTokens = 0\n  field: codexReasoning = \"\"\n  field: codexReasoningEffort = \"\"\n  field: codexMaxOutputTokens = 0\n  field: codexSystemFingerprint = \"\"\n  field: codexServiceTier = \"\"\n  field: operationTokens = 0\n  field: operationCost = 0\n  field: operationDuration = 0\n  field: apiCallCount = 0\n  field: errorCount = 0\n  field: retryCount = 0\n  field: totalLatency = 0\n  field: averageLatency = 0\n  field: peakMemoryUsage = 0\n  field: networkBandwidth = 0\n  field: concurrentRequests = 0",
       "explanation": "BT-1408: Regression test — Value subclass with 20+ long camelCase field names. Previously failed with core_scan_error because the auto-generated keyword constructor atom exceeded Erlang's 255-char atom limit."
     },
     {
@@ -16118,7 +16100,7 @@
         "value",
         "value_point"
       ],
-      "source": "// ValuePoint — a Point class declared with `Value subclass:` (BT-923)\n// Tests auto-generated getters, with*: setters, and keyword constructor\n\nValue subclass: ValuePoint\n  state: x = 0\n  state: y = 0\n\n  // User-defined method: distance squared from origin\n  distanceSquared => (self.x * self.x) + (self.y * self.y)",
+      "source": "// ValuePoint — a Point class declared with `Value subclass:` (BT-923)\n// Tests auto-generated getters, with*: setters, and keyword constructor\n\nValue subclass: ValuePoint\n  field: x = 0\n  field: y = 0\n\n  // User-defined method: distance squared from origin\n  distanceSquared => (self.x * self.x) + (self.y * self.y)",
       "explanation": "ValuePoint — a Point class declared with `Value subclass:` (BT-923) Tests auto-generated getters, with*: setters, and keyword constructor"
     },
     {
@@ -18048,7 +18030,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// BUnit tests for the Result class (BT-1254, ADR 0060).\n\nTestCase subclass: ResultTest\n\n  // =========================================================================\n  // CONSTRUCTORS AND QUERYING\n  // =========================================================================\n  testOkConstructorIsOk =>\n    r := Result ok: 42\n    self assert: r ok\n\n  testOkConstructorIsNotError =>\n    r := Result ok: 42\n    self deny: r isError\n\n  testErrorConstructorIsError =>\n    r := Result error: #not_found\n    self assert: r isError\n\n  testErrorConstructorIsNotOk =>\n    r := Result error: #not_found\n    self deny: r ok\n\n  testOkWithNilValue =>\n    r := Result ok: nil\n    self assert: r ok\n    self assert: r value equals: nil\n\n  testOkWithStringValue =>\n    r := Result ok: \"hello\"\n    self assert: r value equals: \"hello\"\n\n  // =========================================================================\n  // GUARDED ACCESSORS\n  // =========================================================================\n  testValueOnOkResult =>\n    r := Result ok: 42\n    self assert: r value equals: 42\n\n  testValueOnErrorResultRaises =>\n    self should: [(Result error: #x) value] raise: #signal\n\n  testErrorOnErrorResult =>\n    r := Result error: #not_found\n    self assert: r error equals: #not_found\n\n  testErrorOnOkResultRaises =>\n    self should: [(Result ok: 42) error] raise: #signal\n\n  // =========================================================================\n  // SAFE EXTRACTORS\n  // =========================================================================\n  testValueOrOnOkReturnsValue =>\n    self assert: ((Result ok: 42) valueOr: 0) equals: 42\n\n  testValueOrOnErrorReturnsDefault =>\n    self assert: ((Result error: #x) valueOr: 0) equals: 0\n\n  testValueOrDoOnOkReturnsValue =>\n    self assert: ((Result ok: 42) valueOrDo: [:e | -1]) equals: 42\n\n  testValueOrDoOnErrorEvaluatesBlock =>\n    self assert: ((Result error: #x) valueOrDo: [:e | -1]) equals: -1\n\n  testValueOrDoPassesErrorToBlock =>\n    result := (Result error: #my_error) valueOrDo: [:e | e printString]\n    self assert: result equals: \"#my_error\"\n\n  // =========================================================================\n  // UNWRAP\n  // =========================================================================\n  testUnwrapOnOkReturnsValue => self assert: (Result ok: 99) unwrap equals: 99\n\n  testUnwrapOnErrorWithRawSymbolRaises =>\n    self should: [(Result error: #oops) unwrap] raise: #signal\n\n  testUnwrapOnErrorWithExceptionReRaises =>\n    // Result tryDo: captures an exception — unwrap re-raises it\n    r := Result tryDo: [Exception new signal: \"test error\"]\n    self should: [r unwrap] raise: #signal\n\n  // =========================================================================\n  // TRANSFORMERS — map:\n  // =========================================================================\n  testMapOnOkTransformsValue =>\n    r := (Result ok: 42) map: [:v | v + 1]\n    self assert: r ok\n    self assert: r value equals: 43\n\n  testMapOnErrorPropagatesError =>\n    r := (Result error: #x) map: [:v | v + 1]\n    self assert: r isError\n    self assert: r error equals: #x\n\n  testMapChain =>\n    r := (Result ok: 10) map: [:v | v * 2]\n    r2 := r map: [:v | v + 5]\n    self assert: r2 value equals: 25\n\n  // =========================================================================\n  // TRANSFORMERS — andThen:\n  // =========================================================================\n  testAndThenOnOkChainsBlock =>\n    r := (Result ok: 42) andThen: [:v | Result ok: v * 2]\n    self assert: r ok\n    self assert: r value equals: 84\n\n  testAndThenOnErrorPropagatesError =>\n    r := (Result error: #x) andThen: [:v | Result ok: v * 2]\n    self assert: r isError\n    self assert: r error equals: #x\n\n  testAndThenFlattensProperly =>\n    // The block returns a Result — andThen: does not double-wrap\n    r := (Result ok: 5) andThen: [:v | Result ok: v + 1]\n    self assert: r value equals: 6\n\n  testAndThenPropagatesInnerError =>\n    r := (Result ok: 42) andThen: [:v | Result error: #inner_error]\n    self assert: r isError\n    self assert: r error equals: #inner_error\n\n  // =========================================================================\n  // TRANSFORMERS — mapError:\n  // =========================================================================\n  testMapErrorOnErrorTransformsReason =>\n    r := (Result error: #old) mapError: [:e | #new]\n    self assert: r isError\n    self assert: r error equals: #new\n\n  testMapErrorOnOkLeavesOkUnchanged =>\n    r := (Result ok: 42) mapError: [:e | #transformed]\n    self assert: r ok\n    self assert: r value equals: 42\n\n  // =========================================================================\n  // TERMINAL HANDLER — ifError:\n  // =========================================================================\n  testIfErrorOnOkReturnsSelf =>\n    r := Result ok: 42\n    result := r ifError: [:e | 0]\n    self assert: result equals: r\n    // Verify we can still extract the value by creating a known Result and comparing\n    self assert: result equals: (Result ok: 42)\n\n  testIfErrorOnErrorEvaluatesBlock =>\n    result := (Result error: #oops) ifError: [:e | -1]\n    self assert: result equals: -1\n\n  testIfErrorPassesReasonToBlock =>\n    result := (Result error: #my_error) ifError: [:e | e printString]\n    self assert: result equals: \"#my_error\"\n\n  testIfErrorComposesWithAndThen =>\n    // Error in an andThen: chain short-circuits to ifError:\n    chain := (Result ok: 1) andThen: [:v | Result error: #chain_fail]\n    result := chain ifError: [:_ | \"caught\"]\n    self assert: result equals: \"caught\"\n\n  testIfErrorOkChainPassesThrough =>\n    // All steps succeed — ifError: block is never called\n    chain := (Result ok: 10) andThen: [:v | Result ok: v * 2]\n    result := chain ifError: [:_ | -1]\n    self assert: result equals: (Result ok: 20)\n\n  // =========================================================================\n  // PATTERN MATCHING — ifOk:ifError:\n  // =========================================================================\n  testIfOkIfErrorWithOkEvaluatesOkBlock =>\n    result := (Result ok: 42) ifOk: [:v | v + 1] ifError: [:e | -1]\n    self assert: result equals: 43\n\n  testIfOkIfErrorWithErrorEvaluatesErrorBlock =>\n    result := (Result error: #x) ifOk: [:v | v + 1] ifError: [:e | -1]\n    self assert: result equals: -1\n\n  testIfOkIfErrorPassesValueToOkBlock =>\n    result := (Result ok: \"hello\") ifOk: [:v | v ++ \"!\"] ifError: [:e | \"\"]\n    self assert: result equals: \"hello!\"\n\n  testIfOkIfErrorPassesReasonToErrorBlock =>\n    result := (Result error: #my_err) ifOk: [:v |\n      \"ok\"\n    ] ifError: [:e | e printString]\n    self assert: result equals: \"#my_err\"\n\n  // =========================================================================\n  // tryDo:\n  // =========================================================================\n  testTryDoWithSuccessfulBlock =>\n    r := Result tryDo: [42]\n    self assert: r ok\n    self assert: r value equals: 42\n\n  testTryDoWithExceptionReturnsError =>\n    r := Result tryDo: [Exception new signal: \"boom\"]\n    self assert: r isError\n\n  testTryDoErrorReasonIsException =>\n    // isKindOf: does not work for actor-based class instances (Exception);\n    // verify the error reason is non-nil (not nil) instead.\n    r := Result tryDo: [Exception new signal: \"boom\"]\n    self deny: r error isNil\n\n  testTryDoCanUnwrapException =>\n    r := Result tryDo: [Exception new signal: \"boom\"]\n    self should: [r unwrap] raise: #signal\n\n  // =========================================================================\n  // printString\n  // =========================================================================\n  testPrintStringOk =>\n    self assert: (Result ok: 42) printString equals: \"Result ok: 42\"\n\n  testPrintStringError =>\n    self assert: (Result error: #not_found) printString equals: \"Result error: #not_found\"\n\n  testPrintStringOkString =>\n    // \"hello\" printString produces \"hello\" (with embedded quotes)\n    // In Beamtalk triple-quoted form, that becomes: \"\"\"hello\"\"\"\n    // So (Result ok: \"hello\") printString = \"Result ok: \" ++ \"\"\"hello\"\"\"\n    expected := \"Result ok: \" ++ \"\"\"hello\"\"\"\n    self assert: (Result ok: \"hello\") printString equals: expected",
+      "source": "// BUnit tests for the Result class (BT-1254, ADR 0060).\n\nTestCase subclass: ResultTest\n\n  // =========================================================================\n  // CONSTRUCTORS AND QUERYING\n  // =========================================================================\n  testOkConstructorIsOk =>\n    r := Result ok: 42\n    self assert: r ok\n\n  testOkConstructorIsNotError =>\n    r := Result ok: 42\n    self deny: r isError\n\n  testErrorConstructorIsError =>\n    r := Result error: #not_found\n    self assert: r isError\n\n  testErrorConstructorIsNotOk =>\n    r := Result error: #not_found\n    self deny: r ok\n\n  testOkWithNilValue =>\n    r := Result ok: nil\n    self assert: r ok\n    self assert: r value equals: nil\n\n  testOkWithStringValue =>\n    r := Result ok: \"hello\"\n    self assert: r value equals: \"hello\"\n\n  // =========================================================================\n  // GUARDED ACCESSORS\n  // =========================================================================\n  testValueOnOkResult =>\n    r := Result ok: 42\n    self assert: r value equals: 42\n\n  testValueOnErrorResultRaises =>\n    self should: [(Result error: #x) value] raise: #signal\n\n  testErrorOnErrorResult =>\n    r := Result error: #not_found\n    self assert: r error equals: #not_found\n\n  testErrorOnOkResultRaises =>\n    self should: [(Result ok: 42) error] raise: #signal\n\n  // =========================================================================\n  // SAFE EXTRACTORS\n  // =========================================================================\n  testValueOrOnOkReturnsValue =>\n    self assert: ((Result ok: 42) valueOr: 0) equals: 42\n\n  testValueOrOnErrorReturnsDefault =>\n    self assert: ((Result error: #x) valueOr: 0) equals: 0\n\n  testValueOrDoOnOkReturnsValue =>\n    self assert: ((Result ok: 42) valueOrDo: [:e | -1]) equals: 42\n\n  testValueOrDoOnErrorEvaluatesBlock =>\n    self assert: ((Result error: #x) valueOrDo: [:e | -1]) equals: -1\n\n  testValueOrDoPassesErrorToBlock =>\n    result := (Result error: #my_error) valueOrDo: [:e | e printString]\n    self assert: result equals: \"#my_error\"\n\n  // =========================================================================\n  // UNWRAP\n  // =========================================================================\n  testUnwrapOnOkReturnsValue => self assert: (Result ok: 99) unwrap equals: 99\n\n  testUnwrapOnErrorWithRawSymbolRaises =>\n    self should: [(Result error: #oops) unwrap] raise: #signal\n\n  testUnwrapOnErrorWithExceptionReRaises =>\n    // Result tryDo: captures an exception — unwrap re-raises it\n    r := Result tryDo: [Exception signal: \"test error\"]\n    self should: [r unwrap] raise: #signal\n\n  // =========================================================================\n  // TRANSFORMERS — map:\n  // =========================================================================\n  testMapOnOkTransformsValue =>\n    r := (Result ok: 42) map: [:v | v + 1]\n    self assert: r ok\n    self assert: r value equals: 43\n\n  testMapOnErrorPropagatesError =>\n    r := (Result error: #x) map: [:v | v + 1]\n    self assert: r isError\n    self assert: r error equals: #x\n\n  testMapChain =>\n    r := (Result ok: 10) map: [:v | v * 2]\n    r2 := r map: [:v | v + 5]\n    self assert: r2 value equals: 25\n\n  // =========================================================================\n  // TRANSFORMERS — andThen:\n  // =========================================================================\n  testAndThenOnOkChainsBlock =>\n    r := (Result ok: 42) andThen: [:v | Result ok: v * 2]\n    self assert: r ok\n    self assert: r value equals: 84\n\n  testAndThenOnErrorPropagatesError =>\n    r := (Result error: #x) andThen: [:v | Result ok: v * 2]\n    self assert: r isError\n    self assert: r error equals: #x\n\n  testAndThenFlattensProperly =>\n    // The block returns a Result — andThen: does not double-wrap\n    r := (Result ok: 5) andThen: [:v | Result ok: v + 1]\n    self assert: r value equals: 6\n\n  testAndThenPropagatesInnerError =>\n    r := (Result ok: 42) andThen: [:v | Result error: #inner_error]\n    self assert: r isError\n    self assert: r error equals: #inner_error\n\n  // =========================================================================\n  // TRANSFORMERS — mapError:\n  // =========================================================================\n  testMapErrorOnErrorTransformsReason =>\n    r := (Result error: #old) mapError: [:e | #new]\n    self assert: r isError\n    self assert: r error equals: #new\n\n  testMapErrorOnOkLeavesOkUnchanged =>\n    r := (Result ok: 42) mapError: [:e | #transformed]\n    self assert: r ok\n    self assert: r value equals: 42\n\n  // =========================================================================\n  // TERMINAL HANDLER — ifError:\n  // =========================================================================\n  testIfErrorOnOkReturnsSelf =>\n    r := Result ok: 42\n    result := r ifError: [:e | 0]\n    self assert: result equals: r\n    // Verify we can still extract the value by creating a known Result and comparing\n    self assert: result equals: (Result ok: 42)\n\n  testIfErrorOnErrorEvaluatesBlock =>\n    result := (Result error: #oops) ifError: [:e | -1]\n    self assert: result equals: -1\n\n  testIfErrorPassesReasonToBlock =>\n    result := (Result error: #my_error) ifError: [:e | e printString]\n    self assert: result equals: \"#my_error\"\n\n  testIfErrorComposesWithAndThen =>\n    // Error in an andThen: chain short-circuits to ifError:\n    chain := (Result ok: 1) andThen: [:v | Result error: #chain_fail]\n    result := chain ifError: [:_ | \"caught\"]\n    self assert: result equals: \"caught\"\n\n  testIfErrorOkChainPassesThrough =>\n    // All steps succeed — ifError: block is never called\n    chain := (Result ok: 10) andThen: [:v | Result ok: v * 2]\n    result := chain ifError: [:_ | -1]\n    self assert: result equals: (Result ok: 20)\n\n  // =========================================================================\n  // PATTERN MATCHING — ifOk:ifError:\n  // =========================================================================\n  testIfOkIfErrorWithOkEvaluatesOkBlock =>\n    result := (Result ok: 42) ifOk: [:v | v + 1] ifError: [:e | -1]\n    self assert: result equals: 43\n\n  testIfOkIfErrorWithErrorEvaluatesErrorBlock =>\n    result := (Result error: #x) ifOk: [:v | v + 1] ifError: [:e | -1]\n    self assert: result equals: -1\n\n  testIfOkIfErrorPassesValueToOkBlock =>\n    result := (Result ok: \"hello\") ifOk: [:v | v ++ \"!\"] ifError: [:e | \"\"]\n    self assert: result equals: \"hello!\"\n\n  testIfOkIfErrorPassesReasonToErrorBlock =>\n    result := (Result error: #my_err) ifOk: [:v |\n      \"ok\"\n    ] ifError: [:e | e printString]\n    self assert: result equals: \"#my_err\"\n\n  // =========================================================================\n  // tryDo:\n  // =========================================================================\n  testTryDoWithSuccessfulBlock =>\n    r := Result tryDo: [42]\n    self assert: r ok\n    self assert: r value equals: 42\n\n  testTryDoWithExceptionReturnsError =>\n    r := Result tryDo: [Exception signal: \"boom\"]\n    self assert: r isError\n\n  testTryDoErrorReasonIsException =>\n    // isKindOf: does not work for actor-based class instances (Exception);\n    // verify the error reason is non-nil (not nil) instead.\n    r := Result tryDo: [Exception signal: \"boom\"]\n    self deny: r error isNil\n\n  testTryDoCanUnwrapException =>\n    r := Result tryDo: [Exception signal: \"boom\"]\n    self should: [r unwrap] raise: #signal\n\n  // =========================================================================\n  // printString\n  // =========================================================================\n  testPrintStringOk =>\n    self assert: (Result ok: 42) printString equals: \"Result ok: 42\"\n\n  testPrintStringError =>\n    self assert: (Result error: #not_found) printString equals: \"Result error: #not_found\"\n\n  testPrintStringOkString =>\n    // \"hello\" printString produces \"hello\" (with embedded quotes)\n    // In Beamtalk triple-quoted form, that becomes: \"\"\"hello\"\"\"\n    // So (Result ok: \"hello\") printString = \"Result ok: \" ++ \"\"\"hello\"\"\"\n    expected := \"Result ok: \" ++ \"\"\"hello\"\"\"\n    self assert: (Result ok: \"hello\") printString equals: expected",
       "explanation": "BUnit tests for the Result class (BT-1254, ADR 0060)."
     },
     {

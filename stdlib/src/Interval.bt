@@ -13,9 +13,9 @@
 /// (1 to: 10) size    // => 10
 /// ```
 Collection subclass: Interval
-  state: from = 0
-  state: to = 0
-  state: step = 1
+  field: from = 0
+  field: to = 0
+  field: step = 1
 
   /// Number of elements in the interval.
   ///

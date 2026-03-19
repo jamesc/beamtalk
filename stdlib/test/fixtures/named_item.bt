@@ -5,4 +5,4 @@
 // Used to test that inspect quotes string field values.
 
 Value subclass: NamedItem
-  state: name = ""
+  field: name = ""

@@ -5,5 +5,5 @@
 // Used to test that inspect recursively inspects nested value objects.
 
 Value subclass: InspectPair
-  state: left = nil
-  state: right = nil
+  field: left = nil
+  field: right = nil

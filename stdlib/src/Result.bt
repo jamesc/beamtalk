@@ -37,9 +37,9 @@
 /// @see Exception (for exception-based error handling)
 /// @see Error (for exception subclass with reason codes)
 sealed Value subclass: Result
-  state: okValue :: Object = nil
-  state: errReason :: Object = nil
-  state: isOk :: Boolean = true
+  field: okValue :: Object = nil
+  field: errReason :: Object = nil
+  field: isOk :: Boolean = true
 
   // ===== Class Methods — Construction =====
 
