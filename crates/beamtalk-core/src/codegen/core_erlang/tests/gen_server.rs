@@ -1644,7 +1644,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
 
 #[test]
 fn test_is_actor_class_collection_subclass_is_value_type() {
-    // Collection extends Object (built-in), so subclasses are value types.
+    // Collection extends Value (built-in), so subclasses are value types.
     let class = ClassDefinition {
         name: Identifier::new("MyList", Span::new(0, 0)),
         superclass: Some(Identifier::new("Collection", Span::new(0, 0))),
@@ -1675,7 +1675,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         .unwrap();
     assert!(
         !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
-        "Collection subclass should be value type (chain reaches Object)"
+        "Collection subclass should be value type (chain reaches Value)"
     );
 }
 

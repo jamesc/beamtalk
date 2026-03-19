@@ -18,7 +18,7 @@
             {'bt@stdlib@character', 'Character', 'Integer'},
             {'bt@stdlib@class', 'Class', 'Behaviour'},
             {'bt@stdlib@class_builder', 'ClassBuilder', 'Actor'},
-            {'bt@stdlib@collection', 'Collection', 'Object'},
+            {'bt@stdlib@collection', 'Collection', 'Value'},
             {'bt@stdlib@compiled_method', 'CompiledMethod', 'Value'},
             {'bt@stdlib@date_time', 'DateTime', 'Value'},
             {'bt@stdlib@dictionary', 'Dictionary', 'Collection'},

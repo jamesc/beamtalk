@@ -146,3 +146,7 @@ sealed Collection subclass: Dictionary
   /// #{#a => 1} printString                     // => "#{#a => 1}"
   /// ```
   printString -> String => @primitive "printString"
+
+  /// Override inspect to use printString rather than the field-based
+  /// format defined in Value. Dictionaries are primitives, not map-based value objects.
+  inspect -> String => self printString

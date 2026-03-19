@@ -14,7 +14,7 @@
 /// (Bag withAll: #(1, 1, 2)) size         // => 3
 /// ```
 Collection subclass: Bag
-  state: counts = #{}
+  field: counts = #{}
 
   /// Create a Bag containing all elements from a list.
   ///
@@ -115,3 +115,7 @@ Collection subclass: Bag
   /// Bag new printString   // => "a Bag"
   /// ```
   printString -> String => "a Bag"
+
+  /// Override inspect to use printString rather than the field-based
+  /// format defined in Value. Bag's internal counts dictionary is opaque.
+  inspect -> String => self printString
