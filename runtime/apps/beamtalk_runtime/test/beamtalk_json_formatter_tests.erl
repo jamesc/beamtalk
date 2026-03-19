@@ -312,6 +312,19 @@ format_handles_unicode_format_args_test() ->
     Decoded = decode_event(Event),
     ?assert(is_binary(maps:get(<<"msg">>, Decoded))).
 
+format_extra_meta_handles_binary_keys_test() ->
+    %% User-supplied metadata (e.g. from Beamtalk Dictionary) may have binary keys
+    Event = #{
+        level => info,
+        msg => {string, "test"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            <<"prompt_length">> => 42
+        }
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"42">>, maps:get(<<"prompt_length">>, Decoded)).
+
 format_extra_meta_excludes_standard_keys_test() ->
     Event = #{
         level => info,
@@ -327,6 +340,32 @@ format_extra_meta_excludes_standard_keys_test() ->
     ?assertNot(maps:is_key(<<"gl">>, Decoded)),
     ?assertNot(maps:is_key(<<"file">>, Decoded)),
     ?assertNot(maps:is_key(<<"line">>, Decoded)).
+
+format_falls_back_to_plain_text_on_formatter_failure_test() ->
+    %% Force the normal formatter path to fail so the catch branch is exercised.
+    %% A binary in the domain list makes atom_to_list/1 crash inside format_domain.
+    Event = #{
+        level => info,
+        msg => {string, "safe msg"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            domain => [<<"not-an-atom">>]
+        }
+    },
+    Result = beamtalk_json_formatter:format(Event, #{}),
+    Bin = iolist_to_binary(Result),
+    ?assert(binary:match(Bin, <<"formatter error:">>) =/= nomatch),
+    ?assert(binary:match(Bin, <<"safe msg">>) =/= nomatch).
+
+format_handles_format_args_with_binary_test() ->
+    %% The exact pattern produced by the Logger intrinsic codegen
+    Event = #{
+        level => info,
+        msg => {"~ts", [<<"http server started">>]},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"http server started">>, maps:get(<<"msg">>, Decoded)).
 
 %%====================================================================
 %% Helpers
