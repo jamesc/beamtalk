@@ -4,11 +4,10 @@
 // BUnit tests for docs/learning/13-testing.md (Stack)
 
 TestCase subclass: StackTest
-  state: stack = nil
+  field: stack = nil
 
   setUp =>
-    self.stack := Stack spawn
-    self
+    self withStack: (Stack spawn)
 
   testNewStackIsEmpty =>
     self assert: self.stack isEmpty

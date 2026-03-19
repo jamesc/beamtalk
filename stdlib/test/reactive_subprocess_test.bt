@@ -12,7 +12,7 @@
 TestCase subclass: ReactiveSubprocessTest
   field: isUnix = false
 
-  setUp => self.isUnix := System osFamily == "unix"
+  setUp => self withIsUnix: (System osFamily == "unix")
 
   // --- Platform command helpers ---
   shellExe => self.isUnix ifTrue: ["/bin/sh"] ifFalse: ["cmd"]

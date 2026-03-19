@@ -8,7 +8,7 @@
 TestCase subclass: SetupStateTest
   field: value = 0
 
-  setUp => self.value := 42
+  setUp => self withValue: 42
 
   testFieldFromSetUp => self assert: self.value equals: 42
 

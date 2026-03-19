@@ -9,9 +9,7 @@
 TestCase subclass: LifecycleTest
   field: log = "init"
 
-  setUp =>
-    self.log := "S"
-    self
+  setUp => self withLog: "S"
 
   tearDown => nil
 

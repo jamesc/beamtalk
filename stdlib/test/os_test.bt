@@ -6,7 +6,7 @@
 TestCase subclass: OSTest
   field: isUnix = false
 
-  setUp => self.isUnix := System osFamily == "unix"
+  setUp => self withIsUnix: (System osFamily == "unix")
 
   testRunReturnsString =>
     // echo is a shell builtin on both Unix and Windows

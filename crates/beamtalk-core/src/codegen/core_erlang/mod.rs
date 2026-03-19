@@ -544,6 +544,11 @@ pub fn generate_module_with_warnings(
         &mut module_with_writeback,
         &hierarchy,
     );
+    // BT-1534: Correct class_kind for indirect Value/Actor subclasses.
+    // E.g. `TestCase subclass: MyTest` gets ClassKind::Object from the parser
+    // (TestCase is not literally "Value"/"Actor"), but needs ClassKind::Value
+    // so codegen generates auto-slot methods (withX: setters).
+    crate::semantic_analysis::apply_class_kind_writeback(&mut module_with_writeback, &hierarchy);
     let module = &module_with_writeback;
 
     // ADR 0065 / BT-1457: Set Server subclass flag for handle_info codegen dispatch.

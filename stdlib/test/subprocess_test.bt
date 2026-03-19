@@ -10,7 +10,7 @@
 TestCase subclass: SubprocessTest
   field: isUnix = false
 
-  setUp => self.isUnix := System osFamily == "unix"
+  setUp => self withIsUnix: (System osFamily == "unix")
 
   // --- Platform command helpers ---
   echoExe => self.isUnix ifTrue: ["/bin/echo"] ifFalse: ["cmd"]

@@ -4,11 +4,10 @@
 // BUnit tests for docs/learning/13-testing.md (setUp/tearDown)
 
 TestCase subclass: Ch13SetupExample
-  state: counter = nil
+  field: counter = nil
 
   setUp =>
-    self.counter := Counter spawn
-    self
+    self withCounter: (Counter spawn)
 
   tearDown =>
     self.counter isAlive ifTrue: [self.counter stop]
