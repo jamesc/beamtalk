@@ -434,6 +434,13 @@ pub(crate) fn check_value_slot_assignment(
         let class_name = class.name.name.as_str();
         let is_value = hierarchy.is_value_subclass(class_name);
 
+        // BT-1533: TestCase subclasses are exempt from slot assignment checks
+        // during the deprecation period. BT-1534 will migrate `self.slot :=`
+        // to `self withSlot:` syntax in all test subclasses.
+        if hierarchy.is_testcase_subclass(class_name) {
+            continue;
+        }
+
         // Check instance methods only — classState: slots on class methods are
         // separate and not subject to value-type immutability rules.
         for method in &class.methods {
@@ -460,6 +467,12 @@ pub(crate) fn check_value_slot_assignment(
         }
         let class_name = standalone.class_name.name.as_str();
         let is_value = hierarchy.is_value_subclass(class_name);
+
+        // BT-1533: TestCase subclasses exempt (see above).
+        if hierarchy.is_testcase_subclass(class_name) {
+            continue;
+        }
+
         let method_selector = standalone.method.selector.name();
         for stmt in &standalone.method.body {
             walk_expression(&stmt.expression, &mut |e| {
@@ -688,6 +701,12 @@ pub(crate) fn check_value_nil_return(
         if !hierarchy.is_value_subclass(class_name) {
             continue;
         }
+        // BT-1533: TestCase is a Value subclass whose assertion methods
+        // intentionally return Nil (side-effecting by design). Exempt
+        // TestCase and its subclasses from the `-> Nil` lint.
+        if hierarchy.is_testcase_subclass(class_name) {
+            continue;
+        }
         // Only check instance methods — class_methods are exempt.
         for method in &class.methods {
             check_method_nil_return(method, class_name, diagnostics);
@@ -700,6 +719,10 @@ pub(crate) fn check_value_nil_return(
         }
         let class_name = standalone.class_name.name.as_str();
         if !hierarchy.is_value_subclass(class_name) {
+            continue;
+        }
+        // BT-1533: Exempt TestCase and its subclasses (see above).
+        if hierarchy.is_testcase_subclass(class_name) {
             continue;
         }
         check_method_nil_return(&standalone.method, class_name, diagnostics);
@@ -802,6 +825,13 @@ pub(crate) fn check_data_keyword_class_kind(
     for class in &module.classes {
         let class_name = class.name.name.as_str();
         let resolved_kind = hierarchy.resolve_class_kind(class_name);
+
+        // BT-1533: TestCase subclasses are exempt from keyword/kind warnings
+        // during the deprecation period. BT-1534 will migrate `state:` → `field:`
+        // in all test subclasses.
+        if hierarchy.is_testcase_subclass(class_name) {
+            continue;
+        }
 
         // For Object kind, only warn if the superclass is actually known in
         // the hierarchy. When the superclass is unknown (e.g. cross-file class

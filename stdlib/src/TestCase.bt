@@ -8,14 +8,21 @@
 /// Each test method runs in a fresh instance: `setUp` is called first,
 /// then the test method, then `tearDown`. See ADR 0014 Phase 2.
 ///
+/// TestCase is a Value subclass — setUp returns a new self with fields set
+/// (functional pattern), matching EUnit and ExUnit. The test runner threads
+/// the setUp return value to each test method. Each test gets a fresh copy,
+/// so tests cannot corrupt state for each other.
+///
 /// ## Examples
 /// ```beamtalk
 /// TestCase subclass: CounterTest
-///   setUp => self.counter := Counter spawn
+///   field: counter = nil
+///   setUp => self withCounter: (Counter spawn)
 ///   testIncrement =>
-///     self assert: (self.counter getValue await) equals: 1
+///     self.counter increment.
+///     self assert: (self.counter getValue) equals: 1
 /// ```
-Object subclass: TestCase
+Value subclass: TestCase
 
   /// Run all test methods in this class and print a summary.
   ///
@@ -36,11 +43,19 @@ Object subclass: TestCase
 
   /// Prepare the test fixture. Called before each test method.
   /// Override in subclasses to set up shared state or resources.
-  setUp -> Nil => nil
+  ///
+  /// Returns self (or an updated copy with fields set). The test runner
+  /// uses the return value as the receiver for the test method, so
+  /// subclasses should return the configured instance:
+  ///
+  /// ```beamtalk
+  /// setUp => self withCounter: (Counter spawn)
+  /// ```
+  setUp => self
 
   /// Clean up after the test. Called after each test method.
   /// Override in subclasses to release resources or reset state.
-  tearDown -> Nil => nil
+  tearDown => nil
 
   /// Assert that `condition` is true, failing the test if it is false.
   ///

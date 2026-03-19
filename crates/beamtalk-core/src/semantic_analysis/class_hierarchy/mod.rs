@@ -561,6 +561,21 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Value")
     }
 
+    /// Returns true if the named class is `TestCase` or a subclass of `TestCase` (BT-1533).
+    ///
+    /// `TestCase` is a Value subclass with assertion methods that intentionally
+    /// return Nil (side-effecting by design). This check allows validators to
+    /// exempt `TestCase` subclasses from the Value `-> Nil` lint.
+    #[must_use]
+    pub fn is_testcase_subclass(&self, class_name: &str) -> bool {
+        if class_name == "TestCase" {
+            return true;
+        }
+        self.superclass_chain(class_name)
+            .iter()
+            .any(|s| s.as_str() == "TestCase")
+    }
+
     /// Resolve the `ClassKind` for a class by walking its ancestor chain (BT-1528).
     ///
     /// Returns `ClassKind::Actor` if any ancestor is Actor, `ClassKind::Value` if

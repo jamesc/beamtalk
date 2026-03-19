@@ -70,7 +70,7 @@
             {'bt@stdlib@supervisor', 'Supervisor', 'Object'},
             {'bt@stdlib@symbol', 'Symbol', 'Object'},
             {'bt@stdlib@system', 'System', 'Object'},
-            {'bt@stdlib@test_case', 'TestCase', 'Object'},
+            {'bt@stdlib@test_case', 'TestCase', 'Value'},
             {'bt@stdlib@test_result', 'TestResult', 'Object'},
             {'bt@stdlib@test_runner', 'TestRunner', 'Object'},
             {'bt@stdlib@throw_error', 'ThrowError', 'BEAMError'},

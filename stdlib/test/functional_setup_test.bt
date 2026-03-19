@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1533: Tests that the functional setUp pattern works end-to-end
+// with TestCase as a Value subclass.
+//
+// setUp returns a new self with fields set. The test runner threads
+// this return value to each test method. Each test gets a fresh
+// setUp'd instance — tests are isolated.
+//
+// Note: uses `self.slot :=` syntax which returns a new self (value
+// semantics). BT-1534 will migrate to `self withSlot:` syntax.
+
+TestCase subclass: FunctionalSetupTest
+  state: value = 0
+
+  setUp => self.value := 99
+
+  testFieldFromFunctionalSetUp =>
+    // Field should reflect value set in setUp
+    self assert: self.value equals: 99
+
+  testIsolationBetweenTestsFromFunctionalSetUp =>
+    // Each test gets a fresh setUp'd instance — same values
+    self assert: self.value equals: 99
+
+  testSelfIsFunctionalSetupTestInstance =>
+    // self should be a FunctionalSetupTest instance, not nil/false
+    self assert: self class equals: FunctionalSetupTest
