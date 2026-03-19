@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 51
 expression: output
 ---
 Token { kind: Identifier("sealed"), span: Span { start: 215, end: 221 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test Set class compilation as a value type (not gen_server)."), Whitespace("\n"), LineComment("// Standalone Set fixture (Value subclass, not Collection) for codegen testing."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
