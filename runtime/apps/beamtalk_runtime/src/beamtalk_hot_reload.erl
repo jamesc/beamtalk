@@ -53,7 +53,7 @@ code_change(_OldVsn, State, {NewInstanceVars, Module}) when
     is_map(State), is_list(NewInstanceVars), is_atom(Module)
 ->
     %% BT-572: Field migration during hot reload
-    ?LOG_INFO("code_change: field migration", #{
+    ?LOG_DEBUG("code_change: field migration", #{
         module => Module,
         new_instance_vars => NewInstanceVars,
         domain => [beamtalk, runtime]
@@ -89,7 +89,7 @@ trigger_code_change(Module, Pids) ->
     {ok, non_neg_integer(), [{pid(), term()}]}.
 trigger_code_change(Module, Pids, Extra) ->
     PidCount = length(Pids),
-    ?LOG_INFO("Triggering code_change", #{
+    ?LOG_DEBUG("Triggering code_change", #{
         module => Module, actor_count => PidCount, domain => [beamtalk, runtime]
     }),
     Result = lists:foldl(
@@ -107,13 +107,13 @@ trigger_code_change(Module, Pids, Extra) ->
     {ok, Upgraded, Failures} = Result,
     case Failures of
         [] ->
-            ?LOG_INFO("code_change complete", #{
+            ?LOG_DEBUG("code_change complete", #{
                 module => Module,
                 upgraded => Upgraded,
                 domain => [beamtalk, runtime]
             });
         _ ->
-            ?LOG_INFO("code_change complete with failures", #{
+            ?LOG_WARNING("code_change complete with failures", #{
                 module => Module,
                 upgraded => Upgraded,
                 failure_count => length(Failures),
