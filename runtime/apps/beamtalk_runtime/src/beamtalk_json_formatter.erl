@@ -24,6 +24,28 @@
 %% @doc Format a log event as a single-line JSON object followed by a newline.
 -spec format(logger:log_event(), logger:formatter_config()) -> unicode:chardata().
 format(#{level := Level, msg := Msg, meta := Meta}, _Config) ->
+    try
+        format_json(Level, Msg, Meta)
+    catch
+        Class:Reason:Stack ->
+            %% A logger formatter must never crash — fall back to plain text.
+            io_lib:format(
+                "~ts ~ts: ~tp [formatter error: ~p:~p in ~tp]~n",
+                [
+                    format_time(Meta),
+                    Level,
+                    format_msg_fallback(Msg),
+                    Class,
+                    Reason,
+                    hd(Stack)
+                ]
+            )
+    end.
+
+%% @doc Build the JSON log line. Separated from format/2 so the try-catch
+%% wrapper stays small.
+-spec format_json(atom(), term(), map()) -> unicode:chardata().
+format_json(Level, Msg, Meta) ->
     TimeBin = format_time(Meta),
     {MsgBin, ReportFields} = format_msg_structured(Msg, Meta),
     Fields0 = [
@@ -68,6 +90,21 @@ format_time(#{time := Timestamp}) ->
     );
 format_time(_) ->
     <<"unknown">>.
+
+%% @doc Best-effort message extraction for the crash fallback path.
+-spec format_msg_fallback(term()) -> unicode:chardata().
+format_msg_fallback({string, Msg}) ->
+    Msg;
+format_msg_fallback({report, Report}) ->
+    io_lib:format("~tp", [Report]);
+format_msg_fallback({Format, Args}) when is_list(Format), is_list(Args) ->
+    try
+        io_lib:format(Format, Args)
+    catch
+        _:_ -> io_lib:format("~tp", [{Format, Args}])
+    end;
+format_msg_fallback(Other) ->
+    io_lib:format("~tp", [Other]).
 
 %% @doc Format the log message and extract structured fields from OTP reports.
 %%
@@ -215,7 +252,7 @@ append_extra_meta(Meta, Fields) ->
     Extra = maps:without(Dominated, Meta),
     maps:fold(
         fun(Key, Value, Acc) ->
-            BinKey = atom_to_binary(Key, utf8),
+            BinKey = key_to_binary(Key),
             maybe_add(BinKey, format_extra_value(Key, Value), Acc)
         end,
         Fields,
@@ -226,7 +263,7 @@ append_extra_meta(Meta, Fields) ->
 %%
 %% Stacktraces get special formatting via `erl_error:format_stacktrace/1`
 %% (when available) or `~tp`. All other terms are formatted as `~tp`.
--spec format_extra_value(atom(), term()) -> binary().
+-spec format_extra_value(atom() | binary(), term()) -> binary().
 format_extra_value(stacktrace, Stack) when is_list(Stack) ->
     Formatted = lists:join($\n, [io_lib:format("  ~tp", [Frame]) || Frame <- Stack]),
     safe_to_binary(Formatted);
@@ -240,6 +277,13 @@ format_extra_value(_Key, Value) when is_pid(Value) ->
     list_to_binary(pid_to_list(Value));
 format_extra_value(_Key, Value) ->
     safe_to_binary(io_lib:format("~tp", [Value])).
+
+%% @doc Convert a metadata key to a binary.  Keys are usually atoms, but
+%% user-supplied metadata (e.g. from Beamtalk Dictionary) may use binaries.
+-spec key_to_binary(atom() | binary()) -> binary().
+key_to_binary(Key) when is_atom(Key) -> atom_to_binary(Key, utf8);
+key_to_binary(Key) when is_binary(Key) -> Key;
+key_to_binary(Key) -> iolist_to_binary(io_lib:format("~tp", [Key])).
 
 %% @doc Convert unicode chardata to binary, falling back to latin1 on error.
 -spec safe_to_binary(unicode:chardata()) -> binary().

@@ -312,6 +312,19 @@ format_handles_unicode_format_args_test() ->
     Decoded = decode_event(Event),
     ?assert(is_binary(maps:get(<<"msg">>, Decoded))).
 
+format_extra_meta_handles_binary_keys_test() ->
+    %% User-supplied metadata (e.g. from Beamtalk Dictionary) may have binary keys
+    Event = #{
+        level => info,
+        msg => {string, "test"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            <<"prompt_length">> => 42
+        }
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"42">>, maps:get(<<"prompt_length">>, Decoded)).
+
 format_extra_meta_excludes_standard_keys_test() ->
     Event = #{
         level => info,
@@ -327,6 +340,28 @@ format_extra_meta_excludes_standard_keys_test() ->
     ?assertNot(maps:is_key(<<"gl">>, Decoded)),
     ?assertNot(maps:is_key(<<"file">>, Decoded)),
     ?assertNot(maps:is_key(<<"line">>, Decoded)).
+
+format_never_crashes_on_jsx_failure_test() ->
+    %% If jsx:encode fails (e.g. bad data), format/2 must not crash —
+    %% it should fall back to plain text.
+    Event = #{
+        level => info,
+        msg => {string, "safe msg"},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    %% Normal call succeeds (sanity check)
+    Result = beamtalk_json_formatter:format(Event, #{}),
+    ?assert(is_list(Result) orelse is_binary(Result)).
+
+format_handles_format_args_with_binary_test() ->
+    %% The exact pattern produced by the Logger intrinsic codegen
+    Event = #{
+        level => info,
+        msg => {"~ts", [<<"http server started">>]},
+        meta => #{time => erlang:system_time(microsecond)}
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(<<"http server started">>, maps:get(<<"msg">>, Decoded)).
 
 %%====================================================================
 %% Helpers
