@@ -359,11 +359,11 @@ find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
                 try
                     gen_server:call(AncestorPid, get_local_class_methods, 5000)
                 catch
-                    Class:Reason ->
+                    Class:Reason:Stack ->
                         ?LOG_WARNING(
                             "Class chain walk: failed to query ~p class_methods: ~p:~p",
                             [AncestorName, Class, Reason],
-                            #{domain => [beamtalk, runtime]}
+                            #{domain => [beamtalk, runtime], stacktrace => Stack}
                         ),
                         #{}
                 end,
@@ -375,11 +375,11 @@ find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
                             %% the self-call guard fires if AncestorPid happens to be self().
                             beamtalk_object_class:module_name(AncestorPid)
                         catch
-                            Class2:Reason2 ->
+                            Class2:Reason2:Stack2 ->
                                 ?LOG_WARNING(
                                     "Class chain walk: failed to get module for ~p: ~p:~p",
                                     [AncestorName, Class2, Reason2],
-                                    #{domain => [beamtalk, runtime]}
+                                    #{domain => [beamtalk, runtime], stacktrace => Stack2}
                                 ),
                                 undefined
                         end,

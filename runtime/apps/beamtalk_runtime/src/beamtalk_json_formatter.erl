@@ -38,7 +38,9 @@ format(#{level := Level, msg := Msg, meta := Meta}, _Config) ->
     Fields5 = maybe_add(<<"pid">>, format_pid(Meta), Fields4),
     %% Append structured fields extracted from OTP reports
     Fields6 = lists:foldl(fun({K, V}, Acc) -> maybe_add(K, V, Acc) end, Fields5, ReportFields),
-    Json = jsx:encode(lists:reverse(Fields6)),
+    %% Append extra metadata fields (reason, stacktrace, etc.) not already handled
+    Fields7 = append_extra_meta(Meta, Fields6),
+    Json = jsx:encode(lists:reverse(Fields7)),
     [Json, $\n].
 
 %% @doc Validate formatter configuration. Accepts any config.
@@ -85,7 +87,7 @@ format_msg_structured({report, Report}, Meta) when is_map(Report) ->
 format_msg_structured({report, Report}, Meta) ->
     {format_report_fallback(Report, Meta), []};
 format_msg_structured({Format, Args}, _Meta) ->
-    {iolist_to_binary(io_lib:format(Format, Args)), []}.
+    {safe_to_binary(io_lib:format(Format, Args)), []}.
 
 %% @doc Extract structured fields from OTP report maps.
 %%
@@ -189,6 +191,64 @@ format_pid(#{pid := Pid}) when is_pid(Pid) ->
     list_to_binary(pid_to_list(Pid));
 format_pid(_) ->
     undefined.
+
+%% @doc Append user-supplied metadata fields that aren't handled by the core formatter.
+%%
+%% OTP standard keys (time, pid, gl, file, line, mfa, domain, report_cb, etc.)
+%% are excluded. Everything else is formatted as `~tp` and included.
+-spec append_extra_meta(map(), [{binary(), term()}]) -> [{binary(), term()}].
+append_extra_meta(Meta, Fields) ->
+    Dominated = [
+        time,
+        pid,
+        gl,
+        file,
+        line,
+        mfa,
+        domain,
+        report_cb,
+        error_logger,
+        logger_formatter,
+        beamtalk_class,
+        beamtalk_selector
+    ],
+    Extra = maps:without(Dominated, Meta),
+    maps:fold(
+        fun(Key, Value, Acc) ->
+            BinKey = atom_to_binary(Key, utf8),
+            maybe_add(BinKey, format_extra_value(Key, Value), Acc)
+        end,
+        Fields,
+        Extra
+    ).
+
+%% @doc Format an extra metadata value for JSON output.
+%%
+%% Stacktraces get special formatting via `erl_error:format_stacktrace/1`
+%% (when available) or `~tp`. All other terms are formatted as `~tp`.
+-spec format_extra_value(atom(), term()) -> binary().
+format_extra_value(stacktrace, Stack) when is_list(Stack) ->
+    Formatted = lists:join($\n, [io_lib:format("  ~tp", [Frame]) || Frame <- Stack]),
+    safe_to_binary(Formatted);
+format_extra_value(_Key, Value) when is_binary(Value) ->
+    Value;
+format_extra_value(_Key, Value) when is_atom(Value) ->
+    atom_to_binary(Value, utf8);
+format_extra_value(_Key, Value) when is_integer(Value) ->
+    integer_to_binary(Value);
+format_extra_value(_Key, Value) when is_pid(Value) ->
+    list_to_binary(pid_to_list(Value));
+format_extra_value(_Key, Value) ->
+    safe_to_binary(io_lib:format("~tp", [Value])).
+
+%% @doc Convert unicode chardata to binary, falling back to latin1 on error.
+-spec safe_to_binary(unicode:chardata()) -> binary().
+safe_to_binary(Chardata) ->
+    case unicode:characters_to_binary(Chardata) of
+        Bin when is_binary(Bin) -> Bin;
+        {error, Encoded, _} -> Encoded;
+        {incomplete, Encoded, _} -> Encoded
+    end.
 
 %% @doc Conditionally prepend a key-value pair if the value is not undefined.
 -spec maybe_add(binary(), term(), [{binary(), term()}]) -> [{binary(), term()}].
