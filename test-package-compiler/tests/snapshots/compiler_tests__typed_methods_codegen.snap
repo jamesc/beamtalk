@@ -95,8 +95,8 @@ module 'typed_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
             case call 'typed_methods':'safe_dispatch'('initialize', [], State) of
                 <{'reply', _InitResult, InitNewState}> when 'true' ->
                     {'noreply', InitNewState}
-                <{'error', InitError, _InitErrState}> when 'true' ->
-                    {'stop', InitError, State}
+                <{'error', InitError, InitErrState}> when 'true' ->
+                    {'stop', InitError, InitErrState}
             end
         <_> when 'true' -> {'noreply', State}
     end

@@ -86,8 +86,8 @@ module 'actor_state_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
             case call 'actor_state_mutation':'safe_dispatch'('initialize', [], State) of
                 <{'reply', _InitResult, InitNewState}> when 'true' ->
                     {'noreply', InitNewState}
-                <{'error', InitError, _InitErrState}> when 'true' ->
-                    {'stop', InitError, State}
+                <{'error', InitError, InitErrState}> when 'true' ->
+                    {'stop', InitError, InitErrState}
             end
         <_> when 'true' -> {'noreply', State}
     end

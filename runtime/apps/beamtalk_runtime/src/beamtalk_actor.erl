@@ -271,15 +271,11 @@ await_initialize(Pid) ->
             ok
     catch
         exit:{noproc, _} ->
-            %% Process already dead — grab the reason from the DOWN message.
-            %% Receive BEFORE demonitor so the DOWN isn't flushed.
-            Result =
-                receive
-                    {'DOWN', MonRef, process, Pid, Reason} -> {error, Reason}
-                after 0 -> {error, noproc}
-                end,
-            erlang:demonitor(MonRef, [flush]),
-            Result;
+            %% Process already dead — wait for the DOWN message unconditionally.
+            %% The monitor was set before sys:get_state, so DOWN is guaranteed.
+            receive
+                {'DOWN', MonRef, process, Pid, Reason} -> {error, Reason}
+            end;
         exit:{{Reason, _CallInfo}, _} ->
             %% gen_server stop reason wrapped by sys
             erlang:demonitor(MonRef, [flush]),
@@ -314,9 +310,9 @@ safe_spawn(Module, InitArgs) ->
                     %% still running but we gave up waiting). Then flush EXIT
                     %% BEFORE restoring trap_exit to avoid a fatal signal.
                     exit(Pid, kill),
+                    %% Wait unconditionally — EXIT is guaranteed after kill
                     receive
                         {'EXIT', Pid, _} -> ok
-                    after 1000 -> ok
                     end,
                     erlang:process_flag(trap_exit, OldTrap),
                     {error, Reason}

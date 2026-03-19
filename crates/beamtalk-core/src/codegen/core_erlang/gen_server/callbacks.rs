@@ -301,8 +301,8 @@ impl CoreErlangGenerator {
     ///             case call 'module':'safe_dispatch'('initialize', [], State) of
     ///                 <{'reply', _InitResult, InitNewState}> when 'true' ->
     ///                     {'noreply', InitNewState}
-    ///                 <{'error', InitError, _InitErrState}> when 'true' ->
-    ///                     {'stop', InitError, State}
+    ///                 <{'error', InitError, InitErrState}> when 'true' ->
+    ///                     {'stop', InitError, InitErrState}
     ///             end
     ///         <_> when 'true' -> {'noreply', State}
     ///     end
@@ -343,10 +343,13 @@ impl CoreErlangGenerator {
                                                 docvec![line(), "{'noreply', InitNewState}"]
                                             ),
                                             line(),
-                                            "<{'error', InitError, _InitErrState}> when 'true' ->",
+                                            "<{'error', InitError, InitErrState}> when 'true' ->",
                                             nest(
                                                 INDENT,
-                                                docvec![line(), "{'stop', InitError, State}"]
+                                                docvec![
+                                                    line(),
+                                                    "{'stop', InitError, InitErrState}"
+                                                ]
                                             ),
                                         ]
                                     ),

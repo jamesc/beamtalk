@@ -1712,7 +1712,13 @@ safe_spawn_success_test() ->
 safe_spawn_restores_trap_exit_test() ->
     %% safe_spawn restores the original trap_exit flag
     OldTrap = process_flag(trap_exit, false),
-    {ok, Pid} = beamtalk_actor:safe_spawn(test_counter, #{init_count => 0}),
-    ?assertEqual(false, process_flag(trap_exit, false)),
-    gen_server:stop(Pid),
-    process_flag(trap_exit, OldTrap).
+    try
+        {ok, Pid} = beamtalk_actor:safe_spawn(test_counter, #{init_count => 0}),
+        try
+            ?assertEqual(false, process_flag(trap_exit, false))
+        after
+            catch gen_server:stop(Pid)
+        end
+    after
+        process_flag(trap_exit, OldTrap)
+    end.
