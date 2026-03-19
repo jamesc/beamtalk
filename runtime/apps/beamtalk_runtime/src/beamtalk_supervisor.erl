@@ -48,7 +48,8 @@
     is_supervisor/1,
     register_root/1,
     get_root/0,
-    clear_root/0
+    clear_root/0,
+    run_initialize/1
 ]).
 
 -include("beamtalk.hrl").
@@ -471,6 +472,25 @@ clear_root() ->
 %%% Internal helpers
 %%% ============================================================================
 
+%% @doc Run the class-side `initialize:` lifecycle hook on a supervisor tuple.
+%%
+%% Called from `beamtalk_message_dispatch:send/3` AFTER `class_send` returns
+%% the supervisor tuple from a `supervise` call. This ensures `initialize:`
+%% runs in the caller's process — where the class gen_server is free to answer
+%% `has_method`, `superclass`, and other hierarchy lookups that Beamtalk
+%% dispatch requires.
+%%
+%% Uses `call_class_method_direct` to bypass the class gen_server for the
+%% initial `class_initialize:` method lookup (same pattern as `static_init/2`).
+-spec run_initialize(tuple()) -> ok.
+run_initialize({beamtalk_supervisor, ClassName, Module, _Pid} = SupTuple) ->
+    ClassSelf = make_init_class_self(ClassName, Module),
+    ClassVars = #{},
+    call_class_method_direct(ClassName, Module, 'class_initialize:', ClassSelf, ClassVars, [
+        SupTuple
+    ]),
+    ok.
+
 %% @private
 %% Build a ClassSelf tuple for use in direct class method calls during supervisor init.
 %% The pid field is set to the class gen_server pid (may be blocked, but ClassSelf is
@@ -487,20 +507,35 @@ make_init_class_self(ClassName, Module) ->
 %% ETS until the method is found in an ancestor's module.
 -spec call_class_method_direct(atom(), module(), atom(), tuple(), map()) -> term().
 call_class_method_direct(ClassName, Module, FunName, ClassSelf, ClassVars) ->
-    case erlang:function_exported(Module, FunName, 2) of
+    call_class_method_direct(ClassName, Module, FunName, ClassSelf, ClassVars, []).
+
+%% @private
+%% Call a class method directly with extra user-facing arguments.
+%% ExtraArgs are appended after [ClassSelf, ClassVars].
+-spec call_class_method_direct(atom(), module(), atom(), tuple(), map(), [term()]) -> term().
+call_class_method_direct(ClassName, Module, FunName, ClassSelf, ClassVars, ExtraArgs) ->
+    Arity = 2 + length(ExtraArgs),
+    case erlang:function_exported(Module, FunName, Arity) of
         true ->
-            erlang:apply(Module, FunName, [ClassSelf, ClassVars]);
+            erlang:apply(Module, FunName, [ClassSelf, ClassVars | ExtraArgs]);
         false ->
-            call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, 0)
+            call_inherited_class_method_direct(
+                ClassName, FunName, ClassSelf, ClassVars, ExtraArgs, 0
+            )
     end.
 
--spec call_inherited_class_method_direct(atom(), atom(), tuple(), map(), non_neg_integer()) ->
+-spec call_inherited_class_method_direct(
+    atom(), atom(), tuple(), map(), [term()], non_neg_integer()
+) ->
     term().
-call_inherited_class_method_direct(_ClassName, FunName, _ClassSelf, _ClassVars, Depth) when
+call_inherited_class_method_direct(
+    _ClassName, FunName, _ClassSelf, _ClassVars, _ExtraArgs, Depth
+) when
     Depth > 30
 ->
     error({supervisor_init_method_not_found, FunName});
-call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, Depth) ->
+call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, ExtraArgs, Depth) ->
+    Arity = 2 + length(ExtraArgs),
     case beamtalk_class_hierarchy_table:lookup(ClassName) of
         not_found ->
             error({supervisor_init_method_not_found, FunName});
@@ -515,15 +550,15 @@ call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, Dep
                 not_found ->
                     %% Class not yet registered or module not yet recorded — skip upward.
                     call_inherited_class_method_direct(
-                        SuperclassName, FunName, ClassSelf, ClassVars, Depth + 1
+                        SuperclassName, FunName, ClassSelf, ClassVars, ExtraArgs, Depth + 1
                     );
                 {ok, SuperModule} ->
-                    case erlang:function_exported(SuperModule, FunName, 2) of
+                    case erlang:function_exported(SuperModule, FunName, Arity) of
                         true ->
-                            erlang:apply(SuperModule, FunName, [ClassSelf, ClassVars]);
+                            erlang:apply(SuperModule, FunName, [ClassSelf, ClassVars | ExtraArgs]);
                         false ->
                             call_inherited_class_method_direct(
-                                SuperclassName, FunName, ClassSelf, ClassVars, Depth + 1
+                                SuperclassName, FunName, ClassSelf, ClassVars, ExtraArgs, Depth + 1
                             )
                     end
             end

@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1542: Tests for DynamicSupervisor initialize: class-side default.
+//
+// Lifecycle tests (supervise → initialize: → startChild) are in
+// tests/e2e/cases/supervisor_initialize.btscript because they
+// require live OTP processes.
+
+TestCase subclass: DynamicSupervisorInitializeTest
+
+  // initialize: default is nil (no-op)
+  testDynamicSupervisorInitializeDefaultIsNil =>
+    self assert: (DynamicSupervisor initialize: nil) equals: nil
+
+  // DynSupWithInitialize inherits isSupervisor from DynamicSupervisor
+  testDynSupWithInitializeIsSupervisor =>
+    self assert: DynSupWithInitialize isSupervisor equals: true

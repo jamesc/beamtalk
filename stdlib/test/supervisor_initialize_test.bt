@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1542: Tests for Supervisor initialize: class-side default.
+//
+// Lifecycle tests (supervise → initialize: → which:) are in
+// tests/e2e/cases/supervisor_initialize.btscript because they
+// require live OTP processes.
+
+TestCase subclass: SupervisorInitializeTest
+
+  // initialize: default is nil (no-op)
+  testSupervisorInitializeDefaultIsNil =>
+    self assert: (Supervisor initialize: nil) equals: nil
+
+  // SupWithInitialize inherits strategy from Supervisor
+  testSupWithInitializeStrategyDefault =>
+    self assert: SupWithInitialize strategy equals: #oneForOne
+
+  // SupWithInitialize responds to isSupervisor
+  testSupWithInitializeIsSupervisor =>
+    self assert: SupWithInitialize isSupervisor equals: true

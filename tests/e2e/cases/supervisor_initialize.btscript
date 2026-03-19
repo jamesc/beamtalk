@@ -1,0 +1,73 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Supervisor and DynamicSupervisor initialize: lifecycle hook (BT-1542).
+//
+// Verifies that:
+// 1. initialize: runs after all children have started
+// 2. The supervisor is responsive during initialize: (no deadlock)
+// 3. which: and startChild work inside the callback
+
+// @load tests/e2e/fixtures/counter.bt
+// @load tests/e2e/fixtures/e2e_init_child_a.bt
+// @load tests/e2e/fixtures/e2e_init_child_b.bt
+// @load tests/e2e/fixtures/e2e_init_supervisor.bt
+// @load tests/e2e/fixtures/e2e_init_dyn_supervisor.bt
+
+// ===========================================================================
+// STATIC SUPERVISOR — initialize: calls which: on a sibling
+// ===========================================================================
+
+// supervise starts all children, then runs initialize:
+sup := E2EInitSupervisor supervise
+// => #Supervisor<E2EInitSupervisor,_>
+
+// Both children are alive
+sup count
+// => 2
+
+// initialize: called which: on SupInitChildA and set its value to 42
+childA := sup which: E2EInitChildA
+// => #Actor<E2EInitChildA,_>
+
+childA getValue
+// => 42
+
+// ChildB was not modified by initialize:
+childB := sup which: E2EInitChildB
+// => #Actor<E2EInitChildB,_>
+
+childB getValue
+// => 0
+
+sup stop
+// => nil
+
+// ===========================================================================
+// DYNAMIC SUPERVISOR — initialize: calls startChild
+// ===========================================================================
+
+// supervise starts, then initialize: pre-populates with 2 children
+pool := E2EInitDynSupervisor supervise
+// => #DynamicSupervisor<E2EInitDynSupervisor,_>
+
+// initialize: called startChild twice
+pool count
+// => 2
+
+pool stop
+// => nil
+
+// ===========================================================================
+// DEFAULT initialize: — supervisor without override works normally
+// ===========================================================================
+
+// E2EAppSupervisor has no initialize: override — default no-op
+app := E2EAppSupervisor supervise
+// => #Supervisor<E2EAppSupervisor,_>
+
+app count
+// => 1
+
+app stop
+// => nil

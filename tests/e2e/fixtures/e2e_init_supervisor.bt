@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: Supervisor with initialize: hook that wires children (BT-1542).
+// initialize: calls which: on a sibling — would deadlock without caller-side dispatch.
+
+Supervisor subclass: E2EInitSupervisor
+
+  class children => #(E2EInitChildA, E2EInitChildB)
+
+  class initialize: sup =>
+    childA := sup which: E2EInitChildA
+    childA setValue: 42

@@ -57,6 +57,23 @@ abstract Object subclass: Supervisor
   /// ```
   class children -> List => self subclassResponsibility
 
+  /// Lifecycle hook called after all children have started.
+  ///
+  /// Override to perform post-start wiring (e.g., discovering siblings
+  /// via `which:` or injecting dependencies). Runs in the caller's
+  /// process, so `which:` and other supervisor calls will not deadlock.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Supervisor subclass: App
+  ///   class children => #(Store, Engine)
+  ///   class initialize: sup =>
+  ///     engine := sup which: Engine
+  ///     store := sup which: Store
+  ///     engine connectStore: store
+  /// ```
+  class initialize: _supervisor => nil
+
   // === Class-side lifecycle ===
 
   /// Start this supervisor (or return the already-running instance).
