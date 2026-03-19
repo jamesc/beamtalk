@@ -1879,7 +1879,7 @@ impl CoreErlangGenerator {
     ///
     /// For `Logger debug: "msg"`:
     /// ```erlang
-    /// call 'logger':'log'('debug', <<"msg">>, #{
+    /// call 'logger':'log'('debug', {"~ts", [<<"msg">>]}, #{
     ///     'domain' => ['beamtalk', 'user'],
     ///     'beamtalk_class' => 'Counter',
     ///     'beamtalk_selector' => 'increment'
@@ -1888,7 +1888,7 @@ impl CoreErlangGenerator {
     ///
     /// For `Logger debug: "msg" metadata: #{"key" => val}`:
     /// ```erlang
-    /// call 'logger':'log'('debug', <<"msg">>, call 'maps':'merge'(UserMeta, #{
+    /// call 'logger':'log'('debug', {"~ts", [<<"msg">>]}, call 'maps':'merge'(UserMeta, #{
     ///     'domain' => ['beamtalk', 'user'],
     ///     'beamtalk_class' => 'Counter',
     ///     'beamtalk_selector' => 'increment'
@@ -1926,8 +1926,13 @@ impl CoreErlangGenerator {
             _ => return Ok(None),
         };
 
-        // Get the message argument
-        let msg_doc = self.expression_doc(&arguments[0])?;
+        // Get the message argument, wrapped as a format+args tuple so OTP's
+        // logger formatter can handle it.  Beamtalk strings are binaries, but
+        // logger:log/3 expects a char-list string, a report, or {Format, Args}.
+        // Passing a binary directly causes the formatter to crash with
+        // "FORMATTER CRASH: {string, <<\"...\">>}".
+        let raw_msg_doc = self.expression_doc(&arguments[0])?;
+        let msg_doc = docvec!["{\"~ts\", [", raw_msg_doc, "]}"];
 
         // Build domain metadata map
         // The class name comes from the compilation context (the class being compiled)
