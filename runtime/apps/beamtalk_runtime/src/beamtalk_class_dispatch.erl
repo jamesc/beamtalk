@@ -82,7 +82,19 @@ class_send(ClassPid, Selector, Args) ->
         end,
     case gen_server:call(ClassPid, {class_method_call, Selector, Args}, Timeout) of
         {ok, Result} ->
-            Result;
+            %% BT-1542: Run the initialize: lifecycle hook in the caller's process
+            %% after a supervise call returns a freshly-started supervisor tuple.
+            %% startLink/1 returns {beamtalk_supervisor_new, ...} for fresh starts
+            %% and {beamtalk_supervisor, ...} for already_started (idempotent).
+            %% We convert the _new tag to the standard tag after running initialize:.
+            case Result of
+                {beamtalk_supervisor_new, CN, Mod, Pid} ->
+                    SupTuple = {beamtalk_supervisor, CN, Mod, Pid},
+                    beamtalk_supervisor:run_initialize(SupTuple),
+                    SupTuple;
+                _ ->
+                    Result
+            end;
         {error, not_found} ->
             ClassName = gen_server:call(ClassPid, class_name),
             %% ADR 0032 Phase 0 (BT-732): Try Class chain before raising does_not_understand.

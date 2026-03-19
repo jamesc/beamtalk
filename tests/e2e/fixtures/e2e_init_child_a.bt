@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: simple actor child for supervisor initialize: test (BT-1542).
+
+Actor subclass: E2EInitChildA
+  state: value = 0
+
+  getValue => self.value
+
+  setValue: v => self.value := v

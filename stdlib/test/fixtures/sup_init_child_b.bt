@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1542: Simple actor child for supervisor initialize: test.
+
+Actor subclass: SupInitChildB
+  state: value = 0
+
+  getValue => self.value
+
+  setValue: v => self.value := v

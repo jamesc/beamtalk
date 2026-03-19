@@ -49,6 +49,21 @@ abstract Object subclass: DynamicSupervisor
   /// ```
   class childClass -> Class => self subclassResponsibility
 
+  /// Lifecycle hook called after the dynamic supervisor has started.
+  ///
+  /// Override to perform post-start setup (e.g., pre-populating workers
+  /// via `startChild`). Runs in the caller's process, so supervisor
+  /// calls will not deadlock.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DynamicSupervisor subclass: WorkerPool
+  ///   class childClass => Worker
+  ///   class initialize: sup =>
+  ///     3 timesRepeat: [sup startChild]
+  /// ```
+  class initialize: _supervisor => nil
+
   // === Class-side lifecycle ===
 
   /// Start this dynamic supervisor (or return the already-running instance).

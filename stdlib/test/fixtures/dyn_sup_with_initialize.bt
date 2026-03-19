@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1542: DynamicSupervisor with initialize: hook that pre-populates children.
+// initialize: calls startChild — this verifies the hook runs and the supervisor
+// is responsive during the callback.
+
+DynamicSupervisor subclass: DynSupWithInitialize
+
+  class childClass => Counter
+
+  class initialize: sup =>
+    sup startChild
+    sup startChild
