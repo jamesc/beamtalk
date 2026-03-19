@@ -187,10 +187,6 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
             ) | (ExpectCategory::Type, Some(DiagnosticCategory::Type))
                 | (ExpectCategory::Unused, Some(DiagnosticCategory::Unused))
                 | (
-                    ExpectCategory::SelfCapture,
-                    Some(DiagnosticCategory::SelfCapture)
-                )
-                | (
                     ExpectCategory::DeadAssignment,
                     Some(DiagnosticCategory::DeadAssignment)
                 )
@@ -800,84 +796,6 @@ mod tests {
         );
     }
 
-    // ── BT-1302: @expect self_capture ──
-
-    #[test]
-    fn expect_self_capture_suppresses_self_capture_hint() {
-        // @expect self_capture on an actor method that has the self-capture pattern
-        let source = "Actor subclass: Foo\n  state: items = #()\n  run =>\n    @expect self_capture\n    self.items collect: [:x | self printString]";
-        let tokens = lex_with_eof(source);
-        let (module, parse_diags) = parse(tokens);
-        let diagnostics = compute_diagnostics(&module, parse_diags);
-
-        let self_capture = diagnostics
-            .iter()
-            .any(|d| d.message.contains("may deadlock"));
-        assert!(
-            !self_capture,
-            "@expect self_capture should suppress self-capture hint, got: {diagnostics:?}"
-        );
-        let stale = diagnostics
-            .iter()
-            .any(|d| d.message.contains("stale @expect"));
-        assert!(
-            !stale,
-            "@expect self_capture must not be stale, got: {diagnostics:?}"
-        );
-    }
-
-    #[test]
-    fn expect_self_capture_stale_when_no_self_capture() {
-        // @expect self_capture with no self-capture diagnostic → stale warning
-        let source = "@expect self_capture\n42";
-        let tokens = lex_with_eof(source);
-        let (module, parse_diags) = parse(tokens);
-        let diagnostics = compute_diagnostics(&module, parse_diags);
-
-        let stale = diagnostics
-            .iter()
-            .any(|d| d.message.contains("stale @expect"));
-        assert!(
-            stale,
-            "Should emit stale @expect error when no self-capture diagnostic, got: {diagnostics:?}"
-        );
-    }
-
-    #[test]
-    fn expect_dnu_does_not_suppress_self_capture() {
-        // @expect dnu should NOT suppress a self_capture diagnostic — targeted suppression
-        let source = "Actor subclass: Foo\n  state: items = #()\n  run =>\n    @expect dnu\n    self.items collect: [:x | self printString]";
-        let tokens = lex_with_eof(source);
-        let (module, parse_diags) = parse(tokens);
-        let diagnostics = compute_diagnostics(&module, parse_diags);
-
-        // self_capture hint should still be present
-        let self_capture = diagnostics
-            .iter()
-            .any(|d| d.message.contains("may deadlock"));
-        assert!(
-            self_capture,
-            "@expect dnu must NOT suppress self_capture hint, got: {diagnostics:?}"
-        );
-    }
-
-    #[test]
-    fn expect_all_still_suppresses_self_capture() {
-        // @expect all is backwards-compat and should suppress any diagnostic including self_capture
-        let source = "Actor subclass: Foo\n  state: items = #()\n  run =>\n    @expect all\n    self.items collect: [:x | self printString]";
-        let tokens = lex_with_eof(source);
-        let (module, parse_diags) = parse(tokens);
-        let diagnostics = compute_diagnostics(&module, parse_diags);
-
-        let self_capture = diagnostics
-            .iter()
-            .any(|d| d.message.contains("may deadlock"));
-        assert!(
-            !self_capture,
-            "@expect all should suppress self_capture hint, got: {diagnostics:?}"
-        );
-    }
-
     #[test]
     fn unknown_expect_category_is_parse_error() {
         // @expect typo should emit a parse error (prevents silent suppression of nothing)
@@ -892,40 +810,6 @@ mod tests {
         assert!(
             has_error,
             "Typo in @expect category should be a parse error, got: {diagnostics:?}"
-        );
-    }
-
-    #[test]
-    fn expect_self_capture_only_suppresses_self_capture_not_dnu() {
-        // Targeted suppression: @expect self_capture on an expression that has BOTH a
-        // self-capture hint AND a DNU hint should suppress only the self-capture hint;
-        // the DNU hint must still surface.
-        //
-        // The block `[:x | self printString. 42 unknownMsg]` contains:
-        //   - `self printString`  → triggers the self-capture hint on the collect: call
-        //   - `42 unknownMsg`     → triggers a DNU hint (Integer does not understand unknownMsg)
-        // Both spans are within the target span of the @expect directive.
-        let source = "Actor subclass: Foo\n  state: items = #()\n  run =>\n    @expect self_capture\n    self.items collect: [:x | self printString. 42 unknownMsg]";
-        let tokens = lex_with_eof(source);
-        let (module, parse_diags) = parse(tokens);
-        let diagnostics = compute_diagnostics(&module, parse_diags);
-
-        // Self-capture hint must be suppressed
-        let self_capture = diagnostics
-            .iter()
-            .any(|d| d.message.contains("may deadlock"));
-        assert!(
-            !self_capture,
-            "@expect self_capture should suppress self-capture hint, got: {diagnostics:?}"
-        );
-
-        // DNU hint on 42 unknownMsg inside the block must still be present
-        let dnu = diagnostics
-            .iter()
-            .any(|d| d.message.contains("does not understand"));
-        assert!(
-            dnu,
-            "@expect self_capture must NOT suppress the DNU hint on the same expression, got: {diagnostics:?}"
         );
     }
 

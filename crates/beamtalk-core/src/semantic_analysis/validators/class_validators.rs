@@ -15,6 +15,7 @@
 //! - Cast on value types (BT-919)
 //! - Value type `-> Nil` return annotations (BT-1052)
 //! - Data keyword / class-kind mismatch errors (BT-1529, BT-1535)
+//! - Object-kind `new`/`new:` usage errors (BT-1540)
 
 use crate::ast::{
     ClassKind, DeclaredKeyword, Expression, Identifier, MessageSelector, MethodDefinition, Module,
@@ -190,6 +191,85 @@ fn visit_actor_new(
                         )
                         .with_hint(
                             "Actors are processes — use spawn/spawnWith: instead of new/new:",
+                        ),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// BT-1540: Error when Object-kind classes use `new` or `new:`.
+///
+/// Object-kind classes are class-method namespaces and should not be instantiated.
+/// `new`/`new:` are only available on Value subclasses. Classes that define their
+/// own class-side `new`/`new:` factory methods (e.g. `AtomicCounter`, `Ets`) are exempt.
+pub(crate) fn check_object_new_usage(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_object_new);
+}
+
+/// Returns true if `class_name` with `selector` should trigger an Object-kind new error.
+///
+/// Only fires for classes known in the hierarchy (unknown classes get DNU instead).
+fn is_object_new_error(class_name: &str, selector: &str, hierarchy: &ClassHierarchy) -> bool {
+    (selector == "new" || selector == "new:")
+        && !matches!(class_name, "self" | "super")
+        && hierarchy.has_class(class_name)
+        && hierarchy.resolve_class_kind(class_name) == ClassKind::Object
+        && !hierarchy.has_own_class_method(class_name, selector)
+}
+
+fn visit_object_new(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Expression::MessageSend {
+        receiver,
+        selector,
+        span,
+        ..
+    } = expr
+    {
+        if let Some(class_name) = receiver_class_name(receiver) {
+            let sel = selector.name();
+            if is_object_new_error(class_name, &sel, hierarchy) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "Object-kind class `{class_name}` cannot be instantiated with `{sel}`"
+                        ),
+                        *span,
+                    )
+                    .with_hint(
+                        "Object subclasses are not instantiable. Use `Value subclass:` for data types",
+                    ),
+                );
+            }
+        }
+    }
+    // Also check cascade messages
+    if let Expression::Cascade {
+        receiver, messages, ..
+    } = expr
+    {
+        if let Some(class_name) = receiver_class_name(receiver) {
+            for msg in messages {
+                let sel = msg.selector.name();
+                if is_object_new_error(class_name, &sel, hierarchy) {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            format!(
+                                "Object-kind class `{class_name}` cannot be instantiated with `{sel}`"
+                            ),
+                            msg.span,
+                        )
+                        .with_hint(
+                            "Object subclasses are not instantiable. Use `Value subclass:` for data types",
                         ),
                     );
                 }
@@ -544,67 +624,6 @@ fn report_self_slot_assignment(
                  to go through the `{with_selector}` method."
             )),
         );
-    }
-}
-
-/// Collects child expression references from an expression node.
-pub(super) fn child_expressions(expr: &Expression) -> Vec<&Expression> {
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            let mut children = vec![receiver.as_ref()];
-            children.extend(arguments.iter());
-            children
-        }
-        Expression::Block(block) => block.body.iter().map(|s| &s.expression).collect(),
-        Expression::Assignment { target, value, .. } => vec![target.as_ref(), value.as_ref()],
-        Expression::Return { value, .. } => vec![value.as_ref()],
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            let mut children = vec![receiver.as_ref()];
-            for msg in messages {
-                children.extend(msg.arguments.iter());
-            }
-            children
-        }
-        Expression::Parenthesized { expression, .. } => vec![expression.as_ref()],
-        Expression::FieldAccess { receiver, .. } => vec![receiver.as_ref()],
-        Expression::Match { value, arms, .. } => {
-            let mut children = vec![value.as_ref()];
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    children.push(guard);
-                }
-                children.push(&arm.body);
-            }
-            children
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            pairs.iter().flat_map(|p| [&p.key, &p.value]).collect()
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            let mut children: Vec<&Expression> = elements.iter().collect();
-            if let Some(t) = tail {
-                children.push(t.as_ref());
-            }
-            children
-        }
-        Expression::ArrayLiteral { elements, .. } => elements.iter().collect(),
-        Expression::StringInterpolation { segments, .. } => segments
-            .iter()
-            .filter_map(|seg| {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
-                    Some(e)
-                } else {
-                    None
-                }
-            })
-            .collect(),
-        _ => vec![],
     }
 }
 

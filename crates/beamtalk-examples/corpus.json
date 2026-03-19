@@ -1004,14 +1004,11 @@
         "assign",
         "assignment",
         "beamtalk-language-features",
-        "map",
-        "mapping",
         "mutate",
         "mutation",
-        "set",
-        "transform"
+        "set"
       ],
-      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect self_capture\nself.items collect: [:x | self process: x]  // self-capture hint suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
+      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1025,36 +1022,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-73",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Actor",
-        "Processor",
-        "actor",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "extends",
-        "field",
-        "gen_server",
-        "genserver",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "map",
-        "mapping",
-        "member",
-        "process",
-        "property",
-        "subclassing",
-        "transform"
-      ],
-      "source": "Actor subclass: Processor\n  state: items = #()\n  process =>\n    @expect self_capture\n    self.items collect: [:x | self transform: x]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-76",
+      "id": "docs-beamtalk-language-features-block-75",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1077,7 +1045,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-77",
+      "id": "docs-beamtalk-language-features-block-76",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1087,7 +1055,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-78",
+      "id": "docs-beamtalk-language-features-block-77",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1097,7 +1065,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-79",
+      "id": "docs-beamtalk-language-features-block-78",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1138,7 +1106,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-81",
+      "id": "docs-beamtalk-language-features-block-80",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1153,7 +1121,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-82",
+      "id": "docs-beamtalk-language-features-block-81",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1163,7 +1131,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-84",
+      "id": "docs-beamtalk-language-features-block-83",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1176,7 +1144,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-85",
+      "id": "docs-beamtalk-language-features-block-84",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1199,7 +1167,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-86",
+      "id": "docs-beamtalk-language-features-block-85",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1222,7 +1190,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-87",
+      "id": "docs-beamtalk-language-features-block-86",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -10703,7 +10671,7 @@
         "testSetAndGetCurrent",
         "testSingletonCurrentAccessors"
       ],
-      "source": "// BT-488, ADR 0019 Phase 1: Tests that singleton classes (BeamtalkInterface,\n// TranscriptStream, WorkspaceInterface) expose a current accessor that\n// returns nil before initialization\n\nTestCase subclass: ClassVariablesSingletonTest\n\n  testSingletonCurrentAccessors =>\n    self assert: BeamtalkInterface current equals: nil\n    // TranscriptStream has current accessor\n    self assert: TranscriptStream current equals: nil\n    // WorkspaceInterface has current accessor\n    self assert: WorkspaceInterface current equals: nil\n\n  testSetAndGetCurrent =>\n    // Set a BeamtalkInterface instance as current and verify retrieval\n    prev := BeamtalkInterface current\n    sd := BeamtalkInterface new\n    BeamtalkInterface current: sd\n    self assert: BeamtalkInterface current equals: sd\n    // Restore previous value to avoid affecting other tests\n    BeamtalkInterface current: prev",
+      "source": "// BT-488, ADR 0019 Phase 1: Tests that singleton classes (BeamtalkInterface,\n// TranscriptStream, WorkspaceInterface) expose a current accessor that\n// returns nil before initialization\n\nTestCase subclass: ClassVariablesSingletonTest\n\n  testSingletonCurrentAccessors =>\n    self assert: BeamtalkInterface current equals: nil\n    // TranscriptStream has current accessor\n    self assert: TranscriptStream current equals: nil\n    // WorkspaceInterface has current accessor\n    self assert: WorkspaceInterface current equals: nil\n\n  testSetAndGetCurrent =>\n    // Verify that current returns the singleton (set during workspace bootstrap)\n    // We can't create a new BeamtalkInterface since Object-kind classes are\n    // not instantiable — just verify the accessor returns a consistent value.\n    current := BeamtalkInterface current\n    self assert: BeamtalkInterface current equals: current",
       "explanation": "BT-488, ADR 0019 Phase 1: Tests that singleton classes (BeamtalkInterface, TranscriptStream, WorkspaceInterface) expose a current accessor that returns nil before initialization"
     },
     {
@@ -12342,7 +12310,7 @@
         "transform",
         "where"
       ],
-      "source": "// BT-904: Actor fixture for testing self-sends inside collect:/select:/reject:\n// blocks. Self-sends in actor blocks need state threading because they may\n// mutate actor state\n\nActor subclass: ActorCollectCounter\n  state: count = 0\n\n  getCount => self.count\n\n  // Helper: increments count and returns formatted item\n  processItem: item =>\n    self.count := self.count + 1\n    item * 2\n\n  // collect: with self-send — needs state threading.\n  // @expect all: this fixture intentionally sends `self` inside a collection block to\n  // test BT-904 state threading. The compiler correctly warns that re-entering the Actor\n  // gen_server via `calling_self` from within a HOF block can deadlock; we suppress it\n  // here because the deadlock risk is the exact behaviour under test.\n  doubleAll: items =>\n    @expect all\n    items collect: [:item | self processItem: item]\n\n  // select: with self-send — same intentional pattern as doubleAll: above.\n  selectPositive: items =>\n    @expect all\n    items select: [:item | self checkPositive: item]\n\n  // reject: with self-send — same intentional pattern as doubleAll: above.\n  rejectNegative: items =>\n    @expect all\n    items reject: [:item | self checkNegative: item]\n\n  // collect: with field assignment in block — direct field mutation\n  doubleAllWithFieldMutation: items =>\n    items\n      collect: [:item |\n        self.count := self.count + 1\n        item * 2\n      ]\n\n  // collect: as last expression (no ^) — uses last-expression handler.\n  // Same intentional self-capture pattern as doubleAll:.\n  doubleAllImplicit: items =>\n    @expect all\n    items collect: [:item | self processItem: item]\n\n  // do: with self-send — already works (has state threading).\n  // Same intentional self-capture pattern as doubleAll:.\n  countAll: items =>\n    @expect all\n    items do: [:item | self processItem: item]\n    self.count\n\n  // Helper for select:\n  checkPositive: item =>\n    self.count := self.count + 1\n    item > 0\n\n  // Helper for reject:\n  checkNegative: item =>\n    self.count := self.count + 1\n    item < 0",
+      "source": "// BT-904: Actor fixture for testing self-sends inside collect:/select:/reject:\n// blocks. Self-sends in actor blocks need state threading because they may\n// mutate actor state\n\nActor subclass: ActorCollectCounter\n  state: count = 0\n\n  getCount => self.count\n\n  // Helper: increments count and returns formatted item\n  processItem: item =>\n    self.count := self.count + 1\n    item * 2\n\n  // collect: with self-send — safe in blocks (BT-953 lint removed as false positive).\n  doubleAll: items => items collect: [:item | self processItem: item]\n\n  // select: with self-send — same intentional pattern as doubleAll: above.\n  selectPositive: items => items select: [:item | self checkPositive: item]\n\n  // reject: with self-send — same intentional pattern as doubleAll: above.\n  rejectNegative: items => items reject: [:item | self checkNegative: item]\n\n  // collect: with field assignment in block — direct field mutation\n  doubleAllWithFieldMutation: items =>\n    items\n      collect: [:item |\n        self.count := self.count + 1\n        item * 2\n      ]\n\n  // collect: as last expression (no ^) — uses last-expression handler.\n  // Self-sends in blocks are safe (BT-953 lint removed).\n  doubleAllImplicit: items => items collect: [:item | self processItem: item]\n\n  // do: with self-send — already works (has state threading).\n  countAll: items =>\n    items do: [:item | self processItem: item]\n    self.count\n\n  // Helper for select:\n  checkPositive: item =>\n    self.count := self.count + 1\n    item > 0\n\n  // Helper for reject:\n  checkNegative: item =>\n    self.count := self.count + 1\n    item < 0",
       "explanation": "BT-904: Actor fixture for testing self-sends inside collect:/select:/reject: blocks. Self-sends in actor blocks need state threading because they may mutate actor state"
     },
     {
@@ -17299,8 +17267,8 @@
         "set",
         "string conversion",
         "subclassing",
-        "testAllMethodsIncludesNew",
         "testAllMethodsIncludesReload",
+        "testAllMethodsIncludesSpawn",
         "testAllMethodsIncludesSuperclass",
         "testAllMethodsNonEmpty",
         "testAllSubclassesSealed",
@@ -17317,7 +17285,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// BT-412, BT-803, ADR 0036 Phase 2: Tests the metaclass tower — primitive class\n// identity (42 class == Integer), isMeta/isClass predicates, metaclass name,\n// thisClass, superclass hierarchy, self-grounding fixed point, and sealed Metaclass\n\nTestCase subclass: MetaclassTest\n\n  testPrimitiveClassIdentityAndTower =>\n    self assert: 42 class equals: Integer\n    self assert: 3.14 class equals: Float\n    self assert: \"hello\" class equals: String\n    self assert: true class equals: True\n    self assert: false class equals: False\n    self assert: nil class equals: UndefinedObject\n    self assert: #symbol class equals: Symbol\n    // BT-802 (ADR 0036 Phase 1): Metaclass objects replace the #Metaclass sentinel\n    self assert: (42 class class) isMeta equals: true\n    self assert: (\"hello\" class class) isMeta equals: true\n    self assert: (true class class) isMeta equals: true\n    // Metaclass objects are not plain classes\n    self assert: (42 class class) isClass equals: false\n    // Metaclass tower terminates: self-grounding invariant (class class class == class class)\n    self assert: 42 class class class equals: 42 class class\n\n  // BT-803: isMetaclass predicate\n  testIsMetaclass =>\n    self assert: (42 class class) isMetaclass equals: true\n    self assert: (\"hello\" class class) isMetaclass equals: true\n    self assert: (true class class) isMetaclass equals: true\n    self assert: (nil class class) isMetaclass equals: true\n    // isBehaviour is inherited from Behaviour\n    self assert: (42 class class) isBehaviour equals: true\n    // Regular class objects are not metaclasses\n    self assert: (42 class) isMetaclass equals: false\n    self assert: Integer isMetaclass equals: false\n\n  // BT-803: name — e.g. 42 class class name == 'Integer class'\n  testName =>\n    self assert: (42 class class) name equals: \"Integer class\"\n    self assert: (3.14 class class) name equals: \"Float class\"\n    self assert: (\"hello\" class class) name equals: \"String class\"\n    self assert: (true class class) name equals: \"True class\"\n    self assert: (false class class) name equals: \"False class\"\n    self assert: (nil class class) name equals: \"UndefinedObject class\"\n    self assert: (#sym class class) name equals: \"Symbol class\"\n\n  // BT-803: thisClass — e.g. 42 class class thisClass == Integer\n  testThisClass =>\n    self assert: (42 class class) thisClass equals: Integer\n    self assert: (3.14 class class) thisClass equals: Float\n    self assert: (\"hello\" class class) thisClass equals: String\n    self assert: (true class class) thisClass equals: True\n    self assert: (false class class) thisClass equals: False\n    self assert: (nil class class) thisClass equals: UndefinedObject\n\n  // BT-803: printString — same as name\n  testPrintString =>\n    self assert: (42 class class) printString equals: \"Integer class\"\n    self assert: (3.14 class class) printString equals: \"Float class\"\n    self assert: (\"hello\" class class) printString equals: \"String class\"\n\n  // BT-803: superclass invariant — Counter class superclass == Actor class\n  testSuperclassInvariant =>\n    // Parallel hierarchy: Counter class class superclass == Actor class class\n    self assert: Counter class class superclass equals: Actor class class\n    // Actor's metaclass superclass is Object's metaclass\n    self assert: Actor class class superclass equals: Object class class\n    // Object's metaclass superclass is ProtoObject's metaclass\n    self assert: Object class class superclass equals: ProtoObject class class\n\n  // BT-803: self-grounding fixed point — Metaclass class class == Metaclass class\n  testSelfGrounding =>\n    self assert: Metaclass class class equals: Metaclass class\n    // Three-deep also terminates\n    self assert: Metaclass class class class equals: Metaclass class class\n\n  // BT-803: Metaclass allSubclasses returns [] (sealed)\n  testAllSubclassesSealed => self assert: Metaclass allSubclasses isEmpty\n\n  // BT-803: Metaclass new raises error\n  testNewRaisesError => self should: [Metaclass new] raise: #user_error\n\n  // BT-1169: allMethods includes class-side 'new' inherited from Actor\n  testAllMethodsIncludesNew =>\n    methods := Counter class allMethods\n    self assert: (methods includes: #new)\n\n  // BT-1169: allMethods includes Behaviour protocol 'reload'\n  testAllMethodsIncludesReload =>\n    methods := Counter class allMethods\n    self assert: (methods includes: #reload)\n\n  // BT-1169: allMethods includes Behaviour protocol 'superclass'\n  testAllMethodsIncludesSuperclass =>\n    methods := Counter class allMethods\n    self assert: (methods includes: #superclass)\n\n  // BT-1169: allMethods is non-empty\n  testAllMethodsNonEmpty =>\n    methods := Counter class allMethods\n    self deny: methods isEmpty\n\n  // BT-1169: localClassMethods unchanged — Counter has no local class-side methods\n  testLocalClassMethodsUnchanged =>\n    localMethods := Counter class localClassMethods\n    self deny: (localMethods includes: #reload)\n\n  // Class identity tests for domain classes\n  testClassIdentityForDomainClasses =>\n    // Random class isMeta returns true (BT-802 / ADR 0036)\n    self assert: (Random class) isMeta equals: true\n    // Regex class isMeta returns true (BT-802 / ADR 0036)\n    self assert: (Regex class) isMeta equals: true",
+      "source": "// BT-412, BT-803, ADR 0036 Phase 2: Tests the metaclass tower — primitive class\n// identity (42 class == Integer), isMeta/isClass predicates, metaclass name,\n// thisClass, superclass hierarchy, self-grounding fixed point, and sealed Metaclass\n\nTestCase subclass: MetaclassTest\n\n  testPrimitiveClassIdentityAndTower =>\n    self assert: 42 class equals: Integer\n    self assert: 3.14 class equals: Float\n    self assert: \"hello\" class equals: String\n    self assert: true class equals: True\n    self assert: false class equals: False\n    self assert: nil class equals: UndefinedObject\n    self assert: #symbol class equals: Symbol\n    // BT-802 (ADR 0036 Phase 1): Metaclass objects replace the #Metaclass sentinel\n    self assert: (42 class class) isMeta equals: true\n    self assert: (\"hello\" class class) isMeta equals: true\n    self assert: (true class class) isMeta equals: true\n    // Metaclass objects are not plain classes\n    self assert: (42 class class) isClass equals: false\n    // Metaclass tower terminates: self-grounding invariant (class class class == class class)\n    self assert: 42 class class class equals: 42 class class\n\n  // BT-803: isMetaclass predicate\n  testIsMetaclass =>\n    self assert: (42 class class) isMetaclass equals: true\n    self assert: (\"hello\" class class) isMetaclass equals: true\n    self assert: (true class class) isMetaclass equals: true\n    self assert: (nil class class) isMetaclass equals: true\n    // isBehaviour is inherited from Behaviour\n    self assert: (42 class class) isBehaviour equals: true\n    // Regular class objects are not metaclasses\n    self assert: (42 class) isMetaclass equals: false\n    self assert: Integer isMetaclass equals: false\n\n  // BT-803: name — e.g. 42 class class name == 'Integer class'\n  testName =>\n    self assert: (42 class class) name equals: \"Integer class\"\n    self assert: (3.14 class class) name equals: \"Float class\"\n    self assert: (\"hello\" class class) name equals: \"String class\"\n    self assert: (true class class) name equals: \"True class\"\n    self assert: (false class class) name equals: \"False class\"\n    self assert: (nil class class) name equals: \"UndefinedObject class\"\n    self assert: (#sym class class) name equals: \"Symbol class\"\n\n  // BT-803: thisClass — e.g. 42 class class thisClass == Integer\n  testThisClass =>\n    self assert: (42 class class) thisClass equals: Integer\n    self assert: (3.14 class class) thisClass equals: Float\n    self assert: (\"hello\" class class) thisClass equals: String\n    self assert: (true class class) thisClass equals: True\n    self assert: (false class class) thisClass equals: False\n    self assert: (nil class class) thisClass equals: UndefinedObject\n\n  // BT-803: printString — same as name\n  testPrintString =>\n    self assert: (42 class class) printString equals: \"Integer class\"\n    self assert: (3.14 class class) printString equals: \"Float class\"\n    self assert: (\"hello\" class class) printString equals: \"String class\"\n\n  // BT-803: superclass invariant — Counter class superclass == Actor class\n  testSuperclassInvariant =>\n    // Parallel hierarchy: Counter class class superclass == Actor class class\n    self assert: Counter class class superclass equals: Actor class class\n    // Actor's metaclass superclass is Object's metaclass\n    self assert: Actor class class superclass equals: Object class class\n    // Object's metaclass superclass is ProtoObject's metaclass\n    self assert: Object class class superclass equals: ProtoObject class class\n\n  // BT-803: self-grounding fixed point — Metaclass class class == Metaclass class\n  testSelfGrounding =>\n    self assert: Metaclass class class equals: Metaclass class\n    // Three-deep also terminates\n    self assert: Metaclass class class class equals: Metaclass class class\n\n  // BT-803: Metaclass allSubclasses returns [] (sealed)\n  testAllSubclassesSealed => self assert: Metaclass allSubclasses isEmpty\n\n  // BT-803: Metaclass new raises error\n  testNewRaisesError => self should: [Metaclass new] raise: #user_error\n\n  // BT-1169: allMethods includes class-side 'spawn' on Actor subclasses\n  testAllMethodsIncludesSpawn =>\n    methods := Counter class allMethods\n    self assert: (methods includes: #spawn)\n\n  // BT-1169: allMethods includes Behaviour protocol 'reload'\n  testAllMethodsIncludesReload =>\n    methods := Counter class allMethods\n    self assert: (methods includes: #reload)\n\n  // BT-1169: allMethods includes Behaviour protocol 'superclass'\n  testAllMethodsIncludesSuperclass =>\n    methods := Counter class allMethods\n    self assert: (methods includes: #superclass)\n\n  // BT-1169: allMethods is non-empty\n  testAllMethodsNonEmpty =>\n    methods := Counter class allMethods\n    self deny: methods isEmpty\n\n  // BT-1169: localClassMethods unchanged — Counter has no local class-side methods\n  testLocalClassMethodsUnchanged =>\n    localMethods := Counter class localClassMethods\n    self deny: (localMethods includes: #reload)\n\n  // Class identity tests for domain classes\n  testClassIdentityForDomainClasses =>\n    // Random class isMeta returns true (BT-802 / ADR 0036)\n    self assert: (Random class) isMeta equals: true\n    // Regex class isMeta returns true (BT-802 / ADR 0036)\n    self assert: (Regex class) isMeta equals: true",
       "explanation": "BT-412, BT-803, ADR 0036 Phase 2: Tests the metaclass tower — primitive class identity (42 class == Integer), isMeta/isClass predicates, metaclass name, thisClass, superclass hierarchy, self-grounding fixed point, and sealed Metaclass"
     },
     {
@@ -20503,16 +20471,16 @@
       "category": "e2e-fixtures",
       "tags": [
         "CollisionTestClass",
-        "Object",
+        "Value",
         "collision_test_class",
         "extends",
         "greet",
         "inherit",
         "inheritance",
-        "object",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "// Fixture for BT-737 class collision warning test.\n// Defines CollisionTestClass — used to verify that loading this class\n// after it has been registered with a different module atom emits a warning.\n\nObject subclass: CollisionTestClass\n\n  greet => \"hello\"",
+      "source": "// Fixture for BT-737 class collision warning test.\n// Defines CollisionTestClass — used to verify that loading this class\n// after it has been registered with a different module atom emits a warning.\n\nValue subclass: CollisionTestClass\n\n  greet => \"hello\"",
       "explanation": "Fixture for BT-737 class collision warning test. Defines CollisionTestClass — used to verify that loading this class after it has been registered with a different module atom emits a warning."
     },
     {
@@ -20921,7 +20889,7 @@
       "category": "e2e-fixtures",
       "tags": [
         "Hanoi",
-        "Object",
+        "Value",
         "append",
         "branch",
         "concat",
@@ -20934,13 +20902,13 @@
         "inherit",
         "inheritance",
         "negation",
-        "object",
         "solve:from:to:via:",
         "string join",
         "subclassing",
-        "unless"
+        "unless",
+        "value"
       ],
-      "source": "// Towers of Hanoi — e2e test fixture.\n// Canonical source lives in examples/getting-started/src/hanoi.bt.\n\nObject subclass: Hanoi\n\n  solve: n from: source to: target via: auxiliary =>\n    (n > 0)\n      ifTrue: [\n        self\n          solve: n - 1\n          from: source\n          to: auxiliary\n          via: target\n        TranscriptStream current show: \"Move disk from \" ++ source ++ \" to \" ++ target\n        TranscriptStream current cr\n        self\n          solve: n - 1\n          from: auxiliary\n          to: target\n          via: source\n      ]\n      ifFalse: [nil]",
+      "source": "// Towers of Hanoi — e2e test fixture.\n// Canonical source lives in examples/getting-started/src/hanoi.bt.\n\nValue subclass: Hanoi\n\n  solve: n from: source to: target via: auxiliary =>\n    (n > 0)\n      ifTrue: [\n        self\n          solve: n - 1\n          from: source\n          to: auxiliary\n          via: target\n        TranscriptStream current show: \"Move disk from \" ++ source ++ \" to \" ++ target\n        TranscriptStream current cr\n        self\n          solve: n - 1\n          from: auxiliary\n          to: target\n          via: source\n      ]\n      ifFalse: [nil]",
       "explanation": "Towers of Hanoi — e2e test fixture. Canonical source lives in examples/getting-started/src/hanoi.bt."
     },
     {
@@ -21185,7 +21153,7 @@
       "category": "e2e-fixtures",
       "tags": [
         "MultiStatement",
-        "Object",
+        "Value",
         "constructor",
         "create",
         "extends",
@@ -21193,12 +21161,12 @@
         "inheritance",
         "instantiate",
         "multi_statement",
-        "object",
         "sideEffectThenReturn",
         "subclassing",
-        "twoSideEffects"
+        "twoSideEffects",
+        "value"
       ],
-      "source": "// Fixture for testing multi-statement method bodies (BT-360)\n// Methods with newline-separated statements (no period required)\n\nObject subclass: MultiStatement\n\n  sideEffectThenReturn =>\n    Transcript show: \"side effect\"\n    42\n\n  twoSideEffects =>\n    Transcript show: \"first\"\n    Transcript show: \"second\"\n    99",
+      "source": "// Fixture for testing multi-statement method bodies (BT-360)\n// Methods with newline-separated statements (no period required)\n\nValue subclass: MultiStatement\n\n  sideEffectThenReturn =>\n    Transcript show: \"side effect\"\n    42\n\n  twoSideEffects =>\n    Transcript show: \"first\"\n    Transcript show: \"second\"\n    99",
       "explanation": "Fixture for testing multi-statement method bodies (BT-360) Methods with newline-separated statements (no period required)"
     },
     {

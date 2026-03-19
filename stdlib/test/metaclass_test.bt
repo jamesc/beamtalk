@@ -82,10 +82,10 @@ TestCase subclass: MetaclassTest
   // BT-803: Metaclass new raises error
   testNewRaisesError => self should: [Metaclass new] raise: #user_error
 
-  // BT-1169: allMethods includes class-side 'new' inherited from Actor
-  testAllMethodsIncludesNew =>
+  // BT-1169: allMethods includes class-side 'spawn' on Actor subclasses
+  testAllMethodsIncludesSpawn =>
     methods := Counter class allMethods
-    self assert: (methods includes: #new)
+    self assert: (methods includes: #spawn)
 
   // BT-1169: allMethods includes Behaviour protocol 'reload'
   testAllMethodsIncludesReload =>

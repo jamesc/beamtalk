@@ -21,7 +21,7 @@
 /// value := result at: 1     // => 1
 /// rest := result at: 2      // => Queue with [2]
 /// ```
-Object subclass: Queue
+Value subclass: Queue
 
   /// Create an empty Queue (class method).
   ///

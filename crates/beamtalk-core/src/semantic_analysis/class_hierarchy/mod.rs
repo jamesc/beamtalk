@@ -627,6 +627,20 @@ impl ClassHierarchy {
         }
     }
 
+    /// BT-1540: Check whether a class defines its own class-side method with the given selector.
+    ///
+    /// Returns `true` if the class has a class method matching `selector` defined
+    /// directly on it (not inherited). Used to exempt Object-kind classes that
+    /// define their own factory constructors (e.g. `class new:` on `AtomicCounter`).
+    #[must_use]
+    pub fn has_own_class_method(&self, class_name: &str, selector: &str) -> bool {
+        self.classes.get(class_name).is_some_and(|info| {
+            info.class_methods
+                .iter()
+                .any(|m| m.selector.as_str() == selector)
+        })
+    }
+
     /// BT-1528: After all classes in a module are registered, propagate `is_value`
     /// by walking each class's ancestor chain. Classes that indirectly inherit
     /// from Value (e.g. `Value subclass: MyBase` then `MyBase subclass: MyChild`)

@@ -115,7 +115,7 @@ register(BuilderState) when is_map(BuilderState) ->
 do_register(ClassName, ClassInfo) ->
     case beamtalk_object_class:start(ClassName, ClassInfo) of
         {ok, Pid} ->
-            ?LOG_INFO("Registered class via ClassBuilder", #{
+            ?LOG_DEBUG("Registered class via ClassBuilder", #{
                 class => ClassName, module => ?MODULE, domain => [beamtalk, runtime]
             }),
             notify_class_loaded(ClassName),
@@ -124,9 +124,6 @@ do_register(ClassName, ClassInfo) ->
             %% Hot reload path: class already exists, update its metadata.
             case beamtalk_object_class:update_class(ClassName, ClassInfo) of
                 {ok, _IVars} ->
-                    ?LOG_DEBUG("Updated class via ClassBuilder (hot reload)", #{
-                        class => ClassName, module => ?MODULE, domain => [beamtalk, runtime]
-                    }),
                     notify_class_loaded(ClassName),
                     {ok, beamtalk_class_registry:whereis_class(ClassName)};
                 {error, Reason} ->

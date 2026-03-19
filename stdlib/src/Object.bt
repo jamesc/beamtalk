@@ -24,22 +24,6 @@ ProtoObject subclass: Object
   /// ```
   class => @primitive "class"
 
-  /// Create a new instance of the receiver class.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Set new               // => a Set
-  /// ```
-  new => @intrinsic basicNew
-
-  /// Create a new instance with initialization arguments.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Dictionary new: #{#name => 'Alice'}
-  /// ```
-  new: initArgs => @intrinsic basicNewWith
-
   /// Test if the receiver is nil. Returns false for all objects except nil.
   ///
   /// ## Examples
@@ -103,7 +87,7 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// MyClass new printString    // => "a MyClass"
+  /// 42 printString            // => "42"
   /// ```
   printString -> String => "a " ++ self class printString
 
@@ -115,7 +99,6 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// MyClass new displayString    // => "a MyClass"
   /// 42 displayString             // => "42"
   /// ```
   displayString -> String => self printString
@@ -156,7 +139,7 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Object new fieldNames
+  /// 42 fieldNames             // => #()
   /// ```
   sealed fieldNames -> List => @intrinsic fieldNames
 
