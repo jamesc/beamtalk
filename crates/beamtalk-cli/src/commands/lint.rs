@@ -4,8 +4,10 @@
 //! `beamtalk lint` — run style/redundancy lint checks on Beamtalk source files.
 //!
 //! This command parses each `.bt` file, runs all lint passes, and reports
-//! [`Severity::Lint`] diagnostics. It exits non-zero if any unsuppressed lint
-//! diagnostics are found.
+//! [`Severity::Lint`] diagnostics. It also runs semantic analysis to collect
+//! DNU hint diagnostics so that `@expect type` annotations are correctly
+//! applied (BT-1547). It exits non-zero if any unsuppressed lint diagnostics
+//! are found.
 //!
 //! Lint diagnostics are suppressed during normal `check`/`compile` — this is
 //! the only command that surfaces them.
@@ -15,6 +17,39 @@ use crate::diagnostic::CompileDiagnostic;
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use miette::{IntoDiagnostic, Result};
+
+/// Collect lint diagnostics for a parsed module.
+///
+/// Gathers lint-severity diagnostics from parsing and lint passes, plus
+/// DNU hint diagnostics from semantic analysis (BT-1547), then applies
+/// `@expect` directives.
+fn collect_diagnostics(
+    module: &beamtalk_core::ast::Module,
+    parse_diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
+) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+    // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
+    // plus AST-level lint passes.
+    let mut lint_diags: Vec<_> = parse_diags
+        .into_iter()
+        .filter(|d| d.severity == Severity::Lint)
+        .collect();
+    lint_diags.extend(beamtalk_core::lint::run_lint_passes(module));
+
+    // BT-1547: Run semantic analysis to collect DNU hint diagnostics.
+    // Without these, `@expect type` annotations that suppress DNU hints
+    // during `beamtalk build` would be reported as stale by lint.
+    let analysis_result = beamtalk_core::semantic_analysis::analyse(module);
+    lint_diags.extend(analysis_result.diagnostics.into_iter().filter(|d| {
+        d.severity == Severity::Hint && d.category == Some(DiagnosticCategory::Dnu)
+    }));
+
+    // BT-1476: Apply @expect directives to suppress matching lint diagnostics.
+    // Note: apply_expect_directives may inject Severity::Warning for stale
+    // @expect annotations, so we include those in the output.
+    beamtalk_core::queries::diagnostic_provider::apply_expect_directives(module, &mut lint_diags);
+
+    lint_diags
+}
 
 /// Run lint passes on the given path (file or directory).
 ///
@@ -48,29 +83,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
 
-        // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
-        // plus AST-level lint passes.
-        let mut lint_diags: Vec<_> = parse_diags
-            .into_iter()
-            .filter(|d| d.severity == Severity::Lint)
-            .collect();
-        lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
-
-        // BT-1547: Run semantic analysis to collect DNU hint diagnostics.
-        // Without these, `@expect type` annotations that suppress DNU hints
-        // during `beamtalk build` would be reported as stale by lint.
-        let analysis_result = beamtalk_core::semantic_analysis::analyse(&module);
-        lint_diags.extend(analysis_result.diagnostics.into_iter().filter(|d| {
-            d.severity == Severity::Hint && d.category == Some(DiagnosticCategory::Dnu)
-        }));
-
-        // BT-1476: Apply @expect directives to suppress matching lint diagnostics.
-        // Note: apply_expect_directives may inject Severity::Warning for stale
-        // @expect annotations, so we include those in the output.
-        beamtalk_core::queries::diagnostic_provider::apply_expect_directives(
-            &module,
-            &mut lint_diags,
-        );
+        let lint_diags = collect_diagnostics(&module, parse_diags);
 
         for diag in &lint_diags {
             match format {
@@ -137,32 +150,12 @@ impl std::str::FromStr for OutputFormat {
     }
 }
 
-/// Collect lint diagnostics for a single source string without printing.
-///
-/// Returns the diagnostics after applying `@expect` directives. Used by tests
-/// to inspect the diagnostic set without side-effects.
+/// Convenience wrapper for tests: parse source and collect lint diagnostics.
 #[cfg(test)]
 fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     let tokens = lex_with_eof(source);
     let (module, parse_diags) = parse(tokens);
-
-    let mut lint_diags: Vec<_> = parse_diags
-        .into_iter()
-        .filter(|d| d.severity == Severity::Lint)
-        .collect();
-    lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
-
-    // BT-1547: Include DNU hint diagnostics from semantic analysis.
-    let analysis_result = beamtalk_core::semantic_analysis::analyse(&module);
-    lint_diags.extend(
-        analysis_result.diagnostics.into_iter().filter(|d| {
-            d.severity == Severity::Hint && d.category == Some(DiagnosticCategory::Dnu)
-        }),
-    );
-
-    beamtalk_core::queries::diagnostic_provider::apply_expect_directives(&module, &mut lint_diags);
-
-    lint_diags
+    collect_diagnostics(&module, parse_diags)
 }
 
 #[cfg(test)]
