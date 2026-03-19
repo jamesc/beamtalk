@@ -12,6 +12,9 @@
 /// File exists: "test.txt"
 /// File readAll: "test.txt"
 /// File writeAll: "output.txt" contents: "hello"
+/// File readBinary: "image.png"
+/// File writeBinary: "output.bin" contents: data
+/// File appendBinary: "log.bin" contents: data
 /// (File lines: "data.csv") do: [:line | Transcript show: line]
 /// File open: "data.csv" do: [:handle | handle lines take: 10]
 /// ```
@@ -51,6 +54,40 @@ Object subclass: File
   /// ```
   class sealed writeAll: path :: String contents: text :: String -> Result =>
     (Erlang beamtalk_file) writeAll: path contents: text
+
+  /// Read the entire contents of a file as raw binary (class method).
+  ///
+  /// Returns `Result ok: binary` on success, or `Result error: err` on failure.
+  /// Unlike `readAll:`, this does not assume the contents are a UTF-8 string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// File readBinary: "image.png"  // => Result ok: <<...>>
+  /// ```
+  class sealed readBinary: path :: String -> Result =>
+    (Erlang beamtalk_file) readBinary: path
+
+  /// Write binary data to a file, creating or overwriting it (class method).
+  ///
+  /// Returns `Result ok: nil` on success, or `Result error: err` on failure.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// File writeBinary: "output.bin" contents: data
+  /// ```
+  class sealed writeBinary: path :: String contents: binary :: Binary -> Result =>
+    (Erlang beamtalk_file) writeBinary: path contents: binary
+
+  /// Append binary data to a file, creating it if needed (class method).
+  ///
+  /// Returns `Result ok: nil` on success, or `Result error: err` on failure.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// File appendBinary: "log.bin" contents: data
+  /// ```
+  class sealed appendBinary: path :: String contents: binary :: Binary -> Result =>
+    (Erlang beamtalk_file) appendBinary: path contents: binary
 
   /// Return a lazy Stream of lines from a file (class method).
   ///
