@@ -25,6 +25,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Bag"
             | "BeamtalkInterface"
             | "Behaviour"
+            | "Binary"
             | "Block"
             | "Boolean"
             | "Character"
@@ -327,6 +328,29 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "removeFromSystem".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Remove this class from the system, cleaning up all associated state.\n\nFollows Smalltalk convention (`Counter removeFromSystem`). Performs full\ncleanup: stops live actors of the class, terminates the class gen_server,\nremoves from class hierarchy ETS table and pg group, and purges the BEAM\nmodule.\n\nSafety checks:\n- Refuses to remove stdlib/sealed classes (Integer, String, Object, etc.)\n- Refuses if class has subclasses (must remove children first)\n- Stops all live actors of this class before removal\n\n## Examples\n```beamtalk\nCounter removeFromSystem   // => nil (Counter class removed)\nInteger removeFromSystem   // => Error: cannot remove stdlib class\n```".into()) },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Binary".into(),
+        ClassInfo {
+            name: "Binary".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "serialize:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("Object".into())], doc: Some("Serialize any value to a binary (class method).\n\nConverts a Beamtalk value to its binary representation using\nErlang's external term format.\n\n## Examples\n```beamtalk\n(Binary serialize: 42) class name   // => \"Binary\"\n```".into()) },
+                MethodInfo { selector: "deserialize:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Object".into())], doc: Some("Deserialize a binary back to the original value (class method).\n\nUses safe mode to prevent atom table exhaustion from untrusted\ninput. Atoms not already in the atom table will cause an error.\n\n## Examples\n```beamtalk\nBinary deserialize: (Binary serialize: #(1, 2, 3))\n// => _\n```".into()) },
+                MethodInfo { selector: "size:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Object".into())], doc: Some("Return the byte size of a binary (class method).\n\n## Examples\n```beamtalk\nBinary size: \"hello\"   // => 5\nBinary size: \"\"        // => 0\n```".into()) },
+                MethodInfo { selector: "fromIolist:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("Object".into())], doc: Some("Convert an iolist to a flat binary (class method).\n\nAn iolist is a (possibly nested) list of binaries and integers\n(0-255). This flattens it into a single binary.\n\n## Examples\n```beamtalk\nBinary fromIolist: #(\"hello\", \" \", \"world\")\n// => _\n```".into()) },
+            ],
             class_variables: vec![],
         },
     );

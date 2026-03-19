@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Binary class (BT-1554)
+
+TestCase subclass: BinaryTest
+
+  testSerializeAndDeserializeInteger =>
+    bin := Binary serialize: 42
+    self assert: (Binary deserialize: bin) equals: 42
+
+  testSerializeAndDeserializeString =>
+    bin := Binary serialize: "hello"
+    self assert: (Binary deserialize: bin) equals: "hello"
+
+  testSerializeAndDeserializeArray =>
+    bin := Binary serialize: #(1, 2, 3)
+    self assert: (Binary deserialize: bin) equals: #(1, 2, 3)
+
+  testSerializeAndDeserializeNil =>
+    bin := Binary serialize: nil
+    self assert: (Binary deserialize: bin) equals: nil
+
+  testSerializeAndDeserializeBoolean =>
+    binTrue := Binary serialize: true
+    @expect type
+    self assert: (Binary deserialize: binTrue)
+    binFalse := Binary serialize: false
+    @expect type
+    self deny: (Binary deserialize: binFalse)
+
+  testSerializeProducesBinary =>
+    bin := Binary serialize: 42
+    self assert: (Binary size: bin) > 0
+
+  testSizeOfString => self assert: (Binary size: "hello") equals: 5
+
+  testSizeOfEmptyString => self assert: (Binary size: "") equals: 0
+
+  testFromIolist =>
+    result := Binary fromIolist: #("hello", " ", "world")
+    self assert: result equals: "hello world"
+
+  testFromIolistEmpty =>
+    result := Binary fromIolist: #()
+    self assert: result equals: ""
+
+  testDeserializeTypeError =>
+    self should: [Binary deserialize: 42] raise: #type_error
+
+  testSizeTypeError => self should: [Binary size: 42] raise: #type_error
+
+  testClassIdentity =>
+    // BT-802 (ADR 0036): class on class returns a real metaclass object
+    self assert: (Binary class) isMeta equals: true
