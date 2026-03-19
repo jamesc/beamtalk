@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// File binary I/O tests (BT-1555)
+
+TestCase subclass: FileBinaryIoTest
+
+  testReadBinarySuccess =>
+    File writeBinary: "target/bt-test-tmp/binary_read.dat" contents: "hello"
+    result := File readBinary: "target/bt-test-tmp/binary_read.dat"
+    self assert: result isOk
+    self assert: result unwrap equals: "hello"
+
+  testReadBinaryFileNotFound =>
+    result := File readBinary: "target/bt-test-tmp/no_such_file_xyz.bin"
+    self assert: result isError
+    self assert: (result error printString includesSubstring: "file not found")
+
+  testReadBinaryTypeError =>
+    @expect type
+    self should: [File readBinary: 42] raise: #type_error
+
+  testWriteBinarySuccess =>
+    self assert: (File writeBinary: "target/bt-test-tmp/binary_write.dat" contents: "binary data") isOk
+    self assert: (File readBinary: "target/bt-test-tmp/binary_write.dat") unwrap equals: "binary data"
+
+  testWriteBinaryOverwrites =>
+    File writeBinary: "target/bt-test-tmp/binary_overwrite.dat" contents: "first"
+    File writeBinary: "target/bt-test-tmp/binary_overwrite.dat" contents: "second"
+    self assert: (File readBinary: "target/bt-test-tmp/binary_overwrite.dat") unwrap equals: "second"
+
+  testWriteBinaryTypeErrorPath =>
+    @expect type
+    self should: [File writeBinary: 42 contents: "data"] raise: #type_error
+
+  testWriteBinaryTypeErrorContents =>
+    self should: [
+      File writeBinary: "target/bt-test-tmp/test.dat" contents: 42
+    ] raise: #type_error
+
+  testWriteBinaryCreatesSubdirectory =>
+    self assert: (File writeBinary: "target/bt-test-tmp/bin-subdir/nested.dat" contents: "nested") isOk
+    self assert: (File readBinary: "target/bt-test-tmp/bin-subdir/nested.dat") unwrap equals: "nested"
+
+  testAppendBinaryCreatesFile =>
+    // Ensure the file doesn't exist first
+    File delete: "target/bt-test-tmp/binary_append_new.dat"
+    self assert: (File appendBinary: "target/bt-test-tmp/binary_append_new.dat" contents: "first") isOk
+    self assert: (File readBinary: "target/bt-test-tmp/binary_append_new.dat") unwrap equals: "first"
+
+  testAppendBinaryAppendsToExisting =>
+    File writeBinary: "target/bt-test-tmp/binary_append.dat" contents: "hello"
+    File appendBinary: "target/bt-test-tmp/binary_append.dat" contents: " world"
+    self assert: (File readBinary: "target/bt-test-tmp/binary_append.dat") unwrap equals: "hello world"
+
+  testAppendBinaryTypeErrorPath =>
+    @expect type
+    self should: [File appendBinary: 42 contents: "data"] raise: #type_error
+
+  testAppendBinaryTypeErrorContents =>
+    self should: [
+      File appendBinary: "target/bt-test-tmp/test.dat" contents: 42
+    ] raise: #type_error

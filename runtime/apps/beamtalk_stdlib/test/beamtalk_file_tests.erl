@@ -466,6 +466,216 @@ writeAll_permission_denied_test() ->
     end.
 
 %%% ============================================================================
+%%% readBinary:/1
+%%% ============================================================================
+
+readBinary_success_test() ->
+    with_temp_file("_bt_test_read_bin.dat", <<1, 2, 3, 0, 255>>, fun() ->
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := <<1, 2, 3, 0, 255>>},
+            beamtalk_file:'readBinary:'(<<"_bt_test_read_bin.dat">>)
+        )
+    end).
+
+readBinary_file_not_found_test() ->
+    R = beamtalk_file:'readBinary:'(<<"_bt_test_no_such_file.bin">>),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = file_not_found, class = 'File', selector = 'readBinary:'
+                }
+            }
+        },
+        R
+    ).
+
+readBinary_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'readBinary:'
+            }
+        },
+        beamtalk_file:'readBinary:'(42)
+    ).
+
+readBinary_empty_file_test() ->
+    with_temp_file("_bt_test_read_bin_empty.dat", <<>>, fun() ->
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := <<>>},
+            beamtalk_file:'readBinary:'(<<"_bt_test_read_bin_empty.dat">>)
+        )
+    end).
+
+ffi_shim_readBinary_not_found_test() ->
+    R = beamtalk_file:readBinary(<<"_bt_shim_no_such_file.bin">>),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                '$beamtalk_class' := _, error := #beamtalk_error{kind = file_not_found}
+            }
+        },
+        R
+    ).
+
+%%% ============================================================================
+%%% writeBinary:contents:/2
+%%% ============================================================================
+
+writeBinary_success_test() ->
+    FileName = "_bt_test_write_bin.dat",
+    try
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
+            beamtalk_file:'writeBinary:contents:'(
+                list_to_binary(FileName), <<1, 2, 3, 0, 255>>
+            )
+        ),
+        ?assertEqual({ok, <<1, 2, 3, 0, 255>>}, file:read_file(FileName))
+    after
+        file:delete(FileName)
+    end.
+
+writeBinary_creates_subdirectory_test() ->
+    FileName = "_bt_test_bin_subdir/nested.dat",
+    try
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
+            beamtalk_file:'writeBinary:contents:'(
+                list_to_binary(FileName), <<42>>
+            )
+        ),
+        ?assertEqual({ok, <<42>>}, file:read_file(FileName))
+    after
+        file:delete(FileName),
+        file:del_dir("_bt_test_bin_subdir")
+    end.
+
+writeBinary_type_error_non_string_path_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'writeBinary:contents:'
+            }
+        },
+        beamtalk_file:'writeBinary:contents:'(42, <<1, 2, 3>>)
+    ).
+
+writeBinary_type_error_non_binary_contents_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'writeBinary:contents:'
+            }
+        },
+        beamtalk_file:'writeBinary:contents:'(<<"file.dat">>, 42)
+    ).
+
+ffi_shim_writeBinary_success_test() ->
+    FileName = "_bt_shim_write_bin.dat",
+    try
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
+            beamtalk_file:writeBinary(list_to_binary(FileName), <<7, 8, 9>>)
+        ),
+        ?assertEqual({ok, <<7, 8, 9>>}, file:read_file(FileName))
+    after
+        file:delete(FileName)
+    end.
+
+%%% ============================================================================
+%%% appendBinary:contents:/2
+%%% ============================================================================
+
+appendBinary_creates_file_test() ->
+    FileName = "_bt_test_append_bin_new.dat",
+    try
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
+            beamtalk_file:'appendBinary:contents:'(
+                list_to_binary(FileName), <<1, 2, 3>>
+            )
+        ),
+        ?assertEqual({ok, <<1, 2, 3>>}, file:read_file(FileName))
+    after
+        file:delete(FileName)
+    end.
+
+appendBinary_appends_to_existing_test() ->
+    FileName = "_bt_test_append_bin_exist.dat",
+    try
+        ok = file:write_file(FileName, <<1, 2, 3>>),
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
+            beamtalk_file:'appendBinary:contents:'(
+                list_to_binary(FileName), <<4, 5, 6>>
+            )
+        ),
+        ?assertEqual({ok, <<1, 2, 3, 4, 5, 6>>}, file:read_file(FileName))
+    after
+        file:delete(FileName)
+    end.
+
+appendBinary_creates_subdirectory_test() ->
+    FileName = "_bt_test_append_bin_subdir/nested.dat",
+    try
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
+            beamtalk_file:'appendBinary:contents:'(
+                list_to_binary(FileName), <<10, 20>>
+            )
+        ),
+        ?assertEqual({ok, <<10, 20>>}, file:read_file(FileName))
+    after
+        file:delete(FileName),
+        file:del_dir("_bt_test_append_bin_subdir")
+    end.
+
+appendBinary_type_error_non_string_path_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'appendBinary:contents:'
+            }
+        },
+        beamtalk_file:'appendBinary:contents:'(42, <<1, 2, 3>>)
+    ).
+
+appendBinary_type_error_non_binary_contents_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'appendBinary:contents:'
+            }
+        },
+        beamtalk_file:'appendBinary:contents:'(<<"file.dat">>, 42)
+    ).
+
+ffi_shim_appendBinary_success_test() ->
+    FileName = "_bt_shim_append_bin.dat",
+    try
+        ok = file:write_file(FileName, <<10>>),
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
+            beamtalk_file:appendBinary(list_to_binary(FileName), <<20>>)
+        ),
+        ?assertEqual({ok, <<10, 20>>}, file:read_file(FileName))
+    after
+        file:delete(FileName)
+    end.
+
+%%% ============================================================================
 %%% lines:/1
 %%% ============================================================================
 

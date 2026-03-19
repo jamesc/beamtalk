@@ -17,6 +17,9 @@
 %%% | `exists:`                    | Check if file exists (returns Bool)    |
 %%% | `readAll:`                   | Read entire file as String             |
 %%% | `writeAll:contents:`         | Write string to file                   |
+%%% | `readBinary:`                | Read entire file as raw binary         |
+%%% | `writeBinary:contents:`      | Write binary data to file              |
+%%% | `appendBinary:contents:`     | Append binary data to file             |
 %%% | `lines:`                     | Lazy Stream of lines (constant memory) |
 %%% | `open:do:`                   | Block-scoped handle with auto-close    |
 %%%
@@ -41,6 +44,9 @@
     'exists:'/1,
     'readAll:'/1,
     'writeAll:contents:'/2,
+    'readBinary:'/1,
+    'writeBinary:contents:'/2,
+    'appendBinary:contents:'/2,
     'lines:'/1,
     'open:do:'/2,
     'isDirectory:'/1,
@@ -62,6 +68,9 @@
     exists/1,
     readAll/1,
     writeAll/2,
+    readBinary/1,
+    writeBinary/2,
+    appendBinary/2,
     lines/1,
     open/2,
     isDirectory/1,
@@ -169,6 +178,136 @@
 'writeAll:contents:'(_, _) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
     Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
+    beamtalk_error:raise(Error2).
+
+%%% ============================================================================
+%%% Binary I/O (BT-1555)
+%%% ============================================================================
+
+%% @doc Read entire file contents as raw binary.
+%%
+%% Returns a Result ok map with the file contents as a binary, or a
+%% Result error map if the file cannot be read. Unlike readAll:, this
+%% does not assume the contents are a UTF-8 string.
+-spec 'readBinary:'(binary()) -> map().
+'readBinary:'(Path) when is_binary(Path) ->
+    case file:read_file(unicode:characters_to_list(Path)) of
+        {ok, Contents} ->
+            beamtalk_result:from_tagged_tuple({ok, Contents});
+        {error, enoent} ->
+            Error0 = beamtalk_error:new(file_not_found, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'readBinary:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {error, eacces} ->
+            Error0 = beamtalk_error:new(permission_denied, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'readBinary:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {error, Reason} ->
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'readBinary:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+            beamtalk_result:from_tagged_tuple({error, Error2})
+    end;
+'readBinary:'(_) ->
+    Error0 = beamtalk_error:new(type_error, 'File'),
+    Error1 = beamtalk_error:with_selector(Error0, 'readBinary:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
+    beamtalk_error:raise(Error2).
+
+%% @doc Write binary data to a file, creating or overwriting it.
+%%
+%% Creates the file if it doesn't exist, overwrites if it does.
+%% Auto-creates parent directories. Contents must be a binary.
+%% Returns a Result ok map on success, Result error map on failure.
+-spec 'writeBinary:contents:'(binary(), binary()) -> map().
+'writeBinary:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
+    PathStr = unicode:characters_to_list(Path),
+    Dir = filename:dirname(PathStr),
+    case filelib:ensure_dir(filename:join(Dir, "dummy")) of
+        ok ->
+            case file:write_file(PathStr, Contents, [raw]) of
+                ok ->
+                    beamtalk_result:from_tagged_tuple({ok, nil});
+                {error, eacces} ->
+                    Error0 = beamtalk_error:new(permission_denied, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'writeBinary:contents:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                    Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
+                    beamtalk_result:from_tagged_tuple({error, Error3});
+                {error, Reason} ->
+                    Error0 = beamtalk_error:new(io_error, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'writeBinary:contents:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{
+                        path => Path, reason => Reason
+                    }),
+                    beamtalk_result:from_tagged_tuple({error, Error2})
+            end;
+        {error, Reason} ->
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'writeBinary:contents:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Could not create directory">>),
+            beamtalk_result:from_tagged_tuple({error, Error3})
+    end;
+'writeBinary:contents:'(Path, _) when is_binary(Path) ->
+    Error0 = beamtalk_error:new(type_error, 'File'),
+    Error1 = beamtalk_error:with_selector(Error0, 'writeBinary:contents:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Contents must be a binary">>),
+    beamtalk_error:raise(Error2);
+'writeBinary:contents:'(_, _) ->
+    Error0 = beamtalk_error:new(type_error, 'File'),
+    Error1 = beamtalk_error:with_selector(Error0, 'writeBinary:contents:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
+    beamtalk_error:raise(Error2).
+
+%% @doc Append binary data to a file, creating it if it doesn't exist.
+%%
+%% Opens the file in append mode and writes the binary contents.
+%% Auto-creates parent directories. Contents must be a binary.
+%% Returns a Result ok map on success, Result error map on failure.
+-spec 'appendBinary:contents:'(binary(), binary()) -> map().
+'appendBinary:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
+    PathStr = unicode:characters_to_list(Path),
+    Dir = filename:dirname(PathStr),
+    case filelib:ensure_dir(filename:join(Dir, "dummy")) of
+        ok ->
+            case file:write_file(PathStr, Contents, [append, raw]) of
+                ok ->
+                    beamtalk_result:from_tagged_tuple({ok, nil});
+                {error, eacces} ->
+                    Error0 = beamtalk_error:new(permission_denied, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'appendBinary:contents:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                    Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
+                    beamtalk_result:from_tagged_tuple({error, Error3});
+                {error, Reason} ->
+                    Error0 = beamtalk_error:new(io_error, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'appendBinary:contents:'),
+                    Error2 = beamtalk_error:with_details(Error1, #{
+                        path => Path, reason => Reason
+                    }),
+                    beamtalk_result:from_tagged_tuple({error, Error2})
+            end;
+        {error, Reason} ->
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'appendBinary:contents:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Could not create directory">>),
+            beamtalk_result:from_tagged_tuple({error, Error3})
+    end;
+'appendBinary:contents:'(Path, _) when is_binary(Path) ->
+    Error0 = beamtalk_error:new(type_error, 'File'),
+    Error1 = beamtalk_error:with_selector(Error0, 'appendBinary:contents:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Contents must be a binary">>),
+    beamtalk_error:raise(Error2);
+'appendBinary:contents:'(_, _) ->
+    Error0 = beamtalk_error:new(type_error, 'File'),
+    Error1 = beamtalk_error:with_selector(Error0, 'appendBinary:contents:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
     beamtalk_error:raise(Error2).
 
@@ -639,6 +778,9 @@ handle_has_method(_) -> false.
 %%%   (Erlang beamtalk_file) exists: path          → exists/1
 %%%   (Erlang beamtalk_file) readAll: path         → readAll/1
 %%%   (Erlang beamtalk_file) writeAll: p contents: t → writeAll/2
+%%%   (Erlang beamtalk_file) readBinary: path      → readBinary/1
+%%%   (Erlang beamtalk_file) writeBinary: p contents: b → writeBinary/2
+%%%   (Erlang beamtalk_file) appendBinary: p contents: b → appendBinary/2
 %%%   (Erlang beamtalk_file) lines: path           → lines/1
 %%%   (Erlang beamtalk_file) open: path do: block  → open/2
 %%%   (Erlang beamtalk_file) isDirectory: path     → isDirectory/1
@@ -658,6 +800,9 @@ handle_has_method(_) -> false.
 exists(Path) -> 'exists:'(Path).
 readAll(Path) -> 'readAll:'(Path).
 writeAll(Path, Contents) -> 'writeAll:contents:'(Path, Contents).
+readBinary(Path) -> 'readBinary:'(Path).
+writeBinary(Path, Contents) -> 'writeBinary:contents:'(Path, Contents).
+appendBinary(Path, Contents) -> 'appendBinary:contents:'(Path, Contents).
 lines(Path) -> 'lines:'(Path).
 open(Path, Block) -> 'open:do:'(Path, Block).
 isDirectory(Path) -> 'isDirectory:'(Path).
