@@ -341,10 +341,8 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                             catch
                                 Type:Reason:Stack ->
                                     ?LOG_DEBUG("Erlang error in beamtalk_object_ops:dispatch", #{
-                                        error_class => Type,
-                                        reason => Reason,
                                         selector => Selector,
-                                        stacktrace => Stack,
+                                        reason => beamtalk_error:format_reason(Type, Reason),
                                         domain => [beamtalk, runtime]
                                     }),
                                     Wrapped = beamtalk_exception_handler:ensure_wrapped(
@@ -367,11 +365,9 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                             catch
                                 Type:Reason:Stack ->
                                     ?LOG_DEBUG("Erlang error in compiled dispatch", #{
-                                        error_class => Type,
                                         module => ModuleName,
                                         selector => Selector,
-                                        reason => Reason,
-                                        stacktrace => Stack,
+                                        reason => beamtalk_error:format_reason(Type, Reason),
                                         domain => [beamtalk, runtime]
                                     }),
                                     Wrapped = beamtalk_exception_handler:ensure_wrapped(

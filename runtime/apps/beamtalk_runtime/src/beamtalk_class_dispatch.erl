@@ -302,7 +302,6 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                                 #{
                                     class => ClassName,
                                     selector => Selector,
-                                    stacktrace => ST,
                                     domain => [beamtalk, runtime]
                                 }
                             ),
@@ -315,9 +314,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                         #{
                             class => ClassName,
                             selector => Selector,
-                            error_class => ErrClass,
-                            error => Error,
-                            stacktrace => ST,
+                            reason => beamtalk_error:format_reason(ErrClass, Error),
                             domain => [beamtalk, runtime]
                         }
                     ),
