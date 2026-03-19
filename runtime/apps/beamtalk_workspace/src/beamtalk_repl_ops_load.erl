@@ -19,7 +19,8 @@
 -export([
     find_bt_files/1,
     extract_bt_class_info/1,
-    sort_bt_files_by_deps/1
+    sort_bt_files_by_deps/1,
+    structured_file_errors/2
 ]).
 -endif.
 
@@ -385,8 +386,8 @@ load_files_sequential(Files, SessionPid) ->
                     {ok, Classes} ->
                         {lists:reverse(Classes, ClassesAcc), ErrorsAcc};
                     {error, Reason} ->
-                        ErrMap = structured_file_error(Path, Reason),
-                        {ClassesAcc, [ErrMap | ErrorsAcc]}
+                        ErrMaps = structured_file_errors(Path, Reason),
+                        {ClassesAcc, lists:reverse(ErrMaps, ErrorsAcc)}
                 end
             end,
             {[], []},
@@ -395,10 +396,16 @@ load_files_sequential(Files, SessionPid) ->
     {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
 
 %% @private
-%% @doc Build a structured error map for a per-file load failure.
-%% Preserves kind, message, and hint from the underlying beamtalk_error.
--spec structured_file_error(string(), term()) -> map().
-structured_file_error(Path, Reason) ->
+%% @doc Build structured error maps for a per-file load failure.
+%% For compile errors with a diagnostic list, returns one error map per diagnostic
+%% with line numbers preserved. Other errors return a single-element list.
+-spec structured_file_errors(string(), term()) -> [map()].
+structured_file_errors(Path, {compile_error, Diagnostics}) when
+    is_list(Diagnostics), Diagnostics =/= []
+->
+    PathBin = list_to_binary(Path),
+    [diagnostic_to_error_map(PathBin, D) || D <- Diagnostics];
+structured_file_errors(Path, Reason) ->
     #beamtalk_error{kind = Kind, message = Msg, hint = Hint} =
         beamtalk_repl_errors:ensure_structured_error(Reason),
     ErrMap = #{
@@ -406,10 +413,44 @@ structured_file_error(Path, Reason) ->
         <<"kind">> => atom_to_binary(Kind, utf8),
         <<"message">> => Msg
     },
-    case Hint of
-        undefined -> ErrMap;
-        _ -> ErrMap#{<<"hint">> => Hint}
-    end.
+    [
+        case Hint of
+            undefined -> ErrMap;
+            _ -> ErrMap#{<<"hint">> => Hint}
+        end
+    ].
+
+%% @private
+%% @doc Convert a single compiler diagnostic map to a structured error map.
+-spec diagnostic_to_error_map(binary(), term()) -> map().
+diagnostic_to_error_map(PathBin, D) when is_map(D) ->
+    Msg = maps:get(message, D, <<"Unknown error">>),
+    ErrMap0 = #{
+        <<"path">> => PathBin,
+        <<"kind">> => <<"compile_error">>,
+        <<"message">> => Msg
+    },
+    ErrMap1 =
+        case maps:find(line, D) of
+            {ok, Line} when is_integer(Line) -> ErrMap0#{<<"line">> => Line};
+            _ -> ErrMap0
+        end,
+    case maps:find(hint, D) of
+        {ok, Hint} when is_binary(Hint) -> ErrMap1#{<<"hint">> => Hint};
+        _ -> ErrMap1
+    end;
+diagnostic_to_error_map(PathBin, D) when is_binary(D) ->
+    #{
+        <<"path">> => PathBin,
+        <<"kind">> => <<"compile_error">>,
+        <<"message">> => D
+    };
+diagnostic_to_error_map(PathBin, D) ->
+    #{
+        <<"path">> => PathBin,
+        <<"kind">> => <<"compile_error">>,
+        <<"message">> => iolist_to_binary(io_lib:format("~p", [D]))
+    }.
 
 %% @private
 %% @doc Collect collision warnings for the loaded classes after a file load.

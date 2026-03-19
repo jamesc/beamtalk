@@ -6,8 +6,8 @@
 %%% **DDD Context:** REPL Session Context
 %%%
 %%% Tests the load-project helpers: find_bt_files, extract_bt_class_info,
-%%% and sort_bt_files_by_deps. These are pure filesystem/parsing functions
-%%% that do not require a running REPL workspace.
+%%% sort_bt_files_by_deps, and structured_file_errors. These are pure
+%%% filesystem/parsing functions that do not require a running REPL workspace.
 
 -module(beamtalk_repl_ops_load_tests).
 
@@ -141,3 +141,44 @@ sort_bt_files_independent_files_stable_test() ->
     after
         rm_temp_dir(Dir)
     end.
+
+%%====================================================================
+%% structured_file_errors/2
+%%====================================================================
+
+structured_file_errors_compile_diagnostics_test() ->
+    Diags = [
+        #{message => <<"undefined variable 'x'">>, line => 5, hint => <<"Did you mean 'self'?">>},
+        #{message => <<"unexpected token">>}
+    ],
+    Result = beamtalk_repl_ops_load:structured_file_errors(
+        "/src/Broken.bt", {compile_error, Diags}
+    ),
+    ?assertEqual(2, length(Result)),
+    [E1, E2] = Result,
+    ?assertEqual(<<"/src/Broken.bt">>, maps:get(<<"path">>, E1)),
+    ?assertEqual(<<"compile_error">>, maps:get(<<"kind">>, E1)),
+    ?assertEqual(<<"undefined variable 'x'">>, maps:get(<<"message">>, E1)),
+    ?assertEqual(5, maps:get(<<"line">>, E1)),
+    ?assertEqual(<<"Did you mean 'self'?">>, maps:get(<<"hint">>, E1)),
+    %% Second diagnostic has no line or hint.
+    ?assertEqual(<<"unexpected token">>, maps:get(<<"message">>, E2)),
+    ?assertEqual(error, maps:find(<<"line">>, E2)),
+    ?assertEqual(error, maps:find(<<"hint">>, E2)).
+
+structured_file_errors_binary_diagnostic_test() ->
+    Result = beamtalk_repl_ops_load:structured_file_errors(
+        "/src/Bad.bt", {compile_error, [<<"raw error text">>]}
+    ),
+    ?assertEqual(1, length(Result)),
+    [E] = Result,
+    ?assertEqual(<<"raw error text">>, maps:get(<<"message">>, E)).
+
+structured_file_errors_non_compile_error_test() ->
+    Result = beamtalk_repl_ops_load:structured_file_errors(
+        "/src/Missing.bt", {file_not_found, "/src/Missing.bt"}
+    ),
+    ?assertEqual(1, length(Result)),
+    [E] = Result,
+    ?assertEqual(<<"/src/Missing.bt">>, maps:get(<<"path">>, E)),
+    ?assertEqual(<<"file_not_found">>, maps:get(<<"kind">>, E)).
