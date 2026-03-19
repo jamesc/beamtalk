@@ -2104,8 +2104,7 @@ TestCase subclass: IntegrationTest
   field: cache = nil
 
   setUp =>
-    self withDb: (DB connect);
-         withCache: (Cache spawn)
+    (self withDb: (DB connect)) withCache: (Cache spawn)
 
   testLookup =>
     self.cache at: "key" put: "value".
