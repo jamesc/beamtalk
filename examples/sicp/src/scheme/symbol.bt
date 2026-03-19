@@ -15,7 +15,7 @@
 /// sym == (SchemeSymbol withName: "lambda")  // => false
 /// ```
 Value subclass: SchemeSymbol
-  state: symName = ""
+  field: symName = ""
 
   /// Create a new symbol with the given name string.
   ///

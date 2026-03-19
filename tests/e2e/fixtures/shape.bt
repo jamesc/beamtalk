@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Abstract base class for geometric shapes (BT-905 fixture).
-// Defined as a value object (Object subclass:) in its own file
+// Defined as a value class (Value subclass:) in its own file
 // so that subclasses loaded from separate files exercise
-// cross-file value-object inheritance.
+// cross-file value inheritance.
 
-Object subclass: Shape
+Value subclass: Shape
 
   area => self subclassResponsibility
 

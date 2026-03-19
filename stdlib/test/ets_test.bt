@@ -4,7 +4,7 @@
 // BUnit tests for Ets class (BT-1189)
 
 TestCase subclass: EtsTest
-  state: table = nil
+  field: table = nil
 
   setUp =>
     self.table := Ets new: #etsTest type: #set

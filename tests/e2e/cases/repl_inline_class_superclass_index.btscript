@@ -11,7 +11,7 @@
 // to the compiler port, so inline subclasses of file-loaded value-object parents
 // defaulted to Actor codegen.
 //
-// Uses the shape.bt fixture (Object subclass: Shape) as the file-loaded parent.
+// Uses the shape.bt fixture (Value subclass: Shape) as the file-loaded parent.
 
 // @load tests/e2e/fixtures/shape.bt
 
@@ -23,7 +23,7 @@
 // Before the fix, Triangle was compiled as an Actor because the compiler
 // did not receive Shape's superclass info from the ETS table.
 Shape subclass: Triangle
-  state: base = 1.0
+  field: base = 1.0
   class withBase: b => self new: #{#base => b}
 // => _
 
@@ -58,7 +58,7 @@ t base
 // This verifies that activate_module registered Triangle in the hierarchy ETS table
 // so that the next inline compile can resolve Triangle→Shape→Object as value-object.
 Triangle subclass: RightTriangle
-  state: hypotenuse = 0.0
+  field: hypotenuse = 0.0
 // => _
 
 rt := RightTriangle new: #{#base => 3.0, #hypotenuse => 5.0}

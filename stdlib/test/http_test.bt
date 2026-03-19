@@ -20,7 +20,7 @@
 // at type-erasure boundaries (BT-1273).
 
 TestCase subclass: HttpTest
-  state: baseUrl = ""
+  field: baseUrl = ""
 
   // Start the local test server and record the base URL.
   setUp =>

@@ -9,20 +9,20 @@ Module {
             name: Identifier {
                 name: "TypedPoint",
                 span: Span {
-                    start: 136,
-                    end: 146,
+                    start: 135,
+                    end: 145,
                 },
             },
             superclass: Some(
                 Identifier {
-                    name: "Object",
+                    name: "Value",
                     span: Span {
                         start: 119,
-                        end: 125,
+                        end: 124,
                     },
                 },
             ),
-            class_kind: Object,
+            class_kind: Value,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -32,8 +32,8 @@ Module {
                     name: Identifier {
                         name: "x",
                         span: Span {
-                            start: 156,
-                            end: 157,
+                            start: 155,
+                            end: 156,
                         },
                     },
                     type_annotation: Some(
@@ -41,8 +41,8 @@ Module {
                             Identifier {
                                 name: "Integer",
                                 span: Span {
-                                    start: 161,
-                                    end: 168,
+                                    start: 160,
+                                    end: 167,
                                 },
                             },
                         ),
@@ -53,28 +53,28 @@ Module {
                                 0,
                             ),
                             Span {
-                                start: 171,
-                                end: 172,
+                                start: 170,
+                                end: 171,
                             },
                         ),
                     ),
-                    declared_keyword: State,
+                    declared_keyword: Field,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 149,
-                        end: 172,
+                        start: 148,
+                        end: 171,
                     },
                 },
                 StateDeclaration {
                     name: Identifier {
                         name: "y",
                         span: Span {
-                            start: 182,
-                            end: 183,
+                            start: 181,
+                            end: 182,
                         },
                     },
                     type_annotation: Some(
@@ -82,8 +82,8 @@ Module {
                             Identifier {
                                 name: "Integer",
                                 span: Span {
-                                    start: 187,
-                                    end: 194,
+                                    start: 186,
+                                    end: 193,
                                 },
                             },
                         ),
@@ -94,20 +94,20 @@ Module {
                                 0,
                             ),
                             Span {
-                                start: 197,
-                                end: 198,
+                                start: 196,
+                                end: 197,
                             },
                         ),
                     ),
-                    declared_keyword: State,
+                    declared_keyword: Field,
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 175,
-                        end: 198,
+                        start: 174,
+                        end: 197,
                     },
                 },
             ],
@@ -128,21 +128,21 @@ Module {
                                     Identifier {
                                         name: "self",
                                         span: Span {
-                                            start: 246,
-                                            end: 250,
+                                            start: 245,
+                                            end: 249,
                                         },
                                     },
                                 ),
                                 field: Identifier {
                                     name: "x",
                                     span: Span {
-                                        start: 251,
-                                        end: 252,
+                                        start: 250,
+                                        end: 251,
                                     },
                                 },
                                 span: Span {
-                                    start: 246,
-                                    end: 252,
+                                    start: 245,
+                                    end: 251,
                                 },
                             },
                             preceding_blank_line: false,
@@ -153,8 +153,8 @@ Module {
                             Identifier {
                                 name: "Integer",
                                 span: Span {
-                                    start: 235,
-                                    end: 242,
+                                    start: 234,
+                                    end: 241,
                                 },
                             },
                         ),
@@ -166,8 +166,8 @@ Module {
                             Comment {
                                 content: "Typed unary methods",
                                 span: Span {
-                                    start: 227,
-                                    end: 231,
+                                    start: 226,
+                                    end: 230,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -177,8 +177,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 227,
-                        end: 252,
+                        start: 226,
+                        end: 251,
                     },
                 },
                 MethodDefinition {
@@ -197,21 +197,21 @@ Module {
                                     Identifier {
                                         name: "self",
                                         span: Span {
-                                            start: 275,
-                                            end: 279,
+                                            start: 274,
+                                            end: 278,
                                         },
                                     },
                                 ),
                                 field: Identifier {
                                     name: "y",
                                     span: Span {
-                                        start: 280,
-                                        end: 281,
+                                        start: 279,
+                                        end: 280,
                                     },
                                 },
                                 span: Span {
-                                    start: 275,
-                                    end: 281,
+                                    start: 274,
+                                    end: 280,
                                 },
                             },
                             preceding_blank_line: false,
@@ -222,8 +222,8 @@ Module {
                             Identifier {
                                 name: "Integer",
                                 span: Span {
-                                    start: 264,
-                                    end: 271,
+                                    start: 263,
+                                    end: 270,
                                 },
                             },
                         ),
@@ -236,8 +236,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 256,
-                        end: 281,
+                        start: 255,
+                        end: 280,
                     },
                 },
                 MethodDefinition {
@@ -246,8 +246,8 @@ Module {
                             KeywordPart {
                                 keyword: "distanceTo:",
                                 span: Span {
-                                    start: 311,
-                                    end: 322,
+                                    start: 310,
+                                    end: 321,
                                 },
                             },
                         ],
@@ -257,8 +257,8 @@ Module {
                             name: Identifier {
                                 name: "other",
                                 span: Span {
-                                    start: 323,
-                                    end: 328,
+                                    start: 322,
+                                    end: 327,
                                 },
                             },
                             type_annotation: Some(
@@ -266,8 +266,8 @@ Module {
                                     Identifier {
                                         name: "TypedPoint",
                                         span: Span {
-                                            start: 332,
-                                            end: 342,
+                                            start: 331,
+                                            end: 341,
                                         },
                                     },
                                 ),
@@ -285,8 +285,8 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 span: Span {
-                                    start: 355,
-                                    end: 379,
+                                    start: 354,
+                                    end: 378,
                                 },
                             },
                             preceding_blank_line: false,
@@ -297,8 +297,8 @@ Module {
                             Identifier {
                                 name: "Float",
                                 span: Span {
-                                    start: 346,
-                                    end: 351,
+                                    start: 345,
+                                    end: 350,
                                 },
                             },
                         ),
@@ -310,8 +310,8 @@ Module {
                             Comment {
                                 content: "Typed keyword method",
                                 span: Span {
-                                    start: 311,
-                                    end: 322,
+                                    start: 310,
+                                    end: 321,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -321,8 +321,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 311,
-                        end: 379,
+                        start: 310,
+                        end: 378,
                     },
                 },
                 MethodDefinition {
@@ -341,8 +341,8 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 span: Span {
-                                    start: 428,
-                                    end: 452,
+                                    start: 427,
+                                    end: 451,
                                 },
                             },
                             preceding_blank_line: false,
@@ -356,8 +356,8 @@ Module {
                             Comment {
                                 content: "Untyped method (no spec)",
                                 span: Span {
-                                    start: 413,
-                                    end: 424,
+                                    start: 412,
+                                    end: 423,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -367,8 +367,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 413,
-                        end: 452,
+                        start: 412,
+                        end: 451,
                     },
                 },
             ],
@@ -380,7 +380,7 @@ Module {
                         content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 119,
-                            end: 125,
+                            end: 124,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -389,7 +389,7 @@ Module {
                         content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 119,
-                            end: 125,
+                            end: 124,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -398,7 +398,7 @@ Module {
                         content: "Typed value type methods for spec generation",
                         span: Span {
                             start: 119,
-                            end: 125,
+                            end: 124,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -410,7 +410,7 @@ Module {
             backing_module: None,
             span: Span {
                 start: 119,
-                end: 452,
+                end: 451,
             },
         },
     ],
@@ -418,7 +418,7 @@ Module {
     expressions: [],
     span: Span {
         start: 119,
-        end: 452,
+        end: 451,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

@@ -4,7 +4,7 @@
 // Stdlib tests for OS class (BT-1244, BT-1247)
 
 TestCase subclass: OSTest
-  state: isUnix = false
+  field: isUnix = false
 
   setUp => self.isUnix := System osFamily == "unix"
 

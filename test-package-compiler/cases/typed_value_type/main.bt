@@ -3,9 +3,9 @@
 
 // Typed value type methods for spec generation
 
-Object subclass: TypedPoint
-  state: x :: Integer = 0
-  state: y :: Integer = 0
+Value subclass: TypedPoint
+  field: x :: Integer = 0
+  field: y :: Integer = 0
 
   // Typed unary methods
   getX -> Integer => self.x

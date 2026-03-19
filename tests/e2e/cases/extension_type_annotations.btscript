@@ -12,8 +12,8 @@
 // Setup: define a simple class to extend
 // ===========================================================================
 
-Object subclass: Greeter
-  state: name = "World"
+Value subclass: Greeter
+  field: name = "World"
   greet => "Hello, " ++ self.name
 // => Greeter
 

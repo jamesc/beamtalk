@@ -4,7 +4,7 @@
 // BUnit tests for AtomicCounter class (BT-1250)
 
 TestCase subclass: AtomicCounterTest
-  state: counter = nil
+  field: counter = nil
 
   setUp =>
     // Defensively clean up any leftover table from a crashed previous run

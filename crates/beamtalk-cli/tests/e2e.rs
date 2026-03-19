@@ -1722,7 +1722,7 @@ fn e2e_inline_class_trailing_expressions() {
     // Before the fix, this returned the class name. After the fix, it should
     // return the result of '{class_name} new count' (0).
     let source = format!(
-        "Object subclass: {class_name}\n  state: count = 0\n  count => self.count\n{class_name} new count"
+        "Value subclass: {class_name}\n  field: count = 0\n  count => self.count\n{class_name} new count"
     );
     let result = client.eval(&source).expect("Eval failed");
     assert_eq!(

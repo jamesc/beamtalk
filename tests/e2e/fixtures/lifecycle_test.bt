@@ -7,9 +7,11 @@
 // Value objects are immutable maps, so the runner must use setUp's return value.
 
 TestCase subclass: LifecycleTest
-  state: log = "init"
+  field: log = "init"
 
-  setUp => self.log := "S"
+  setUp =>
+    self.log := "S"
+    self
 
   tearDown => nil
 

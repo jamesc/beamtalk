@@ -12,7 +12,7 @@
 // semantics). BT-1534 will migrate to `self withSlot:` syntax.
 
 TestCase subclass: FunctionalSetupTest
-  state: value = 0
+  field: value = 0
 
   setUp => self.value := 99
 

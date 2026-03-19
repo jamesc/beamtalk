@@ -6,7 +6,7 @@
 // the compiler defaults to Actor codegen because Shape is not defined here.
 
 Shape subclass: Circle
-  state: radius = 1.0
+  field: radius = 1.0
 
   class withRadius: r => self new: #{#radius => r}
 

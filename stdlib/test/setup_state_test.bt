@@ -6,7 +6,7 @@
 // The BUnit runner must use that return value as the receiver for test methods
 
 TestCase subclass: SetupStateTest
-  state: value = 0
+  field: value = 0
 
   setUp => self.value := 42
 

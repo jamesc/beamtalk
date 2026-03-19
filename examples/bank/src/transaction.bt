@@ -12,8 +12,8 @@
 ///   txn amount   // => 250
 ///   txn status   // => "completed"
 Value subclass: Transaction
-  state: amount = 0
-  state: from = ""
-  state: to = ""
-  state: timestamp = nil
-  state: status = "pending"
+  field: amount = 0
+  field: from = ""
+  field: to = ""
+  field: timestamp = nil
+  field: status = "pending"

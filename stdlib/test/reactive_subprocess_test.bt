@@ -10,7 +10,7 @@
 // StubDelegate actor is defined in fixtures/stub_delegate_fixture.bt.
 
 TestCase subclass: ReactiveSubprocessTest
-  state: isUnix = false
+  field: isUnix = false
 
   setUp => self.isUnix := System osFamily == "unix"
 
