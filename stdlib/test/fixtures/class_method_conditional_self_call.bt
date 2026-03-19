@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1550: Fixture for class method with conditional self-call.
+// Regression: the compiler emitted unbound_var ClassVars{N} when a class method
+// combined a conditional self-call with subsequent expressions or ^ early return.
+
+Object subclass: ClassMethodConditionalSelfCall
+  classState: counter = 0
+
+  class helper => nil
+
+  class increment => self.counter := self.counter + 1
+
+  class counterValue => self.counter
+
+  class resetCounter => self.counter := 0
+
+  // Minimal repro: conditional self-call + subsequent expression.
+  // The self-call inside ifTrue: increments class_var_version inside the block,
+  // which leaked to the outer scope causing unbound ClassVars{N}.
+  class trigger: x =>
+    x > 0 ifTrue: [self helper]
+    x
+
+  // Variant with ^ early return after conditional self-call.
+  class triggerWithReturn: x default: default =>
+    x > 0 ifTrue: [self helper]
+    default isNil not ifTrue: [^default]
+    x
+
+  // Variant: conditional self-call that mutates class state + subsequent expression.
+  class triggerWithMutation: x =>
+    x > 0 ifTrue: [self increment]
+    x
+
+  // Full pattern from the original bug report: ifAbsent: + conditional self + ^.
+  class triggerFull: x dict: dict =>
+    val := dict at: #bar ifAbsent: [nil]
+    (val isNil not and: [val /= x]) ifTrue: [self helper]
+    cached := dict at: #baz ifAbsent: [nil]
+    cached isNil not ifTrue: [^cached]
+    x

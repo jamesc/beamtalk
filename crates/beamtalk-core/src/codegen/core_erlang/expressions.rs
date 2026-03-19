@@ -628,6 +628,11 @@ impl CoreErlangGenerator {
         self.push_scope();
         // BT-1475: Track block nesting so self-cast sends route through the mailbox
         self.block_depth += 1;
+        // BT-1550: Save class_var_version so that self-calls inside the closure
+        // don't leak ClassVars{N} bindings into the enclosing scope.  The closure
+        // is a separate Core Erlang `fun`, so any let-bindings inside it are not
+        // visible to the outer method body.
+        let saved_class_var_version = self.class_var_version();
 
         let mut param_parts: Vec<Document<'static>> = Vec::new();
         for (i, param) in block.parameters.iter().enumerate() {
@@ -643,6 +648,7 @@ impl CoreErlangGenerator {
         // BT-1475: Ensure block_depth and scope are restored even on error.
         let body_result = self.generate_block_body(block);
         self.block_depth -= 1;
+        self.set_class_var_version(saved_class_var_version);
         self.pop_scope();
         Ok(docvec![header, body_result?])
     }

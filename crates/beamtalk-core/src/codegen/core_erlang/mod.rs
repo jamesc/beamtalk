@@ -1429,14 +1429,20 @@ impl CoreErlangGenerator {
     }
 
     /// BT-1449: Executes `f` inside a branch context where `in_loop_body` is
-    /// `true` and `state_version` is reset to 0.  The previous values of both
-    /// fields are unconditionally restored after `f` returns (even on `Err`).
+    /// `true` and `state_version` is reset to 0.  The previous values are
+    /// unconditionally restored after `f` returns (even on `Err`).
+    ///
+    /// BT-1550: Also saves/restores `class_var_version` so that self-calls
+    /// inside a conditional branch don't leak `ClassVars{N}` bindings into
+    /// the outer scope.  `class_var_mutated` is intentionally NOT restored —
+    /// it is a method-level flag that must stay sticky once set.
     pub(super) fn with_branch_context<T>(
         &mut self,
         f: impl FnOnce(&mut CoreErlangGenerator) -> T,
     ) -> T {
         let saved_state_version = self.state_version();
         let saved_in_loop = self.in_loop_body;
+        let saved_class_var_version = self.class_var_version();
         self.set_state_version(0);
         self.in_loop_body = true;
 
@@ -1444,6 +1450,7 @@ impl CoreErlangGenerator {
 
         self.in_loop_body = saved_in_loop;
         self.set_state_version(saved_state_version);
+        self.set_class_var_version(saved_class_var_version);
         result
     }
 
