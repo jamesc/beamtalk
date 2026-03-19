@@ -2412,11 +2412,12 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
-                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Value".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Create a new instance of the receiver class.\n\n## Examples\n```beamtalk\nPoint new              // => Point(x: 0, y: 0)\n```".into()) },
-                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Value".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Create a new instance with initialization arguments.\n\n## Examples\n```beamtalk\nPoint new: #{#x => 3, #y => 4}\n```".into()) },
                 MethodInfo { selector: "inspect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Value".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation showing fields.\n\nProduces `ClassName(field: value, ...)`. Field values are recursively\ninspected — strings are quoted, nested objects show their own inspect.\nA class with no fields produces `ClassName()`.\n\n## Examples\n```beamtalk\nValuePoint x: 3 y: 4        inspect   // => \"ValuePoint(x: 3, y: 4)\"\nValuePoint new              inspect   // => \"ValuePoint(x: 0, y: 0)\"\n```".into()) },
             ],
-            class_methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Value".into(), is_sealed: true, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Create a new instance of the receiver class.\n\n## Examples\n```beamtalk\nPoint new              // => Point(x: 0, y: 0)\n```".into()) },
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Value".into(), is_sealed: true, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Create a new instance with initialization arguments.\n\n## Examples\n```beamtalk\nPoint new: #{#x => 3, #y => 4}\n```".into()) },
+            ],
             class_variables: vec![],
         },
     );
