@@ -13,9 +13,9 @@
 /// (1 to: 10) size    // => 10
 /// ```
 Collection subclass: Interval
-  state: from = 0
-  state: to = 0
-  state: step = 1
+  field: from = 0
+  field: to = 0
+  field: step = 1
 
   /// Number of elements in the interval.
   ///
@@ -81,3 +81,7 @@ Collection subclass: Interval
       ""
     ] ifFalse: [" by: " ++ self.step asString]
     "(" ++ self.from asString ++ " to: " ++ self.to asString ++ stepStr ++ ")"
+
+  /// Override inspect to use printString rather than the field-based
+  /// format defined in Value. Intervals use their mathematical notation.
+  inspect -> String => self printString

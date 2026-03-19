@@ -553,6 +553,10 @@ sealed typed Collection subclass: String
   /// ```
   printString -> String => """" ++ (self replaceAll: """" with: """""") ++ """"
 
+  /// Override inspect to use printString rather than the field-based
+  /// format defined in Value. Strings are primitives, not map-based value objects.
+  inspect -> String => self printString
+
   /// Return the string itself (identity conversion).
   ///
   /// ## Examples

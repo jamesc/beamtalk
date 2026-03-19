@@ -120,6 +120,10 @@ sealed typed Collection subclass: Tuple
   /// ```
   printString -> String => self asString
 
+  /// Override inspect to use printString rather than the field-based
+  /// format defined in Value. Tuples are primitives, not map-based value objects.
+  inspect -> String => self printString
+
   /// Iterate over each element, evaluating `block` with each one.
   ///
   /// ## Examples

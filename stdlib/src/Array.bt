@@ -127,3 +127,7 @@ sealed Collection subclass: Array
   /// #[1, 2, 3] printString       // => "#[1, 2, 3]"
   /// ```
   printString -> String => @primitive "printString"
+
+  /// Override inspect to use printString rather than the field-based
+  /// format defined in Value. Arrays are primitives, not map-based value objects.
+  inspect -> String => self printString

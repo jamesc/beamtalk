@@ -257,6 +257,10 @@ sealed typed Collection subclass: List
   /// ```
   printString -> String => @primitive "printString"
 
+  /// Override inspect to use printString rather than the field-based
+  /// format defined in Value. Lists are primitives, not map-based value objects.
+  inspect -> String => self printString
+
   /// Return a subsequence from `start` to `end` (1-based, inclusive).
   ///
   /// ## Examples
