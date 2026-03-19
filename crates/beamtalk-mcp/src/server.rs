@@ -9,6 +9,7 @@
 //! beamtalk REPL's JSON-over-TCP protocol, allowing any MCP-compatible
 //! agent to interact with live beamtalk objects.
 
+use std::fmt::Write;
 use std::sync::Arc;
 
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
@@ -425,7 +426,7 @@ impl BeamtalkMcp {
                 let msg = match e {
                     serde_json::Value::Object(map) => {
                         let path = map.get("path").and_then(|v| v.as_str()).unwrap_or("");
-                        let line = map.get("line").and_then(|v| v.as_u64());
+                        let line = map.get("line").and_then(serde_json::Value::as_u64);
                         let message = map
                             .get("message")
                             .and_then(|v| v.as_str())
@@ -437,7 +438,7 @@ impl BeamtalkMcp {
                             (false, None) => format!("{path}: {message}"),
                         };
                         if let Some(h) = hint {
-                            s.push_str(&format!(" (hint: {h})"));
+                            let _ = write!(s, " (hint: {h})");
                         }
                         s
                     }
