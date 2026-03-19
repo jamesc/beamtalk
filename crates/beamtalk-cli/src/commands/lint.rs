@@ -39,9 +39,11 @@ fn collect_diagnostics(
     // Without these, `@expect type` annotations that suppress DNU hints
     // during `beamtalk build` would be reported as stale by lint.
     let analysis_result = beamtalk_core::semantic_analysis::analyse(module);
-    lint_diags.extend(analysis_result.diagnostics.into_iter().filter(|d| {
-        d.severity == Severity::Hint && d.category == Some(DiagnosticCategory::Dnu)
-    }));
+    lint_diags.extend(
+        analysis_result.diagnostics.into_iter().filter(|d| {
+            d.severity == Severity::Hint && d.category == Some(DiagnosticCategory::Dnu)
+        }),
+    );
 
     // BT-1476: Apply @expect directives to suppress matching lint diagnostics.
     // Note: apply_expect_directives may inject Severity::Warning for stale
