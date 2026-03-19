@@ -52,6 +52,7 @@
     'deleteAll:'/1,
     'rename:to:'/2,
     'absolutePath:'/1,
+    'lastModified:'/1,
     'cwd'/0,
     'tempDirectory'/0
 ]).
@@ -73,6 +74,7 @@
     deleteAll/1,
     rename/2,
     absolutePath/1,
+    lastModified/1,
     handleLines/1
 ]).
 
@@ -582,6 +584,29 @@ handle_has_method(_) -> false.
     Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
     beamtalk_error:raise(Error2).
 
+%% @doc Get the last modification time of a file.
+%%
+%% Returns a Result ok map with a DateTime on success, or a Result error map
+%% if the file does not exist.
+-spec 'lastModified:'(binary()) -> map().
+'lastModified:'(Path) when is_binary(Path) ->
+    case filelib:last_modified(unicode:characters_to_list(Path)) of
+        0 ->
+            Error0 = beamtalk_error:new(file_not_found, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'lastModified:'),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
+            beamtalk_result:from_tagged_tuple({error, Error3});
+        {{Y, Mo, D}, {H, Mi, S}} ->
+            DT = beamtalk_datetime:'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S),
+            beamtalk_result:from_tagged_tuple({ok, DT})
+    end;
+'lastModified:'(_) ->
+    Error0 = beamtalk_error:new(type_error, 'File'),
+    Error1 = beamtalk_error:with_selector(Error0, 'lastModified:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
+    beamtalk_error:raise(Error2).
+
 %% @doc Return the current working directory.
 %%
 %% Returns the current working directory as a String (absolute path).
@@ -650,6 +675,7 @@ handle_has_method(_) -> false.
 %%%   (Erlang beamtalk_file) deleteAll: path       → deleteAll/1
 %%%   (Erlang beamtalk_file) rename: from to: to   → rename/2
 %%%   (Erlang beamtalk_file) absolutePath: path     → absolutePath/1
+%%%   (Erlang beamtalk_file) lastModified: path    → lastModified/1
 %%%   (Erlang beamtalk_file) handleLines: handle   → handleLines/1
 %%%   (Erlang beamtalk_file) cwd                   → 'cwd'/0 (direct)
 %%%   (Erlang beamtalk_file) tempDirectory         → 'tempDirectory'/0 (direct)
@@ -669,6 +695,7 @@ delete(Path) -> 'delete:'(Path).
 deleteAll(Path) -> 'deleteAll:'(Path).
 rename(From, To) -> 'rename:to:'(From, To).
 absolutePath(Path) -> 'absolutePath:'(Path).
+lastModified(Path) -> 'lastModified:'(Path).
 handleLines(Handle) -> handle_lines(Handle).
 
 %%% ============================================================================
