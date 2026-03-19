@@ -2233,6 +2233,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![],
             class_methods: vec![
+                MethodInfo { selector: "nowS".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in seconds since the Unix epoch.\n\nWraps `erlang:system_time(second)`.\n\n## Examples\n```beamtalk\nTime nowS   // => _\n```".into()) },
                 MethodInfo { selector: "nowMs".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in milliseconds since the Unix epoch.\n\nWraps `erlang:system_time(millisecond)`.\n\n## Examples\n```beamtalk\nTime nowMs   // => _\n```".into()) },
                 MethodInfo { selector: "nowUs".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in microseconds since the Unix epoch.\n\nWraps `erlang:system_time(microsecond)`.\n\n## Examples\n```beamtalk\nTime nowUs   // => _\n```".into()) },
             ],
