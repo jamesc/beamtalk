@@ -211,26 +211,12 @@ init(_Args) ->
 
 handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
-    CacheSize = map_size(State#state.classes),
-    ?LOG_DEBUG("Compile expression", #{
-        domain => [beamtalk, runtime],
-        module => ModuleName,
-        source_preview => binary:part(Source, 0, min(80, byte_size(Source))),
-        cache_size => CacheSize
-    }),
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = beamtalk_compiler_port:compile_expression(
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),
     {reply, Result, State};
 handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, _From, State) ->
-    CacheSize = map_size(State#state.classes),
-    ?LOG_DEBUG("Compile expression (trace)", #{
-        domain => [beamtalk, runtime],
-        module => ModuleName,
-        source_preview => binary:part(Source, 0, min(80, byte_size(Source))),
-        cache_size => CacheSize
-    }),
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = beamtalk_compiler_port:compile_expression_trace(
         State#state.port, Source, ModuleName, KnownVars, Options1
@@ -238,12 +224,6 @@ handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, 
     {reply, Result, State};
 handle_call({compile, Source, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
-    CacheSize = map_size(State#state.classes),
-    ?LOG_DEBUG("Compile file", #{
-        domain => [beamtalk, runtime],
-        path => maps:get(path, Options, undefined),
-        cache_size => CacheSize
-    }),
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = do_compile(State#state.port, Source, Options1),
     {reply, Result, State};
@@ -268,12 +248,6 @@ handle_call(_Request, _From, State) ->
 
 handle_cast({register_class, ClassName, MetaMap}, State) ->
     %% ADR 0050 Phase 3: Accumulate class metadata; overwrite on redefinition.
-    IsRedefinition = maps:is_key(ClassName, State#state.classes),
-    ?LOG_DEBUG("Register class", #{
-        domain => [beamtalk, runtime],
-        class => ClassName,
-        redefinition => IsRedefinition
-    }),
     NewClasses = maps:put(ClassName, MetaMap, State#state.classes),
     {noreply, State#state{classes = NewClasses}};
 handle_cast(_Msg, State) ->
@@ -350,9 +324,9 @@ open_port() ->
     try
         beamtalk_compiler_port:open()
     catch
-        error:{compiler_not_found, _} = Err ->
+        error:{compiler_not_found, _} = Err:Stack ->
             ?LOG_ERROR("Failed to open compiler port", #{
-                domain => [beamtalk, runtime], error => Err
+                domain => [beamtalk, runtime], error => Err, stacktrace => Stack
             }),
             error(Err)
     end.
@@ -369,7 +343,6 @@ open_port() ->
     {ok, term()} | {exit_status, non_neg_integer()} | timeout | port_not_available | decode_error.
 send_port_request(Port, Request, Timeout) ->
     Command = maps:get(command, Request, unknown),
-    ?LOG_DEBUG("Port request", #{domain => [beamtalk, runtime], command => Command}),
     T0 = erlang:monotonic_time(millisecond),
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
@@ -381,24 +354,14 @@ send_port_request(Port, Request, Timeout) ->
                         %% [safe] prevents atom exhaustion: all response atoms are
                         %% literals in this module and guaranteed to exist.
                         Response ->
-                            Status =
-                                case is_map(Response) of
-                                    true -> maps:get(status, Response, unknown);
-                                    false -> unknown
-                                end,
-                            ?LOG_DEBUG("Port response", #{
-                                domain => [beamtalk, runtime],
-                                command => Command,
-                                status => Status,
-                                elapsed_ms => Elapsed
-                            }),
                             {ok, Response}
                     catch
-                        error:badarg ->
+                        error:badarg:Stack ->
                             ?LOG_ERROR("Compiler port decode error", #{
                                 domain => [beamtalk, runtime],
                                 port => Port,
-                                elapsed_ms => Elapsed
+                                elapsed_ms => Elapsed,
+                                stacktrace => Stack
                             }),
                             decode_error
                     end;

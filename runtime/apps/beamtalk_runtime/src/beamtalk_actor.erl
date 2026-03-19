@@ -437,12 +437,13 @@ async_send(ActorPid, 'onExit:', [Block], FuturePid) ->
                 try
                     Block(Reason)
                 catch
-                    Class:Err ->
+                    Class:Err:Stack ->
                         ?LOG_WARNING("Error in onExit: callback", #{
                             actor_pid => ActorPid,
                             exit_reason => Reason,
                             error_class => Class,
-                            error => Err
+                            error => Err,
+                            stacktrace => Stack
                         })
                 end
         end
@@ -580,12 +581,13 @@ sync_send(ActorPid, 'onExit:', [Block]) ->
                 try
                     Block(Reason)
                 catch
-                    Class:Err ->
+                    Class:Err:Stack ->
                         ?LOG_WARNING("Error in onExit: callback", #{
                             actor_pid => ActorPid,
                             exit_reason => Reason,
                             error_class => Class,
-                            error => Err
+                            error => Err,
+                            stacktrace => Stack
                         })
                 end
         end
@@ -1160,11 +1162,12 @@ dispatch_via_hierarchy(Selector, Args, Self, State) ->
                 domain => [beamtalk, runtime]
             }),
             object_fallback(Selector, Args, Self, State, ClassName);
-        exit:{Reason, _} ->
+        exit:{Reason, _}:Stack ->
             ?LOG_WARNING("Class dispatch lookup failed", #{
                 selector => Selector,
                 class => ClassName,
                 reason => Reason,
+                stacktrace => Stack,
                 domain => [beamtalk, runtime]
             }),
             object_fallback(Selector, Args, Self, State, ClassName)
