@@ -97,14 +97,13 @@ Loaded Hello
 
 **Note:** `:load` is for loading class definitions. The class name in the file determines the module name, not the filename.
 
-## Working with Modules
+## Working with Classes
 
-After loading, you can see loaded modules:
+After loading, you can see loaded classes:
 
 ```beamtalk
-> :modules
-Loaded modules:
-  hello - examples/hello.bt (0 actors, loaded just now)
+> Workspace classes
+#(Hello)
 ```
 
 Reload after editing:
@@ -212,8 +211,7 @@ Beamtalk REPL Commands:
   :bindings       Show current variable bindings
   :load <path>    Load a .bt file
   :reload         Reload the last loaded file
-  :modules        List loaded modules
-  :unload <name>  Unload a module (fails if actors exist)
+  :unload <name>  Unload a class (fails if actors exist)
   :actors         List running actors
   :kill <pid>     Kill an actor by PID
 ```
@@ -229,14 +227,6 @@ Beamtalk REPL Commands:
 
 > x
 Error: Undefined variable: x
-```
-
-### :modules - List Loaded Modules
-
-```beamtalk
-> :modules
-Loaded modules:
-  counter - examples/counter.bt (2 actors, loaded 5m ago)
 ```
 
 ### :reload - Reload Last File
@@ -431,9 +421,8 @@ Variable bindings:
 > :load examples/hello.bt
 Loaded Hello
 
-> :modules
-Loaded modules:
-  hello - examples/hello.bt (0 actors, loaded just now)
+> Workspace classes
+#(Hello)
 
 > :exit
 Goodbye!

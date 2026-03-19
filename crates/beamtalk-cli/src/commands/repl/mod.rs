@@ -89,7 +89,7 @@ use process::{
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)] // fields populated by serde deserialization from REPL JSON protocol
 pub(crate) struct ReplResponse {
-    /// Legacy response type (result, error, bindings, loaded, actors, modules)
+    /// Legacy response type (result, error, bindings, loaded, actors)
     #[serde(rename = "type")]
     pub(crate) response_type: Option<String>,
     /// New protocol: message correlation ID
@@ -112,7 +112,7 @@ pub(crate) struct ReplResponse {
     pub(crate) classes: Option<Vec<String>>,
     /// Actor list (both formats)
     pub(crate) actors: Option<Vec<ActorInfo>>,
-    /// Module list (both formats)
+    /// Module list (legacy protocol — retained for backward-compatible deserialization)
     pub(crate) modules: Option<Vec<ModuleInfo>>,
     /// Session list (new protocol)
     pub(crate) sessions: Option<Vec<SessionInfo>>,

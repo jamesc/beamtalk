@@ -48,8 +48,6 @@ const REPL_COMMANDS: &[&str] = &[
     ":reload",
     ":r",
     ":unload",
-    ":modules",
-    ":m",
     ":actors",
     ":a",
     ":kill",

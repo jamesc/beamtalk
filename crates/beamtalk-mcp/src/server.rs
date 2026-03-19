@@ -138,12 +138,12 @@ pub struct InspectParams {
     pub actor: String,
 }
 
-/// Parameters for the `reload_module` MCP tool.
+/// Parameters for the `reload_class` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct ReloadModuleParams {
-    /// Module name to reload.
-    #[schemars(description = "Name of the beamtalk module to reload (hot code reload)")]
-    pub module: String,
+pub struct ReloadClassParams {
+    /// Class name to reload.
+    #[schemars(description = "Name of the beamtalk class to reload (hot code reload)")]
+    pub class: String,
 }
 
 /// Parameters for the `docs` MCP tool.
@@ -174,9 +174,9 @@ pub struct ShowCodegenParams {
         description = "Name of a loaded Beamtalk class to show generated Core Erlang for. Takes priority over 'code' when both are provided."
     )]
     pub class: Option<String>,
-    /// Optional method selector when using `class`. If omitted, shows the full module.
+    /// Optional method selector when using `class`. If omitted, shows the full class.
     #[schemars(
-        description = "Optional method selector when inspecting a class. Narrows context but full module Core Erlang is returned."
+        description = "Optional method selector when inspecting a class. Narrows context but full class Core Erlang is returned."
     )]
     pub selector: Option<String>,
 }
@@ -199,9 +199,9 @@ pub struct TestParams {
 /// Parameters for the `unload` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UnloadParams {
-    /// Name of the module to unload from the workspace.
-    #[schemars(description = "Name of the beamtalk module to unload from the workspace")]
-    pub module: String,
+    /// Name of the class to unload from the workspace.
+    #[schemars(description = "Name of the beamtalk class to unload from the workspace")]
+    pub class: String,
 }
 
 /// Parameters for the `load_project` MCP tool.
@@ -462,19 +462,19 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("load_file");
         tracing::debug!(tool = "load_file", path = %params.path, "tool invoked");
+        // Use native Beamtalk API: Workspace load: "path"
+        let expr = format!("Workspace load: \"{}\"", params.path.replace('"', "\\\""));
         let response = self
             .client
-            .load_file(&params.path)
+            .evaluate_with_options(&expr, false)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
         check_response!(response, "Failed to load file");
 
-        let classes = response.classes.unwrap_or_default();
-        let text = if classes.is_empty() {
-            "File loaded (no classes defined)".to_string()
-        } else {
-            format!("Loaded classes: {}", classes.join(", "))
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() { "File loaded".to_string() } else { v }
         };
 
         let mut parts = vec![Content::text(text)];
@@ -520,7 +520,7 @@ impl BeamtalkMcp {
 
     /// List all running actors in the workspace.
     #[tool(
-        description = "List all running actors in the workspace. Returns each actor's PID, class, and module."
+        description = "List all running actors in the workspace. Returns each actor's PID and class."
     )]
     async fn list_actors(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("list_actors");
@@ -540,41 +540,6 @@ impl BeamtalkMcp {
             actors
                 .iter()
                 .map(|a| format!("{} ({}) — pid: {}", a.class, a.module, a.pid))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
-    }
-
-    /// List all loaded modules in the workspace.
-    #[tool(
-        description = "List all loaded modules in the workspace. Returns each module's name, source file, actor count, and when it was loaded."
-    )]
-    async fn list_modules(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("list_modules");
-        tracing::debug!(tool = "list_modules", "tool invoked");
-        let response = self
-            .client
-            .modules()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-
-        check_response!(response, "Failed to list modules");
-
-        let modules = response.modules.unwrap_or_default();
-        let text = if modules.is_empty() {
-            "No modules loaded".to_string()
-        } else {
-            modules
-                .iter()
-                .map(|m| {
-                    format!(
-                        "{} — {} ({} actors, loaded {})",
-                        m.name, m.source_file, m.actor_count, m.time_ago
-                    )
-                })
                 .collect::<Vec<_>>()
                 .join("\n")
         };
@@ -669,37 +634,33 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
-    /// Hot-reload a module, migrating running actors to the new code.
+    /// Hot-reload a class, migrating running actors to the new code.
     #[tool(
-        description = "Hot-reload a module. Recompiles and reloads the module, migrating any running actors to the new code. Returns the number of affected actors and any migration failures."
+        description = "Hot-reload a class. Recompiles and reloads the class, migrating any running actors to the new code. Returns the number of affected actors and any migration failures."
     )]
-    async fn reload_module(
+    async fn reload_class(
         &self,
-        Parameters(params): Parameters<ReloadModuleParams>,
+        Parameters(params): Parameters<ReloadClassParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("reload_module");
-        tracing::debug!(tool = "reload_module", module = %params.module, "tool invoked");
+        let mut timer = ToolTimer::new("reload_class");
+        tracing::debug!(tool = "reload_class", class = %params.class, "tool invoked");
+        // Use native Beamtalk API: ClassName reload
+        let expr = format!("{} reload", params.class);
         let response = self
             .client
-            .reload(&params.module)
+            .evaluate_with_options(&expr, false)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        check_response!(response, "Failed to reload module");
+        check_response!(response, "Failed to reload class");
 
-        let mut parts = vec![Content::text("Module reloaded successfully")];
-
-        if let Some(affected) = response.affected_actors {
-            parts.push(Content::text(format!("Affected actors: {affected}")));
-        }
-        if let Some(failures) = response.migration_failures {
-            if failures > 0 {
-                parts.push(Content::text(format!("Migration failures: {failures}")));
-            }
-        }
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() { "Class reloaded successfully".to_string() } else { v }
+        };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(parts))
+        Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
     /// Get documentation for a beamtalk class or method.
@@ -712,17 +673,23 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("docs");
         tracing::debug!(tool = "docs", class = %params.class, selector = ?params.selector, "tool invoked");
+        // Use native Beamtalk API: Beamtalk help: ClassName [selector: #sel]
+        let expr = match params.selector.as_deref() {
+            Some(sel) => format!("Beamtalk help: {} selector: #{}", params.class, sel),
+            None => format!("Beamtalk help: {}", params.class),
+        };
         let response = self
             .client
-            .docs(&params.class, params.selector.as_deref())
+            .evaluate_with_options(&expr, false)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
         check_response!(response, "No documentation found");
 
-        let text = response
-            .docs
-            .unwrap_or_else(|| "No documentation available".to_string());
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() { "No documentation available".to_string() } else { v }
+        };
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
@@ -749,28 +716,28 @@ impl BeamtalkMcp {
         )]))
     }
 
-    /// Unload a module from the workspace.
+    /// Unload a class from the workspace.
     #[tool(
-        description = "Unload a module from the workspace. Removes the module and its classes. Does not affect running actors."
+        description = "Unload a class from the workspace. Removes the class. Does not affect running actors."
     )]
     async fn unload(
         &self,
         Parameters(params): Parameters<UnloadParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("unload");
-        tracing::debug!(tool = "unload", module = %params.module, "tool invoked");
+        tracing::debug!(tool = "unload", class = %params.class, "tool invoked");
         let response = self
             .client
-            .unload(&params.module)
+            .unload(&params.class)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        check_response!(response, "Failed to unload module");
+        check_response!(response, "Failed to unload class");
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "Module '{}' unloaded",
-            params.module
+            "Class '{}' unloaded",
+            params.class
         ))]))
     }
 
@@ -1296,13 +1263,13 @@ impl ServerHandler for BeamtalkMcp {
                  from a project in dependency order, 'load_file' to load a single source file, \
                  'list_actors' to see running actors, 'list_classes' for a class overview with optional superclass/scope filter, \
                  'inspect' to examine actor state, \
-                 'reload_module' for hot code reloading, 'test' to run BUnit tests, \
+                 'reload_class' for hot code reloading, 'test' to run BUnit tests, \
                  'lint' to run style/redundancy checks on .bt source files, \
                  'search_classes' to discover Beamtalk classes by keyword or concept (works offline, no REPL needed), \
                  'search_examples' to find Beamtalk code examples by keyword (works offline, no REPL needed), \
                  'show_codegen' to inspect generated Core Erlang (use class+selector for loaded classes), 'info' for symbol details, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
-                 'unload' to remove a module, and 'interrupt' to cancel evaluations.",
+                 'unload' to remove a class, and 'interrupt' to cancel evaluations.",
             )
     }
 }

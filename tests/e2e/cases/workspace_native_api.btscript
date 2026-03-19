@@ -9,7 +9,7 @@
 //
 // Native API:
 //   Workspace load: "path"   (replaces load-file protocol op / :load alias)
-//   Workspace classes         (replaces modules protocol op / :modules alias)
+//   Workspace classes         (lists loaded classes)
 //   Counter reload            (replaces reload protocol op / :reload alias)
 //   Beamtalk help: Class      (replaces docs protocol op / :help command)
 //   Beamtalk help: Class selector: #sel  (replaces docs with selector)
@@ -98,7 +98,7 @@ methodHelpText isNil
 // => == Integer < Number ==_
 
 // ===========================================================================
-// WORKSPACE CLASSES — native equivalent of :modules / modules protocol op
+// WORKSPACE CLASSES — list loaded classes
 // ===========================================================================
 
 // Load a fixture class

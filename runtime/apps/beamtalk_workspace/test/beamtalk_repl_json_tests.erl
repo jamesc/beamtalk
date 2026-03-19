@@ -1228,12 +1228,12 @@ format_error_message_class_not_found_binary_test() ->
     Msg = beamtalk_repl_json:format_error_message({class_not_found, <<"Foo">>}),
     ?assert(binary:match(Msg, <<"Unknown class">>) =/= nomatch).
 
-format_error_message_class_not_found_with_modules_hint_test() ->
+format_error_message_class_not_found_with_hint_test() ->
     %% Ensure the atom exists first
     _ = 'NonExistentClass',
     Msg = beamtalk_repl_json:format_error_message({class_not_found, 'NonExistentClass'}),
     ?assert(binary:match(Msg, <<"Unknown class">>) =/= nomatch),
-    ?assert(binary:match(Msg, <<":modules">>) =/= nomatch).
+    ?assert(binary:match(Msg, <<"Workspace classes">>) =/= nomatch).
 
 format_error_message_method_not_found_v2_test() ->
     Msg = beamtalk_repl_json:format_error_message({method_not_found, 'Integer', <<"+:">>}),
