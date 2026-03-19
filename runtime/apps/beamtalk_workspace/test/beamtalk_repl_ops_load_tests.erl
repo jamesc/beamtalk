@@ -151,7 +151,9 @@ structured_file_errors_compile_diagnostics_test() ->
         #{message => <<"undefined variable 'x'">>, line => 5, hint => <<"Did you mean 'self'?">>},
         #{message => <<"unexpected token">>}
     ],
-    Result = beamtalk_repl_ops_load:structured_file_errors("/src/Broken.bt", {compile_error, Diags}),
+    Result = beamtalk_repl_ops_load:structured_file_errors(
+        "/src/Broken.bt", {compile_error, Diags}
+    ),
     ?assertEqual(2, length(Result)),
     [E1, E2] = Result,
     ?assertEqual(<<"/src/Broken.bt">>, maps:get(<<"path">>, E1)),

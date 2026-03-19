@@ -400,7 +400,9 @@ load_files_sequential(Files, SessionPid) ->
 %% For compile errors with a diagnostic list, returns one error map per diagnostic
 %% with line numbers preserved. Other errors return a single-element list.
 -spec structured_file_errors(string(), term()) -> [map()].
-structured_file_errors(Path, {compile_error, Diagnostics}) when is_list(Diagnostics), Diagnostics =/= [] ->
+structured_file_errors(Path, {compile_error, Diagnostics}) when
+    is_list(Diagnostics), Diagnostics =/= []
+->
     PathBin = list_to_binary(Path),
     [diagnostic_to_error_map(PathBin, D) || D <- Diagnostics];
 structured_file_errors(Path, Reason) ->
@@ -411,10 +413,12 @@ structured_file_errors(Path, Reason) ->
         <<"kind">> => atom_to_binary(Kind, utf8),
         <<"message">> => Msg
     },
-    [case Hint of
-        undefined -> ErrMap;
-        _ -> ErrMap#{<<"hint">> => Hint}
-    end].
+    [
+        case Hint of
+            undefined -> ErrMap;
+            _ -> ErrMap#{<<"hint">> => Hint}
+        end
+    ].
 
 %% @private
 %% @doc Convert a single compiler diagnostic map to a structured error map.
@@ -426,10 +430,11 @@ diagnostic_to_error_map(PathBin, D) when is_map(D) ->
         <<"kind">> => <<"compile_error">>,
         <<"message">> => Msg
     },
-    ErrMap1 = case maps:find(line, D) of
-        {ok, Line} when is_integer(Line) -> ErrMap0#{<<"line">> => Line};
-        _ -> ErrMap0
-    end,
+    ErrMap1 =
+        case maps:find(line, D) of
+            {ok, Line} when is_integer(Line) -> ErrMap0#{<<"line">> => Line};
+            _ -> ErrMap0
+        end,
     case maps:find(hint, D) of
         {ok, Hint} when is_binary(Hint) -> ErrMap1#{<<"hint">> => Hint};
         _ -> ErrMap1
