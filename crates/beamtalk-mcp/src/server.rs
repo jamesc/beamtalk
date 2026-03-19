@@ -70,6 +70,37 @@ fn error_result(msg: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![Content::text(msg.into())])
 }
 
+/// Validate that a string is a valid Beamtalk class name (uppercase-starting identifier).
+fn validate_class_name(name: &str) -> Result<(), rmcp::ErrorData> {
+    if name.is_empty()
+        || !name.starts_with(|c: char| c.is_ascii_uppercase())
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(rmcp::ErrorData::invalid_params(
+            format!("Invalid class name: '{name}'. Must be an uppercase-starting identifier."),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+/// Validate that a string is a valid Beamtalk selector (alphanumeric keyword, possibly with colons).
+fn validate_selector(sel: &str) -> Result<(), rmcp::ErrorData> {
+    if sel.is_empty()
+        || !sel
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+    {
+        return Err(rmcp::ErrorData::invalid_params(
+            format!(
+                "Invalid selector: '{sel}'. Must be an alphanumeric identifier, optionally with colons."
+            ),
+            None,
+        ));
+    }
+    Ok(())
+}
+
 /// Pretty-print a JSON value, falling back to `Display` on serialization error.
 fn pretty_json(value: &serde_json::Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
@@ -463,7 +494,10 @@ impl BeamtalkMcp {
         let mut timer = ToolTimer::new("load_file");
         tracing::debug!(tool = "load_file", path = %params.path, "tool invoked");
         // Use native Beamtalk API: Workspace load: "path"
-        let expr = format!("Workspace load: \"{}\"", params.path.replace('"', "\\\""));
+        let expr = format!(
+            "Workspace load: \"{}\"",
+            params.path.replace('\\', "\\\\").replace('"', "\\\"")
+        );
         let response = self
             .client
             .evaluate_with_options(&expr, false)
@@ -543,7 +577,7 @@ impl BeamtalkMcp {
         } else {
             actors
                 .iter()
-                .map(|a| format!("{} ({}) — pid: {}", a.class, a.module, a.pid))
+                .map(|a| format!("{} — pid: {}", a.class, a.pid))
                 .collect::<Vec<_>>()
                 .join("\n")
         };
@@ -648,6 +682,7 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("reload_class");
         tracing::debug!(tool = "reload_class", class = %params.class, "tool invoked");
+        validate_class_name(&params.class)?;
         // Use native Beamtalk API: ClassName reload
         let expr = format!("{} reload", params.class);
         let response = self
@@ -681,9 +716,14 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("docs");
         tracing::debug!(tool = "docs", class = %params.class, selector = ?params.selector, "tool invoked");
+        validate_class_name(&params.class)?;
         // Use native Beamtalk API: Beamtalk help: ClassName [selector: #sel]
         let expr = match params.selector.as_deref() {
-            Some(sel) => format!("Beamtalk help: {} selector: #{}", params.class, sel),
+            Some(sel) => {
+                let sel = sel.strip_prefix('#').unwrap_or(sel);
+                validate_selector(sel)?;
+                format!("Beamtalk help: {} selector: #{}", params.class, sel)
+            }
             None => format!("Beamtalk help: {}", params.class),
         };
         let response = self
