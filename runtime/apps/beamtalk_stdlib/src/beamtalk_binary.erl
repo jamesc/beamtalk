@@ -46,7 +46,9 @@
         error:badarg ->
             Error0 = beamtalk_error:new(type_error, 'Binary'),
             Error1 = beamtalk_error:with_selector(Error0, 'deserialize:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Binary data is invalid or contains unknown atoms">>),
+            Error2 = beamtalk_error:with_hint(
+                Error1, <<"Binary data is invalid or contains unknown atoms">>
+            ),
             beamtalk_error:raise(Error2)
     end;
 'deserialize:'(_) ->
@@ -74,7 +76,10 @@
         error:badarg ->
             Error0 = beamtalk_error:new(type_error, 'Binary'),
             Error1 = beamtalk_error:with_selector(Error0, 'fromIolist:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a valid iolist (list of binaries, integers 0-255, or nested iolists)">>),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                <<"Argument must be a valid iolist (list of binaries, integers 0-255, or nested iolists)">>
+            ),
             beamtalk_error:raise(Error2)
     end.
 
