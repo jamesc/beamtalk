@@ -27,7 +27,7 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
 
-use crate::ast::{ClassDefinition, Expression, Module};
+use crate::ast::{ClassDefinition, ClassKind, Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
 use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::queries::erlang_modules;
@@ -44,6 +44,8 @@ enum ClassContext<'a> {
     InstanceMethod(&'a ClassDefinition),
     /// Cursor is inside a class-side method of the named class.
     ClassMethod(&'a ClassDefinition),
+    /// Cursor is inside a class body but not inside any method (where `field:`/`state:` go).
+    ClassBody(&'a ClassDefinition),
     /// Cursor is at top level (not inside any class).
     TopLevel,
 }
@@ -127,8 +129,8 @@ pub fn compute_completions(
     // Try to find receiver type at cursor for type-filtered completions
     let receiver_type = find_receiver_type(module, offset, &type_map);
 
-    // Add keyword completions
-    add_keyword_completions(&mut completions);
+    // Add keyword completions (context-aware for field:/state: by class kind, BT-1537)
+    add_keyword_completions(&mut completions, &context, hierarchy);
 
     // Add identifiers from the current scope
     add_identifier_completions(module, &mut completions);
@@ -323,7 +325,11 @@ fn has_erlang_class_ref_at(expr: &Expression, offset: u32) -> bool {
 }
 
 /// Adds keyword completions.
-fn add_keyword_completions(completions: &mut Vec<Completion>) {
+fn add_keyword_completions(
+    completions: &mut Vec<Completion>,
+    context: &ClassContext<'_>,
+    hierarchy: &ClassHierarchy,
+) {
     let keywords = [
         ("self", "Reference to the current object"),
         ("super", "Reference to the superclass"),
@@ -337,6 +343,30 @@ fn add_keyword_completions(completions: &mut Vec<Completion>) {
     for (keyword, doc) in &keywords {
         completions
             .push(Completion::new(*keyword, CompletionKind::Keyword).with_documentation(*doc));
+    }
+
+    // Offer field:/state: based on class kind when inside a class body (BT-1537).
+    if let ClassContext::ClassBody(class) = context {
+        let kind = hierarchy.resolve_class_kind(&class.name.name);
+        match kind {
+            ClassKind::Value => {
+                completions.push(
+                    Completion::new("field:", CompletionKind::Keyword)
+                        .with_documentation("Immutable data field (Value subclass)")
+                        .with_detail("field: name :: Type = default"),
+                );
+            }
+            ClassKind::Actor => {
+                completions.push(
+                    Completion::new("state:", CompletionKind::Keyword)
+                        .with_documentation("Mutable process state (Actor subclass)")
+                        .with_detail("state: name :: Type = default"),
+                );
+            }
+            ClassKind::Object => {
+                // Object subclasses cannot have instance data — don't offer either keyword
+            }
+        }
     }
 }
 
@@ -374,6 +404,11 @@ fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
             if offset >= span.start() && offset < span.end() {
                 return ClassContext::ClassMethod(class);
             }
+        }
+        // Check if inside class body but not in any method (BT-1537)
+        let class_span = class.span;
+        if offset >= class_span.start() && offset < class_span.end() {
+            return ClassContext::ClassBody(class);
         }
     }
     ClassContext::TopLevel
@@ -758,9 +793,9 @@ fn should_exclude_delegate(
     }
     // Fallback to editing context for untyped completions.
     match context {
-        ClassContext::InstanceMethod(class) | ClassContext::ClassMethod(class) => {
-            class.backing_module.is_none()
-        }
+        ClassContext::InstanceMethod(class)
+        | ClassContext::ClassMethod(class)
+        | ClassContext::ClassBody(class) => class.backing_module.is_none(),
         ClassContext::TopLevel => true,
     }
 }
@@ -825,6 +860,28 @@ fn add_hierarchy_completions(
             collect_method_completions(
                 hierarchy.all_methods(class_name),
                 false,
+                context,
+                None,
+                hierarchy,
+                &mut seen,
+                completions,
+            );
+        }
+        ClassContext::ClassBody(class) => {
+            // Inside a class body but not in a method — show instance and class-side methods
+            let class_name = class.name.name.as_str();
+            collect_method_completions(
+                hierarchy.all_methods(class_name),
+                false,
+                context,
+                None,
+                hierarchy,
+                &mut seen,
+                completions,
+            );
+            collect_method_completions(
+                hierarchy.all_class_methods(class_name),
+                true,
                 context,
                 None,
                 hierarchy,
@@ -1034,14 +1091,21 @@ mod tests {
 
     #[test]
     fn keyword_completions_have_documentation() {
-        let mut completions = Vec::new();
-        add_keyword_completions(&mut completions);
+        // Use completions_at to get keyword completions via the full pipeline
+        let completions = completions_at("x := 42", Position::new(0, 0));
 
         // All keywords should have documentation
-        for completion in completions {
-            if let CompletionKind::Keyword = completion.kind {
-                assert!(completion.documentation.is_some());
-            }
+        let keyword_completions: Vec<_> = completions
+            .iter()
+            .filter(|c| matches!(c.kind, CompletionKind::Keyword))
+            .collect();
+        assert!(!keyword_completions.is_empty());
+        for completion in keyword_completions {
+            assert!(
+                completion.documentation.is_some(),
+                "Keyword '{}' should have documentation",
+                completion.label
+            );
         }
     }
 
@@ -1228,6 +1292,122 @@ mod tests {
             has_is_nil,
             "Dynamic type should include Object methods (fallback). Got labels: {:?}",
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    // --- field:/state: class-kind-aware completion tests (BT-1537) ---
+
+    #[test]
+    fn value_class_body_offers_field_not_state() {
+        // Cursor inside a Value subclass body, on the blank line between
+        // the class header and the method definition.
+        let source = "Value subclass: Point\n  field: x = 0\n\n  getX => self.x";
+        let completions = completions_at(source, Position::new(2, 0));
+
+        assert!(
+            completions.iter().any(|c| c.label == "field:"),
+            "Value class body should offer 'field:' completion. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            !completions.iter().any(|c| c.label == "state:"),
+            "Value class body should NOT offer 'state:' completion"
+        );
+    }
+
+    #[test]
+    fn actor_class_body_offers_state_not_field() {
+        // Cursor inside an Actor subclass body, on the blank line.
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
+        let completions = completions_at(source, Position::new(2, 0));
+
+        assert!(
+            completions.iter().any(|c| c.label == "state:"),
+            "Actor class body should offer 'state:' completion. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            !completions.iter().any(|c| c.label == "field:"),
+            "Actor class body should NOT offer 'field:' completion"
+        );
+    }
+
+    #[test]
+    fn object_class_body_offers_neither_field_nor_state() {
+        // Cursor inside an Object subclass body.
+        let source = "Object subclass: Helper\n\n  class doStuff => 42";
+        let completions = completions_at(source, Position::new(1, 0));
+
+        assert!(
+            !completions.iter().any(|c| c.label == "field:"),
+            "Object class body should NOT offer 'field:' completion"
+        );
+        assert!(
+            !completions.iter().any(|c| c.label == "state:"),
+            "Object class body should NOT offer 'state:' completion"
+        );
+    }
+
+    #[test]
+    fn top_level_offers_neither_field_nor_state() {
+        // Cursor at top level, not inside any class.
+        let source = "x := 42";
+        let completions = completions_at(source, Position::new(0, 0));
+
+        assert!(
+            !completions.iter().any(|c| c.label == "field:"),
+            "Top level should NOT offer 'field:' completion"
+        );
+        assert!(
+            !completions.iter().any(|c| c.label == "state:"),
+            "Top level should NOT offer 'state:' completion"
+        );
+    }
+
+    #[test]
+    fn field_completion_has_correct_kind_and_docs() {
+        let source = "Value subclass: Point\n  field: x = 0\n\n  getX => self.x";
+        let completions = completions_at(source, Position::new(2, 0));
+
+        let field_completion = completions
+            .iter()
+            .find(|c| c.label == "field:")
+            .expect("should have field: completion");
+        assert_eq!(field_completion.kind, CompletionKind::Keyword);
+        assert!(field_completion.documentation.is_some());
+        assert!(field_completion.detail.is_some());
+    }
+
+    #[test]
+    fn state_completion_has_correct_kind_and_docs() {
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
+        let completions = completions_at(source, Position::new(2, 0));
+
+        let state_completion = completions
+            .iter()
+            .find(|c| c.label == "state:")
+            .expect("should have state: completion");
+        assert_eq!(state_completion.kind, CompletionKind::Keyword);
+        assert!(state_completion.documentation.is_some());
+        assert!(state_completion.detail.is_some());
+    }
+
+    #[test]
+    fn inherited_value_subclass_offers_field() {
+        // A class that indirectly inherits from Value should still get field: completions.
+        // "Value subclass: Base" then "Base subclass: Child" — Child resolves to ClassKind::Value.
+        let source =
+            "Value subclass: Base\n  field: x = 0\n\nBase subclass: Child\n\n  getX => self.x";
+        let completions = completions_at(source, Position::new(4, 0));
+
+        assert!(
+            completions.iter().any(|c| c.label == "field:"),
+            "Inherited Value subclass body should offer 'field:'. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            !completions.iter().any(|c| c.label == "state:"),
+            "Inherited Value subclass body should NOT offer 'state:'"
         );
     }
 
