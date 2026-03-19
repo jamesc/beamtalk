@@ -14,7 +14,7 @@
 //! - Value type slot assignment (BT-914)
 //! - Cast on value types (BT-919)
 //! - Value type `-> Nil` return annotations (BT-1052)
-//! - Data keyword / class-kind mismatch warnings (BT-1529)
+//! - Data keyword / class-kind mismatch errors (BT-1529, BT-1535)
 
 use crate::ast::{
     ClassKind, DeclaredKeyword, Expression, Identifier, MessageSelector, MethodDefinition, Module,
@@ -801,42 +801,30 @@ fn check_method_nil_return(
     );
 }
 
-/// BT-1529: Warn when data declaration keywords don't match the class kind.
+/// BT-1529/BT-1535: Enforce data declaration keywords matching the class kind.
 ///
 /// Checks each class's `state:` / `field:` declarations against the resolved
-/// `ClassKind` (via hierarchy propagation from BT-1528) and emits warnings:
+/// `ClassKind` (via hierarchy propagation from BT-1528) and emits errors:
 ///
 /// - `state:` on a Value subclass → "use 'field:' instead"
 /// - `field:` on an Actor subclass → "use 'state:' instead"
 /// - `state:` or `field:` on an Object subclass → "Object cannot have instance data"
 ///
-/// These warnings will be promoted to hard errors in Phase 4 (BT-1535).
-/// Suppressed when `stdlib_mode` is true to allow gradual migration.
+/// Originally warnings (Phase 2, BT-1529), promoted to hard errors in Phase 4
+/// (BT-1535) after all stdlib/test/example migrations were completed.
 pub(crate) fn check_data_keyword_class_kind(
     module: &Module,
     hierarchy: &ClassHierarchy,
-    stdlib_mode: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if stdlib_mode {
-        return;
-    }
-
     for class in &module.classes {
         let class_name = class.name.name.as_str();
         let resolved_kind = hierarchy.resolve_class_kind(class_name);
 
-        // BT-1533: TestCase subclasses are exempt from keyword/kind warnings
-        // during the deprecation period. BT-1534 will migrate `state:` → `field:`
-        // in all test subclasses.
-        if hierarchy.is_testcase_subclass(class_name) {
-            continue;
-        }
-
-        // For Object kind, only warn if the superclass is actually known in
+        // For Object kind, only error if the superclass is actually known in
         // the hierarchy. When the superclass is unknown (e.g. cross-file class
         // not loaded via pre_loaded_classes), resolve_class_kind defaults to
-        // Object — producing false positive warnings.
+        // Object — producing false positives.
         if resolved_kind == ClassKind::Object {
             let superclass_known = class
                 .superclass
@@ -861,7 +849,7 @@ pub(crate) fn check_data_keyword_class_kind(
 }
 
 /// Checks a single data declaration keyword against the resolved class kind
-/// and emits a warning if they don't match.
+/// and emits a compile error if they don't match.
 fn check_keyword_for_kind(
     keyword: DeclaredKeyword,
     kind: ClassKind,
@@ -871,50 +859,41 @@ fn check_keyword_for_kind(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match (kind, keyword) {
-        // Correct combinations — no warning
+        // Correct combinations — no error
         (ClassKind::Value, DeclaredKeyword::Field) | (ClassKind::Actor, DeclaredKeyword::State) => {
         }
 
         // state: on Value → should be field:
         (ClassKind::Value, DeclaredKeyword::State) => {
-            diagnostics.push(
-                Diagnostic::warning(
-                    format!(
-                        "Use 'field:' for Value subclass `{class_name}` data declarations, \
-                         not 'state:' — `{field_name}` is immutable"
-                    ),
-                    span,
-                )
-                .with_category(DiagnosticCategory::Deprecation),
-            );
+            diagnostics.push(Diagnostic::error(
+                format!(
+                    "Use 'field:' for Value subclass `{class_name}` data declarations, \
+                     not 'state:' — `{field_name}` is immutable"
+                ),
+                span,
+            ));
         }
 
         // field: on Actor → should be state:
         (ClassKind::Actor, DeclaredKeyword::Field) => {
-            diagnostics.push(
-                Diagnostic::warning(
-                    format!(
-                        "Use 'state:' for Actor subclass `{class_name}` data declarations, \
-                         not 'field:' — `{field_name}` is mutable process state"
-                    ),
-                    span,
-                )
-                .with_category(DiagnosticCategory::Deprecation),
-            );
+            diagnostics.push(Diagnostic::error(
+                format!(
+                    "Use 'state:' for Actor subclass `{class_name}` data declarations, \
+                     not 'field:' — `{field_name}` is mutable process state"
+                ),
+                span,
+            ));
         }
 
         // Any data keyword on Object → Object cannot have instance data
         (ClassKind::Object, _) => {
-            diagnostics.push(
-                Diagnostic::warning(
-                    format!(
-                        "Object subclass `{class_name}` cannot have instance data declarations; \
-                         use 'Value subclass:' for immutable data or 'Actor subclass:' for mutable state"
-                    ),
-                    span,
-                )
-                .with_category(DiagnosticCategory::Deprecation),
-            );
+            diagnostics.push(Diagnostic::error(
+                format!(
+                    "Object subclass `{class_name}` cannot have instance data declarations; \
+                     use 'Value subclass:' for immutable data or 'Actor subclass:' for mutable state"
+                ),
+                span,
+            ));
         }
     }
 }
@@ -1342,10 +1321,10 @@ mod tests {
         );
     }
 
-    // --- BT-1529: Data keyword / class-kind mismatch warnings ---
+    // --- BT-1535: Data keyword / class-kind mismatch errors (promoted from warnings) ---
 
     #[test]
-    fn state_on_value_warns() {
+    fn state_on_value_errors() {
         let src = "Value subclass: Point\n  state: x = 0\n  state: y = 0";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
@@ -1353,24 +1332,19 @@ mod tests {
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_data_keyword_class_kind(&module, &hierarchy, false, &mut diagnostics);
+        check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             2,
-            "Expected 2 warnings for state: on Value, got: {diagnostics:?}"
+            "Expected 2 errors for state: on Value, got: {diagnostics:?}"
         );
-        assert!(diagnostics[0].severity == Severity::Warning);
-        assert_eq!(
-            diagnostics[0].category,
-            Some(DiagnosticCategory::Deprecation),
-            "Deprecation category required for warnings-as-errors exclusion"
-        );
+        assert!(diagnostics[0].severity == Severity::Error);
         assert!(diagnostics[0].message.contains("field:"));
         assert!(diagnostics[0].message.contains("not 'state:'"));
     }
 
     #[test]
-    fn field_on_actor_warns() {
+    fn field_on_actor_errors() {
         let src = "Actor subclass: Counter\n  field: count = 0";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
@@ -1378,19 +1352,19 @@ mod tests {
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_data_keyword_class_kind(&module, &hierarchy, false, &mut diagnostics);
+        check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
-            "Expected 1 warning for field: on Actor, got: {diagnostics:?}"
+            "Expected 1 error for field: on Actor, got: {diagnostics:?}"
         );
-        assert!(diagnostics[0].severity == Severity::Warning);
+        assert!(diagnostics[0].severity == Severity::Error);
         assert!(diagnostics[0].message.contains("state:"));
         assert!(diagnostics[0].message.contains("not 'field:'"));
     }
 
     #[test]
-    fn state_on_object_warns() {
+    fn state_on_object_errors() {
         let src = "Object subclass: BadObj\n  state: x = 0";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
@@ -1398,18 +1372,18 @@ mod tests {
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_data_keyword_class_kind(&module, &hierarchy, false, &mut diagnostics);
+        check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
-            "Expected 1 warning for state: on Object, got: {diagnostics:?}"
+            "Expected 1 error for state: on Object, got: {diagnostics:?}"
         );
-        assert!(diagnostics[0].severity == Severity::Warning);
+        assert!(diagnostics[0].severity == Severity::Error);
         assert!(diagnostics[0].message.contains("cannot have instance data"));
     }
 
     #[test]
-    fn field_on_object_warns() {
+    fn field_on_object_errors() {
         let src = "Object subclass: BadObj\n  field: x = 0";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
@@ -1417,18 +1391,18 @@ mod tests {
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_data_keyword_class_kind(&module, &hierarchy, false, &mut diagnostics);
+        check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
-            "Expected 1 warning for field: on Object, got: {diagnostics:?}"
+            "Expected 1 error for field: on Object, got: {diagnostics:?}"
         );
-        assert!(diagnostics[0].severity == Severity::Warning);
+        assert!(diagnostics[0].severity == Severity::Error);
         assert!(diagnostics[0].message.contains("cannot have instance data"));
     }
 
     #[test]
-    fn field_on_value_no_warning() {
+    fn field_on_value_no_error() {
         let src = "Value subclass: Point\n  field: x = 0\n  field: y = 0";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
@@ -1436,15 +1410,15 @@ mod tests {
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_data_keyword_class_kind(&module, &hierarchy, false, &mut diagnostics);
+        check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
-            "Expected no warnings for field: on Value, got: {diagnostics:?}"
+            "Expected no errors for field: on Value, got: {diagnostics:?}"
         );
     }
 
     #[test]
-    fn state_on_actor_no_warning() {
+    fn state_on_actor_no_error() {
         let src = "Actor subclass: Counter\n  state: count = 0";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
@@ -1452,32 +1426,16 @@ mod tests {
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_data_keyword_class_kind(&module, &hierarchy, false, &mut diagnostics);
+        check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
-            "Expected no warnings for state: on Actor, got: {diagnostics:?}"
+            "Expected no errors for state: on Actor, got: {diagnostics:?}"
         );
     }
 
     #[test]
-    fn stdlib_mode_suppresses_keyword_warnings() {
-        let src = "Value subclass: Point\n  state: x = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-        let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
-        let mut diagnostics = Vec::new();
-        check_data_keyword_class_kind(&module, &hierarchy, true, &mut diagnostics);
-        assert!(
-            diagnostics.is_empty(),
-            "Expected no warnings in stdlib_mode, got: {diagnostics:?}"
-        );
-    }
-
-    #[test]
-    fn indirect_value_subclass_state_warns() {
-        // A class that inherits from a Value subclass should also get warnings
+    fn indirect_value_subclass_state_errors() {
+        // A class that inherits from a Value subclass should also get errors
         // when using state: instead of field:
         let src = "Value subclass: Shape\n  field: color = \"red\"\n\nShape subclass: Circle\n  state: radius = 0";
         let tokens = lex_with_eof(src);
@@ -1486,19 +1444,20 @@ mod tests {
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_data_keyword_class_kind(&module, &hierarchy, false, &mut diagnostics);
+        check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
-            "Expected 1 warning for state: on indirect Value subclass, got: {diagnostics:?}"
+            "Expected 1 error for state: on indirect Value subclass, got: {diagnostics:?}"
         );
+        assert!(diagnostics[0].severity == Severity::Error);
         assert!(diagnostics[0].message.contains("Circle"));
         assert!(diagnostics[0].message.contains("field:"));
     }
 
     #[test]
-    fn object_no_state_no_warning() {
-        // Object subclass with no data declarations should produce no warnings
+    fn object_no_state_no_error() {
+        // Object subclass with no data declarations should produce no errors
         let src = "Object subclass: Helper\n  class doStuff => 42";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
@@ -1506,10 +1465,30 @@ mod tests {
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_data_keyword_class_kind(&module, &hierarchy, false, &mut diagnostics);
+        check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
-            "Expected no warnings for Object without data, got: {diagnostics:?}"
+            "Expected no errors for Object without data, got: {diagnostics:?}"
         );
+    }
+
+    #[test]
+    fn testcase_subclass_state_errors() {
+        // BT-1535: TestCase subclasses are no longer exempt (migration complete)
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\nTestCase subclass: MyTest\n  state: counter = nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for state: on TestCase subclass, got: {diagnostics:?}"
+        );
+        assert!(diagnostics[0].severity == Severity::Error);
+        assert!(diagnostics[0].message.contains("field:"));
     }
 }

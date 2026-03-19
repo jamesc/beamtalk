@@ -6,6 +6,6 @@
 // but should create a Coffee instance when called as `Coffee wrap:`.
 
 Beverage subclass: Coffee
-  state: flavor = "espresso"
+  field: flavor = "espresso"
 
   flavor => self.flavor

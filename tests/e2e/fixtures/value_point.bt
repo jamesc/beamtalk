@@ -6,8 +6,8 @@
 // keyword constructor, and value equality.
 
 Value subclass: ValuePoint
-  state: x = 0
-  state: y = 0
+  field: x = 0
+  field: y = 0
 
   // User-defined method: Euclidean distance squared from origin
   distanceSquared => (self.x * self.x) + (self.y * self.y)

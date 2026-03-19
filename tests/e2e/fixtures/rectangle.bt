@@ -6,8 +6,8 @@
 // value-object inheritance works correctly.
 
 Shape subclass: Rectangle
-  state: width = 1.0
-  state: height = 1.0
+  field: width = 1.0
+  field: height = 1.0
 
   class withWidth: w height: h => self new: #{#width => w, #height => h}
 

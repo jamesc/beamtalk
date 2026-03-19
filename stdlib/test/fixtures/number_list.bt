@@ -6,7 +6,7 @@
 // methods (collect:, select:, inject:into:, etc.) are inherited from Collection
 
 Collection subclass: NumberList
-  state: items = #()
+  field: items = #()
 
   // Return number of elements
   size -> Integer => self.items size

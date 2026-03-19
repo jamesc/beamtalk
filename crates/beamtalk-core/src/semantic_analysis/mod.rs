@@ -372,11 +372,10 @@ fn analyse_full(
         &mut result.diagnostics,
     );
 
-    // BT-1529: Warn on data keyword / class-kind mismatch (ADR 0067 Phase 2)
+    // BT-1535: Error on data keyword / class-kind mismatch (ADR 0067 Phase 4)
     validators::check_data_keyword_class_kind(
         module,
         &result.class_hierarchy,
-        stdlib_mode,
         &mut result.diagnostics,
     );
 

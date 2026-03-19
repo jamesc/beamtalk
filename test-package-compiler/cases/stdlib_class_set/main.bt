@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Test Set class compilation as a value type (not gen_server).
-// Mirrors lib/Set.bt exactly — new/0 should return tagged map with empty elements.
+// Standalone Set fixture (Value subclass, not Collection) for codegen testing.
 
-sealed Object subclass: Set
-  state: elements = #()
+sealed Value subclass: Set
+  field: elements = #()
 
   // Size
   size => @primitive "size"
