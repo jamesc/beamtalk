@@ -19,7 +19,7 @@
 // Define a temporary class for removal
 // ===========================================================================
 
-Object subclass: TempClassForRemoval
+Value subclass: TempClassForRemoval
   greet => "hello"
 // => _
 

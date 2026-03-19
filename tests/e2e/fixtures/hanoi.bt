@@ -4,7 +4,7 @@
 // Towers of Hanoi — e2e test fixture.
 // Canonical source lives in examples/getting-started/src/hanoi.bt.
 
-Object subclass: Hanoi
+Value subclass: Hanoi
 
   solve: n from: source to: target via: auxiliary =>
     (n > 0)

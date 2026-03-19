@@ -328,8 +328,9 @@ fn analyse_full(
         &mut result.diagnostics,
     );
 
-    // Phase 5: Class-aware diagnostics (BT-563)
+    // Phase 5: Class-aware diagnostics (BT-563, BT-1540)
     validators::check_actor_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
+    validators::check_object_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
     validators::check_new_field_names(module, &result.class_hierarchy, &mut result.diagnostics);
     validators::check_class_variable_access(
         module,
@@ -3695,6 +3696,63 @@ mod tests {
             result.diagnostics
         );
         assert!(actor_errors[0].message.contains("Counter"));
+    }
+
+    #[test]
+    fn test_object_new_error() {
+        // BT-1540: Object-kind classes cannot use new/new:
+        let source = "
+Object subclass: MyService
+  doStuff => 42
+
+Value subclass: Caller
+  test => MyService new
+";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let result = analyse(&module);
+        let object_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| {
+                d.message.contains("cannot be instantiated")
+                    && d.severity == crate::source_analysis::Severity::Error
+            })
+            .collect();
+        assert_eq!(
+            object_errors.len(),
+            1,
+            "Should detect Object-kind new usage, got: {:?}",
+            result.diagnostics
+        );
+        assert!(object_errors[0].message.contains("MyService"));
+    }
+
+    #[test]
+    fn test_object_new_allowed_with_own_class_method() {
+        // BT-1540: Object-kind classes with their own class-side new: are exempt
+        let source = "
+Object subclass: Factory
+  class new: name => 42
+
+Value subclass: Caller
+  test => Factory new: #foo
+";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let result = analyse(&module);
+        let object_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| {
+                d.message.contains("cannot be instantiated")
+                    && d.severity == crate::source_analysis::Severity::Error
+            })
+            .collect();
+        assert!(
+            object_errors.is_empty(),
+            "Object-kind class with own class-side new: should be exempt, got: {object_errors:?}",
+        );
     }
 
     // ── ADR 0050 Phase 4: analyse_with_known_vars_and_classes ──

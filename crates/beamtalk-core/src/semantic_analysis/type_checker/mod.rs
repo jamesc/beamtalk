@@ -2983,7 +2983,7 @@ Object subclass: Foo
         // A defines -> Self, B extends A, C extends B with a unique method.
         // A call on C should resolve Self to C (not A or B).
         let source = "
-Object subclass: A
+Value subclass: A
   clone -> Self => self
 
 A subclass: B
@@ -2991,7 +2991,7 @@ A subclass: B
 B subclass: C
   onlyOnC => 42
 
-Object subclass: Foo
+Value subclass: Foo
   test =>
     c := C new
     result := c clone

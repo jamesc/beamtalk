@@ -5,6 +5,6 @@
 // Defines CollisionTestClass — used to verify that loading this class
 // after it has been registered with a different module atom emits a warning.
 
-Object subclass: CollisionTestClass
+Value subclass: CollisionTestClass
 
   greet => "hello"

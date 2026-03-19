@@ -33,6 +33,22 @@
 /// @see Actor (for concurrent actor processes)
 Object subclass: Value
 
+  /// Create a new instance of the receiver class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Point new              // => Point(x: 0, y: 0)
+  /// ```
+  new => @intrinsic basicNew
+
+  /// Create a new instance with initialization arguments.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Point new: #{#x => 3, #y => 4}
+  /// ```
+  new: initArgs => @intrinsic basicNewWith
+
   /// Return a developer-readable string representation showing fields.
   ///
   /// Produces `ClassName(field: value, ...)`. Field values are recursively
