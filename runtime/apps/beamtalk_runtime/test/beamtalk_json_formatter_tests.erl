@@ -341,17 +341,21 @@ format_extra_meta_excludes_standard_keys_test() ->
     ?assertNot(maps:is_key(<<"file">>, Decoded)),
     ?assertNot(maps:is_key(<<"line">>, Decoded)).
 
-format_never_crashes_on_jsx_failure_test() ->
-    %% If jsx:encode fails (e.g. bad data), format/2 must not crash —
-    %% it should fall back to plain text.
+format_falls_back_to_plain_text_on_formatter_failure_test() ->
+    %% Force the normal formatter path to fail so the catch branch is exercised.
+    %% A binary in the domain list makes atom_to_list/1 crash inside format_domain.
     Event = #{
         level => info,
         msg => {string, "safe msg"},
-        meta => #{time => erlang:system_time(microsecond)}
+        meta => #{
+            time => erlang:system_time(microsecond),
+            domain => [<<"not-an-atom">>]
+        }
     },
-    %% Normal call succeeds (sanity check)
     Result = beamtalk_json_formatter:format(Event, #{}),
-    ?assert(is_list(Result) orelse is_binary(Result)).
+    Bin = iolist_to_binary(Result),
+    ?assert(binary:match(Bin, <<"formatter error:">>) =/= nomatch),
+    ?assert(binary:match(Bin, <<"safe msg">>) =/= nomatch).
 
 format_handles_format_args_with_binary_test() ->
     %% The exact pattern produced by the Logger intrinsic codegen
