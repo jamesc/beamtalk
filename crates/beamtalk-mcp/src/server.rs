@@ -543,7 +543,11 @@ impl BeamtalkMcp {
         // Use native Beamtalk API: Workspace load: "path"
         let expr = format!(
             "Workspace load: \"{}\"",
-            params.path.replace('\\', "\\\\").replace('"', "\\\"")
+            params
+                .path
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('{', "\\{")
         );
         let response = self
             .client
