@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1559: Concrete Value sub-subclass for inheritance tests.
+// Extends ValueBaseShape (which extends Value), adding its own field.
+// Exercises: new, new:, keyword constructor, inherited field access,
+// and withX: setters on both own and inherited fields.
+
+ValueBaseShape subclass: ValueSubCircle
+  field: radius = 1.0
+
+  // Class-side factory using new:
+  class withRadius: r =>
+    // DNU false positive — new: is on Value ancestor, resolved at runtime
+    @expect dnu
+    self new: #{#radius => r}
+
+  // User-defined method using both inherited and own fields
+  describe => "{self.color} circle r={self.radius}"

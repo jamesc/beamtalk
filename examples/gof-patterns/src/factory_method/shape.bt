@@ -4,7 +4,7 @@
 /// Factory Method Pattern — Shape (abstract product)
 /// Intent: Define the common product interface implemented by concrete shapes
 /// created by factory method creators.
-Object subclass: Shape
+Value subclass: Shape
 
   /// Return the area of this shape.
   area => self subclassResponsibility

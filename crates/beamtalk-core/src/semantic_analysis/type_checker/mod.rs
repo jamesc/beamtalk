@@ -3623,4 +3623,59 @@ Value subclass: Foo
             "Wrong argument type to extension should warn"
         );
     }
+
+    /// BT-1559: Cross-file Value sub-subclass `self new:` should NOT produce DNU warning.
+    ///
+    /// Simulates the build command's flow: Child is in the current file,
+    /// Base is injected from another file via pre-loaded classes.
+    #[test]
+    fn cross_file_value_sub_subclass_no_dnu_for_new() {
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+
+        // Parse a module containing only Child (extends Base, has a class method using self new:)
+        let source = r"
+Base subclass: Child
+  field: y = 0
+  class make: val => self new: #{#y => val}
+";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+        // Simulate Base from another file: Value subclass: Base (field: x = 0)
+        let base_info = ClassInfo {
+            name: eco_string("Base"),
+            superclass: Some(eco_string("Value")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec![eco_string("x")],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+        };
+
+        // Use the full analysis pipeline (same as the build command)
+        let result = crate::semantic_analysis::analyse_with_options_and_classes(
+            &module,
+            &crate::CompilerOptions::default(),
+            vec![base_info],
+        );
+        let dnu_warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "self new: in class method should not produce DNU for Value sub-subclass, got: {dnu_warnings:?}"
+        );
+    }
+
+    fn eco_string(s: &str) -> ecow::EcoString {
+        ecow::EcoString::from(s)
+    }
 }

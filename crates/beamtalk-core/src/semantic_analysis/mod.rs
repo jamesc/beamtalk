@@ -282,6 +282,13 @@ fn analyse_full(
         result
             .class_hierarchy
             .add_from_beam_meta(pre_loaded_classes);
+        // BT-1559: Re-propagate class kind after cross-file classes are injected.
+        // Both module-local classes (whose superclass is in another file) and
+        // cross-file classes (whose is_value wasn't set at extraction time) may
+        // need fixup. propagate_class_kind handles AST classes from this module;
+        // propagate_cross_file_class_kind handles all remaining classes.
+        result.class_hierarchy.propagate_class_kind(module);
+        result.class_hierarchy.propagate_cross_file_class_kind();
     }
 
     // ADR 0066 Phase 4: Register extension methods into the class hierarchy
