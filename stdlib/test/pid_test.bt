@@ -40,8 +40,9 @@ TestCase subclass: PidTest
     Erlang erlang unlink: pid
     result := pid kill
     self assert: result equals: true
-    // Cleanup
+    // Wait for process to terminate
     50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]
+    self deny: pid isAlive
 
   testExitReturnValue =>
     pid := Erlang erlang
@@ -49,7 +50,8 @@ TestCase subclass: PidTest
       module: #sleep
       args: #(#infinity)
     Erlang erlang unlink: pid
-    result := pid exit: #normal
+    result := pid exit: #shutdown
     self assert: result equals: true
-    // Cleanup
+    // Wait for process to terminate
     50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]
+    self deny: pid isAlive
