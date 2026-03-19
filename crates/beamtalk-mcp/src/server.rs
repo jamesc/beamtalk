@@ -474,7 +474,11 @@ impl BeamtalkMcp {
 
         let text = {
             let v = response.value_string();
-            if v.is_empty() { "File loaded".to_string() } else { v }
+            if v.is_empty() {
+                "File loaded".to_string()
+            } else {
+                v
+            }
         };
 
         let mut parts = vec![Content::text(text)];
@@ -656,7 +660,11 @@ impl BeamtalkMcp {
 
         let text = {
             let v = response.value_string();
-            if v.is_empty() { "Class reloaded successfully".to_string() } else { v }
+            if v.is_empty() {
+                "Class reloaded successfully".to_string()
+            } else {
+                v
+            }
         };
 
         timer.mark_ok();
@@ -688,7 +696,11 @@ impl BeamtalkMcp {
 
         let text = {
             let v = response.value_string();
-            if v.is_empty() { "No documentation available".to_string() } else { v }
+            if v.is_empty() {
+                "No documentation available".to_string()
+            } else {
+                v
+            }
         };
 
         timer.mark_ok();

@@ -1530,10 +1530,7 @@ mod tests {
 
         // Load a test fixture first so there is at least one test class to run
         let load_resp = client
-            .evaluate_with_options(
-                "Workspace load: \"stdlib/test/arithmetic_test.bt\"",
-                false,
-            )
+            .evaluate_with_options("Workspace load: \"stdlib/test/arithmetic_test.bt\"", false)
             .await
             .unwrap();
         assert!(
@@ -1570,10 +1567,7 @@ mod tests {
 
         // Load BUnit test fixture first
         let load_resp = client
-            .evaluate_with_options(
-                "Workspace load: \"stdlib/test/arithmetic_test.bt\"",
-                false,
-            )
+            .evaluate_with_options("Workspace load: \"stdlib/test/arithmetic_test.bt\"", false)
             .await
             .unwrap();
         assert!(
