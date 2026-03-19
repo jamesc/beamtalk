@@ -26,7 +26,7 @@ sup := E2EInitSupervisor supervise
 sup count
 // => 2
 
-// initialize: called which: on SupInitChildA and set its value to 42
+// initialize: called which: on E2EInitChildA and set its value to 42
 childA := sup which: E2EInitChildA
 // => #Actor<E2EInitChildA,_>
 
@@ -39,6 +39,16 @@ childB := sup which: E2EInitChildB
 
 childB getValue
 // => 0
+
+// Idempotent supervise does NOT re-run initialize:
+sup2 := E2EInitSupervisor supervise
+// => #Supervisor<E2EInitSupervisor,_>
+
+// setValue: 42 was called once during the first supervise; a second supervise
+// should not replay it. If it did, the value would still be 42 (same effect),
+// so we verify count is still 2 — no extra children or side effects.
+sup2 count
+// => 2
 
 sup stop
 // => nil
@@ -53,6 +63,13 @@ pool := E2EInitDynSupervisor supervise
 
 // initialize: called startChild twice
 pool count
+// => 2
+
+// Idempotent supervise does NOT re-run initialize: (would add 2 more children)
+pool2 := E2EInitDynSupervisor supervise
+// => #DynamicSupervisor<E2EInitDynSupervisor,_>
+
+pool2 count
 // => 2
 
 pool stop

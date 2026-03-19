@@ -81,7 +81,10 @@ startLink(Self) ->
             ?LOG_INFO("Supervisor started", #{
                 supervisor => ClassName, module => Module, pid => Pid, domain => [beamtalk, runtime]
             }),
-            {beamtalk_supervisor, ClassName, Module, Pid};
+            %% BT-1542: Use beamtalk_supervisor_new tag to signal to the post-dispatch
+            %% hook in beamtalk_class_dispatch that this is a fresh start. The hook
+            %% converts it to beamtalk_supervisor after running initialize:.
+            {beamtalk_supervisor_new, ClassName, Module, Pid};
         {error, {already_started, Pid}} ->
             {beamtalk_supervisor, ClassName, Module, Pid};
         {error, Reason} ->
