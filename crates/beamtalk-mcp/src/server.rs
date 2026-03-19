@@ -84,21 +84,49 @@ fn validate_class_name(name: &str) -> Result<(), rmcp::ErrorData> {
     Ok(())
 }
 
-/// Validate that a string is a valid Beamtalk selector (alphanumeric keyword, possibly with colons).
+/// Validate that a string is a valid Beamtalk selector.
+///
+/// Accepts keyword/unary selectors (`increment`, `at:put:`) and binary operator
+/// selectors (`+`, `>=`, `**`) matching the lexer's `is_binary_selector_char`.
 fn validate_selector(sel: &str) -> Result<(), rmcp::ErrorData> {
-    if sel.is_empty()
-        || !sel
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
-    {
+    fn is_binary_selector_char(c: char) -> bool {
+        matches!(
+            c,
+            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
+        )
+    }
+
+    if sel.is_empty() {
         return Err(rmcp::ErrorData::invalid_params(
-            format!(
-                "Invalid selector: '{sel}'. Must be an alphanumeric identifier, optionally with colons."
-            ),
+            "Selector must not be empty.",
             None,
         ));
     }
-    Ok(())
+
+    // Binary operator selectors: all chars are operator chars
+    let first = sel.chars().next().unwrap();
+    if is_binary_selector_char(first) {
+        if sel.chars().all(is_binary_selector_char) {
+            return Ok(());
+        }
+        return Err(rmcp::ErrorData::invalid_params(
+            format!("Invalid binary selector: '{sel}'."),
+            None,
+        ));
+    }
+
+    // Keyword/unary selectors: alphanumeric, underscores, and colons
+    if sel
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+    {
+        return Ok(());
+    }
+
+    Err(rmcp::ErrorData::invalid_params(
+        format!("Invalid selector: '{sel}'."),
+        None,
+    ))
 }
 
 /// Pretty-print a JSON value, falling back to `Display` on serialization error.
@@ -674,7 +702,7 @@ impl BeamtalkMcp {
 
     /// Hot-reload a class, migrating running actors to the new code.
     #[tool(
-        description = "Hot-reload a class. Recompiles and reloads the class, migrating any running actors to the new code. Returns the number of affected actors and any migration failures."
+        description = "Hot-reload a class. Recompiles and reloads the class, migrating any running actors to the new code."
     )]
     async fn reload_class(
         &self,
