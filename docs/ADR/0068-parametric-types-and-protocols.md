@@ -38,8 +38,8 @@ Protocol define: Collection
   requiring: [size, do:, collect:]   // collect: returns... what? Collection of what?
 
 // With generics, we can express the relationship
-Protocol define: Collection<E>
-  requiring: [size -> Integer, do: :: Block<E, Object>, collect: :: Block<E, Object> -> Self]
+Protocol define: Collection(E)
+  requiring: [size -> Integer, do: :: Block(E, Object), collect: :: Block(E, Object) -> Self]
 ```
 
 Generics are a prerequisite for expressive protocols. This ADR therefore addresses **generics first, then protocols**, as an integrated type system extension.
@@ -60,20 +60,20 @@ The AST already defines `TypeAnnotation::Generic { base, parameters, span }` but
 2. **Warnings, not errors** (ADR 0025): Type mismatches produce warnings, never block compilation.
 3. **Gradual adoption**: Untyped code must continue working unchanged. `Result ok: 42` without annotations stays valid.
 4. **BEAM integration**: Generic annotations should generate appropriate Dialyzer `-spec` attributes.
-5. **Forward compatibility**: The design must support future protocol bounds (`T :: <Printable>`) without breaking changes.
+5. **Forward compatibility**: The design must support future protocol bounds (`T :: Printable`) without breaking changes.
 
 ## Decision
 
-Beamtalk adopts **declaration-site parametric types** with **compile-time substitution** and **structural protocols**, implemented in two ordered stages.
+Beamtalk adopts **declaration-site parametric types** with **compile-time substitution** and **structural protocols**, implemented in two ordered stages. Type parameters use **parenthesis syntax** — `Result(T, E)` — keeping `<` reserved exclusively as a binary message (comparison operator).
 
 ### Stage 1: Parametric Types (Generics)
 
 #### Class-Level Type Parameter Declaration
 
-Classes declare type parameters after the class name using angle brackets:
+Classes declare type parameters after the class name using parentheses:
 
 ```beamtalk
-sealed Value subclass: Result<T, E>
+sealed Value subclass: Result(T, E)
   field: okValue :: T = nil
   field: errReason :: E = nil
 
@@ -82,18 +82,18 @@ sealed Value subclass: Result<T, E>
       self.okValue
     ] ifFalse: [(Erlang beamtalk_result) unwrapError: self.errReason]
 
-  sealed map: block :: Block<T, R> -> Result<R, E> =>
+  sealed map: block :: Block(T, R) -> Result(R, E) =>
     self.isOk ifTrue: [Result ok: (block value: self.okValue)] ifFalse: [self]
 
-  sealed andThen: block :: Block<T, Result<R, E>> -> Result<R, E> =>
+  sealed andThen: block :: Block(T, Result(R, E)) -> Result(R, E) =>
     self.isOk ifTrue: [block value: self.okValue] ifFalse: [self]
 ```
 
 Type parameters are bare uppercase identifiers (by convention single letters: `T`, `E`, `K`, `V`, `R`). They appear in:
 - Field type annotations: `field: okValue :: T`
-- Method parameter types: `block :: Block<T, R>`
-- Method return types: `-> T`, `-> Result<R, E>`
-- Nested generic types: `Block<T, Result<R, E>>`
+- Method parameter types: `block :: Block(T, R)`
+- Method return types: `-> T`, `-> Result(R, E)`
+- Nested generic types: `Block(T, Result(R, E))`
 
 #### Usage-Site Type Application
 
@@ -101,26 +101,26 @@ When using a generic class as a type annotation, concrete types replace the para
 
 ```beamtalk
 // Annotating a variable
-result :: Result<String, IOError> := File read: "config.json"
+result :: Result(String, IOError) := File read: "config.json"
 result unwrap    // Type checker knows: → String
 
 // Annotating a method parameter
-processResult: r :: Result<Integer, Error> -> Integer =>
+processResult: r :: Result(Integer, Error) -> Integer =>
   r unwrap + 1   // ✅ r unwrap is Integer, Integer has '+'
 
 // Annotating state
-Actor subclass: Cache<K, V>
-  state: store :: Dictionary<K, V> = Dictionary new
+Actor subclass: Cache(K, V)
+  state: store :: Dictionary(K, V) = Dictionary new
 ```
 
 #### Type Inference Through Generics
 
-The type checker performs **positional substitution**: when it encounters `Result<String, IOError>`, it maps `T → String`, `E → IOError`, and substitutes through all method signatures of `Result`:
+The type checker performs **positional substitution**: when it encounters `Result(String, IOError)`, it maps `T → String`, `E → IOError`, and substitutes through all method signatures of `Result`:
 
 ```beamtalk
-r :: Result<Integer, Error> := computeSomething
+r :: Result(Integer, Error) := computeSomething
 r unwrap          // Return type T → Integer ✅
-r map: [:v | v asString]   // Block param T → Integer, return Result<String, Error>
+r map: [:v | v asString]   // Block param T → Integer, return Result(String, Error)
 r error           // Return type E → Error ✅
 ```
 
@@ -137,10 +137,10 @@ r unwrap + 1               // No warning — Dynamic bypasses checking
 For named constructors (`ok:`, `error:`, `new`), the compiler infers type parameters from the argument types:
 
 ```beamtalk
-r := Result ok: 42                  // Inferred: Result<Integer, Dynamic>
+r := Result ok: 42                  // Inferred: Result(Integer, Dynamic)
 r unwrap                            // → Integer ✅
 
-r2 := Result error: #file_not_found // Inferred: Result<Dynamic, Symbol>
+r2 := Result error: #file_not_found // Inferred: Result(Dynamic, Symbol)
 r2 error                            // → Symbol ✅
 ```
 
@@ -151,7 +151,7 @@ This is limited to direct constructor calls with literal or already-typed argume
 Generic types generate expanded Dialyzer specs with concrete types substituted:
 
 ```beamtalk
-processResult: r :: Result<Integer, Error> -> Integer => r unwrap + 1
+processResult: r :: Result(Integer, Error) -> Integer => r unwrap + 1
 ```
 
 Generates:
@@ -173,13 +173,13 @@ Unresolved type parameters map to `any()` in Dialyzer specs.
 
 > r unwrap
 => 42
-// Type info: Integer (inferred from Result<Integer, Dynamic>)
+// Type info: Integer (inferred from Result(Integer, Dynamic))
 
 > r map: [:v | v asString]
 => Result ok: "42"
-// Type info: Result<String, Dynamic>
+// Type info: Result(String, Dynamic)
 
-> r2 :: Result<String, IOError> := File read: "test.txt"
+> r2 :: Result(String, IOError) := File read: "test.txt"
 => Result ok: "hello world"
 
 > r2 unwrap size
@@ -191,21 +191,21 @@ Unresolved type parameters map to `any()` in Dialyzer specs.
 
 ```beamtalk
 // When type params are known, checking works through them
-r :: Result<Integer, Error> := computeSomething
+r :: Result(Integer, Error) := computeSomething
 r unwrap ++ " suffix"
 // ⚠️ Warning: Integer does not respond to '++'
 //    Did you mean '+'?
 
 // Mismatched type application
-x :: Result<Integer, Error> := Result ok: "hello"
-// ⚠️ Warning: Result<Integer, Error> expected Integer for T, got String
+x :: Result(Integer, Error) := Result ok: "hello"
+// ⚠️ Warning: Result(Integer, Error) expected Integer for T, got String
 ```
 
 #### What Is NOT Included in Stage 1
 
-- **Variance rules** (covariance/contravariance): All type parameters are invariant. `Result<Integer, E>` is not assignable to `Result<Number, E>`. Variance can be added later without breaking changes.
-- **Type parameter bounds/constraints** (`T :: <Printable>`): Deferred to Stage 2 (protocols). Type parameters are unbounded — any type is accepted.
-- **Higher-kinded types** (`F<_>`): Not planned. Beamtalk is not Haskell.
+- **Variance rules** (covariance/contravariance): All type parameters are invariant. `Result(Integer, E)` is not assignable to `Result(Number, E)`. Variance can be added later without breaking changes.
+- **Type parameter bounds/constraints** (`T :: Printable`): Deferred to Stage 2 (protocols). Type parameters are unbounded — any type is accepted.
+- **Higher-kinded types** (`F(_)`): Not planned. Beamtalk is not Haskell.
 - **Type parameter inference from usage patterns**: Only constructor calls infer type params. Method chains don't propagate backwards.
 - **Generic methods** (methods with their own type params independent of the class): Deferred. Class-level params cover the immediate needs.
 
@@ -223,32 +223,32 @@ Protocol define: Comparable
   requiring: [< :: Self -> Boolean, > :: Self -> Boolean,
               <= :: Self -> Boolean, >= :: Self -> Boolean]
 
-Protocol define: Collection<E>
-  requiring: [size -> Integer, do: :: Block<E, Object>,
-              collect: :: Block<E, Object> -> Array<Object>,
-              select: :: Block<E, Boolean> -> Self]
+Protocol define: Collection(E)
+  requiring: [size -> Integer, do: :: Block(E, Object),
+              collect: :: Block(E, Object) -> Array(Object),
+              select: :: Block(E, Boolean) -> Self]
 ```
 
-Protocol names are **bare identifiers** (uppercase, like class names). Required methods use the same `:: Type` and `-> ReturnType` annotation syntax as regular methods.
+Protocol names are **bare identifiers** (uppercase, like class names). Protocols and classes share a single namespace — having both a class and a protocol named `Printable` is a compile error. Required methods use the same `:: Type` and `-> ReturnType` annotation syntax as regular methods.
 
 #### Protocol Type Syntax
 
-Protocol types use angle brackets `<ProtocolName>` in type annotations to distinguish structural types from nominal class types:
+Protocol types use the **same syntax as class types** in type annotations — bare identifiers. The compiler resolves the name and determines whether to perform nominal (class) or structural (protocol) checking:
 
 ```beamtalk
-// Nominal type — must be exactly this class (or subclass)
+// Nominal type — compiler looks up Integer, finds a class → nominal check
 deposit: amount :: Integer => ...
 
-// Structural/protocol type — must respond to required messages
-printAll: items :: <Collection<Object>> =>
-  items do: [:each | Transcript show: each asString]
-
-// Protocol as parameter constraint
-display: thing :: <Printable> =>
+// Structural/protocol type — compiler looks up Printable, finds a protocol → structural check
+display: thing :: Printable =>
   Transcript show: thing asString    // ✅ Printable guarantees asString
+
+// Generic protocol type
+printAll: items :: Collection(Object) =>
+  items do: [:each | Transcript show: each asString]
 ```
 
-The `<>` wrapper distinguishes "any object conforming to Printable" from a hypothetical class named `Printable`.
+No special wrapper syntax is needed — name resolution is sufficient because protocols and classes share a namespace. This is the same model used by TypeScript (interfaces) and Swift (protocols).
 
 #### Conformance Checking
 
@@ -259,9 +259,9 @@ Conformance is **structural and automatic**:
 // Integer has asString → conforms to Printable
 // Counter has asString (from Object) → conforms to Printable
 
-display: "hello"           // ✅ String conforms to <Printable>
-display: 42                // ✅ Integer conforms to <Printable>
-display: Counter spawn     // ✅ Counter conforms to <Printable>
+display: "hello"           // ✅ String conforms to Printable
+display: 42                // ✅ Integer conforms to Printable
+display: Counter spawn     // ✅ Counter conforms to Printable
 ```
 
 The type checker verifies conformance by checking that the class's method table (including inherited methods) contains all required selectors with compatible signatures.
@@ -270,7 +270,7 @@ When conformance cannot be verified (Dynamic values, runtime-constructed classes
 
 ```beamtalk
 display: someUnknownValue
-// ⚠️ Warning: cannot verify <Printable> conformance for Dynamic value
+// ⚠️ Warning: cannot verify Printable conformance for Dynamic value
 ```
 
 #### Runtime Protocol Queries
@@ -295,7 +295,7 @@ Runtime queries use the protocol registry compiled into module attributes. `conf
 
 ```beamtalk
 // Require multiple protocols
-sort: items :: <Collection<Object> & Comparable> => ...
+sort: items :: Collection(Object) & Comparable => ...
 
 // Protocol extending another
 Protocol define: Sortable
@@ -309,9 +309,9 @@ Once both stages are complete, type parameters can be bounded by protocols:
 
 ```beamtalk
 // T must conform to Printable
-Actor subclass: Logger<T :: <Printable>>
+Actor subclass: Logger(T :: Printable)
   log: item :: T =>
-    Transcript show: item asString    // ✅ Guaranteed by <Printable> bound
+    Transcript show: item asString    // ✅ Guaranteed by Printable bound
 ```
 
 This is the natural composition of Stage 1 (type parameters) and Stage 2 (protocols as type constraints).
@@ -319,19 +319,25 @@ This is the natural composition of Stage 1 (type parameters) and Stage 2 (protoc
 ## Prior Art
 
 ### Strongtalk (Primary Influence)
-Optional, structural typing for Smalltalk designed by Gilad Bracha. Strongtalk introduced **protocols as named message sets** with structural conformance — no `implements:` needed. We adopt this model directly. Strongtalk used `<Type>` syntax for type annotations; we adapt this as `<ProtocolName>` specifically for structural/protocol types while using `:: Type` for nominal class types (per ADR 0053).
+Optional, structural typing for Smalltalk designed by Gilad Bracha. Strongtalk introduced **protocols as named message sets** with structural conformance — no `implements:` needed. We adopt this model directly. Strongtalk used `<Type>` syntax for all type annotations; we use `:: Type` for annotations (per ADR 0053) and bare names for both classes and protocols (the compiler resolves which is which).
 
 **Adopted:** Structural conformance, protocols as message sets, type erasure.
-**Adapted:** Separate syntax for structural (`<Protocol>`) vs nominal (`Class`) types.
+**Adapted:** Bare-name protocol types instead of Strongtalk's angle-bracket wrapper.
 
 ### TypeScript (Inference and Generics Model)
-TypeScript's generics use `<T>` syntax with structural compatibility. Generic interfaces (`interface Stack<T> { push(item: T): void }`) map directly to our protocol design. TypeScript infers generic type arguments from constructor calls and assignment context — we adopt the same inference strategy for constructors.
+TypeScript's generics use `<T>` syntax with structural compatibility. Generic interfaces (`interface Stack<T> { push(item: T): void }`) map directly to our protocol design. TypeScript infers generic type arguments from constructor calls and assignment context — we adopt the same inference strategy for constructors. TypeScript interfaces and classes share a namespace, with no special syntax to distinguish them in type position — we adopt this approach.
 
-**Adopted:** `<T>` syntax, constructor inference, structural compatibility.
-**Adapted:** No conditional types, no mapped types, no `infer` keyword — Beamtalk keeps generics simple.
+**Adopted:** Constructor inference, structural compatibility, shared namespace for protocols/classes.
+**Adapted:** Parenthesis syntax `(T)` instead of angle brackets `<T>` to avoid overloading `<` (a binary message in Beamtalk).
+
+### Gleam (Generics on BEAM)
+Gleam has full Hindley-Milner generics with complete type inference. `fn push(stack: Stack(a), item: a) -> Stack(a)` uses parentheses for type application. Gleam proves that parametric types work well on BEAM with type erasure — generated BEAM code is identical with or without generics.
+
+**Adopted:** Parenthesis syntax for type application (`Result(T, E)`), type erasure for generics on BEAM (zero runtime cost).
+**Rejected:** Mandatory typing, lowercase type variable convention.
 
 ### Swift (Protocols with Associated Types)
-Swift combines protocols with associated types for parametric protocol definitions. `protocol Collection { associatedtype Element }` is equivalent to our `Protocol define: Collection<E>`. Swift requires explicit conformance declarations (`struct Foo: Collection`); we reject this in favor of automatic structural conformance.
+Swift combines protocols with associated types for parametric protocol definitions. `protocol Collection { associatedtype Element }` is equivalent to our `Protocol define: Collection(E)`. Swift requires explicit conformance declarations (`struct Foo: Collection`); we reject this in favor of automatic structural conformance.
 
 **Adopted:** Parametric protocols, generic protocol constraints (`T: Protocol`).
 **Rejected:** Explicit conformance declarations (too much boilerplate for a Smalltalk-family language).
@@ -342,12 +348,6 @@ Elixir protocols are **nominal** — types must explicitly implement them (`defi
 **Rejected:** Nominal/explicit conformance.
 **Learned:** Protocol dispatch is efficient on BEAM; protocol metadata can live in module attributes.
 
-### Gleam (Generics on BEAM)
-Gleam has full Hindley-Milner generics with complete type inference. `fn push(stack: Stack(a), item: a) -> Stack(a)` uses parentheses for type application. Gleam proves that parametric types work well on BEAM with type erasure — generated BEAM code is identical with or without generics.
-
-**Adopted:** Type erasure for generics on BEAM (zero runtime cost).
-**Rejected:** Mandatory typing, parenthesis syntax (angle brackets are more familiar to our target users).
-
 ### Pony (Structural Typing with Capabilities)
 Pony combines structural subtyping with reference capabilities. Its `interface` keyword defines structural types similar to our protocols. Pony requires explicit `fun` signatures in interfaces — we simplify to selector lists with optional type annotations.
 
@@ -356,9 +356,9 @@ Pony combines structural subtyping with reference capabilities. Its `interface` 
 ## User Impact
 
 ### Newcomer (from Python/JS/Ruby)
-- **Generics:** "It's like TypeScript generics — `Result<string, Error>` looks familiar." The `<T>` syntax maps directly to TypeScript/Java/C# experience.
+- **Generics:** "`Result(Integer, Error)` reads naturally — like a function signature." Parenthesis syntax is familiar from Python's `List[int]` or Gleam's `Result(ok, err)`.
 - **Protocols:** "Like TypeScript interfaces but you don't have to say `implements`." Automatic conformance removes a friction point.
-- **Risk:** Generic syntax in class definitions (`Value subclass: Result<T, E>`) mixes Smalltalk keyword syntax with generic brackets — could look unfamiliar. Mitigation: users encounter generic *usage* (`:: Result<Integer, Error>`) long before they write generic *definitions*.
+- **Risk:** Generic syntax in class definitions (`Value subclass: Result(T, E)`) mixes Smalltalk keyword syntax with generic parentheses — could look unfamiliar. Mitigation: users encounter generic *usage* (`:: Result(Integer, Error)`) long before they write generic *definitions*.
 
 ### Smalltalk Developer
 - **Generics:** Smalltalk has no generics — this is a departure. However, it's purely optional. Untyped code works exactly as before. Generics only appear in type annotations, which are themselves optional.
@@ -375,7 +375,7 @@ Pony combines structural subtyping with reference capabilities. Its `interface` 
 - **Risk:** None specific to this change. Type checking remains warnings-only.
 
 ### Tooling Developer (LSP)
-- **Generics:** Major win — `result unwrap` now returns `String` instead of `Object`. Completions after `unwrap` show String methods. Hover shows `Result<String, IOError>`.
+- **Generics:** Major win — `result unwrap` now returns `String` instead of `Object`. Completions after `unwrap` show String methods. Hover shows `Result(String, IOError)`.
 - **Protocols:** Protocol-typed parameters get completions for all required methods. "Go to protocol definition" becomes possible.
 - **This is the primary driver** — generics exist to make tooling accurate.
 
@@ -383,12 +383,12 @@ Pony combines structural subtyping with reference capabilities. Its `interface` 
 
 ### Option A: Annotation-Only Generics (Rejected)
 
-Parse `Result<Integer, IOError>` at usage sites but don't add type params to class definitions. Hardcode substitution rules for known stdlib types.
+Parse `Result(Integer, IOError)` at usage sites but don't add type params to class definitions. Hardcode substitution rules for known stdlib types.
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Newcomer** | "I only need to write `:: Result<Integer, Error>` — I never have to define generic classes myself" |
-| **Smalltalk purist** | "This keeps class definitions pure Smalltalk — no angle brackets in class headers" |
+| **Newcomer** | "I only need to write `:: Result(Integer, Error)` — I never have to define generic classes myself" |
+| **Smalltalk purist** | "This keeps class definitions pure Smalltalk — no parenthesized params in class headers" |
 | **BEAM veteran** | "Generates the same Dialyzer specs with less compiler complexity" |
 | **Operator** | "Less compiler machinery = fewer compiler bugs = more stable builds" |
 | **Language designer** | "YAGNI — solve the Result problem without building a full generics system" |
@@ -397,7 +397,7 @@ Parse `Result<Integer, IOError>` at usage sites but don't add type params to cla
 
 ### Option B: Full Parametric Polymorphism (Rejected)
 
-Complete generics with variance annotations (`<+T, -E>`), bounded quantification, generic methods, and type parameter inference from usage patterns.
+Complete generics with variance annotations, bounded quantification, generic methods, and type parameter inference from usage patterns.
 
 | Cohort | Strongest argument |
 |--------|-------------------|
@@ -413,7 +413,7 @@ Classes declare type parameters. Methods reference them. Type checker substitute
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Newcomer** | "Looks like TypeScript — I can write `Result<string, Error>` and it just works" |
+| **Newcomer** | "`Result(Integer, Error)` reads cleanly — like Gleam or Python type hints" |
 | **Smalltalk purist** | "Type params are optional — my untyped code doesn't change at all" |
 | **BEAM veteran** | "Generates proper Dialyzer specs and the compiler catches real bugs" |
 | **Operator** | "Zero runtime cost, same bytecode, same observability" |
@@ -423,13 +423,29 @@ Classes declare type parameters. Methods reference them. Type checker substitute
 
 - **Smalltalk purists** would prefer no generics at all — but they accept that type annotations are optional and generics only appear inside them.
 - **Language designers** would prefer variance rules from day one — but invariant generics are forward-compatible and dramatically simpler.
-- **Newcomers** expect familiar `<T>` syntax — which slightly clashes with Smalltalk's angle-bracket-free aesthetic. The trade-off favors familiarity over purity.
+- **TypeScript/Java developers** expect angle-bracket `<T>` syntax — but `<` is a binary message in Beamtalk, and parentheses are unambiguous. Gleam validates this choice on BEAM.
 
 ## Alternatives Considered
 
-### Alternative A: Square Bracket Syntax (`Result[T, E]`)
+### Alternative A: Angle Bracket Syntax (`Result<T, E>`)
 
-Use `Result[Integer, IOError]` instead of `Result<Integer, IOError>`, following Scala/Python convention.
+Use `Result<Integer, IOError>` following TypeScript/Java/Rust convention.
+
+```beamtalk
+sealed Value subclass: Result<T, E>
+  field: okValue :: T = nil
+  unwrap -> T => ...
+```
+
+**Rejected because:**
+- `<` is a binary message (comparison operator) in Beamtalk — giving it dual meaning as both a message send and a type parameter delimiter adds parsing complexity and cognitive load
+- Parentheses keep `<` purely as a message, with no dual meaning anywhere in the language
+- Gleam (the closest typed BEAM language) successfully uses parentheses for the same purpose
+- ADR 0025's earlier `<>` examples predate the current syntax decisions and are not binding
+
+### Alternative B: Square Bracket Syntax (`Result[T, E]`)
+
+Use `Result[Integer, IOError]` following Scala/Python convention.
 
 ```beamtalk
 sealed Value subclass: Result[T, E]
@@ -438,37 +454,13 @@ sealed Value subclass: Result[T, E]
 ```
 
 **Rejected because:**
-- The AST already defines `TypeAnnotation::Generic` with angle bracket semantics
-- Angle brackets are more widely recognized (TypeScript, Java, C#, Swift, Rust, Kotlin)
-- Square brackets could conflict with array literal syntax: `[1, 2, 3]` vs `Array[Integer]`
-- ADR 0025 Phase 4 already shows `Stack<T>` syntax
-
-### Alternative B: Parenthesis Syntax (`Result(T, E)`)
-
-Use `Result(Integer, IOError)` following Gleam convention.
-
-```beamtalk
-sealed Value subclass: Result(T, E)
-  field: okValue :: T = nil
-  unwrap -> T => ...
-```
-
-**Rejected because:**
-- Parentheses are used for grouping in expressions — `Result(Integer)` looks like a function call
-- ADR 0060 mentioned this syntax speculatively but it was not a design decision
-- Gleam uses it because Gleam has no message-send syntax to conflict with; Beamtalk does
+- Square brackets are used for array/block literals: `[1, 2, 3]` and `[:x | x + 1]`
+- `Array[Integer]` is visually ambiguous with `Array` followed by a block literal
+- Parentheses don't have this collision
 
 ### Alternative C: No Class-Level Declaration — Infer Everything
 
-Don't add type params to classes. Instead, infer generic relationships from method signatures:
-
-```beamtalk
-// The compiler sees that unwrap returns the same type as okValue
-// and infers a generic relationship
-sealed Value subclass: Result
-  field: okValue :: Object = nil
-  unwrap -> Object => self.okValue
-```
+Don't add type params to classes. Instead, infer generic relationships from method signatures.
 
 **Rejected because:**
 - Inferring generic relationships from `Object` return types is unsound — every class that returns `Object` would look generic
@@ -477,7 +469,7 @@ sealed Value subclass: Result
 
 ### Alternative D: Nominal Protocol Conformance (`implements:`)
 
-Require explicit `implements:` declarations instead of automatic structural conformance:
+Require explicit `implements:` declarations instead of automatic structural conformance.
 
 ```beamtalk
 Value subclass: Point
@@ -496,9 +488,24 @@ Value subclass: Point
 Implement protocols first (Phase 3), then generics (Phase 4), following ADR 0025's original ordering.
 
 **Rejected because:**
-- Protocols without generics can't express useful container contracts (`Collection<E>`)
+- Protocols without generics can't express useful container contracts (`Collection(E)`)
 - The immediate pain point (Result typing) requires generics, not protocols
 - Protocols are more useful once they can reference type parameters
+
+### Alternative F: Angle-Bracket Protocol Type Wrapper (`<Printable>`)
+
+Use `<Printable>` in type annotations to distinguish protocol types from class types, following Strongtalk convention.
+
+```beamtalk
+display: thing :: <Printable> => ...   // structural check
+deposit: amount :: Integer => ...      // nominal check
+```
+
+**Rejected because:**
+- Protocols and classes share a namespace — the compiler already knows whether `Printable` is a protocol or a class from name resolution
+- The wrapper is redundant information — it tells the compiler what it already knows
+- TypeScript and Swift both use bare names for interface/protocol types without any wrapper
+- Fewer syntax concepts to learn — one way to reference types, not two
 
 ## Consequences
 
@@ -510,14 +517,15 @@ Implement protocols first (Phase 3), then generics (Phase 4), following ADR 0025
 - Both features are purely additive — all existing untyped code works unchanged
 - Forward-compatible: invariant generics can be extended with variance; unbounded params can gain protocol bounds
 - Removes the escape hatches in the type checker (`_ => return`, `contains('<')` bypass)
+- `<` remains exclusively a binary message — no dual meaning anywhere in the language
 
 ### Negative
 - Generics add complexity to the type checker — substitution, constructor inference, and generic-aware method resolution
-- Class definition syntax becomes slightly more complex for generic classes (`Result<T, E>`)
+- Class definition syntax becomes slightly more complex for generic classes (`Result(T, E)`)
 - Two-letter naming convention for type parameters (`T`, `E`, `K`, `V`) is implicit — could be confusing without documentation
 - Protocol conformance checking on large class hierarchies has compilation performance implications
 - Structural conformance can produce surprising results — a class may accidentally conform to a protocol it knows nothing about
-- Generic method signatures are more complex to read: `map: block :: Block<T, R> -> Result<R, E>`
+- Generic method signatures are more complex to read: `map: block :: Block(T, R) -> Result(R, E)`
 
 ### Neutral
 - Generated BEAM bytecode is unchanged — type erasure means zero runtime cost
@@ -531,13 +539,14 @@ Implement protocols first (Phase 3), then generics (Phase 4), following ADR 0025
 
 **Phase 1a: Parser and AST (M)**
 - Add `type_params: Vec<Identifier>` to `ClassDefinition` in `ast.rs`
-- Parse `<T, E>` after class name in `parse_class_definition` (declarations.rs)
-- Parse `Collection<Integer>` in `parse_single_type_annotation` — consume `<` `>` with nested type annotations
-- Update `skip_double_colon_type` lookahead to handle `<...>` sequences
+- Parse `(T, E)` after class name in `parse_class_definition` (declarations.rs)
+- Parse `Collection(Integer)` in `parse_single_type_annotation` — consume `(` `)` with nested type annotations
+- Update `skip_double_colon_type` lookahead to handle `Name(...)` sequences
 - Add `type_params: Vec<EcoString>` to `ClassInfo` in class_hierarchy
+- Update `TypeAnnotation::Generic` delimiter semantics from angle brackets to parentheses
 
 **Phase 1b: Type Checker Substitution (L)**
-- Build substitution map: when encountering `Result<Integer, IOError>`, map `{T → Integer, E → IOError}`
+- Build substitution map: when encountering `Result(Integer, IOError)`, map `{T → Integer, E → IOError}`
 - Apply substitution to method return types during inference: `unwrap -> T` becomes `unwrap -> Integer`
 - Apply substitution to parameter types during validation
 - Replace escape hatches: `_ => return` → generic-aware matching; `contains('<')` → structural comparison
@@ -554,8 +563,8 @@ Implement protocols first (Phase 3), then generics (Phase 4), following ADR 0025
 - Unresolved parameters → `any()`
 
 **Phase 1e: Stdlib Annotations (M)**
-- Update `Result.bt`: `Result<T, E>`, fields `:: T` / `:: E`, method return types
-- Update collection classes: `Array<E>`, `Dictionary<K, V>`, `Set<E>`
+- Update `Result.bt`: `Result(T, E)`, fields `:: T` / `:: E`, method return types
+- Update collection classes: `Array(E)`, `Dictionary(K, V)`, `Set(E)`
 - Update `Block` types if applicable
 
 ### Stage 2: Structural Protocols (Size: L)
@@ -563,13 +572,13 @@ Implement protocols first (Phase 3), then generics (Phase 4), following ADR 0025
 **Phase 2a: Protocol AST and Parser (M)**
 - Add `ProtocolDefinition` to `ast.rs`: name, type params, required methods with signatures, span
 - Parse `Protocol define: Name requiring: [...]` syntax
-- Parse `<ProtocolName>` as a type annotation variant (structural type marker)
+- Protocol names resolve to protocol objects in the same namespace as classes
 
 **Phase 2b: Protocol Registry and Conformance (L)**
 - Protocol registry in `semantic_analysis/`: maps protocol names → required message sets
 - Conformance engine: check class method tables against protocol requirements
-- Type checker integration: warn when protocol-typed parameter receives non-conforming value
-- Handle generic protocols: `Collection<Integer>` conformance substitutes `E → Integer` in required signatures
+- Type checker integration: when a type annotation resolves to a protocol name, perform structural conformance checking instead of nominal class checking
+- Handle generic protocols: `Collection(Integer)` conformance substitutes `E → Integer` in required signatures
 
 **Phase 2c: Runtime Queries (M)**
 - `conformsTo:` primitive on class objects
@@ -578,7 +587,7 @@ Implement protocols first (Phase 3), then generics (Phase 4), following ADR 0025
 - Protocol metadata compiled into module attributes
 
 **Phase 2d: Type Parameter Bounds (S)**
-- Allow `T :: <Printable>` in class/protocol type parameter declarations
+- Allow `T :: Printable` in class/protocol type parameter declarations
 - Type checker verifies that concrete type arguments conform to the bound
 
 ### Implementation Tracking
@@ -599,7 +608,7 @@ Implement protocols first (Phase 3), then generics (Phase 4), following ADR 0025
 
 No migration is required. Both features are purely additive:
 
-- **Generics:** Existing classes without type parameters continue working unchanged. Adding `<T, E>` to a class definition is opt-in. Existing `:: Result` annotations remain valid (equivalent to `:: Result<Dynamic, Dynamic>`).
+- **Generics:** Existing classes without type parameters continue working unchanged. Adding `(T, E)` to a class definition is opt-in. Existing `:: Result` annotations remain valid (equivalent to `:: Result(Dynamic, Dynamic)`).
 - **Protocols:** Protocol definitions are new syntax. Existing code is not affected. Conformance is automatic — classes don't need `implements:` declarations.
 
 The only stdlib change is updating `Result.bt` and collection classes to declare their type parameters and update field/method annotations. This is a non-breaking change — the runtime behavior is identical (type erasure).
@@ -616,6 +625,6 @@ The only stdlib change is updating `Result.bt` and collection classes to declare
   - [Strongtalk: Typechecking Smalltalk in a Production Environment](https://bracha.org/oopsla93.pdf) — Bracha & Griswold, 1993
   - [TypeScript Generics](https://www.typescriptlang.org/docs/handbook/2/generics.html) — Inference model
   - [Swift Protocols](https://docs.swift.org/swift-book/LanguageGuide/Protocols.html) — Associated types
-  - [Gleam Type System](https://gleam.run/frequently-asked-questions/) — Full generics on BEAM
+  - [Gleam Type System](https://gleam.run/frequently-asked-questions/) — Parenthesis generics on BEAM
   - [Elixir Protocols](https://hexdocs.pm/elixir/protocols.html) — Nominal protocols on BEAM
 - Documentation: `docs/beamtalk-language-features.md`, `docs/internal/type-system-design.md`
