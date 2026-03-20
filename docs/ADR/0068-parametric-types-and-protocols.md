@@ -343,7 +343,7 @@ These can be added incrementally — each new pattern is a new AST shape to reco
 
 #### What Is NOT Included in Stage 1
 
-- **Variance rules** (covariance/contravariance): All type parameters are invariant. `Result(Integer, E)` is not assignable to `Result(Number, E)`. Variance can be added later without breaking changes.
+- **Variance rules** (covariance/contravariance): All type parameters are invariant in Stage 1. This is fine because Beamtalk's class hierarchy is shallow with sealed leaf types — `Integer`, `String`, `Float` etc. have no subclasses, so `Array(Integer)` vs `Array(Number)` rarely arises. **Variance becomes necessary in Stage 2** when protocol types create meaningful subtyping: `Array(Integer)` passed where `Array(Printable)` is expected requires covariance. Stage 2 must address variance alongside protocol-typed generic parameters — it is not indefinitely deferred.
 - **Type parameter bounds/constraints** (`T :: Printable`): Deferred to Stage 2 (protocols). Type parameters are unbounded — any type is accepted.
 - **Higher-kinded types** (`F(_)`): Not planned. Beamtalk is not Haskell.
 - **Chain-backwards inference**: `r unwrap + 1` does NOT infer that `T = Integer` by reasoning backwards from `+`. Type params are inferred from constructor arguments and method arguments at call sites (forward/call-site inference), not from downstream usage of return values.
@@ -816,10 +816,10 @@ Ship only Stage 1 (generic type params and substitution). Defer protocols, union
 ### Tension Points
 
 - **Smalltalk purists** would prefer no generics at all — but they accept that type annotations are optional and generics only appear inside them.
-- **Language designers** would prefer variance rules from day one — and the invariance limitation *will* cause friction at subtyping boundaries. The bet is that Beamtalk's shallow hierarchy makes this rare enough to defer.
+- **Language designers** would prefer variance rules from day one — but invariance is fine for Stage 1 because Beamtalk's class hierarchy is shallow with sealed leaf types (no subclasses of Integer, String, etc.). Variance becomes necessary in Stage 2 (Phase 2e) when protocol types create structural subtyping — `Array(Printable)` accepting `Array(Integer)`. This is explicitly planned, not indefinitely deferred.
 - **TypeScript/Java developers** expect angle-bracket `<T>` syntax — but `<` is a binary message in Beamtalk, and parentheses are unambiguous. Gleam validates this choice on BEAM.
 - **Pragmatists** would prefer a smaller ADR (generics only) — but union checking and narrowing are needed for generics to be useful in practice (`String | nil` is the killer use case).
-- **The variance question is the most load-bearing tension.** If real-world Beamtalk code frequently needs `Array(Integer)` assignable to `Array(Number)`, invariant generics will feel broken. The mitigation is: sealed leaf classes reduce subtyping, and variance can be added later. But "later" means existing code works but is more restrictive than users expect.
+- **The variance question is resolved by staging.** Invariance is fine for Stage 1 (sealed leaf classes have no subtyping). Variance is planned for Stage 2 Phase 2e (protocol types create the subtyping relationships that demand it). This is not "add variance someday" — it's "add variance when the feature that needs it ships."
 
 ## Alternatives Considered
 
@@ -1026,6 +1026,13 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 - Allow `T :: Printable` in class/protocol type parameter declarations
 - Type checker verifies that concrete type arguments conform to the bound
 
+**Phase 2e: Variance for Protocol-Typed Parameters (M)**
+- Invariant generics break when protocol types create subtyping: `Array(Integer)` should be assignable to `Array(Printable)` because Integer conforms to Printable, but invariant checking rejects it
+- Add covariance for type parameters in read-only positions (return types, immutable fields)
+- Practical rule: sealed Value classes with no mutating methods on the type parameter are covariant by default — `Array(E)` is covariant in `E` because Array is immutable
+- Actor state fields that use type params remain invariant (mutation invalidates covariance)
+- This only matters for protocol-typed bounds — class-typed bounds between sealed leaf types have no subtyping to worry about
+
 ### Implementation Tracking
 
 | Phase | Description | Size | Dependencies |
@@ -1041,7 +1048,8 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 | 2b | Protocol registry and conformance | L | 2a, 1b |
 | 2c | Runtime protocol queries | M | 2b |
 | 2d | Type parameter bounds | S | 1b, 2b |
-| 2e | respondsTo: narrowing | S | 1g, 2b |
+| 2e | Variance for protocol-typed parameters | M | 2b, 2d |
+| 2f | respondsTo: narrowing | S | 1g, 2b |
 
 ## Migration Path
 
