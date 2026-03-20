@@ -266,20 +266,26 @@ x + 1                  // ⚠️ Warning: String does not respond to '+'
                        //    (Integer does, but String doesn't)
 ```
 
-The `FalseOr` pattern (`String | False`) is the most common union — it's Beamtalk's Option/Maybe type. Without union checking, these are invisible to the type system:
+The nullable pattern (`String | nil`) is the most common union — it's Beamtalk's Option/Maybe type. `nil` in type position resolves to `UndefinedObject` (the singleton's class), just as `nil` in expression position evaluates to the singleton instance. Without union checking, these are invisible to the type system:
 
 ```beamtalk
-name :: String | False := dictionary at: "name"
-name size              // ⚠️ Warning: False does not respond to 'size'
-                       //    Hint: check for nil/false before sending 'size'
+name :: String | nil := dictionary at: "name"
+name size              // ⚠️ Warning: UndefinedObject does not respond to 'size'
+                       //    Hint: check for nil before sending 'size'
+```
+
+Similarly, `false` in type position resolves to `False` — used for Erlang FFI patterns where functions return `false` on failure:
+
+```beamtalk
+entry :: Tuple | false := ErlangLists keyfind: key   // lists:keyfind returns false on miss
 ```
 
 **Union + narrowing compose** — this is where both features pay off together:
 
 ```beamtalk
-name :: String | False := dictionary at: "name"
+name :: String | nil := dictionary at: "name"
 name isNil ifTrue: [^"unknown"]
-name size              // ✅ name is narrowed to String — False eliminated by early return
+name size              // ✅ name is narrowed to String — nil eliminated by early return
 ```
 
 **Return type of union message sends:** When a message is valid on all union members but returns different types, the return type is the union of return types. `(Integer | Float) abs` returns `Integer | Float` (both have `abs` returning their own type). If all members return the same type, the return type is that type: `(Integer | String) asString` returns `String`.
@@ -969,7 +975,8 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 - On message send to a union-typed receiver: check selector exists on ALL members, warn if any member lacks it
 - Return type of union sends: union of member return types (simplified to single type if all agree)
 - Remove the `_ => return` and `contains('|')` escape hatches for unions
-- Handle `FalseOr` as sugar for `T | False` unions
+- Handle `FalseOr` as sugar for `T | False` unions (Erlang FFI pattern)
+- Resolve `nil` in type position to `UndefinedObject`, `false` to `False`, `true` to `True`
 
 **Phase 1g: Control Flow Narrowing (M)**
 - Add narrowing environment to scope: `HashMap<VariableId, InferredType>` refinement layer pushed/popped per block
