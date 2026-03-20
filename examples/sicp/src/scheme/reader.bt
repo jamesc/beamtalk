@@ -22,7 +22,7 @@
 /// reader read: "#t"         // => true
 /// reader read: "()"         // => #()
 /// ```
-Object subclass: SchemeReader
+Value subclass: SchemeReader
 
   /// Parse a Scheme expression string and return its AST value.
   ///

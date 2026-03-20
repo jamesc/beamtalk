@@ -10,6 +10,6 @@
 ///   > Hello new greeting
 ///   │ Hello, World!
 ///   a Hello
-Object subclass: Hello
+Value subclass: Hello
 
   greeting => self traceCr: "Hello, World!"
