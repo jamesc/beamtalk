@@ -107,8 +107,7 @@ pub(crate) fn print_help() {
     println!("  Workspace actorsOf: Counter # All actors of a class");
     println!();
     println!("Actor message sends return Futures, which are automatically");
-    println!("awaited for synchronous REPL experience. If you store a Future");
-    println!("in a binding before it resolves, you'll see #Future<pending>.");
+    println!("awaited for a synchronous REPL experience.");
 }
 
 /// Display generated Core Erlang source (BT-724).
