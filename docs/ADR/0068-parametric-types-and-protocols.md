@@ -257,7 +257,8 @@ x :: Result(Integer, Error) := Result ok: "hello"
 - **Variance rules** (covariance/contravariance): All type parameters are invariant. `Result(Integer, E)` is not assignable to `Result(Number, E)`. Variance can be added later without breaking changes.
 - **Type parameter bounds/constraints** (`T :: Printable`): Deferred to Stage 2 (protocols). Type parameters are unbounded — any type is accepted.
 - **Higher-kinded types** (`F(_)`): Not planned. Beamtalk is not Haskell.
-- **Type parameter inference from usage patterns**: Only constructor calls and method arguments infer type params. Method chains don't propagate backwards.
+- **Chain-backwards inference**: `r unwrap + 1` does NOT infer that `T = Integer` by reasoning backwards from `+`. Type params are inferred from constructor arguments and method arguments at call sites (forward/call-site inference), not from downstream usage of return values.
+- **Full bidirectional type checking**: No expected-type propagation from assignment targets into subexpressions. `x :: Array(String) := expr` does not push `Array(String)` into `expr` to constrain inference. This could be added later without breaking changes.
 
 ### Design Challenges
 
@@ -326,17 +327,47 @@ filtered := arr select: [:x | x > 1]
 // filtered should be Array(Integer), not Array(Dynamic)
 ```
 
-**Solution: Extend `InferredType::Known` to carry optional type arguments.**
+**Solution: Extend `InferredType::Known` to carry optional type arguments and provenance.**
 
 ```rust
+/// Tracks where a type came from — enables precise error messages
+/// and determines how far inference should propagate.
+enum TypeProvenance {
+    Declared(Span),      // user wrote :: Type at this location
+    Inferred(Span),      // compiler inferred from expression at this location
+    Substituted(Span),   // derived from a generic substitution at this location
+}
+
 enum InferredType {
     Known {
         class_name: EcoString,
         type_args: Vec<InferredType>,  // empty for non-generic types
+        provenance: TypeProvenance,
     },
     Dynamic,
 }
 ```
+
+**Provenance** tracks whether a type was explicitly declared by the user, inferred by the compiler, or derived from a generic substitution. This serves two purposes:
+
+1. **Error messages distinguish declared vs inferred types:**
+
+   ```beamtalk
+   // Declared — user owns the assertion
+   x :: Result(Integer, Error) := someMethod
+   x unwrap ++ "hello"
+   // ⚠️ Warning: Integer does not respond to '++'
+   //    Note: x declared as Result(Integer, Error) on line 1
+
+   // Inferred — compiler guessed, user can override
+   x := Result ok: 42
+   x unwrap ++ "hello"
+   // ⚠️ Warning: Integer does not respond to '++'
+   //    Note: x inferred as Result(Integer, Dynamic) from constructor on line 1
+   //    Hint: add a type annotation if this inference is wrong
+   ```
+
+2. **Expected-type propagation uses provenance to calibrate confidence.** Both declared and inferred types propagate forward through chains, but error messages always trace back to the origin and tell the user whether they wrote the type or the compiler guessed it. This lets users decide whether to trust the inference or anchor it with an explicit annotation.
 
 When resolving `Self` for a receiver with known type args, the type args propagate:
 - Receiver `Array(Integer)` + return type `Self` → `Array(Integer)`
