@@ -7,7 +7,7 @@ Proposed (2026-03-20)
 
 Beamtalk currently models `String` and `Binary` as unrelated classes:
 
-```
+```text
 Object
 ├── Binary    (sealed, class methods only)
 └── Collection
@@ -36,7 +36,7 @@ Make `String` a subclass of `Binary`. Binary becomes a proper class with instanc
 
 ### New class hierarchy
 
-```
+```text
 Object
 └── Collection
     └── Binary   (sealed, byte-level operations)
