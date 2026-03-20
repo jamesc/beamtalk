@@ -15,7 +15,9 @@ TestCase subclass: StrictEqualityTest
 
   testLooseEqualityCoercesIntFloat => self assert: (5 == 5.0)
 
-  testStrictInequalityIntFloat => self assert: (5 =/= 5.0)
+  testStrictInequalityIntFloat =>
+    @expect type
+    self assert: (5 =/= 5.0)
 
   testZeroIntNotStrictEqualsZeroFloat => self deny: (0 =:= 0.0)
 
