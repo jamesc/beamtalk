@@ -131,6 +131,9 @@ When the concrete type parameters are unknown — because the value comes from a
 r := someMethod
 r unwrap                   // → Dynamic (T is unknown — no annotation, no inference context)
 r unwrap + 1               // No warning — Dynamic bypasses checking
+// 💡 Hint: someMethod returns unparameterized Result — consider annotating
+//    its return type (-> Result(Integer, Error)) or this variable
+//    (r :: Result(Integer, Error)) to enable type checking
 
 // Fix: annotate the variable to provide type context
 r :: Result(Integer, Error) := someMethod
