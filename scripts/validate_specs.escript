@@ -298,18 +298,39 @@ build_abstract_forms(ModName, SpecEntries) ->
 
 run_dialyzer(BeamFiles) ->
     try
+        PltOpts = ensure_plt(),
         %% Use {warnings, []} to suppress return-type mismatch warnings
         %% from the nif_error stubs. Dialyzer still validates that all type
         %% expressions in specs are well-formed (unknown types cause a crash).
         case dialyzer:run([{files, BeamFiles},
                            {warnings, []},
-                           {analysis_type, succ_typings}]) of
+                           {analysis_type, succ_typings}] ++ PltOpts) of
             [] -> ok;
             Warnings -> {warnings, Warnings}
         end
     catch
         throw:{dialyzer_error, Msg} ->
             {error, Msg}
+    end.
+
+%% Ensure a Dialyzer PLT exists.  If the default PLT is missing (e.g. in CI
+%% where `rebar3 dialyzer` hasn't run), build a minimal one with just the
+%% core OTP apps that generated specs reference.
+ensure_plt() ->
+    DefaultPlt = dialyzer_plt:get_default_plt(),
+    case filelib:is_file(DefaultPlt) of
+        true ->
+            [];
+        false ->
+            io:format("Building minimal Dialyzer PLT (first run)...~n"),
+            Apps = [erts, kernel, stdlib],
+            Dirs = [code:lib_dir(A, ebin) || A <- Apps],
+            ok = filelib:ensure_dir(DefaultPlt),
+            dialyzer:run([{analysis_type, plt_build},
+                          {output_plt, DefaultPlt},
+                          {files_rec, Dirs}]),
+            io:format("PLT built at ~s~n", [DefaultPlt]),
+            []
     end.
 
 %% ── Utilities ───────────────────────────────────────────────────────────
