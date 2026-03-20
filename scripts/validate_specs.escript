@@ -317,7 +317,7 @@ run_dialyzer(BeamFiles) ->
 %% where `rebar3 dialyzer` hasn't run), build a minimal one with just the
 %% core OTP apps that generated specs reference.
 ensure_plt() ->
-    DefaultPlt = dialyzer_plt:get_default_plt(),
+    DefaultPlt = default_plt_path(),
     case filelib:is_file(DefaultPlt) of
         true ->
             [];
@@ -332,6 +332,13 @@ ensure_plt() ->
             io:format("PLT built at ~s~n", [DefaultPlt]),
             []
     end.
+
+default_plt_path() ->
+    Home = case os:getenv("HOME") of
+        false -> os:getenv("USERPROFILE", "/tmp");
+        H -> H
+    end,
+    filename:join([Home, ".cache", "erlang", ".dialyzer_plt"]).
 
 %% ── Utilities ───────────────────────────────────────────────────────────
 
