@@ -763,47 +763,63 @@ Pony combines structural subtyping with reference capabilities. Its `interface` 
 
 ### Option A: Annotation-Only Generics (Rejected)
 
-Parse `Result(Integer, IOError)` at usage sites but don't add type params to class definitions. Hardcode substitution rules for known stdlib types.
+Parse `Result(Integer, IOError)` at usage sites but don't add type params to class definitions. Hardcode substitution rules for known stdlib types (Result, Array, Dictionary, Set, Block).
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Newcomer** | "I only need to write `:: Result(Integer, Error)` — I never have to define generic classes myself" |
-| **Smalltalk purist** | "This keeps class definitions pure Smalltalk — no parenthesized params in class headers" |
-| **BEAM veteran** | "Generates the same Dialyzer specs with less compiler complexity" |
-| **Operator** | "Less compiler machinery = fewer compiler bugs = more stable builds" |
-| **Language designer** | "YAGNI — solve the Result problem without building a full generics system" |
+| **Newcomer** | "I only need to write `:: Result(Integer, Error)` — I never have to define generic classes myself. Less to learn." |
+| **Smalltalk purist** | "This keeps class definitions pure Smalltalk — no parenthesized params polluting class headers. The type system stays invisible to class authors." |
+| **BEAM veteran** | "Generates the same Dialyzer specs at the FFI boundary with dramatically less compiler complexity. Fewer moving parts in the compiler means fewer compiler bugs." |
+| **Operator** | "For the next 2 years, only stdlib types need generics. Hardcoding 5 substitution rules is less risky than building a generics engine that might have subtle bugs." |
+| **Language designer** | "YAGNI — we only need Result, Array, Dictionary, Set, and Block. That's 5 types, not a generics system. If users eventually need custom generic classes, we can upgrade then — the annotation syntax is forward-compatible." |
 
-**Why rejected:** Doesn't scale. Every new generic class requires hardcoded substitution rules in the type checker. Users can't define their own generic classes. The type checker becomes a bag of special cases rather than a principled system.
+**Why rejected:** The YAGNI argument is genuinely compelling for the short term. But the type checker becomes a bag of special cases rather than a principled system — each new generic type requires new hardcoded rules instead of falling out from a general mechanism. More importantly, user-defined generic classes (e.g., `Stack(E)`, `Cache(K, V)`) would be impossible without upgrading to declaration-site generics. The annotation syntax is forward-compatible, but the type checker internals would need a rewrite.
 
 ### Option B: Full Parametric Polymorphism (Rejected)
 
-Complete generics with variance annotations, bounded quantification, generic methods, and type parameter inference from usage patterns.
+Complete generics with variance annotations (`+T` covariant, `-T` contravariant), bounded quantification, generic methods with explicit type params, and type parameter inference from usage patterns.
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Newcomer** | "If we're going to do generics, do them right — I know variance from Kotlin/Scala" |
-| **Language designer** | "A sound type system with variance prevents real bugs that invariant generics miss" |
-| **BEAM veteran** | "Gleam has full HM inference — Beamtalk should match it for credibility" |
+| **Newcomer** | "In TypeScript and Kotlin, `List<Integer>` is assignable to `List<Number>`. If Beamtalk's invariant generics reject this, I'll hit a wall fast and blame the type system." |
+| **Smalltalk purist** | "If you're going to impose a type system on Smalltalk, at least make it sound. Half-measures are worse than nothing — they give false confidence." |
+| **BEAM veteran** | "Gleam ships full HM inference with zero annotations needed. If Beamtalk's generics require annotations that Gleam infers automatically, we'll look like the inferior BEAM typed language." |
+| **Operator** | "Invariant generics mean I can't pass `Array(Integer)` where `Array(Number)` is expected — I'll end up casting everything, which defeats the purpose of types." |
+| **Language designer** | "Variance is the difference between a toy type system and a real one. Without it, every container type hits a wall at subtyping boundaries. Adding variance later means migrating every existing generic annotation — it's not as painless as the ADR claims." |
 
-**Why rejected:** Massive implementation effort (XL+) for marginal benefit. Variance rules and bounded quantification add complexity that most Beamtalk users will never encounter. The gradual typing philosophy means we can always add variance later — invariant generics are a subset of variant generics, not a dead end.
+**Why rejected:** The variance argument is the strongest — invariant generics *will* surprise users at subtyping boundaries. However: (1) Beamtalk's class hierarchy is shallow (most types are sealed leaf classes), so subtyping boundaries are rare in practice; (2) variance can be added later as an *extension* to existing invariant generics — existing code remains valid, it just gains more permissive assignability; (3) the implementation cost of variance (XL+) would delay everything else in this ADR by months. The pragmatic path is: ship invariant generics, collect real-world evidence of where variance is needed, then add it with data rather than speculation.
 
 ### Option C: Pragmatic Declaration-Site Generics (Chosen)
 
-Classes declare type parameters. Methods reference them. Type checker substitutes. No variance, no bounds (until protocols land), no HKTs.
+Classes declare type parameters. Methods reference them. Type checker substitutes. No variance, no bounds (until protocols land), no HKTs. Union checking and simple control flow narrowing included.
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Newcomer** | "`Result(Integer, Error)` reads cleanly — like Gleam or Python type hints" |
-| **Smalltalk purist** | "Type params are optional — my untyped code doesn't change at all" |
-| **BEAM veteran** | "Generates proper Dialyzer specs and the compiler catches real bugs" |
-| **Operator** | "Zero runtime cost, same bytecode, same observability" |
-| **Language designer** | "Simple enough to implement well, extensible to variance/bounds later" |
+| **Newcomer** | "`Result(Integer, Error)` reads cleanly — like Gleam or Python type hints. Union checking catches my `String | nil` mistakes. Narrowing means I don't need verbose null-checking patterns." |
+| **Smalltalk purist** | "Type params are optional — my untyped code doesn't change at all. Protocols formalize what I already do informally. The structural conformance model IS duck typing, just explicit." |
+| **BEAM veteran** | "Generates proper Dialyzer specs at the FFI boundary. Union types match Erlang's `{ok, V} \| {error, R}` pattern naturally." |
+| **Operator** | "Zero runtime cost, same bytecode, same observability. The type system helps my team catch bugs without any production impact." |
+| **Language designer** | "Simple enough to implement well, extensible to variance/bounds later. Union checking and narrowing compose into something genuinely useful without HM complexity." |
+
+### Option D: Generics Only — Defer Protocols, Unions, and Narrowing (Not Chosen)
+
+Ship only Stage 1 (generic type params and substitution). Defer protocols, union checking, and narrowing to separate ADRs.
+
+| Cohort | Strongest argument |
+|--------|-------------------|
+| **Operator** | "Smaller scope = less risk. Ship generics, prove they work, then add protocols. One big ADR with 10 implementation phases is a recipe for scope creep." |
+| **Language designer** | "Protocols are a separate concept from generics. Bundling them forces both to ship together — if protocols slip, generics slip too. Decouple them." |
+| **BEAM veteran** | "Elixir shipped protocols and generics independently. They don't have to be one thing." |
+
+**Why not chosen:** Generics without union checking leaves a hole — `String | nil` is the most common type annotation, and without union checking it's decoration. Narrowing without unions is pointless. Protocols without generics can't express `Collection(E)`. The features compose into something greater than the sum — shipping them separately means each is less useful in isolation. However, the staged implementation (Stage 1 before Stage 2) does allow generics + unions + narrowing to ship before protocols if needed.
 
 ### Tension Points
 
 - **Smalltalk purists** would prefer no generics at all — but they accept that type annotations are optional and generics only appear inside them.
-- **Language designers** would prefer variance rules from day one — but invariant generics are forward-compatible and dramatically simpler.
+- **Language designers** would prefer variance rules from day one — and the invariance limitation *will* cause friction at subtyping boundaries. The bet is that Beamtalk's shallow hierarchy makes this rare enough to defer.
 - **TypeScript/Java developers** expect angle-bracket `<T>` syntax — but `<` is a binary message in Beamtalk, and parentheses are unambiguous. Gleam validates this choice on BEAM.
+- **Pragmatists** would prefer a smaller ADR (generics only) — but union checking and narrowing are needed for generics to be useful in practice (`String | nil` is the killer use case).
+- **The variance question is the most load-bearing tension.** If real-world Beamtalk code frequently needs `Array(Integer)` assignable to `Array(Number)`, invariant generics will feel broken. The mitigation is: sealed leaf classes reduce subtyping, and variance can be added later. But "later" means existing code works but is more restrictive than users expect.
 
 ## Alternatives Considered
 
