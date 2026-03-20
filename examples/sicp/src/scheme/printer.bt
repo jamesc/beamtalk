@@ -16,7 +16,7 @@
 /// printer print: nil         // => "()"
 /// printer print: #(1, 2, 3)    // => "(1 2 3)"
 /// ```
-Object subclass: SchemePrinter
+Value subclass: SchemePrinter
 
   /// Convert `val` to its Scheme string representation.
   ///

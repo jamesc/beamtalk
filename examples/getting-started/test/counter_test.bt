@@ -27,7 +27,9 @@ TestCase subclass: ExampleCounterTest
 
   testIncrementAndDecrement =>
     counter := Counter spawn
-    counter increment; increment; decrement
+    counter increment
+    counter increment
+    counter decrement
     self assert: counter getValue equals: 1
 
   testDenyInitialNonPositive => self deny: Counter spawn getValue > 0
