@@ -687,7 +687,7 @@ deposit: amount :: Integer => ...      // nominal check
 ### Positive
 - `Result unwrap` returns the actual wrapped type instead of `Object` — unlocks downstream type checking and IDE completions
 - `Array`, `Dictionary`, and other container types gain element-type tracking
-- Generic annotations generate precise Dialyzer `-spec` attributes (concrete types instead of `any()`)
+- Generic annotations generate precise Dialyzer `-spec` attributes (concrete types instead of `any()`) — but see prerequisite below on Dialyzer validation
 - Protocols formalize Smalltalk's informal "responds to these messages" contracts
 - Both features are purely additive — all existing untyped code works unchanged
 - Forward-compatible: invariant generics can be extended with variance; unbounded params can gain protocol bounds
@@ -701,6 +701,7 @@ deposit: amount :: Integer => ...      // nominal check
 - Protocol conformance checking on large class hierarchies has compilation performance implications
 - Structural conformance can produce surprising results — a class may accidentally conform to a protocol it knows nothing about
 - Generic method signatures are more complex to read: `map: block :: Block(T, R) -> Result(R, E)`
+- **Dialyzer spec validation gap:** We generate `-spec` attributes but have no automated verification that they are valid or that Dialyzer can use them to catch bugs. Existing `spec_codegen.rs` unit tests only verify string output, not Dialyzer acceptance. This gap exists today for simple type annotations and will widen with generic specs — a malformed generic spec could go undetected. See prerequisite in Implementation.
 
 ### Neutral
 - Generated BEAM bytecode is unchanged — type erasure means zero runtime cost
@@ -709,6 +710,22 @@ deposit: amount :: Integer => ...      // nominal check
 - The `typed` class modifier works orthogonally — `typed` generic classes get thorough checking, non-typed ones get inference only
 
 ## Implementation
+
+### Prerequisite: Dialyzer Spec Validation (BT-1565)
+
+Before expanding spec generation to handle generics, we need confidence that the specs we already generate are valid and useful. Today:
+
+- `spec_codegen.rs` unit tests verify rendered string output — not that Dialyzer accepts the specs
+- `just dialyzer` runs on hand-written runtime `.erl` files only, not on compiled `.bt` output
+- CI only runs Dialyzer when runtime `.erl` files change — stdlib and user code specs are never checked
+- No cross-module Dialyzer checking verifies that caller and callee specs are consistent
+
+**Required before Phase 1d (generic spec codegen):**
+1. Add a CI step that compiles stdlib `.bt` classes to BEAM and runs Dialyzer on the output — verifying that existing `-spec` attributes are valid
+2. Add integration tests that round-trip: `.bt` source → Core Erlang with specs → `erlc` compile → Dialyzer check → no warnings
+3. Include at least one test with intentionally wrong types to verify Dialyzer catches the mismatch (a "negative test" for the spec pipeline)
+
+Without this, we'd be generating increasingly complex generic specs (`Result(integer(), any())`) with no verification that Dialyzer can parse or use them. This is tracked as [BT-1565](https://linear.app/beamtalk/issue/BT-1565).
 
 ### Stage 1: Parametric Types (Size: L)
 
