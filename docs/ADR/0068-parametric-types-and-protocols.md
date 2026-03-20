@@ -1050,21 +1050,29 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 
 ### Implementation Tracking
 
-| Phase | Description | Size | Dependencies |
-|-------|-------------|------|--------------|
-| 1a | Parser and AST for generic types | M | None |
-| 1b | Type checker substitution | L | 1a |
-| 1c | Constructor type inference | M | 1b |
-| 1d | Codegen — Dialyzer specs and runtime meta for generics | M | 1a |
-| 1e | Stdlib generic annotations | M | 1a, 1b |
-| 1f | Union type checking (message must exist on all members) | M | 1b |
-| 1g | Control flow narrowing (class =, isKindOf:, isNil) | M | 1b, 1f |
-| 2a | Protocol AST and parser | M | None (parallel with 1) |
-| 2b | Protocol registry and conformance | L | 2a, 1b |
-| 2c | Runtime protocol queries | M | 2b |
-| 2d | Type parameter bounds | S | 1b, 2b |
-| 2e | respondsTo: narrowing | S | 1g, 2b |
-| 2f | Variance for protocol-typed parameters | M | 2b, 2d |
+**Epic:** [BT-1567](https://linear.app/beamtalk/issue/BT-1567)
+**Status:** Planned
+
+| Phase | Issue | Description | Size | Dependencies |
+|-------|-------|-------------|------|--------------|
+| prereq | [BT-1565](https://linear.app/beamtalk/issue/BT-1565) | Dialyzer spec validation CI | M | None |
+| 1a | [BT-1568](https://linear.app/beamtalk/issue/BT-1568) | Parser and AST for generic types | M | None |
+| 1 | [BT-1569](https://linear.app/beamtalk/issue/BT-1569) | Extend InferredType with type_args, Union, provenance | M | None |
+| 1b | [BT-1570](https://linear.app/beamtalk/issue/BT-1570) | Type checker generic substitution | L | BT-1568, BT-1569 |
+| 1c | [BT-1571](https://linear.app/beamtalk/issue/BT-1571) | Constructor type inference | M | BT-1570 |
+| 1f | [BT-1572](https://linear.app/beamtalk/issue/BT-1572) | Union type checking | M | BT-1569 |
+| 1g | [BT-1573](https://linear.app/beamtalk/issue/BT-1573) | Control flow narrowing | M | BT-1569, BT-1572 |
+| 1d | [BT-1574](https://linear.app/beamtalk/issue/BT-1574) | Codegen — Dialyzer specs for generics | M | BT-1568, BT-1565 |
+| 1d | [BT-1575](https://linear.app/beamtalk/issue/BT-1575) | Codegen — runtime meta for generics | M | BT-1568 |
+| 1e | [BT-1576](https://linear.app/beamtalk/issue/BT-1576) | Stdlib generic annotations | M | BT-1570, BT-1574, BT-1575 |
+| — | [BT-1577](https://linear.app/beamtalk/issue/BT-1577) | Generic inheritance — superclass type application | M | BT-1570 |
+| 2a | [BT-1578](https://linear.app/beamtalk/issue/BT-1578) | Protocol AST and parser | M | BT-1568 |
+| 2b | [BT-1579](https://linear.app/beamtalk/issue/BT-1579) | Protocol registry and conformance | L | BT-1570, BT-1578 |
+| 2c | [BT-1580](https://linear.app/beamtalk/issue/BT-1580) | Runtime protocol queries | M | BT-1579 |
+| 2d | [BT-1581](https://linear.app/beamtalk/issue/BT-1581) | Type parameter bounds | S | BT-1579 |
+| 2e | [BT-1582](https://linear.app/beamtalk/issue/BT-1582) | respondsTo: narrowing | S | BT-1573, BT-1579 |
+| 2f | [BT-1583](https://linear.app/beamtalk/issue/BT-1583) | Variance for protocol-typed params | M | BT-1579, BT-1581 |
+| — | [BT-1584](https://linear.app/beamtalk/issue/BT-1584) | Documentation — language spec update | M | BT-1576, BT-1579 |
 
 ## Migration Path
 
