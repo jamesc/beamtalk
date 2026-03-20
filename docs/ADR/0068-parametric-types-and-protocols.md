@@ -35,11 +35,15 @@ ADR 0025 Phase 3 defines structural protocols — named message sets like `Print
 ```beamtalk
 // Without generics, Collection's collect: can't express its return type
 Protocol define: Collection
-  requiring: [size, do:, collect:]   // collect: returns... what? Collection of what?
+  size -> Integer
+  do: block :: Block
+  collect: block :: Block -> Self   // collect: returns... Self of what element type?
 
 // With generics, we can express the relationship
 Protocol define: Collection(E)
-  requiring: [size -> Integer, do: :: Block(E, Object), collect: :: Block(E, Object) -> Self]
+  size -> Integer
+  do: block :: Block(E, Object)
+  collect: block :: Block(E, Object) -> Self
 ```
 
 Generics are a prerequisite for expressive protocols. This ADR therefore addresses **generics first, then protocols**, as an integrated type system extension.
@@ -998,7 +1002,8 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 - On message send to a union-typed receiver: check selector exists on ALL members, warn if any member lacks it
 - Return type of union sends: union of member return types (simplified to single type if all agree)
 - Remove the `_ => return` and `contains('|')` escape hatches for unions
-- Handle `FalseOr` as sugar for `T | False` unions (Erlang FFI pattern)
+- Resolve `nil` → `UndefinedObject`, `false` → `False`, `true` → `True` in type position
+- Handle `TypeAnnotation::FalseOr` (existing AST variant) as `T | False` union
 - Resolve `nil` in type position to `UndefinedObject`, `false` to `False`, `true` to `True`
 
 **Phase 1g: Control Flow Narrowing (M)**
