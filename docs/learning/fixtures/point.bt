@@ -4,8 +4,8 @@
 // Fixture for docs/learning/10-value-classes.md
 
 Value subclass: Point
-  state: x = 0
-  state: y = 0
+  field: x = 0
+  field: y = 0
 
   x => self.x
 

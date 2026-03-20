@@ -143,4 +143,4 @@ Error assertions:
 
 - [`docs/beamtalk-language-features.md`](../beamtalk-language-features.md) — full language reference
 - [`docs/beamtalk-syntax-rationale.md`](../beamtalk-syntax-rationale.md) — why the syntax is the way it is
-- [`stdlib/test/`](../../stdlib/test/) — the full test suite
+- [`docs/beamtalk-tooling.md`](../beamtalk-tooling.md) — CLI, REPL, VS Code, MCP, and testing

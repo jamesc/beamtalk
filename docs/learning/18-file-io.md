@@ -12,7 +12,7 @@ Write a file with `writeAll:contents:` and read it back with `readAll:`:
 
 ```beamtalk
 TestCase subclass: Ch18WriteRead
-  state: tmpDir = "target/bt-doctest-tmp/ch18wr"
+  field: tmpDir = "target/bt-doctest-tmp/ch18wr"
   setUp =>
     File mkdirAll: self.tmpDir
     self
@@ -53,7 +53,7 @@ Create directories, list contents, and clean up:
 
 ```beamtalk
 TestCase subclass: Ch18Directories
-  state: tmpDir = "target/bt-doctest-tmp/ch18dirs"
+  field: tmpDir = "target/bt-doctest-tmp/ch18dirs"
   setUp =>
     File mkdirAll: self.tmpDir
     self
@@ -106,14 +106,14 @@ For large files, use streams instead of reading everything into memory.
 
 ```beamtalk
 TestCase subclass: Ch18Streams
-  state: tmpDir = "target/bt-doctest-tmp/ch18streams"
-  state: nl = ""
+  field: tmpDir = "target/bt-doctest-tmp/ch18streams"
+  field: nl = ""
   setUp =>
-    self.nl := String fromCodePoint: 10
-    File mkdirAll: self.tmpDir
-    File writeAll: self.tmpDir ++ "/data.txt"
-      contents: "one" ++ self.nl ++ "two" ++ self.nl ++ "three" ++ self.nl ++ "four" ++ self.nl ++ "five"
-    self
+    updated := self withNl: (String fromCodePoint: 10)
+    File mkdirAll: updated tmpDir
+    File writeAll: updated tmpDir ++ "/data.txt"
+      contents: "one" ++ updated nl ++ "two" ++ updated nl ++ "three" ++ updated nl ++ "four" ++ updated nl ++ "five"
+    updated
   tearDown =>
     File deleteAll: self.tmpDir
     self

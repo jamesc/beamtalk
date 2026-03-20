@@ -12,6 +12,10 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 
 - [String Encoding and UTF-8](#string-encoding-and-utf-8)
 - [Core Syntax](#core-syntax)
+  - [Class-Side Methods (ADR 0048)](#class-side-methods-adr-0048)
+  - [Doc Comments (`///`)](#doc-comments-)
+  - [Erlang FFI](#erlang-ffi)
+  - [Loading Code into the Workspace](#loading-code-into-the-workspace)
 - [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
 - [Actor Message Passing](#actor-message-passing)
 - [Server — OTP Interop (ADR 0065)](#server--otp-interop-adr-0065)
@@ -160,7 +164,7 @@ Beamtalk has three class kinds with distinct data keywords and construction prot
 |------------|-------------|-----------|--------------|-----------------|
 | **Value** | `field:` | Immutable data slots, `self.slot :=` is compile error | `new` / `new:` / keyword ctor | No |
 | **Actor** | `state:` (permitted, not required) | Mutable process state, `self.slot :=` persists via gen_server | `spawn` / `spawnWith:` | Yes |
-| **Object** | *(none)* | Methods only, no instance data, not instantiable | *(none)* | No |
+| **Object** | *(none)* | No Beamtalk-managed data; often class-methods-only, but can have instances with runtime-backed state (ETS, handles) | Custom constructors | No |
 
 ```beamtalk
 // Value — immutable data, no process (ADR 0042)
@@ -180,7 +184,7 @@ Actor subclass: Counter
   increment => self.count := self.count + 1
   getCount => self.count
 
-// Object — class methods only, not instantiable
+// Object — no Beamtalk-managed data; commonly class-methods-only
 Object subclass: MathHelper
   class factorial: n =>
     n <= 1
@@ -427,10 +431,10 @@ Binary operators follow standard math precedence (highest to lowest):
 **Note on `and`/`or`:** These are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation:
 ```beamtalk
 // Short-circuit AND - second block only evaluated if first is true
-result := condition and: [expensiveCheck()]
+result := condition and: [self expensiveCheck]
 
 // Short-circuit OR - second block only evaluated if first is false  
-result := condition or: [fallbackValue()]
+result := condition or: [self fallbackValue]
 ```
 
 ### Field Access and Assignment
@@ -461,18 +465,22 @@ self.total := self.total * factor
 // Field assignments as sequential statements
 self.x := 5
 self.y := self.x + 1
-^self.y
+self.y
 ```
 
-**Limitation:** Field assignments in stored blocks (non-control-flow) are not supported:
+**Limitation:** Field assignments (`self.x :=`) in stored closures are a compile error — they require control-flow context for state threading. Local variable mutations in stored closures work fine (ADR 0041 Tier 2).
 
 ```beamtalk
-// NOT SUPPORTED: field assignment inside stored blocks
+// ❌ ERROR: field assignment inside stored closure
 nestedBlock := [:m | self.x := m]
-nestedBlock value: 10
 
-// SUPPORTED: field mutation in control flow blocks
+// ✅ Field mutation in control flow blocks
 true ifTrue: [self.x := 5]
+
+// ✅ Local variable mutation in stored closure (Tier 2)
+count := 0
+myBlock := [count := count + 1]
+10 timesRepeat: myBlock   // count => 10
 ```
 
 ### Blocks (Closures)
@@ -524,6 +532,140 @@ processPayment => self notImplemented
 
 Both methods raise a runtime error with a clear message. The distinction is intent: `subclassResponsibility` signals an interface contract, while `notImplemented` marks incomplete work.
 
+### Class-Side Methods (ADR 0048)
+
+Methods prefixed with `class` belong to the class itself, not to instances. They are called on the class name directly.
+
+```beamtalk
+Object subclass: MathUtils
+  class factorial: n =>
+    n <= 1
+      ifTrue: [1]
+      ifFalse: [n * (self factorial: n - 1)]
+
+  class fibonacci: n =>
+    n <= 1
+      ifTrue: [n]
+      ifFalse: [(self fibonacci: n - 1) + (self fibonacci: n - 2)]
+
+MathUtils factorial: 10    // => 3628800
+MathUtils fibonacci: 10    // => 55
+```
+
+Common uses:
+- **Factory methods:** `Counter spawn`, `Point x: 3 y: 4` (auto-generated from `field:` declarations)
+- **FFI namespaces:** `File readAll: path`, `Json parse: str` — class methods wrapping Erlang modules
+- **Supervisor configuration:** `class children`, `class strategy` — pure metadata for OTP init
+- **Singleton access:** `class current` — return the singleton instance (see `classState:` below)
+
+**`classState:`** declares mutable class-level state — shared across all instances and accessible from class methods. Used for singletons:
+
+```beamtalk
+sealed Object subclass: MyRegistry
+  classState: current = nil
+
+  class current => self.current
+  class current: instance => self.current := instance
+```
+
+`classState:` is distinct from `state:` (per-instance actor state) and `field:` (per-instance immutable data). It stores values at the class level, analogous to Smalltalk class variables.
+
+### Doc Comments (`///`)
+
+Triple-slash comments (`///`) are structured documentation parsed into the AST and queryable at runtime via `Beamtalk help:`. They support Markdown formatting and a `## Examples` convention with fenced code blocks.
+
+```beamtalk
+/// Counter — A simple incrementing actor.
+///
+/// Demonstrates actor state and message passing.
+///
+/// ## Examples
+/// ```beamtalk
+/// c := Counter spawn
+/// c increment   // => 1
+/// ```
+Actor subclass: Counter
+  state: value = 0
+
+  /// Increment the counter by 1 and return the new value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter spawn increment   // => 1
+  /// ```
+  increment => self.value := self.value + 1
+```
+
+Query documentation at runtime:
+
+```beamtalk
+Beamtalk help: Counter
+// => "== Counter < Actor ==\n  increment\n  ..."
+
+Beamtalk help: Counter selector: #increment
+// => "Counter >> increment\n  Increment the counter by 1..."
+```
+
+Doc comments flow from source → AST → compiled BEAM module → runtime. They are not stripped at compilation. The `## Examples` blocks are the source for `Beamtalk help:` output and can be verified by the test framework.
+
+### Erlang FFI
+
+Beamtalk provides direct access to all Erlang modules via the `Erlang` gateway object (ADR 0028). Send a unary message with the module name to get a proxy, then send messages as normal:
+
+```beamtalk
+// Call any Erlang module function
+Erlang lists reverse: #(3, 2, 1)      // => [1, 2, 3]
+Erlang erlang node                     // => current node atom
+Erlang maps merge: #{#a => 1} with: #{#b => 2}
+
+// Store a module proxy for repeated use
+proxy := Erlang crypto
+proxy strong_rand_bytes: 16            // => random binary
+```
+
+The `(Erlang module)` pattern is used throughout the stdlib to wrap Erlang functions as Beamtalk class methods:
+
+```beamtalk
+// How File.readAll: is implemented — a thin wrapper
+Object subclass: File
+  class readAll: path :: String -> String =>
+    (Erlang beamtalk_file) readAll: path
+```
+
+**Keyword mapping:** Beamtalk keyword selectors map to Erlang function names by joining with underscores. `Erlang maps merge: a with: b` calls `maps:merge_with(A, B)`. Unary selectors map directly: `Erlang erlang node` calls `erlang:node()`.
+
+**Error handling:** Errors from Erlang calls are wrapped as `BEAMError`, `ExitError`, or `ThrowError` — catchable with `on:do:`:
+
+```beamtalk
+[Erlang erlang error: #badarg] on: BEAMError do: [:e | e message]
+// => "badarg"
+```
+
+### Loading Code into the Workspace
+
+Beamtalk source files are loaded into the live workspace via `:load` or the `Workspace` singleton. Loaded classes are immediately available — existing actors pick up new code on next dispatch.
+
+```beamtalk
+// Via REPL shortcut
+:load examples/counter.bt
+// => Loaded: Counter
+
+// Via native message send (works from compiled code and MCP)
+Workspace load: "examples/counter.bt"
+
+// Load an entire directory (compiles all .bt files in dependency order)
+Workspace load: "src/"
+
+// Reload a specific class from its source file
+Counter reload
+// => Counter  (recompiled and hot-swapped)
+
+// Or via REPL shortcut
+:reload Counter
+```
+
+See [Workspace and Reflection API](#workspace-and-reflection-api) for the full `Workspace` singleton interface.
+
 ---
 
 ## Gradual Typing (ADR 0025)
@@ -539,9 +681,9 @@ typed Actor subclass: TypedAccount
 
   deposit: amount :: Integer -> Integer =>
     self.balance := self.balance + amount
-    ^self.balance
+    self.balance
 
-  balance -> Integer => ^self.balance
+  balance -> Integer => self.balance
 ```
 
 ### Annotation Forms
@@ -588,17 +730,20 @@ collect: block :: Block -> Self =>
 
 ## Control Flow and Mutations
 
-Beamtalk supports Smalltalk-style control flow via messages to booleans and blocks, with one important enhancement: **literal blocks in control flow positions can mutate local variables and fields**.
+Beamtalk supports Smalltalk-style control flow via messages to booleans and blocks, with full mutation support via a universal state-threading protocol ([ADR 0041](ADR/0041-universal-state-threading-block-protocol.md)).
 
-### The Simple Rule
+### How It Works
 
-> **Literal blocks in control flow positions can mutate (both local vars AND fields). Stored/passed closures cannot.**
+The compiler uses a two-tier optimization for block mutations:
 
-This enables idiomatic Smalltalk patterns while maintaining clear semantics on the BEAM.
+- **Tier 1 (stdlib control flow):** `whileTrue:`, `do:`, `collect:`, `timesRepeat:`, etc. — inlined tail-recursive loops with versioned state variables. Zero overhead.
+- **Tier 2 (user-defined methods):** All other methods accepting blocks — universal `{Result, StateAcc}` protocol. Pure blocks have no overhead; stateful blocks pay ~65ns per invocation.
+
+**Local variable mutations** work in all blocks — including stored closures and blocks passed to user-defined higher-order methods. **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures.
 
 ### Control Flow Constructs
 
-These message sends detect literal blocks and generate tail-recursive loops with state threading:
+These message sends are Tier 1 optimized — the compiler generates inlined tail-recursive loops with zero overhead:
 
 | Construct | Example | Mutations Allowed |
 |-----------|---------|-------------------|
@@ -653,7 +798,7 @@ Actor subclass: Counter
     [self.value < 10] whileTrue: [
       self.value := self.value + 1
     ]
-    ^self.value
+    self.value
 
   // Multiple fields
   incrementBoth =>
@@ -680,46 +825,50 @@ processItems =>
     ^total
 ```
 
-### What's Forbidden
+### What Works and What Doesn't
 
-Stored or passed closures cannot mutate:
+**Local variable mutations** work in all blocks — including stored closures and user-defined higher-order methods (ADR 0041 Tier 2):
+
+```beamtalk
+// ✅ Local mutation in stored closure — works via Tier 2 protocol
+count := 0
+myBlock := [count := count + 1]
+10 timesRepeat: myBlock
+count  // => 10
+
+// ✅ Local mutation in user-defined HOM — works via Tier 2 protocol
+count := 0
+items myCustomLoop: [:x | count := count + x]
+count  // => sum of items
+```
+
+**Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 
 ```beamtalk
 // ❌ ERROR: Field assignment in stored closure
 badBlock =>
     myBlock := [self.value := self.value + 1]
     // ERROR: Cannot assign to field 'value' inside a stored closure.
-    
-// ⚠️ WARNING: Local mutation in stored closure has no effect
-testWarning =>
-    count := 0
-    myBlock := [count := count + 1]
-    // WARNING: Assignment to 'count' has no effect on outer scope.
-    
-    10 timesRepeat: myBlock
-    ^count  // Still 0, not 10
-    
-// ✅ CORRECT: Use literal blocks in control flow
-testCorrect =>
-    count := 0
-    10 timesRepeat: [count := count + 1]  // ✅ Works!
-    ^count  // Now 10
+
+// ✅ CORRECT: Field mutation in control flow
+increment =>
+    10 timesRepeat: [self.value := self.value + 1]  // ✅ Works!
 ```
 
 ### Why This Design?
 
 | Property | ✅ Benefit |
 |----------|-----------|
-| **Simple** | One rule covers everything |
-| **Orthogonal** | Same behavior for local vars and fields |
-| **Smalltalk-like** | Natural iteration patterns work |
-| **Safe** | Escaping closures can't cause confusion |
+| **Universal** | Local variable mutations work in all blocks — no whitelist |
+| **Smalltalk-like** | Natural iteration patterns work, including user-defined HOMs |
+| **Safe** | Field mutations in stored closures are caught at compile time |
 | **Good DX** | Clear errors with fix suggestions |
 | **BEAM-idiomatic** | Compiles to tail recursion + state threading |
+| **Performant** | Stdlib hot paths are zero overhead (Tier 1); user HOMs ~65ns (Tier 2) |
 
 ### Error Messages
 
-When you accidentally store a mutating closure, you get helpful guidance:
+When you accidentally assign to a field inside a stored closure, the compiler provides guidance:
 
 ```beamtalk
 // This won't compile — stored closure can't mutate fields
@@ -736,10 +885,10 @@ Fix: Use control flow directly, or extract to a method:
   // Instead of:
   myBlock := [:item | self.sum := self.sum + item].
   items do: myBlock.
-  
+
   // Write:
   items do: [:item | self.sum := self.sum + item].
-  
+
   // Or use a method:
   addToSum: item => self.sum := self.sum + item.
   items do: [:item | self addToSum: item].
@@ -1492,9 +1641,8 @@ classes and runtime-only built-ins like `Future`):
 ```beamtalk
 // ❌ Compile-time warning: Class name `Integer` conflicts with a stdlib class.
 //    Loading will fail because stdlib class names are protected.
-Object subclass: Integer
-  | x |
-  => x: v [ x := v ]
+Value subclass: Integer
+  field: x = 0
 ```
 
 **Runtime load-time error** — fires for fully-featured stdlib classes that are
@@ -1513,10 +1661,9 @@ If you need to customise stdlib behaviour, subclass instead of redefining:
 ```beamtalk
 // ✓ Subclass is fine
 Integer subclass: SafeInteger
-  => divSafe: divisor [
-    divisor = 0 ifTrue: [ ^ 0 ].
+  divSafe: divisor =>
+    divisor == 0 ifTrue: [^0]
     self / divisor
-  ]
 ```
 
 
@@ -1534,7 +1681,7 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 |----------------------------|----------------------|
 | Value object | `Value subclass:` with `field:` — plain Erlang map (no process) |
 | Actor | `Actor subclass:` with `state:` — BEAM process (gen_server) |
-| Module/utility class | `Object subclass:` — class methods only, not instantiable |
+| Module/utility class | `Object subclass:` — no Beamtalk-managed data; class methods or runtime-backed instances |
 | Class | Module + constructor function |
 | Instance variable (immutable) | `field:` — value map field |
 | Instance variable (mutable) | `state:` — gen_server state map field |
