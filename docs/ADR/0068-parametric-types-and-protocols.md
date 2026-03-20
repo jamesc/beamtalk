@@ -59,7 +59,7 @@ The AST already defines `TypeAnnotation::Generic { base, parameters, span }` but
 1. **Type erasure** (ADR 0025): All type information is compile-time only. Zero runtime cost.
 2. **Warnings, not errors** (ADR 0025): Type mismatches produce warnings, never block compilation.
 3. **Gradual adoption**: Untyped code must continue working unchanged. `Result ok: 42` without annotations stays valid.
-4. **BEAM integration**: Generic annotations should generate appropriate Dialyzer `-spec` attributes.
+4. **BEAM integration**: Generic annotations should generate Dialyzer `-spec` attributes for FFI/interop (see Dialyzer section below).
 5. **Forward compatibility**: The design must support future protocol bounds (`T :: Printable`) without breaking changes.
 
 ## Decision
@@ -156,7 +156,14 @@ r2 error                            // → Symbol ✅
 
 This is limited to direct constructor calls with literal or already-typed arguments. Complex expressions fall back to `Dynamic` parameters.
 
-#### Dialyzer Spec Generation
+#### Dialyzer Spec Generation (FFI/Interop Boundary)
+
+Dialyzer specs serve the **BEAM interop boundary**, not pure Beamtalk code. For Beamtalk-to-Beamtalk calls, the Beamtalk type checker is the primary tool — it understands class hierarchies, message sends, sealed classes, and `doesNotUnderstand:` overrides. Dialyzer sees only BEAM bytecode (`gen_server:call`, map operations) and knows none of this.
+
+Dialyzer specs are valuable when:
+- **Erlang/Elixir calls Beamtalk** — Beamtalk actors are `gen_server` modules; specs let Dialyzer verify that callers pass the right types at the BEAM boundary
+- **Beamtalk calls Erlang/Elixir** — specs on the Erlang side let Dialyzer cross-check against what Beamtalk passes in (where Beamtalk's own type checker returns `Dynamic`)
+- **Mixed-language projects** — Dialyzer provides the common type language across BEAM languages
 
 Generic types generate expanded Dialyzer specs with concrete types substituted:
 
@@ -541,7 +548,7 @@ Pony combines structural subtyping with reference capabilities. Its `interface` 
 - **Risk:** "Type parameters feel alien to Smalltalk." Mitigation: `typed` classes opt into generics; regular classes never see them.
 
 ### Erlang/Elixir Developer
-- **Generics:** "It generates proper Dialyzer specs with concrete types — I get real BEAM-level checking!" Generic annotations produce expanded `-spec` with `integer()`, `binary()`, etc. instead of `any()`.
+- **Generics:** "When I call Beamtalk actors from Erlang, Dialyzer now sees proper specs with concrete types instead of `any()`." Generic annotations produce expanded `-spec` at the FFI boundary — this is where Dialyzer adds real value, not for pure Beamtalk code (where Beamtalk's own type checker is more capable).
 - **Protocols:** "Like Elixir protocols but structural — no `defimpl` boilerplate." Familiar concept, less ceremony.
 - **Risk:** Structural protocols may not map cleanly to Elixir's nominal protocol dispatch for interop. Mitigation: Beamtalk protocols are compile-time only; at the BEAM level, it's still standard message dispatch.
 
@@ -687,7 +694,7 @@ deposit: amount :: Integer => ...      // nominal check
 ### Positive
 - `Result unwrap` returns the actual wrapped type instead of `Object` — unlocks downstream type checking and IDE completions
 - `Array`, `Dictionary`, and other container types gain element-type tracking
-- Generic annotations generate precise Dialyzer `-spec` attributes (concrete types instead of `any()`) — but see prerequisite below on Dialyzer validation
+- Generic annotations generate precise Dialyzer `-spec` attributes at the BEAM interop boundary (concrete types instead of `any()` for Erlang/Elixir callers) — but see prerequisite below on Dialyzer validation
 - Protocols formalize Smalltalk's informal "responds to these messages" contracts
 - Both features are purely additive — all existing untyped code works unchanged
 - Forward-compatible: invariant generics can be extended with variance; unbounded params can gain protocol bounds
@@ -713,19 +720,21 @@ deposit: amount :: Integer => ...      // nominal check
 
 ### Prerequisite: Dialyzer Spec Validation (BT-1565)
 
-Before expanding spec generation to handle generics, we need confidence that the specs we already generate are valid and useful. Today:
+Dialyzer specs serve the FFI/interop boundary — they let Erlang/Elixir callers get type-checked when calling Beamtalk actors. For pure Beamtalk, the Beamtalk type checker is the right tool (it understands message sends, class hierarchies, `doesNotUnderstand:`, etc.; Dialyzer just sees `gen_server:call`).
+
+Before expanding spec generation to handle generics, we need confidence that the specs we generate for interop are actually valid. Today:
 
 - `spec_codegen.rs` unit tests verify rendered string output — not that Dialyzer accepts the specs
 - `just dialyzer` runs on hand-written runtime `.erl` files only, not on compiled `.bt` output
-- CI only runs Dialyzer when runtime `.erl` files change — stdlib and user code specs are never checked
-- No cross-module Dialyzer checking verifies that caller and callee specs are consistent
+- CI only runs Dialyzer when runtime `.erl` files change — stdlib specs are never checked
+- No cross-language Dialyzer test verifies that an Erlang caller of a Beamtalk actor gets correct type checking
 
 **Required before Phase 1d (generic spec codegen):**
 1. Add a CI step that compiles stdlib `.bt` classes to BEAM and runs Dialyzer on the output — verifying that existing `-spec` attributes are valid
-2. Add integration tests that round-trip: `.bt` source → Core Erlang with specs → `erlc` compile → Dialyzer check → no warnings
-3. Include at least one test with intentionally wrong types to verify Dialyzer catches the mismatch (a "negative test" for the spec pipeline)
+2. Add an integration test with an Erlang module calling a typed Beamtalk actor — verifying Dialyzer catches type mismatches at the FFI boundary
+3. Include a negative test (intentionally wrong types from Erlang side → Dialyzer warning)
 
-Without this, we'd be generating increasingly complex generic specs (`Result(integer(), any())`) with no verification that Dialyzer can parse or use them. This is tracked as [BT-1565](https://linear.app/beamtalk/issue/BT-1565).
+Without this, we'd be generating increasingly complex generic specs (`Result(integer(), any())`) with no verification that Dialyzer can parse or use them at the boundary. This is tracked as [BT-1565](https://linear.app/beamtalk/issue/BT-1565).
 
 ### Stage 1: Parametric Types (Size: L)
 
