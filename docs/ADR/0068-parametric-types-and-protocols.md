@@ -53,7 +53,7 @@ Generics are a prerequisite for expressive protocols. This ADR therefore address
 The AST already defines `TypeAnnotation::Generic { base, parameters, span }` but it is **never produced by the parser** — only constructible programmatically. The type checker has two escape hatches that bail out on non-simple types:
 
 - `check_return_type` (validation.rs:251): `_ => return` skips any union/generic return type
-- `is_assignable_to` (validation.rs:492): string-level `contains('<')` bypass
+- `is_assignable_to` (validation.rs:492): string-level `contains('<')` and `contains('|')` bypasses — any type containing `<`, `|`, or `#` is unconditionally accepted
 - `set_param_types` (inference.rs:147): non-`Simple` annotations → `Dynamic`
 
 `ClassDefinition` has no `type_params` field. Classes cannot declare themselves as generic.
@@ -144,7 +144,7 @@ r :: Result(Integer, Error) := someMethod
 r unwrap + 1               // ✅ Integer has '+'
 ```
 
-Note that constructor calls like `Result ok: 42` **do** infer type params from their arguments (see Constructor Type Inference above). The Dynamic fallback only applies when type params are genuinely unknowable — typically from unparameterized method return types or Erlang FFI calls.
+Note that constructor calls like `Result ok: 42` **do** infer type params from their arguments (see Constructor Type Inference below). The Dynamic fallback only applies when type params are genuinely unknowable — typically from unparameterized method return types or Erlang FFI calls.
 
 #### Constructor Type Inference
 
@@ -415,9 +415,9 @@ Collection(E) subclass: Array(E)
   // Inherited from Collection: select: -> Self
   // For Array(Integer), Self should be Array(Integer), not bare Array
 
-arr :: List(Integer) := List withAll: #[1, 2, 3]
+arr :: Array(Integer) := Array withAll: #[1, 2, 3]
 filtered := arr select: [:x | x > 1]
-// filtered should be List(Integer), not List(Dynamic)
+// filtered should be Array(Integer), not Array(Dynamic)
 ```
 
 **Solution: Extend `InferredType::Known` to carry optional type arguments and provenance.**
@@ -1037,7 +1037,11 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 - Allow `T :: Printable` in class/protocol type parameter declarations
 - Type checker verifies that concrete type arguments conform to the bound
 
-**Phase 2e: Variance for Protocol-Typed Parameters (M)**
+**Phase 2e: `respondsTo:` Narrowing (S)**
+- Extend Stage 1 narrowing patterns: `x respondsTo: #selector ifTrue: [...]` narrows `x` to "has that method" in the true block
+- Requires protocol registry to determine what conformance means — `respondsTo: #asString` narrows to Printable conformance if Printable is defined
+
+**Phase 2f: Variance for Protocol-Typed Parameters (M)**
 - Invariant generics break when protocol types create subtyping: `Array(Integer)` should be assignable to `Array(Printable)` because Integer conforms to Printable, but invariant checking rejects it
 - Add covariance for type parameters in read-only positions (return types, immutable fields)
 - Practical rule: sealed Value classes with no mutating methods on the type parameter are covariant by default — `Array(E)` is covariant in `E` because Array is immutable
@@ -1059,8 +1063,8 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 | 2b | Protocol registry and conformance | L | 2a, 1b |
 | 2c | Runtime protocol queries | M | 2b |
 | 2d | Type parameter bounds | S | 1b, 2b |
-| 2e | Variance for protocol-typed parameters | M | 2b, 2d |
-| 2f | respondsTo: narrowing | S | 1g, 2b |
+| 2e | respondsTo: narrowing | S | 1g, 2b |
+| 2f | Variance for protocol-typed parameters | M | 2b, 2d |
 
 ## Migration Path
 
