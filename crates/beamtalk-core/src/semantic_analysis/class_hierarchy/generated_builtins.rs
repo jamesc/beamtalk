@@ -139,6 +139,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "supervisionSpec".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![], doc: Some("Return a SupervisionSpec for this actor class with default settings.\n\nCreates a SupervisionSpec with `actorClass` set to the receiver and\n`restart` set from `supervisionPolicy`. Use the fluent `with*:` API to\noverride per-child settings:\n\n## Examples\n```beamtalk\nDatabasePool supervisionSpec\n    // => SupervisionSpec with actorClass: DatabasePool, restart: #temporary\n\nDatabasePool supervisionSpec withId: #primary withArgs: #{#role => #primary}\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -172,6 +173,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array".into()), param_types: vec![Some("List".into())], doc: Some("Create an Array from a list. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nArray new: #(1, 2, 3)            // => #[1, 2, 3]\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -201,6 +203,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "named:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: true, spawns_block: false, return_type: Some("AtomicCounter".into()), param_types: vec![Some("Symbol".into())], doc: Some("Look up an existing counter by name (class method).\n\nRaises `not_found` if no counter with this name exists.\nRaises `type_error` if the argument is not a Symbol.\n\n## Examples\n```beamtalk\nc := AtomicCounter named: #requests\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -219,6 +222,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -249,6 +253,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, spawns_block: false, return_type: Some("Bag".into()), param_types: vec![Some("List".into())], doc: Some("Create a Bag containing all elements from a list.\n\n## Examples\n```beamtalk\nBag withAll: #(1, 2, 1, 3)   // => a Bag\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -287,6 +292,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("BeamtalkInterface".into())], doc: Some("Set the current singleton instance.".into()) },
             ],
             class_variables: vec!["current".into()],
+            type_params: vec![],
         },
     );
 
@@ -329,6 +335,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -352,6 +359,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "fromIolist:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("Object".into())], doc: Some("Convert an iolist to a flat binary (class method).\n\nAn iolist is a (possibly nested) list of binaries and integers\n(0-255). This flattens it into a single binary.\n\n## Examples\n```beamtalk\nBinary fromIolist: #(\"hello\", \" \", \"world\")\n// => _\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -382,6 +390,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -410,6 +419,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -448,6 +458,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "value:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Character".into(), is_sealed: true, spawns_block: false, return_type: Some("Character".into()), param_types: vec![Some("Integer".into())], doc: Some("Create a Character from a Unicode codepoint integer (class method).\n\n## Examples\n```beamtalk\nCharacter value: 65      // => $A\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -472,6 +483,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -499,6 +511,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -536,6 +549,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, spawns_block: false, return_type: Some("Self".into()), param_types: vec![Some("List".into())], doc: Some("Factory method — create a collection of this type from a list.\n\nDefault implementation returns the list as-is, giving `List` results\nfor custom user-defined Collection subclasses. Sealed built-in types\n(List, Set, Array, Tuple, String) override this to produce their own type.\n\n## Examples\n```beamtalk\nList withAll: #(1, 2, 3)         // => #(1, 2, 3)\nArray withAll: #(1, 2, 3)        // => #[1, 2, 3]\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -561,6 +575,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -606,6 +621,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "fromString:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, spawns_block: false, return_type: Some("DateTime".into()), param_types: vec![Some("String".into())], doc: Some("Parse an ISO 8601 string.\n\n## Examples\n```beamtalk\nDateTime fromString: '2026-02-18T10:30:00Z'\n// => a DateTime(2026-02-18T10:30:00Z)\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -641,6 +657,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -673,6 +690,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Return the running supervisor instance, or nil if not started.".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -693,6 +711,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Erlang".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None, None], doc: Some("Look up an Erlang module by name, returning an ErlangModule proxy.\n\nInvoked automatically when an unknown unary message is sent to `Erlang`.\nThe `selector` becomes the module name; `arguments` is always empty.\nCompiled via `@intrinsic erlangModuleLookup` — no gen_server roundtrip.\n\n## Examples\n```beamtalk\nErlang lists       // => #ErlangModule<lists>\nErlang maps        // => #ErlangModule<maps>\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -713,6 +732,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -731,6 +751,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -763,6 +784,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "newOrExisting:type:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: true, spawns_block: false, return_type: Some("Ets".into()), param_types: vec![Some("Symbol".into()), Some("Symbol".into())], doc: Some("Create a named table or return the existing one.\n\nIf a table with the given name already exists, returns an `Ets` instance\nwrapping it. Otherwise creates a new table with the specified type.\nThis is useful in setUp/tearDown cycles where the previous owner may\nstill be alive.\n\n## Examples\n```beamtalk\ntable := Ets newOrExisting: #events type: #set\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -794,6 +816,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "signal".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Create and raise a new exception with the class name as the message.\n\n## Examples\n```beamtalk\nException signal\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -812,6 +835,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -838,6 +862,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -877,6 +902,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "tempDirectory".into(), arity: 0, kind: MethodKind::Primary, defined_in: "File".into(), is_sealed: true, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the OS temporary directory path (class method).\n\n## Examples\n```beamtalk\nFile tempDirectory\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -897,6 +923,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -958,6 +985,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "infinity".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, spawns_block: false, return_type: Some("Float".into()), param_types: vec![], doc: Some("Positive infinity.\n\nNote: BEAM does not support IEEE 754 infinity. This method\nis provided for API completeness but will raise an error.\nUse `isInfinite` to check (always returns false on BEAM).\n\n## Examples\n```beamtalk\nFloat infinity       // => ERROR: _\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -988,6 +1016,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "request:url:options:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None, Some("String".into()), Some("Dictionary".into())], doc: Some("Perform a one-shot generic request (class method).\n\nOptions dict may contain:\n  - `#headers` — List of [name, value] binary pairs\n  - `#body`    — Request body String\n  - `#timeout` — Timeout in milliseconds (default 30000)\n\n## Examples\n```beamtalk\nresp := HTTPClient request: #patch url: \"https://httpbin.org/patch\"\n  options: #{#body => \"{}\", #timeout => 5000}\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1023,6 +1052,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "method:path:headers:body:queryParams:params:".into(), arity: 6, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, spawns_block: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("String".into()), Some("String".into()), Some("List".into()), Some("String".into()), Some("Dictionary".into()), Some("Dictionary".into())], doc: Some("Creates a new `HTTPRequest`. Args: method (default: \"\"), path (default: \"/\"), headers (default: ...), body (default: \"\"), queryParams (default: ...), params (default: ...).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1053,6 +1083,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "status:headers:body:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: false, spawns_block: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("Integer".into()), Some("List".into()), Some("String".into())], doc: Some("Creates a new `HTTPResponse`. Args: status (default: 0), headers (default: ...), body (default: \"\").\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1086,6 +1117,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "method:path:handler:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, spawns_block: false, return_type: Some("HTTPRoute".into()), param_types: vec![Some("String".into()), Some("String".into()), None], doc: Some("Creates a new `HTTPRoute`. Args: method (default: \"\"), path (default: \"/\"), handler (default: nil).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1113,6 +1145,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1144,6 +1177,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "compiledRoutes:notFoundHandler:routeCount:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, spawns_block: false, return_type: Some("HTTPRouter".into()), param_types: vec![None, None, Some("Integer".into())], doc: Some("Creates a new `HTTPRouter`. Args: compiledRoutes (default: nil), notFoundHandler (default: nil), routeCount (default: 0).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1168,6 +1202,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "start:handler:options:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, spawns_block: false, return_type: Some("HTTPServer".into()), param_types: vec![Some("Integer".into()), None, Some("Dictionary".into())], doc: Some("Start an HTTP server with additional options.\n\nOptions:\n  - `#bind` — IP address to bind to (default `\"127.0.0.1\"`)\n\n## Examples\n```beamtalk\nsrv := HTTPServer start: 0 handler: handler\n  options: #{ #bind => \"0.0.0.0\" }\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1186,6 +1221,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1252,6 +1288,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1277,6 +1314,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1299,6 +1337,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "prettyPrint:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Json".into(), is_sealed: true, spawns_block: false, return_type: Some("String".into()), param_types: vec![Some("Object".into())], doc: Some("Generate a pretty-printed JSON string with indentation (class method).\n\n## Examples\n```beamtalk\nJson prettyPrint: #{\"name\" => \"Ada\", \"age\" => 36}\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1364,6 +1403,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("List".into())], doc: Some("Create a List from a list. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nList new: #(1, 2, 3)             // => #(1, 2, 3)\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1392,6 +1432,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "setLevel:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Symbol".into())], doc: Some("Set the primary log level at runtime.\n\nValid levels: #emergency, #alert, #critical, #error,\n#warning, #notice, #info, #debug\n\n## Examples\n```beamtalk\nLogger setLevel: #debug\n// => nil\nLogger setLevel: #warning\n// => nil\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1424,6 +1465,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Raises an error — metaclasses cannot be constructed directly.\n\nUse `x class class` to obtain a metaclass for a class `x`.\n\n## Examples\n```beamtalk\nMetaclass new   // => Error: 'Use x class class to obtain a metaclass'\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1454,6 +1496,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1475,6 +1518,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "run:timeout:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "OS".into(), is_sealed: true, spawns_block: false, return_type: Some("String".into()), param_types: vec![Some("String".into()), Some("Integer".into())], doc: Some("Execute a shell command with an explicit wall-clock timeout in milliseconds.\n\nBehaves like `run:` but the caller controls the deadline.\nRaises a `#timeout` error if the command has not exited within `ms` milliseconds.\n\n## Examples\n```beamtalk\nOS run: \"sleep 1\" timeout: 5000   // => \"\"\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1518,6 +1562,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1545,6 +1590,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1569,6 +1615,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1593,6 +1640,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1619,6 +1667,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: true, spawns_block: false, return_type: Some("Queue".into()), param_types: vec![], doc: Some("Create an empty Queue (class method).\n\n## Examples\n```beamtalk\nq := Queue new\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1646,6 +1695,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "seed:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: true, spawns_block: false, return_type: Some("Random".into()), param_types: vec![Some("Integer".into())], doc: Some("Create a new Random instance with a specific seed for reproducibility.\n\nTwo instances created with the same seed will produce the same\ndeterministic values for `next` and `nextInteger:` (for a given max).\n\n## Examples\n```beamtalk\nrng := Random seed: 42\nrng next                     // => deterministic value\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1671,6 +1721,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "open:args:env:dir:notify:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None, None, None, None, None], doc: Some("Open a subprocess with environment and working directory, delivering lines to `notify`.\n\n## Examples\n```beamtalk\nproc := (ReactiveSubprocess\n  open: \"make\" args: #(\"test\")\n  env: #{#\"CI\" => #\"true\"} dir: #\"/tmp\"\n  notify: delegate) unwrap\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1696,6 +1747,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1721,6 +1773,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "from:options:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: true, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("String".into()), Some("List".into())], doc: Some("Compile a regex pattern with PCRE options (class method).\n\nOptions: caseless, multiline, dotall, extended, ungreedy.\n\n## Examples\n```beamtalk\nRegex from: \"[a-z]+\" options: #(#caseless)\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1764,6 +1817,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "okValue:errReason:isOk:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("Object".into()), Some("Object".into()), Some("Boolean".into())], doc: Some("Creates a new `Result`. Args: okValue (default: nil), errReason (default: nil), isOk (default: true).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1782,6 +1836,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1802,6 +1857,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1839,6 +1895,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set".into()), param_types: vec![Some("List".into())], doc: Some("Create a Set from a list, deduplicating elements. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nSet new: #(1, 2, 2, 3)           // => Set(1, 2, 3)\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1866,6 +1923,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1902,6 +1960,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "on:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: true, spawns_block: false, return_type: Some("Stream".into()), param_types: vec![None], doc: Some("Create a Stream from a collection (list).\n\n## Examples\n```beamtalk\n(Stream on: #(1, 2, 3)) asList     // => #(1, 2, 3)\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -1986,6 +2045,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "fromIolist:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![None], doc: Some("Convert an Erlang iolist or charlist to a String binary.\n\nUseful for coercing the result of Erlang FFI calls that return\niolists (nested lists of binaries and integers) into a plain String.\n\n## Examples\n```beamtalk\nString fromIolist: #(104, 105)   // => \"hi\"\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2018,6 +2078,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "open:args:env:dir:".into(), arity: 4, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None, None, None, None], doc: Some("Convenience factory — open a subprocess with command, args, environment, and working directory.\n\n## Examples\n```beamtalk\nagent := (Subprocess open: \"make\" args: #(\"test\") env: #{#\"CI\" => #\"true\"} dir: #\"/tmp\") unwrap\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2054,6 +2115,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "id:actorClass:restart:args:shutdown:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None, None, Some("Symbol".into()), None, None], doc: Some("Creates a new `SupervisionSpec`. Args: id (default: nil), actorClass (default: nil), restart (default: #temporary), args (default: nil), shutdown (default: nil).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2087,6 +2149,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Return the running supervisor instance, or nil if not started.".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2113,6 +2176,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2143,6 +2207,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "uniqueId".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return a unique positive monotonic integer.\n\nEach call returns a value strictly greater than any previous call\nwithin this VM instance. Useful for generating unique IDs.\n\n## Examples\n```beamtalk\nSystem uniqueId\n// => _\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2179,6 +2244,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![None], doc: Some("Run the named test method in this class and print a summary.\n\n## Examples\n```beamtalk\nCounterTest run: #testIncrement\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2207,6 +2273,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2229,6 +2296,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "run:method:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "TestRunner".into(), is_sealed: false, spawns_block: false, return_type: Some("TestResult".into()), param_types: vec![None, None], doc: Some("Run a single named test method in `testClass`.\nReturns a TestResult containing just that method's outcome.\n\n## Examples\n```beamtalk\nresult := TestRunner run: CounterTest method: #testIncrement\nresult hasPassed       // => true\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2247,6 +2315,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2269,6 +2338,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "nowUs".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in microseconds since the Unix epoch.\n\nWraps `erlang:system_time(microsecond)`.\n\n## Examples\n```beamtalk\nTime nowUs   // => _\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2295,6 +2365,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "sleep:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Integer".into())], doc: Some("Block the current process for `ms` milliseconds.\n\n## Examples\n```beamtalk\nTimer sleep: 10    // => nil\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2324,6 +2395,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "resetCurrent".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Clear the current singleton instance (reset to nil).".into()) },
             ],
             class_variables: vec!["current".into()],
+            type_params: vec![],
         },
     );
 
@@ -2350,6 +2422,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2384,6 +2457,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false, spawns_block: false, return_type: Some("Tuple".into()), param_types: vec![Some("List".into())], doc: Some("Create a Tuple from a list. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nTuple new: #(1, 2, 3)            // => {1, 2, 3}\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2402,6 +2476,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2431,6 +2506,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2454,6 +2530,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Value".into(), is_sealed: true, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Create a new instance with initialization arguments.\n\n## Examples\n```beamtalk\nPoint new: #{#x => 3, #y => 4}\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 
@@ -2491,6 +2568,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("WorkspaceInterface".into())], doc: Some("Set the current singleton instance.".into()) },
             ],
             class_variables: vec!["current".into()],
+            type_params: vec![],
         },
     );
 
@@ -2514,6 +2592,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "parseFile:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Yaml".into(), is_sealed: true, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("String".into())], doc: Some("Parse a YAML file into a Beamtalk value (class method).\n\nReads the file at the given path and parses it as YAML.\nReturns the first document from the file.\n\n## Examples\n```beamtalk\n(Yaml parseFile: \"/etc/myapp.yaml\") unwrap   // => _\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
         },
     );
 

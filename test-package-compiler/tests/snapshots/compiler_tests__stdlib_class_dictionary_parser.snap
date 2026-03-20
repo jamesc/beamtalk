@@ -641,6 +641,7 @@ Module {
             },
             doc_comment: None,
             backing_module: None,
+            type_params: [],
             span: Span {
                 start: 247,
                 end: 763,

@@ -33,6 +33,16 @@ pub(super) enum DoubleColonSkip {
     Malformed(usize),
 }
 
+/// Returns `true` if the token kind is a comma binary selector.
+fn is_comma(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::BinarySelector(s) if s.as_str() == ",")
+}
+
+/// Returns `true` if the optional token kind is a comma binary selector.
+fn is_comma_opt(kind: Option<&TokenKind>) -> bool {
+    kind.is_some_and(is_comma)
+}
+
 impl Parser {
     // ========================================================================
     // Class Definition Parsing
@@ -104,6 +114,9 @@ impl Parser {
         // Parse class name
         let name = self.parse_identifier("Expected class name");
 
+        // Parse optional type parameters: `ClassName(T, E)`
+        let type_params = self.parse_optional_type_params();
+
         // Parse optional `native: module_name` (ADR 0056)
         let backing_module = if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "native:")
         {
@@ -158,12 +171,37 @@ impl Parser {
             span,
         );
         class_def.is_typed = is_typed;
+        class_def.type_params = type_params;
         class_def.class_methods = class_methods;
         class_def.class_variables = class_variables;
         class_def.doc_comment = doc_comment;
         class_def.comments = comments;
         class_def.backing_module = backing_module;
         class_def
+    }
+
+    /// Parses optional type parameters: `(T, E)`.
+    ///
+    /// Returns an empty `Vec` if no `(` follows the current position.
+    fn parse_optional_type_params(&mut self) -> Vec<Identifier> {
+        if !matches!(self.current_kind(), TokenKind::LeftParen) {
+            return Vec::new();
+        }
+        self.advance(); // consume `(`
+        let mut params = Vec::new();
+        if !matches!(self.current_kind(), TokenKind::RightParen) {
+            params.push(self.parse_identifier("Expected type parameter name"));
+            while is_comma(self.current_kind()) {
+                self.advance(); // consume `,`
+                params.push(self.parse_identifier("Expected type parameter name"));
+            }
+        }
+        if matches!(self.current_kind(), TokenKind::RightParen) {
+            self.advance(); // consume `)`
+        } else {
+            self.error("Expected ')' after type parameters");
+        }
+        params
     }
 
     /// Helper to parse an identifier, reporting an error if not found.
@@ -343,6 +381,12 @@ impl Parser {
             return DoubleColonSkip::Malformed(o);
         }
         o += 1;
+        // Skip generic type parameters: `Name(Type, Type, ...)`
+        if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+            if let Some(after) = self.skip_paren_type_params(o) {
+                o = after;
+            }
+        }
         // Skip union types: `| Type`
         while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
             o += 1;
@@ -350,8 +394,76 @@ impl Parser {
                 return DoubleColonSkip::Malformed(o);
             }
             o += 1;
+            // Skip generic type parameters on union member
+            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                if let Some(after) = self.skip_paren_type_params(o) {
+                    o = after;
+                }
+            }
         }
         DoubleColonSkip::Valid(o)
+    }
+
+    /// Skips a parenthesized type parameter list in lookahead context.
+    ///
+    /// Starting at the `(` token, advances past `(Type, Type, ...)` and returns
+    /// the offset after the closing `)`. Returns `None` if the sequence is
+    /// malformed (e.g., missing closing paren or non-identifier content).
+    pub(super) fn skip_paren_type_params(&self, offset: usize) -> Option<usize> {
+        debug_assert!(matches!(self.peek_at(offset), Some(TokenKind::LeftParen)));
+        let mut o = offset + 1; // past `(`
+        // Handle empty parens `()`
+        if matches!(self.peek_at(o), Some(TokenKind::RightParen)) {
+            return Some(o + 1);
+        }
+        // First type param
+        if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+            return None;
+        }
+        o += 1;
+        // Nested generic: `Name(Type(...))`
+        if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+            o = self.skip_paren_type_params(o)?;
+        }
+        // Union in type param position: `Type | Type`
+        while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
+            o += 1;
+            if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+                return None;
+            }
+            o += 1;
+            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                o = self.skip_paren_type_params(o)?;
+            }
+        }
+        // Additional type params: `, Type`
+        while is_comma_opt(self.peek_at(o)) {
+            o += 1;
+            if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+                return None;
+            }
+            o += 1;
+            // Nested generic
+            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                o = self.skip_paren_type_params(o)?;
+            }
+            // Union
+            while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
+                o += 1;
+                if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+                    return None;
+                }
+                o += 1;
+                if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                    o = self.skip_paren_type_params(o)?;
+                }
+            }
+        }
+        if matches!(self.peek_at(o), Some(TokenKind::RightParen)) {
+            Some(o + 1)
+        } else {
+            None
+        }
     }
 
     /// Checks if the token at `offset` starts a `=>` or `-> Type =>` pattern.
@@ -387,7 +499,7 @@ impl Parser {
         if !matches!(self.peek_at(offset), Some(TokenKind::Arrow)) {
             return false;
         }
-        // Skip -> Type (and possible | Type unions)
+        // Skip -> Type (and possible | Type unions, generic params)
         let mut o = offset + 1;
         // Allow `-> =>` (missing type) for error recovery
         if matches!(self.peek_at(o), Some(TokenKind::FatArrow)) {
@@ -398,6 +510,12 @@ impl Parser {
             return false;
         }
         o += 1;
+        // Skip generic type parameters: `Type(T, E)`
+        if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+            if let Some(after) = self.skip_paren_type_params(o) {
+                o = after;
+            }
+        }
         // Skip union types: `| Type`
         while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
             o += 1;
@@ -405,6 +523,12 @@ impl Parser {
                 return false;
             }
             o += 1;
+            // Skip generic params on union member
+            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                if let Some(after) = self.skip_paren_type_params(o) {
+                    o = after;
+                }
+            }
         }
         matches!(self.peek_at(o), Some(TokenKind::FatArrow))
     }
@@ -591,6 +715,11 @@ impl Parser {
     }
 
     /// Parses a single type annotation (no unions).
+    ///
+    /// Handles:
+    /// - Simple types: `Integer`, `String`
+    /// - Generic types: `Result(T, E)`, `Array(Integer)`, `Block(T, Result(R, E))`
+    /// - Self type: `Self`
     fn parse_single_type_annotation(&mut self) -> TypeAnnotation {
         if let TokenKind::Identifier(name) = self.current_kind() {
             let span = self.current_token().span();
@@ -600,7 +729,32 @@ impl Parser {
             } else {
                 let ident = Identifier::new(name.clone(), span);
                 self.advance();
-                TypeAnnotation::Simple(ident)
+
+                // Check for generic type parameters: `Name(Type, Type)`
+                if matches!(self.current_kind(), TokenKind::LeftParen) {
+                    self.advance(); // consume `(`
+                    let mut parameters = Vec::new();
+                    if !matches!(self.current_kind(), TokenKind::RightParen) {
+                        parameters.push(self.parse_type_annotation());
+                        while is_comma(self.current_kind()) {
+                            self.advance(); // consume `,`
+                            parameters.push(self.parse_type_annotation());
+                        }
+                    }
+                    let end_span = self.current_token().span();
+                    if matches!(self.current_kind(), TokenKind::RightParen) {
+                        self.advance(); // consume `)`
+                    } else {
+                        self.error("Expected ')' after generic type parameters");
+                    }
+                    TypeAnnotation::Generic {
+                        base: ident,
+                        parameters,
+                        span: span.merge(end_span),
+                    }
+                } else {
+                    TypeAnnotation::Simple(ident)
+                }
             }
         } else {
             let span = self.current_token().span();

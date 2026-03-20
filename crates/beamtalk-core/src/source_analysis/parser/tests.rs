@@ -3,7 +3,8 @@
 
 //! Tests for the Beamtalk recursive descent parser.
 use super::*;
-use crate::ast::DeclaredKeyword;
+use crate::ast::{DeclaredKeyword, Identifier, TypeAnnotation};
+use crate::source_analysis::Span;
 use crate::source_analysis::lex_with_eof;
 
 /// Helper to parse a string and check for errors.
@@ -5183,4 +5184,235 @@ fn mixed_state_and_field_declarations() {
         module.classes[0].state[1].declared_keyword,
         DeclaredKeyword::Field
     );
+}
+
+// ==========================================================================
+// Generic type annotation parsing (ADR 0068, BT-1568)
+// ==========================================================================
+
+#[test]
+fn parse_generic_class_definition_single_param() {
+    let module = parse_ok(
+        "Value subclass: Stack(E)
+  state: items = #[]",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Stack");
+    assert_eq!(class.type_params.len(), 1);
+    assert_eq!(class.type_params[0].name, "E");
+}
+
+#[test]
+fn parse_generic_class_definition_two_params() {
+    let module = parse_ok(
+        "sealed Value subclass: Result(T, E)
+  state: okValue = nil
+  state: errReason = nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Result");
+    assert!(class.is_sealed);
+    assert_eq!(class.type_params.len(), 2);
+    assert_eq!(class.type_params[0].name, "T");
+    assert_eq!(class.type_params[1].name, "E");
+    assert_eq!(class.state.len(), 2);
+}
+
+#[test]
+fn parse_generic_class_definition_no_params() {
+    let module = parse_ok(
+        "Actor subclass: Counter
+  state: value = 0",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Counter");
+    assert!(class.type_params.is_empty());
+}
+
+#[test]
+fn parse_generic_type_annotation_single() {
+    // `Array(Integer)` in a type annotation
+    let module = parse_ok(
+        "Actor subclass: Foo
+  state: items :: Array(Integer) = #[]",
+    );
+    let class = &module.classes[0];
+    let state = &class.state[0];
+    let ty = state.type_annotation.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ty
+    {
+        assert_eq!(base.name, "Array");
+        assert_eq!(parameters.len(), 1);
+        assert!(matches!(&parameters[0], TypeAnnotation::Simple(id) if id.name == "Integer"));
+    } else {
+        panic!("Expected Generic type annotation, got: {ty:?}");
+    }
+}
+
+#[test]
+fn parse_generic_type_annotation_result() {
+    // `Result(T, E)` in a type annotation
+    let module = parse_ok(
+        "Actor subclass: Foo
+  state: result :: Result(String, IOError) = nil",
+    );
+    let ty = module.classes[0].state[0].type_annotation.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ty
+    {
+        assert_eq!(base.name, "Result");
+        assert_eq!(parameters.len(), 2);
+        assert!(matches!(&parameters[0], TypeAnnotation::Simple(id) if id.name == "String"));
+        assert!(matches!(&parameters[1], TypeAnnotation::Simple(id) if id.name == "IOError"));
+    } else {
+        panic!("Expected Generic type annotation, got: {ty:?}");
+    }
+}
+
+#[test]
+fn parse_generic_type_annotation_nested() {
+    // `Block(T, Result(R, E))` — nested generic type
+    let module = parse_ok(
+        "Actor subclass: Foo
+  state: handler :: Block(T, Result(R, E)) = nil",
+    );
+    let ty = module.classes[0].state[0].type_annotation.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base,
+        parameters: params,
+        ..
+    } = ty
+    {
+        assert_eq!(base.name, "Block");
+        assert_eq!(params.len(), 2);
+        assert!(matches!(&params[0], TypeAnnotation::Simple(id) if id.name == "T"));
+        if let TypeAnnotation::Generic {
+            base: inner_base,
+            parameters: inner_params,
+            ..
+        } = &params[1]
+        {
+            assert_eq!(inner_base.name, "Result");
+            assert_eq!(inner_params.len(), 2);
+            assert!(matches!(&inner_params[0], TypeAnnotation::Simple(id) if id.name == "R"));
+            assert!(matches!(&inner_params[1], TypeAnnotation::Simple(id) if id.name == "E"));
+        } else {
+            panic!("Expected nested Generic, got: {:?}", params[1]);
+        }
+    } else {
+        panic!("Expected Generic type annotation, got: {ty:?}");
+    }
+}
+
+#[test]
+fn parse_generic_type_in_method_return_type() {
+    // Method with `-> Result(Integer, Error)` return type
+    let module = parse_ok(
+        "Actor subclass: Foo
+  compute -> Result(Integer, Error) => nil",
+    );
+    let method = &module.classes[0].methods[0];
+    let ret_ty = method.return_type.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ret_ty
+    {
+        assert_eq!(base.name, "Result");
+        assert_eq!(parameters.len(), 2);
+    } else {
+        panic!("Expected Generic return type, got: {ret_ty:?}");
+    }
+}
+
+#[test]
+fn parse_generic_type_in_method_param() {
+    // Method with `block :: Block(T, R)` parameter type
+    let module = parse_ok(
+        "Actor subclass: Foo
+  map: block :: Block(T, R) -> Result(R, E) => nil",
+    );
+    let method = &module.classes[0].methods[0];
+    let param_ty = method.parameters[0].type_annotation.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = param_ty
+    {
+        assert_eq!(base.name, "Block");
+        assert_eq!(parameters.len(), 2);
+    } else {
+        panic!("Expected Generic param type, got: {param_ty:?}");
+    }
+    let ret_ty = method.return_type.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ret_ty
+    {
+        assert_eq!(base.name, "Result");
+        assert_eq!(parameters.len(), 2);
+    } else {
+        panic!("Expected Generic return type, got: {ret_ty:?}");
+    }
+}
+
+#[test]
+fn parse_generic_type_name_uses_parentheses() {
+    // `type_name()` should produce `Collection(Integer)` not `Collection<Integer>`
+    let ty = TypeAnnotation::generic(
+        Identifier::new("Collection", Span::new(0, 10)),
+        vec![TypeAnnotation::simple("Integer", Span::new(11, 18))],
+        Span::new(0, 19),
+    );
+    assert_eq!(ty.type_name(), "Collection(Integer)");
+
+    let ty2 = TypeAnnotation::generic(
+        Identifier::new("Result", Span::new(0, 6)),
+        vec![
+            TypeAnnotation::simple("String", Span::new(7, 13)),
+            TypeAnnotation::simple("Error", Span::new(15, 20)),
+        ],
+        Span::new(0, 21),
+    );
+    assert_eq!(ty2.type_name(), "Result(String, Error)");
+}
+
+#[test]
+fn parse_generic_class_with_native_module() {
+    // Generic class with native: backing module
+    let module = parse_ok(
+        "Actor subclass: Cache(K, V) native: beamtalk_cache
+  getValue: key :: K -> V => nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Cache");
+    assert_eq!(class.type_params.len(), 2);
+    assert_eq!(class.type_params[0].name, "K");
+    assert_eq!(class.type_params[1].name, "V");
+    assert!(class.backing_module.is_some());
+    assert_eq!(
+        class.backing_module.as_ref().unwrap().name,
+        "beamtalk_cache"
+    );
+}
+
+#[test]
+fn parse_generic_union_with_generic_member() {
+    // `Result(Integer, Error) | nil` — union with a generic member
+    let module = parse_ok(
+        "Actor subclass: Foo
+  state: result :: Result(Integer, Error) | nil = nil",
+    );
+    let ty = module.classes[0].state[0].type_annotation.as_ref().unwrap();
+    if let TypeAnnotation::Union { types, .. } = ty {
+        assert_eq!(types.len(), 2);
+        assert!(
+            matches!(&types[0], TypeAnnotation::Generic { base, parameters, .. }
+            if base.name == "Result" && parameters.len() == 2)
+        );
+    } else {
+        panic!("Expected Union type, got: {ty:?}");
+    }
 }
