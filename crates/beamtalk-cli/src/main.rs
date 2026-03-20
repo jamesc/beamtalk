@@ -201,7 +201,7 @@ enum Command {
         no_warnings: bool,
 
         /// Treat warnings and hints as errors — fail if any are emitted
-        #[arg(long)]
+        #[arg(long, conflicts_with = "no_warnings")]
         warnings_as_errors: bool,
 
         /// Suppress per-file output, show only summary
@@ -225,7 +225,7 @@ enum Command {
         no_warnings: bool,
 
         /// Treat warnings and hints as errors — fail if any are emitted
-        #[arg(long)]
+        #[arg(long, conflicts_with = "no_warnings")]
         warnings_as_errors: bool,
 
         /// Suppress per-file output, show only summary
