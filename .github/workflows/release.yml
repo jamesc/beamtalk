@@ -78,17 +78,8 @@ jobs:
             ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
             ${{ runner.os }}-erlang-otp-27.0-
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-release-
-            ${{ runner.os }}-cargo-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Build distribution
         run: just dist
@@ -157,17 +148,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-x86_64-erlang-otp-27.0-
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-x86_64-cargo-release-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-x86_64-cargo-release-
-            ${{ runner.os }}-cargo-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Build and install distribution
         run: just install dist
@@ -236,17 +218,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-arm64-erlang-otp-27.0-
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-arm64-cargo-release-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-arm64-cargo-release-
-            ${{ runner.os }}-cargo-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Build and install distribution
         run: just install dist
@@ -314,16 +287,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-erlang-otp-27.0-
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-release-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Build Rust (release)
         run: cargo build --all-targets --release --quiet
