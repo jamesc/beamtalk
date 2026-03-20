@@ -124,13 +124,20 @@ r map: [:v | v asString]   // Block param T → Integer, return Result(String, E
 r error           // Return type E → Error ✅
 ```
 
-When the concrete type parameters are unknown (no annotation, no inference context), type parameters fall back to `Dynamic` — preserving the current behavior:
+When the concrete type parameters are unknown — because the value comes from a method whose return type is bare `Result` with no type params — they fall back to `Dynamic`, preserving the current behavior:
 
 ```beamtalk
-r := Result ok: 42         // r is Result (no type params inferred)
-r unwrap                   // → Dynamic (T is unknown)
+// someMethod's return type is just -> Result (no type params declared)
+r := someMethod
+r unwrap                   // → Dynamic (T is unknown — no annotation, no inference context)
 r unwrap + 1               // No warning — Dynamic bypasses checking
+
+// Fix: annotate the variable to provide type context
+r :: Result(Integer, Error) := someMethod
+r unwrap + 1               // ✅ Integer has '+'
 ```
+
+Note that constructor calls like `Result ok: 42` **do** infer type params from their arguments (see Constructor Type Inference above). The Dynamic fallback only applies when type params are genuinely unknowable — typically from unparameterized method return types or Erlang FFI calls.
 
 #### Constructor Type Inference
 
