@@ -411,9 +411,9 @@ Collection(E) subclass: Array(E)
   // Inherited from Collection: select: -> Self
   // For Array(Integer), Self should be Array(Integer), not bare Array
 
-arr :: Array(Integer) := #(1, 2, 3)
+arr :: List(Integer) := List withAll: #[1, 2, 3]
 filtered := arr select: [:x | x > 1]
-// filtered should be Array(Integer), not Array(Dynamic)
+// filtered should be List(Integer), not List(Dynamic)
 ```
 
 **Solution: Extend `InferredType::Known` to carry optional type arguments and provenance.**
@@ -556,8 +556,8 @@ Protocol define: Collection(E)
   /// Iterate over each element, evaluating the block for side effects.
   do: block :: Block(E, Object)
 
-  /// Transform each element, returning a new collection of results.
-  collect: block :: Block(E, Object) -> Array(Object)
+  /// Transform each element, returning a new collection of the same kind.
+  collect: block :: Block(E, Object) -> Self
 
   /// Return elements matching the predicate.
   select: block :: Block(E, Boolean) -> Self
@@ -834,8 +834,9 @@ sealed Value subclass: Result[T, E]
 ```
 
 **Rejected because:**
-- Square brackets are used for array/block literals: `[1, 2, 3]` and `[:x | x + 1]`
+- Square brackets are used for block literals: `[:x | x + 1]`
 - `Array[Integer]` is visually ambiguous with `Array` followed by a block literal
+- Array literals use `#[1, 2, 3]` — `Array[Integer]` could be confused with a hash-prefixed literal
 - Parentheses don't have this collision
 
 ### Alternative C: No Class-Level Declaration — Infer Everything
