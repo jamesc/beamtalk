@@ -430,19 +430,32 @@ Protocols define named message sets. A class conforms to a protocol if it respon
 
 ```beamtalk
 Protocol define: Printable
-  requiring: [asString -> String]
+  /// Return a human-readable string representation.
+  asString -> String
 
 Protocol define: Comparable
-  requiring: [< :: Self -> Boolean, > :: Self -> Boolean,
-              <= :: Self -> Boolean, >= :: Self -> Boolean]
+  < other :: Self -> Boolean
+  > other :: Self -> Boolean
+  <= other :: Self -> Boolean
+  >= other :: Self -> Boolean
 
 Protocol define: Collection(E)
-  requiring: [size -> Integer, do: :: Block(E, Object),
-              collect: :: Block(E, Object) -> Array(Object),
-              select: :: Block(E, Boolean) -> Self]
+  /// The number of elements in this collection.
+  size -> Integer
+
+  /// Iterate over each element, evaluating the block for side effects.
+  do: block :: Block(E, Object)
+
+  /// Transform each element, returning a new collection of results.
+  collect: block :: Block(E, Object) -> Array(Object)
+
+  /// Return elements matching the predicate.
+  select: block :: Block(E, Boolean) -> Self
 ```
 
-Protocol names are **bare identifiers** (uppercase, like class names). Protocols and classes share a single namespace — having both a class and a protocol named `Printable` is a compile error. Required methods use the same `:: Type` and `-> ReturnType` annotation syntax as regular methods.
+Protocol bodies use **class-body style** — method signatures without `=>` implementations. This supports parameter names, type annotations, return types, and doc comments on each required method. The parser distinguishes protocol method signatures from class method definitions by the absence of `=>`.
+
+Protocol names are **bare identifiers** (uppercase, like class names). Protocols and classes share a single namespace — having both a class and a protocol named `Printable` is a compile error.
 
 #### Protocol Type Syntax
 
@@ -496,7 +509,7 @@ display: someUnknownValue
 => #(Printable, Comparable)
 
 > Printable requiredMethods
-=> #(asString)
+=> #(#asString)
 
 > Printable conformingClasses
 => #(Integer, Float, String, Boolean, Symbol, Array, ...)
@@ -513,7 +526,8 @@ sort: items :: Collection(Object) & Comparable => ...
 // Protocol extending another
 Protocol define: Sortable
   extending: Comparable
-  requiring: [sortKey -> Object]
+  /// The key used for sort ordering.
+  sortKey -> Object
 ```
 
 #### Generic Protocol Bounds (Connecting Stages 1 and 2)
@@ -805,8 +819,9 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 ### Stage 2: Structural Protocols (Size: L)
 
 **Phase 2a: Protocol AST and Parser (M)**
-- Add `ProtocolDefinition` to `ast.rs`: name, type params, required methods with signatures, span
-- Parse `Protocol define: Name requiring: [...]` syntax
+- Add `ProtocolDefinition` to `ast.rs`: name, type params, required method signatures (with param names, types, return types, doc comments), span
+- Parse `Protocol define: Name` followed by class-body-style method signatures (no `=>` body)
+- Distinguish protocol method signatures from class method definitions by absence of `=>`
 - Protocol names resolve to protocol objects in the same namespace as classes
 
 **Phase 2b: Protocol Registry and Conformance (L)**
