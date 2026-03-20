@@ -382,7 +382,14 @@ fn generate_bunit_wrappers(
 ///
 /// Files with no ` ```beamtalk ` blocks are skipped silently.
 #[instrument(skip_all)]
-pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> Result<()> {
+#[allow(clippy::fn_params_excessive_bools)]
+pub fn run_tests(
+    path: &str,
+    no_warnings: bool,
+    warnings_as_errors: bool,
+    quiet: bool,
+    verbose: bool,
+) -> Result<()> {
     info!("Starting doctest run");
 
     let test_path = Utf8PathBuf::from(path);
@@ -440,8 +447,9 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
     let mut all_fixture_modules: Vec<String> = Vec::new();
 
     for (md_path, btscript_path) in &btscript_files {
-        let result = compile_single_test_file(btscript_path, &build_dir, no_warnings)
-            .wrap_err_with(|| format!("Failed to compile doctests from '{md_path}'"))?;
+        let result =
+            compile_single_test_file(btscript_path, &build_dir, no_warnings, warnings_as_errors)
+                .wrap_err_with(|| format!("Failed to compile doctests from '{md_path}'"))?;
 
         all_core_files.extend(result.core_files);
         all_erl_files.push(result.erl_file);

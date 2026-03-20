@@ -200,6 +200,10 @@ enum Command {
         #[arg(long)]
         no_warnings: bool,
 
+        /// Treat warnings and hints as errors — fail if any are emitted
+        #[arg(long)]
+        warnings_as_errors: bool,
+
         /// Suppress per-file output, show only summary
         #[arg(long, short)]
         quiet: bool,
@@ -219,6 +223,10 @@ enum Command {
         /// Suppress warning diagnostics when compiling test fixtures
         #[arg(long)]
         no_warnings: bool,
+
+        /// Treat warnings and hints as errors — fail if any are emitted
+        #[arg(long)]
+        warnings_as_errors: bool,
 
         /// Suppress per-file output, show only summary
         #[arg(long, short)]
@@ -431,15 +439,29 @@ fn run() -> Result<()> {
         Command::TestScript {
             path,
             no_warnings,
+            warnings_as_errors,
             quiet,
             show_output,
-        } => commands::test_stdlib::run_tests(&path, no_warnings, quiet, show_output),
+        } => commands::test_stdlib::run_tests(
+            &path,
+            no_warnings,
+            warnings_as_errors,
+            quiet,
+            show_output,
+        ),
         Command::TestDocs {
             path,
             no_warnings,
+            warnings_as_errors,
             quiet,
             show_output,
-        } => commands::test_docs::run_tests(&path, no_warnings, quiet, show_output),
+        } => commands::test_docs::run_tests(
+            &path,
+            no_warnings,
+            warnings_as_errors,
+            quiet,
+            show_output,
+        ),
         Command::Test {
             path,
             warnings_as_errors,

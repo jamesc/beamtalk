@@ -379,6 +379,7 @@ fn compile_fixture(
     fixture_path: &Utf8Path,
     output_dir: &Utf8Path,
     suppress_warnings: bool,
+    warnings_as_errors: bool,
 ) -> Result<()> {
     let stem = fixture_path
         .file_stem()
@@ -401,7 +402,7 @@ fn compile_fixture(
         // paired with `// =>` comments. Skip the module-expression lint to avoid
         // false positives on intentional assertion expressions.
         skip_module_expression_lint: true,
-        warnings_as_errors: false,
+        warnings_as_errors,
     };
 
     crate::beam_compiler::compile_source(fixture_path, &module_name, &core_file, &options)
@@ -436,7 +437,14 @@ pub(crate) struct CompiledTestFile {
 /// `// =>` assertions, compiles expressions to Core Erlang, generates
 /// `EUnit` wrappers, and runs all tests in a single BEAM process.
 #[instrument(skip_all)]
-pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> Result<()> {
+#[allow(clippy::fn_params_excessive_bools)]
+pub fn run_tests(
+    path: &str,
+    no_warnings: bool,
+    warnings_as_errors: bool,
+    quiet: bool,
+    verbose: bool,
+) -> Result<()> {
     info!("Starting stdlib test run");
 
     let test_path = Utf8PathBuf::from(path);
@@ -470,7 +478,8 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
     let mut all_fixture_modules = Vec::new();
 
     for test_file in &test_files {
-        let result = compile_single_test_file(test_file, &build_dir, no_warnings)?;
+        let result =
+            compile_single_test_file(test_file, &build_dir, no_warnings, warnings_as_errors)?;
         all_core_files.extend(result.core_files);
         all_erl_files.push(result.erl_file);
         all_fixture_modules.extend(result.fixture_modules);
@@ -611,6 +620,7 @@ pub(crate) fn compile_single_test_file(
     test_file: &Utf8Path,
     build_dir: &Utf8Path,
     suppress_warnings: bool,
+    warnings_as_errors: bool,
 ) -> Result<CompilationResult> {
     let content = fs::read_to_string(test_file)
         .into_diagnostic()
@@ -641,7 +651,12 @@ pub(crate) fn compile_single_test_file(
                 test_file
             );
         }
-        compile_fixture(&fixture_path, build_dir, suppress_warnings)?;
+        compile_fixture(
+            &fixture_path,
+            build_dir,
+            suppress_warnings,
+            warnings_as_errors,
+        )?;
         // Track fixture module name for code:ensure_loaded at runtime
         if let Some(stem) = fixture_path.file_stem() {
             let module_name = format!(
