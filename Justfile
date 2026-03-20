@@ -259,8 +259,8 @@ lint-beamtalk: fmt-check-beamtalk
 # Lint Rust: clippy + formatting check
 lint-rust: clippy fmt-check-rust
 
-# Lint Erlang: Dialyzer type checking + format check
-lint-erlang: dialyzer fmt-check-erlang
+# Lint Erlang: Dialyzer type checking + format check + generated spec validation
+lint-erlang: dialyzer dialyzer-specs fmt-check-erlang
 
 # Lint JS/TS: Biome lint + format check
 [working-directory: 'editors/vscode']
@@ -347,6 +347,24 @@ fmt-check-beamtalk:
 dialyzer:
     @echo "🔬 Running Dialyzer type checking..."
     rebar3 dialyzer
+
+# Validate Dialyzer -spec attributes generated from Beamtalk type annotations.
+# Compiles stdlib .bt sources to Core Erlang, extracts spec attributes, builds
+# BEAM stubs with those specs embedded, and runs Dialyzer to verify well-formedness.
+[unix]
+dialyzer-specs: build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔬 Validating generated -spec attributes..."
+    # Compile stdlib to Core Erlang (preserves .core files)
+    CORE_DIR=$(mktemp -d)
+    trap 'rm -rf "$CORE_DIR"' EXIT
+    # Copy .bt sources and build in temp dir to get .core files
+    cp stdlib/src/*.bt "$CORE_DIR/"
+    cargo run --bin beamtalk --quiet -- build --stdlib-mode "$CORE_DIR/"
+    # Run spec validation on the generated .core files
+    escript scripts/validate_specs.escript "$CORE_DIR/build/"
+    echo "✅ All generated specs are valid"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Testing
