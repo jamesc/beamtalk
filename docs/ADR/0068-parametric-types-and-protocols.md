@@ -252,6 +252,47 @@ x :: Result(Integer, Error) := Result ok: "hello"
 // ⚠️ Warning: Result(Integer, Error) expected Integer for T, got String
 ```
 
+#### Control Flow Narrowing (Simple Cases)
+
+When the type checker recognises a type-testing message send followed by `ifTrue:` / `ifFalse:`, it narrows the variable's type inside the block scope:
+
+```beamtalk
+// class identity check — narrows to exact class
+process: x :: Object =>
+  x class = Integer ifTrue: [
+    x + 1          // ✅ x is Integer here — has '+'
+  ]
+  x + 1            // ⚠️ x is Object here — no narrowing outside the block
+
+// kind check — narrows to class including subclasses
+process: x :: Object =>
+  x isKindOf: Number ifTrue: [
+    x abs           // ✅ x is Number here
+  ]
+
+// early return narrows the rest of the method
+validate: x :: Object =>
+  x isNil ifTrue: [^nil]
+  x doSomething    // ✅ x is non-nil for the remainder — narrowed by early return
+```
+
+**Supported narrowing patterns (Stage 1):**
+
+| Pattern | Narrows to | Scope |
+|---|---|---|
+| `x class = Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
+| `x isKindOf: Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
+| `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
+| `x isNil ifTrue: [^...] ifFalse: [...]` | `x` is non-nil in false block | False block |
+
+**Not supported in Stage 1:**
+- `respondsTo:` narrowing (requires protocol integration — Stage 2)
+- False-branch complement types (`ifFalse:` knowing "x is NOT Integer" — requires difference types)
+- Narrowing through `and:`/`or:` chains
+- Narrowing stored in variables (`isValid := x class = Integer; isValid ifTrue: [...]`)
+
+These can be added incrementally — each new pattern is a new AST shape to recognise, not a new mechanism.
+
 #### What Is NOT Included in Stage 1
 
 - **Variance rules** (covariance/contravariance): All type parameters are invariant. `Result(Integer, E)` is not assignable to `Result(Number, E)`. Variance can be added later without breaking changes.
@@ -416,7 +457,24 @@ When the type checker resolves an inherited method, it composes the substitution
 
 This works because class methods conceptually construct instances — they are the bridge between the unparameterized class object and parameterized instances. The type checker treats class method calls on generic classes as implicit type application sites.
 
-#### Challenge 6: @primitive Methods in Generic Classes
+#### Challenge 6: Control Flow Narrowing Through Blocks
+
+TypeScript narrows types inside `if` branches — lexical scopes that the compiler directly controls. In Beamtalk, `ifTrue:` takes a **block argument** — a closure. The type checker needs to recognise that certain message patterns create narrowing contexts and thread the narrowed type into the block's scope.
+
+**Solution: Pattern-match on the AST shape, not on general message semantics.** The type checker recognises a fixed set of narrowing idioms:
+
+1. When visiting a message send like `[expr] class = [ClassName] ifTrue: [block]`, the checker:
+   - Identifies the cascade: binary send `class =` producing a Boolean, followed by `ifTrue:` with a block argument
+   - Determines which variable `expr` refers to
+   - Pushes a scope refinement `{variable → ClassName}` into the block's scope before type-checking the block body
+
+2. For early-return narrowing (`x isNil ifTrue: [^nil]`), the checker:
+   - Recognises the block contains a non-local return (`^`)
+   - After the statement, pushes the complement refinement (x is non-nil) into the current method scope for all subsequent statements
+
+This is **not** a general narrowing framework — it's a small set of recognised patterns. Each new pattern (e.g., `respondsTo:` in Stage 2) is a new case in the pattern matcher, not a new mechanism. The type checker already walks the AST and already has scoped environments; narrowing adds refinement entries to those environments.
+
+#### Challenge 7: @primitive Methods in Generic Classes
 
 `Array(E)`, `Dictionary(K, V)`, and `Block` methods are `@primitive` — dispatched to Erlang functions that know nothing about type parameters. The type params exist only in annotations.
 
@@ -859,6 +917,13 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 - Update collection classes: `Array(E)`, `Dictionary(K, V)`, `Set(E)`
 - Update `Block` types if applicable
 
+**Phase 1f: Control Flow Narrowing (M)**
+- Add narrowing environment to scope: `HashMap<VariableId, InferredType>` refinement layer pushed/popped per block
+- Pattern-match `[expr] class = [ClassName] ifTrue: [block]` — push `{expr → ClassName}` into block scope
+- Pattern-match `[expr] isKindOf: [ClassName] ifTrue: [block]` — same narrowing
+- Early-return narrowing: `[expr] isNil ifTrue: [^...]` — push non-nil refinement for rest of method
+- `ifFalse:` gets the complement for nil checks (`isNil ifTrue: [^...] ifFalse: [block]` — `expr` is non-nil in false block)
+
 ### Stage 2: Structural Protocols (Size: L)
 
 **Phase 2a: Protocol AST and Parser (M)**
@@ -892,10 +957,12 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 | 1c | Constructor type inference | M | 1b |
 | 1d | Codegen — Dialyzer specs and runtime meta for generics | M | 1a |
 | 1e | Stdlib generic annotations | M | 1a, 1b |
+| 1f | Control flow narrowing (class =, isKindOf:, isNil) | M | 1b |
 | 2a | Protocol AST and parser | M | None (parallel with 1) |
 | 2b | Protocol registry and conformance | L | 2a, 1b |
 | 2c | Runtime protocol queries | M | 2b |
 | 2d | Type parameter bounds | S | 1b, 2b |
+| 2e | respondsTo: narrowing | S | 1f, 2b |
 
 ## Migration Path
 
