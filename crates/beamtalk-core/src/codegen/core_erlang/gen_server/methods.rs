@@ -2588,6 +2588,7 @@ mod tests {
         let module = Module {
             classes: vec![],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -2607,6 +2608,7 @@ mod tests {
         let module = Module {
             classes: vec![empty_actor_class("Counter")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],

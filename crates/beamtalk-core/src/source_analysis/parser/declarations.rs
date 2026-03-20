@@ -9,9 +9,10 @@
 //! - Method definitions with optional `sealed` modifier
 
 use crate::ast::{
-    ClassDefinition, DeclaredKeyword, Expression, ExpressionStatement, Identifier, KeywordPart,
-    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition, StandaloneMethodDefinition,
-    StateDeclaration, TypeAnnotation,
+    ClassDefinition, CommentAttachment, DeclaredKeyword, Expression, ExpressionStatement,
+    Identifier, KeywordPart, MessageSelector, MethodDefinition, MethodKind, ParameterDefinition,
+    ProtocolDefinition, ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration,
+    TypeAnnotation,
 };
 use crate::source_analysis::TokenKind;
 
@@ -245,6 +246,7 @@ impl Parser {
 
         while !self.is_at_end()
             && !self.is_at_class_definition()
+            && !self.is_at_protocol_definition()
             && !self.is_at_standalone_method_definition()
         {
             // Check for state/field declaration: `state: fieldName ...` or `field: fieldName ...`
@@ -969,6 +971,7 @@ impl Parser {
         #[allow(clippy::nonminimal_bool)]
         while !self.is_at_end()
             && !self.is_at_class_definition()
+            && !self.is_at_protocol_definition()
             && !(
                 // Only test is_at_method_definition when the token could plausibly
                 // be a class member (indentation <= 2). Deeper tokens are continuation
@@ -1016,6 +1019,7 @@ impl Parser {
                 // If synchronize stopped at a method/class/state boundary, break
                 if self.is_at_end()
                     || self.is_at_class_definition()
+                    || self.is_at_protocol_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
@@ -1032,6 +1036,7 @@ impl Parser {
                 let period_span = self.tokens[self.current - 1].span();
                 if self.is_at_end()
                     || self.is_at_class_definition()
+                    || self.is_at_protocol_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
@@ -1070,6 +1075,7 @@ impl Parser {
                 // Check if next token starts a new method/state/class (same as period)
                 if self.is_at_end()
                     || self.is_at_class_definition()
+                    || self.is_at_protocol_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
@@ -1157,5 +1163,256 @@ impl Parser {
             method,
             span,
         }
+    }
+
+    // ========================================================================
+    // Protocol Definition Parsing (ADR 0068, Phase 2a)
+    // ========================================================================
+
+    /// Parses a protocol definition.
+    ///
+    /// Syntax:
+    /// ```text
+    /// Protocol define: <Name>
+    ///   extending: <OtherProtocol>        // optional
+    ///   selectorName -> ReturnType
+    ///   + other :: Self -> Boolean
+    ///   doSomething: arg :: Type -> ReturnType
+    /// ```
+    ///
+    /// Protocol method signatures are like method definitions but without `=>` bodies.
+    /// The parser distinguishes them from class methods by the absence of `=>`.
+    pub(super) fn parse_protocol_definition(&mut self) -> ProtocolDefinition {
+        let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
+
+        // Consume `Protocol`
+        self.advance();
+
+        // Expect `define:` keyword
+        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "define:") {
+            self.error("Expected 'define:' after 'Protocol'");
+            return ProtocolDefinition {
+                name: Identifier::new("Error", start),
+                type_params: Vec::new(),
+                extending: None,
+                method_signatures: Vec::new(),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: start,
+            };
+        }
+        self.advance(); // consume `define:`
+
+        // Parse protocol name
+        let name = self.parse_identifier("Expected protocol name after 'Protocol define:'");
+
+        // Parse optional type parameters: `Collection(E)`, `Mapping(K, V)`
+        let type_params = self.parse_optional_type_params();
+
+        // Parse optional `extending:` clause
+        let extending = if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "extending:")
+        {
+            self.advance(); // consume `extending:`
+            Some(self.parse_identifier("Expected protocol name after 'extending:'"))
+        } else {
+            None
+        };
+
+        // Parse protocol body (method signatures without =>)
+        let method_signatures = self.parse_protocol_body();
+
+        // Determine end span
+        let mut end = name.span;
+        if let Some(tp) = type_params.last() {
+            end = end.merge(tp.span);
+        }
+        if let Some(ref ext) = extending {
+            end = end.merge(ext.span);
+        }
+        if let Some(sig) = method_signatures.last() {
+            end = end.merge(sig.span);
+        }
+        let span = start.merge(end);
+
+        ProtocolDefinition {
+            name,
+            type_params,
+            extending,
+            method_signatures,
+            comments,
+            doc_comment,
+            span,
+        }
+    }
+
+    /// Parses the body of a protocol definition (method signatures without `=>`).
+    ///
+    /// Protocol method signatures have the same selector and parameter syntax as
+    /// class methods, but end before `=>`. They may include optional type annotations
+    /// and return types.
+    ///
+    /// The body ends when we hit:
+    /// - EOF
+    /// - Another protocol definition (`Protocol define:`)
+    /// - A class definition (`Superclass subclass:`)
+    /// - A standalone method definition (`Class >>`)
+    fn parse_protocol_body(&mut self) -> Vec<ProtocolMethodSignature> {
+        let mut signatures = Vec::new();
+
+        // Skip any periods/statement terminators
+        while self.match_token(&TokenKind::Period) {}
+
+        while !self.is_at_end()
+            && !self.is_at_protocol_definition()
+            && !self.is_at_class_definition()
+            && !self.is_at_standalone_method_definition()
+        {
+            if let Some(sig) = self.parse_protocol_method_signature() {
+                signatures.push(sig);
+            } else {
+                // Not a valid signature start — end of protocol body
+                break;
+            }
+
+            // Skip any periods/statement terminators
+            while self.match_token(&TokenKind::Period) {}
+        }
+
+        signatures
+    }
+
+    /// Parses a single protocol method signature (no `=>` body).
+    ///
+    /// Returns `None` if the current position doesn't look like a method signature.
+    ///
+    /// Syntax:
+    /// - Unary: `asString -> String`
+    /// - Binary: `< other :: Self -> Boolean`
+    /// - Keyword: `do: block :: Block(E, Object)`
+    fn parse_protocol_method_signature(&mut self) -> Option<ProtocolMethodSignature> {
+        let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
+
+        // Determine what kind of signature this is
+        let (selector, parameters) = match self.current_kind() {
+            // Unary: identifier (not followed by `=>`, not a known delimiter keyword)
+            TokenKind::Identifier(name) => {
+                // Guard against consuming non-signature identifiers
+                // (e.g., `Protocol` starting the next definition)
+                if name == "Protocol" || name == "abstract" || name == "sealed" || name == "typed" {
+                    return None;
+                }
+                let selector = MessageSelector::Unary(name.clone());
+                self.advance();
+                (selector, Vec::new())
+            }
+            // Binary: `+ other`, `< other`, etc.
+            TokenKind::BinarySelector(op) => {
+                let selector = MessageSelector::Binary(op.clone());
+                self.advance();
+
+                let param_name =
+                    self.parse_identifier("Expected parameter name after binary selector");
+                let type_annotation = self.parse_optional_param_type();
+                let param = match type_annotation {
+                    Some(ta) => ParameterDefinition::with_type(param_name, ta),
+                    None => ParameterDefinition::new(param_name),
+                };
+                (selector, vec![param])
+            }
+            // Arrow (`->`) is also a valid binary method selector (ADR 0047)
+            TokenKind::Arrow => {
+                let selector = MessageSelector::Binary("->".into());
+                self.advance();
+
+                let param_name =
+                    self.parse_identifier("Expected parameter name after binary selector");
+                let type_annotation = self.parse_optional_param_type();
+                let param = match type_annotation {
+                    Some(ta) => ParameterDefinition::with_type(param_name, ta),
+                    None => ParameterDefinition::new(param_name),
+                };
+                (selector, vec![param])
+            }
+            // Keyword: `do: block :: Block(E, Object)`
+            TokenKind::Keyword(kw) => {
+                // Guard: `extending:` is the protocol extension keyword, not a selector
+                if kw == "extending:" {
+                    return None;
+                }
+                let mut keywords = Vec::new();
+                let mut parameters = Vec::new();
+
+                while let TokenKind::Keyword(keyword) = self.current_kind() {
+                    // In protocol bodies, keywords on a new line are separate
+                    // signatures. Only continue if the keyword is on the same
+                    // line as the previous one (i.e., a multi-keyword selector
+                    // like `at: key put: value`).
+                    if !keywords.is_empty() && self.current_token().has_leading_newline() {
+                        break;
+                    }
+                    let span = self.current_token().span();
+                    keywords.push(KeywordPart::new(keyword.clone(), span));
+                    self.advance();
+
+                    let param_name = self.parse_identifier("Expected parameter name after keyword");
+                    let type_annotation = self.parse_optional_param_type();
+                    let param = match type_annotation {
+                        Some(ta) => ParameterDefinition::with_type(param_name, ta),
+                        None => ParameterDefinition::new(param_name),
+                    };
+                    parameters.push(param);
+                }
+
+                let selector = MessageSelector::Keyword(keywords);
+                (selector, parameters)
+            }
+            _ => return None,
+        };
+
+        // Parse optional return type: `-> Type`
+        let return_type = self.parse_optional_return_type();
+
+        // Protocol signatures must NOT have `=>`; if we see one, that's
+        // a user error — they probably meant a class method.
+        if matches!(self.current_kind(), TokenKind::FatArrow) {
+            let span = self.current_token().span();
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "Protocol method signatures cannot have implementations ('=>')",
+                    span,
+                )
+                .with_hint("Remove '=>' and the method body — protocols only declare signatures"),
+            );
+            // Consume the `=>` and skip to the next line/signature for recovery
+            self.advance();
+            // Skip tokens until newline or next signature-like token
+            while !self.is_at_end()
+                && !self.current_token().has_leading_newline()
+                && !matches!(self.current_kind(), TokenKind::Period)
+            {
+                self.advance();
+            }
+        }
+
+        // Determine end span
+        let end = return_type
+            .as_ref()
+            .map(TypeAnnotation::span)
+            .or(parameters.last().map(ParameterDefinition::span))
+            .unwrap_or(start);
+        let span = start.merge(end);
+
+        Some(ProtocolMethodSignature {
+            selector,
+            parameters,
+            return_type,
+            comments,
+            doc_comment,
+            span,
+        })
     }
 }

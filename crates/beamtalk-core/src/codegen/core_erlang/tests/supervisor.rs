@@ -28,6 +28,7 @@ fn make_static_supervisor_module() -> Module {
     Module {
         classes: vec![class],
         method_definitions: vec![],
+        protocols: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -58,6 +59,7 @@ fn make_dynamic_supervisor_module() -> Module {
     Module {
         classes: vec![class],
         method_definitions: vec![],
+        protocols: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -306,6 +308,7 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
     let module = Module {
         classes: vec![class],
         method_definitions: vec![],
+        protocols: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
