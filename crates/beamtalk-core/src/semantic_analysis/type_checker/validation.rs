@@ -519,6 +519,7 @@ impl TypeChecker {
         // that contain non-class-name characters. These need Phase 3 union support.
         if declared_type.contains('|')
             || declared_type.contains('<')
+            || declared_type.contains('(')
             || declared_type.starts_with('#')
         {
             return true;

@@ -1107,6 +1107,12 @@ impl Parser {
                     return false;
                 }
                 offset += 1;
+                // Skip generic type params: `Type(T, E)`
+                if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
+                    if let Some(after) = self.skip_paren_type_params(offset) {
+                        offset = after;
+                    }
+                }
                 // Skip union tail: `| Type | Type ...`
                 while matches!(self.peek_at(offset), Some(TokenKind::Pipe)) {
                     offset += 1;
@@ -1114,6 +1120,12 @@ impl Parser {
                         return false;
                     }
                     offset += 1;
+                    // Skip generic type params on union member
+                    if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
+                        if let Some(after) = self.skip_paren_type_params(offset) {
+                            offset = after;
+                        }
+                    }
                 }
                 match self.peek_at(offset) {
                     Some(TokenKind::FatArrow) => return true,
@@ -1157,6 +1169,12 @@ impl Parser {
                         return false;
                     }
                     offset += 1; // skip type name
+                    // Skip generic type params: `Type(T, E)`
+                    if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
+                        if let Some(after) = self.skip_paren_type_params(offset) {
+                            offset = after;
+                        }
+                    }
                     // Skip union tail: `| Type | Type ...`
                     while matches!(self.peek_at(offset), Some(TokenKind::Pipe)) {
                         offset += 1;
@@ -1164,6 +1182,12 @@ impl Parser {
                             return false;
                         }
                         offset += 1;
+                        // Skip generic type params on union member
+                        if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
+                            if let Some(after) = self.skip_paren_type_params(offset) {
+                                offset = after;
+                            }
+                        }
                     }
                     match self.peek_at(offset) {
                         Some(TokenKind::FatArrow) => return true,

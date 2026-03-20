@@ -110,6 +110,10 @@ pub struct ClassInfo {
     pub class_methods: Vec<MethodInfo>,
     /// Class variable names (declared with `classState:`).
     pub class_variables: Vec<EcoString>,
+    /// Type parameters for generic classes (e.g., `["T", "E"]` for `Result(T, E)`).
+    ///
+    /// Empty for non-generic classes.
+    pub type_params: Vec<EcoString>,
 }
 
 impl ClassInfo {
@@ -199,6 +203,7 @@ impl ClassInfo {
                 .iter()
                 .map(|cv| cv.name.name.clone())
                 .collect(),
+            type_params: class.type_params.iter().map(|tp| tp.name.clone()).collect(),
         }
     }
 }
@@ -337,6 +342,7 @@ impl ClassHierarchy {
                         methods: Vec::new(),
                         class_methods: Vec::new(),
                         class_variables: Vec::new(),
+                        type_params: Vec::new(),
                     },
                 );
             }
@@ -2040,6 +2046,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2319,6 +2326,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2354,6 +2362,7 @@ mod tests {
                 span: test_span(),
             }],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2527,6 +2536,7 @@ mod tests {
                 methods: vec![builtin_method("methodA", 0, "A")],
                 class_methods: vec![],
                 class_variables: vec![],
+                type_params: vec![],
             },
         );
         h.classes.insert(
@@ -2544,6 +2554,7 @@ mod tests {
                 methods: vec![builtin_method("methodB", 0, "B")],
                 class_methods: vec![],
                 class_variables: vec![],
+                type_params: vec![],
             },
         );
 
@@ -2582,6 +2593,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2609,6 +2621,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2703,6 +2716,7 @@ mod tests {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2764,6 +2778,7 @@ mod tests {
                 },
             ],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2822,6 +2837,7 @@ mod tests {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2983,6 +2999,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
@@ -3034,6 +3051,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
@@ -3082,6 +3100,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3161,6 +3180,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3221,6 +3241,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3393,6 +3414,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3426,6 +3448,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3495,6 +3518,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3584,6 +3608,7 @@ mod tests {
             )],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3661,6 +3686,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3691,6 +3717,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3760,6 +3787,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         };
         h.add_from_beam_meta(vec![info]);
         assert!(h.has_class("Counter"));
@@ -3796,6 +3824,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         };
         h.classes.insert(EcoString::from("Counter"), ast_info);
 
@@ -3823,6 +3852,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         };
         h.add_from_beam_meta(vec![cache_info]);
 
@@ -3849,6 +3879,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         };
         h.add_from_beam_meta(vec![stub]);
         // Built-in should be unchanged
@@ -4399,6 +4430,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         };
         h.add_from_beam_meta(vec![base_info]);
 

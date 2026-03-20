@@ -344,6 +344,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
+        type_params: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,

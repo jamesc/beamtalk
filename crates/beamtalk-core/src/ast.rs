@@ -366,6 +366,11 @@ pub struct ClassDefinition {
     /// Set by the parser when `native: <module>` appears on the `subclass:` declaration.
     /// `None` for all ordinary Beamtalk classes.
     pub backing_module: Option<Identifier>,
+    /// Type parameters for generic classes (e.g., `T`, `E` in `Result(T, E)`).
+    ///
+    /// Empty for non-generic classes. Populated by the parser when parenthesized
+    /// type parameters appear after the class name in the definition.
+    pub type_params: Vec<Identifier>,
     /// Source location of the entire class definition.
     pub span: Span,
 }
@@ -393,6 +398,7 @@ impl ClassDefinition {
             methods,
             class_methods: Vec::new(),
             class_variables: Vec::new(),
+            type_params: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -426,6 +432,7 @@ impl ClassDefinition {
             methods,
             class_methods: Vec::new(),
             class_variables: Vec::new(),
+            type_params: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -762,7 +769,7 @@ pub enum TypeAnnotation {
         /// Source location.
         span: Span,
     },
-    /// A generic type (e.g., `Collection<Integer>`).
+    /// A generic type (e.g., `Collection(Integer)`, `Result(T, E)`).
     Generic {
         /// The base type name.
         base: Identifier,
@@ -867,14 +874,14 @@ impl TypeAnnotation {
             Self::Generic {
                 base, parameters, ..
             } => {
-                let mut result = eco_format!("{}<", base.name);
+                let mut result = eco_format!("{}(", base.name);
                 for (i, ty) in parameters.iter().enumerate() {
                     if i > 0 {
                         result.push_str(", ");
                     }
                     result.push_str(&ty.type_name());
                 }
-                result.push('>');
+                result.push(')');
                 result
             }
             Self::FalseOr { inner, .. } => {
@@ -2100,7 +2107,7 @@ mod tests {
             vec![TypeAnnotation::simple("Integer", Span::new(11, 18))],
             Span::new(0, 19),
         );
-        assert_eq!(generic.type_name(), "Collection<Integer>");
+        assert_eq!(generic.type_name(), "Collection(Integer)");
 
         let false_or = TypeAnnotation::false_or(
             TypeAnnotation::simple("Integer", Span::new(0, 7)),
