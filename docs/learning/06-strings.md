@@ -48,7 +48,7 @@ items := #[1, 2, 3]           // => _
 Escape `{` with `\{` to suppress interpolation:
 
 ```beamtalk
-"Literal: \{name\}"  // => Literal: \{name\}
+"Literal: \{name\}"  // => Literal: {name}
 ```
 
 ## Size and indexing
