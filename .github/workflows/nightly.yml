@@ -74,16 +74,8 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@v3
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: nightly-${{ runner.os }}-arm64-cargo-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            nightly-${{ runner.os }}-arm64-cargo-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
@@ -143,16 +135,8 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@v3
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: nightly-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            nightly-${{ runner.os }}-cargo-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
