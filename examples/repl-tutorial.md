@@ -316,7 +316,7 @@ Read files lazily — constant memory, safe for large files:
 Block-scoped handles close automatically:
 
 ```beamtalk
-> File open: "examples/getting-started/src/hello.bt" do: [:handle | handle lines take: 2]
+> (File open: "examples/getting-started/src/hello.bt" do: [:handle | handle lines take: 2]) unwrap
 ["// Copyright 2026 James Casey","// SPDX-License-Identifier: Apache-2.0"]
 ```
 
