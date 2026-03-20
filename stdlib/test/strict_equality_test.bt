@@ -1,22 +1,57 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-1562: Strict equality (=:=) must distinguish integer from float.
+// BT-1562: Strict equality (=:=) and strict inequality (=/=).
 // Erlang's =:= is exact equality — 5 =:= 5.0 is false because they are
-// different types. Loose equality (==) coerces, so 5 == 5.0 is true.
+// different types. =/= is the complement: (x =/= y) iff not (x =:= y).
+// Loose equality (==) coerces, so 5 == 5.0 is true.
 
 TestCase subclass: StrictEqualityTest
 
+  // --- Integer =:= / =/= ---
   testIntegerStrictEqualsSameInteger => self assert: (5 =:= 5)
 
   testIntegerStrictNotEqualsFloat => self deny: (5 =:= 5.0)
 
+  testIntegerInequalityDifferentValues => self assert: (1 =/= 2)
+
+  testIntegerInequalitySameValue => self deny: (5 =/= 5)
+
+  testIntegerInequalityIntVsFloat => self assert: (5 =/= 5.0)
+
+  // --- Float =:= / =/= ---
   testFloatStrictEqualsSameFloat => self assert: (5.0 =:= 5.0)
 
+  testFloatStrictNotEqualsInteger => self deny: (5.0 =:= 5)
+
+  testFloatInequalityDifferentValues => self assert: (1.0 =/= 2.0)
+
+  testFloatInequalitySameValue => self deny: (3.14 =/= 3.14)
+
+  // --- Loose equality (==) coerces across int/float ---
   testLooseEqualityCoercesIntFloat => self assert: (5 == 5.0)
 
-  testStrictInequalityIntFloat => self assert: (5 =/= 5.0)
-
+  // --- Zero and negative edge cases ---
   testZeroIntNotStrictEqualsZeroFloat => self deny: (0 =:= 0.0)
 
+  testZeroIntStrictInequalityZeroFloat => self assert: (0 =/= 0.0)
+
   testNegativeIntNotStrictEqualsNegativeFloat => self deny: (-1 =:= -1.0)
+
+  // --- String =:= / =/= ---
+  testStringStrictEqualsSameString => self assert: ("abc" =:= "abc")
+
+  testStringStrictNotEqualsDifferent => self deny: ("abc" =:= "xyz")
+
+  testStringInequalityDifferent => self assert: ("abc" =/= "xyz")
+
+  testStringInequalitySame => self deny: ("abc" =/= "abc")
+
+  // --- Symbol =:= / =/= ---
+  testSymbolStrictEqualsSame => self assert: (#hello =:= #hello)
+
+  testSymbolStrictNotEqualsDifferent => self deny: (#hello =:= #world)
+
+  testSymbolInequalityDifferent => self assert: (#hello =/= #world)
+
+  testSymbolInequalitySame => self deny: (#hello =/= #hello)
