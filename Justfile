@@ -366,6 +366,11 @@ dialyzer-specs: build-stdlib
     escript scripts/validate_specs.escript "$CORE_DIR/build/"
     echo "✅ All generated specs are valid"
 
+# Dialyzer spec validation (no-op on Windows — escript / bash not available)
+[windows]
+dialyzer-specs:
+    @echo "⏭️  Skipping spec validation on Windows"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Testing
 # ═══════════════════════════════════════════════════════════════════════════
