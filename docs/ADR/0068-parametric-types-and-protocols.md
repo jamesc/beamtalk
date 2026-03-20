@@ -240,8 +240,139 @@ x :: Result(Integer, Error) := Result ok: "hello"
 - **Variance rules** (covariance/contravariance): All type parameters are invariant. `Result(Integer, E)` is not assignable to `Result(Number, E)`. Variance can be added later without breaking changes.
 - **Type parameter bounds/constraints** (`T :: Printable`): Deferred to Stage 2 (protocols). Type parameters are unbounded — any type is accepted.
 - **Higher-kinded types** (`F(_)`): Not planned. Beamtalk is not Haskell.
-- **Type parameter inference from usage patterns**: Only constructor calls infer type params. Method chains don't propagate backwards.
-- **Generic methods** (methods with their own type params independent of the class): Deferred. Class-level params cover the immediate needs.
+- **Type parameter inference from usage patterns**: Only constructor calls and method arguments infer type params. Method chains don't propagate backwards.
+
+### Design Challenges
+
+The following challenges were identified during design and have specific solutions. These are not deferred — they must be addressed in Stage 1.
+
+#### Challenge 1: Method-Local Type Parameters (the `R` Problem)
+
+`Result`'s `map:` method introduces a type variable `R` that is **not** a type parameter of `Result`:
+
+```beamtalk
+sealed map: block :: Block(T, R) -> Result(R, E) =>
+  self.isOk ifTrue: [Result ok: (block value: self.okValue)] ifFalse: [self]
+```
+
+`R` is the block's return type — unknown until the call site. This is effectively a generic method, not just a generic class.
+
+**Solution: Implicit method-local type params via call-site inference.** Any identifier in type position that is neither a known class/protocol name nor a class-level type parameter is treated as a method-local type parameter. Its value is inferred from the arguments at each call site:
+
+```beamtalk
+r :: Result(Integer, Error) := computeSomething
+
+// At this call site, the block returns String, so R = String
+r map: [:v | v asString]
+// Type checker infers: Block(Integer, String) → R = String → Result(String, Error)
+
+// At this call site, the block returns Integer, so R = Integer
+r map: [:v | v + 1]
+// Type checker infers: Block(Integer, Integer) → R = Integer → Result(Integer, Error)
+```
+
+This is lightweight call-site unification — the type checker matches the argument types against the parameter's generic type to solve for unknown variables. It is **not** full Hindley-Milner inference; it only solves variables that appear in parameter positions and can be determined from the provided arguments.
+
+When a method-local type param cannot be inferred (no matching argument), it falls back to `Dynamic`:
+
+```beamtalk
+// R cannot be inferred if the block is stored in a variable
+myBlock := [:v | v asString]
+r map: myBlock    // Block type params unknown → R = Dynamic → Result(Dynamic, Error)
+```
+
+#### Challenge 2: Block Is Not a Normal Generic Class
+
+`Block` is `sealed Object subclass: Block` with `@intrinsic` methods. Blocks take 0, 1, or 2+ arguments — they have **variable-arity type parameters**, which can't be expressed as a fixed class-level `Block(A, R)`.
+
+**Solution: Block type params are special-cased in the type checker.** `Block(...)` in a type annotation is not treated as a regular generic class application. Instead, the type checker interprets it as:
+
+- `Block(R)` — zero-argument block returning `R`
+- `Block(A, R)` — one-argument block with arg type `A`, returning `R`
+- `Block(A, B, R)` — two-argument block with arg types `A` and `B`, returning `R`
+
+The last type parameter is always the return type; all preceding ones are argument types. `Block.bt` itself is not modified to declare type params — the type checker handles Block as a built-in generic form, similar to how TypeScript treats function types `(a: A) => R` specially rather than as a generic class.
+
+This special-casing is limited to `Block` only. All other generic types are regular declaration-site generics.
+
+#### Challenge 3: Self Type with Generic Type Arguments
+
+The existing `Self` return type resolves to the receiver's class name via string comparison. With generics, `Self` must carry type arguments:
+
+```beamtalk
+Collection(E) subclass: Array(E)
+  // Inherited from Collection: select: -> Self
+  // For Array(Integer), Self should be Array(Integer), not bare Array
+
+arr :: Array(Integer) := #(1, 2, 3)
+filtered := arr select: [:x | x > 1]
+// filtered should be Array(Integer), not Array(Dynamic)
+```
+
+**Solution: Extend `InferredType::Known` to carry optional type arguments.**
+
+```rust
+enum InferredType {
+    Known {
+        class_name: EcoString,
+        type_args: Vec<InferredType>,  // empty for non-generic types
+    },
+    Dynamic,
+}
+```
+
+When resolving `Self` for a receiver with known type args, the type args propagate:
+- Receiver `Array(Integer)` + return type `Self` → `Array(Integer)`
+- Receiver `Result(String, Error)` + return type `Self` → `Result(String, Error)`
+
+This also enables generic type flow through chains: `r map: [:v | v asString]` returns `Result(String, Error)`, and further calls on that result carry `String` and `Error` through.
+
+#### Challenge 4: Generic Inheritance and Superclass Type Application
+
+When a generic class extends another, the type parameter mapping must be explicit:
+
+```beamtalk
+// Array passes its E to Collection's E
+Collection(E) subclass: Array(E)
+
+// IntArray fixes E to Integer
+Collection(Integer) subclass: IntArray
+
+// SortedArray passes E through and adds a constraint (Stage 2)
+Array(E) subclass: SortedArray(E)
+```
+
+The superclass in the class header is now a **type application**, not just a name. When `arr :: Array(Integer)` calls a method inherited from `Collection`, the type checker must:
+1. Know that `Array(E)` extends `Collection(E)` — so Array's `E` maps to Collection's `E`
+2. Substitute `E → Integer` through Collection's method signatures too
+
+**Solution: Store the superclass type application in `ClassInfo`.**
+
+```rust
+struct ClassInfo {
+    // ... existing fields ...
+    type_params: Vec<EcoString>,
+    superclass_type_args: Vec<TypeParamMapping>,  // how our params map to super's params
+}
+```
+
+For `Collection(E) subclass: Array(E)`, `Array`'s `superclass_type_args` records that `E` (position 0) maps to Collection's position 0. For `Collection(Integer) subclass: IntArray`, the mapping is a concrete type, not a param reference.
+
+When the type checker resolves an inherited method, it composes the substitution: caller's type args → current class's params → superclass's params.
+
+#### Challenge 5: Constructor Inference Bridges Class and Instance
+
+`Result ok: 42` calls a **class method** where the parameter is `:: T`. But `T` is a type param of `Result` **instances**. The class object itself is not parameterized — there's no `Result(Integer, Error)` class object.
+
+**Solution: Class methods that reference instance type params trigger inference.** The type checker recognises that `T` in a class method's parameter type refers to the enclosing class's type params. When `ok:` receives an Integer argument, the checker infers `T = Integer` and returns `Result(Integer, Dynamic)` as the inferred type of the expression.
+
+This works because class methods conceptually construct instances — they are the bridge between the unparameterized class object and parameterized instances. The type checker treats class method calls on generic classes as implicit type application sites.
+
+#### Challenge 6: @primitive Methods in Generic Classes
+
+`Array(E)`, `Dictionary(K, V)`, and `Block` methods are `@primitive` — dispatched to Erlang functions that know nothing about type parameters. The type params exist only in annotations.
+
+**This is fine** — type erasure means the runtime dispatch is unchanged. The type checker uses the annotations for checking and inference, and codegen generates the same primitive dispatch as today. The `__beamtalk_meta/0` function carries the type param metadata for tooling, but the actual method dispatch ignores it completely. This is exactly the same as how `typed` classes generate identical bytecode to non-typed classes.
 
 ### Stage 2: Structural Protocols
 
