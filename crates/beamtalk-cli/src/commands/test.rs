@@ -1916,8 +1916,12 @@ mod tests {
         .unwrap();
 
         let files = vec![dir.join("counter.bt")];
-        let (module_index, _superclass_index) = build_fixture_class_indexes(&files).unwrap();
+        let (module_index, superclass_index) = build_fixture_class_indexes(&files).unwrap();
         assert_eq!(module_index.get("Counter").map(String::as_str), Some("bt@counter"));
+        assert_eq!(
+            superclass_index.get("Counter").map(String::as_str),
+            Some("Object")
+        );
     }
 
     #[test]
@@ -1934,8 +1938,12 @@ mod tests {
 
         // fixture_module_name uses the file stem only, so env.bt → bt@env
         let files = vec![subdir.join("env.bt")];
-        let (module_index, _superclass_index) = build_fixture_class_indexes(&files).unwrap();
+        let (module_index, superclass_index) = build_fixture_class_indexes(&files).unwrap();
         assert_eq!(module_index.get("SchemeEnv").map(String::as_str), Some("bt@env"));
+        assert_eq!(
+            superclass_index.get("SchemeEnv").map(String::as_str),
+            Some("Object")
+        );
     }
 
     #[test]
