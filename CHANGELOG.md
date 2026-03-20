@@ -1,11 +1,11 @@
 # Changelog
 
-## 0.2.0 — 2026-03-19
+## 0.2.0 — 2026-03-20
 
 ### Language
 
-- **Three distinct class kinds** — `Value subclass:` (immutable, `field:`), `Actor subclass:` (mutable process, `state:`), `Object subclass:` (methods only, no data). Wrong keyword/class-kind combinations are now compile errors ([ADR 0065](docs/ADR/0065-complete-otp-primitives.md))
-- **Extension methods** (`>>`) — add methods to sealed classes from outside, with compile-time conflict detection and type metadata ([ADR documented](docs/ADR/))
+- **Three distinct class kinds** — `Value subclass:` (immutable, `field:`), `Actor subclass:` (mutable process, `state:`), `Object subclass:` (methods only, no data). Wrong keyword/class-kind combinations are now compile errors ([ADR 0067](docs/ADR/0067-separate-state-field-keywords-by-class-kind.md))
+- **Extension methods** (`>>`) — add methods to sealed classes from outside, with compile-time conflict detection and type metadata ([ADR 0066](docs/ADR/0066-open-class-extension-methods.md))
 - **Extension type annotations** — `:: -> ReturnType` on `>>` definitions for gradual type checking
 - **`initialize:` lifecycle hook** — Supervisor and DynamicSupervisor support post-start initialization
 - **`terminate:` lifecycle hook** — documented and tested actor cleanup on shutdown
@@ -46,14 +46,14 @@
 - **`@expect dead_assignment`** — new suppression annotation for intentional dead assignments
 - **Keyword constructor hashing** — long keyword constructor atom names hashed to stay within Erlang's 255-char limit
 - **Parser** — helpful error for unescaped `{` in strings (was a crash); stale `@expect type` treated as error
-- **`new`/`new:` moved from Object to Value** — Object-kind classes can no longer be instantiated; constructors are Value-only
+- **`new`/`new:` moved from Object to Value** — Object-kind classes can no longer be instantiated; constructors are Value-only. Sub-subclass instantiation (`new`/`new:`/keyword ctors) now works correctly
 - **Lint improvements** — warn when Object subclass has only state + getters (suggests Value); block-scoped variable mutation lint for value types; removed false-positive self-capture lint (BT-953)
 - **Codegen refactoring** — decomposed large functions across gen_server dispatch, state threading, method body loops, and register_class; explicit return values replace implicit side-channel fields; unified branch body loops with classify/dispatch pattern
 - **Performance** — cache Pass 1 ASTs to eliminate double-parse in package build; REPL `:load` builds class indexes once per batch
 
 ### Tooling
 
-- **Logging and observability** ([ADR 0064](docs/ADR/0064-runtime-logging-control-and-observability.md)):
+- **Logging and observability** ([ADR 0064](docs/ADR/0064-runtime-logging-control-and-observability-api.md)):
   - `beamtalk logs` CLI command for workspace log access
   - JSON log format switching via `Beamtalk logFormat:`
   - Per-class and per-actor debug filtering with `enableDebug:`
@@ -80,6 +80,8 @@
 - Scope leak fix when `generate_method_body_with_reply` returns Err in dispatch codegen
 - Actor method error messages enriched with stacktrace and source location
 - Move `initialize` dispatch to `handle_continue` to surface init errors properly
+- Float literals retain decimal in codegen for strict equality correctness
+- BUnit fixture superclass index fix for Value sub-subclass tests
 
 ## 0.1.0 — 2026-03-15
 
