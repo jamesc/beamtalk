@@ -132,7 +132,7 @@ Classes themselves respond to messages:
 ```beamtalk
 TestCase subclass: Ch24ClassRespondsTo
   testClassRespondsTo =>
-    self assert: (Point respondsTo: #new)
+    self assert: (Point respondsTo: #name)
     self assert: (Point respondsTo: #methods)
 ```
 

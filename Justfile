@@ -162,7 +162,7 @@ test-examples: build-stdlib
             continue
         fi
         echo "  Testing ${name}..."
-        if (cd "${dir}" && cargo run --bin beamtalk --quiet -- test 2>&1); then
+        if (cd "${dir}" && cargo run --bin beamtalk --quiet -- test --warnings-as-errors 2>&1); then
             passed=$((passed + 1))
         else
             echo "❌ ${name} tests failed"
@@ -456,7 +456,7 @@ test-install: build-release build-stdlib
 [working-directory: 'stdlib']
 test-stdlib *ARGS: build-stdlib
     @echo "🧪 Running stdlib tests..."
-    @cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings --quiet {{ ARGS }}
+    @cargo run --bin beamtalk --quiet -- test-stdlib --warnings-as-errors --quiet {{ ARGS }}
     @echo "✅ Stdlib tests complete"
 
 # Run BUnit TestCase tests (ADR 0014 Phase 2)
@@ -471,7 +471,7 @@ test-bunit *ARGS: build-stdlib
 # Extracts ```beamtalk blocks from Markdown chapters and runs them via test-docs
 test-learn: build-stdlib
     @echo "📚 Running learning guide doctests..."
-    @cargo run --bin beamtalk --quiet -- test-docs --no-warnings --quiet docs/learning/
+    @cargo run --bin beamtalk --quiet -- test-docs --warnings-as-errors --quiet docs/learning/
     @echo "✅ Learning guide tests complete"
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
@@ -633,7 +633,7 @@ coverage-stdlib: build-stdlib
     set -euo pipefail
     echo "📊 Running stdlib tests with Erlang cover instrumentation..."
     echo "   (This is slower than normal stdlib tests due to cover overhead)"
-    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings bootstrap-test || true
+    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib --warnings-as-errors bootstrap-test || true
     if [ -f ../runtime/_build/test/cover/stdlib.coverdata ]; then
         SIZE=$(wc -c < ../runtime/_build/test/cover/stdlib.coverdata)
         echo "  📁 Coverdata: runtime/_build/test/cover/stdlib.coverdata (${SIZE} bytes)"

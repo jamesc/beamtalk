@@ -42,7 +42,7 @@ TestCase subclass: Ch24Reflection
     self assert: Point superclass equals: Value
 
   testClassRespondsTo =>
-    self assert: (Point respondsTo: #new)
+    self assert: (Point respondsTo: #name)
     self assert: (Point respondsTo: #methods)
 
   // — Metaclass —

@@ -181,6 +181,12 @@ jobs:
       - name: Test stdlib (compiled language features)
         run: just test-stdlib
 
+      - name: Test BUnit (TestCase tests)
+        run: just test-bunit
+
+      - name: Test examples
+        run: just test-examples
+
       - name: Test Erlang runtime (unit tests)
         run: just test-runtime
 

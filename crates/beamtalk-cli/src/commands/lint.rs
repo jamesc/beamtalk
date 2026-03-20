@@ -14,7 +14,7 @@
 
 use crate::commands::build::collect_source_files_from_dir;
 use crate::diagnostic::CompileDiagnostic;
-use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use miette::{IntoDiagnostic, Result};
 
@@ -35,14 +35,18 @@ fn collect_diagnostics(
         .collect();
     lint_diags.extend(beamtalk_core::lint::run_lint_passes(module));
 
-    // BT-1547: Run semantic analysis to collect DNU hint diagnostics.
-    // Without these, `@expect type` annotations that suppress DNU hints
-    // during `beamtalk build` would be reported as stale by lint.
+    // BT-1547: Run semantic analysis to collect all categorised diagnostics
+    // so that `@expect` directives can match them. Without this, `@expect type`
+    // annotations that suppress real type/DNU diagnostics during build would be
+    // reported as stale by lint. We include every diagnostic that has a category
+    // (Type, Dnu, Unused, etc.) — this keeps lint in sync with `category_matches`
+    // in diagnostic_provider.rs without manually mirroring its match arms.
     let analysis_result = beamtalk_core::semantic_analysis::analyse(module);
     lint_diags.extend(
-        analysis_result.diagnostics.into_iter().filter(|d| {
-            d.severity == Severity::Hint && d.category == Some(DiagnosticCategory::Dnu)
-        }),
+        analysis_result
+            .diagnostics
+            .into_iter()
+            .filter(|d| d.category.is_some()),
     );
 
     // BT-1476: Apply @expect directives to suppress matching lint diagnostics.
