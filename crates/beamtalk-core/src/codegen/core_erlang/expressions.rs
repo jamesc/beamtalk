@@ -67,7 +67,16 @@ impl CoreErlangGenerator {
     pub(super) fn generate_literal(&self, lit: &Literal) -> Result<Document<'static>> {
         match lit {
             Literal::Integer(n) => Ok(Document::String(n.to_string())),
-            Literal::Float(f) => Ok(Document::String(f.to_string())),
+            Literal::Float(f) => {
+                let s = f.to_string();
+                // Ensure Core Erlang float literals always contain a decimal point,
+                // otherwise Erlang interprets them as integers (e.g. 5.0 → "5" → int 5).
+                if s.contains('.') || s.contains('e') || s.contains('E') {
+                    Ok(Document::String(s))
+                } else {
+                    Ok(docvec![Document::String(s), ".0"])
+                }
+            }
             Literal::String(s) => {
                 let result = Self::binary_string_literal(s);
                 Ok(docvec![result])

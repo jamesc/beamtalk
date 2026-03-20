@@ -26,6 +26,16 @@ fn test_generate_literal_float() {
 }
 
 #[test]
+fn test_generate_literal_float_whole_number() {
+    // BT-1562: Whole-number floats must retain decimal point in Core Erlang
+    // so that Erlang distinguishes them from integers (5.0 ≠ 5).
+    let generator = CoreErlangGenerator::new("test");
+    let lit = Literal::Float(5.0);
+    let doc = generator.generate_literal(&lit).unwrap();
+    assert_eq!(doc.to_pretty_string(), "5.0");
+}
+
+#[test]
 fn test_generate_literal_symbol() {
     let generator = CoreErlangGenerator::new("test");
     let lit = Literal::Symbol("ok".into());

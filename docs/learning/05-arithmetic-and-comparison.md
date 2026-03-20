@@ -103,15 +103,15 @@ Parentheses override:
 
 Beamtalk has several equality operators:
 
-- `=:=` value equality (works across Integer/Float)
-- `==` value equality (same as `=:=`)
-- `=/=` value inequality
-- `/=` value inequality (same as `=/=`)
+- `=:=` strict equality (no type coercion — `5 =:= 5.0` is false)
+- `==` loose equality (coerces Integer/Float — `5 == 5.0` is true)
+- `=/=` strict inequality (opposite of `=:=`)
+- `/=` loose inequality (opposite of `==`)
 - `=` alias for `=:=` (legacy; lint warns on `x = true` / `x = false`)
 
 ```beamtalk
 5 =:= 5      // => true
-5 =:= 5.0    // => true
+5 =:= 5.0    // => false
 5 == 5.0     // => true
 5 =/= 6      // => true
 5 /= 5.0     // => false
