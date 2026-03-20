@@ -194,6 +194,9 @@ jobs:
         if: steps.erlang-changes.outputs.changed == 'true'
         run: just dialyzer
 
+      - name: Dialyzer spec validation (generated -spec attributes)
+        run: just dialyzer-specs
+
       - name: Test workspace integration
         run: just test-integration
 
