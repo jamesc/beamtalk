@@ -74,7 +74,7 @@ impl CoreErlangGenerator {
                 if s.contains('.') || s.contains('e') || s.contains('E') {
                     Ok(Document::String(s))
                 } else {
-                    Ok(Document::String(format!("{s}.0")))
+                    Ok(docvec![Document::String(s), ".0"])
                 }
             }
             Literal::String(s) => {
