@@ -173,8 +173,8 @@ Binary defines the Collection protocol (`at:`, `size`) with byte semantics. Stri
 | `do: block` | iterate bytes | iterate graphemes (override) |
 | `part: offset size: n` | byte-level slice → Binary | inherited — byte-level slice → Binary |
 | `concat:` | byte concatenation → Binary | inherited — byte concatenation → Binary |
-| `asString` | Result (UTF-8 validation) | no-op → self |
-| `asStringUnchecked` | self (cast, no validation) | no-op → self |
+| `asString` | Result ok: String (UTF-8 validation) | no-op → Result ok: self |
+| `asStringUnchecked` | String (unchecked cast) | no-op → self |
 | `isEmpty` | inherited from Collection | inherited from Collection |
 
 The key insight: `at:` and `size` follow the Collection contract on both classes — "access the nth element" and "count elements." The element is a byte on Binary and a grapheme on String. This is the same override pattern as `do:` (iterate bytes vs iterate graphemes).
