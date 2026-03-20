@@ -70,7 +70,9 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> Document<'static> {
         TypeAnnotation::Singleton { name, .. } => {
             Document::String(format!("{{'atom', 0, '{name}'}}"))
         }
-        TypeAnnotation::Generic { base, .. } => simple_type_to_spec(base.name.as_str()),
+        TypeAnnotation::Generic {
+            base, parameters, ..
+        } => generic_type_to_spec(base.name.as_str(), parameters),
         TypeAnnotation::FalseOr { inner, .. } => {
             let inner_spec = type_annotation_to_spec(inner);
             docvec![
@@ -102,6 +104,65 @@ fn simple_type_to_spec(name: &str) -> Document<'static> {
         "Block" => "{'type', 0, 'fun', []}",
         _ => "{'type', 0, 'any', []}",
     })
+}
+
+/// Maps a generic `TypeAnnotation::Generic` to its Core Erlang abstract type representation.
+///
+/// For known parameterized types, incorporates the type parameters into the spec:
+///
+/// - `List(T)` → `{'type', 0, 'list', [T_spec]}`
+/// - `Block(A, R)` → `{'type', 0, 'fun', [{'type', 0, 'product', [A_spec]}, R_spec]}`
+/// - `Block(R)` → `{'type', 0, 'fun', [{'type', 0, 'product', []}, R_spec]}`
+///
+/// For types where Dialyzer does not support parameterization (Dictionary, Set, Tuple),
+/// the base type is emitted without parameters. For unknown/custom classes, `any()` is used.
+///
+/// Unresolved type parameters (bare names like `T`, `E` that do not match a known class)
+/// are recursively resolved — ultimately falling through to `any()` via [`simple_type_to_spec`].
+fn generic_type_to_spec(base_name: &str, parameters: &[TypeAnnotation]) -> Document<'static> {
+    match base_name {
+        // List(T) → list(T) — Erlang list type supports an element type parameter
+        "List" => {
+            if let Some(elem) = parameters.first() {
+                let elem_spec = type_annotation_to_spec(elem);
+                docvec!["{'type', 0, 'list', [", elem_spec, "]}"]
+            } else {
+                Document::Str("{'type', 0, 'list', []}")
+            }
+        }
+        // Block(...) → fun type with product args and return type
+        // Block(R) = zero-arg block returning R
+        // Block(A, R) = one-arg block with arg A, returning R
+        // Block(A, B, R) = two-arg block, etc.
+        // Last parameter is always the return type; preceding ones are arg types.
+        "Block" => {
+            if parameters.is_empty() {
+                Document::Str("{'type', 0, 'fun', []}")
+            } else {
+                let (arg_params, return_param) = parameters.split_at(parameters.len() - 1);
+                let return_spec = type_annotation_to_spec(&return_param[0]);
+                let arg_specs: Vec<Document<'static>> =
+                    arg_params.iter().map(type_annotation_to_spec).collect();
+                let product = if arg_specs.is_empty() {
+                    Document::Str("{'type', 0, 'product', []}")
+                } else {
+                    docvec![
+                        "{'type', 0, 'product', [",
+                        join(arg_specs, &Document::Str(", ")),
+                        "]}"
+                    ]
+                };
+                docvec!["{'type', 0, 'fun', [", product, ", ", return_spec, "]}"]
+            }
+        }
+        // Dictionary, Set, Tuple — Dialyzer doesn't support parameterized forms
+        // for these in the abstract type representation, so emit the base type.
+        "Dictionary" | "Set" => Document::Str("{'type', 0, 'map', 'any'}"),
+        "Tuple" => Document::Str("{'type', 0, 'tuple', 'any'}"),
+        // Any other generic type (custom classes like Result, Array, etc.)
+        // maps to any() — the base class is not a built-in Erlang type.
+        _ => simple_type_to_spec(base_name),
+    }
 }
 
 /// Generates the spec attribute for a single method.
@@ -867,6 +928,336 @@ mod tests {
         assert!(
             result.contains("'any'"),
             "Unannotated field should use any(), got: {result}"
+        );
+    }
+
+    // Tests for generic type spec generation (BT-1574)
+
+    #[test]
+    fn generic_list_with_integer_element() {
+        let ann = TypeAnnotation::generic(
+            Identifier::new("List", span()),
+            vec![TypeAnnotation::simple("Integer", span())],
+            span(),
+        );
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'list', [{'type', 0, 'integer', []}]}"
+        );
+    }
+
+    #[test]
+    fn generic_list_with_string_element() {
+        let ann = TypeAnnotation::generic(
+            Identifier::new("List", span()),
+            vec![TypeAnnotation::simple("String", span())],
+            span(),
+        );
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'list', [{'type', 0, 'binary', []}]}"
+        );
+    }
+
+    #[test]
+    fn generic_list_no_params_falls_back_to_unparameterized() {
+        let ann = TypeAnnotation::generic(Identifier::new("List", span()), vec![], span());
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'list', []}"
+        );
+    }
+
+    #[test]
+    fn generic_block_zero_arg_with_return_type() {
+        // Block(Integer) = zero-arg block returning Integer
+        let ann = TypeAnnotation::generic(
+            Identifier::new("Block", span()),
+            vec![TypeAnnotation::simple("Integer", span())],
+            span(),
+        );
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'fun', [{'type', 0, 'product', []}, {'type', 0, 'integer', []}]}"
+        );
+    }
+
+    #[test]
+    fn generic_block_one_arg() {
+        // Block(Integer, String) = one-arg block: Integer → String
+        let ann = TypeAnnotation::generic(
+            Identifier::new("Block", span()),
+            vec![
+                TypeAnnotation::simple("Integer", span()),
+                TypeAnnotation::simple("String", span()),
+            ],
+            span(),
+        );
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'integer', []}]}, {'type', 0, 'binary', []}]}"
+        );
+    }
+
+    #[test]
+    fn generic_block_two_args() {
+        // Block(Integer, String, Boolean) = two-arg block: (Integer, String) → Boolean
+        let ann = TypeAnnotation::generic(
+            Identifier::new("Block", span()),
+            vec![
+                TypeAnnotation::simple("Integer", span()),
+                TypeAnnotation::simple("String", span()),
+                TypeAnnotation::simple("Boolean", span()),
+            ],
+            span(),
+        );
+        let result = render(&type_annotation_to_spec(&ann));
+        assert_eq!(
+            result,
+            "{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'integer', []}, {'type', 0, 'binary', []}]}, {'type', 0, 'boolean', []}]}"
+        );
+    }
+
+    #[test]
+    fn generic_block_no_params_falls_back() {
+        let ann = TypeAnnotation::generic(Identifier::new("Block", span()), vec![], span());
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'fun', []}"
+        );
+    }
+
+    #[test]
+    fn generic_dictionary_ignores_params() {
+        // Dictionary(String, Integer) → map() (Dialyzer doesn't parameterize maps)
+        let ann = TypeAnnotation::generic(
+            Identifier::new("Dictionary", span()),
+            vec![
+                TypeAnnotation::simple("String", span()),
+                TypeAnnotation::simple("Integer", span()),
+            ],
+            span(),
+        );
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'map', 'any'}"
+        );
+    }
+
+    #[test]
+    fn generic_set_ignores_params() {
+        let ann = TypeAnnotation::generic(
+            Identifier::new("Set", span()),
+            vec![TypeAnnotation::simple("Integer", span())],
+            span(),
+        );
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'map', 'any'}"
+        );
+    }
+
+    #[test]
+    fn generic_tuple_ignores_params() {
+        let ann = TypeAnnotation::generic(
+            Identifier::new("Tuple", span()),
+            vec![
+                TypeAnnotation::simple("Integer", span()),
+                TypeAnnotation::simple("String", span()),
+            ],
+            span(),
+        );
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'tuple', 'any'}"
+        );
+    }
+
+    #[test]
+    fn generic_custom_class_maps_to_any() {
+        // Result(Integer, Error) — custom class maps to any()
+        let ann = TypeAnnotation::generic(
+            Identifier::new("Result", span()),
+            vec![
+                TypeAnnotation::simple("Integer", span()),
+                TypeAnnotation::simple("Error", span()),
+            ],
+            span(),
+        );
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'any', []}"
+        );
+    }
+
+    #[test]
+    fn unresolved_type_param_maps_to_any() {
+        // Bare type variable T maps to any() via simple_type_to_spec catch-all
+        let ann = TypeAnnotation::simple("T", span());
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'any', []}"
+        );
+    }
+
+    #[test]
+    fn generic_list_with_unresolved_type_param() {
+        // List(T) — T is unresolved, maps to any()
+        let ann = TypeAnnotation::generic(
+            Identifier::new("List", span()),
+            vec![TypeAnnotation::simple("T", span())],
+            span(),
+        );
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'list', [{'type', 0, 'any', []}]}"
+        );
+    }
+
+    #[test]
+    fn nested_generic_list_of_lists() {
+        // List(List(Integer)) — nested generic
+        let inner = TypeAnnotation::generic(
+            Identifier::new("List", span()),
+            vec![TypeAnnotation::simple("Integer", span())],
+            span(),
+        );
+        let ann = TypeAnnotation::generic(Identifier::new("List", span()), vec![inner], span());
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann)),
+            "{'type', 0, 'list', [{'type', 0, 'list', [{'type', 0, 'integer', []}]}]}"
+        );
+    }
+
+    #[test]
+    fn generic_block_with_nested_generic_return() {
+        // Block(Integer, List(String)) — block taking Integer, returning List(String)
+        let return_type = TypeAnnotation::generic(
+            Identifier::new("List", span()),
+            vec![TypeAnnotation::simple("String", span())],
+            span(),
+        );
+        let ann = TypeAnnotation::generic(
+            Identifier::new("Block", span()),
+            vec![TypeAnnotation::simple("Integer", span()), return_type],
+            span(),
+        );
+        let result = render(&type_annotation_to_spec(&ann));
+        assert_eq!(
+            result,
+            "{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'integer', []}]}, {'type', 0, 'list', [{'type', 0, 'binary', []}]}]}"
+        );
+    }
+
+    #[test]
+    fn method_with_generic_param_type_generates_spec() {
+        // Method: process: items :: List(Integer) -> Integer
+        let method = MethodDefinition::with_return_type(
+            MessageSelector::Keyword(vec![KeywordPart::new("process:", span())]),
+            vec![ParameterDefinition::with_type(
+                Identifier::new("items", span()),
+                TypeAnnotation::generic(
+                    Identifier::new("List", span()),
+                    vec![TypeAnnotation::simple("Integer", span())],
+                    span(),
+                ),
+            )],
+            vec![],
+            TypeAnnotation::simple("Integer", span()),
+            span(),
+        );
+
+        let spec = render(&generate_method_spec(&method, false).unwrap());
+        assert!(
+            spec.contains("'list', [{'type', 0, 'integer', []}]"),
+            "Should contain parameterized list type, got: {spec}"
+        );
+        assert!(
+            spec.contains("{'process:', 1}"),
+            "Should have correct selector and arity, got: {spec}"
+        );
+    }
+
+    #[test]
+    fn method_with_generic_return_type_generates_spec() {
+        // Method: getItems -> List(String)
+        let method = MethodDefinition::with_return_type(
+            MessageSelector::Unary("getItems".into()),
+            vec![],
+            vec![],
+            TypeAnnotation::generic(
+                Identifier::new("List", span()),
+                vec![TypeAnnotation::simple("String", span())],
+                span(),
+            ),
+            span(),
+        );
+
+        let spec = render(&generate_method_spec(&method, false).unwrap());
+        assert!(
+            spec.contains("'list', [{'type', 0, 'binary', []}]"),
+            "Return type should be parameterized list, got: {spec}"
+        );
+    }
+
+    #[test]
+    fn method_with_block_param_generates_fun_spec() {
+        // Method: do: block :: Block(Integer, Object) -> Nil
+        let method = MethodDefinition::with_return_type(
+            MessageSelector::Keyword(vec![KeywordPart::new("do:", span())]),
+            vec![ParameterDefinition::with_type(
+                Identifier::new("block", span()),
+                TypeAnnotation::generic(
+                    Identifier::new("Block", span()),
+                    vec![
+                        TypeAnnotation::simple("Integer", span()),
+                        TypeAnnotation::simple("Object", span()),
+                    ],
+                    span(),
+                ),
+            )],
+            vec![],
+            TypeAnnotation::simple("Nil", span()),
+            span(),
+        );
+
+        let spec = render(&generate_method_spec(&method, false).unwrap());
+        assert!(
+            spec.contains("'fun'"),
+            "Block param should generate fun type, got: {spec}"
+        );
+        assert!(
+            spec.contains("'integer'"),
+            "Block arg type should be integer, got: {spec}"
+        );
+    }
+
+    #[test]
+    fn type_alias_with_generic_field_type() {
+        // Value class with a field typed as List(Integer)
+        use crate::ast::StateDeclaration;
+        let state = vec![StateDeclaration::with_type(
+            Identifier::new("items", span()),
+            TypeAnnotation::generic(
+                Identifier::new("List", span()),
+                vec![TypeAnnotation::simple("Integer", span())],
+                span(),
+            ),
+            span(),
+        )];
+        let class = ClassDefinition::with_modifiers(
+            Identifier::new("Container", span()),
+            Some(Identifier::new("Value", span())),
+            false,
+            false,
+            state,
+            vec![],
+            span(),
+        );
+        let result = render(&generate_type_alias(&class, "Container").unwrap());
+        assert!(
+            result.contains("'list', [{'type', 0, 'integer', []}]"),
+            "Field type should be parameterized list, got: {result}"
         );
     }
 }
