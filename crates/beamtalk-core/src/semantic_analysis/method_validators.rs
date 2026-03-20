@@ -582,7 +582,7 @@ impl MethodValidator for TypeAwareIntegerArgValidator {
 
         // Only validate when receiver type is a known integer-indexed class
         let is_integer_indexed = match receiver_type {
-            Some(InferredType::Known(class_name)) => {
+            Some(InferredType::Known { class_name, .. }) => {
                 INTEGER_AT_CLASSES.iter().any(|&c| c == class_name.as_str())
             }
             _ => false,
@@ -634,7 +634,7 @@ impl MethodValidator for TypeAwareStringArgValidator {
 
         // Only validate when receiver is known to be String
         let is_string_receiver = match receiver_type {
-            Some(InferredType::Known(class_name)) => STRING_INCLUDES_CLASSES
+            Some(InferredType::Known { class_name, .. }) => STRING_INCLUDES_CLASSES
                 .iter()
                 .any(|&c| c == class_name.as_str()),
             _ => false,
@@ -1540,7 +1540,7 @@ mod tests {
     // ── Type-aware integer validator tests ───────────────────────────────
 
     fn known_type(name: &str) -> InferredType {
-        InferredType::Known(name.into())
+        InferredType::known(name)
     }
 
     #[test]
