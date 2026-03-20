@@ -4,8 +4,8 @@
 // Fixture for docs/learning/10-value-classes.md
 
 Value subclass: Money
-  state: amount = 0
-  state: currency = #USD
+  field: amount = 0
+  field: currency = #USD
 
   amount => self.amount
 

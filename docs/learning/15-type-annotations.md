@@ -13,7 +13,7 @@ Syntax:
 ```
 param :: Type          — annotate a method parameter
 -> ReturnType          — annotate the return type
-state: slot :: Type    — annotate a slot
+field: slot :: Type    — annotate a Value slot (or state: for Actor)
 ```
 
 The `::` delimiter was chosen because `:` alone is ambiguous in Smalltalk
@@ -48,11 +48,16 @@ These all run as normal, they're just self-documenting:
 // inject: initial into: block :: Block => ...
 ```
 
-## State slot annotations
+## Data slot annotations
 
-Annotate instance variable slots:
+Annotate instance variable slots with the keyword for your class kind:
 
 ```beamtalk
+// Value subclass — use field:
+// field: x :: Integer = 0
+// field: name :: String = ""
+
+// Actor subclass — use state:
 // state: balance :: Integer = 0
 // state: owner :: String = ""
 ```
@@ -101,9 +106,9 @@ metadata for tooling.
 ### A typed value class
 
 ```beamtalk
-typed Object subclass: Ch15TypedPoint
-  state: x :: Integer = 0
-  state: y :: Integer = 0
+typed Value subclass: Ch15TypedPoint
+  field: x :: Integer = 0
+  field: y :: Integer = 0
 
   getX -> Integer => self.x
   getY -> Integer => self.y
@@ -196,8 +201,9 @@ Always put a space on both sides of `::`.
 ```
 param :: Type                  — parameter annotation
 methodName -> ReturnType =>    — return type
-state: slot :: Type = default  — slot annotation
-typed Object subclass: ...     — enable type metadata
+field: slot :: Type = default  — Value slot annotation
+state: slot :: Type = default  — Actor slot annotation
+typed Value subclass: ...      — typed value class
 typed Actor subclass: ...      — typed actor
 ```
 
@@ -234,8 +240,8 @@ degrees is below 0.
 <summary>Hint</summary>
 
 ```text
-typed Object subclass: Temperature
-  state: degrees :: Float = 0.0
+typed Value subclass: Temperature
+  field: degrees :: Float = 0.0
   isFreezing -> Boolean => self.degrees < 0
 ```
 
