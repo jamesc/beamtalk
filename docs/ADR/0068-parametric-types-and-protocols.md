@@ -252,6 +252,48 @@ x :: Result(Integer, Error) := Result ok: "hello"
 // ⚠️ Warning: Result(Integer, Error) expected Integer for T, got String
 ```
 
+#### Union Type Checking
+
+Union types (`Integer | String`, `String | False`) are already parsed and stored in the AST as `TypeAnnotation::Union`. The type checker currently skips them (`_ => return`). Stage 1 adds proper union checking: a message send on a union-typed value warns unless **all** members of the union respond to that selector.
+
+```beamtalk
+// All members must respond to the message
+x :: Integer | String := getValue
+x asString             // ✅ Both Integer and String have asString
+x size                 // ⚠️ Warning: Integer does not respond to 'size'
+                       //    (String does, but Integer doesn't)
+x + 1                  // ⚠️ Warning: String does not respond to '+'
+                       //    (Integer does, but String doesn't)
+```
+
+The `FalseOr` pattern (`String | False`) is the most common union — it's Beamtalk's Option/Maybe type. Without union checking, these are invisible to the type system:
+
+```beamtalk
+name :: String | False := dictionary at: "name"
+name size              // ⚠️ Warning: False does not respond to 'size'
+                       //    Hint: check for nil/false before sending 'size'
+```
+
+**Union + narrowing compose** — this is where both features pay off together:
+
+```beamtalk
+name :: String | False := dictionary at: "name"
+name isNil ifTrue: [^"unknown"]
+name size              // ✅ name is narrowed to String — False eliminated by early return
+```
+
+**Return type of union message sends:** When a message is valid on all union members but returns different types, the return type is the union of return types. `(Integer | Float) abs` returns `Integer | Float` (both have `abs` returning their own type). If all members return the same type, the return type is that type: `(Integer | String) asString` returns `String`.
+
+**Union representation in `InferredType`:** Unions are represented as a new variant alongside `Known` and `Dynamic`:
+
+```rust
+enum InferredType {
+    Known { class_name: EcoString, type_args: Vec<InferredType>, provenance: TypeProvenance },
+    Union { members: Vec<InferredType>, provenance: TypeProvenance },
+    Dynamic,
+}
+```
+
 #### Control Flow Narrowing (Simple Cases)
 
 When the type checker recognises a type-testing message send followed by `ifTrue:` / `ifFalse:`, it narrows the variable's type inside the block scope:
@@ -383,6 +425,10 @@ enum InferredType {
     Known {
         class_name: EcoString,
         type_args: Vec<InferredType>,  // empty for non-generic types
+        provenance: TypeProvenance,
+    },
+    Union {
+        members: Vec<InferredType>,    // e.g., [Known("String"), Known("False")]
         provenance: TypeProvenance,
     },
     Dynamic,
@@ -917,7 +963,15 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 - Update collection classes: `Array(E)`, `Dictionary(K, V)`, `Set(E)`
 - Update `Block` types if applicable
 
-**Phase 1f: Control Flow Narrowing (M)**
+**Phase 1f: Union Type Checking (M)**
+- Add `InferredType::Union` variant to represent union types in the checker
+- When encountering `TypeAnnotation::Union`, build `InferredType::Union` with each member resolved
+- On message send to a union-typed receiver: check selector exists on ALL members, warn if any member lacks it
+- Return type of union sends: union of member return types (simplified to single type if all agree)
+- Remove the `_ => return` and `contains('|')` escape hatches for unions
+- Handle `FalseOr` as sugar for `T | False` unions
+
+**Phase 1g: Control Flow Narrowing (M)**
 - Add narrowing environment to scope: `HashMap<VariableId, InferredType>` refinement layer pushed/popped per block
 - Pattern-match `[expr] class = [ClassName] ifTrue: [block]` — push `{expr → ClassName}` into block scope
 - Pattern-match `[expr] isKindOf: [ClassName] ifTrue: [block]` — same narrowing
@@ -957,12 +1011,13 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 | 1c | Constructor type inference | M | 1b |
 | 1d | Codegen — Dialyzer specs and runtime meta for generics | M | 1a |
 | 1e | Stdlib generic annotations | M | 1a, 1b |
-| 1f | Control flow narrowing (class =, isKindOf:, isNil) | M | 1b |
+| 1f | Union type checking (message must exist on all members) | M | 1b |
+| 1g | Control flow narrowing (class =, isKindOf:, isNil) | M | 1b, 1f |
 | 2a | Protocol AST and parser | M | None (parallel with 1) |
 | 2b | Protocol registry and conformance | L | 2a, 1b |
 | 2c | Runtime protocol queries | M | 2b |
 | 2d | Type parameter bounds | S | 1b, 2b |
-| 2e | respondsTo: narrowing | S | 1f, 2b |
+| 2e | respondsTo: narrowing | S | 1g, 2b |
 
 ## Migration Path
 
