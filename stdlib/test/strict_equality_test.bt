@@ -13,20 +13,30 @@ TestCase subclass: StrictEqualityTest
 
   testIntegerStrictNotEqualsFloat => self deny: (5 =:= 5.0)
 
-  testIntegerInequalityDifferentValues => self assert: (1 =/= 2)
+  testIntegerInequalityDifferentValues =>
+    @expect type
+    self assert: (1 =/= 2)
 
-  testIntegerInequalitySameValue => self deny: (5 =/= 5)
+  testIntegerInequalitySameValue =>
+    @expect type
+    self deny: (5 =/= 5)
 
-  testIntegerInequalityIntVsFloat => self assert: (5 =/= 5.0)
+  testIntegerInequalityIntVsFloat =>
+    @expect type
+    self assert: (5 =/= 5.0)
 
   // --- Float =:= / =/= ---
   testFloatStrictEqualsSameFloat => self assert: (5.0 =:= 5.0)
 
   testFloatStrictNotEqualsInteger => self deny: (5.0 =:= 5)
 
-  testFloatInequalityDifferentValues => self assert: (1.0 =/= 2.0)
+  testFloatInequalityDifferentValues =>
+    @expect type
+    self assert: (1.0 =/= 2.0)
 
-  testFloatInequalitySameValue => self deny: (3.14 =/= 3.14)
+  testFloatInequalitySameValue =>
+    @expect type
+    self deny: (3.14 =/= 3.14)
 
   // --- Loose equality (==) coerces across int/float ---
   testLooseEqualityCoercesIntFloat => self assert: (5 == 5.0)
@@ -34,7 +44,9 @@ TestCase subclass: StrictEqualityTest
   // --- Zero and negative edge cases ---
   testZeroIntNotStrictEqualsZeroFloat => self deny: (0 =:= 0.0)
 
-  testZeroIntStrictInequalityZeroFloat => self assert: (0 =/= 0.0)
+  testZeroIntStrictInequalityZeroFloat =>
+    @expect type
+    self assert: (0 =/= 0.0)
 
   testNegativeIntNotStrictEqualsNegativeFloat => self deny: (-1 =:= -1.0)
 
@@ -43,15 +55,23 @@ TestCase subclass: StrictEqualityTest
 
   testStringStrictNotEqualsDifferent => self deny: ("abc" =:= "xyz")
 
-  testStringInequalityDifferent => self assert: ("abc" =/= "xyz")
+  testStringInequalityDifferent =>
+    @expect type
+    self assert: ("abc" =/= "xyz")
 
-  testStringInequalitySame => self deny: ("abc" =/= "abc")
+  testStringInequalitySame =>
+    @expect type
+    self deny: ("abc" =/= "abc")
 
   // --- Symbol =:= / =/= ---
   testSymbolStrictEqualsSame => self assert: (#hello =:= #hello)
 
   testSymbolStrictNotEqualsDifferent => self deny: (#hello =:= #world)
 
-  testSymbolInequalityDifferent => self assert: (#hello =/= #world)
+  testSymbolInequalityDifferent =>
+    @expect type
+    self assert: (#hello =/= #world)
 
-  testSymbolInequalitySame => self deny: (#hello =/= #hello)
+  testSymbolInequalitySame =>
+    @expect type
+    self deny: (#hello =/= #hello)

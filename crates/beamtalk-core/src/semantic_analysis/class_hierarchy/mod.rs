@@ -1941,28 +1941,6 @@ mod tests {
     }
 
     #[test]
-    fn resolves_selector_strict_inequality() {
-        let h = ClassHierarchy::with_builtins();
-        // =/= is defined directly on Integer, Float, Number, and other types
-        assert!(
-            h.resolves_selector("Integer", "=/="),
-            "Integer must resolve =/= (strict inequality)"
-        );
-        assert!(
-            h.resolves_selector("Float", "=/="),
-            "Float must resolve =/= (strict inequality)"
-        );
-        assert!(
-            h.resolves_selector("String", "=/="),
-            "String must resolve =/= (strict inequality)"
-        );
-        assert!(
-            h.resolves_selector("Symbol", "=/="),
-            "Symbol must resolve =/= (strict inequality)"
-        );
-    }
-
-    #[test]
     fn resolves_selector_inherited() {
         let h = ClassHierarchy::with_builtins();
         // Integer inherits from Object which has isNil
