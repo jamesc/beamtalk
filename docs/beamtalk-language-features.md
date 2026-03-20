@@ -164,7 +164,7 @@ Beamtalk has three class kinds with distinct data keywords and construction prot
 |------------|-------------|-----------|--------------|-----------------|
 | **Value** | `field:` | Immutable data slots, `self.slot :=` is compile error | `new` / `new:` / keyword ctor | No |
 | **Actor** | `state:` (permitted, not required) | Mutable process state, `self.slot :=` persists via gen_server | `spawn` / `spawnWith:` | Yes |
-| **Object** | *(none)* | Methods only, no instance data, not instantiable | *(none)* | No |
+| **Object** | *(none)* | No Beamtalk-managed data; often class-methods-only, but can have instances with runtime-backed state (ETS, handles) | Custom constructors | No |
 
 ```beamtalk
 // Value — immutable data, no process (ADR 0042)
@@ -184,7 +184,7 @@ Actor subclass: Counter
   increment => self.count := self.count + 1
   getCount => self.count
 
-// Object — class methods only, not instantiable
+// Object — no Beamtalk-managed data; commonly class-methods-only
 Object subclass: MathHelper
   class factorial: n =>
     n <= 1
@@ -1681,7 +1681,7 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 |----------------------------|----------------------|
 | Value object | `Value subclass:` with `field:` — plain Erlang map (no process) |
 | Actor | `Actor subclass:` with `state:` — BEAM process (gen_server) |
-| Module/utility class | `Object subclass:` — class methods only, not instantiable |
+| Module/utility class | `Object subclass:` — no Beamtalk-managed data; class methods or runtime-backed instances |
 | Class | Module + constructor function |
 | Instance variable (immutable) | `field:` — value map field |
 | Instance variable (mutable) | `state:` — gen_server state map field |
