@@ -650,7 +650,13 @@ Only parse and structural errors block compilation — never type checking resul
 - **Add `typed` modifier** → get completeness warnings for missing annotations
 - **Never blocked** → code always compiles and runs
 
-There is no `--warnings-as-errors` flag — ADR 0025 rejected global strict mode. The `typed` class modifier is the opt-in for thoroughness, but even it only produces more warnings, not errors.
+ADR 0025 rejected a **language-level** strict mode (where the same code behaves differently depending on a compiler flag). The language always produces warnings, never errors, for type issues. However, the **build pipeline** enforces warnings via `--warnings-as-errors` on `test-stdlib`, `test-docs`, and `test-examples` (PR #1567). This is the adoption forcing function:
+
+- **Dev time / REPL**: Warnings only — experiment freely, nothing blocks you
+- **CI / `just test`**: `--warnings-as-errors` — type warnings fail the build, you must fix or annotate
+- **Same language everywhere**: The compiler always emits warnings. The build system decides whether warnings are acceptable to merge.
+
+This avoids TypeScript's `--strict` problem (same code, different behavior per config) while providing the enforcement that drives adoption. The forcing function is in the build pipeline, not the language semantics. Every new type checking feature in this ADR (generics, unions, narrowing, protocols) produces warnings that `--warnings-as-errors` will enforce in CI automatically — no additional configuration needed.
 
 #### Runtime Protocol Queries
 
