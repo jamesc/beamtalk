@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1562: Strict equality (=:=) must distinguish integer from float.
+// Erlang's =:= is exact equality — 5 =:= 5.0 is false because they are
+// different types. Loose equality (==) coerces, so 5 == 5.0 is true.
+
+TestCase subclass: StrictEqualityTest
+
+  testIntegerStrictEqualsSameInteger => self assert: (5 =:= 5)
+
+  testIntegerStrictNotEqualsFloat => self deny: (5 =:= 5.0)
+
+  testFloatStrictEqualsSameFloat => self assert: (5.0 =:= 5.0)
+
+  testLooseEqualityCoercesIntFloat => self assert: (5 == 5.0)
+
+  testStrictInequalityIntFloat => self assert: (5 =/= 5.0)
+
+  testZeroIntNotStrictEqualsZeroFloat => self deny: (0 =:= 0.0)
+
+  testNegativeIntNotStrictEqualsNegativeFloat => self deny: (-1 =:= -1.0)

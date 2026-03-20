@@ -1580,7 +1580,7 @@
         "mutation",
         "set"
       ],
-      "source": "5 =:= 5      // => true\n5 =:= 5.0    // => true\n5 == 5.0     // => true\n5 =/= 6      // => true\n5 /= 5.0     // => false",
+      "source": "5 =:= 5      // => true\n5 =:= 5.0    // => false\n5 == 5.0     // => true\n5 =/= 6      // => true\n5 /= 5.0     // => false",
       "explanation": "Code example from docs/learning/05-arithmetic-and-comparison.md"
     },
     {
