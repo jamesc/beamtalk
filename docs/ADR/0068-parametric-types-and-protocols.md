@@ -165,6 +165,40 @@ Generates:
 
 Unresolved type parameters map to `any()` in Dialyzer specs.
 
+#### Runtime Type Representation
+
+Beamtalk does **not** fully erase types at the BEAM level. Every compiled class exports `__beamtalk_meta/0` containing `method_info` maps with `return_type` and `param_types` entries (used by REPL chain completion, `:help`, and `CompiledMethod` introspection — see ADR 0045). This means generic type information must survive into the runtime representation, or introspection will lie about method signatures.
+
+**Parameterized methods store type parameter references**, not erased `none`:
+
+```erlang
+%% __beamtalk_meta/0 for Result(T, E)
+#{method_info => #{
+    'unwrap' => #{arity => 0, return_type => {type_param, 'T', 0}, ...},
+    'error'  => #{arity => 0, return_type => {type_param, 'E', 1}, ...},
+    'map:'   => #{arity => 1,
+                  return_type => {generic, 'Result', [{type_param, 'R', -1}, {type_param, 'E', 1}]},
+                  param_types => [{generic, 'Block', [{type_param, 'T', 0}, {type_param, 'R', -1}]}],
+                  ...}
+  },
+  type_params => ['T', 'E'],   %% declared type parameter names
+  ...
+}
+```
+
+The `{type_param, Name, Index}` tagged tuple preserves the parameter name and its position in the class's type parameter list (`-1` for method-local params like `R` in `map:`). This enables:
+
+- **`:help` display**: `Result >> unwrap` shows `unwrap -> T` (not `unwrap -> Object` or `unwrap -> ???`)
+- **REPL chain completion**: When the workspace knows `r :: Result(Integer, Error)`, it substitutes `T → Integer` into `{type_param, 'T', 0}` to resolve `r unwrap` as `Integer` and offer Integer completions
+- **`CompiledMethod` introspection**: Future `returnType` / `paramTypes` messages can return the parameterized form for tooling
+- **Fallback to Dynamic**: When concrete type params are unknown, `{type_param, ...}` entries are treated as Dynamic — same behavior as `none` today, but with the information preserved for when context is available
+
+The `method_return_types` map on the class gen_server (used for fast chain-completion lookups) stores the tagged tuples directly. The chain-resolution code in `beamtalk_repl_ops_dev.erl` gains a substitution step: if it encounters `{type_param, _, Index}`, it looks up the concrete type from the caller's annotation context.
+
+**This is NOT reified generics** (Java's alternative to erasure). There are no runtime type checks, no generic type tags on instances, no `instanceof Result(Integer, Error)`. The type parameter metadata lives on the *class* (in `method_info`), not on *instances*. It's introspection data for tooling, not a runtime type system.
+
+**Contrast with Java's erasure problem:** Java erased generics from `.class` files but kept `instanceof`, `getClass()`, and reflection APIs that expected to find them — a mismatch. Beamtalk stores type params in `method_info` (which tooling already reads) and doesn't pretend they're absent. No mismatch, no lies.
+
 #### REPL Examples
 
 ```beamtalk
@@ -557,10 +591,13 @@ deposit: amount :: Integer => ...      // nominal check
 - For `Result error: #not_found`, infer `E = Symbol` from the argument type
 - Store inferred type params on the expression's `InferredType`
 
-**Phase 1d: Spec Codegen (S)**
-- Extend `spec_codegen.rs` to expand generic types with concrete substitutions
-- Map type parameters to Dialyzer type expressions
-- Unresolved parameters → `any()`
+**Phase 1d: Codegen — Spec and Meta (M)**
+- Extend `spec_codegen.rs` to expand generic types with concrete substitutions in Dialyzer specs
+- Unresolved type parameters → `any()` in specs
+- Emit `type_params` list in `__beamtalk_meta/0` output
+- Emit `{type_param, Name, Index}` tagged tuples in `method_info` return_type/param_types entries
+- Update `method_return_types` map population in `beamtalk_object_class.erl` to handle tagged tuples
+- Update chain-resolution in `beamtalk_repl_ops_dev.erl` to substitute type params when caller context provides concrete types
 
 **Phase 1e: Stdlib Annotations (M)**
 - Update `Result.bt`: `Result(T, E)`, fields `:: T` / `:: E`, method return types
@@ -597,7 +634,7 @@ deposit: amount :: Integer => ...      // nominal check
 | 1a | Parser and AST for generic types | M | None |
 | 1b | Type checker substitution | L | 1a |
 | 1c | Constructor type inference | M | 1b |
-| 1d | Dialyzer spec generation for generics | S | 1a |
+| 1d | Codegen — Dialyzer specs and runtime meta for generics | M | 1a |
 | 1e | Stdlib generic annotations | M | 1a, 1b |
 | 2a | Protocol AST and parser | M | None (parallel with 1) |
 | 2b | Protocol registry and conformance | L | 2a, 1b |
