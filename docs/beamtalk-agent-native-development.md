@@ -69,10 +69,10 @@ Actor subclass: Counter
 
   increment => self.value := self.value + 1
   decrement => self.value := self.value - 1
-  getValue => ^self.value
+  getValue => self.value
 ```
 
-This defines a `Counter` that's a subclass of `Actor`. It has one piece of state (`value`, initialized to 0) and three methods. The `^` means "return this value." That's the entire class — no boilerplate, no imports, no ceremony.
+This defines a `Counter` that's a subclass of `Actor`. It has one piece of state (`value`, initialized to 0) and three methods. The last expression in a method is implicitly returned — no `return` keyword needed. That's the entire class — no boilerplate, no imports, no ceremony.
 
 For comparison, the equivalent Erlang is ~50 lines of `gen_server` callbacks. The equivalent Elixir is ~20 lines. Beamtalk hides the OTP machinery behind the object model most developers already know.
 
@@ -182,7 +182,7 @@ Agent edits counter.rs (or .ts, .go, .py)
 
 **In a beamtalk workspace:**
 ```beamtalk
-// Agent modifies a method on the live class (proposed syntax — not yet implemented)
+// Agent modifies a method on the live class
 Counter >> increment => self.count := self.count + 1
 
 // Effect is immediate — next message send uses new code
@@ -193,7 +193,7 @@ c increment    // => 2
 ```
 *Iteration time for a single method edit: <100ms via hot reload. Structural changes (adding fields, new classes) still require recompilation — seconds, not minutes.*
 
-The BEAM's hot code loading means a changed method takes effect on the *next message send*. For the common case — modifying method behavior — the agent doesn't wait for a build. Structural changes (new state fields, new class definitions) go through the compiler but are still faster than most file-based workflows because the BEAM reloads only the changed module.
+The `>>` live-patching syntax is implemented — it replaces a single method on a live class, and existing instances pick up the new code immediately on the next message send. Classes can also be reloaded from their source file via `Counter reload` or the REPL shortcut `:reload Counter`. Structural changes (new state fields, new class definitions) go through the compiler but are still faster than most file-based workflows because the BEAM reloads only the changed module.
 
 ### 4.2 Reflection Replaces Grep
 
@@ -217,9 +217,16 @@ Counter superclass
 
 Counter respondsTo: #size
 // => false
+
+// Two system singletons provide rich introspection:
+Beamtalk allClasses        // All registered class names
+Beamtalk help: Counter     // Formatted documentation
+Workspace actors           // All live actors in the workspace
+Workspace actorsOf: Counter // All Counter instances
+Workspace classes          // All loaded user classes
 ```
 
-The agent **asks the system directly**. No parsing, no inference, no missed cases. The program describes itself.
+The agent **asks the system directly**. No parsing, no inference, no missed cases. The `Beamtalk` singleton provides system reflection (class registry, documentation, globals) while the `Workspace` singleton provides project operations (file loading, testing, actor introspection, namespace binding). Both are implemented today.
 
 ### 4.3 Structured Errors Guide the Agent
 
@@ -236,41 +243,43 @@ The agent must parse this string, guess the cause, locate the relevant code.
 // ERROR: DoesNotUnderstand
 //   class: Integer
 //   selector: foo
-//   hint: "Integer does not understand 'foo'. 
-//          Did you mean: factorial, floor, float?"
+//   hint: "Check spelling or use 'respondsTo:' to verify method exists"
 ```
 
-The error is a structured object (`#beamtalk_error{}`), not a string. The agent can pattern match on `kind`, read `hint`, inspect `class` and `selector` — programmatically, not by parsing text.
+The error is a structured object (`#beamtalk_error{}`), not a string. It carries `kind`, `class`, `selector`, and `hint` fields — machine-readable, not text to parse.
 
 ```beamtalk
 // Agent can catch and inspect errors as objects
-[42 foo] on: DoesNotUnderstand do: [:e |
-  e selector    // => #foo
-  e class       // => Integer
-  e hint        // => "Did you mean: factorial, floor, float?"
+[42 foo] on: RuntimeError do: [:e |
+  e message     // => "Integer does not understand 'foo'"
 ]
+
+// Or prevent errors entirely via reflection:
+Integer respondsTo: #foo    // => false — don't even try
 ```
 
-### 4.4 Persistent Workspace Preserves Context (Planned)
+### 4.4 Persistent Workspace Preserves Context
 
-**Today:** Every agent session starts from scratch. Previous experiments are gone. Variables, spawned processes, modified classes — all lost when the session ends. (This is the current state — the REPL starts a fresh BEAM node that terminates when the session ends.)
+**Today (file-based):** Every agent session starts from scratch. Previous experiments are gone. Variables, spawned processes, modified classes — all lost when the session ends.
 
-**With beamtalk's planned persistent workspace ([ADR 0004](ADR/0004-persistent-workspace-management.md)):**
+**In a beamtalk workspace ([ADR 0004](ADR/0004-persistent-workspace-management.md) — implemented):**
 
 ```beamtalk
 // Monday: Agent spawns actors, builds up state
 server := ChatServer spawn
 server addRoom: "general"
 server addUser: "alice"
+Workspace bind: server as: #chatServer  // Register for later lookup
 // Agent disconnects
 
-// Tuesday: Agent reconnects — everything is still running
-server rooms          // => #("general")
-server users          // => #("alice")
-server addRoom: "dev" // Continue where we left off
+// Tuesday: Agent reconnects — actors are still running
+Workspace actors                        // Discover live actors
+server := Workspace actorsOf: ChatServer // Rebind to the running actor
+(server first) rooms                    // => #("general") — state preserved!
+(server first) addRoom: "dev"           // Continue where we left off
 ```
 
-The workspace **becomes** the agent's memory. Not a text file the agent re-reads, but living objects the agent picks back up. ADR 0004 designs this using detached BEAM nodes with supervision trees — processes survive REPL disconnections, state lives in running actors, and multiple sessions can share a workspace.
+The actors and their state survive across sessions; REPL variable *bindings* are session-local and must be reestablished (via `Workspace actors`, `actorsOf:`, or `actorAt:`). The workspace **becomes** the agent's persistent memory — not a text file the agent re-reads, but living objects the agent rediscovers and picks back up. Workspaces use detached BEAM nodes with supervision trees — processes survive REPL disconnections, state lives in running actors, and multiple sessions can share a workspace.
 
 ### 4.5 Incremental Verification, Not Batch Testing
 
@@ -287,9 +296,10 @@ c increment
 c increment
 c count        // => 2  ✓
 
-// Only after local verification: run full suite via CLI
-// (today: `just test` or `just test-e2e`; in-workspace test API is planned)
-// => 12 passed, 0 failed
+// Only after local verification: run full suite
+Workspace test        // => TestResult (12 passed, 0 failed)
+// Or target a specific test class:
+Workspace test: CounterTest
 ```
 
 The agent uses the live workspace as a **scratchpad**, verifying incrementally before committing to a full test run. This matches how expert human developers use Smalltalk — and it's the natural workflow for an agent that wants fast feedback.
@@ -314,14 +324,63 @@ server rooms  // => #("general", "dev") — unaffected
 
 This is natural A/B testing for code changes. The agent can run the old and new implementation side by side, in complete isolation, on the same running system.
 
-### 4.7 The Live↔File Round-Trip
+### 4.7 MCP: The Agent's Native Interface to the Workspace
+
+The features described above aren't hypothetical — AI agents use them **today** via Model Context Protocol (MCP). Beamtalk's MCP server exposes the live workspace as a set of tools: `evaluate` (run any Beamtalk expression), `load_file` (compile and hot-reload), `test` (run tests), and `docs` (query documentation). The agent never shells out or parses text — it sends structured requests and gets structured responses.
+
+Here's a real interaction where Claude Code discovers and uses a native API, replacing an Erlang FFI call:
+
+```
+Agent sees: Erlang filelib last_modified: filePath  — raw FFI call in user code
+Agent wants: the native Beamtalk API (if one exists)
+
+→ evaluate("File class allMethods")
+← [... "lastModified:", "readString:", "writeString:contents:", ...]
+   // Agent discovers the method exists — no grep, no file reading
+
+→ docs(class: "File", selector: "lastModified:")
+← File >> lastModified: path :: String -> Result
+   // Agent sees the signature and return type
+
+→ // Agent edits the source file: replaces FFI call with File lastModified:
+
+→ load_file("src/workflow_watcher.bt")
+← Loaded classes: WorkflowWatcher
+   // Hot-reloaded in <200ms — no full rebuild
+
+→ test("test/workflow_watcher_test.bt")
+← { "passed": 5, "failed": 0 }
+
+→ evaluate("File lastModified: \"src/workflow_watcher.bt\"")
+← Result ok: a DateTime(2026-03-19T17:36:30Z)
+   // Smoke test confirms the change works
+```
+
+The agent's loop was: **reflect → discover → edit → reload → test → verify** — with sub-second feedback at every step. No compilation wait, no output parsing, no guessing at API surfaces. The MCP tools are thin wrappers around the same `Workspace` and `Beamtalk` APIs described in §4.2 — `evaluate` runs any expression in the live workspace, `docs` calls `Beamtalk help:selector:`, and `load_file` calls `Workspace load:`.
+
+A live workspace is a natural host for multiple interfaces. The same running workspace serves three audiences simultaneously:
+
+| Interface | Audience | Transport |
+|-----------|----------|-----------|
+| **REPL** (terminal) | Human developer | WebSocket (JSON protocol) |
+| **VS Code extension** | Human developer | WebSocket (same JSON protocol) + LSP |
+| **Browser workspace** | Human developer | WebSocket (same JSON protocol) — multi-pane Smalltalk-style UI ([ADR 0017](ADR/0017-browser-connectivity-to-running-workspaces.md)) |
+| **MCP server** | AI coding agent | WebSocket (same JSON protocol) exposed as MCP tools |
+
+All four connect to the same live BEAM node via the same WebSocket transport and JSON REPL protocol (`beamtalk_ws_handler`), share the same actors, and see the same hot-reloaded code. An agent exploring via MCP and a developer browsing classes in VS Code are interacting with the same running system — changes made by one are immediately visible to the other. This isn't four separate tools bolted together; it's one live workspace with four windows into it.
+
+Crucially, all interfaces share the same underlying protocol: **message sends to live objects over one WebSocket transport.** The REPL evaluates `Counter methods`, the VS Code extension calls `Beamtalk help: Counter`, the browser workspace sends `{"op": "eval", "code": "Counter methods"}`, and the MCP server runs `evaluate("Counter methods")` — all dispatching the same message to the same object via the same `beamtalk_repl_shell` session infrastructure. Adding a new interface — a mobile client, a Jupyter kernel, a voice assistant — doesn't require new runtime infrastructure. It requires a protocol adapter over the WebSocket transport that already exists.
+
+This is the Smalltalk uniformity principle at work: because everything is a message send, and the workspace exposes one protocol for all clients, any interface that can send JSON over a WebSocket gets full access to the running system. The transport is solved once; the interfaces multiply freely.
+
+### 4.8 The Live↔File Round-Trip
 
 A fair question: if agents work by sending messages to live objects, how does this integrate with version control, code review, and team collaboration?
 
 The answer: **live-first doesn't mean file-free.** Beamtalk source files (`.bt`) remain the persistent record. The workflow is:
 
 1. **Agent modifies methods in the live workspace** — instant feedback, no compile wait
-2. **Agent persists changes to `.bt` source files** — the workspace can serialize modified methods back to their source files
+2. **Agent persists changes to `.bt` source files** — once the agent is satisfied with live-patched behavior, it writes the changes back to the source file
 3. **Standard git workflow** — `git diff`, PR review, CI checks all work on the source files
 4. **Source files bootstrap the workspace** — loading a `.bt` file into a workspace brings live objects into existence
 
@@ -342,7 +401,7 @@ AI agents working on the beamtalk codebase today leave issue references in comme
 ### The idea: structured provenance
 
 Beamtalk already has structured annotations:
-- `///` doc comments → parsed into AST → flow to EEP-48 docs
+- `///` doc comments → parsed into AST → flow to runtime-queryable documentation (via `Beamtalk help:`)
 - `@primitive`, `@intrinsic`, `@sealed` → parsed pragmas with semantic meaning
 
 Why not extend this to provenance?
@@ -450,7 +509,7 @@ Total per feature: 5-45 minutes (varies greatly by language — faster for TypeS
 
 ```
 ┌──────────────────┐
-│ Resume workspace │  (actors still running from last session — planned: ADR 0004)
+│ Resume workspace │  (actors still running from last session — ADR 0004)
 └───────┬──────────┘
         ▼
 ┌──────────────────┐
@@ -495,14 +554,21 @@ The difference is significant — potentially **an order of magnitude** for lang
 | **Actor isolation** | Experiments can't break the system | ✅ Core BEAM |
 | **Futures / async messaging** | Parallel experiments, await results | ✅ Implemented |
 | **`///` doc comments** | Structured documentation in AST | ✅ Implemented |
-| **EEP-48 docs** | Standard BEAM documentation protocol | ✅ Implemented |
+| **Runtime-queryable docs** | `Beamtalk help:` returns formatted documentation for any class/method | ✅ Implemented |
 | **Supervision trees** | Automatic recovery from failures | ✅ Core OTP |
+| **Persistent workspace** | Detached BEAM nodes survive REPL disconnects; actors keep running | ✅ Implemented ([ADR 0004](ADR/0004-persistent-workspace-management.md)) |
+| **`Workspace` singleton** | Actor introspection, file loading, testing, namespace binding | ✅ Implemented |
+| **`Beamtalk` singleton** | System reflection: class registry, globals, documentation | ✅ Implemented |
+| **Live patching (`>>`)** | Replace individual methods on live classes, immediate effect | ✅ Implemented |
+| **Class-based reload** | `Counter reload` recompiles from source file and hot-swaps | ✅ Implemented |
+| **In-workspace testing** | `Workspace test` / `Workspace test: AClass` — run tests from the workspace | ✅ Implemented |
+| **Workspace supervisors** | `Workspace startSupervisor:` / `stopSupervisor:` — manage supervision from REPL | ✅ Implemented |
+| **MCP server** | `evaluate`, `load_file`, `test`, `docs` — structured agent interface to live workspace | ✅ Implemented |
 
 ### Planned / future
 
 | Feature | Agent benefit | Reference |
 |---------|--------------|-----------|
-| **Persistent workspace** | State survives across agent sessions | [ADR 0004](ADR/0004-persistent-workspace-management.md) |
 | **Provenance annotations** | Code knows *why* it exists (issues, ADRs, authorship) | This document §5 |
 | **Workspace-level undo** | Agent checkpoints before risky changes, rolls back on failure | Future |
 | **Observable message traces** | "Trace all messages to Counter for next 10 sends" | Future |
@@ -535,12 +601,13 @@ A REPL alone doesn't get you there. The key properties are:
 | Hot method reload | ✅ <100ms | ❌ Restart | ✅ Module | ❌ Rebuild | ✅ Function |
 | Runtime reflection | ✅ First-class | ⚠️ `dir()` | ⚠️ Limited | ❌ Compile-time | ✅ First-class |
 | Isolated experiments | ✅ Actors | ❌ Shared state | ✅ Processes | ❌ Threads | ❌ Shared state |
-| Persistent state | 🔮 Workspace (planned) | ❌ Session ends | ⚠️ Node runs | ❌ Process ends | ⚠️ nREPL |
+| Persistent state | ✅ Workspace (ADR 0004) | ❌ Session ends | ⚠️ Node runs | ❌ Process ends | ⚠️ nREPL |
 | Structured errors | ✅ Objects | ❌ Strings | ⚠️ Tuples | ✅ Types | ⚠️ Maps |
 | Provenance tracking | 🔮 Planned | ❌ | ❌ | ❌ | ❌ |
 | Method-level editing | ✅ One method | ❌ Whole module | ❌ Whole module | ❌ Whole crate | ✅ One function |
 | Agent fault isolation | ✅ Supervision | ❌ | ✅ Supervision | ❌ | ❌ |
 | Distribution | ✅ Multi-node | ❌ Manual | ✅ Multi-node | ❌ Manual | ❌ Manual |
+| Native MCP server | ✅ evaluate/load/test/docs | ❌ | ❌ | ❌ | ❌ |
 
 Clojure comes closest — it has a live REPL, first-class reflection, and function-level reloading. But it lacks BEAM's process isolation, supervision trees, and distribution. Elixir has the BEAM properties but lacks Smalltalk's deep reflection and method-level granularity.
 
@@ -605,8 +672,7 @@ Ronacher worries about reformatting causing constructs to move between lines, tr
 
 ```beamtalk
 // Not: "edit lines 47-52 of counter.bt"
-// Instead: conceptually, "replace the increment method on Counter"
-// (proposed syntax — not yet implemented; see §4.1 for design)
+// Instead: "replace the increment method on Counter"
 Counter >> increment => self.count := self.count + 2
 ```
 
@@ -733,10 +799,20 @@ Actor subclass: Counter
   state: value = 0
 
   increment => self.value := self.value + 1
-  getValue => ^self.value
+  getValue => self.value
 ```
 
 No GenServer boilerplate, no `handle_call` callbacks, no `{:reply, value, new_state}` tuples, no `__MODULE__`, no separate client API and server callbacks. Any developer who's ever used an object understands the beamtalk version immediately. Under the hood, `spawn` creates a BEAM process and `increment` is a `gen_server:call` — but the developer doesn't need to know that.
+
+### The performance question: mutable syntax on an immutable VM
+
+A reasonable objection: "Beamtalk looks like it has mutable objects, but the BEAM has no mutable variables. How much overhead does this abstraction cost?"
+
+The BEAM is a functional runtime — all state is immutable, threaded through recursive calls. Beamtalk's `state:` declarations and `self.value := self.value + 1` compile to state-threading codegen ([ADR 0041](ADR/0041-universal-state-threading-block-protocol.md)). The primary optimization: state mutations within methods compile to **versioned state variables** (`State`, `State1`, `State2`, ...) threaded directly through the generated Core Erlang — the same pattern a hand-written Erlang `gen_server` uses. No map packing, no tuple wrapping, no overhead. The more expensive map-based `{Result, StateAcc}` protocol is only used as a fallback for blocks crossing unknown call boundaries (user-defined higher-order methods), and even there the cost is ~65ns per invocation.
+
+Performance benchmarks (`just perf`) directly compare beamtalk actor calls against hand-written Erlang `gen_server` with map state — the same state representation, minus beamtalk's dispatch layer. The result: **beamtalk dispatch is within 1-2x of the hand-written Erlang baseline.** The benchmarks track four tiers — raw process messaging, `gen_server` with record state, `gen_server` with map state, and beamtalk actor — and report overhead ratios (`beamtalk_vs_gs_map`, `beamtalk_vs_raw`) to catch regressions. See [performance.md](performance.md) for baseline numbers.
+
+This matters for the agent-native thesis: the uniform "everything is a message send" interface doesn't come at the cost of production viability. Agents get a simple, uniform programming model *and* near-native BEAM performance.
 
 ### Where Elixir still has the edge (honestly)
 
@@ -834,33 +910,33 @@ A language is **agent-native** when its core design properties match the needs o
 
 Beamtalk has or plans all eight. Most modern languages score fully on three or four; the best (Clojure, Elixir) reach five or six, but each misses critical pieces — Clojure lacks fault isolation and distribution; Elixir lacks deep reflection and method-level granularity. No other language targets all eight simultaneously.
 
-### Even without the planned features
+### What's implemented today
 
-It's worth being explicit: the persistent workspace (ADR 0004) and provenance annotations (§5) are not yet built. Without them, beamtalk still offers a unique combination: **<100ms method-level hot reload + live runtime reflection + structured machine-readable errors + actor-based fault isolation + message passing as the universal interface.** No other single language delivers all of these today. The planned features amplify the advantage — especially session persistence, which eliminates cold starts — but the core thesis holds without them.
+Beamtalk delivers a unique combination today: **<100ms method-level hot reload via `>>` live patching + persistent workspaces with actor survival across sessions (ADR 0004) + live runtime reflection via `Beamtalk` and `Workspace` singletons + an MCP server that gives AI agents structured access to all of these + structured machine-readable errors + actor-based fault isolation + in-workspace testing + message passing as the universal interface.** No other single language delivers all of these. The MCP integration is particularly significant — it means AI agents don't need special adaptation to use beamtalk's live features; any MCP-capable agent (Claude Code, Cursor, etc.) can `evaluate` expressions, `load_file` to hot-reload, and query `docs` on running objects out of the box. The remaining planned features — provenance annotations (§5), observable message traces, workspace-level undo — would amplify the advantage further, but the core thesis is already substantiated by what ships today.
 
 ### The future: development as conversation
 
 Today, an AI agent developing software is essentially doing text manipulation — reading files, writing files, running shell commands, parsing output. The *program* is something that exists in files. The agent operates *on* the files.
 
-In a beamtalk workspace, the program is something that exists in **running objects**. The agent operates *with* the objects, in conversation. Here's what this looks like when the planned features come together — some of this works today (reflection, hot reload, actors), some is future (workspace persistence, provenance):
+In a beamtalk workspace, the program is something that exists in **running objects**. The agent operates *with* the objects, in conversation. Here's what this looks like — most of this works today (reflection, hot reload, actors, workspace persistence), with provenance annotations as the remaining future piece:
 
 ```beamtalk
-// Agent joins a workspace where code is already running (planned: ADR 0004)
-Workspace connect: "my-project"
+// Agent joins a workspace where code is already running (ADR 0004)
+Workspace actors              // Discover what's running
 
-// Agent asks the system about the relevant code (works today)
+// Agent asks the system about the relevant code
 ChatServer methods
 // => #(handleMessage:, addUser:, broadcast:, ...)
 
 ChatServer >> #handleMessage:
 // => CompiledMethod(handleMessage: msg => ...)
 
-// Agent modifies behavior (works today via hot reload)
+// Agent modifies behavior (via live patching)
 ChatServer >> handleMessage: msg =>
-  self.rateLimiter check: msg sender.
+  self.rateLimiter check: msg sender
   // ... rest of implementation
 
-// Agent verifies immediately (works today)
+// Agent verifies immediately
 server := ChatServer spawn
 server handleMessage: (Message new: "test" from: "alice")
 // => #ok
@@ -869,13 +945,27 @@ server handleMessage: (Message new: "test" from: "alice")
 // The method now carries @issue BT-500, @author copilot-cli
 ```
 
-The agent never left the conversation. No file I/O, no shell commands, no output parsing. Just messages to living objects.
+The agent never left the conversation. No shell commands, no output parsing. Just messages to living objects — delivered today via MCP tools (`evaluate`, `load_file`, `docs`, `test`) that give any AI agent structured access to the running workspace.
 
 **This is what software development looks like when the language is designed for it.**
 
+### The always-connected agent
+
+Today's AI coding agents are session-based: the user asks a question, the agent spins up, does work, and exits. But a live workspace invites a different model — **an agent that stays connected.**
+
+Because the workspace is a persistent BEAM node that survives disconnections, and because MCP provides a structured WebSocket interface, an agent can maintain a long-lived connection to the running system. It doesn't need to rebuild context from files each session — the workspace *is* the context. The agent can:
+
+- **Watch for changes** — observe hot-reloaded classes, detect new test failures, flag regressions as they happen
+- **Improve code continuously** — refactor a method, verify via `evaluate`, run tests, commit — without human prompting
+- **Monitor runtime behavior** — watch logs via the Transcript, track actor message rates, observe metrics, detect slow methods, suggest optimizations based on live data — not from log files after the fact, but from the running system in real time
+- **Respond to production signals** — an agent connected to a production workspace can observe error rates, correlate with recent hot-reloads, and propose or apply fixes without a deploy cycle
+- **Pair with the developer** — the developer works in VS Code or the REPL, the agent watches the same workspace via MCP, offering suggestions or catching mistakes in real time
+
+This isn't orchestration tooling wrapping a batch process. It's a collaborator connected to the same living system as the developer, seeing the same objects, sending the same messages, over the same WebSocket protocol. The workspace doesn't distinguish between a human and an agent — both are just sessions sending messages to live objects.
+
 ### What remains to prove
 
-The argument in this document is structural: the properties AI agents need are the properties beamtalk inherits from Smalltalk and the BEAM. Empirical validation — measuring agent performance (iterations, time, success rate) in beamtalk workspaces vs. file-based environments — is future work. SemanticSqueak provides case studies for the live-object interaction model; beamtalk needs its own, particularly comparing the full development loop (not just individual interactions) across languages. This is a multi-year vision. The language and core runtime exist today; the workspace persistence and provenance system are next.
+The argument in this document is structural: the properties AI agents need are the properties beamtalk inherits from Smalltalk and the BEAM. Empirical validation — measuring agent performance (iterations, time, success rate) in beamtalk workspaces vs. file-based environments — is future work. SemanticSqueak provides case studies for the live-object interaction model; beamtalk needs its own, particularly comparing the full development loop (not just individual interactions) across languages. The language, core runtime, persistent workspaces, and live patching all exist today; provenance annotations are the major remaining piece.
 
 ---
 
@@ -982,7 +1072,8 @@ The Smalltalk research (SemanticSqueak, Latta, MIT) validates that live objects 
 | Document | Focus | Relationship |
 |----------|-------|-------------|
 | [beamtalk-principles.md](beamtalk-principles.md) | Core design philosophy | Foundation — interactive-first, hot reload, actors-are-everything |
-| [ADR 0004](ADR/0004-persistent-workspace-management.md) | Persistent workspace architecture | Enabling technology for agent session persistence |
+| [beamtalk-language-features.md](beamtalk-language-features.md) | Language spec including Workspace & Reflection API | Reference for all features described here |
+| [ADR 0004](ADR/0004-persistent-workspace-management.md) | Persistent workspace architecture (implemented) | Foundation for agent session persistence |
 | [beamtalk-architecture.md](beamtalk-architecture.md) | Compilation pipeline and runtime | The system agents would interact with |
 | [AGENTS.md](../AGENTS.md) | Guidelines for AI agents contributing to beamtalk | Current state — how agents work *today* on this codebase |
 
