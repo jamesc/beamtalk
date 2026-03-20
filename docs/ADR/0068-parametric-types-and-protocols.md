@@ -490,7 +490,25 @@ display: 42                // ✅ Integer conforms to Printable
 display: Counter spawn     // ✅ Counter conforms to Printable
 ```
 
-The type checker verifies conformance by checking that the class's method table (including inherited methods) contains all required selectors with compatible signatures.
+Conformance checking uses a **three-tier model** depending on what information is available:
+
+**Tier 1: Compile-time ClassHierarchy (batch compilation).** The type checker walks the full superclass chain via `ClassHierarchy` — statically defined methods only. Methods added at runtime (`Counter >> newMethod => ...`) are invisible. This is the same method table used for dispatch and existing type inference.
+
+**Tier 2: REPL workspace (live development).** In the REPL, the workspace tracks live method additions and class redefinitions. Conformance checking in the REPL can use the runtime method table for more accurate results than batch compilation.
+
+**Tier 3: `doesNotUnderstand:` bypass.** Classes that override `doesNotUnderstand:` can respond to *any* message — they structurally conform to every protocol. The conformance checker treats these classes as conforming without checking individual selectors, matching the existing ADR 0025 rule that suppresses unknown-message warnings for DNU classes.
+
+```beamtalk
+// Tier 1: compile-time — walks full hierarchy
+display: "hello"           // ✅ String has asString (from Object hierarchy)
+display: 42                // ✅ Integer has asString (from Object hierarchy)
+display: Counter spawn     // ✅ Counter has asString (inherited from Object)
+
+// Tier 3: DNU bypass — conforms to everything
+Actor subclass: Proxy
+  doesNotUnderstand: msg => self.target forward: msg
+display: Proxy spawn       // ✅ No warning — Proxy has DNU override
+```
 
 When conformance cannot be verified (Dynamic values, runtime-constructed classes):
 
@@ -498,6 +516,31 @@ When conformance cannot be verified (Dynamic values, runtime-constructed classes
 display: someUnknownValue
 // ⚠️ Warning: cannot verify Printable conformance for Dynamic value
 ```
+
+#### Diagnostic Philosophy: Warnings, Never Errors
+
+The type system — including generics and protocol conformance — **never produces errors** (ADR 0025). Code always compiles and runs. This principle extends unchanged to all features in this ADR:
+
+| Situation | Diagnostic | Severity |
+|---|---|---|
+| Unknown message send | "Counter does not respond to 'foo'" | Warning |
+| Protocol conformance unverifiable | "cannot verify Printable conformance" | Warning |
+| Type mismatch in argument | "expected Integer, got String" | Warning |
+| Missing annotation in `typed` class | "untyped parameter in typed class" | Warning |
+| Unparameterized generic return | "someMethod returns unparameterized Result" | Warning + hint |
+| Namespace collision (class + protocol) | "Printable is already defined as a class" | **Error** (structural) |
+| Invalid type param reference | "T is not a type parameter of this class" | **Error** (structural) |
+| Malformed protocol definition | "expected method signature" | **Error** (parse) |
+
+Only parse and structural errors block compilation — never type checking results. The escalation model:
+
+- **No types** → no warnings, fully dynamic, everything works as today
+- **Add annotations** → get helpful warnings where the checker can verify
+- **Add protocols** → get conformance warnings when shapes don't match
+- **Add `typed` modifier** → get completeness warnings for missing annotations
+- **Never blocked** → code always compiles and runs
+
+There is no `--warnings-as-errors` flag — ADR 0025 rejected global strict mode. The `typed` class modifier is the opt-in for thoroughness, but even it only produces more warnings, not errors.
 
 #### Runtime Protocol Queries
 
