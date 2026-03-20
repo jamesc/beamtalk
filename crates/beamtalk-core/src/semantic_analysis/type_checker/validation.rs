@@ -56,7 +56,7 @@ impl TypeChecker {
 
         // Infer return type for known factory methods
         match selector {
-            "spawn" | "spawnWith:" | "new" | "new:" => InferredType::Known(class_name.clone()),
+            "spawn" | "spawnWith:" | "new" | "new:" => InferredType::known(class_name.clone()),
             _ => {
                 if let Some(method) = hierarchy.find_class_method(class_name, selector) {
                     if let Some(ref ret_ty) = method.return_type {
@@ -66,13 +66,13 @@ impl TypeChecker {
                         } else {
                             ret_ty.clone()
                         };
-                        return InferredType::Known(resolved);
+                        return InferredType::known(resolved);
                     }
                 }
                 // BT-1047: Fall back to return types inferred earlier in this pass.
                 let key = (class_name.clone(), EcoString::from(selector), true);
                 if let Some(ret_ty) = self.method_return_types.get(&key) {
-                    return InferredType::Known(ret_ty.clone());
+                    return InferredType::known(ret_ty.clone());
                 }
                 InferredType::Dynamic
             }
@@ -201,7 +201,11 @@ impl TypeChecker {
             let Some(expected_ty) = expected else {
                 continue;
             };
-            let InferredType::Known(actual_ty) = arg_ty else {
+            let InferredType::Known {
+                class_name: actual_ty,
+                ..
+            } = arg_ty
+            else {
                 continue; // Dynamic arguments never produce warnings
             };
             if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
@@ -240,7 +244,11 @@ impl TypeChecker {
         let Some(ref declared) = method.return_type else {
             return;
         };
-        let InferredType::Known(actual_ty) = body_type else {
+        let InferredType::Known {
+            class_name: actual_ty,
+            ..
+        } = body_type
+        else {
             return; // Dynamic body — can't check
         };
 
@@ -419,10 +427,14 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         env: &TypeEnv,
     ) {
-        let InferredType::Known(value_type) = value_ty else {
+        let InferredType::Known {
+            class_name: value_type,
+            ..
+        } = value_ty
+        else {
             return; // Dynamic expressions never produce warnings
         };
-        let Some(InferredType::Known(class_name)) = env.get("self") else {
+        let Some(InferredType::Known { class_name, .. }) = env.get("self") else {
             return;
         };
         let Some(declared_type) = hierarchy.state_field_type(&class_name, &field.name) else {
@@ -460,9 +472,13 @@ impl TypeChecker {
             };
             let declared_type = type_annotation.type_name();
             let mut env = TypeEnv::new();
-            env.set("self", InferredType::Known(class.name.name.clone()));
+            env.set("self", InferredType::known(class.name.name.clone()));
             let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
-            let InferredType::Known(value_type) = &inferred else {
+            let InferredType::Known {
+                class_name: value_type,
+                ..
+            } = &inferred
+            else {
                 continue; // Dynamic defaults are fine
             };
             if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {

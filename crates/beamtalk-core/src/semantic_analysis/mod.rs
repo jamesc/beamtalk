@@ -56,8 +56,8 @@ pub use return_type_writeback::apply_return_type_writeback;
 pub use scope::BindingKind;
 pub use supervisor_kind_writeback::apply_supervisor_kind_writeback;
 pub use type_checker::{
-    InferredType, MethodReturnKey, TypeChecker, TypeMap, infer_method_return_types, infer_types,
-    infer_types_and_returns,
+    InferredType, MethodReturnKey, TypeChecker, TypeMap, TypeProvenance, infer_method_return_types,
+    infer_types, infer_types_and_returns,
 };
 
 /// BT-738: Warn when a user-defined class name shadows a stdlib built-in.

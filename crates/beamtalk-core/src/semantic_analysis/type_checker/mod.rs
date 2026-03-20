@@ -27,22 +27,93 @@ use std::collections::HashMap;
 mod inference;
 mod validation;
 
+/// Tracks where a type came from — enables precise error messages
+/// and determines how far inference should propagate.
+///
+/// **References:** ADR 0068 Challenge 3
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeProvenance {
+    /// User wrote `:: Type` at this location.
+    Declared(Span),
+    /// Compiler inferred from expression at this location.
+    Inferred(Span),
+    /// Derived from a generic substitution at this location.
+    Substituted(Span),
+}
+
 /// Inferred type for an expression or variable.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **Equality semantics:** Two types are equal if they represent the same type,
+/// regardless of provenance. This ensures `HashMap` lookups in `TypeMap` and test
+/// assertions work correctly even when the same type is inferred at different spans.
+///
+/// **References:** ADR 0068 Phase 1
+#[derive(Debug, Clone, Eq)]
 pub enum InferredType {
     /// A known concrete class type (e.g., "Integer", "Counter").
-    Known(EcoString),
+    Known {
+        class_name: EcoString,
+        /// Type arguments for generic types (empty for non-generic types).
+        type_args: Vec<InferredType>,
+        /// Where this type came from.
+        provenance: TypeProvenance,
+    },
+    /// A union of possible types (e.g., `String | False`).
+    Union {
+        members: Vec<InferredType>,
+        provenance: TypeProvenance,
+    },
     /// Type cannot be determined — skip all checking.
     Dynamic,
 }
 
+impl PartialEq for InferredType {
+    /// Compares types structurally, ignoring provenance.
+    ///
+    /// `Known("Integer", [], Inferred(0..1))` == `Known("Integer", [], Declared(5..10))`
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Known {
+                    class_name: a,
+                    type_args: ta,
+                    ..
+                },
+                Self::Known {
+                    class_name: b,
+                    type_args: tb,
+                    ..
+                },
+            ) => a == b && ta == tb,
+            (Self::Union { members: a, .. }, Self::Union { members: b, .. }) => a == b,
+            (Self::Dynamic, Self::Dynamic) => true,
+            _ => false,
+        }
+    }
+}
+
 impl InferredType {
+    /// Creates a `Known` type with no type arguments and `Inferred` provenance.
+    ///
+    /// This is the most common construction path — used for literals, message
+    /// sends, and all inference sites where we don't yet track provenance
+    /// precisely. As Phase 2+ rolls out, callers will switch to explicit
+    /// provenance where appropriate.
+    #[must_use]
+    pub fn known(class_name: impl Into<EcoString>) -> Self {
+        Self::Known {
+            class_name: class_name.into(),
+            type_args: vec![],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+    }
+
     /// Returns the class name if this is a known type.
     #[must_use]
     pub fn as_known(&self) -> Option<&EcoString> {
         match self {
-            Self::Known(name) => Some(name),
-            Self::Dynamic => None,
+            Self::Known { class_name, .. } => Some(class_name),
+            Self::Union { .. } | Self::Dynamic => None,
         }
     }
 }
@@ -333,19 +404,19 @@ mod tests {
     fn test_literal_type_inference() {
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Integer(42)),
-            InferredType::Known("Integer".into())
+            InferredType::known("Integer")
         );
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Float(1.5)),
-            InferredType::Known("Float".into())
+            InferredType::known("Float")
         );
         assert_eq!(
             TypeChecker::infer_literal(&Literal::String("hello".into())),
-            InferredType::Known("String".into())
+            InferredType::known("String")
         );
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Symbol("sym".into())),
-            InferredType::Known("Symbol".into())
+            InferredType::known("Symbol")
         );
     }
 
@@ -659,7 +730,7 @@ mod tests {
         });
 
         let ty = checker.infer_expr(&block_expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Known("Block".into()));
+        assert_eq!(ty, InferredType::known("Block"));
     }
 
     #[test]
@@ -674,7 +745,7 @@ mod tests {
         };
 
         let ty = checker.infer_expr(&map_expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Known("Dictionary".into()));
+        assert_eq!(ty, InferredType::known("Dictionary"));
     }
 
     #[test]
@@ -690,7 +761,7 @@ mod tests {
         };
 
         let ty = checker.infer_expr(&list_expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Known("List".into()));
+        assert_eq!(ty, InferredType::known("List"));
     }
 
     #[test]
@@ -711,15 +782,15 @@ mod tests {
 
         assert_eq!(
             checker.infer_expr(&var("true"), &hierarchy, &mut env, false),
-            InferredType::Known("Boolean".into())
+            InferredType::known("Boolean")
         );
         assert_eq!(
             checker.infer_expr(&var("false"), &hierarchy, &mut env, false),
-            InferredType::Known("Boolean".into())
+            InferredType::known("Boolean")
         );
         assert_eq!(
             checker.infer_expr(&var("nil"), &hierarchy, &mut env, false),
-            InferredType::Known("UndefinedObject".into())
+            InferredType::known("UndefinedObject")
         );
     }
 
@@ -747,12 +818,12 @@ mod tests {
     #[test]
     fn test_type_env_child_scope() {
         let mut parent = TypeEnv::new();
-        parent.set("x", InferredType::Known("Integer".into()));
+        parent.set("x", InferredType::known("Integer"));
 
         let mut child = parent.child();
-        assert_eq!(child.get("x"), Some(InferredType::Known("Integer".into())));
+        assert_eq!(child.get("x"), Some(InferredType::known("Integer")));
 
-        child.set("y", InferredType::Known("String".into()));
+        child.set("y", InferredType::known("String"));
         assert!(parent.get("y").is_none(), "parent should not see child's y");
     }
 
@@ -889,7 +960,7 @@ mod tests {
         assert!(ty.is_some(), "TypeMap should record literal type");
         assert_eq!(
             ty.unwrap(),
-            &InferredType::Known("Integer".into()),
+            &InferredType::known("Integer"),
             "Integer literal should infer as Integer"
         );
     }
@@ -910,7 +981,7 @@ mod tests {
         );
         assert_eq!(
             ty.unwrap(),
-            &InferredType::Known("Integer".into()),
+            &InferredType::known("Integer"),
             "Variable assigned integer should infer as Integer"
         );
     }
@@ -923,7 +994,7 @@ mod tests {
         let ty = type_map.get(module.expressions[0].expression.span());
         assert_eq!(
             ty,
-            Some(&InferredType::Known("String".into())),
+            Some(&InferredType::known("String")),
             "infer_types should return correct type map"
         );
     }
@@ -1177,7 +1248,7 @@ mod tests {
         let ty = type_map.get(super_span);
         assert_eq!(
             ty,
-            Some(&InferredType::Known("Parent".into())),
+            Some(&InferredType::known("Parent")),
             "super should infer as parent class type"
         );
     }
