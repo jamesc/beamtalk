@@ -953,4 +953,39 @@ mod tests {
         assert_eq!(parse_reload_class_prefix(":load Counter"), None);
         assert_eq!(parse_reload_class_prefix("Counter reload"), None);
     }
+
+    // --- REPL_COMMANDS: verify :modules and :m were removed ---
+
+    #[test]
+    fn test_repl_commands_does_not_contain_modules() {
+        let commands: Vec<&str> = REPL_COMMANDS.to_vec();
+        assert!(
+            !commands.contains(&":modules"),
+            ":modules should not be in REPL_COMMANDS (removed in this PR)"
+        );
+    }
+
+    #[test]
+    fn test_repl_commands_does_not_contain_m_alias() {
+        let commands: Vec<&str> = REPL_COMMANDS.to_vec();
+        // :m was the short alias for :modules — also removed
+        assert!(
+            !commands.contains(&":m"),
+            ":m should not be in REPL_COMMANDS (removed along with :modules)"
+        );
+    }
+
+    #[test]
+    fn test_repl_commands_no_modules_prefix_completions() {
+        // Completing ":m" should NOT suggest :modules
+        let candidates = command_completions(":m");
+        assert!(
+            !candidates.contains(&":modules".to_string()),
+            ":modules should not appear as a completion"
+        );
+        assert!(
+            !candidates.iter().any(|c| c == ":m"),
+            ":m alias should not appear as a completion"
+        );
+    }
 }
