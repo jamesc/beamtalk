@@ -347,14 +347,18 @@ impl TypeChecker {
                     );
                 }
             }
-            InferredType::Union(members) => {
+            InferredType::Union { members, .. } => {
                 // Body type must be compatible with at least one union member
-                let compatible = members
-                    .iter()
-                    .any(|member| Self::is_type_compatible(actual_ty, member, hierarchy));
+                let compatible = members.iter().any(|member| {
+                    member
+                        .as_known()
+                        .is_none_or(|name| Self::is_type_compatible(actual_ty, name, hierarchy))
+                });
                 if !compatible {
                     let selector = method.selector.name();
-                    let union_display = members.join(" | ");
+                    let union_display = expected
+                        .display_name()
+                        .unwrap_or_else(|| EcoString::from("Dynamic"));
                     self.diagnostics.push(
                         Diagnostic::warning(
                             format!(
@@ -887,7 +891,7 @@ impl TypeChecker {
                     );
                 }
             }
-            InferredType::Union(_) => {
+            InferredType::Union { .. } => {
                 // Union types — skip for now (Phase 2 extension)
             }
         }
@@ -988,7 +992,7 @@ impl TypeChecker {
                 }
                 // Dynamic values: can't verify bounds (skip silently).
                 // Union types: deferred to future phase.
-                InferredType::Dynamic | InferredType::Union(_) => {}
+                InferredType::Dynamic | InferredType::Union { .. } => {}
             }
         }
     }
