@@ -1,0 +1,152 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests verifying generic type annotations on stdlib collection classes
+// (BT-1576, ADR 0068 Phase 1e).
+//
+// These tests exercise the generic type parameters declared on Result(T, E),
+// Array(E), Dictionary(K, V), and Set(E). The tests verify that:
+// 1. Constructor inference propagates type params through unwrap/value/error
+// 2. Collection methods preserve type params through transformations
+// 3. @primitive method signatures carry correct generic annotations
+// 4. Existing runtime behavior is unchanged (generics are compile-time only)
+
+TestCase subclass: GenericStdlibTest
+
+  // ===== Result(T, E) =====
+  testResultOkUnwrapPreservesValue =>
+    // Result ok: 42 infers Result(Integer, Dynamic), unwrap -> Integer
+    r := Result ok: 42
+    self assert: r unwrap equals: 42
+
+  testResultErrorPreservesReason =>
+    // Result error: #not_found infers Result(Dynamic, Symbol)
+    r := Result error: #not_found
+    self assert: r error equals: #not_found
+
+  testResultMapTransformsValue =>
+    // map: block :: Block(T, R) -> Result(R, E)
+    r := Result ok: 42
+    mapped := r map: [:v | v asString]
+    self assert: mapped unwrap equals: "42"
+
+  testResultAndThenChains =>
+    // andThen: block :: Block(T, Result(R, E)) -> Result(R, E)
+    r := Result ok: 42
+    chained := r andThen: [:v | Result ok: v * 2]
+    self assert: chained unwrap equals: 84
+
+  testResultMapErrorTransforms =>
+    // mapError: block :: Block(E, F) -> Result(T, F)
+    r := Result error: #not_found
+    mapped := r mapError: [:e | "wrapped: " ++ e printString]
+    self assert: mapped error equals: "wrapped: #not_found"
+
+  testResultValueOrDefault =>
+    // valueOr: default :: T -> T
+    self assert: ((Result ok: 42) valueOr: 0) equals: 42
+    self assert: ((Result error: #x) valueOr: 0) equals: 0
+
+  testResultIfOkIfError =>
+    // ifOk: okBlock :: Block(T, R) ifError: errorBlock :: Block(E, R) -> R
+    okResult := (Result ok: 42) ifOk: [:v | v + 1] ifError: [:e | -1]
+    self assert: okResult equals: 43
+    errResult := (Result error: #x) ifOk: [:v | v] ifError: [:e | 0]
+    self assert: errResult equals: 0
+
+  // ===== Array(E) =====
+  testArrayAtReturnsElement =>
+    // at: index :: Integer -> E
+    arr := #[10, 20, 30]
+    self assert: (arr at: 2) equals: 20
+
+  testArrayCollectTransforms =>
+    // collect: block :: Block(E, R) -> Array(R)
+    arr := #[1, 2, 3]
+    doubled := arr collect: [:x | x * 2]
+    self assert: doubled equals: #[2, 4, 6]
+
+  testArraySelectFilters =>
+    // select: block :: Block(E, Boolean) -> Array(E)
+    arr := #[1, 2, 3, 4]
+    big := arr select: [:x | x > 2]
+    self assert: big equals: #[3, 4]
+
+  testArrayInjectIntoReduces =>
+    // inject: initial :: A into: block :: Block(A, E, A) -> A
+    sum := #[1, 2, 3] inject: 0 into: [:acc :x | acc + x]
+    self assert: sum equals: 6
+
+  testArrayAtPutReturnsArray =>
+    // at: index :: Integer put: value :: E -> Array(E)
+    arr := #[1, 2, 3] at: 2 put: 99
+    self assert: arr equals: #[1, 99, 3]
+
+  testArrayIncludesChecksElement =>
+    // includes: element :: E -> Boolean
+    self assert: (#[1, 2, 3] includes: 2)
+    self deny: (#[1, 2, 3] includes: 9)
+
+  // ===== Dictionary(K, V) =====
+  testDictionaryAtReturnsValue =>
+    // at: key :: K -> V
+    dict := #{#name => "Alice", #age => 30}
+    self assert: (dict at: #name) equals: "Alice"
+
+  testDictionaryAtPutReturnsDictionary =>
+    // at: key :: K put: value :: V -> Dictionary(K, V)
+    dict := #{#a => 1} at: #b put: 2
+    self assert: (dict at: #b) equals: 2
+    self assert: dict size equals: 2
+
+  testDictionaryCollectTransformsValues =>
+    // collect: block :: Block(V, R) -> Dictionary(K, R)
+    dict := #{#a => 1, #b => 2} collect: [:v | v * 10]
+    self assert: (dict at: #a) equals: 10
+    self assert: (dict at: #b) equals: 20
+
+  testDictionaryIncludesChecksValue =>
+    // includes: value :: V -> Boolean
+    self assert: (#{#a => 1, #b => 2} includes: 1)
+    self deny: (#{#a => 1} includes: 3)
+
+  testDictionaryMerge =>
+    // merge: other :: Dictionary(K, V) -> Dictionary(K, V)
+    merged := #{#a => 1} merge: #{#b => 2}
+    self assert: merged size equals: 2
+
+  // ===== Set(E) =====
+  testSetIncludesChecksElement =>
+    // includes: element :: E -> Boolean
+    s := (Set new add: 1) add: 2
+    self assert: (s includes: 1)
+    self deny: (s includes: 3)
+
+  testSetAddReturnsSet =>
+    // add: element :: E -> Set(E)
+    s := Set new add: 42
+    self assert: s size equals: 1
+    self assert: (s includes: 42)
+
+  testSetUnionCombines =>
+    // union: other :: Set(E) -> Set(E)
+    s1 := (Set new add: 1) add: 2
+    s2 := (Set new add: 2) add: 3
+    u := s1 union: s2
+    self assert: u size equals: 3
+
+  testSetIntersection =>
+    // intersection: other :: Set(E) -> Set(E)
+    s1 := (Set new add: 1) add: 2
+    s2 := (Set new add: 2) add: 3
+    i := s1 intersection: s2
+    self assert: i size equals: 1
+    self assert: (i includes: 2)
+
+  testSetDifference =>
+    // difference: other :: Set(E) -> Set(E)
+    s1 := (Set new add: 1) add: 2
+    s2 := Set new add: 2
+    d := s1 difference: s2
+    self assert: d size equals: 1
+    self assert: (d includes: 1)

@@ -8,7 +8,6 @@ TestCase subclass: RegexTest
   testRegexConstruction =>
     self assert: (Regex from: "[0-9]+") unwrap class equals: Regex
     // Source returns the original pattern
-    @expect type
     self assert: (Regex from: "[0-9]+") unwrap source equals: "[0-9]+"
     // Compile with options
     self assert: (Regex from: "[a-z]+" options: #(#caseless)) unwrap class equals: Regex

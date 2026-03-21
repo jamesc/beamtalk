@@ -22,7 +22,7 @@
 /// #[10, 20, 30] at: 2         // => 20
 /// #[1, 2, 3] collect: [:x | x * 2]  // => #[2, 4, 6]
 /// ```
-sealed Collection subclass: Array
+sealed Collection subclass: Array(E)
 
   /// Create an Array from a list of elements.
   ///
@@ -30,7 +30,7 @@ sealed Collection subclass: Array
   /// ```beamtalk
   /// Array withAll: #(1, 2, 3)   // => #[1, 2, 3]
   /// ```
-  class withAll: list :: List -> Array => @primitive "withAll:"
+  class withAll: list :: List -> Array(E) => @primitive "withAll:"
 
   /// Create an Array from a list. Convenience alias for `withAll:`.
   ///
@@ -38,7 +38,7 @@ sealed Collection subclass: Array
   /// ```beamtalk
   /// Array new: #(1, 2, 3)            // => #[1, 2, 3]
   /// ```
-  class new: elements :: List -> Array => self withAll: elements
+  class new: elements :: List -> Array(E) => self withAll: elements
 
   /// Number of elements in the array.
   ///
@@ -67,7 +67,7 @@ sealed Collection subclass: Array
   /// #[10, 20, 30] at: 2          // => 20
   /// #[10, 20, 30] at: 1          // => 10
   /// ```
-  at: index :: Integer => @primitive "at:"
+  at: index :: Integer -> E => @primitive "at:"
 
   /// Return a new array with the element at `index` replaced by `value`.
   ///
@@ -77,7 +77,7 @@ sealed Collection subclass: Array
   /// ```beamtalk
   /// (#[1, 2, 3] at: 2 put: 99)  // => #[1, 99, 3]
   /// ```
-  at: index :: Integer put: value -> Array => @primitive "at:put:"
+  at: index :: Integer put: value :: E -> Array(E) => @primitive "at:put:"
 
   /// Test if the array contains the given element.
   ///
@@ -86,7 +86,7 @@ sealed Collection subclass: Array
   /// #[1, 2, 3] includes: 2       // => true
   /// #[1, 2, 3] includes: 9       // => false
   /// ```
-  includes: element -> Boolean => @primitive "includes:"
+  includes: element :: E -> Boolean => @primitive "includes:"
 
   /// Iterate over each element, evaluating `block` with each one.
   ///
@@ -94,7 +94,7 @@ sealed Collection subclass: Array
   /// ```beamtalk
   /// #[1, 2, 3] do: [:x | Transcript show: x]
   /// ```
-  do: block :: Block -> Nil => @primitive "do:"
+  do: block :: Block(E, Object) -> Nil => @primitive "do:"
 
   /// Map a block over the array, returning a new Array.
   ///
@@ -102,7 +102,7 @@ sealed Collection subclass: Array
   /// ```beamtalk
   /// #[1, 2, 3] collect: [:x | x * 2]   // => #[2, 4, 6]
   /// ```
-  collect: block :: Block -> Array => @primitive "collect:"
+  collect: block :: Block(E, R) -> Array(R) => @primitive "collect:"
 
   /// Select elements for which `block` returns true, returning a new Array.
   ///
@@ -110,7 +110,7 @@ sealed Collection subclass: Array
   /// ```beamtalk
   /// #[1, 2, 3, 4] select: [:x | x > 2]  // => #[3, 4]
   /// ```
-  select: block :: Block -> Array => @primitive "select:"
+  select: block :: Block(E, Boolean) -> Array(E) => @primitive "select:"
 
   /// Reduce the array with an accumulator.
   ///
@@ -118,7 +118,8 @@ sealed Collection subclass: Array
   /// ```beamtalk
   /// #[1, 2, 3] inject: 0 into: [:acc :x | acc + x]   // => 6
   /// ```
-  inject: initial into: block :: Block => @primitive "inject:into:"
+  inject: initial :: A into: block :: Block(A, E, A) -> A =>
+    @primitive "inject:into:"
 
   /// Return a developer-readable string representation.
   ///

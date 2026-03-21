@@ -73,140 +73,100 @@ TestCase subclass: SubprocessTest
   testSpawnAndReadLine =>
     // echo outputs one line then exits
     agent := (Subprocess open: self echoExe args: (self echoArgs: "hello")) unwrap
-    @expect type
     self assert: agent isAlive
-    @expect type
     self assert: agent readLine equals: "hello"
     // After process exits and buffer is drained, readLine returns nil (EOF)
-    @expect type
     self assert: agent readLine equals: nil
-    @expect type
     self assert: agent stop equals: #ok
 
   testWriteLineAndReadLine =>
     // cat echoes stdin lines back to stdout
     agent := (Subprocess open: self catExe args: self catArgs) unwrap
-    @expect type
     agent writeLine: "hello world"
-    @expect type
     self assert: agent readLine equals: "hello world"
-    @expect type
     self assert: agent stop equals: #ok
 
   testReadLineEofReturnsNil =>
     // echo produces one line; second readLine returns nil (EOF)
     agent := (Subprocess open: self echoExe args: (self echoArgs: "goodbye")) unwrap
-    @expect type
     self assert: agent readLine equals: "goodbye"
-    @expect type
     self assert: agent readLine equals: nil
-    @expect type
     self assert: agent stop equals: #ok
 
   testReadLineWithTimeoutReturnsNil =>
     // sleep produces no stdout; readLine: returns nil after timeout
     agent := (Subprocess open: self sleepExe args: self sleepArgs) unwrap
-    @expect type
     self assert: (agent readLine: 100) equals: nil
-    @expect type
     self assert: agent stop equals: #ok
 
   testSeparateStderrChannel =>
     // shell writes only to stderr; stdout readLine returns nil, stderr returns the line
     agent := (Subprocess open: self shellExe args: (self shellArgs: self stderrScript)) unwrap
-    @expect type
     self assert: agent readLine equals: nil
-    @expect type
     self assert: agent readStderrLine equals: "err"
-    @expect type
     self assert: agent readStderrLine equals: nil
-    @expect type
     self assert: agent stop equals: #ok
 
   testStdoutAndStderrAreIndependent =>
     // shell writes to both channels independently
     agent := (Subprocess open: self shellExe args: (self shellArgs: self stdoutStderrScript)) unwrap
-    @expect type
     self assert: agent readLine equals: "out"
-    @expect type
     self assert: agent readStderrLine equals: "err"
-    @expect type
     self assert: agent stop equals: #ok
 
   testExitCodeNilWhileRunning =>
     // sleep stays running; exitCode is nil until exit
     agent := (Subprocess open: self sleepExe args: self sleepArgs) unwrap
-    @expect type
     self assert: agent exitCode equals: nil
-    @expect type
     self assert: agent stop equals: #ok
 
   testExitCodeAfterExit =>
     // echo exits with code 0; after draining output exitCode is 0
     agent := (Subprocess open: self echoExe args: (self echoArgs: "done")) unwrap
-    @expect type
     self assert: agent readLine equals: "done"
     // Second readLine blocks until subprocess exits; when nil is returned
     // the exit event has been processed and exitCode is set
-    @expect type
     self assert: agent readLine equals: nil
-    @expect type
     self assert: agent exitCode equals: 0
-    @expect type
     self assert: agent stop equals: #ok
 
   testCloseRaisesPortClosedOnWriteLine =>
     // After close, writeLine: raises port_closed
     agent := (Subprocess open: self sleepExe args: self sleepArgs) unwrap
-    @expect type
     self assert: agent close equals: nil
-    @expect type
     self should: [agent writeLine: "after close"] raise: #port_closed
-    @expect type
     self assert: agent stop equals: #ok
 
   testCloseIdempotent =>
     // close can be called multiple times safely
     agent := (Subprocess open: self sleepExe args: self sleepArgs) unwrap
-    @expect type
     self assert: agent close equals: nil
-    @expect type
     self assert: agent close equals: nil
-    @expect type
     self assert: agent stop equals: #ok
 
   testStopLifecycle =>
     // Standard Actor lifecycle: isAlive, stop, deny isAlive
     agent := (Subprocess open: self sleepExe args: self sleepArgs) unwrap
-    @expect type
     self assert: agent isAlive
-    @expect type
     self assert: agent stop equals: #ok
-    @expect type
     self deny: agent isAlive
 
   testLinesStream =>
     // printf writes three lines to stdout; lines asList materializes them
     agent := (Subprocess open: self shellExe args: (self shellArgs: self multilineScript)) unwrap
-    @expect type
     self assert: agent lines asList equals: #("alpha", "beta", "gamma")
-    @expect type
     self assert: agent stop equals: #ok
 
   testStderrLinesStream =>
     // echo writes three lines to stderr; stderrLines asList materializes them
     agent := (Subprocess open: self shellExe args: (self shellArgs: self stderrMultilineScript)) unwrap
-    @expect type
     self assert: agent stderrLines asList equals: #("x", "y", "z")
-    @expect type
     self assert: agent stop equals: #ok
 
   testReadStderrLineTimeout =>
     // sleep produces no stderr; readStderrLine: returns nil after timeout
     agent := (Subprocess open: self sleepExe args: self sleepArgs) unwrap
-    @expect type
     self assert: (agent readStderrLine: 100) equals: nil
-    @expect type
     self assert: agent stop equals: #ok
 
   testOpenWithDir =>
@@ -215,10 +175,8 @@ TestCase subclass: SubprocessTest
       open: self shellExe
       args: (self shellArgs: self pwdScript)
       dir: self envDir) unwrap
-    @expect type
     line := agent readLine
     self assert: (line includesSubstring: self envDir)
-    @expect type
     self assert: agent stop equals: #ok
 
   testOpenWithEnvAndDir =>
@@ -228,11 +186,8 @@ TestCase subclass: SubprocessTest
       args: (self shellArgs: self envAndPwdScript)
       env: #{"BT_TEST_SEED" => "hello1411"}
       dir: self envDir) unwrap
-    @expect type
     envLine := agent readLine
     self assert: envLine equals: "hello1411"
-    @expect type
     dirLine := agent readLine
     self assert: (dirLine includesSubstring: self envDir)
-    @expect type
     self assert: agent stop equals: #ok

@@ -31,9 +31,7 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp status equals: 200
-    @expect type
     self assert: resp body equals: "home"
 
   testBuilderMultipleRoutes =>
@@ -49,31 +47,21 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     base := "http://localhost:" ++ self.srv port asString
     homeResp := (HTTPClient get: base ++ "/") unwrap
-    @expect type
     self assert: homeResp body equals: "home"
     aboutResp := (HTTPClient get: base ++ "/about") unwrap
-    @expect type
     self assert: aboutResp body equals: "about"
 
   testBuilderPostRoute =>
     router := HTTPRouter
       build: [:r |
-        r
-          post: "/items"
-          handler: [:req |
-            @expect type
-            HTTPResponse new: #{
-              #status => 201,
-              #body => "created: " ++ req body
-            }
-          ]
+        r post: "/items" handler: [:req |
+          HTTPResponse new: #{#status => 201, #body => "created: " ++ req body}
+        ]
       ]
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/items"
     resp := (HTTPClient post: url body: "widget") unwrap
-    @expect type
     self assert: resp status equals: 201
-    @expect type
     self assert: resp body equals: "created: widget"
 
   // ===== Route array API =====
@@ -85,7 +73,6 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp body equals: "array home"
 
   // ===== Path parameters =====
@@ -95,7 +82,6 @@ TestCase subclass: HTTPRouterTest
         r
           get: "/users/:id"
           handler: [:req |
-            @expect type
             id := req param: "id"
             HTTPResponse new: #{#status => 200, #body => id}
           ]
@@ -103,7 +89,6 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/users/42"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp body equals: "42"
 
   testMultiplePathParams =>
@@ -112,9 +97,7 @@ TestCase subclass: HTTPRouterTest
         r
           get: "/users/:userId/posts/:postId"
           handler: [:req |
-            @expect type
             uid := req param: "userId"
-            @expect type
             pid := req param: "postId"
             HTTPResponse new: #{#status => 200, #body => uid ++ ":" ++ pid}
           ]
@@ -122,7 +105,6 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/users/7/posts/99"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp body equals: "7:99"
 
   // ===== Wildcard routes =====
@@ -132,7 +114,6 @@ TestCase subclass: HTTPRouterTest
         r
           get: "/static/*path"
           handler: [:req |
-            @expect type
             p := req param: "path"
             HTTPResponse new: #{#status => 200, #body => p}
           ]
@@ -140,7 +121,6 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/static/css/main.css"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp body equals: "css/main.css"
 
   // ===== Method dispatch =====
@@ -160,13 +140,10 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/items"
     getResp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: getResp body equals: "listed"
     postResp := (HTTPClient post: url body: "") unwrap
-    @expect type
     self assert: postResp body equals: "created"
     deleteResp := (HTTPClient delete: url) unwrap
-    @expect type
     self assert: deleteResp body equals: "deleted"
 
   // ===== 404 Not Found =====
@@ -180,9 +157,7 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/nonexistent"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp status equals: 404
-    @expect type
     self assert: resp body equals: "Not Found"
 
   testCustomNotFoundHandler =>
@@ -193,7 +168,6 @@ TestCase subclass: HTTPRouterTest
         ]
         r
           notFound: [:req |
-            @expect type
             body := "Custom 404: " ++ req path
             HTTPResponse new: #{#status => 404, #body => body}
           ]
@@ -201,9 +175,7 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/missing"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp status equals: 404
-    @expect type
     self assert: resp body equals: "Custom 404: /missing"
 
   // ===== 405 Method Not Allowed =====
@@ -217,7 +189,6 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/items"
     resp := (HTTPClient post: url body: "") unwrap
-    @expect type
     self assert: resp status equals: 405
 
   // ===== Controller object dispatch =====
@@ -233,7 +204,6 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/api/state"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp body equals: "hello from controller"
 
   // ===== printString =====
@@ -258,13 +228,11 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer
       start: 0
       handler: [:req |
-        @expect type
         sz := req params size asString
         HTTPResponse new: #{#status => 200, #body => sz}
       ]
     url := "http://localhost:" ++ self.srv port asString ++ "/test"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp body equals: "0"
 
   // ===== All builder HTTP methods =====
@@ -274,7 +242,6 @@ TestCase subclass: HTTPRouterTest
         r
           put: "/items/:id"
           handler: [:req |
-            @expect type
             id := req param: "id"
             HTTPResponse new: #{#status => 200, #body => "updated " ++ id}
           ]
@@ -282,7 +249,6 @@ TestCase subclass: HTTPRouterTest
     self.srv := HTTPServer start: 0 handler: router
     url := "http://localhost:" ++ self.srv port asString ++ "/items/5"
     resp := (HTTPClient put: url body: "data") unwrap
-    @expect type
     self assert: resp body equals: "updated 5"
 
   testPatchRoute =>
@@ -291,7 +257,6 @@ TestCase subclass: HTTPRouterTest
         r
           patch: "/items/:id"
           handler: [:req |
-            @expect type
             id := req param: "id"
             HTTPResponse new: #{#status => 200, #body => "patched " ++ id}
           ]
@@ -302,5 +267,4 @@ TestCase subclass: HTTPRouterTest
       request: "PATCH"
       url: url
       options: #{#body => "data"}) unwrap
-    @expect type
     self assert: resp body equals: "patched 3"
