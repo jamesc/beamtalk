@@ -61,35 +61,50 @@ The gerund form (`Tracing`) names the *subsystem*, not the *agent*. This establi
 
 This gives us optionality — the `Logging` migration is a separate future ADR, not a prerequisite for this work. But naming `Tracing` now signals the direction and avoids a rename later.
 
-### Architecture: `telemetry` event bus + ETS storage handlers
+### Architecture: `telemetry` event bus + lock-free storage
 
-Use the Erlang [`telemetry`](https://github.com/beam-telemetry/telemetry) library as the event bus, with custom ETS-backed handlers for aggregation and trace capture. This is a **hybrid approach**: standard event emission, Beamtalk-specific storage and query.
+Use the Erlang [`telemetry`](https://github.com/beam-telemetry/telemetry) library as the event bus, with lock-free storage for aggregation and direct ETS writes for trace capture. The `beamtalk_trace_store` gen_server owns the tables and handles queries/lifecycle but is **not in the write path** — no serialization bottleneck on the hot path.
 
 ```
 Beamtalk API (Tracing class — stdlib/src/Tracing.bt)
     ↓ delegates to
 Erlang shim (beamtalk_tracing.erl — runtime)
     ↓ queries
-ETS storage (beamtalk_trace_store.erl — telemetry handler + gen_server)
+Storage:
+  counters (lock-free aggregates, ~50ns writes)
+  ETS index ({Pid, Selector} → counter ref + slot)
+  ETS ordered_set (trace events, direct insert)
+    ↑ all writes happen in the CALLING process (no gen_server in write path)
+beamtalk_trace_store gen_server:
+  - owns tables, handles enable/disable/clear/queries
+  - periodic sweep for ring buffer eviction
+  - NOT in the write path
     ↑ events emitted by
 Instrumented send wrappers (beamtalk_actor.erl)
     ↑ using
 telemetry:execute/3 (standard BEAM event bus)
+    ↑ VM measurements via
+telemetry_poller (periodic VM stats for systemHealth)
 ```
 
-**Why `telemetry` over custom ETS-only?**
-- Single dependency, zero transitive deps, pure Erlang (~500 LOC)
-- De facto BEAM ecosystem standard (Phoenix, Ecto, Broadway all use it)
-- `telemetry:persist/0` copies handlers into `persistent_term` — near-zero dispatch overhead when no handlers are attached
-- Composable: users can attach their own handlers (export to StatsD, Datadog, etc.) without modifying Beamtalk internals
-- Bridge to OpenTelemetry available via `opentelemetry_telemetry` when distributed tracing is needed — additive, not a rewrite
+**Design principle: no bottlenecks on the hot path.** Aggregate updates use the `counters` module (truly lock-free, ~50ns). Trace event inserts go directly to ETS from the calling process. The gen_server only handles control operations (enable/disable/clear) and periodic maintenance (ring buffer eviction). A crash of the gen_server loses accumulated data but does not affect actor dispatch.
+
+**Why `telemetry` + `telemetry_poller`?**
+- `telemetry`: Single dependency, zero transitive deps, pure Erlang (~500 LOC). De facto BEAM ecosystem standard (Phoenix, Ecto, Broadway). Composable — users can attach their own handlers (export to StatsD, Datadog, etc.) without modifying Beamtalk internals. Bridge to OpenTelemetry available via `opentelemetry_telemetry` when distributed tracing is needed.
+- `telemetry_poller`: Periodic VM measurements (scheduler utilization, memory, run queues) — eliminates custom implementation for `Tracing systemHealth`. Pure Erlang, zero transitive deps beyond `telemetry`.
 
 **Why not OpenTelemetry directly?**
 - 6-10+ transitive dependencies (gRPC stack, HTTP/2, protobuf)
 - ~10-50μs per span (vs ~1-5μs for telemetry dispatch) — 10x overhead
-- Designed for distributed export, not local REPL querying
+- Designed for distributed export, not local REPL querying — no built-in "queryable in-memory store"
 - Erlang SDK is secondary to Elixir in practice — documentation and examples lag
 - Available as an add-on via the telemetry bridge when needed
+
+**Why not `telemetry_metrics`?**
+- Provides declarative metric definitions (counter, summary, last_value) but no storage — requires a "reporter" to consume the definitions
+- No existing reporter does "in-memory queryable store" (reporters export to Prometheus, StatsD, etc.)
+- We would write a custom reporter, which is essentially our `beamtalk_trace_store` conforming to an additional interface — overhead without payoff for v1
+- Deferred: design aggregates so they *could* be wrapped in a `telemetry_metrics` reporter later
 
 ### Telemetry Events
 
@@ -141,15 +156,34 @@ To distinguish queueing delay from execution time on sync calls, use `Tracing he
 
 **Codegen-level instrumentation** (wrapping `safe_dispatch` in generated code) is deferred as a future enhancement. Send-wrapper instrumentation captures the caller-perspective round-trip time, which is the actionable metric for bottleneck detection. Codegen-level instrumentation would add precise method-body timing if needed later.
 
-### Storage: Two ETS Tables
+### Storage: Lock-Free Aggregates + ETS Trace Buffer
 
-`beamtalk_trace_store.erl` — a `gen_server` that owns the ETS tables and acts as a `telemetry` handler:
+`beamtalk_trace_store.erl` — a `gen_server` that owns tables/counters and handles queries/lifecycle, but is **not in the write path**.
 
-**Table 1: `beamtalk_trace_events` (ordered_set, ring buffer)**
-
-Captures individual dispatch events when tracing is enabled.
+**Aggregates: `counters` module + ETS index (always-on)**
 
 ```erlang
+%% ETS index table: beamtalk_agg_index (set)
+%% Key: {Pid, Selector}
+%% Value: {Key, CounterRef, SlotBase}
+%%   — SlotBase is the base offset into the counters array
+%%   — Each key uses 6 slots: Calls, OkCount, ErrorCount, TimeoutCount, TotalDuration, reserved
+
+%% counters reference: created by counters:new(InitialSize, [write_concurrency])
+%%   — Truly lock-free writes via counters:add/3
+%%   — ~50ns per increment (vs ~100-200ns for ets:update_counter)
+```
+
+- On first observation of a new `{Pid, Selector}`, allocate slots in the counter array and insert an index entry (ETS write — rare, once per unique key)
+- On every subsequent dispatch, `counters:add(Ref, Slot, 1)` for the call count and outcome — truly lock-free, no per-bucket locking
+- Duration tracking: `counters:add(Ref, TotalDurationSlot, Duration)` for running total. Min/max require `atomics:compare_exchange` loop (still lock-free) or deferral to query-time computation from trace events
+- Persists until explicitly cleared (survives actor death for post-mortem analysis)
+- Counter array can grow dynamically by creating a new `counters` reference and atomically swapping via `persistent_term`
+
+**Trace events: ETS `ordered_set` (opt-in, direct insert)**
+
+```erlang
+%% Table: beamtalk_trace_events (ordered_set, public, {write_concurrency, true})
 %% Key: {erlang:monotonic_time(nanosecond), erlang:unique_integer([monotonic])}
 %%   — composite key ensures uniqueness across concurrent schedulers
 %% Row: {Key, Pid, Class, Selector, Mode, Duration_ns, Outcome, Metadata}
@@ -157,32 +191,34 @@ Captures individual dispatch events when tracing is enabled.
 %% Metadata: #{error => Term} for failures, #{} otherwise
 ```
 
+- **Written directly from the calling process** — no gen_server in the write path
 - Capped at 100,000 events (configurable via `Tracing maxEvents:`)
-- Ring buffer semantics: trace event inserts go through the `beamtalk_trace_store` gen_server (serialized) to avoid TOCTOU races on eviction. On insert, if `ets:info(Tab, size) >= MaxEvents`, the gen_server evicts the oldest 10% via `ets:select_delete` on the smallest keys (batch eviction amortizes cleanup cost). The gen_server is only a bottleneck for trace events (opt-in), not for always-on aggregates which write directly to ETS
+- Ring buffer eviction: the `beamtalk_trace_store` gen_server runs a periodic sweep (e.g., every 1s or triggered when a size counter exceeds threshold). Eviction deletes the oldest 10% via `ets:select_delete` on the smallest keys. The buffer may temporarily exceed `maxEvents` between sweeps — this is a soft bound, not a hard contract.
 - Only populated when tracing is enabled
 - Toggle via `persistent_term:put(beamtalk_tracing_enabled, true | false)` — ~5ns check
 
-**Table 2: `beamtalk_actor_agg` (set, always-on counters)**
+**`beamtalk_trace_store` gen_server responsibilities:**
 
-Running aggregates, updated on every dispatch regardless of tracing state.
+The gen_server is the owner and lifecycle manager, NOT the write path:
 
-```erlang
-%% Key: {Pid, Selector}
-%% Value: {Key, Calls, OkCount, ErrorCount, TimeoutCount, TotalDuration_ns, MinDuration_ns, MaxDuration_ns}
-```
-
-- Updated via `ets:update_counter/3` — atomic, ~100-200ns per call
-- Always on — no toggle needed, negligible overhead
-- Persists until explicitly cleared (survives actor death for post-mortem analysis)
+| Responsibility | Hot path? | Notes |
+|---------------|-----------|-------|
+| Own ETS tables + counter refs | No | Created in `init/1` |
+| `enable` / `disable` / `clear` | No | Control operations, infrequent |
+| Periodic ring buffer eviction | No | Timer-based sweep, async |
+| Query: `traces`, `stats`, `slowMethods:` | No | Read-only, called from REPL/MCP |
+| Crash recovery | No | Tables/counters lost, recreated on restart |
 
 **Overhead budget:**
 
 | Operation | Cost | When |
 |-----------|------|------|
-| `telemetry:span/3` dispatch + aggregate update | ~150-250ns | Always |
+| `telemetry` handler dispatch | ~10-50ns | Always |
+| `counters:add/3` (aggregate increment) | ~50ns | Always |
 | `persistent_term` check (trace enabled?) | ~5ns | Always |
-| Trace event insert (`ets:insert` + eviction amortized) | ~300-500ns | Only when tracing enabled |
-| **Total per-call** | **~200ns (tracing off) / ~600ns (tracing on)** | |
+| Class lookup (`beamtalk_object_instances`) | ~50-100ns | Always |
+| ETS `insert` (trace event) | ~300-500ns | Only when tracing enabled |
+| **Total per-call** | **~150ns (tracing off) / ~500ns (tracing on)** | |
 
 ### Beamtalk API: `Tracing` Class
 
@@ -508,9 +544,9 @@ Place `enableTracing` / `disableTracing` / `tracingEnabled` on `Beamtalk`, with 
 - `Tracing` / `Logging` naming convention scales to future observability subsystems
 
 ### Negative
-- New dependency: `telemetry` library (mitigated: zero transitive deps, pure Erlang, ~500 LOC, de facto BEAM standard)
-- ~200ns overhead per actor message send (always-on aggregates) — negligible but non-zero
-- `beamtalk_trace_store` gen_server serializes trace event inserts (mitigated: only active when tracing is enabled; always-on aggregate writes bypass the gen_server via direct `ets:update_counter` which uses per-bucket locking, not the gen_server)
+- New dependencies: `telemetry` + `telemetry_poller` (mitigated: zero transitive deps, pure Erlang, de facto BEAM standard)
+- ~150ns overhead per actor message send (always-on aggregates via `counters`) — negligible but non-zero
+- `beamtalk_trace_store` gen_server crash loses all accumulated data (mitigated: tracing data is ephemeral by nature; gen_server is NOT in the write path so its crash does not affect actor dispatch)
 - Trace events reference PIDs which are opaque after actor death (mitigated: class name is captured at record time via `beamtalk_object_instances` lookup)
 - Aggregate `{Pid, Selector}` space grows without bound in long-running sessions with actor churn (PIDs are not reused within a BEAM session). Mitigated: `Tracing clear` resets; a future enhancement could auto-evict entries for dead PIDs on a periodic sweep
 - Standalone `Tracing` class is temporarily inconsistent with ADR 0064's pattern of logging config on `Beamtalk` (mitigated: planned `Logging` class migration will make both consistent)
@@ -528,22 +564,24 @@ Place `enableTracing` / `disableTracing` / `tracingEnabled` on `Beamtalk`, with 
 
 Prove the core assumptions before committing to the full architecture:
 
-1. Add `telemetry` dependency to `runtime/rebar.config` (root umbrella config)
+1. Add `telemetry` and `telemetry_poller` dependencies to `runtime/rebar.config`
 2. Write a minimal EUnit test that wraps a `gen_server:call` with `telemetry:span/3` and verifies:
    - The `stop` event fires with correct duration
    - The `exception` event fires on timeout and preserves the `exit:{timeout, _}` shape (critical: existing `sync_send/3` error handling depends on this)
-   - An attached handler can write to an ETS table from the calling process
+   - An attached handler can write to ETS / increment `counters` from the calling process
 3. Verify `beamtalk_object_instances` reverse lookup (Pid → Class) works and measure overhead
-4. Microbenchmark: `telemetry:span/3` + `ets:update_counter/3` under the actual scheduler count — validate the ~200ns budget
+4. Microbenchmark: `telemetry:span/3` + `counters:add/3` under the actual scheduler count — validate the ~150ns budget
+5. Verify `telemetry_poller` can emit periodic VM stats (scheduler utilization, memory) as telemetry events
 
 This spike should be a single branch with ~100 lines of test code. If the telemetry/try-catch composition breaks, fall back to direct ETS writes (the Custom ETS-Only alternative).
 
 ### Phase 1: Core Infrastructure (M)
 **Affected components:** Runtime (Erlang)
 
-1. Create `beamtalk_trace_store.erl` — gen_server owning ETS tables, telemetry handler callbacks, query API
+1. Create `beamtalk_trace_store.erl` — gen_server owning ETS tables + `counters` refs, telemetry handler callbacks, query API, periodic eviction sweep
 2. Add `beamtalk_trace_store` to `beamtalk_runtime_sup` supervision tree
-3. EUnit tests for trace store: insert, query, ring buffer overflow (batch eviction), aggregate counters, clear, composite key uniqueness
+3. Configure `telemetry_poller` for periodic VM measurements (feeds `Tracing systemHealth`)
+4. EUnit tests for trace store: direct insert, query, ring buffer eviction sweep, `counters`-based aggregates, clear, composite key uniqueness, gen_server crash recovery
 
 ### Phase 2: Actor Instrumentation (S)
 **Affected components:** Runtime (`beamtalk_actor.erl`)
@@ -576,6 +614,6 @@ This spike should be a single branch with ~100 lines of test code. If the teleme
 - Related issues: BT-1429 (deferred from ADR 0064)
 - Related ADRs: ADR 0064 (Runtime Logging Control — complementary), ADR 0065 (OTP Primitives — Actor/Server hierarchy), ADR 0043 (Sync-by-Default Messaging)
 - Code: `beamtalk_actor.erl` (sync_send, async_send, cast_send), `server.rs` (MCP tool pattern)
-- External: [beam-telemetry/telemetry](https://github.com/beam-telemetry/telemetry), [opentelemetry_telemetry bridge](https://github.com/open-telemetry/opentelemetry-erlang-contrib)
+- External: [beam-telemetry/telemetry](https://github.com/beam-telemetry/telemetry), [beam-telemetry/telemetry_poller](https://github.com/beam-telemetry/telemetry_poller), [opentelemetry_telemetry bridge](https://github.com/open-telemetry/opentelemetry-erlang-contrib)
 - Prior art: Erlang sys/recon, Elixir telemetry/LiveDashboard, Akka Insights, Pharo MessageTally/PerformanceProfiler, Pony flight recorder
 - Design document: `issue-adr-actor-observability.md` on branch `claude/erlang-genserver-tracing-DfzoF`
