@@ -132,3 +132,5 @@ _bt_stdlib_subdir/
 _site/
 .claude/skills-repo
 .claude/commands/
+# Session-start hook is copied from skills-repo at runtime
+.claude/hooks/session-start.sh
