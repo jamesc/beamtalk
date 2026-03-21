@@ -39,6 +39,8 @@ enum VtBodyExprKind {
     ConditionalWithLocalThreading,
     /// Non-last block value with captured mutations (BT-1213).
     BlockWithCapturedMutations(Vec<String>),
+    /// Non-last `whileTrue:` / `whileFalse:` with local mutations (BT-1609).
+    WhileWithLocalThreading,
     /// Regular expression with no special Self-threading needs.
     Pure,
 }
@@ -894,6 +896,9 @@ impl CoreErlangGenerator {
         if self.is_do_with_vt_local_threading(expr) {
             return VtBodyExprKind::DoWithLocalThreading;
         }
+        if self.is_while_with_vt_local_threading(expr) {
+            return VtBodyExprKind::WhileWithLocalThreading;
+        }
         if self.is_conditional_with_vt_local_threading(expr) {
             return VtBodyExprKind::ConditionalWithLocalThreading;
         }
@@ -1016,6 +1021,7 @@ impl CoreErlangGenerator {
     ///
     /// `EarlyReturn` is handled by the caller (`generate_vt_body_exprs`)
     /// before calling this method, so it is not matched here.
+    #[allow(clippy::too_many_lines)]
     fn emit_vt_body_expr(
         &mut self,
         expr: &Expression,
@@ -1108,6 +1114,15 @@ impl CoreErlangGenerator {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
                     let doc = self.generate_vt_conditional_open(expr)?;
+                    body_parts.push(doc);
+                }
+            }
+            VtBodyExprKind::WhileWithLocalThreading => {
+                // BT-1609: Non-last whileTrue:/whileFalse: with captured local mutations.
+                if is_last {
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                } else {
+                    let doc = self.generate_vt_while_open(expr)?;
                     body_parts.push(doc);
                 }
             }
@@ -1420,6 +1435,139 @@ impl CoreErlangGenerator {
             }
         }
         false
+    }
+
+    /// BT-1609: Returns `true` if `expr` is a `whileTrue:` or `whileFalse:` message send
+    /// whose body block captures and mutates outer local variables in value-type context.
+    ///
+    /// Uses the same `needs_mutation_threading` check that the while-loop codegen uses
+    /// to decide whether to emit the stateful variant (returning `{'nil', StateAcc}`)
+    /// or the simple variant (returning `'nil'`). This ensures the detection and codegen
+    /// are consistent — we only extract threaded locals when the codegen actually packed them.
+    fn is_while_with_vt_local_threading(&self, expr: &Expression) -> bool {
+        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
+            return false;
+        }
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        {
+            let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+            if sel == "whileTrue:" || sel == "whileFalse:" {
+                if let Some(Expression::Block(body)) = arguments.first() {
+                    // Must match the same check used by generate_while_true/generate_while_false
+                    let analysis = super::block_analysis::analyze_block(body);
+                    if !self.needs_mutation_threading(&analysis)
+                        && !self.body_has_list_op_cross_scope_mutations(body)
+                    {
+                        return false;
+                    }
+                    // Verify there are actually threaded locals to extract
+                    let condition = if let Expression::Block(_) = receiver.as_ref() {
+                        Some(receiver.as_ref())
+                    } else {
+                        None
+                    };
+                    return !self
+                        .compute_threaded_locals_for_loop(body, condition)
+                        .is_empty();
+                }
+            }
+        }
+        false
+    }
+
+    /// BT-1609: Generates a non-last `whileTrue:` / `whileFalse:` loop (with value-type
+    /// captured local threading) as an **open let chain**.
+    ///
+    /// The while loop returns `{'nil', StateAcc}`. This method:
+    /// 1. Binds the tuple result to a temp var
+    /// 2. Extracts the `StateAcc` from element 2
+    /// 3. Extracts each threaded local from the `StateAcc` via `maps:get`
+    /// 4. Rebinds the variable names in scope so subsequent code sees the updated values
+    fn generate_vt_while_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        // Generate the while loop expression (returns {'nil', StateAcc} tuple)
+        let loop_doc = self.expression_doc(expr)?;
+
+        // Determine threaded locals from the while loop
+        let threaded_locals = self.get_while_threaded_locals(expr);
+        if threaded_locals.is_empty() {
+            // Fallback: just sequence the expression
+            let tmp = self.fresh_temp_var("seq");
+            return Ok(docvec![
+                "    let ",
+                Document::String(tmp),
+                " = ",
+                loop_doc,
+                " in\n",
+            ]);
+        }
+
+        let tuple_var = self.fresh_temp_var("WhileResult");
+        let state_var = self.fresh_temp_var("WhileState");
+
+        let mut parts: Vec<Document<'static>> = Vec::new();
+
+        // Bind the tuple result
+        parts.push(docvec![
+            "    let ",
+            Document::String(tuple_var.clone()),
+            " = ",
+            loop_doc,
+            " in\n",
+        ]);
+
+        // Extract StateAcc from element 2 of the tuple
+        parts.push(docvec![
+            "    let ",
+            Document::String(state_var.clone()),
+            " = call 'erlang':'element'(2, ",
+            Document::String(tuple_var),
+            ") in\n",
+        ]);
+
+        // Extract each threaded local from the state map
+        for var_name in &threaded_locals {
+            let core_var = self.fresh_var(var_name);
+            let key = Self::local_state_key(var_name);
+            parts.push(docvec![
+                "    let ",
+                Document::String(core_var.clone()),
+                " = call 'maps':'get'('",
+                Document::String(key),
+                "', ",
+                Document::String(state_var.clone()),
+                ") in\n",
+            ]);
+            self.bind_var(var_name, &core_var);
+        }
+
+        Ok(Document::Vec(parts))
+    }
+
+    /// BT-1609: Returns the threaded local variable names for a `whileTrue:` / `whileFalse:`
+    /// expression, or an empty Vec if none.
+    fn get_while_threaded_locals(&self, expr: &Expression) -> Vec<String> {
+        let Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } = expr
+        else {
+            return Vec::new();
+        };
+        let Some(Expression::Block(body)) = arguments.first() else {
+            return Vec::new();
+        };
+        let condition = if let Expression::Block(_) = receiver.as_ref() {
+            Some(receiver.as_ref())
+        } else {
+            None
+        };
+        self.compute_threaded_locals_for_loop(body, condition)
     }
 
     /// BT-1053/BT-1414: Generates a non-last `do:` loop (with value-type/class-method

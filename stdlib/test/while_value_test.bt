@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1609: Regression tests for whileTrue:/whileFalse: in value-type context.
+// The bug: body mutations were silently discarded because the value-type method body
+// wrapper did not extract threaded locals from the loop's {'nil', StateAcc} result tuple.
+
+TestCase subclass: WhileValueTest
+
+  // Core bug: body mutation must be visible to condition and outer scope
+  testWhileTrueBodyMutationVisibleToCondition =>
+    counter := 3
+    steps := 0
+    [counter > 0]
+      whileTrue: [
+        counter := counter - 1
+        steps := steps + 1
+      ]
+    self assert: steps equals: 3
+    self assert: counter equals: 0
+
+  // Condition reads variable mutated in body — sum accumulates correctly
+  testWhileTrueAccumulation =>
+    i := 1
+    sum := 0
+    [i <= 5]
+      whileTrue: [
+        sum := sum + i
+        i := i + 1
+      ]
+    self assert: sum equals: 15
+    self assert: i equals: 6
+
+  // whileFalse: variant
+  testWhileFalseBodyMutation =>
+    counter := 0
+    [counter >= 3] whileFalse: [counter := counter + 1]
+    self assert: counter equals: 3
+
+  // whileTrue: with false condition — no iterations, returns nil
+  testWhileTrueImmediateExit =>
+    x := 42
+    [false] whileTrue: [x := 0]
+    self assert: x equals: 42

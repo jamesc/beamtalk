@@ -21005,6 +21005,32 @@
       "explanation": "BT-833: Tests for immutable-update semantics on value types Field assignments use Self-threading (Self -> Self1 -> Self{N}) so that `self` in expression position resolves to the latest snapshot"
     },
     {
+      "id": "stdlib-test-while-value-test",
+      "title": "WhileValueTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "TestCase",
+        "WhileValueTest",
+        "assign",
+        "assignment",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testWhileFalseBodyMutation",
+        "testWhileTrueAccumulation",
+        "testWhileTrueBodyMutationVisibleToCondition",
+        "testWhileTrueImmediateExit",
+        "while_value_test"
+      ],
+      "source": "// BT-1609: Regression tests for whileTrue:/whileFalse: in value-type context.\n// The bug: body mutations were silently discarded because the value-type method body\n// wrapper did not extract threaded locals from the loop's {'nil', StateAcc} result tuple.\n\nTestCase subclass: WhileValueTest\n\n  // Core bug: body mutation must be visible to condition and outer scope\n  testWhileTrueBodyMutationVisibleToCondition =>\n    counter := 3\n    steps := 0\n    [counter > 0]\n      whileTrue: [\n        counter := counter - 1\n        steps := steps + 1\n      ]\n    self assert: steps equals: 3\n    self assert: counter equals: 0\n\n  // Condition reads variable mutated in body — sum accumulates correctly\n  testWhileTrueAccumulation =>\n    i := 1\n    sum := 0\n    [i <= 5]\n      whileTrue: [\n        sum := sum + i\n        i := i + 1\n      ]\n    self assert: sum equals: 15\n    self assert: i equals: 6\n\n  // whileFalse: variant\n  testWhileFalseBodyMutation =>\n    counter := 0\n    [counter >= 3] whileFalse: [counter := counter + 1]\n    self assert: counter equals: 3\n\n  // whileTrue: with false condition — no iterations, returns nil\n  testWhileTrueImmediateExit =>\n    x := 42\n    [false] whileTrue: [x := 0]\n    self assert: x equals: 42",
+      "explanation": "BT-1609: Regression tests for whileTrue:/whileFalse: in value-type context. The bug: body mutations were silently discarded because the value-type method body wrapper did not extract threaded locals from the loop's {'nil', StateAcc} result tuple."
+    },
+    {
       "id": "stdlib-test-workspace-interface-test",
       "title": "WorkspaceInterfaceTest",
       "category": "stdlib-tests",

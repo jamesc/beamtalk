@@ -1049,4 +1049,44 @@ mod tests {
             "Expected StateAcc or hybrid diagnostic for field-only mutations. Got: {diag_msgs:?}"
         );
     }
+
+    // ── BT-1609: value-type local threading ─────────────────────────────
+
+    #[test]
+    fn test_value_type_while_true_extracts_threaded_locals() {
+        // BT-1609: whileTrue: in value-type context must extract threaded locals
+        // from the returned {'nil', StateAcc} tuple after the loop.
+        let src = "Object subclass: Calc\n\n  run =>\n    counter := 3\n    steps := 0\n    [counter > 0] whileTrue: [\n      counter := counter - 1\n      steps := steps + 1\n    ]\n    steps\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("WhileResult") || code.contains("whileResult"),
+            "value-type whileTrue: should bind loop result to WhileResult var. Got:\n{code}"
+        );
+        assert!(
+            code.contains("element'(2,"),
+            "value-type whileTrue: should extract state from element 2. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'get'('__local__counter'"),
+            "value-type whileTrue: should extract counter from state. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'get'('__local__steps'"),
+            "value-type whileTrue: should extract steps from state. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_while_false_extracts_threaded_locals() {
+        let src = "Object subclass: Calc\n\n  run =>\n    counter := 0\n    [counter >= 3] whileFalse: [\n      counter := counter + 1\n    ]\n    counter\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("WhileResult") || code.contains("whileResult"),
+            "value-type whileFalse: should bind loop result. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'get'('__local__counter'"),
+            "value-type whileFalse: should extract counter from state. Got:\n{code}"
+        );
+    }
 }
