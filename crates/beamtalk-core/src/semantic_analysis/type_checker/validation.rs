@@ -807,4 +807,84 @@ impl TypeChecker {
         // A protocol type is one that's in the registry and NOT a class name
         protocol_registry.has_protocol(base_name) && !hierarchy.has_class(base_name)
     }
+
+    /// Check type parameter bounds for a generic type application (ADR 0068 Phase 2d).
+    ///
+    /// When a generic class has bounded type parameters (e.g., `Logger(T :: Printable)`),
+    /// this checks that the concrete type arguments conform to those bounds.
+    ///
+    /// For example, `Logger(Integer)` is valid because `Integer` conforms to `Printable`,
+    /// but `Logger(SomeOpaqueType)` would warn if `SomeOpaqueType` does not.
+    ///
+    /// Only emits warnings (not errors) per ADR 0025 gradual typing philosophy.
+    pub(super) fn check_type_param_bounds(
+        &mut self,
+        class_name: &EcoString,
+        type_args: &[InferredType],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        // Resolve type param names and bounds from either ClassInfo or ProtocolInfo
+        let (param_names, param_bounds): (Vec<&EcoString>, Vec<&Option<EcoString>>) =
+            if let Some(class_info) = hierarchy.get_class(class_name) {
+                (
+                    class_info.type_params.iter().collect(),
+                    class_info.type_param_bounds.iter().collect(),
+                )
+            } else if let Some(proto_info) = protocol_registry.get(class_name) {
+                (
+                    proto_info.type_params.iter().collect(),
+                    proto_info.type_param_bounds.iter().collect(),
+                )
+            } else {
+                return; // Unknown type — can't check bounds
+            };
+
+        if param_bounds.is_empty() || param_bounds.iter().all(|b| b.is_none()) {
+            return;
+        }
+
+        for (i, (arg, bound_opt)) in type_args.iter().zip(param_bounds.iter()).enumerate() {
+            let Some(bound_protocol) = bound_opt else {
+                continue; // Unbounded — any type is accepted
+            };
+
+            match arg {
+                InferredType::Known {
+                    class_name: arg_class,
+                    ..
+                } => {
+                    // Check if the concrete type arg conforms to the bound protocol
+                    match protocol_registry.check_conformance(arg_class, bound_protocol, hierarchy)
+                    {
+                        Ok(()) => {} // Conforms — no warning
+                        Err(missing) => {
+                            let param_name = param_names.get(i).map_or("?", |p| p.as_str());
+                            let missing_list = missing
+                                .iter()
+                                .map(|s| format!("'{s}'"))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            self.diagnostics.push(
+                                Diagnostic::warning(
+                                    format!(
+                                        "Type argument {arg_class} for {param_name} in {class_name} does not conform to {bound_protocol}"
+                                    ),
+                                    span,
+                                )
+                                .with_category(DiagnosticCategory::Type)
+                                .with_hint(format!(
+                                    "{arg_class} is missing required method(s): {missing_list}"
+                                )),
+                            );
+                        }
+                    }
+                }
+                // Dynamic values: can't verify bounds (skip silently).
+                // Union types: deferred to future phase.
+                InferredType::Dynamic | InferredType::Union(_) => {}
+            }
+        }
+    }
 }

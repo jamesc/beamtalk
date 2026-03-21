@@ -256,10 +256,19 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                if i == 0 {
-                    Document::String(p.name.to_string())
+                let param_doc = if let Some(ref bound) = p.bound {
+                    docvec![
+                        Document::String(p.name.name.to_string()),
+                        " :: ",
+                        Document::String(bound.name.to_string())
+                    ]
                 } else {
-                    docvec![", ", Document::String(p.name.to_string())]
+                    Document::String(p.name.name.to_string())
+                };
+                if i == 0 {
+                    param_doc
+                } else {
+                    docvec![", ", param_doc]
                 }
             })
             .collect();
@@ -418,7 +427,7 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
             if i > 0 {
                 header.push(Document::Str(", "));
             }
-            header.push(Document::String(tp.name.to_string()));
+            header.push(Document::String(tp.name.name.to_string()));
         }
         header.push(Document::Str(")"));
     }

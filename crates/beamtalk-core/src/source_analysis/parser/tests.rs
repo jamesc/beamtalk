@@ -5200,7 +5200,7 @@ fn parse_generic_class_definition_single_param() {
     let class = &module.classes[0];
     assert_eq!(class.name.name, "Stack");
     assert_eq!(class.type_params.len(), 1);
-    assert_eq!(class.type_params[0].name, "E");
+    assert_eq!(class.type_params[0].name.name, "E");
 }
 
 #[test]
@@ -5214,8 +5214,8 @@ fn parse_generic_class_definition_two_params() {
     assert_eq!(class.name.name, "Result");
     assert!(class.is_sealed);
     assert_eq!(class.type_params.len(), 2);
-    assert_eq!(class.type_params[0].name, "T");
-    assert_eq!(class.type_params[1].name, "E");
+    assert_eq!(class.type_params[0].name.name, "T");
+    assert_eq!(class.type_params[1].name.name, "E");
     assert_eq!(class.state.len(), 2);
 }
 
@@ -5228,6 +5228,81 @@ fn parse_generic_class_definition_no_params() {
     let class = &module.classes[0];
     assert_eq!(class.name.name, "Counter");
     assert!(class.type_params.is_empty());
+}
+
+// --- ADR 0068 Phase 2d: Bounded type parameters ---
+
+#[test]
+fn parse_bounded_type_param_single() {
+    let module = parse_ok(
+        "Actor subclass: Logger(T :: Printable)
+  log: item :: T => item asString",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Logger");
+    assert_eq!(class.type_params.len(), 1);
+    assert_eq!(class.type_params[0].name.name, "T");
+    assert!(class.type_params[0].bound.is_some());
+    assert_eq!(
+        class.type_params[0].bound.as_ref().unwrap().name,
+        "Printable"
+    );
+}
+
+#[test]
+fn parse_bounded_type_param_mixed() {
+    // T is bounded, E is unbounded
+    let module = parse_ok(
+        "Value subclass: Container(T :: Printable, E)
+  state: item :: T = nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.type_params.len(), 2);
+    assert_eq!(class.type_params[0].name.name, "T");
+    assert!(class.type_params[0].bound.is_some());
+    assert_eq!(
+        class.type_params[0].bound.as_ref().unwrap().name,
+        "Printable"
+    );
+    assert_eq!(class.type_params[1].name.name, "E");
+    assert!(class.type_params[1].bound.is_none());
+}
+
+#[test]
+fn parse_bounded_type_param_all_bounded() {
+    let module = parse_ok(
+        "Value subclass: SortedMap(K :: Comparable, V :: Printable)
+  state: items = #[]",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.type_params.len(), 2);
+    assert_eq!(class.type_params[0].name.name, "K");
+    assert_eq!(
+        class.type_params[0].bound.as_ref().unwrap().name,
+        "Comparable"
+    );
+    assert_eq!(class.type_params[1].name.name, "V");
+    assert_eq!(
+        class.type_params[1].bound.as_ref().unwrap().name,
+        "Printable"
+    );
+}
+
+#[test]
+fn parse_bounded_type_param_protocol() {
+    // Protocol with bounded type params
+    let module = parse_ok(
+        "Protocol define: Mapper(T :: Printable)
+  map: block :: Block(T, Object) -> Object",
+    );
+    let proto = &module.protocols[0];
+    assert_eq!(proto.type_params.len(), 1);
+    assert_eq!(proto.type_params[0].name.name, "T");
+    assert!(proto.type_params[0].bound.is_some());
+    assert_eq!(
+        proto.type_params[0].bound.as_ref().unwrap().name,
+        "Printable"
+    );
 }
 
 #[test]
@@ -5389,8 +5464,8 @@ fn parse_generic_class_with_native_module() {
     let class = &module.classes[0];
     assert_eq!(class.name.name, "Cache");
     assert_eq!(class.type_params.len(), 2);
-    assert_eq!(class.type_params[0].name, "K");
-    assert_eq!(class.type_params[1].name, "V");
+    assert_eq!(class.type_params[0].name.name, "K");
+    assert_eq!(class.type_params[1].name.name, "V");
     assert!(class.backing_module.is_some());
     assert_eq!(
         class.backing_module.as_ref().unwrap().name,
@@ -5485,7 +5560,7 @@ fn parse_protocol_generic_collection() {
     let proto = &module.protocols[0];
     assert_eq!(proto.name.name, "Collection");
     assert_eq!(proto.type_params.len(), 1);
-    assert_eq!(proto.type_params[0].name, "E");
+    assert_eq!(proto.type_params[0].name.name, "E");
     assert_eq!(proto.method_signatures.len(), 4);
 
     // Check `size -> Integer`
@@ -5553,8 +5628,8 @@ fn parse_protocol_multiple_type_params() {
     let proto = &module.protocols[0];
     assert_eq!(proto.name.name, "Mapping");
     assert_eq!(proto.type_params.len(), 2);
-    assert_eq!(proto.type_params[0].name, "K");
-    assert_eq!(proto.type_params[1].name, "V");
+    assert_eq!(proto.type_params[0].name.name, "K");
+    assert_eq!(proto.type_params[1].name.name, "V");
     assert_eq!(proto.method_signatures.len(), 2);
 
     // Check `at: key :: K -> V`
@@ -5662,7 +5737,7 @@ fn parse_superclass_type_args_single_param() {
     assert_eq!(class.name.name, "Array");
     assert_eq!(class.superclass.as_ref().unwrap().name, "Collection");
     assert_eq!(class.type_params.len(), 1);
-    assert_eq!(class.type_params[0].name, "E");
+    assert_eq!(class.type_params[0].name.name, "E");
     assert_eq!(class.superclass_type_args.len(), 1);
     match &class.superclass_type_args[0] {
         TypeAnnotation::Simple(id) => assert_eq!(id.name, "E"),
