@@ -201,16 +201,33 @@ impl InferredType {
     /// - If all resolved members are the same type, returns that type.
     /// - If any member is `Dynamic`, returns `Dynamic` (can't validate).
     /// - Otherwise returns `Union { members, .. }` with deduplication.
+    ///
+    /// Provenance is derived from the first input that carries a non-default
+    /// provenance (Declared or Substituted win over Inferred).
     fn union_of(members: &[Self]) -> Self {
         let mut flat: Vec<InferredType> = Vec::new();
+        let mut best_provenance = TypeProvenance::Inferred(Span::default());
         for m in members {
             match m {
-                Self::Known { .. } => {
+                Self::Known { provenance, .. } => {
+                    if matches!(best_provenance, TypeProvenance::Inferred(_))
+                        && !matches!(provenance, TypeProvenance::Inferred(_))
+                    {
+                        best_provenance = *provenance;
+                    }
                     if !flat.contains(m) {
                         flat.push(m.clone());
                     }
                 }
-                Self::Union { members: inner, .. } => {
+                Self::Union {
+                    members: inner,
+                    provenance,
+                } => {
+                    if matches!(best_provenance, TypeProvenance::Inferred(_))
+                        && !matches!(provenance, TypeProvenance::Inferred(_))
+                    {
+                        best_provenance = *provenance;
+                    }
                     for inner_m in inner {
                         if !flat.contains(inner_m) {
                             flat.push(inner_m.clone());
@@ -225,7 +242,7 @@ impl InferredType {
             1 => flat.into_iter().next().unwrap(),
             _ => Self::Union {
                 members: flat,
-                provenance: TypeProvenance::Inferred(Span::default()),
+                provenance: best_provenance,
             },
         }
     }
