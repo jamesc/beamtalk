@@ -20,7 +20,23 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 
-use super::{InferredType, TypeChecker, TypeEnv};
+use super::{InferredType, TypeChecker, TypeEnv, TypeProvenance};
+
+/// Describes a control-flow narrowing detected from a type-test expression.
+///
+/// When a Boolean-producing expression like `x class = Foo` or `x isNil` is used
+/// as the receiver of `ifTrue:`/`ifFalse:`, the type checker narrows the tested
+/// variable inside the block scope (ADR 0068 Phase 1g).
+#[derive(Debug, Clone)]
+pub(super) struct NarrowingInfo {
+    /// The variable name being narrowed.
+    pub(super) variable: EcoString,
+    /// The type the variable is narrowed to in the *true* branch.
+    pub(super) true_type: InferredType,
+    /// Whether this is a nil-check (`isNil`). If so, the *false* branch
+    /// narrows to non-nil and early-return narrowing applies.
+    pub(super) is_nil_check: bool,
+}
 
 impl TypeChecker {
     /// Checks types in a module using the class hierarchy for method resolution.
@@ -585,11 +601,35 @@ impl TypeChecker {
         let receiver_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
         let selector_name = selector.name();
 
-        // Infer argument types (for side effects / variable tracking)
-        let arg_types: Vec<InferredType> = arguments
-            .iter()
-            .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
-            .collect();
+        // Control-flow narrowing (ADR 0068 Phase 1g):
+        // When the selector is ifTrue:, ifFalse:, or ifTrue:ifFalse:, detect
+        // type-testing patterns in the receiver and narrow variable types inside
+        // block arguments.
+        let narrowing = if matches!(
+            selector_name.as_str(),
+            "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:"
+        ) {
+            Self::detect_narrowing(receiver)
+        } else {
+            None
+        };
+
+        // Infer argument types, applying narrowing to block arguments when detected.
+        let arg_types: Vec<InferredType> = if let Some(ref info) = narrowing {
+            self.infer_args_with_narrowing(
+                arguments,
+                &selector_name,
+                info,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
+        } else {
+            arguments
+                .iter()
+                .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
+                .collect()
+        };
 
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
         // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
@@ -818,6 +858,270 @@ impl TypeChecker {
         InferredType::union_of(&return_types)
     }
 
+    /// Detect control-flow narrowing from the receiver of `ifTrue:`/`ifFalse:`.
+    ///
+    /// Recognises a fixed set of type-testing patterns (ADR 0068 Phase 1g):
+    ///
+    /// | Pattern | Detected as |
+    /// |---|---|
+    /// | `x class = ClassName` / `x class =:= ClassName` | class identity check |
+    /// | `(x class) = ClassName` / `(x class) =:= ClassName` | class identity check (parens) |
+    /// | `x isKindOf: ClassName` | kind check |
+    /// | `x isNil` | nil check |
+    pub(super) fn detect_narrowing(receiver: &Expression) -> Option<NarrowingInfo> {
+        // Unwrap parentheses
+        let receiver = match receiver {
+            Expression::Parenthesized { expression, .. } => expression.as_ref(),
+            _ => receiver,
+        };
+
+        match receiver {
+            // Pattern: `x isNil`
+            Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Unary(sel),
+                ..
+            } if sel.as_str() == "isNil" => {
+                let var_name = Self::extract_variable_name(inner_recv)?;
+                Some(NarrowingInfo {
+                    variable: var_name,
+                    true_type: InferredType::known("UndefinedObject"),
+                    is_nil_check: true,
+                })
+            }
+
+            // Pattern: `x isKindOf: ClassName`
+            Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } if parts.len() == 1 && parts[0].keyword == "isKindOf:" => {
+                let var_name = Self::extract_variable_name(inner_recv)?;
+                if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
+                    Some(NarrowingInfo {
+                        variable: var_name,
+                        true_type: InferredType::known(name.name.clone()),
+                        is_nil_check: false,
+                    })
+                } else {
+                    None
+                }
+            }
+
+            // Pattern: `x class = ClassName` or `x class =:= ClassName`
+            // Also handles `(x class) = ClassName` via parenthesized unwrap
+            Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Binary(op),
+                arguments,
+                ..
+            } if op.as_str() == "=" || op.as_str() == "=:=" => {
+                // The inner receiver should be `x class` or `(x class)`
+                let class_send = match inner_recv.as_ref() {
+                    Expression::Parenthesized { expression, .. } => expression.as_ref(),
+                    other => other,
+                };
+                if let Expression::MessageSend {
+                    receiver: var_expr,
+                    selector: MessageSelector::Unary(sel),
+                    ..
+                } = class_send
+                {
+                    if sel.as_str() == "class" {
+                        let var_name = Self::extract_variable_name(var_expr)?;
+                        if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
+                            return Some(NarrowingInfo {
+                                variable: var_name,
+                                true_type: InferredType::known(name.name.clone()),
+                                is_nil_check: false,
+                            });
+                        }
+                    }
+                }
+                None
+            }
+
+            _ => None,
+        }
+    }
+
+    /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` with
+    /// narrowed type environments for block arguments.
+    ///
+    /// For `ifTrue:`, the true-block gets the narrowed type.
+    /// For `ifFalse:`, the false-block gets the complement (non-nil for nil checks).
+    /// For `ifTrue:ifFalse:`, both blocks get their respective narrowings.
+    fn infer_args_with_narrowing(
+        &mut self,
+        arguments: &[Expression],
+        selector_name: &str,
+        info: &NarrowingInfo,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> Vec<InferredType> {
+        let mut arg_types = Vec::new();
+
+        match selector_name {
+            "ifTrue:" => {
+                // Single argument: narrow in the true branch
+                if let Some(arg) = arguments.first() {
+                    let ty = self.infer_block_with_narrowing(
+                        arg,
+                        &info.variable,
+                        &info.true_type,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    );
+                    arg_types.push(ty);
+                }
+            }
+            "ifFalse:" => {
+                // Single argument: narrow in the false branch (complement)
+                if let Some(arg) = arguments.first() {
+                    if info.is_nil_check {
+                        // isNil ifFalse: → variable is non-nil
+                        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+                        let non_nil = Self::non_nil_type(&current_ty);
+                        let ty = self.infer_block_with_narrowing(
+                            arg,
+                            &info.variable,
+                            &non_nil,
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        );
+                        arg_types.push(ty);
+                    } else {
+                        // class = / isKindOf: ifFalse: → no useful narrowing
+                        let ty = self.infer_expr(arg, hierarchy, env, in_abstract_method);
+                        arg_types.push(ty);
+                    }
+                }
+            }
+            "ifTrue:ifFalse:" => {
+                // Two arguments: true block then false block
+                if let Some(true_arg) = arguments.first() {
+                    let ty = self.infer_block_with_narrowing(
+                        true_arg,
+                        &info.variable,
+                        &info.true_type,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    );
+                    arg_types.push(ty);
+                }
+                if let Some(false_arg) = arguments.get(1) {
+                    if info.is_nil_check {
+                        // isNil ifTrue: [...] ifFalse: [block] → non-nil in false block
+                        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+                        let non_nil = Self::non_nil_type(&current_ty);
+                        let ty = self.infer_block_with_narrowing(
+                            false_arg,
+                            &info.variable,
+                            &non_nil,
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        );
+                        arg_types.push(ty);
+                    } else {
+                        // class = / isKindOf: ifTrue: [...] ifFalse: [...] — no useful narrowing for false block
+                        let ty = self.infer_expr(false_arg, hierarchy, env, in_abstract_method);
+                        arg_types.push(ty);
+                    }
+                }
+                // Handle any remaining arguments (shouldn't happen, but be safe)
+                for arg in arguments.iter().skip(2) {
+                    arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
+                }
+            }
+            _ => {
+                // Fallback: no narrowing
+                for arg in arguments {
+                    arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
+                }
+            }
+        }
+
+        arg_types
+    }
+
+    /// Type-check a block expression (or any expression) with a variable narrowed
+    /// to a specific type in a child environment.
+    fn infer_block_with_narrowing(
+        &mut self,
+        arg: &Expression,
+        var_name: &str,
+        narrowed_type: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        if let Expression::Block(block) = arg {
+            let mut block_env = env.child();
+            block_env.set(var_name, narrowed_type.clone());
+            for param in &block.parameters {
+                block_env.set(param.name.as_str(), InferredType::Dynamic);
+            }
+            self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+            let ty = InferredType::known("Block");
+            self.type_map.insert(arg.span(), ty.clone());
+            ty
+        } else {
+            // Not a block literal — just infer normally
+            self.infer_expr(arg, hierarchy, env, in_abstract_method)
+        }
+    }
+
+    /// Extract a variable name from an expression, supporting identifiers
+    /// and parenthesized identifiers.
+    fn extract_variable_name(expr: &Expression) -> Option<EcoString> {
+        match expr {
+            Expression::Identifier(ident) => Some(ident.name.clone()),
+            Expression::Parenthesized { expression, .. } => Self::extract_variable_name(expression),
+            _ => None,
+        }
+    }
+
+    /// Check whether a block contains a non-local return (`^`).
+    fn block_has_return(block: &crate::ast::Block) -> bool {
+        block
+            .body
+            .iter()
+            .any(|stmt| matches!(stmt.expression, Expression::Return { .. }))
+    }
+
+    /// Remove `UndefinedObject` (nil) from a union type or convert a known type
+    /// to itself if it is non-nil.
+    pub(super) fn non_nil_type(ty: &InferredType) -> InferredType {
+        match ty {
+            InferredType::Union { members, .. } => {
+                let non_nil: Vec<InferredType> = members
+                    .iter()
+                    .filter(|m| {
+                        !matches!(m, InferredType::Known { class_name, .. } if class_name.as_str() == "UndefinedObject")
+                    })
+                    .cloned()
+                    .collect();
+                match non_nil.len() {
+                    0 => InferredType::Dynamic,
+                    1 => non_nil.into_iter().next().unwrap(),
+                    _ => InferredType::Union {
+                        members: non_nil,
+                        provenance: TypeProvenance::Inferred(Span::default()),
+                    },
+                }
+            }
+            // If the variable is not a union, narrowing away nil for a non-union
+            // type means it stays the same (we can't make it "more non-nil").
+            _ => ty.clone(),
+        }
+    }
+
     /// Infer types for a sequence of expression statements.
     ///
     /// Skips `@expect` directive nodes so they don't reset the inferred body type
@@ -847,12 +1151,51 @@ impl TypeChecker {
 
             body_type = self.infer_expr(expr, hierarchy, env, in_abstract_method);
 
+            // Early-return narrowing (ADR 0068 Phase 1g):
+            // After `x isNil ifTrue: [^...]`, narrow x to non-nil for the rest.
+            Self::apply_early_return_narrowing(expr, env);
+
             if matches!(expr, Expression::Return { .. }) {
                 break;
             }
         }
 
         body_type
+    }
+
+    /// Apply early-return narrowing to the environment after a statement.
+    ///
+    /// Detects `x isNil ifTrue: [^...]` — if the true-block contains a non-local
+    /// return, the variable must be non-nil in subsequent statements (because if
+    /// it were nil, we would have already returned).
+    fn apply_early_return_narrowing(expr: &Expression, env: &mut TypeEnv) {
+        // Match: `<receiver> ifTrue: [block with ^]`
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        {
+            // Only applies to `ifTrue:` (single block with early return)
+            if !(parts.len() == 1 && parts[0].keyword == "ifTrue:") {
+                return;
+            }
+            if let Some(info) = Self::detect_narrowing(receiver) {
+                if !info.is_nil_check {
+                    return;
+                }
+                // Check if the block contains a non-local return
+                if let Some(Expression::Block(block)) = arguments.first() {
+                    if Self::block_has_return(block) {
+                        // After this statement, the variable is non-nil
+                        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+                        let non_nil = Self::non_nil_type(&current_ty);
+                        env.set(&info.variable, non_nil);
+                    }
+                }
+            }
+        }
     }
 
     /// Build a substitution map from a class's type parameters and concrete type arguments.

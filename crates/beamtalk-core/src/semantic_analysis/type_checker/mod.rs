@@ -4720,4 +4720,506 @@ Base subclass: Child
             "error on (GenResult error: #not_found) should return Symbol via constructor inference"
         );
     }
+
+    // ---- Control-flow narrowing tests (ADR 0068 Phase 1g) ----
+
+    /// Helper: build `x class` unary message
+    fn x_class(var_name: &str) -> Expression {
+        msg_send(
+            var(var_name),
+            MessageSelector::Unary("class".into()),
+            vec![],
+        )
+    }
+
+    /// Helper: build `(x class) = ClassName` binary expression
+    fn class_eq(var_name: &str, class_name: &str) -> Expression {
+        msg_send(
+            x_class(var_name),
+            MessageSelector::Binary("=".into()),
+            vec![class_ref(class_name)],
+        )
+    }
+
+    /// Helper: build `(x class) =:= ClassName` binary expression
+    fn class_eqeq(var_name: &str, class_name: &str) -> Expression {
+        msg_send(
+            x_class(var_name),
+            MessageSelector::Binary("=:=".into()),
+            vec![class_ref(class_name)],
+        )
+    }
+
+    /// Helper: build `x isKindOf: ClassName` keyword expression
+    fn is_kind_of(var_name: &str, class_name: &str) -> Expression {
+        msg_send(
+            var(var_name),
+            MessageSelector::Keyword(vec![KeywordPart::new("isKindOf:", span())]),
+            vec![class_ref(class_name)],
+        )
+    }
+
+    /// Helper: build `x isNil` unary expression
+    fn is_nil(var_name: &str) -> Expression {
+        msg_send(
+            var(var_name),
+            MessageSelector::Unary("isNil".into()),
+            vec![],
+        )
+    }
+
+    /// Helper: build a block expression `[body]`
+    fn block_expr(body: Vec<Expression>) -> Expression {
+        Expression::Block(Block::new(
+            vec![],
+            body.into_iter().map(ExpressionStatement::bare).collect(),
+            span(),
+        ))
+    }
+
+    /// Helper: build a block with a non-local return `[^value]`
+    fn block_with_return(value: Expression) -> Expression {
+        Expression::Block(Block::new(
+            vec![],
+            vec![ExpressionStatement::bare(Expression::Return {
+                value: Box::new(value),
+                span: span(),
+            })],
+            span(),
+        ))
+    }
+
+    /// Helper: build `receiver ifTrue: [block]`
+    fn if_true(receiver: Expression, block: Expression) -> Expression {
+        msg_send(
+            receiver,
+            MessageSelector::Keyword(vec![KeywordPart::new("ifTrue:", span())]),
+            vec![block],
+        )
+    }
+
+    /// Helper: build `receiver ifFalse: [block]`
+    #[allow(dead_code)] // Used in future narrowing tests
+    fn if_false(receiver: Expression, block: Expression) -> Expression {
+        msg_send(
+            receiver,
+            MessageSelector::Keyword(vec![KeywordPart::new("ifFalse:", span())]),
+            vec![block],
+        )
+    }
+
+    /// Helper: build `receiver ifTrue: [block1] ifFalse: [block2]`
+    fn if_true_if_false(
+        receiver: Expression,
+        true_block: Expression,
+        false_block: Expression,
+    ) -> Expression {
+        msg_send(
+            receiver,
+            MessageSelector::Keyword(vec![
+                KeywordPart::new("ifTrue:", span()),
+                KeywordPart::new("ifFalse:", span()),
+            ]),
+            vec![true_block, false_block],
+        )
+    }
+
+    /// Helper: make a keyword method with typed parameters and a body
+    fn make_keyword_method(
+        selector_parts: &[&str],
+        params: Vec<(&str, Option<&str>)>,
+        body: Vec<Expression>,
+    ) -> MethodDefinition {
+        MethodDefinition {
+            selector: MessageSelector::Keyword(
+                selector_parts
+                    .iter()
+                    .map(|k| KeywordPart::new(*k, span()))
+                    .collect(),
+            ),
+            parameters: params
+                .into_iter()
+                .map(|(name, ty)| {
+                    if let Some(t) = ty {
+                        ParameterDefinition::with_type(
+                            ident(name),
+                            TypeAnnotation::Simple(ident(t)),
+                        )
+                    } else {
+                        ParameterDefinition::new(ident(name))
+                    }
+                })
+                .collect(),
+            body: body.into_iter().map(ExpressionStatement::bare).collect(),
+            return_type: None,
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn test_narrowing_class_eq_in_true_block() {
+        // Build a class with a method:
+        //   process: x :: Object =>
+        //     (x class = Integer) ifTrue: [x + 1]
+        //     x + 1    // should warn — x is Object outside the block
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    // (x class = Integer) ifTrue: [x + 1]
+                    if_true(
+                        class_eq("x", "Integer"),
+                        block_expr(vec![msg_send(
+                            var("x"),
+                            MessageSelector::Binary("+".into()),
+                            vec![int_lit(1)],
+                        )]),
+                    ),
+                    // x + 1  — should warn (Object doesn't have +)
+                    msg_send(
+                        var("x"),
+                        MessageSelector::Binary("+".into()),
+                        vec![int_lit(1)],
+                    ),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // Inside the block: `x + 1` should NOT warn because x is narrowed to Integer
+        // Outside the block: `x + 1` SHOULD warn because x is still Object
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        // The outside `x + 1` should produce a warning
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning for x + 1 outside the narrowed block, got {}:\n{:?}",
+            warnings.len(),
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_narrowing_class_eqeq_in_true_block() {
+        // Same as above but with =:= operator
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    // (x class =:= Integer) ifTrue: [x + 1]
+                    if_true(
+                        class_eqeq("x", "Integer"),
+                        block_expr(vec![msg_send(
+                            var("x"),
+                            MessageSelector::Binary("+".into()),
+                            vec![int_lit(1)],
+                        )]),
+                    ),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // Inside the block: `x + 1` should NOT warn because x is narrowed to Integer
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for x + 1 inside narrowed block, got: {:?}",
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_narrowing_is_kind_of_in_true_block() {
+        // process: x :: Object =>
+        //   (x isKindOf: Integer) ifTrue: [x + 1]
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![if_true(
+                    is_kind_of("x", "Integer"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Binary("+".into()),
+                        vec![int_lit(1)],
+                    )]),
+                )],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings inside isKindOf: narrowed block, got: {:?}",
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_narrowing_is_nil_early_return() {
+        // validate: x :: Object =>
+        //   x isNil ifTrue: [^nil]
+        //   x size   // x should be non-nil, but still Object
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        let class = {
+            let validate_method = make_keyword_method(
+                &["validate:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    // x isNil ifTrue: [^nil]
+                    if_true(is_nil("x"), block_with_return(var("nil"))),
+                    // x size  — after early return, x is non-nil
+                    msg_send(var("x"), MessageSelector::Unary("size".into()), vec![]),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![validate_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // After early return narrowing, x is still Object (non-nil) but Object
+        // does respond to `size` (it's a built-in), so no warning expected.
+        // This test just verifies the narrowing doesn't crash.
+    }
+
+    #[test]
+    fn test_narrowing_is_nil_if_true_if_false() {
+        // process: x :: Object =>
+        //   x isNil ifTrue: [42] ifFalse: [x size]
+        // In the false block, x should be non-nil.
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![if_true_if_false(
+                    is_nil("x"),
+                    block_expr(vec![int_lit(42)]),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("size".into()),
+                        vec![],
+                    )]),
+                )],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // This just verifies the narrowing path executes without crash.
+        // Object responds to `size`, so no warning expected.
+    }
+
+    #[test]
+    fn test_narrowing_union_with_nil_check() {
+        // Compose union checking with narrowing:
+        // A parameter typed as String|UndefinedObject (union), after nil check,
+        // should narrow to String in the false block.
+        //
+        // For now, union types in annotations aren't parsed to InferredType::Union
+        // (they resolve to Dynamic), so this test validates the non_nil_type logic
+        // directly.
+        let union = InferredType::Union {
+            members: vec![
+                InferredType::known("String"),
+                InferredType::known("UndefinedObject"),
+            ],
+            provenance: TypeProvenance::Inferred(span()),
+        };
+        let narrowed = TypeChecker::non_nil_type(&union);
+        assert_eq!(
+            narrowed,
+            InferredType::known("String"),
+            "Removing UndefinedObject from String|UndefinedObject should yield String"
+        );
+    }
+
+    #[test]
+    fn test_narrowing_union_multi_member() {
+        // String | Integer | UndefinedObject → String | Integer after non_nil
+        let union = InferredType::Union {
+            members: vec![
+                InferredType::known("String"),
+                InferredType::known("Integer"),
+                InferredType::known("UndefinedObject"),
+            ],
+            provenance: TypeProvenance::Inferred(span()),
+        };
+        let narrowed = TypeChecker::non_nil_type(&union);
+        match narrowed {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(members.contains(&InferredType::known("String")));
+                assert!(members.contains(&InferredType::known("Integer")));
+            }
+            _ => panic!("Expected Union type after narrowing, got: {narrowed:?}"),
+        }
+    }
+
+    #[test]
+    fn test_detect_narrowing_class_eq_pattern() {
+        // (x class = Integer) → should detect narrowing for x to Integer
+        let expr = class_eq("x", "Integer");
+        let info = TypeChecker::detect_narrowing(&expr);
+        assert!(info.is_some(), "Should detect class = narrowing");
+        let info = info.unwrap();
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::known("Integer"));
+        assert!(!info.is_nil_check);
+    }
+
+    #[test]
+    fn test_detect_narrowing_is_kind_of_pattern() {
+        let expr = is_kind_of("x", "Number");
+        let info = TypeChecker::detect_narrowing(&expr);
+        assert!(info.is_some(), "Should detect isKindOf: narrowing");
+        let info = info.unwrap();
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::known("Number"));
+        assert!(!info.is_nil_check);
+    }
+
+    #[test]
+    fn test_detect_narrowing_is_nil_pattern() {
+        let expr = is_nil("x");
+        let info = TypeChecker::detect_narrowing(&expr);
+        assert!(info.is_some(), "Should detect isNil narrowing");
+        let info = info.unwrap();
+        assert_eq!(info.variable.as_str(), "x");
+        assert!(info.is_nil_check);
+    }
+
+    #[test]
+    fn test_detect_narrowing_no_match() {
+        // `x + 1` is not a narrowing pattern
+        let expr = msg_send(
+            var("x"),
+            MessageSelector::Binary("+".into()),
+            vec![int_lit(1)],
+        );
+        assert!(
+            TypeChecker::detect_narrowing(&expr).is_none(),
+            "x + 1 should not be detected as narrowing"
+        );
+    }
+
+    #[test]
+    fn test_narrowing_does_not_leak_outside_block() {
+        // Verify narrowing is scoped to block only:
+        //   process: x :: Object =>
+        //     (x class = String) ifTrue: [x size]
+        //     x unknownThing   // Object doesn't have unknownThing → warning
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    if_true(
+                        class_eq("x", "String"),
+                        block_expr(vec![msg_send(
+                            var("x"),
+                            MessageSelector::Unary("size".into()),
+                            vec![],
+                        )]),
+                    ),
+                    msg_send(
+                        var("x"),
+                        MessageSelector::Unary("unknownThing".into()),
+                        vec![],
+                    ),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        // 'unknownThing' on Object should warn (narrowing doesn't leak)
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning for unknownThing outside narrowed block, got {}",
+            warnings.len(),
+        );
+    }
 }
