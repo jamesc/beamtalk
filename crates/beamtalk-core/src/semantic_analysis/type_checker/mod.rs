@@ -61,9 +61,13 @@ pub enum InferredType {
     },
     /// A union of known types (e.g., `String | UndefinedObject`).
     ///
-    /// Members are stored as resolved class names (e.g., `nil` → `UndefinedObject`).
+    /// Members are full `InferredType` values, preserving generic type args
+    /// (e.g., `Result(Integer, String) | nil`).  Equality is order-independent.
     /// An empty member list is impossible — construction always requires ≥2 members.
-    Union(Vec<EcoString>),
+    Union {
+        members: Vec<InferredType>,
+        provenance: TypeProvenance,
+    },
     /// Type cannot be determined — skip all checking.
     Dynamic,
 }
@@ -86,7 +90,9 @@ impl PartialEq for InferredType {
                     ..
                 },
             ) => a == b && ta == tb,
-            (Self::Union(a), Self::Union(b)) => a == b,
+            (Self::Union { members: a, .. }, Self::Union { members: b, .. }) => {
+                a.len() == b.len() && a.iter().all(|m| b.contains(m))
+            }
             (Self::Dynamic, Self::Dynamic) => true,
             _ => false,
         }
@@ -109,6 +115,26 @@ impl InferredType {
         }
     }
 
+    /// Creates a `Union` from simple class names with `Inferred` provenance.
+    ///
+    /// Convenience for the common case of `String | nil` style unions where
+    /// members don't carry generic type args.  Resolves type keywords
+    /// (`nil` → `UndefinedObject`, `true` → `True`, `false` → `False`)
+    /// and deduplicates via `union_of`.
+    #[must_use]
+    pub fn simple_union(names: &[&str]) -> Self {
+        let members: Vec<Self> = names
+            .iter()
+            .map(|name| match *name {
+                "nil" => Self::known("UndefinedObject"),
+                "true" => Self::known("True"),
+                "false" => Self::known("False"),
+                other => Self::known(other),
+            })
+            .collect();
+        Self::union_of(&members)
+    }
+
     /// Returns the class name if this is a known single type.
     ///
     /// Returns `None` for `Dynamic` and `Union` variants. LSP providers that
@@ -117,26 +143,52 @@ impl InferredType {
     pub fn as_known(&self) -> Option<&EcoString> {
         match self {
             Self::Known { class_name, .. } => Some(class_name),
-            Self::Dynamic | Self::Union(_) => None,
+            Self::Dynamic | Self::Union { .. } => None,
         }
     }
 
     /// Returns a human-readable display name for this type.
     ///
-    /// - `Known("Integer")` → `"Integer"`
-    /// - `Union(["String", "UndefinedObject"])` → `"String | UndefinedObject"`
+    /// - `Known("Integer", [])` → `"Integer"`
+    /// - `Known("Result", [Known("Integer"), Known("String")])` → `"Result(Integer, String)"`
+    /// - `Union([Known("String"), Known("UndefinedObject")])` → `"String | UndefinedObject"`
     /// - `Dynamic` → `None`
     #[must_use]
     pub fn display_name(&self) -> Option<EcoString> {
         match self {
-            Self::Known { class_name, .. } => Some(class_name.clone()),
-            Self::Union(members) => {
+            Self::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                if type_args.is_empty() {
+                    Some(class_name.clone())
+                } else {
+                    let args: Vec<String> = type_args
+                        .iter()
+                        .map(|a| {
+                            a.display_name()
+                                .map_or_else(|| "Dynamic".to_string(), |n| n.to_string())
+                        })
+                        .collect();
+                    Some(EcoString::from(format!(
+                        "{}({})",
+                        class_name,
+                        args.join(", ")
+                    )))
+                }
+            }
+            Self::Union { members, .. } => {
                 let mut result = EcoString::new();
                 for (i, m) in members.iter().enumerate() {
                     if i > 0 {
                         result.push_str(" | ");
                     }
-                    result.push_str(m);
+                    if let Some(name) = m.display_name() {
+                        result.push_str(&name);
+                    } else {
+                        result.push_str("Dynamic");
+                    }
                 }
                 Some(result)
             }
@@ -146,32 +198,74 @@ impl InferredType {
 
     /// Builds a union type, simplifying when possible.
     ///
-    /// - If all resolved members are the same type, returns `Known(that_type)`.
+    /// - If all resolved members are the same type, returns that type.
     /// - If any member is `Dynamic`, returns `Dynamic` (can't validate).
-    /// - Otherwise returns `Union(deduped_members)`.
+    /// - Otherwise returns `Union { members, .. }` with deduplication.
+    ///
+    /// Provenance is derived from the first input that carries a non-default
+    /// provenance (Declared or Substituted win over Inferred).
     fn union_of(members: &[Self]) -> Self {
-        let mut names: Vec<EcoString> = Vec::new();
+        let mut flat: Vec<InferredType> = Vec::new();
+        let mut best_provenance = TypeProvenance::Inferred(Span::default());
         for m in members {
             match m {
-                Self::Known { class_name, .. } => {
-                    if !names.contains(class_name) {
-                        names.push(class_name.clone());
+                Self::Known { provenance, .. } => {
+                    if matches!(best_provenance, TypeProvenance::Inferred(_))
+                        && !matches!(provenance, TypeProvenance::Inferred(_))
+                    {
+                        best_provenance = *provenance;
+                    }
+                    if !flat.contains(m) {
+                        flat.push(m.clone());
                     }
                 }
-                Self::Union(inner) => {
-                    for name in inner {
-                        if !names.contains(name) {
-                            names.push(name.clone());
+                Self::Union {
+                    members: inner,
+                    provenance,
+                } => {
+                    if matches!(best_provenance, TypeProvenance::Inferred(_))
+                        && !matches!(provenance, TypeProvenance::Inferred(_))
+                    {
+                        best_provenance = *provenance;
+                    }
+                    for inner_m in inner {
+                        if let Self::Known { provenance: p, .. } = inner_m {
+                            if matches!(best_provenance, TypeProvenance::Inferred(_))
+                                && !matches!(p, TypeProvenance::Inferred(_))
+                            {
+                                best_provenance = *p;
+                            }
+                        }
+                        if !flat.contains(inner_m) {
+                            flat.push(inner_m.clone());
                         }
                     }
                 }
                 Self::Dynamic => return Self::Dynamic,
             }
         }
-        match names.len() {
+        match flat.len() {
             0 => Self::Dynamic,
-            1 => Self::known(names.into_iter().next().unwrap()),
-            _ => Self::Union(names),
+            1 => match flat.into_iter().next().unwrap() {
+                Self::Known {
+                    class_name,
+                    type_args,
+                    provenance,
+                } if matches!(provenance, TypeProvenance::Inferred(_))
+                    && !matches!(best_provenance, TypeProvenance::Inferred(_)) =>
+                {
+                    Self::Known {
+                        class_name,
+                        type_args,
+                        provenance: best_provenance,
+                    }
+                }
+                only => only,
+            },
+            _ => Self::Union {
+                members: flat,
+                provenance: best_provenance,
+            },
         }
     }
 }
@@ -751,10 +845,10 @@ impl TypeChecker {
                 }
             }
             InferredType::Dynamic => EcoString::from("Dynamic"),
-            InferredType::Union(members) => EcoString::from(
+            InferredType::Union { members, .. } => EcoString::from(
                 members
                     .iter()
-                    .map(EcoString::as_str)
+                    .map(|m| Self::inferred_type_to_string(m).to_string())
                     .collect::<Vec<_>>()
                     .join(" | "),
             ),
@@ -4387,7 +4481,7 @@ Base subclass: Child
         ]);
         assert_eq!(
             result,
-            InferredType::Union(vec!["String".into(), "UndefinedObject".into()])
+            InferredType::simple_union(&["String", "UndefinedObject"])
         );
     }
 
@@ -4400,7 +4494,7 @@ Base subclass: Child
 
     #[test]
     fn union_display_name() {
-        let ty = InferredType::Union(vec!["String".into(), "UndefinedObject".into()]);
+        let ty = InferredType::simple_union(&["String", "UndefinedObject"]);
         assert_eq!(ty.display_name(), Some("String | UndefinedObject".into()));
     }
 
@@ -4455,7 +4549,7 @@ Base subclass: Child
         let result = TypeChecker::resolve_type_annotation(&ann);
         assert_eq!(
             result,
-            InferredType::Union(vec!["String".into(), "UndefinedObject".into()])
+            InferredType::simple_union(&["String", "UndefinedObject"])
         );
     }
 
@@ -4466,10 +4560,7 @@ Base subclass: Child
             span: span(),
         };
         let result = TypeChecker::resolve_type_annotation(&ann);
-        assert_eq!(
-            result,
-            InferredType::Union(vec!["Integer".into(), "False".into()])
-        );
+        assert_eq!(result, InferredType::simple_union(&["Integer", "False"]));
     }
 
     #[test]
@@ -4483,7 +4574,7 @@ Base subclass: Child
         let result = TypeChecker::resolve_type_name_string(&"String | nil".into());
         assert_eq!(
             result,
-            InferredType::Union(vec!["String".into(), "UndefinedObject".into()])
+            InferredType::simple_union(&["String", "UndefinedObject"])
         );
     }
 
@@ -4511,7 +4602,7 @@ Base subclass: Child
         let mut env = TypeEnv::new();
         env.set(
             "x",
-            InferredType::Union(vec!["String".into(), "UndefinedObject".into()]),
+            InferredType::simple_union(&["String", "UndefinedObject"]),
         );
 
         let _ty = checker.infer_expr(
@@ -4554,7 +4645,7 @@ Base subclass: Child
         let mut env = TypeEnv::new();
         env.set(
             "x",
-            InferredType::Union(vec!["String".into(), "UndefinedObject".into()]),
+            InferredType::simple_union(&["String", "UndefinedObject"]),
         );
 
         checker.infer_expr(
@@ -4596,10 +4687,7 @@ Base subclass: Child
         let hierarchy = ClassHierarchy::with_builtins();
         let mut checker = TypeChecker::new();
         let mut env = TypeEnv::new();
-        env.set(
-            "x",
-            InferredType::Union(vec!["Integer".into(), "String".into()]),
-        );
+        env.set("x", InferredType::simple_union(&["Integer", "String"]));
 
         checker.infer_expr(
             &module.expressions[0].expression,
@@ -5652,7 +5740,7 @@ Base subclass: Child
         // For now, union types in annotations aren't parsed to InferredType::Union
         // (they resolve to Dynamic), so this test validates the non_nil_type logic
         // directly.
-        let union = InferredType::Union(vec![eco_string("String"), eco_string("UndefinedObject")]);
+        let union = InferredType::simple_union(&["String", "UndefinedObject"]);
         let narrowed = TypeChecker::non_nil_type(&union);
         assert_eq!(
             narrowed,
@@ -5664,19 +5752,73 @@ Base subclass: Child
     #[test]
     fn test_narrowing_union_multi_member() {
         // String | Integer | UndefinedObject → String | Integer after non_nil
-        let union = InferredType::Union(vec![
-            eco_string("String"),
-            eco_string("Integer"),
-            eco_string("UndefinedObject"),
-        ]);
+        let union = InferredType::simple_union(&["String", "Integer", "UndefinedObject"]);
         let narrowed = TypeChecker::non_nil_type(&union);
         match narrowed {
-            InferredType::Union(members) => {
+            InferredType::Union { members, .. } => {
                 assert_eq!(members.len(), 2);
-                assert!(members.contains(&eco_string("String")));
-                assert!(members.contains(&eco_string("Integer")));
+                assert!(members.contains(&InferredType::known("String")));
+                assert!(members.contains(&InferredType::known("Integer")));
             }
             _ => panic!("Expected Union type after narrowing, got: {narrowed:?}"),
+        }
+    }
+
+    #[test]
+    fn test_union_order_independent_equality() {
+        // A | B should equal B | A
+        let ab = InferredType::simple_union(&["String", "Integer"]);
+        let ba = InferredType::simple_union(&["Integer", "String"]);
+        assert_eq!(ab, ba, "Union equality should be order-independent");
+    }
+
+    #[test]
+    fn test_union_with_generic_members() {
+        // Result(Integer, String) | UndefinedObject
+        let result_ty = InferredType::Known {
+            class_name: "Result".into(),
+            type_args: vec![
+                InferredType::known("Integer"),
+                InferredType::known("String"),
+            ],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        let nil_ty = InferredType::known("UndefinedObject");
+        let union = InferredType::union_of(&[result_ty.clone(), nil_ty]);
+
+        // display_name should render generics
+        let display = union.display_name().unwrap();
+        assert!(
+            display.contains("Result(Integer, String)"),
+            "Union display should include generic args, got: {display}"
+        );
+        assert!(
+            display.contains("UndefinedObject"),
+            "Union display should include nil member, got: {display}"
+        );
+
+        // non_nil_type should preserve generic args
+        let narrowed = TypeChecker::non_nil_type(&union);
+        assert_eq!(
+            narrowed, result_ty,
+            "Narrowing away nil should preserve the full generic Result type"
+        );
+    }
+
+    #[test]
+    fn test_union_deduplication() {
+        // union_of([String, String, Integer]) should deduplicate to String | Integer
+        let members = vec![
+            InferredType::known("String"),
+            InferredType::known("String"),
+            InferredType::known("Integer"),
+        ];
+        let union = InferredType::union_of(&members);
+        match union {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2, "Duplicate members should be removed");
+            }
+            _ => panic!("Expected Union, got: {union:?}"),
         }
     }
 
@@ -6953,5 +7095,331 @@ Base subclass: Child
         let (base, args) = TypeChecker::parse_generic_type_string("String");
         assert_eq!(base, "String");
         assert!(args.is_empty());
+    }
+
+    // ── simple_union keyword resolution tests (BT-1586) ───────────────────────
+
+    #[test]
+    fn simple_union_resolves_nil_to_undefined_object() {
+        // "nil" should map to "UndefinedObject" inside the union
+        let ty = InferredType::simple_union(&["String", "nil"]);
+        match &ty {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(
+                    members.contains(&InferredType::known("UndefinedObject")),
+                    "nil should resolve to UndefinedObject, members: {members:?}"
+                );
+                assert!(
+                    members.contains(&InferredType::known("String")),
+                    "String member should be present"
+                );
+            }
+            _ => panic!("Expected Union, got: {ty:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_union_resolves_true_to_true_class() {
+        // "true" should map to "True"
+        let ty = InferredType::simple_union(&["Integer", "true"]);
+        match &ty {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(
+                    members.contains(&InferredType::known("True")),
+                    "true should resolve to True class, members: {members:?}"
+                );
+            }
+            _ => panic!("Expected Union, got: {ty:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_union_resolves_false_to_false_class() {
+        // "false" should map to "False"
+        let ty = InferredType::simple_union(&["Integer", "false"]);
+        match &ty {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(
+                    members.contains(&InferredType::known("False")),
+                    "false should resolve to False class, members: {members:?}"
+                );
+            }
+            _ => panic!("Expected Union, got: {ty:?}"),
+        }
+    }
+
+    #[test]
+    fn simple_union_single_element_returns_known() {
+        // simple_union with one name should collapse to Known (via union_of dedup)
+        let ty = InferredType::simple_union(&["Integer"]);
+        assert_eq!(
+            ty,
+            InferredType::known("Integer"),
+            "single-element simple_union should collapse to Known"
+        );
+    }
+
+    #[test]
+    fn simple_union_deduplicates_keyword_aliases() {
+        // "nil" and "UndefinedObject" are the same after resolution — should deduplicate
+        let ty = InferredType::simple_union(&["nil", "UndefinedObject"]);
+        // Both resolve to known("UndefinedObject"), so result should be a single Known
+        assert_eq!(
+            ty,
+            InferredType::known("UndefinedObject"),
+            "nil and UndefinedObject should deduplicate to a single Known"
+        );
+    }
+
+    // ── display_name for generic types (BT-1586) ──────────────────────────────
+
+    #[test]
+    fn display_name_generic_known_single_arg() {
+        let ty = InferredType::Known {
+            class_name: "Array".into(),
+            type_args: vec![InferredType::known("Integer")],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        assert_eq!(
+            ty.display_name(),
+            Some("Array(Integer)".into()),
+            "Generic Known with one arg should include arg in display name"
+        );
+    }
+
+    #[test]
+    fn display_name_generic_known_dynamic_arg() {
+        // A generic type whose arg is Dynamic should render as "Dynamic"
+        let ty = InferredType::Known {
+            class_name: "Result".into(),
+            type_args: vec![InferredType::Dynamic, InferredType::known("String")],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        let name = ty.display_name().expect("display_name should be Some");
+        assert!(
+            name.contains("Dynamic"),
+            "Generic arg Dynamic should render as 'Dynamic', got: {name}"
+        );
+        assert!(
+            name.contains("String"),
+            "Second arg String should still appear, got: {name}"
+        );
+    }
+
+    #[test]
+    fn display_name_union_with_dynamic_member() {
+        // A Union that contains Dynamic should never be constructed (union_of returns Dynamic),
+        // but if we test union display containing a Dynamic-rendering member (e.g. nested),
+        // verify the fallback "Dynamic" string is used.
+        // We test via a Known with Dynamic type_arg inside a Union member.
+        let generic_member = InferredType::Known {
+            class_name: "Array".into(),
+            type_args: vec![InferredType::Dynamic],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        let other_member = InferredType::known("String");
+        // Manually construct the union (not via union_of to avoid Dynamic short-circuit)
+        let union = InferredType::Union {
+            members: vec![generic_member, other_member],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        let name = union.display_name().expect("display_name should be Some");
+        assert!(
+            name.contains("Array(Dynamic)"),
+            "Generic member with Dynamic arg should render as Array(Dynamic), got: {name}"
+        );
+        assert!(
+            name.contains("String"),
+            "Second member String should appear, got: {name}"
+        );
+    }
+
+    // ── as_known returns None for non-Known variants (BT-1586) ───────────────
+
+    #[test]
+    fn as_known_returns_none_for_union() {
+        let ty = InferredType::simple_union(&["String", "Integer"]);
+        assert!(
+            ty.as_known().is_none(),
+            "as_known should return None for Union"
+        );
+    }
+
+    #[test]
+    fn as_known_returns_none_for_dynamic() {
+        assert!(
+            InferredType::Dynamic.as_known().is_none(),
+            "as_known should return None for Dynamic"
+        );
+    }
+
+    #[test]
+    fn as_known_returns_class_name_for_known() {
+        let ty = InferredType::known("Integer");
+        assert_eq!(
+            ty.as_known().map(|s| s.as_str()),
+            Some("Integer"),
+            "as_known should return Some(class_name) for Known"
+        );
+    }
+
+    // ── non_nil_type edge cases (BT-1586) ─────────────────────────────────────
+
+    #[test]
+    fn non_nil_type_only_undefined_object_returns_dynamic() {
+        // A union of only UndefinedObject → all members filtered → Dynamic
+        let union = InferredType::Union {
+            members: vec![InferredType::known("UndefinedObject")],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        let result = TypeChecker::non_nil_type(&union);
+        assert_eq!(
+            result,
+            InferredType::Dynamic,
+            "Removing UndefinedObject from a single-member union should yield Dynamic"
+        );
+    }
+
+    #[test]
+    fn non_nil_type_passes_through_known() {
+        // non_nil_type on a Known type should return it unchanged
+        let ty = InferredType::known("String");
+        let result = TypeChecker::non_nil_type(&ty);
+        assert_eq!(result, ty, "non_nil_type on Known should return it unchanged");
+    }
+
+    #[test]
+    fn non_nil_type_passes_through_dynamic() {
+        // non_nil_type on Dynamic should return Dynamic unchanged
+        let result = TypeChecker::non_nil_type(&InferredType::Dynamic);
+        assert_eq!(
+            result,
+            InferredType::Dynamic,
+            "non_nil_type on Dynamic should return Dynamic"
+        );
+    }
+
+    #[test]
+    fn non_nil_type_all_non_nil_union_unchanged() {
+        // A union with no UndefinedObject members should be returned unchanged
+        let union = InferredType::simple_union(&["String", "Integer"]);
+        let result = TypeChecker::non_nil_type(&union);
+        assert_eq!(
+            result, union,
+            "non_nil_type should not remove non-nil members"
+        );
+    }
+
+    // ── union_of nested union flattening (BT-1586) ────────────────────────────
+
+    #[test]
+    fn union_of_flattens_nested_unions() {
+        // union_of([ Union(A, B), C ]) should flatten to Union(A, B, C)
+        let inner_union = InferredType::simple_union(&["String", "Integer"]);
+        let extra = InferredType::known("Float");
+        let result = InferredType::union_of(&[inner_union, extra]);
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 3, "Nested union should be flattened, members: {members:?}");
+                assert!(members.contains(&InferredType::known("String")));
+                assert!(members.contains(&InferredType::known("Integer")));
+                assert!(members.contains(&InferredType::known("Float")));
+            }
+            _ => panic!("Expected Union after flattening, got: {result:?}"),
+        }
+    }
+
+    #[test]
+    fn union_of_empty_slice_returns_dynamic() {
+        // union_of with no members should return Dynamic (sentinel for "cannot validate")
+        let result = InferredType::union_of(&[]);
+        assert_eq!(
+            result,
+            InferredType::Dynamic,
+            "union_of with empty slice should return Dynamic"
+        );
+    }
+
+    // ── Union PartialEq ignores provenance (BT-1586) ──────────────────────────
+
+    #[test]
+    fn union_eq_ignores_provenance() {
+        // Two unions with the same members but different provenances should be equal
+        let span1 = Span::default();
+        let union_inferred = InferredType::Union {
+            members: vec![
+                InferredType::known("String"),
+                InferredType::known("Integer"),
+            ],
+            provenance: TypeProvenance::Inferred(span1),
+        };
+        let union_declared = InferredType::Union {
+            members: vec![
+                InferredType::known("String"),
+                InferredType::known("Integer"),
+            ],
+            provenance: TypeProvenance::Declared(span1),
+        };
+        assert_eq!(
+            union_inferred, union_declared,
+            "Unions with same members but different provenances should be equal"
+        );
+    }
+
+    #[test]
+    fn known_eq_ignores_provenance() {
+        // Two Known types with the same class but different provenances should be equal
+        let known_inferred = InferredType::Known {
+            class_name: "Integer".into(),
+            type_args: vec![],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        let known_declared = InferredType::Known {
+            class_name: "Integer".into(),
+            type_args: vec![],
+            provenance: TypeProvenance::Declared(Span::default()),
+        };
+        assert_eq!(
+            known_inferred, known_declared,
+            "Known types with same class but different provenances should be equal"
+        );
+    }
+
+    // ── union_of with all-same generic members (BT-1586) ─────────────────────
+
+    #[test]
+    fn union_of_collapses_identical_generic_types() {
+        // union_of([Result(Integer, String), Result(Integer, String)]) → Result(Integer, String)
+        let generic_ty = InferredType::Known {
+            class_name: "Result".into(),
+            type_args: vec![
+                InferredType::known("Integer"),
+                InferredType::known("String"),
+            ],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        };
+        let result = InferredType::union_of(&[generic_ty.clone(), generic_ty.clone()]);
+        assert_eq!(
+            result, generic_ty,
+            "Identical generic types in union_of should collapse to a single Known"
+        );
+    }
+
+    #[test]
+    fn union_of_dynamic_member_short_circuits() {
+        // union_of with any Dynamic member immediately returns Dynamic
+        let result = InferredType::union_of(&[
+            InferredType::known("String"),
+            InferredType::Dynamic,
+            InferredType::known("Integer"),
+        ]);
+        assert_eq!(
+            result,
+            InferredType::Dynamic,
+            "Any Dynamic member in union_of should return Dynamic immediately"
+        );
     }
 }
