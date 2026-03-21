@@ -560,6 +560,13 @@ impl TypeChecker {
         class: &crate::ast::ClassDefinition,
         hierarchy: &ClassHierarchy,
     ) {
+        // Collect type parameter names once — we can't validate concrete
+        // assignability for generic fields at class definition time.
+        let type_param_names: Vec<&str> = class
+            .type_params
+            .iter()
+            .map(|tp| tp.name.name.as_str())
+            .collect();
         for decl in &class.state {
             let Some(ref type_annotation) = decl.type_annotation else {
                 continue;
@@ -568,6 +575,9 @@ impl TypeChecker {
                 continue;
             };
             let declared_type = type_annotation.type_name();
+            if type_param_names.contains(&declared_type.as_str()) {
+                continue;
+            }
             let mut env = TypeEnv::new();
             env.set("self", InferredType::known(class.name.name.clone()));
             let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
