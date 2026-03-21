@@ -7,10 +7,12 @@
 # Usage:
 #   curl -fsSL https://jamesc.github.io/beamtalk/install.sh | sh
 #   curl ... | sh -s -- --version v0.1.0         # specific version
+#   curl ... | sh -s -- --nightly                # latest nightly build
 #   curl ... | sh -s -- --prefix /usr/local       # custom install location
 #
 # Environment variables:
 #   BEAMTALK_VERSION   - version to install (default: latest)
+#   BEAMTALK_NIGHTLY   - set to 1 for nightly build
 #   BEAMTALK_PREFIX    - install prefix (default: ~/.beamtalk)
 
 set -eu
@@ -23,6 +25,7 @@ GITHUB_RELEASES="https://github.com/${REPO}/releases"
 # ─── Parse arguments ────────────────────────────────────────────────────
 
 VERSION="${BEAMTALK_VERSION:-}"
+NIGHTLY="${BEAMTALK_NIGHTLY:-}"
 PREFIX="${BEAMTALK_PREFIX:-${DEFAULT_PREFIX}}"
 
 while [ $# -gt 0 ]; do
@@ -30,18 +33,22 @@ while [ $# -gt 0 ]; do
         --version)
             if [ $# -lt 2 ]; then echo "Error: --version requires a value"; exit 1; fi
             VERSION="$2"; shift 2 ;;
+        --nightly)
+            NIGHTLY=1; shift ;;
         --prefix)
             if [ $# -lt 2 ]; then echo "Error: --prefix requires a value"; exit 1; fi
             PREFIX="$2"; shift 2 ;;
         --help)
-            echo "Usage: install.sh [--version VERSION] [--prefix PATH]"
+            echo "Usage: install.sh [--version VERSION] [--nightly] [--prefix PATH]"
             echo ""
             echo "Options:"
             echo "  --version VERSION   Install a specific version (e.g., v0.1.0)"
+            echo "  --nightly           Install the latest nightly build"
             echo "  --prefix PATH       Install to PATH (default: ~/.beamtalk)"
             echo ""
             echo "Environment variables:"
             echo "  BEAMTALK_VERSION    Same as --version"
+            echo "  BEAMTALK_NIGHTLY    Set to 1 for nightly build"
             echo "  BEAMTALK_PREFIX     Same as --prefix"
             exit 0
             ;;
@@ -81,6 +88,11 @@ detect_platform() {
 # ─── Determine version ──────────────────────────────────────────────────
 
 resolve_version() {
+    if [ -n "${VERSION}" ] && [ "${NIGHTLY}" = "1" ]; then
+        echo "Error: --version and --nightly cannot be used together"
+        exit 1
+    fi
+
     if [ -n "${VERSION}" ]; then
         # Strip leading 'v' if present for consistency, then add it back
         VERSION="${VERSION#v}"
@@ -88,14 +100,34 @@ resolve_version() {
         return
     fi
 
-    echo "Fetching latest release..."
+    if [ "${NIGHTLY}" = "1" ]; then
+        echo "Fetching latest nightly build..."
+        TAG="nightly"
+        RELEASE_URL="${GITHUB_API}/repos/${REPO}/releases/tags/nightly"
+    else
+        echo "Fetching latest release..."
+        RELEASE_URL="${GITHUB_API}/repos/${REPO}/releases/latest"
+    fi
+
     if command -v curl >/dev/null 2>&1; then
-        RELEASE_JSON=$(curl -sS "${GITHUB_API}/repos/${REPO}/releases/latest")
+        RELEASE_JSON=$(curl -sS "${RELEASE_URL}")
     elif command -v wget >/dev/null 2>&1; then
-        RELEASE_JSON=$(wget -qO- "${GITHUB_API}/repos/${REPO}/releases/latest")
+        RELEASE_JSON=$(wget -qO- "${RELEASE_URL}")
     else
         echo "Error: curl or wget required"
         exit 1
+    fi
+
+    if [ "${NIGHTLY}" = "1" ]; then
+        # For nightly, extract the version from the release name (e.g., "Nightly Build (nightly-20260321-abc1234)")
+        VERSION=$(echo "${RELEASE_JSON}" | sed -n 's/.*"tag_name" *: *"\([^"]*\)".*/\1/p' | head -1)
+        if [ -z "${VERSION}" ]; then
+            echo "Error: No nightly release found. Nightly builds may not be available yet."
+            exit 1
+        fi
+        # For nightly, the tag IS the version identifier
+        TAG="${VERSION}"
+        return
     fi
 
     # Parse tag_name from JSON (handles variable whitespace)
@@ -249,6 +281,9 @@ main() {
     echo "  Version:  ${VERSION}"
     echo "  Platform: ${PLATFORM}"
     echo "  Prefix:   ${PREFIX}"
+    if [ "${NIGHTLY}" = "1" ]; then
+        echo "  Channel:  nightly (pre-release)"
+    fi
     echo ""
 
     install_beamtalk

@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// String/Binary inheritance tests — verify byte-level methods inherited
+// from Binary work correctly on String instances (ADR 0069 Phase 3b, BT-1595)
+
+TestCase subclass: StringBinaryInheritanceTest
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Grapheme-level overrides still work (no regressions)
+  // ═══════════════════════════════════════════════════════════════════
+  testAtReturnsGraphemes =>
+    // String's at: returns graphemes, not bytes
+    self assert: ("hello" at: 1) equals: "h"
+    self assert: ("hello" at: 5) equals: "o"
+    // Multi-byte grapheme: "café" — é is 2 bytes but 1 grapheme
+    self assert: ("café" at: 4) equals: "é"
+
+  testSizeReturnsGraphemeCount =>
+    // String's size returns grapheme count, not byte count
+    self assert: "hello" size equals: 5
+    self assert: "café" size equals: 4
+
+  testDoIteratesGraphemes =>
+    // String's do: iterates graphemes, not bytes (returns nil)
+    self assert: ("hi" do: [:ch | nil]) equals: nil
+
+  testCollectOperatesOnGraphemes =>
+    self assert: ("hi" collect: [:ch | ch uppercase]) equals: "HI"
+
+  testSelectOperatesOnGraphemes =>
+    self assert: ("hello" select: [:ch | ch /= "l"]) equals: "heo"
+
+  testRejectOperatesOnGraphemes =>
+    self assert: ("hello" reject: [:ch | ch =:= "l"]) equals: "heo"
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Byte-level methods inherited from Binary
+  // ═══════════════════════════════════════════════════════════════════
+  testByteAtReturnsBytes =>
+    // byteAt: uses 0-based indexing and returns byte values
+    self assert: ("hello" byteAt: 0) equals: 104
+    self assert: ("hello" byteAt: 1) equals: 101
+    self assert: ("hello" byteAt: 4) equals: 111
+
+  testByteSizeReturnsBytes =>
+    // byteSize returns byte count (same as size for ASCII)
+    self assert: "hello" byteSize equals: 5
+
+  testByteSizeVsSize =>
+    // "café" — é is 2 bytes (C3 A9) but 1 grapheme
+    self assert: "café" byteSize equals: 5
+    self assert: "café" size equals: 4
+
+  testPartReturnsBinary =>
+    // part:size: returns a Binary slice (not String)
+    result := "hello" part: 0 size: 3
+    self assert: result equals: "hel"
+
+  testConcatReturnsBinary =>
+    // concat: returns Binary (not String)
+    result := "hello" concat: "world"
+    self assert: result equals: "helloworld"
+
+  testToBytes =>
+    // toBytes returns list of byte integers
+    self assert: "hello" toBytes equals: #(104, 101, 108, 108, 111)
+
+  testAsStringOnString =>
+    // asString on a String is a no-op, returns the string itself
+    self assert: "hello" asString equals: "hello"
+
+  testAsStringUncheckedOnString =>
+    // asStringUnchecked on a String returns the string itself
+    self assert: "hello" asStringUnchecked equals: "hello"
