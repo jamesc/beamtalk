@@ -4106,6 +4106,7 @@ Base subclass: Child
             methods: vec![method],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
