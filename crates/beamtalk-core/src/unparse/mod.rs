@@ -1338,7 +1338,7 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
             let param_docs: Vec<Document<'static>> =
                 parameters.iter().map(unparse_type_annotation).collect();
             let joined = join_docs(param_docs, ", ");
-            docvec![Document::String(base.name.to_string()), "<", joined, ">"]
+            docvec![Document::String(base.name.to_string()), "(", joined, ")"]
         }
         TypeAnnotation::FalseOr { inner, .. } => {
             docvec![unparse_type_annotation(inner), " | False"]

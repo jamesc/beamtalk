@@ -602,8 +602,10 @@ fn find_receiver_in_expr(
                     }
                 }
                 return type_map.get(*span).and_then(|ty| match ty {
-                    InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
-                    InferredType::Dynamic | InferredType::Union(_) => None,
+                    InferredType::Known { class_name: n, .. } => {
+                        Some(ReceiverSide::Instance(n.clone()))
+                    }
+                    InferredType::Union { .. } | InferredType::Dynamic => None,
                 });
             }
             None
@@ -612,8 +614,10 @@ fn find_receiver_in_expr(
         Expression::Identifier(ident) => {
             if offset >= ident.span.end() && offset <= ident.span.end() + 1 {
                 type_map.get(ident.span).and_then(|ty| match ty {
-                    InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
-                    InferredType::Dynamic | InferredType::Union(_) => None,
+                    InferredType::Known { class_name: n, .. } => {
+                        Some(ReceiverSide::Instance(n.clone()))
+                    }
+                    InferredType::Union { .. } | InferredType::Dynamic => None,
                 })
             } else {
                 None
@@ -631,8 +635,10 @@ fn find_receiver_in_expr(
         Expression::Literal(_, span) => {
             if offset >= span.end() && offset <= span.end() + 1 {
                 type_map.get(*span).and_then(|ty| match ty {
-                    InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
-                    InferredType::Dynamic | InferredType::Union(_) => None,
+                    InferredType::Known { class_name: n, .. } => {
+                        Some(ReceiverSide::Instance(n.clone()))
+                    }
+                    InferredType::Union { .. } | InferredType::Dynamic => None,
                 })
             } else {
                 None
@@ -647,8 +653,10 @@ fn find_receiver_in_expr(
         Expression::Parenthesized { expression, span } => {
             if offset >= span.end() && offset <= span.end() + 1 {
                 type_map.get(*span).and_then(|ty| match ty {
-                    InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
-                    InferredType::Dynamic | InferredType::Union(_) => None,
+                    InferredType::Known { class_name: n, .. } => {
+                        Some(ReceiverSide::Instance(n.clone()))
+                    }
+                    InferredType::Union { .. } | InferredType::Dynamic => None,
                 })
             } else {
                 find_receiver_in_expr(expression, offset, type_map)
@@ -991,7 +999,7 @@ pub fn resolve_expression_type(source: &str, hierarchy: &ClassHierarchy) -> Opti
     let span = last_expr.expression.span();
     let type_map = crate::semantic_analysis::infer_types(&module, hierarchy);
     match type_map.get(span) {
-        Some(InferredType::Known(class_name)) => Some(class_name.to_string()),
+        Some(InferredType::Known { class_name, .. }) => Some(class_name.to_string()),
         _ => None,
     }
 }

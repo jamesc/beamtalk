@@ -11,8 +11,8 @@
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
-    Block, ClassDefinition, ClassKind, Expression, Literal, MessageSelector, MethodDefinition,
-    MethodKind, Module, StateDeclaration,
+    Block, ClassDefinition, ClassKind, Expression, Identifier, Literal, MessageSelector,
+    MethodDefinition, MethodKind, Module, StateDeclaration,
 };
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
@@ -60,10 +60,32 @@ pub(in crate::codegen::core_erlang) enum BodyExprKind {
     Pure,
 }
 
+/// Representation of a type in runtime meta (`method_info` `return_type` / `param_types`).
+///
+/// ADR 0068: Generic classes emit `{type_param, Name, Index}` tagged tuples
+/// for type parameters and `{generic, Base, [Params]}` for parameterised types,
+/// rather than flat atom strings.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum MetaTypeRepr {
+    /// No type annotation — rendered as `'none'`.
+    None,
+    /// A concrete named type — rendered as `'TypeName'`.
+    Atom(String),
+    /// A reference to a class-level type parameter — rendered as
+    /// `{'type_param', 'Name', Index}`.
+    TypeParam { name: String, index: i32 },
+    /// A parameterised type — rendered as
+    /// `{'generic', 'Base', [Param1, Param2, ...]}`.
+    Generic {
+        base: String,
+        parameters: Vec<MetaTypeRepr>,
+    },
+}
+
 /// Tuple representing a method entry for `method_info` / `class_method_info` meta maps.
 ///
 /// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`, `is_sealed`)
-pub(super) type MethodInfoEntry = (String, usize, Option<String>, Vec<Option<String>>, bool);
+pub(super) type MethodInfoEntry = (String, usize, MetaTypeRepr, Vec<MetaTypeRepr>, bool);
 
 impl CoreErlangGenerator {
     /// Generates dispatch case clauses for all methods in a class definition.
@@ -2290,6 +2312,15 @@ impl CoreErlangGenerator {
             synthesize_supervision_spec,
         ));
 
+        // ADR 0068: Emit type_params list for generic classes
+        let type_params_doc = Self::meta_atom_list(
+            &class
+                .type_params
+                .iter()
+                .map(|tp| tp.name.to_string())
+                .collect::<Vec<_>>(),
+        );
+
         docvec![
             "~{'class' => '",
             Document::String(class_name),
@@ -2305,6 +2336,8 @@ impl CoreErlangGenerator {
             is_value_doc,
             ",\n      'is_typed' => ",
             is_typed_doc,
+            ",\n      'type_params' => ",
+            type_params_doc,
             ",\n      'field_types' => ",
             field_types_doc,
             ",\n      'method_info' => ",
@@ -2381,11 +2414,12 @@ impl CoreErlangGenerator {
         include_standalone: bool,
     ) -> Vec<MethodInfoEntry> {
         let sealed = class.is_sealed;
+        let type_params = &class.type_params;
         let mut entries: Vec<MethodInfoEntry> = class
             .methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(|m| Self::meta_method_entry(m, sealed))
+            .map(|m| Self::meta_method_entry(m, sealed, type_params))
             .collect();
         // BT-1005: Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
         // but included in BuilderState.meta so init/1 can register their return types.
@@ -2395,20 +2429,24 @@ impl CoreErlangGenerator {
                     && !m.is_class_method
                     && m.method.kind == MethodKind::Primary
             }) {
-                entries.push(Self::meta_method_entry(&standalone.method, sealed));
+                entries.push(Self::meta_method_entry(
+                    &standalone.method,
+                    sealed,
+                    type_params,
+                ));
             }
         }
         if let Some(auto) = auto {
             use crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods;
             for field in &auto.getters {
-                entries.push((field.clone(), 0, None, vec![], sealed));
+                entries.push((field.clone(), 0, MetaTypeRepr::None, vec![], sealed));
             }
             for field in &auto.setters {
                 entries.push((
                     AutoSlotMethods::with_star_selector(field),
                     1,
-                    None,
-                    vec![None],
+                    MetaTypeRepr::None,
+                    vec![MetaTypeRepr::None],
                     sealed,
                 ));
             }
@@ -2426,11 +2464,12 @@ impl CoreErlangGenerator {
         synthesize_supervision_spec: bool,
     ) -> Vec<MethodInfoEntry> {
         let sealed = class.is_sealed;
+        let type_params = &class.type_params;
         let mut entries: Vec<MethodInfoEntry> = class
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(|m| Self::meta_method_entry(m, sealed))
+            .map(|m| Self::meta_method_entry(m, sealed, type_params))
             .collect();
         // BT-1005: Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
         // but included in BuilderState.meta so init/1 can register their return types.
@@ -2440,7 +2479,11 @@ impl CoreErlangGenerator {
                     && m.is_class_method
                     && m.method.kind == MethodKind::Primary
             }) {
-                entries.push(Self::meta_method_entry(&standalone.method, sealed));
+                entries.push(Self::meta_method_entry(
+                    &standalone.method,
+                    sealed,
+                    type_params,
+                ));
             }
         }
         if let Some(auto) = auto {
@@ -2453,7 +2496,13 @@ impl CoreErlangGenerator {
                     crate::codegen::core_erlang::selector_mangler::safe_class_method_selector(
                         kw_sel,
                     );
-                entries.push((safe_sel, arity, None, vec![None; arity], sealed));
+                entries.push((
+                    safe_sel,
+                    arity,
+                    MetaTypeRepr::None,
+                    vec![MetaTypeRepr::None; arity],
+                    sealed,
+                ));
             }
         }
         // BT-1218: Register the synthesized supervisionSpec so class dispatch finds it locally
@@ -2462,7 +2511,7 @@ impl CoreErlangGenerator {
             entries.push((
                 "supervisionSpec".to_string(),
                 0,
-                Some("SupervisionSpec".to_string()),
+                MetaTypeRepr::Atom("SupervisionSpec".to_string()),
                 vec![],
                 sealed,
             ));
@@ -2471,15 +2520,24 @@ impl CoreErlangGenerator {
     }
 
     /// Converts a `MethodDefinition` into a `MethodInfoEntry`.
-    fn meta_method_entry(m: &MethodDefinition, class_is_sealed: bool) -> MethodInfoEntry {
-        let return_type = m.return_type.as_ref().map(|rt| rt.type_name().to_string());
-        let param_types: Vec<Option<String>> = m
+    ///
+    /// ADR 0068: When `class_type_params` is non-empty, type annotations that reference
+    /// a class-level type parameter emit `MetaTypeRepr::TypeParam` instead of a flat atom.
+    fn meta_method_entry(
+        m: &MethodDefinition,
+        class_is_sealed: bool,
+        class_type_params: &[Identifier],
+    ) -> MethodInfoEntry {
+        let return_type = m.return_type.as_ref().map_or(MetaTypeRepr::None, |rt| {
+            Self::type_annotation_to_meta_repr(rt, class_type_params)
+        });
+        let param_types: Vec<MetaTypeRepr> = m
             .parameters
             .iter()
             .map(|p| {
-                p.type_annotation
-                    .as_ref()
-                    .map(|ta| ta.type_name().to_string())
+                p.type_annotation.as_ref().map_or(MetaTypeRepr::None, |ta| {
+                    Self::type_annotation_to_meta_repr(ta, class_type_params)
+                })
             })
             .collect();
         (
@@ -2491,10 +2549,103 @@ impl CoreErlangGenerator {
         )
     }
 
+    /// Converts a `TypeAnnotation` into a `MetaTypeRepr`.
+    ///
+    /// ADR 0068: If the type name matches one of the class-level type parameters,
+    /// it becomes a `TypeParam { name, index }`. Generic types with parameters
+    /// become `Generic { base, parameters }`. Method-local type params (not in
+    /// `class_type_params`) get index `-1`.
+    fn type_annotation_to_meta_repr(
+        ta: &crate::ast::TypeAnnotation,
+        class_type_params: &[Identifier],
+    ) -> MetaTypeRepr {
+        use crate::ast::TypeAnnotation;
+        match ta {
+            TypeAnnotation::Simple(id) => {
+                // Check if this is a class-level type parameter
+                if let Some(index) = class_type_params.iter().position(|tp| tp.name == id.name) {
+                    MetaTypeRepr::TypeParam {
+                        name: id.name.to_string(),
+                        index: i32::try_from(index).unwrap_or(0),
+                    }
+                } else if id.name.len() == 1
+                    && id
+                        .name
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_uppercase())
+                {
+                    // Single uppercase letter not in class type params → method-local type param
+                    MetaTypeRepr::TypeParam {
+                        name: id.name.to_string(),
+                        index: -1,
+                    }
+                } else {
+                    MetaTypeRepr::Atom(id.name.to_string())
+                }
+            }
+            TypeAnnotation::Generic {
+                base, parameters, ..
+            } => {
+                let params: Vec<MetaTypeRepr> = parameters
+                    .iter()
+                    .map(|p| Self::type_annotation_to_meta_repr(p, class_type_params))
+                    .collect();
+                MetaTypeRepr::Generic {
+                    base: base.name.to_string(),
+                    parameters: params,
+                }
+            }
+            // Union, FalseOr, Singleton, SelfType → fall back to flat atom string
+            _ => MetaTypeRepr::Atom(ta.type_name().to_string()),
+        }
+    }
+
+    /// Renders a `MetaTypeRepr` as a Core Erlang document.
+    ///
+    /// - `None` → `'none'`
+    /// - `Atom("T")` → `'T'`
+    /// - `TypeParam { name: "T", index: 0 }` → `{'type_param', 'T', 0}`
+    /// - `Generic { base: "Result", params: [TypeParam T, Atom E] }` →
+    ///   `{'generic', 'Result', [{'type_param', 'T', 0}, 'E']}`
+    pub(super) fn meta_type_repr_doc(repr: &MetaTypeRepr) -> Document<'static> {
+        match repr {
+            MetaTypeRepr::None => Document::Str("'none'"),
+            MetaTypeRepr::Atom(name) => docvec!["'", Document::String(name.clone()), "'"],
+            MetaTypeRepr::TypeParam { name, index } => docvec![
+                "{'type_param', '",
+                Document::String(name.clone()),
+                "', ",
+                Document::String(index.to_string()),
+                "}"
+            ],
+            MetaTypeRepr::Generic { base, parameters } => {
+                let mut params: Vec<Document<'static>> = Vec::new();
+                params.push(Document::Str("["));
+                for (i, p) in parameters.iter().enumerate() {
+                    if i > 0 {
+                        params.push(Document::Str(", "));
+                    }
+                    params.push(Self::meta_type_repr_doc(p));
+                }
+                params.push(Document::Str("]"));
+                docvec![
+                    "{'generic', '",
+                    Document::String(base.clone()),
+                    "', ",
+                    Document::Vec(params),
+                    "}"
+                ]
+            }
+        }
+    }
+
     /// Builds a Core Erlang map of selector → method info map.
     ///
-    /// Each entry: `'selector' => ~{'arity' => N, 'param_types' => [...], 'return_type' => 'T'}~`
+    /// Each entry: `'selector' => ~{'arity' => N, 'param_types' => [...], 'return_type' => ...}~`
     /// Empty slice → `~{}~`
+    ///
+    /// ADR 0068: `return_type` and `param_types` can now be tagged tuples for generic types.
     pub(super) fn meta_method_info_map(methods: &[MethodInfoEntry]) -> Document<'static> {
         if methods.is_empty() {
             return Document::Str("~{}~");
@@ -2514,18 +2665,12 @@ impl CoreErlangGenerator {
                     if j > 0 {
                         pts.push(Document::Str(", "));
                     }
-                    pts.push(match pt {
-                        Some(name) => docvec!["'", Document::String(name.clone()), "'"],
-                        None => Document::Str("'none'"),
-                    });
+                    pts.push(Self::meta_type_repr_doc(pt));
                 }
                 pts.push(Document::Str("]"));
                 Document::Vec(pts)
             };
-            let return_type_doc = match return_type {
-                Some(name) => docvec!["'", Document::String(name.clone()), "'"],
-                None => Document::Str("'none'"),
-            };
+            let return_type_doc = Self::meta_type_repr_doc(return_type);
             let is_sealed_doc = if *is_sealed { "'true'" } else { "'false'" };
             parts.push(docvec![
                 "'",
@@ -2659,6 +2804,201 @@ mod tests {
             doc.to_pretty_string(),
             "",
             "class with no class methods should produce empty doc"
+        );
+    }
+
+    // ── ADR 0068: MetaTypeRepr tests ──
+
+    use super::MetaTypeRepr;
+    use crate::ast::TypeAnnotation;
+
+    #[test]
+    fn test_meta_type_repr_none_renders_none_atom() {
+        let doc = CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::None);
+        assert_eq!(doc.to_pretty_string(), "'none'");
+    }
+
+    #[test]
+    fn test_meta_type_repr_atom_renders_quoted() {
+        let doc =
+            CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::Atom("Integer".to_string()));
+        assert_eq!(doc.to_pretty_string(), "'Integer'");
+    }
+
+    #[test]
+    fn test_meta_type_repr_type_param_renders_tagged_tuple() {
+        let doc = CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::TypeParam {
+            name: "T".to_string(),
+            index: 0,
+        });
+        assert_eq!(doc.to_pretty_string(), "{'type_param', 'T', 0}");
+    }
+
+    #[test]
+    fn test_meta_type_repr_type_param_method_local() {
+        let doc = CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::TypeParam {
+            name: "R".to_string(),
+            index: -1,
+        });
+        assert_eq!(doc.to_pretty_string(), "{'type_param', 'R', -1}");
+    }
+
+    #[test]
+    fn test_meta_type_repr_generic_renders_tagged_tuple() {
+        let doc = CoreErlangGenerator::meta_type_repr_doc(&MetaTypeRepr::Generic {
+            base: "Result".to_string(),
+            parameters: vec![
+                MetaTypeRepr::TypeParam {
+                    name: "T".to_string(),
+                    index: 0,
+                },
+                MetaTypeRepr::TypeParam {
+                    name: "E".to_string(),
+                    index: 1,
+                },
+            ],
+        });
+        assert_eq!(
+            doc.to_pretty_string(),
+            "{'generic', 'Result', [{'type_param', 'T', 0}, {'type_param', 'E', 1}]}"
+        );
+    }
+
+    #[test]
+    fn test_type_annotation_to_meta_repr_simple_concrete() {
+        let ta = TypeAnnotation::simple("Integer", s());
+        let class_tp = vec![];
+        let repr = CoreErlangGenerator::type_annotation_to_meta_repr(&ta, &class_tp);
+        assert_eq!(repr, MetaTypeRepr::Atom("Integer".to_string()));
+    }
+
+    #[test]
+    fn test_type_annotation_to_meta_repr_simple_type_param() {
+        let ta = TypeAnnotation::simple("T", s());
+        let class_tp = vec![Identifier::new("T", s()), Identifier::new("E", s())];
+        let repr = CoreErlangGenerator::type_annotation_to_meta_repr(&ta, &class_tp);
+        assert_eq!(
+            repr,
+            MetaTypeRepr::TypeParam {
+                name: "T".to_string(),
+                index: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_type_annotation_to_meta_repr_method_local_type_param() {
+        // 'R' is a single uppercase letter not in class type_params → method-local
+        let ta = TypeAnnotation::simple("R", s());
+        let class_tp = vec![Identifier::new("T", s())];
+        let repr = CoreErlangGenerator::type_annotation_to_meta_repr(&ta, &class_tp);
+        assert_eq!(
+            repr,
+            MetaTypeRepr::TypeParam {
+                name: "R".to_string(),
+                index: -1,
+            }
+        );
+    }
+
+    #[test]
+    fn test_type_annotation_to_meta_repr_generic_with_type_params() {
+        // Result(R, E) where class has T, E → R is method-local (-1), E is class param (1)
+        let ta = TypeAnnotation::generic(
+            Identifier::new("Result", s()),
+            vec![
+                TypeAnnotation::simple("R", s()),
+                TypeAnnotation::simple("E", s()),
+            ],
+            s(),
+        );
+        let class_tp = vec![Identifier::new("T", s()), Identifier::new("E", s())];
+        let repr = CoreErlangGenerator::type_annotation_to_meta_repr(&ta, &class_tp);
+        assert_eq!(
+            repr,
+            MetaTypeRepr::Generic {
+                base: "Result".to_string(),
+                parameters: vec![
+                    MetaTypeRepr::TypeParam {
+                        name: "R".to_string(),
+                        index: -1,
+                    },
+                    MetaTypeRepr::TypeParam {
+                        name: "E".to_string(),
+                        index: 1,
+                    },
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn test_meta_method_info_map_with_type_params() {
+        let entries: Vec<super::MethodInfoEntry> = vec![(
+            "unwrap".to_string(),
+            0,
+            MetaTypeRepr::TypeParam {
+                name: "T".to_string(),
+                index: 0,
+            },
+            vec![],
+            true,
+        )];
+        let doc = CoreErlangGenerator::meta_method_info_map(&entries);
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("{'type_param', 'T', 0}"),
+            "method_info map should contain type_param tagged tuple. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_meta_type_params_in_meta_map() {
+        // Build a generic class and verify type_params appears in meta map
+        let mut class = empty_actor_class("Container");
+        class.type_params = vec![Identifier::new("T", s()), Identifier::new("E", s())];
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let doc = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+        );
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'type_params' => ['T', 'E']"),
+            "meta map should include type_params list. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_meta_type_params_empty_for_non_generic() {
+        let class = empty_actor_class("Counter");
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let doc = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+        );
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'type_params' => []"),
+            "non-generic class should have empty type_params. Got: {output}"
         );
     }
 }

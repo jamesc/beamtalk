@@ -66,6 +66,42 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
 - ✅ Tests: `stdlib/test/` BUnit tests for the class
 - ✅ Docs: Updated `stdlib/src/README.md` with class hierarchy
 
+## Validating Generated Dialyzer Specs
+
+Beamtalk generates `-spec` attributes from type annotations (e.g. `:: Integer`, `-> String`). Since Core Erlang compilation does not preserve specs in BEAM debug_info, a separate validation pipeline verifies that generated specs are well-formed.
+
+### Quick check
+
+```bash
+just dialyzer-specs    # Compile stdlib → extract specs → Dialyzer validation
+```
+
+### How it works
+
+1. `beamtalk build --stdlib-mode` compiles `.bt` sources to `.core` files with `'spec'` attributes
+2. `scripts/validate_specs.escript` extracts those spec terms, constructs Erlang abstract forms with the actual type expressions, compiles to BEAM with `debug_info`, and runs Dialyzer
+3. Dialyzer validates that all type expressions in the specs are well-formed (unknown types, malformed tuples, etc. are caught)
+
+### Integration tests
+
+```bash
+cargo test --test spec_validation -- --ignored    # Round-trip tests + negative test
+```
+
+The integration tests in `crates/beamtalk-cli/tests/spec_validation.rs` verify:
+- `.bt` with type annotations → Core Erlang → Dialyzer validation passes
+- Correct type mappings (Integer→integer, String→binary, etc.)
+- Invalid spec types are detected (negative test)
+
+### Adding new type mappings
+
+When adding a new type to `spec_codegen.rs`:
+
+1. Add the mapping in `simple_type_to_spec()`
+2. Add a unit test in the `tests` module
+3. Run `just dialyzer-specs` to verify the generated spec is valid
+4. Run `cargo test --test spec_validation -- --ignored` for the full round-trip
+
 ## Debugging Compilation
 
 1. Use `BEAMTALK_DEBUG=1` to print intermediate representations

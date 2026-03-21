@@ -11,6 +11,8 @@
 //! - Message send type resolution
 //! - Literal type mapping
 
+use std::collections::{HashMap, HashSet};
+
 use crate::ast::{
     Expression, ExpressionStatement, Literal, MessageSelector, Module, Pattern, TypeAnnotation,
 };
@@ -27,6 +29,7 @@ impl TypeChecker {
     /// available when type-checking top-level expressions (BT-1047). This
     /// enables single-pass chain resolution: the `TypeChecker` consults its own
     /// `method_return_types` map when the hierarchy has no explicit annotation.
+    #[allow(clippy::too_many_lines)] // struct patterns expanded by BT-1569 refactor
     pub fn check_module(&mut self, module: &Module, hierarchy: &ClassHierarchy) {
         let mut env = TypeEnv::new();
 
@@ -40,7 +43,7 @@ impl TypeChecker {
 
             for method in &class.methods {
                 let mut method_env = TypeEnv::new();
-                method_env.set("self", InferredType::Known(class.name.name.clone()));
+                method_env.set("self", InferredType::known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
@@ -56,7 +59,11 @@ impl TypeChecker {
                         .iter()
                         .any(|s| matches!(s.expression, Expression::Primitive { .. }))
                 {
-                    if let InferredType::Known(ref inferred) = body_type {
+                    if let InferredType::Known {
+                        class_name: ref inferred,
+                        ..
+                    } = body_type
+                    {
                         self.method_return_types.insert(
                             (class.name.name.clone(), method.selector.name(), false),
                             inferred.clone(),
@@ -67,7 +74,7 @@ impl TypeChecker {
             for method in &class.class_methods {
                 let mut method_env = TypeEnv::new();
                 method_env.in_class_method = true;
-                method_env.set("self", InferredType::Known(class.name.name.clone()));
+                method_env.set("self", InferredType::known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
@@ -82,7 +89,11 @@ impl TypeChecker {
                         .iter()
                         .any(|s| matches!(s.expression, Expression::Primitive { .. }))
                 {
-                    if let InferredType::Known(ref inferred) = body_type {
+                    if let InferredType::Known {
+                        class_name: ref inferred,
+                        ..
+                    } = body_type
+                    {
                         self.method_return_types.insert(
                             (class.name.name.clone(), method.selector.name(), true),
                             inferred.clone(),
@@ -101,7 +112,7 @@ impl TypeChecker {
             let is_abstract = hierarchy.is_abstract(class_name);
             let mut method_env = TypeEnv::new();
             method_env.in_class_method = standalone.is_class_method;
-            method_env.set("self", InferredType::Known(class_name.clone()));
+            method_env.set("self", InferredType::known(class_name.clone()));
             Self::set_param_types(&mut method_env, &standalone.method.parameters);
             let body_type = self.infer_stmts(
                 &standalone.method.body,
@@ -118,7 +129,11 @@ impl TypeChecker {
                     .iter()
                     .any(|s| matches!(s.expression, Expression::Primitive { .. }))
             {
-                if let InferredType::Known(ref inferred) = body_type {
+                if let InferredType::Known {
+                    class_name: ref inferred,
+                    ..
+                } = body_type
+                {
                     self.method_return_types.insert(
                         (
                             class_name.clone(),
@@ -139,14 +154,20 @@ impl TypeChecker {
     ///
     /// All parameters are always registered. Typed parameters are resolved
     /// via [`resolve_type_annotation`]; untyped parameters are registered as
-    /// `Dynamic`. Registering untyped params is necessary to prevent the
-    /// bare-identifier state-field fallback in `infer_expr` from mis-inferring
-    /// an untyped param as `self.<field>` when the parameter name shadows a
-    /// state field name.
-    fn set_param_types(env: &mut TypeEnv, parameters: &[crate::ast::ParameterDefinition]) {
+    /// `Dynamic`. Generic annotations (e.g., `:: Result(Integer, Error)`) are
+    /// resolved to `Known` with `type_args`. Type parameters of enclosing
+    /// generic classes (e.g., `T` in `Result(T, E)`) resolve to `Dynamic` when
+    /// no substitution context is available.
+    /// Registering untyped params is necessary to prevent the bare-identifier
+    /// state-field fallback in `infer_expr` from mis-inferring an untyped param
+    /// as `self.<field>` when the parameter name shadows a state field name.
+    pub(super) fn set_param_types(
+        env: &mut TypeEnv,
+        parameters: &[crate::ast::ParameterDefinition],
+    ) {
         for param in parameters {
             let ty = match &param.type_annotation {
-                Some(annotation) => Self::resolve_type_annotation(annotation),
+                Some(ann) => Self::resolve_type_annotation(ann),
                 None => InferredType::Dynamic, // preserve parameter shadowing of state fields
             };
             env.set(&param.name.name, ty);
@@ -156,16 +177,30 @@ impl TypeChecker {
     /// Resolves a [`TypeAnnotation`] to an [`InferredType`].
     ///
     /// Handles all annotation variants:
-    /// - `Simple` → `Known(name)` with keyword resolution (`nil` → `UndefinedObject`, etc.)
+    /// - `Simple` → `Known { class_name, .. }` with keyword resolution (`nil` → `UndefinedObject`, etc.)
+    /// - `Generic` → `Known { class_name: base, type_args: [resolved...] }`
     /// - `Union` → `Union(resolved_members)`
     /// - `FalseOr` → `Union([inner, False])`
     /// - `SelfType` → `Dynamic` (resolved at call site, not here)
-    /// - `Singleton` / `Generic` → `Dynamic` (not yet supported)
-    pub(super) fn resolve_type_annotation(annotation: &TypeAnnotation) -> InferredType {
-        match annotation {
+    /// - `Singleton` → `Dynamic` (not yet supported)
+    pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
+        match ann {
             TypeAnnotation::Simple(type_id) => {
                 let name = Self::resolve_type_keyword(&type_id.name);
-                InferredType::Known(name)
+                InferredType::known(name)
+            }
+            TypeAnnotation::Generic {
+                base, parameters, ..
+            } => {
+                let type_args: Vec<InferredType> = parameters
+                    .iter()
+                    .map(Self::resolve_type_annotation)
+                    .collect();
+                InferredType::Known {
+                    class_name: base.name.clone(),
+                    type_args,
+                    provenance: super::TypeProvenance::Declared(ann.span()),
+                }
             }
             TypeAnnotation::Union { types, .. } => {
                 let members: Vec<InferredType> =
@@ -174,11 +209,11 @@ impl TypeChecker {
             }
             TypeAnnotation::FalseOr { inner, .. } => {
                 let inner_ty = Self::resolve_type_annotation(inner);
-                InferredType::union_of(&[inner_ty, InferredType::Known("False".into())])
+                InferredType::union_of(&[inner_ty, InferredType::known("False")])
             }
-            TypeAnnotation::SelfType { .. }
-            | TypeAnnotation::Singleton { .. }
-            | TypeAnnotation::Generic { .. } => InferredType::Dynamic,
+            TypeAnnotation::SelfType { .. } | TypeAnnotation::Singleton { .. } => {
+                InferredType::Dynamic
+            }
         }
     }
 
@@ -209,12 +244,12 @@ impl TypeChecker {
                 .split('|')
                 .map(|s| {
                     let trimmed = s.trim();
-                    InferredType::Known(Self::resolve_type_keyword(&EcoString::from(trimmed)))
+                    InferredType::known(Self::resolve_type_keyword(&EcoString::from(trimmed)))
                 })
                 .collect();
             InferredType::union_of(&members)
         } else {
-            InferredType::Known(Self::resolve_type_keyword(type_name))
+            InferredType::known(Self::resolve_type_keyword(type_name))
         }
     }
 
@@ -238,8 +273,8 @@ impl TypeChecker {
             Expression::Identifier(ident) => {
                 let name = ident.name.as_str();
                 match name {
-                    "true" | "false" => InferredType::Known("Boolean".into()),
-                    "nil" => InferredType::Known("UndefinedObject".into()),
+                    "true" | "false" => InferredType::known("Boolean"),
+                    "nil" => InferredType::known("UndefinedObject"),
                     "self" => env.get("self").unwrap_or(InferredType::Dynamic),
                     _ => {
                         // First check environment for local variables or parameters
@@ -248,7 +283,7 @@ impl TypeChecker {
                         } else {
                             // Bare identifier might be implicit self field access
                             // (e.g., `getValue => value` is sugar for `getValue => self.value`)
-                            if let Some(InferredType::Known(class_name)) = env.get("self") {
+                            if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
                                 if let Some(field_type) =
                                     hierarchy.state_field_type(&class_name, name)
                                 {
@@ -265,7 +300,7 @@ impl TypeChecker {
             }
 
             // Class references are the class itself (class-side receiver)
-            Expression::ClassReference { name, .. } => InferredType::Known(name.name.clone()),
+            Expression::ClassReference { name, .. } => InferredType::known(name.name.clone()),
 
             // Field access — infer type from declared state type for self.field
             Expression::FieldAccess {
@@ -274,7 +309,7 @@ impl TypeChecker {
                 let mut result = InferredType::Dynamic;
                 if let Expression::Identifier(recv_id) = receiver.as_ref() {
                     if recv_id.name == "self" {
-                        if let Some(InferredType::Known(class_name)) = env.get("self") {
+                        if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
                             if let Some(field_type) =
                                 hierarchy.state_field_type(&class_name, &field.name)
                             {
@@ -396,7 +431,7 @@ impl TypeChecker {
                                 hierarchy,
                             );
                         }
-                    } else if let InferredType::Known(ref class_name) = receiver_ty {
+                    } else if let InferredType::Known { ref class_name, .. } = receiver_ty {
                         if env.in_class_method && Self::is_self_receiver(receiver) {
                             if !in_abstract_method {
                                 self.check_class_side_send(
@@ -434,7 +469,7 @@ impl TypeChecker {
                     block_env.set(param.name.as_str(), InferredType::Dynamic);
                 }
                 self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
-                InferredType::Known("Block".into())
+                InferredType::known("Block")
             }
 
             // Match — result is Dynamic (branches may differ)
@@ -456,7 +491,7 @@ impl TypeChecker {
                     self.infer_expr(&pair.key, hierarchy, env, in_abstract_method);
                     self.infer_expr(&pair.value, hierarchy, env, in_abstract_method);
                 }
-                InferredType::Known("Dictionary".into())
+                InferredType::known("Dictionary")
             }
 
             // List literal → List
@@ -467,7 +502,7 @@ impl TypeChecker {
                 if let Some(t) = tail {
                     self.infer_expr(t, hierarchy, env, in_abstract_method);
                 }
-                InferredType::Known("List".into())
+                InferredType::known("List")
             }
 
             // Array literal → Array
@@ -475,7 +510,7 @@ impl TypeChecker {
                 for elem in elements {
                     self.infer_expr(elem, hierarchy, env, in_abstract_method);
                 }
-                InferredType::Known("Array".into())
+                InferredType::known("Array")
             }
 
             // String interpolation → String
@@ -485,16 +520,16 @@ impl TypeChecker {
                         self.infer_expr(inner_expr, hierarchy, env, in_abstract_method);
                     }
                 }
-                InferredType::Known("String".into())
+                InferredType::known("String")
             }
 
             // Super — resolve to parent class type for method validation
             Expression::Super(_) => {
                 // Look up current class from 'self' type, then find parent
-                if let Some(InferredType::Known(class_name)) = env.get("self") {
+                if let Some(InferredType::Known { class_name, .. }) = env.get("self") {
                     if let Some(class_info) = hierarchy.get_class(&class_name) {
                         if let Some(ref parent) = class_info.superclass {
-                            InferredType::Known(parent.clone())
+                            InferredType::known(parent.clone())
                         } else {
                             InferredType::Dynamic
                         }
@@ -534,6 +569,7 @@ impl TypeChecker {
 
     /// Infer the type of a message send and validate the selector.
     #[allow(clippy::too_many_arguments)] // hierarchy + env + flag needed for recursive checking
+    #[allow(clippy::too_many_lines)] // generic substitution adds necessary branches
     fn infer_message_send(
         &mut self,
         receiver: &Expression,
@@ -557,7 +593,7 @@ impl TypeChecker {
         // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
         if selector_name == "asType:" {
             if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
-                return InferredType::Known(name.name.clone());
+                return InferredType::known(name.name.clone());
             }
             return receiver_ty;
         }
@@ -566,8 +602,15 @@ impl TypeChecker {
         // Only check if the receiver type actually defines the operator (avoids
         // duplicate warnings when the selector is already unknown).
         if let MessageSelector::Binary(op) = selector {
-            if let (InferredType::Known(recv_ty), Some(InferredType::Known(arg_ty))) =
-                (&receiver_ty, arg_types.first())
+            if let (
+                InferredType::Known {
+                    class_name: recv_ty,
+                    ..
+                },
+                Some(InferredType::Known {
+                    class_name: arg_ty, ..
+                }),
+            ) = (&receiver_ty, arg_types.first())
             {
                 if hierarchy.resolves_selector(recv_ty, &selector_name) {
                     self.check_binary_operand_types(recv_ty, op, arg_ty, span, hierarchy);
@@ -590,7 +633,12 @@ impl TypeChecker {
         }
 
         // For instance-side sends on known types
-        if let InferredType::Known(ref class_name) = receiver_ty {
+        if let InferredType::Known {
+            ref class_name,
+            ref type_args,
+            ..
+        } = receiver_ty
+        {
             // In class methods, self sends should check class-side methods
             if env.in_class_method && Self::is_self_receiver(receiver) {
                 if !in_abstract_method {
@@ -621,16 +669,35 @@ impl TypeChecker {
                 );
             }
 
+            // Build substitution map from receiver's type args (ADR 0068 Phase 1b)
+            let subst = Self::build_substitution_map(hierarchy, class_name, type_args);
+
             // Infer return type from method info
             if let Some(method) = hierarchy.find_method(class_name, &selector_name) {
                 if let Some(ref ret_ty) = method.return_type {
-                    // `Self` resolves to the static receiver class
-                    let resolved = if ret_ty.as_str() == "Self" {
-                        class_name.clone()
-                    } else {
-                        ret_ty.clone()
-                    };
-                    return InferredType::Known(resolved);
+                    // `Self` resolves to the static receiver class (with type args)
+                    if ret_ty.as_str() == "Self" {
+                        if type_args.is_empty() {
+                            return InferredType::known(class_name.clone());
+                        }
+                        return InferredType::Known {
+                            class_name: class_name.clone(),
+                            type_args: type_args.clone(),
+                            provenance: super::TypeProvenance::Substituted(
+                                crate::source_analysis::Span::default(),
+                            ),
+                        };
+                    }
+
+                    // Apply generic substitution if we have type args
+                    if !subst.is_empty() {
+                        let method_subst = Self::infer_method_local_params(
+                            &method, &arg_types, &subst, hierarchy, class_name,
+                        );
+                        return Self::substitute_return_type(ret_ty, &subst, &method_subst);
+                    }
+
+                    return InferredType::known(ret_ty.clone());
                 }
             }
 
@@ -639,7 +706,7 @@ impl TypeChecker {
             // return types are available for chain resolution without a second pass.
             let key = (class_name.clone(), selector_name.clone(), false);
             if let Some(ret_ty) = self.method_return_types.get(&key) {
-                return InferredType::Known(ret_ty.clone());
+                return InferredType::known(ret_ty.clone());
             }
         }
 
@@ -693,7 +760,7 @@ impl TypeChecker {
                         } else {
                             ret_ty.clone()
                         };
-                        return_types.push(InferredType::Known(resolved));
+                        return_types.push(InferredType::known(resolved));
                     } else {
                         return_types.push(InferredType::Dynamic);
                     }
@@ -774,15 +841,176 @@ impl TypeChecker {
         body_type
     }
 
+    /// Build a substitution map from a class's type parameters and concrete type arguments.
+    ///
+    /// Given a class like `Result(T, E)` and concrete args `[Integer, IOError]`,
+    /// builds `{T → Integer, E → IOError}`.
+    ///
+    /// Returns an empty map if the class has no type params or the args are empty.
+    fn build_substitution_map(
+        hierarchy: &ClassHierarchy,
+        class_name: &str,
+        type_args: &[InferredType],
+    ) -> HashMap<EcoString, InferredType> {
+        let mut map = HashMap::new();
+        if type_args.is_empty() {
+            return map;
+        }
+        if let Some(class_info) = hierarchy.get_class(class_name) {
+            for (param, arg) in class_info.type_params.iter().zip(type_args.iter()) {
+                map.insert(param.clone(), arg.clone());
+            }
+        }
+        map
+    }
+
+    /// Substitute type parameters in a return type string using the substitution map.
+    ///
+    /// Handles simple cases like `T` → `Integer` and generic return types like
+    /// `Result(R, E)` where each parameter is individually substituted.
+    fn substitute_return_type(
+        ret_ty: &str,
+        subst: &HashMap<EcoString, InferredType>,
+        method_local_subst: &HashMap<EcoString, InferredType>,
+    ) -> InferredType {
+        let ret_eco: EcoString = ret_ty.into();
+
+        // Check method-local params first (e.g., R in map:)
+        if let Some(resolved) = method_local_subst.get(&ret_eco) {
+            return resolved.clone();
+        }
+
+        // Check class-level params (e.g., T, E)
+        if let Some(resolved) = subst.get(&ret_eco) {
+            return resolved.clone();
+        }
+
+        // Check for generic return type like "Result(R, E)"
+        if let Some(open) = ret_ty.find('(') {
+            let base = &ret_ty[..open];
+            let inner = &ret_ty[open + 1..ret_ty.len() - 1]; // strip parens
+            let params = Self::split_type_params(inner);
+            let mut resolved_args = Vec::new();
+            for p in &params {
+                let p_eco: EcoString = (*p).into();
+                if let Some(resolved) = method_local_subst.get(&p_eco) {
+                    resolved_args.push(resolved.clone());
+                } else if let Some(resolved) = subst.get(&p_eco) {
+                    resolved_args.push(resolved.clone());
+                } else {
+                    // Recursively substitute nested generics
+                    resolved_args.push(Self::substitute_return_type(p, subst, method_local_subst));
+                }
+            }
+            return InferredType::Known {
+                class_name: base.into(),
+                type_args: resolved_args,
+                provenance: super::TypeProvenance::Substituted(Span::default()),
+            };
+        }
+
+        // Not a type param — return as-is
+        InferredType::known(ret_eco)
+    }
+
+    /// Split a comma-separated list of type parameters, respecting nested parentheses.
+    ///
+    /// `"T, E"` → `["T", "E"]`
+    /// `"GenResult(A, B), E"` → `["GenResult(A, B)", "E"]`
+    fn split_type_params(s: &str) -> Vec<&str> {
+        let mut result = Vec::new();
+        let mut depth = 0;
+        let mut start = 0;
+        for (i, c) in s.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                ',' if depth == 0 => {
+                    result.push(s[start..i].trim());
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        let last = s[start..].trim();
+        if !last.is_empty() {
+            result.push(last);
+        }
+        result
+    }
+
+    /// Infer method-local type parameters (like `R` in `map:`) from call-site arguments.
+    ///
+    /// When a method parameter is annotated as `Block(T, R)`, and `T` is already known
+    /// from the class substitution, the block's actual return type can solve for `R`.
+    fn infer_method_local_params(
+        method: &crate::semantic_analysis::class_hierarchy::MethodInfo,
+        arg_types: &[InferredType],
+        _class_subst: &HashMap<EcoString, InferredType>,
+        hierarchy: &ClassHierarchy,
+        class_name: &str,
+    ) -> HashMap<EcoString, InferredType> {
+        let mut method_subst = HashMap::new();
+
+        // Identify which single-letter uppercase identifiers in param/return types
+        // are NOT class-level type params — those are method-local.
+        let class_type_params: HashSet<&EcoString> =
+            if let Some(info) = hierarchy.get_class(class_name) {
+                info.type_params.iter().collect()
+            } else {
+                HashSet::new()
+            };
+
+        for (i, param_type_opt) in method.param_types.iter().enumerate() {
+            let Some(param_type) = param_type_opt else {
+                continue;
+            };
+            let Some(arg_ty) = arg_types.get(i) else {
+                continue;
+            };
+
+            // Handle Block(A, B, ..., R) parameter types
+            if param_type.starts_with("Block(") && param_type.ends_with(')') {
+                let inner = &param_type[6..param_type.len() - 1];
+                let block_params = Self::split_type_params(inner);
+                if let Some(last) = block_params.last() {
+                    let last_eco: EcoString = (*last).into();
+                    // If last param is not a class-level type param and not a known class,
+                    // it's a method-local type param (like R)
+                    if !class_type_params.contains(&last_eco) && !hierarchy.has_class(&last_eco) {
+                        // Try to infer R from the block argument's actual return type
+                        // For now, if the arg is a Block expression, infer from its body
+                        // This is a simplified version — blocks are Dynamic unless annotated
+                        if let InferredType::Known {
+                            class_name,
+                            type_args,
+                            ..
+                        } = arg_ty
+                        {
+                            if class_name.as_str() == "Block" && !type_args.is_empty() {
+                                // Block type_args: last is return type
+                                if let Some(ret) = type_args.last() {
+                                    method_subst.insert(last_eco, ret.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        method_subst
+    }
+
     /// Infer the type of a literal value.
     pub(super) fn infer_literal(lit: &Literal) -> InferredType {
         match lit {
-            Literal::Integer(_) => InferredType::Known("Integer".into()),
-            Literal::Float(_) => InferredType::Known("Float".into()),
-            Literal::String(_) => InferredType::Known("String".into()),
-            Literal::Symbol(_) => InferredType::Known("Symbol".into()),
-            Literal::Character(_) => InferredType::Known("Character".into()),
-            Literal::List(_) => InferredType::Known("List".into()),
+            Literal::Integer(_) => InferredType::known("Integer"),
+            Literal::Float(_) => InferredType::known("Float"),
+            Literal::String(_) => InferredType::known("String"),
+            Literal::Symbol(_) => InferredType::known("Symbol"),
+            Literal::Character(_) => InferredType::known("Character"),
+            Literal::List(_) => InferredType::known("List"),
         }
     }
 }

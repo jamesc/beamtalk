@@ -56,7 +56,7 @@ impl TypeChecker {
 
         // Infer return type for known factory methods
         match selector {
-            "spawn" | "spawnWith:" | "new" | "new:" => InferredType::Known(class_name.clone()),
+            "spawn" | "spawnWith:" | "new" | "new:" => InferredType::known(class_name.clone()),
             _ => {
                 if let Some(method) = hierarchy.find_class_method(class_name, selector) {
                     if let Some(ref ret_ty) = method.return_type {
@@ -66,13 +66,13 @@ impl TypeChecker {
                         } else {
                             ret_ty.clone()
                         };
-                        return InferredType::Known(resolved);
+                        return InferredType::known(resolved);
                     }
                 }
                 // BT-1047: Fall back to return types inferred earlier in this pass.
                 let key = (class_name.clone(), EcoString::from(selector), true);
                 if let Some(ret_ty) = self.method_return_types.get(&key) {
-                    return InferredType::Known(ret_ty.clone());
+                    return InferredType::known(ret_ty.clone());
                 }
                 InferredType::Dynamic
             }
@@ -201,7 +201,11 @@ impl TypeChecker {
             let Some(expected_ty) = expected else {
                 continue;
             };
-            let InferredType::Known(actual_ty) = arg_ty else {
+            let InferredType::Known {
+                class_name: actual_ty,
+                ..
+            } = arg_ty
+            else {
                 continue; // Dynamic or Union arguments — skip (conservative)
             };
             if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
@@ -240,22 +244,29 @@ impl TypeChecker {
         let Some(ref declared) = method.return_type else {
             return;
         };
-        let InferredType::Known(actual_ty) = body_type else {
+        let InferredType::Known {
+            class_name: actual_ty,
+            ..
+        } = body_type
+        else {
             return; // Dynamic or Union body — can't reliably check
         };
 
         // For `-> Self`, the expected type is the class itself
+        // For `-> Generic(...)`, extract the base type name for compatibility checking
+        // For `-> Union` / `-> FalseOr`, resolve via resolve_type_annotation
         let expected = match declared {
-            TypeAnnotation::Simple(type_id) => InferredType::Known(type_id.name.clone()),
-            TypeAnnotation::SelfType { .. } => InferredType::Known(class_name.clone()),
+            TypeAnnotation::Simple(type_id) => InferredType::known(type_id.name.clone()),
+            TypeAnnotation::SelfType { .. } => InferredType::known(class_name.clone()),
+            TypeAnnotation::Generic { base, .. } => InferredType::known(base.name.clone()),
             TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. } => {
                 Self::resolve_type_annotation(declared)
             }
-            _ => return, // Singleton/Generic — not yet supported
+            _ => return, // Singleton — not yet supported
         };
 
         match &expected {
-            InferredType::Known(expected_ty) => {
+            InferredType::Known { class_name: expected_ty, .. } => {
                 if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
                     let selector = method.selector.name();
                     self.diagnostics.push(
@@ -447,10 +458,14 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         env: &TypeEnv,
     ) {
-        let InferredType::Known(value_type) = value_ty else {
+        let InferredType::Known {
+            class_name: value_type,
+            ..
+        } = value_ty
+        else {
             return; // Dynamic or Union values — skip (conservative)
         };
-        let Some(InferredType::Known(class_name)) = env.get("self") else {
+        let Some(InferredType::Known { class_name, .. }) = env.get("self") else {
             return;
         };
         let Some(declared_type) = hierarchy.state_field_type(&class_name, &field.name) else {
@@ -488,9 +503,13 @@ impl TypeChecker {
             };
             let declared_type = type_annotation.type_name();
             let mut env = TypeEnv::new();
-            env.set("self", InferredType::Known(class.name.name.clone()));
+            env.set("self", InferredType::known(class.name.name.clone()));
             let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
-            let InferredType::Known(value_type) = &inferred else {
+            let InferredType::Known {
+                class_name: value_type,
+                ..
+            } = &inferred
+            else {
                 continue; // Dynamic defaults are fine
             };
             if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
@@ -518,8 +537,8 @@ impl TypeChecker {
     /// chain includes Number.
     ///
     /// For union declared types (containing `|`), the value is assignable if it's
-    /// compatible with any member. Generic (`<`) and singleton (`#`) types are
-    /// still permissive — full support is a later phase.
+    /// compatible with any member. For generic types (`Result(Integer, Error)`),
+    /// compares the base type name. Singleton (`#`) types are still permissive.
     pub(super) fn is_assignable_to(
         value_type: &EcoString,
         declared_type: &EcoString,
@@ -528,8 +547,8 @@ impl TypeChecker {
         if value_type == declared_type {
             return true;
         }
-        // Generic and singleton types — permissive until those phases land
-        if declared_type.contains('<') || declared_type.starts_with('#') {
+        // Singleton types — permissive until that phase lands
+        if declared_type.starts_with('#') {
             return true;
         }
         // Union declared types: value must be compatible with at least one member
@@ -539,11 +558,28 @@ impl TypeChecker {
                 Self::is_type_compatible(value_type, &member_eco, hierarchy)
             });
         }
-        // Check if value_type is a subclass of declared_type
+        // For generic declared types like "Result(Integer, Error)", extract
+        // the base type name and compare structurally.
+        let declared_base = if let Some(open) = declared_type.find('(') {
+            &declared_type[..open]
+        } else {
+            declared_type.as_str()
+        };
+        let value_base = if let Some(open) = value_type.find('(') {
+            &value_type[..open]
+        } else {
+            value_type.as_str()
+        };
+        if value_base == declared_base {
+            return true;
+        }
+        // Check if value_type's base is a subclass of declared_type's base
+        let value_eco: EcoString = value_base.into();
+        let declared_eco: EcoString = declared_base.into();
         hierarchy
-            .superclass_chain(value_type)
+            .superclass_chain(&value_eco)
             .iter()
-            .any(|ancestor| ancestor == declared_type)
+            .any(|ancestor| ancestor == &declared_eco)
     }
 
     /// Resolves type-position keywords to their class names (static version).

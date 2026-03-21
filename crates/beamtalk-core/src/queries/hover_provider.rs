@@ -426,7 +426,7 @@ fn type_annotation_label(type_annotation: &crate::ast::TypeAnnotation) -> String
                 .map(type_annotation_label)
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{}<{params}>", base.name)
+            format!("{}({params})", base.name)
         }
         crate::ast::TypeAnnotation::FalseOr { inner, .. } => {
             format!("{}?", type_annotation_label(inner))

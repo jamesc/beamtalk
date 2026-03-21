@@ -301,6 +301,7 @@ fn parse_class_info_from_meta_term(
         methods,
         class_methods,
         class_variables,
+        type_params: Vec::new(),
     })
 }
 

@@ -918,6 +918,9 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         code.push_str("],\n");
     }
 
+    // Type parameters (always empty for now — populated by parser for generic classes)
+    code.push_str("            type_params: vec![],\n");
+
     code.push_str("        },\n    );\n\n");
 }
 

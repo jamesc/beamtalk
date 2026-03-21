@@ -61,6 +61,12 @@
 
 -type class_name() :: atom().
 -type selector() :: atom().
+%% ADR 0068: Runtime representation of types in method_info metadata.
+%% Atoms for concrete types, tagged tuples for type parameters and generic types.
+-type meta_type_repr() ::
+    atom()
+    | {type_param, Name :: atom(), Index :: integer()}
+    | {generic, Base :: atom(), Params :: [meta_type_repr()]}.
 -type method_info() :: #{
     arity => non_neg_integer(),
     block => fun(),
@@ -83,9 +89,12 @@
     method_signatures = #{} :: #{selector() => binary()},
     %% BT-990: Class-side method display signatures for :help command
     class_method_signatures = #{} :: #{selector() => binary()},
-    %% BT-1002 / ADR 0045: Machine-readable return-type map for chain resolution
-    method_return_types = #{} :: #{selector() => atom()},
-    class_method_return_types = #{} :: #{selector() => atom()},
+    %% BT-1002 / ADR 0045: Machine-readable return-type map for chain resolution.
+    %% ADR 0068: Values may be atoms (concrete types) or tagged tuples:
+    %%   {type_param, Name :: atom(), Index :: integer()}
+    %%   {generic, Base :: atom(), Params :: [meta_type_repr()]}
+    method_return_types = #{} :: #{selector() => meta_type_repr()},
+    class_method_return_types = #{} :: #{selector() => meta_type_repr()},
     %% ADR 0033: Runtime-embedded documentation
     doc = none :: binary() | none,
     method_docs = #{} :: #{selector() => binary()}

@@ -27,11 +27,37 @@ use std::collections::HashMap;
 mod inference;
 mod validation;
 
+/// Tracks where a type came from — enables precise error messages
+/// and determines how far inference should propagate.
+///
+/// **References:** ADR 0068 Challenge 3
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeProvenance {
+    /// User wrote `:: Type` at this location.
+    Declared(Span),
+    /// Compiler inferred from expression at this location.
+    Inferred(Span),
+    /// Derived from a generic substitution at this location.
+    Substituted(Span),
+}
+
 /// Inferred type for an expression or variable.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **Equality semantics:** Two types are equal if they represent the same type,
+/// regardless of provenance. This ensures `HashMap` lookups in `TypeMap` and test
+/// assertions work correctly even when the same type is inferred at different spans.
+///
+/// **References:** ADR 0068 Phase 1
+#[derive(Debug, Clone, Eq)]
 pub enum InferredType {
     /// A known concrete class type (e.g., "Integer", "Counter").
-    Known(EcoString),
+    Known {
+        class_name: EcoString,
+        /// Type arguments for generic types (empty for non-generic types).
+        type_args: Vec<InferredType>,
+        /// Where this type came from.
+        provenance: TypeProvenance,
+    },
     /// A union of known types (e.g., `String | UndefinedObject`).
     ///
     /// Members are stored as resolved class names (e.g., `nil` → `UndefinedObject`).
@@ -41,7 +67,47 @@ pub enum InferredType {
     Dynamic,
 }
 
+impl PartialEq for InferredType {
+    /// Compares types structurally, ignoring provenance.
+    ///
+    /// `Known("Integer", [], Inferred(0..1))` == `Known("Integer", [], Declared(5..10))`
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Known {
+                    class_name: a,
+                    type_args: ta,
+                    ..
+                },
+                Self::Known {
+                    class_name: b,
+                    type_args: tb,
+                    ..
+                },
+            ) => a == b && ta == tb,
+            (Self::Union(a), Self::Union(b)) => a == b,
+            (Self::Dynamic, Self::Dynamic) => true,
+            _ => false,
+        }
+    }
+}
+
 impl InferredType {
+    /// Creates a `Known` type with no type arguments and `Inferred` provenance.
+    ///
+    /// This is the most common construction path — used for literals, message
+    /// sends, and all inference sites where we don't yet track provenance
+    /// precisely. As Phase 2+ rolls out, callers will switch to explicit
+    /// provenance where appropriate.
+    #[must_use]
+    pub fn known(class_name: impl Into<EcoString>) -> Self {
+        Self::Known {
+            class_name: class_name.into(),
+            type_args: vec![],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+    }
+
     /// Returns the class name if this is a known single type.
     ///
     /// Returns `None` for `Dynamic` and `Union` variants. LSP providers that
@@ -49,7 +115,7 @@ impl InferredType {
     #[must_use]
     pub fn as_known(&self) -> Option<&EcoString> {
         match self {
-            Self::Known(name) => Some(name),
+            Self::Known { class_name, .. } => Some(class_name),
             Self::Dynamic | Self::Union(_) => None,
         }
     }
@@ -62,7 +128,7 @@ impl InferredType {
     #[must_use]
     pub fn display_name(&self) -> Option<EcoString> {
         match self {
-            Self::Known(name) => Some(name.clone()),
+            Self::Known { class_name, .. } => Some(class_name.clone()),
             Self::Union(members) => {
                 let mut result = EcoString::new();
                 for (i, m) in members.iter().enumerate() {
@@ -86,9 +152,9 @@ impl InferredType {
         let mut names: Vec<EcoString> = Vec::new();
         for m in members {
             match m {
-                Self::Known(name) => {
-                    if !names.contains(name) {
-                        names.push(name.clone());
+                Self::Known { class_name, .. } => {
+                    if !names.contains(class_name) {
+                        names.push(class_name.clone());
                     }
                 }
                 Self::Union(inner) => {
@@ -103,7 +169,7 @@ impl InferredType {
         }
         match names.len() {
             0 => Self::Dynamic,
-            1 => Self::Known(names.into_iter().next().unwrap()),
+            1 => Self::known(names.into_iter().next().unwrap()),
             _ => Self::Union(names),
         }
     }
@@ -395,19 +461,19 @@ mod tests {
     fn test_literal_type_inference() {
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Integer(42)),
-            InferredType::Known("Integer".into())
+            InferredType::known("Integer")
         );
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Float(1.5)),
-            InferredType::Known("Float".into())
+            InferredType::known("Float")
         );
         assert_eq!(
             TypeChecker::infer_literal(&Literal::String("hello".into())),
-            InferredType::Known("String".into())
+            InferredType::known("String")
         );
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Symbol("sym".into())),
-            InferredType::Known("Symbol".into())
+            InferredType::known("Symbol")
         );
     }
 
@@ -624,6 +690,7 @@ mod tests {
                 }],
                 class_methods: vec![],
                 class_variables: vec![],
+                type_params: vec![],
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 backing_module: None,
@@ -721,7 +788,7 @@ mod tests {
         });
 
         let ty = checker.infer_expr(&block_expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Known("Block".into()));
+        assert_eq!(ty, InferredType::known("Block"));
     }
 
     #[test]
@@ -736,7 +803,7 @@ mod tests {
         };
 
         let ty = checker.infer_expr(&map_expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Known("Dictionary".into()));
+        assert_eq!(ty, InferredType::known("Dictionary"));
     }
 
     #[test]
@@ -752,7 +819,7 @@ mod tests {
         };
 
         let ty = checker.infer_expr(&list_expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Known("List".into()));
+        assert_eq!(ty, InferredType::known("List"));
     }
 
     #[test]
@@ -773,15 +840,15 @@ mod tests {
 
         assert_eq!(
             checker.infer_expr(&var("true"), &hierarchy, &mut env, false),
-            InferredType::Known("Boolean".into())
+            InferredType::known("Boolean")
         );
         assert_eq!(
             checker.infer_expr(&var("false"), &hierarchy, &mut env, false),
-            InferredType::Known("Boolean".into())
+            InferredType::known("Boolean")
         );
         assert_eq!(
             checker.infer_expr(&var("nil"), &hierarchy, &mut env, false),
-            InferredType::Known("UndefinedObject".into())
+            InferredType::known("UndefinedObject")
         );
     }
 
@@ -809,12 +876,12 @@ mod tests {
     #[test]
     fn test_type_env_child_scope() {
         let mut parent = TypeEnv::new();
-        parent.set("x", InferredType::Known("Integer".into()));
+        parent.set("x", InferredType::known("Integer"));
 
         let mut child = parent.child();
-        assert_eq!(child.get("x"), Some(InferredType::Known("Integer".into())));
+        assert_eq!(child.get("x"), Some(InferredType::known("Integer")));
 
-        child.set("y", InferredType::Known("String".into()));
+        child.set("y", InferredType::known("String"));
         assert!(parent.get("y").is_none(), "parent should not see child's y");
     }
 
@@ -865,6 +932,7 @@ mod tests {
                 }],
                 class_methods: vec![],
                 class_variables: vec![],
+                type_params: vec![],
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 backing_module: None,
@@ -951,7 +1019,7 @@ mod tests {
         assert!(ty.is_some(), "TypeMap should record literal type");
         assert_eq!(
             ty.unwrap(),
-            &InferredType::Known("Integer".into()),
+            &InferredType::known("Integer"),
             "Integer literal should infer as Integer"
         );
     }
@@ -972,7 +1040,7 @@ mod tests {
         );
         assert_eq!(
             ty.unwrap(),
-            &InferredType::Known("Integer".into()),
+            &InferredType::known("Integer"),
             "Variable assigned integer should infer as Integer"
         );
     }
@@ -985,7 +1053,7 @@ mod tests {
         let ty = type_map.get(module.expressions[0].expression.span());
         assert_eq!(
             ty,
-            Some(&InferredType::Known("String".into())),
+            Some(&InferredType::known("String")),
             "infer_types should return correct type map"
         );
     }
@@ -1009,6 +1077,7 @@ mod tests {
             methods: instance_methods,
             class_methods,
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1189,6 +1258,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1225,6 +1295,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1239,7 +1310,7 @@ mod tests {
         let ty = type_map.get(super_span);
         assert_eq!(
             ty,
-            Some(&InferredType::Known("Parent".into())),
+            Some(&InferredType::known("Parent")),
             "super should infer as parent class type"
         );
     }
@@ -1270,6 +1341,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1302,6 +1374,7 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2332,6 +2405,7 @@ mod tests {
             methods,
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3097,6 +3171,7 @@ Value subclass: Foo
             methods: instance_methods,
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3718,6 +3793,7 @@ Base subclass: Child
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         };
 
         // Use the full analysis pipeline (same as the build command)
@@ -3746,17 +3822,17 @@ Base subclass: Child
     #[test]
     fn union_of_simplifies_single_type() {
         let result = InferredType::union_of(&[
-            InferredType::Known("Integer".into()),
-            InferredType::Known("Integer".into()),
+            InferredType::known("Integer"),
+            InferredType::known("Integer"),
         ]);
-        assert_eq!(result, InferredType::Known("Integer".into()));
+        assert_eq!(result, InferredType::known("Integer"));
     }
 
     #[test]
     fn union_of_preserves_different_types() {
         let result = InferredType::union_of(&[
-            InferredType::Known("String".into()),
-            InferredType::Known("UndefinedObject".into()),
+            InferredType::known("String"),
+            InferredType::known("UndefinedObject"),
         ]);
         assert_eq!(
             result,
@@ -3767,7 +3843,7 @@ Base subclass: Child
     #[test]
     fn union_of_returns_dynamic_if_any_dynamic() {
         let result =
-            InferredType::union_of(&[InferredType::Known("String".into()), InferredType::Dynamic]);
+            InferredType::union_of(&[InferredType::known("String"), InferredType::Dynamic]);
         assert_eq!(result, InferredType::Dynamic);
     }
 
@@ -3779,7 +3855,7 @@ Base subclass: Child
 
     #[test]
     fn known_display_name() {
-        let ty = InferredType::Known("Integer".into());
+        let ty = InferredType::known("Integer");
         assert_eq!(ty.display_name(), Some("Integer".into()));
     }
 
@@ -3792,28 +3868,28 @@ Base subclass: Child
     fn resolve_type_annotation_simple() {
         let ann = TypeAnnotation::Simple(ident("Integer"));
         let result = TypeChecker::resolve_type_annotation(&ann);
-        assert_eq!(result, InferredType::Known("Integer".into()));
+        assert_eq!(result, InferredType::known("Integer"));
     }
 
     #[test]
     fn resolve_type_annotation_nil_keyword() {
         let ann = TypeAnnotation::Simple(ident("nil"));
         let result = TypeChecker::resolve_type_annotation(&ann);
-        assert_eq!(result, InferredType::Known("UndefinedObject".into()));
+        assert_eq!(result, InferredType::known("UndefinedObject"));
     }
 
     #[test]
     fn resolve_type_annotation_false_keyword() {
         let ann = TypeAnnotation::Simple(ident("false"));
         let result = TypeChecker::resolve_type_annotation(&ann);
-        assert_eq!(result, InferredType::Known("False".into()));
+        assert_eq!(result, InferredType::known("False"));
     }
 
     #[test]
     fn resolve_type_annotation_true_keyword() {
         let ann = TypeAnnotation::Simple(ident("true"));
         let result = TypeChecker::resolve_type_annotation(&ann);
-        assert_eq!(result, InferredType::Known("True".into()));
+        assert_eq!(result, InferredType::known("True"));
     }
 
     #[test]
@@ -3848,7 +3924,7 @@ Base subclass: Child
     #[test]
     fn resolve_type_name_string_simple() {
         let result = TypeChecker::resolve_type_name_string(&"Integer".into());
-        assert_eq!(result, InferredType::Known("Integer".into()));
+        assert_eq!(result, InferredType::known("Integer"));
     }
 
     #[test]
@@ -4096,5 +4172,346 @@ Base subclass: Child
             &"Integer | String".into(),
             &hierarchy
         ));
+    }
+
+    // ---- BT-1570: Generic substitution tests ----
+
+    /// Build a `GenResult(T, E)` class in the hierarchy for generic tests.
+    ///
+    /// Uses `GenResult` instead of `Result` to avoid collision with the
+    /// builtin `Result` class (which has no `type_params`).
+    fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+
+        let result_info = ClassInfo {
+            name: eco_string("GenResult"),
+            superclass: Some(eco_string("Value")),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec![eco_string("okValue"), eco_string("errReason")],
+            state_types: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(eco_string("okValue"), eco_string("T"));
+                m.insert(eco_string("errReason"), eco_string("E"));
+                m
+            },
+            methods: vec![
+                MethodInfo {
+                    selector: eco_string("unwrap"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("T")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("error"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("E")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("map:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("GenResult(R, E)")),
+                    param_types: vec![Some(eco_string("Block(T, R)"))],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("isOk"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Boolean")),
+                    param_types: vec![],
+                    doc: None,
+                },
+            ],
+            class_methods: vec![
+                MethodInfo {
+                    selector: eco_string("ok:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Self")),
+                    param_types: vec![Some(eco_string("T"))],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("error:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Self")),
+                    param_types: vec![Some(eco_string("E"))],
+                    doc: None,
+                },
+            ],
+            class_variables: vec![],
+            type_params: vec![eco_string("T"), eco_string("E")],
+        };
+
+        hierarchy.add_from_beam_meta(vec![result_info]);
+    }
+
+    /// BT-1570: Substitution map built from `GenResult(Integer, IOError)`.
+    /// `unwrap` returns `T` → `Integer`.
+    #[test]
+    fn generic_substitution_unwrap_returns_concrete_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "unwrap on GenResult(Integer, IOError) should return Integer, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1570: `error` returns `E` → `IOError`.
+    #[test]
+    fn generic_substitution_error_returns_concrete_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("error".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("IOError"),
+            "error on GenResult(Integer, IOError) should return IOError, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1570: Non-generic return type (`isOk` -> `Boolean`) is unaffected.
+    #[test]
+    fn generic_substitution_non_generic_return_unchanged() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("isOk".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Boolean"),
+            "isOk on GenResult should return Boolean regardless of type args"
+        );
+    }
+
+    /// BT-1570: No `type_args` on receiver falls back to unsubstituted return.
+    #[test]
+    fn generic_no_type_args_returns_unsubstituted() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        // Set r to bare GenResult (no type_args) — unparameterized
+        env.set("r", InferredType::known("GenResult"));
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        // Without type_args, the return type "T" is returned as-is (known("T")).
+        // It won't produce false-positive warnings because "T" is unknown to
+        // the hierarchy, so all type compatibility checks return true.
+        assert!(
+            result_ty.as_known().map(EcoString::as_str) != Some("Integer"),
+            "unwrap on bare GenResult (no type_args) should NOT return Integer"
+        );
+    }
+
+    /// BT-1570: `set_param_types` handles generic annotations.
+    #[test]
+    fn set_param_types_resolves_generic_annotation() {
+        // Parameter annotated as :: Result(Integer, Error) should be Known("Result")
+        // with type_args
+        let params = vec![ParameterDefinition {
+            name: ident("r"),
+            type_annotation: Some(TypeAnnotation::Generic {
+                base: ident("Result"),
+                parameters: vec![
+                    TypeAnnotation::Simple(ident("Integer")),
+                    TypeAnnotation::Simple(ident("Error")),
+                ],
+                span: span(),
+            }),
+        }];
+
+        let mut env = TypeEnv::new();
+        TypeChecker::set_param_types(&mut env, &params);
+
+        let r_type = env.get("r").expect("r should be in env");
+        match r_type {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Result");
+                assert_eq!(type_args.len(), 2);
+                assert_eq!(
+                    type_args[0].as_known().map(EcoString::as_str),
+                    Some("Integer")
+                );
+                assert_eq!(
+                    type_args[1].as_known().map(EcoString::as_str),
+                    Some("Error")
+                );
+            }
+            other => panic!("Expected Known type with type_args, got: {other:?}"),
+        }
+    }
+
+    /// BT-1570: Generic return type check extracts base type for compatibility.
+    #[test]
+    fn check_return_type_handles_generic_declared_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        // Method declares -> GenResult(Integer, Error), body returns GenResult
+        let method = MethodDefinition {
+            selector: MessageSelector::Unary("compute".into()),
+            parameters: vec![],
+            body: vec![bare(int_lit(42))], // placeholder body
+            return_type: Some(TypeAnnotation::Generic {
+                base: ident("GenResult"),
+                parameters: vec![
+                    TypeAnnotation::Simple(ident("Integer")),
+                    TypeAnnotation::Simple(ident("Error")),
+                ],
+                span: span(),
+            }),
+            kind: MethodKind::Primary,
+            is_sealed: false,
+            span: span(),
+            doc_comment: None,
+            comments: CommentAttachment::default(),
+        };
+
+        let body_type = InferredType::known("GenResult");
+        let mut checker = TypeChecker::new();
+        checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+        // Should NOT warn: GenResult is compatible with declared GenResult(Integer, Error)
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("return type"))
+            .collect();
+        assert!(
+            type_warnings.is_empty(),
+            "GenResult body should be compatible with GenResult(Integer, Error) return type, got: {type_warnings:?}"
+        );
+    }
+
+    /// BT-1570: `is_assignable_to` handles generic declared types structurally.
+    #[test]
+    fn is_assignable_to_generic_declared_type() {
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Result is assignable to Result(Integer, Error) — base type matches
+        assert!(
+            TypeChecker::is_assignable_to(
+                &eco_string("Result"),
+                &eco_string("Result(Integer, Error)"),
+                &hierarchy,
+            ),
+            "Result should be assignable to Result(Integer, Error)"
+        );
+
+        // Integer is NOT assignable to Result(Integer, Error) — base types differ
+        assert!(
+            !TypeChecker::is_assignable_to(
+                &eco_string("Integer"),
+                &eco_string("Result(Integer, Error)"),
+                &hierarchy,
+            ),
+            "Integer should NOT be assignable to Result(Integer, Error)"
+        );
     }
 }
