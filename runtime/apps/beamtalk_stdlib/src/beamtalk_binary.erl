@@ -39,7 +39,7 @@
 -module(beamtalk_binary).
 
 %% Class methods
--export(['serialize:'/1, 'deserialize:'/1, 'size:'/1, 'fromIolist:'/1]).
+-export(['serialize:'/1, 'deserialize:'/1, 'size:'/1, 'fromIolist:'/1, 'fromBytes:'/1]).
 -export([serialize/1, deserialize/1, size/1, fromIolist/1]).
 
 %% Instance methods (ADR 0069 Phase 1)
@@ -348,3 +348,7 @@ size(X) -> 'size:'(X).
 %% @doc FFI alias for fromIolist:/1.
 -spec fromIolist(iolist()) -> binary().
 fromIolist(X) -> 'fromIolist:'(X).
+
+%% @doc Class method wrapper for from_bytes/1.
+-spec 'fromBytes:'([non_neg_integer()]) -> binary().
+'fromBytes:'(Bytes) -> from_bytes(Bytes).

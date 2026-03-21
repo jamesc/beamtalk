@@ -6,7 +6,6 @@
 TestCase subclass: FileBinaryIoTest
 
   testReadBinarySuccess =>
-    @expect type
     File writeBinary: "target/bt-test-tmp/binary_read.dat" contents: "hello"
     result := File readBinary: "target/bt-test-tmp/binary_read.dat"
     self assert: result isOk
@@ -22,14 +21,11 @@ TestCase subclass: FileBinaryIoTest
     self should: [File readBinary: 42] raise: #type_error
 
   testWriteBinarySuccess =>
-    @expect type
     self assert: (File writeBinary: "target/bt-test-tmp/binary_write.dat" contents: "binary data") isOk
     self assert: (File readBinary: "target/bt-test-tmp/binary_write.dat") unwrap equals: "binary data"
 
   testWriteBinaryOverwrites =>
-    @expect type
     File writeBinary: "target/bt-test-tmp/binary_overwrite.dat" contents: "first"
-    @expect type
     File writeBinary: "target/bt-test-tmp/binary_overwrite.dat" contents: "second"
     self assert: (File readBinary: "target/bt-test-tmp/binary_overwrite.dat") unwrap equals: "second"
 
@@ -44,21 +40,17 @@ TestCase subclass: FileBinaryIoTest
     ] raise: #type_error
 
   testWriteBinaryCreatesSubdirectory =>
-    @expect type
     self assert: (File writeBinary: "target/bt-test-tmp/bin-subdir/nested.dat" contents: "nested") isOk
     self assert: (File readBinary: "target/bt-test-tmp/bin-subdir/nested.dat") unwrap equals: "nested"
 
   testAppendBinaryCreatesFile =>
     // Ensure the file doesn't exist first
     File delete: "target/bt-test-tmp/binary_append_new.dat"
-    @expect type
     self assert: (File appendBinary: "target/bt-test-tmp/binary_append_new.dat" contents: "first") isOk
     self assert: (File readBinary: "target/bt-test-tmp/binary_append_new.dat") unwrap equals: "first"
 
   testAppendBinaryAppendsToExisting =>
-    @expect type
     File writeBinary: "target/bt-test-tmp/binary_append.dat" contents: "hello"
-    @expect type
     File appendBinary: "target/bt-test-tmp/binary_append.dat" contents: " world"
     self assert: (File readBinary: "target/bt-test-tmp/binary_append.dat") unwrap equals: "hello world"
 

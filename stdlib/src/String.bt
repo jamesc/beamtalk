@@ -15,7 +15,7 @@
 /// "hello" length        // => 5
 /// "hello" ++ " world"   // => "hello world"
 /// ```
-sealed typed Collection subclass: String
+sealed typed Binary subclass: String
 
   /// Create a String by joining a list of grapheme cluster strings.
   ///
