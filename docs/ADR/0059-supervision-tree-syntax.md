@@ -253,7 +253,7 @@ Supervisor subclass: MultiRegionSup
 When the number of children isn't known at startup, subclass `DynamicSupervisor` and implement `childClass`:
 
 ```beamtalk
-DynamicSupervisor subclass: WorkerPool
+DynamicSupervisor(Worker) subclass: WorkerPool
   class childClass => Worker
 ```
 

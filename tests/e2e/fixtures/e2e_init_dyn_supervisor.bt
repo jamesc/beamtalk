@@ -4,7 +4,7 @@
 // E2E fixture: DynamicSupervisor with initialize: hook that pre-populates (BT-1542).
 // initialize: calls startChild — verifies supervisor is responsive during callback.
 
-DynamicSupervisor subclass: E2EInitDynSupervisor
+DynamicSupervisor(Counter) subclass: E2EInitDynSupervisor
 
   class childClass => Counter
 
