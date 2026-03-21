@@ -1220,6 +1220,7 @@ impl CoreErlangGenerator {
     ///     catch <CatchType, CatchError, CatchStack> ->
     ///         primop 'raw_raise'(CatchType, CatchError, CatchStack)
     /// ```
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_register_class(
         &mut self,
         module: &Module,
@@ -1317,23 +1318,57 @@ impl CoreErlangGenerator {
         // {error, ...} from register/1 propagates out of on_load, regardless
         // of which class position caused it.
         let try_body = Self::build_short_circuit_chain(&class_docs);
-        let doc = docvec![
-            "'register_class'/0 = fun () ->",
-            nest(
-                INDENT,
-                docvec![line(), "try", nest(INDENT, docvec![try_body, "\n",]),]
-            ),
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "of RegResult -> RegResult",
-                    line(),
-                    "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
-                ]
-            ),
-            "\n\n",
-        ];
+
+        // ADR 0068 Phase 2c: Generate protocol registration calls.
+        // Protocol definitions in the module are registered with the runtime
+        // protocol registry during on_load, after class registration succeeds.
+        // The protocol registration is wrapped in a let/in chain that feeds
+        // the class registration result through.
+        let protocol_reg_doc = Self::generate_protocol_registrations(module);
+
+        let doc = if module.protocols.is_empty() {
+            docvec![
+                "'register_class'/0 = fun () ->",
+                nest(
+                    INDENT,
+                    docvec![line(), "try", nest(INDENT, docvec![try_body, "\n",]),]
+                ),
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "of _ClassRegResult -> _ClassRegResult",
+                        line(),
+                        "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
+                    ]
+                ),
+                "\n\n",
+            ]
+        } else {
+            // ADR 0068 Phase 2c: After class registration succeeds, register
+            // protocol definitions before returning the result.
+            docvec![
+                "'register_class'/0 = fun () ->",
+                nest(
+                    INDENT,
+                    docvec![line(), "try", nest(INDENT, docvec![try_body, "\n",]),]
+                ),
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "of _ClassRegResult ->",
+                        nest(
+                            INDENT,
+                            docvec![protocol_reg_doc, line(), "_ClassRegResult",]
+                        ),
+                        line(),
+                        "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
+                    ]
+                ),
+                "\n\n",
+            ]
+        };
 
         Ok(doc)
     }
@@ -1561,6 +1596,90 @@ impl CoreErlangGenerator {
     ///       let _BuilderState1 = ... in _Reg1
     ///   end
     /// ```
+    /// Generates Core Erlang calls to register protocol definitions with the
+    /// runtime protocol registry (ADR 0068 Phase 2c).
+    ///
+    /// For each `ProtocolDefinition` in the module, emits a call to
+    /// `beamtalk_protocol_registry:register_protocol/1` with a map containing
+    /// the protocol's name, required methods, type parameters, and extending clause.
+    ///
+    /// Returns `Document::Nil` if the module has no protocol definitions.
+    fn generate_protocol_registrations(module: &Module) -> Document<'static> {
+        if module.protocols.is_empty() {
+            return Document::Nil;
+        }
+
+        let mut parts: Vec<Document<'static>> = Vec::new();
+
+        for protocol in &module.protocols {
+            let name = protocol.name.name.to_string();
+
+            // Build the required_methods list
+            let methods: Vec<Document<'static>> = protocol
+                .method_signatures
+                .iter()
+                .map(|sig| {
+                    let selector = sig.selector.name().to_string();
+                    let arity = sig.selector.arity();
+                    docvec![
+                        "~{'selector' => '",
+                        Document::String(selector),
+                        "', 'arity' => ",
+                        Document::String(arity.to_string()),
+                        "}~"
+                    ]
+                })
+                .collect();
+
+            let methods_doc = if methods.is_empty() {
+                Document::Str("[]")
+            } else {
+                let mut list_parts: Vec<Document<'static>> = Vec::new();
+                list_parts.push(Document::Str("["));
+                for (i, m) in methods.into_iter().enumerate() {
+                    if i > 0 {
+                        list_parts.push(Document::Str(", "));
+                    }
+                    list_parts.push(m);
+                }
+                list_parts.push(Document::Str("]"));
+                Document::Vec(list_parts)
+            };
+
+            // Build type_params list
+            let type_params: Vec<String> = protocol
+                .type_params
+                .iter()
+                .map(|tp| tp.name.to_string())
+                .collect();
+            let type_params_doc = Self::meta_atom_list(&type_params);
+
+            // Build extending value
+            let extending_doc: Document<'static> = if let Some(ref ext) = protocol.extending {
+                docvec!["'", Document::String(ext.name.to_string()), "'"]
+            } else {
+                Document::Str("'undefined'")
+            };
+
+            parts.push(docvec![
+                "\nlet <_ProtoReg_",
+                Document::String(name.clone()),
+                "> = call 'beamtalk_protocol_registry':'register_protocol'(",
+                "~{'name' => '",
+                Document::String(name),
+                "', 'required_methods' => ",
+                methods_doc,
+                ", 'type_params' => ",
+                type_params_doc,
+                ", 'extending' => ",
+                extending_doc,
+                "}~) in",
+            ]);
+        }
+
+        Document::Vec(parts)
+    }
+
     fn build_short_circuit_chain(class_docs: &[Document<'static>]) -> Document<'static> {
         let last_i = class_docs.len() - 1;
         // Innermost: last class doc + final result variable

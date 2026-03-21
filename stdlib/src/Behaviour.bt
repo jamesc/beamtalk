@@ -229,6 +229,31 @@ abstract Object subclass: Behaviour
   /// ```
   sealed isMetaclass -> Boolean => false
 
+  // --- Protocol queries (ADR 0068 Phase 2c) ---
+
+  /// Test whether instances of the receiver conform to a protocol.
+  ///
+  /// Structural conformance: the class conforms if it responds to all
+  /// required selectors of the protocol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Integer conformsTo: #Printable    // => true
+  /// Integer conformsTo: #Sortable     // => false (if Sortable requires sortKey)
+  /// ```
+  sealed conformsTo: protocolName :: Symbol -> Boolean =>
+    @primitive "classConformsTo"
+
+  /// Return the list of protocols this class conforms to.
+  ///
+  /// Returns a list of protocol name symbols, sorted alphabetically.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Integer protocols   // => [#Printable, #Comparable, ...]
+  /// ```
+  sealed protocols -> List => @primitive "classProtocols"
+
   // --- Source file and reload (ADR 0040 Phase 2) ---
 
   /// Return the path of the source file this class was compiled from, or nil.
