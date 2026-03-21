@@ -16,7 +16,7 @@ Object
 
 ADR 0037 established this hierarchy with `String` as a direct subclass of `Collection`, explicitly noting "no intermediate subclasses for v0.1". `Binary` sits outside the `Collection` tree entirely — it inherits from `Object` and has no instance methods.
 
-On BEAM, strings and binaries are the **same Erlang type** (`binary()`). Erlang's `is_binary("hello")` returns `true`. There is no runtime distinction.
+On BEAM, Beamtalk strings are represented as Erlang binaries (`binary()`). In Erlang syntax, `is_binary(<<"hello">>)` returns `true` (while Erlang's own `"hello"` is a charlist). There is no runtime distinction between a Beamtalk string and a Beamtalk binary.
 
 This mismatch causes three problems:
 
