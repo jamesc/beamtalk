@@ -1052,7 +1052,7 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 ### Implementation Tracking
 
 **Epic:** [BT-1567](https://linear.app/beamtalk/issue/BT-1567)
-**Status:** Planned
+**Status:** Completed in v0.3.0
 
 | Phase | Issue | Description | Size | Dependencies |
 |-------|-------|-------------|------|--------------|
