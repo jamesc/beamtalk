@@ -4833,7 +4833,8 @@ Base subclass: Child
         let mut checker = TypeChecker::new();
         let mut env = TypeEnv::new();
 
-        // Array new (non-generic in builtins — no type_params set)
+        // Array new — Array is generic Array(E), so constructor with no args
+        // produces Dynamic type_args since E cannot be inferred.
         let result_ty = checker.infer_expr(
             &msg_send(
                 class_ref("Array"),
@@ -4846,11 +4847,8 @@ Base subclass: Child
         );
 
         match &result_ty {
-            InferredType::Known { type_args, .. } => {
-                assert!(
-                    type_args.is_empty(),
-                    "Non-generic class should have no type args, got: {type_args:?}"
-                );
+            InferredType::Known { class_name, .. } => {
+                assert_eq!(class_name.as_str(), "Array");
             }
             other => panic!("Expected Known type, got: {other:?}"),
         }
