@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 76
 expression: core_erlang
 ---
 module 'sealed_class_violation' ['new'/0, 'new'/1, 'doubled'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
@@ -98,6 +97,7 @@ call 'erlang':'*'(Self, 2)
       'is_abstract' => 'false',
       'is_value' => 'true',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{}~,
       'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
@@ -122,6 +122,7 @@ call 'erlang':'*'(Self, 2)
       'is_abstract' => 'false',
       'is_value' => 'true',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{}~,
       'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~

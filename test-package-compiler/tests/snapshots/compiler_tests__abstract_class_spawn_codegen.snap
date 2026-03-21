@@ -142,6 +142,7 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
       'is_abstract' => 'true',
       'is_value' => 'false',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{}~,
       'method_info' => ~{'area' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false'}~}~
@@ -166,6 +167,7 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
       'is_abstract' => 'true',
       'is_value' => 'false',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{}~,
       'method_info' => ~{'area' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false'}~}~

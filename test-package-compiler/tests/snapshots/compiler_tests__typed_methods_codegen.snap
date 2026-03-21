@@ -235,6 +235,7 @@ module 'typed_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
       'is_abstract' => 'false',
       'is_value' => 'false',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{'value' => 'Integer'}~,
       'method_info' => ~{'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~, 'deposit:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Integer', 'is_sealed' => 'false'}~, 'tryGet' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer | Nil', 'is_sealed' => 'false'}~, 'increment' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false'}~}~
@@ -259,6 +260,7 @@ module 'typed_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
       'is_abstract' => 'false',
       'is_value' => 'false',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{'value' => 'Integer'}~,
       'method_info' => ~{'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~, 'deposit:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Integer', 'is_sealed' => 'false'}~, 'tryGet' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer | Nil', 'is_sealed' => 'false'}~, 'increment' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false'}~}~
