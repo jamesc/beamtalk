@@ -2,7 +2,7 @@
 
 Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy and [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) for syntax design decisions.
 
-**Status:** v0.1.0 — implemented features are stable; planned sections are marked inline.
+**Status:** v0.2.0 — implemented features are stable; planned sections (generics, protocols, unions, narrowing) are marked inline. See [ADR 0068](ADR/0068-parametric-types-and-protocols.md) for the full design.
 
 **Syntax note:** Beamtalk uses a modernised Smalltalk syntax: `//` comments (not `"..."`), standard math precedence (not left-to-right), and optional statement terminators (newlines work).
 
@@ -17,6 +17,9 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
   - [Erlang FFI](#erlang-ffi)
   - [Loading Code into the Workspace](#loading-code-into-the-workspace)
 - [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
+- [Parametric Types — Generics (ADR 0068)](#parametric-types--generics-adr-0068)
+- [Structural Protocols (ADR 0068)](#structural-protocols-adr-0068)
+- [Union Types and Narrowing (ADR 0068)](#union-types-and-narrowing-adr-0068)
 - [Actor Message Passing](#actor-message-passing)
 - [Server — OTP Interop (ADR 0065)](#server--otp-interop-adr-0065)
 - [Supervision Trees (ADR 0059)](#supervision-trees-adr-0059)
@@ -725,6 +728,338 @@ collect: block :: Block -> Self =>
 - Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
+
+---
+
+## Parametric Types — Generics (ADR 0068)
+
+Beamtalk supports **declaration-site parametric types** (generics) with compile-time substitution. Type parameters use **parenthesis syntax** — `Result(T, E)` — keeping `<` reserved exclusively as a binary message (comparison operator). All generic type information is erased at runtime (zero cost).
+
+### Declaring a Generic Class
+
+Classes declare type parameters in parentheses after the class name:
+
+```beamtalk
+sealed Value subclass: Result(T, E)
+  field: okValue :: T = nil
+  field: errReason :: E = nil
+
+  sealed unwrap -> T =>
+    self.isOk ifTrue: [
+      self.okValue
+    ] ifFalse: [(Erlang beamtalk_result) unwrapError: self.errReason]
+
+  sealed map: block :: Block(T, R) -> Result(R, E) =>
+    self.isOk ifTrue: [Result ok: (block value: self.okValue)] ifFalse: [self]
+
+  sealed andThen: block :: Block(T, Result(R, E)) -> Result(R, E) =>
+    self.isOk ifTrue: [block value: self.okValue] ifFalse: [self]
+```
+
+Type parameters are bare uppercase identifiers (by convention single letters: `T`, `E`, `K`, `V`, `R`). They appear in:
+- Field type annotations: `field: okValue :: T`
+- Method parameter types: `block :: Block(T, R)`
+- Method return types: `-> T`, `-> Result(R, E)`
+- Nested generic types: `Block(T, Result(R, E))`
+
+### Using Generic Types
+
+When using a generic class as a type annotation, concrete types replace the parameters:
+
+```beamtalk
+// Annotating a variable
+result :: Result(String, IOError) := File read: "config.json"
+result unwrap    // Type checker knows: -> String
+
+// Annotating a method parameter
+processResult: r :: Result(Integer, Error) -> Integer =>
+  r unwrap + 1   // r unwrap is Integer, Integer has '+'
+
+// Annotating state
+Actor subclass: Cache(K, V)
+  state: store :: Dictionary(K, V) = Dictionary new
+```
+
+### Type Inference Through Generics
+
+The type checker performs **positional substitution**: when it encounters `Result(String, IOError)`, it maps `T -> String`, `E -> IOError`, and substitutes through all method signatures:
+
+```beamtalk
+r :: Result(Integer, Error) := computeSomething
+r unwrap          // Return type T -> Integer
+r map: [:v | v asString]   // Block param T -> Integer, return Result(String, Error)
+r error           // Return type E -> Error
+```
+
+When concrete type parameters are unknown, they fall back to `Dynamic`:
+
+```beamtalk
+r := someMethod        // someMethod returns bare Result (no type params)
+r unwrap               // -> Dynamic (T is unknown)
+r unwrap + 1           // No warning — Dynamic bypasses checking
+```
+
+### Constructor Type Inference
+
+For named constructors (`ok:`, `error:`, `new`), the compiler infers type parameters from the argument types:
+
+```beamtalk
+r := Result ok: 42                  // Inferred: Result(Integer, Dynamic)
+r unwrap                            // -> Integer
+
+r2 := Result error: #file_not_found // Inferred: Result(Dynamic, Symbol)
+r2 error                            // -> Symbol
+```
+
+### Generic Inheritance
+
+When a generic class extends another, the type parameter mapping must be explicit:
+
+```beamtalk
+// Array passes its E to Collection's E
+Collection(E) subclass: Array(E)
+
+// IntArray fixes E to Integer
+Collection(Integer) subclass: IntArray
+
+// SortedArray passes E through
+Array(E) subclass: SortedArray(E)
+```
+
+### Block Type Parameters
+
+`Block(...)` is special-cased — the last type parameter is always the return type:
+
+- `Block(R)` — zero-argument block returning `R`
+- `Block(A, R)` — one-argument block with arg type `A`, returning `R`
+- `Block(A, B, R)` — two-argument block, returning `R`
+
+### Design Constraints
+
+- **Type erasure**: All type information is compile-time only. Zero runtime cost.
+- **Warnings, not errors**: Type mismatches produce warnings, never block compilation.
+- **Invariant type parameters**: No covariance/contravariance in Stage 1 (added with protocols in Stage 2).
+- **Parenthesis syntax**: `Result(T, E)` not `Result<T, E>` — keeps `<` as a pure binary message.
+
+### Dialyzer Spec Generation
+
+Generic annotations generate expanded Dialyzer specs with concrete types at the BEAM interop boundary:
+
+```beamtalk
+processResult: r :: Result(Integer, Error) -> Integer => r unwrap + 1
+```
+
+Generates:
+```erlang
+-spec processResult(#{
+  '__class__' := 'Elixir.Result',
+  'okValue' := integer(),
+  'errReason' := any()
+}) -> integer().
+```
+
+Unresolved type parameters map to `any()` in Dialyzer specs.
+
+### REPL Type Display
+
+The REPL displays generic type information when available:
+
+```beamtalk
+> :help Result >> unwrap
+unwrap -> T
+```
+
+When the workspace knows the concrete type parameters, `:help` substitutes them:
+
+```beamtalk
+> r := Result ok: 42
+> r unwrap
+=> 42
+// Type info: Integer (inferred from Result(Integer, Dynamic))
+```
+
+---
+
+## Structural Protocols (ADR 0068)
+
+Protocols define named message sets. A class conforms to a protocol if it responds to all required messages — no `implements:` declaration needed. This is Smalltalk's duck-typing philosophy made explicit.
+
+### Defining a Protocol
+
+```beamtalk
+Protocol define: Printable
+  /// Return a human-readable string representation.
+  asString -> String
+
+Protocol define: Comparable
+  < other :: Self -> Boolean
+  > other :: Self -> Boolean
+  <= other :: Self -> Boolean
+  >= other :: Self -> Boolean
+
+Protocol define: Collection(E)
+  /// The number of elements in this collection.
+  size -> Integer
+
+  /// Iterate over each element.
+  do: block :: Block(E, Object)
+
+  /// Transform each element, returning a new collection of the same kind.
+  collect: block :: Block(E, Object) -> Self
+
+  /// Return elements matching the predicate.
+  select: block :: Block(E, Boolean) -> Self
+```
+
+Protocol bodies use **class-body style** — method signatures without `=>` implementations. Doc comments are supported on each required method.
+
+### Using Protocols as Types
+
+Protocol names are used in type annotations the same way as class names — the compiler resolves the name and determines whether to perform nominal (class) or structural (protocol) checking:
+
+```beamtalk
+// Structural/protocol type — Printable guarantees asString
+display: thing :: Printable =>
+  Transcript show: thing asString
+
+// Generic protocol type
+printAll: items :: Collection(Object) =>
+  items do: [:each | Transcript show: each asString]
+```
+
+### Automatic Conformance
+
+Conformance is structural and automatic — no `implements:` declaration needed:
+
+```beamtalk
+// String has asString -> conforms to Printable
+// Integer has asString -> conforms to Printable
+display: "hello"           // String conforms to Printable
+display: 42                // Integer conforms to Printable
+display: Counter spawn     // Counter conforms to Printable (inherited from Object)
+```
+
+Classes that override `doesNotUnderstand:` conform to every protocol (they can respond to any message).
+
+### Protocol Composition
+
+```beamtalk
+// Require multiple protocols
+sort: items :: Collection(Object) & Comparable => ...
+
+// Protocol extending another
+Protocol define: Sortable
+  extending: Comparable
+  /// The key used for sort ordering.
+  sortKey -> Object
+```
+
+### Type Parameter Bounds
+
+Type parameters can be bounded by protocols:
+
+```beamtalk
+// T must conform to Printable
+Actor subclass: Logger(T :: Printable)
+  log: item :: T =>
+    Transcript show: item asString    // Guaranteed by Printable bound
+```
+
+### Runtime Protocol Queries
+
+```beamtalk
+> Integer conformsTo: Printable
+=> true
+
+> Integer protocols
+=> #(Printable, Comparable)
+
+> Printable requiredMethods
+=> #(#asString)
+
+> Printable conformingClasses
+=> #(Integer, Float, String, Boolean, Symbol, Array, ...)
+```
+
+### Diagnostic Philosophy
+
+Protocol conformance issues are **warnings, never errors**:
+
+| Situation | Severity |
+|---|---|
+| Protocol conformance unverifiable | Warning |
+| Missing method for protocol | Warning |
+| Namespace collision (class + protocol same name) | Error (structural) |
+
+---
+
+## Union Types and Narrowing (ADR 0068)
+
+### Union Types
+
+Union types express that a value may be one of several types:
+
+```beamtalk
+// All members must respond to the message
+x :: Integer | String := getValue
+x asString             // Both Integer and String have asString
+x size                 // Warning: Integer does not respond to 'size'
+x + 1                  // Warning: String does not respond to '+'
+```
+
+The nullable pattern (`String | nil`) is the most common union — Beamtalk's Option/Maybe type:
+
+```beamtalk
+name :: String | nil := dictionary at: "name"
+name size              // Warning: UndefinedObject does not respond to 'size'
+```
+
+Similarly, `false` in type position resolves to `False` — used for Erlang FFI patterns:
+
+```beamtalk
+entry :: Tuple | false := ErlangLists keyfind: key
+```
+
+### Control Flow Narrowing
+
+When the type checker recognises a type-testing pattern followed by `ifTrue:` / `ifFalse:`, it narrows the variable's type inside the block scope:
+
+```beamtalk
+// class identity check — narrows to exact class
+process: x :: Object =>
+  x class = Integer ifTrue: [
+    x + 1          // x is Integer here — has '+'
+  ]
+  x + 1            // x is Object here — no narrowing outside the block
+
+// kind check — narrows to class including subclasses
+process: x :: Object =>
+  x isKindOf: Number ifTrue: [
+    x abs           // x is Number here
+  ]
+
+// early return narrows the rest of the method
+validate: x :: Object =>
+  x isNil ifTrue: [^nil]
+  x doSomething    // x is non-nil for the remainder
+```
+
+**Supported narrowing patterns:**
+
+| Pattern | Narrows to | Scope |
+|---|---|---|
+| `x class = Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
+| `x isKindOf: Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
+| `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
+| `x isNil ifTrue: [^...] ifFalse: [...]` | `x` is non-nil in false block | False block |
+
+### Union + Narrowing Compose
+
+```beamtalk
+name :: String | nil := dictionary at: "name"
+name isNil ifTrue: [^"unknown"]
+name size              // name is narrowed to String — nil eliminated by early return
+```
 
 ---
 

@@ -2,8 +2,8 @@
 
 This document describes the type system design for Beamtalk, including implementation strategy and technical decisions.
 
-**Status**: Design Phase  
-**Related Docs**: [semantic-analysis.md](semantic-analysis.md), [beamtalk-language-features.md](../beamtalk-language-features.md)
+**Status**: Implementation Phase (ADR 0068 accepted)
+**Related Docs**: [semantic-analysis.md](semantic-analysis.md), [beamtalk-language-features.md](../beamtalk-language-features.md), [ADR 0068](../ADR/0068-parametric-types-and-protocols.md)
 
 ---
 
@@ -11,6 +11,10 @@ This document describes the type system design for Beamtalk, including implement
 
 - [Design Goals](#design-goals)
 - [Type System Approach](#type-system-approach)
+- [Architecture: InferredType (ADR 0068)](#architecture-inferredtype-adr-0068)
+- [Parametric Types (Generics)](#parametric-types-generics)
+- [Structural Protocols](#structural-protocols)
+- [Union Types and Narrowing](#union-types-and-narrowing)
 - [Background: Smalltalk vs Modern Typing](#background-smalltalk-vs-modern-typing)
 - [Erlang Type Systems](#erlang-type-systems)
 - [Hindley-Milner Type Inference](#hindley-milner-type-inference)
@@ -56,13 +60,177 @@ transferFrom: source: Account amount: Money -> Boolean =>
 
 ### Features Planned
 
-From [beamtalk-language-features.md](../beamtalk-language-features.md#optional-type-annotations-dylan-inspired):
+From [beamtalk-language-features.md](../beamtalk-language-features.md) and [ADR 0068](../ADR/0068-parametric-types-and-protocols.md):
 
 - **Basic types**: `Integer`, `Float`, `String`, `Boolean`
 - **Union types**: `Integer | Error` (for Erlang interop)
 - **Singleton types**: `#north | #south | #east | #west` (atoms)
 - **False-or types**: `Integer | False` (option/maybe pattern)
-- **Generic types**: `Array[T]`, `Future[T]` (future)
+- **Generic types**: `Result(T, E)`, `Array(E)`, `Dictionary(K, V)` (parenthesis syntax)
+- **Structural protocols**: `Printable`, `Comparable`, `Collection(E)` (duck-typing made explicit)
+- **Control flow narrowing**: `x isNil ifTrue: [^nil]; x doSomething` (nil-safe)
+
+---
+
+## Architecture: InferredType (ADR 0068)
+
+ADR 0068 introduces a richer `InferredType` representation to support generics, unions, and provenance tracking:
+
+```rust
+/// Tracks where a type came from — enables precise error messages
+/// and determines how far inference should propagate.
+enum TypeProvenance {
+    Declared(Span),      // user wrote :: Type at this location
+    Inferred(Span),      // compiler inferred from expression at this location
+    Substituted(Span),   // derived from a generic substitution at this location
+}
+
+enum InferredType {
+    Known {
+        class_name: EcoString,
+        type_args: Vec<InferredType>,  // empty for non-generic types
+        provenance: TypeProvenance,
+    },
+    Union {
+        members: Vec<InferredType>,    // e.g., [Known("String"), Known("False")]
+        provenance: TypeProvenance,
+    },
+    Dynamic,
+}
+```
+
+### Provenance
+
+Provenance tracks whether a type was explicitly declared, inferred by the compiler, or derived from a generic substitution. This improves error messages:
+
+- **Declared** — user owns the assertion: `x declared as Result(Integer, Error) on line 1`
+- **Inferred** — compiler guessed, user can override: `x inferred as Result(Integer, Dynamic) from constructor; add annotation if wrong`
+- **Substituted** — derived from generic resolution: helps trace through chains
+
+### Type Arguments on InferredType::Known
+
+The `type_args` field on `Known` enables generic type flow through method chains:
+
+```beamtalk
+r :: Result(Integer, Error) := computeSomething
+r map: [:v | v asString]   // Result(String, Error) — type args carried through
+```
+
+When resolving `Self` for a receiver with known type args, the type args propagate: `Array(Integer)` + return type `Self` resolves to `Array(Integer)`.
+
+---
+
+## Parametric Types (Generics)
+
+### Overview
+
+Beamtalk adopts declaration-site parametric types with compile-time substitution. Classes declare type parameters after the class name using parenthesis syntax: `Result(T, E)`. This keeps `<` reserved as a binary message (comparison operator), following Gleam's approach on BEAM.
+
+### Class-Level Type Parameters
+
+```rust
+struct ClassDefinition {
+    // ... existing fields ...
+    type_params: Vec<Identifier>,  // e.g., [T, E] for Result(T, E)
+}
+
+struct ClassInfo {
+    // ... existing fields ...
+    type_params: Vec<EcoString>,
+    superclass_type_args: Vec<TypeParamMapping>,
+}
+```
+
+### Substitution Algorithm
+
+When the type checker encounters `Result(Integer, IOError)`:
+
+1. Build substitution map: `{T -> Integer, E -> IOError}`
+2. Apply substitution to method return types: `unwrap -> T` becomes `unwrap -> Integer`
+3. Apply substitution to parameter types during validation
+
+### Method-Local Type Parameters
+
+Methods can introduce type variables not declared at the class level. In `map: block :: Block(T, R) -> Result(R, E)`, `R` is a method-local type param inferred from call-site arguments:
+
+```beamtalk
+r :: Result(Integer, Error) := computeSomething
+r map: [:v | v asString]   // R = String inferred from block return type
+// Result: Result(String, Error)
+```
+
+### Block Special-Casing
+
+`Block(...)` is interpreted specially — the last type parameter is always the return type:
+
+- `Block(R)` — zero-arg block returning `R`
+- `Block(A, R)` — one-arg block
+- `Block(A, B, R)` — two-arg block
+
+### Constructor Type Inference
+
+Class methods that reference instance type params trigger inference:
+
+```beamtalk
+Result ok: 42              // T = Integer from argument -> Result(Integer, Dynamic)
+Result error: #not_found   // E = Symbol from argument -> Result(Dynamic, Symbol)
+```
+
+### Runtime Type Representation
+
+Parameterized methods store type parameter references in `__beamtalk_meta/0`:
+
+```erlang
+#{method_info => #{
+    'unwrap' => #{arity => 0, return_type => {type_param, 'T', 0}, ...},
+    'error'  => #{arity => 0, return_type => {type_param, 'E', 1}, ...}
+  },
+  type_params => ['T', 'E']
+}
+```
+
+This is introspection data for tooling (REPL chain completion, `:help`), not reified generics.
+
+---
+
+## Structural Protocols
+
+### Overview
+
+Protocols define named message sets. Conformance is structural and automatic — no `implements:` declaration needed. This formalizes Smalltalk's duck-typing philosophy.
+
+### Protocol Registry
+
+The compiler maintains a protocol registry mapping protocol names to required message sets. At type-checking time, when a type annotation resolves to a protocol name, the checker performs structural conformance checking.
+
+### Conformance Tiers
+
+1. **Compile-time ClassHierarchy** — statically defined methods only
+2. **REPL workspace** — includes live method additions and class redefinitions
+3. **`doesNotUnderstand:` bypass** — DNU-overriding classes conform to every protocol
+
+### Protocol Metadata
+
+Protocol definitions compile into module attributes for runtime queries (`conformsTo:`, `protocols`, `requiredMethods`, `conformingClasses`).
+
+---
+
+## Union Types and Narrowing
+
+### Union Type Checking
+
+A message send on a union-typed receiver warns unless all union members respond to the selector. Return type is the union of member return types (simplified if all agree).
+
+### Control Flow Narrowing
+
+The type checker pattern-matches on known AST shapes to narrow types:
+
+- `x class = Foo ifTrue: [...]` — narrows `x` to `Foo` in true block
+- `x isKindOf: Foo ifTrue: [...]` — same
+- `x isNil ifTrue: [^...]` — narrows `x` to non-nil for rest of method
+- `x respondsTo: #selector ifTrue: [...]` — narrows to protocol conformance (Stage 2)
+
+This is not a general narrowing framework but a fixed set of recognized idioms, each added as a new case in the AST pattern matcher.
 
 ---
 
@@ -317,51 +485,71 @@ result := count + 1  // result: Integer
 
 **Estimated effort**: 3-4 weeks
 
-### Phase 3: Polymorphism and Generics
+### Phase 3: Parametric Types and Generics (ADR 0068 Stage 1)
 
-**Goal**: Support polymorphic functions and generic types.
+**Goal**: Declaration-site parametric types with compile-time substitution.
 
 ```beamtalk
-// Polymorphic block
-identity := [:x | x]
-identity value: 5        // Integer -> Integer
-identity value: 'hello'  // String -> String
+// Generic class declaration — parenthesis syntax
+sealed Value subclass: Result(T, E)
+  field: okValue :: T = nil
+  field: errReason :: E = nil
+  unwrap -> T => ...
 
-// Generic collection
-Array[Integer] new
+// Usage-site type application
+result :: Result(String, IOError) := File read: "config.json"
+result unwrap    // -> String (type checker substitutes T -> String)
+
+// Constructor inference
+r := Result ok: 42    // Inferred: Result(Integer, Dynamic)
+```
+
+**Components needed (see [ADR 0068 implementation phases](../ADR/0068-parametric-types-and-protocols.md#implementation)):**
+
+1. **Parser and AST** (Phase 1a): `type_params` on `ClassDefinition`, parse `Name(Type, ...)` in annotations
+2. **InferredType extension** (Phase 1): `type_args`, `Union` variant, `TypeProvenance`
+3. **Type checker substitution** (Phase 1b): positional substitution, replace escape hatches
+4. **Constructor inference** (Phase 1c): infer type params from constructor arguments
+5. **Union type checking** (Phase 1f): check all union members respond to message
+6. **Control flow narrowing** (Phase 1g): `isNil`, `class =`, `isKindOf:` patterns
+7. **Codegen** (Phases 1d, 1e): Dialyzer spec expansion, runtime meta with `{type_param, Name, Index}`
+
+**Design choices:**
+- Parenthesis syntax `Result(T, E)` not `Result<T, E>` — `<` stays as binary message
+- Invariant type parameters (variance added in Stage 2 with protocols)
+- Block type params special-cased (last param = return type)
+- Method-local type params inferred from call-site arguments
+
+### Phase 4: Structural Protocols (ADR 0068 Stage 2)
+
+**Goal**: Named message sets with automatic structural conformance.
+
+```beamtalk
+Protocol define: Printable
+  asString -> String
+
+Protocol define: Collection(E)
+  size -> Integer
+  do: block :: Block(E, Object)
+  collect: block :: Block(E, Object) -> Self
+
+// Protocol as type annotation — structural check
+display: thing :: Printable =>
+  Transcript show: thing asString
+
+// Protocol bounds on type parameters
+Actor subclass: Logger(T :: Printable)
+  log: item :: T => Transcript show: item asString
 ```
 
 **Components needed:**
-1. Type scheme generalization (forall quantifiers)
-2. Type instantiation on usage
-3. Generic type parameters
-4. Constraint solving for polymorphic calls
 
-**Estimated effort**: 4-6 weeks
-
-### Phase 4: Subtyping and Classes
-
-**Goal**: Support class hierarchies and inheritance.
-
-```beamtalk
-// Subclass relationship
-Animal subclass: Dog
-  methods: [
-    bark => Transcript show: 'Woof!'
-  ]
-
-// Can pass Dog where Animal expected
-greet: (animal: Animal) => animal speak
-greet: myDog  // OK - Dog is subtype of Animal
-```
-
-**Components needed:**
-1. Subtyping constraints
-2. Method resolution with inheritance
-3. Variance rules (covariance/contravariance)
-4. Bounded polymorphism
-
-**Estimated effort**: 6-8 weeks
+1. **Protocol AST and parser** (Phase 2a): `ProtocolDefinition` node, method signatures without `=>`
+2. **Protocol registry and conformance** (Phase 2b): structural checking against required message sets
+3. **Runtime queries** (Phase 2c): `conformsTo:`, `protocols`, `requiredMethods`
+4. **Type parameter bounds** (Phase 2d): `T :: Printable` in type param declarations
+5. **`respondsTo:` narrowing** (Phase 2e): protocol-aware narrowing
+6. **Variance** (Phase 2f): covariance for immutable type params, invariance for mutable
 
 ---
 
@@ -475,5 +663,9 @@ getValue -> String => self.value toString
 
 ### Related Beamtalk Docs
 - [beamtalk-language-features.md](../beamtalk-language-features.md) - language design with type syntax
+- [ADR 0068: Parametric Types and Protocols](../ADR/0068-parametric-types-and-protocols.md) - definitive design for generics, protocols, unions, narrowing
+- [ADR 0025: Gradual Typing and Protocols](../ADR/0025-gradual-typing-and-protocols.md) - foundation (Phases 1-2 complete)
+- [ADR 0053: Double-Colon Type Annotation Syntax](../ADR/0053-double-colon-type-annotation-syntax.md) - `::` delimiter
+- [ADR 0060: Result Type](../ADR/0060-result-type-hybrid-error-handling.md) - motivating use case for generics
 - [semantic-analysis.md](semantic-analysis.md) - compiler phase before type checking
 - [design-tooling-ide.md](design-tooling-ide.md) - LSP integration needs type information
