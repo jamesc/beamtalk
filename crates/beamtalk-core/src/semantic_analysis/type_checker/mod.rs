@@ -20,6 +20,7 @@
 
 use crate::ast::Module;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -269,6 +270,7 @@ pub fn infer_types_and_returns(
 /// - Tracks variable types through assignments
 /// - Validates message sends against class method tables
 /// - Emits warnings for unknown selectors with hints
+/// - Protocol conformance checking for protocol-typed parameters (ADR 0068 Phase 2b)
 #[derive(Debug)]
 pub struct TypeChecker {
     pub(super) diagnostics: Vec<Diagnostic>,
@@ -318,6 +320,204 @@ impl TypeChecker {
     /// Takes ownership of the method return types map, leaving an empty map.
     pub fn take_method_return_types(&mut self) -> HashMap<MethodReturnKey, EcoString> {
         std::mem::take(&mut self.method_return_types)
+    }
+
+    /// Checks types in a module using both the class hierarchy and protocol registry.
+    ///
+    /// This is the protocol-aware entry point used by `analyse_full` when protocols
+    /// are present. It delegates to `check_module` for the main type checking pass
+    /// and then performs protocol conformance checking on type annotations.
+    ///
+    /// **References:** ADR 0068 Phase 2b
+    pub fn check_module_with_protocols(
+        &mut self,
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        // Run the standard type checking pass first
+        self.check_module(module, hierarchy);
+
+        // Phase 2b: Protocol conformance checking on type annotations.
+        // When a parameter type annotation resolves to a protocol name, check
+        // that the argument type (if known) conforms structurally.
+        self.check_protocol_conformance_in_module(module, hierarchy, protocol_registry);
+    }
+
+    /// Check protocol conformance for type annotations across a module.
+    ///
+    /// Walks all message send call sites: when a target method's parameter type
+    /// annotation is a protocol name, and we have an inferred argument type,
+    /// perform structural conformance checking. This is the call-site check
+    /// described in ADR 0068 Phase 2b.
+    fn check_protocol_conformance_in_module(
+        &mut self,
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        // Walk all expressions looking for message sends with protocol-typed parameters
+        for class in &module.classes {
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                for stmt in &method.body {
+                    self.check_protocol_conformance_in_expr(
+                        &stmt.expression,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
+        }
+
+        for standalone in &module.method_definitions {
+            for stmt in &standalone.method.body {
+                self.check_protocol_conformance_in_expr(
+                    &stmt.expression,
+                    hierarchy,
+                    protocol_registry,
+                );
+            }
+        }
+
+        for stmt in &module.expressions {
+            self.check_protocol_conformance_in_expr(&stmt.expression, hierarchy, protocol_registry);
+        }
+    }
+
+    /// Recursively check protocol conformance in expressions.
+    #[allow(clippy::too_many_lines)] // match over all Expression variants
+    fn check_protocol_conformance_in_expr(
+        &mut self,
+        expr: &crate::ast::Expression,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        use crate::ast::Expression;
+
+        match expr {
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                span,
+                ..
+            } => {
+                // Check if the receiver's method has protocol-typed params
+                if let Some(receiver_type) = self.type_map.get(receiver.span()) {
+                    if let InferredType::Known { class_name, .. } = receiver_type.clone() {
+                        let sel_name = selector.name();
+                        let method = hierarchy.find_method(&class_name, &sel_name);
+                        if let Some(method) = method {
+                            for (i, arg) in arguments.iter().enumerate() {
+                                if let Some(Some(expected_ty)) = method.param_types.get(i) {
+                                    if Self::is_protocol_type(
+                                        expected_ty,
+                                        hierarchy,
+                                        protocol_registry,
+                                    ) {
+                                        if let Some(arg_type) = self.type_map.get(arg.span()) {
+                                            self.check_protocol_argument_conformance(
+                                                &arg_type.clone(),
+                                                expected_ty,
+                                                *span,
+                                                hierarchy,
+                                                protocol_registry,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Recurse into sub-expressions
+                self.check_protocol_conformance_in_expr(receiver, hierarchy, protocol_registry);
+                for arg in arguments {
+                    self.check_protocol_conformance_in_expr(arg, hierarchy, protocol_registry);
+                }
+            }
+            Expression::Block(block) => {
+                for stmt in &block.body {
+                    self.check_protocol_conformance_in_expr(
+                        &stmt.expression,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
+            Expression::Assignment { value, .. }
+            | Expression::DestructureAssignment { value, .. }
+            | Expression::Return { value, .. } => {
+                self.check_protocol_conformance_in_expr(value, hierarchy, protocol_registry);
+            }
+            Expression::Parenthesized { expression, .. } => {
+                self.check_protocol_conformance_in_expr(expression, hierarchy, protocol_registry);
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                self.check_protocol_conformance_in_expr(receiver, hierarchy, protocol_registry);
+                for msg in messages {
+                    for arg in &msg.arguments {
+                        self.check_protocol_conformance_in_expr(arg, hierarchy, protocol_registry);
+                    }
+                }
+            }
+            Expression::FieldAccess { receiver, .. } => {
+                self.check_protocol_conformance_in_expr(receiver, hierarchy, protocol_registry);
+            }
+            Expression::Match { value, arms, .. } => {
+                self.check_protocol_conformance_in_expr(value, hierarchy, protocol_registry);
+                for arm in arms {
+                    self.check_protocol_conformance_in_expr(
+                        &arm.body,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
+            Expression::StringInterpolation { segments, .. } => {
+                for seg in segments {
+                    if let crate::ast::StringSegment::Interpolation(expr) = seg {
+                        self.check_protocol_conformance_in_expr(expr, hierarchy, protocol_registry);
+                    }
+                }
+            }
+            Expression::ArrayLiteral { elements, .. } => {
+                for elem in elements {
+                    self.check_protocol_conformance_in_expr(elem, hierarchy, protocol_registry);
+                }
+            }
+            Expression::ListLiteral { elements, tail, .. } => {
+                for elem in elements {
+                    self.check_protocol_conformance_in_expr(elem, hierarchy, protocol_registry);
+                }
+                if let Some(tail_expr) = tail {
+                    self.check_protocol_conformance_in_expr(
+                        tail_expr,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
+            Expression::MapLiteral { pairs, .. } => {
+                for pair in pairs {
+                    self.check_protocol_conformance_in_expr(
+                        &pair.key,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                    self.check_protocol_conformance_in_expr(
+                        &pair.value,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
+            // Leaf expressions — no sub-expressions to recurse into
+            _ => {}
+        }
     }
 }
 

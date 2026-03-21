@@ -15,6 +15,7 @@
 
 use crate::ast::{Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -648,5 +649,100 @@ impl TypeChecker {
         }
 
         best.map(|(sel, _)| sel)
+    }
+
+    /// Check protocol conformance for a call-site argument.
+    ///
+    /// When a parameter type is a protocol name and the argument type is a known
+    /// class, checks structural conformance. Emits a warning if the class does
+    /// not conform to the protocol.
+    ///
+    /// **References:** ADR 0068 Phase 2b — "Type checker: protocol name in type
+    /// annotation → structural conformance check"
+    pub(super) fn check_protocol_argument_conformance(
+        &mut self,
+        arg_type: &InferredType,
+        expected_protocol: &str,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        match arg_type {
+            InferredType::Known { class_name, .. } => {
+                // Extract base protocol name for generic protocols
+                let base_protocol = if let Some(open) = expected_protocol.find('(') {
+                    &expected_protocol[..open]
+                } else {
+                    expected_protocol
+                };
+
+                let Some(_protocol) = protocol_registry.get(base_protocol) else {
+                    return; // Not a protocol — handled by normal type checking
+                };
+
+                match protocol_registry.check_conformance(class_name, base_protocol, hierarchy) {
+                    Ok(()) => {} // Conforms — no warning
+                    Err(missing) => {
+                        let missing_list = missing
+                            .iter()
+                            .map(|s| format!("'{s}'"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        self.diagnostics.push(
+                            Diagnostic::warning(
+                                format!(
+                                    "{class_name} does not conform to protocol {base_protocol}"
+                                ),
+                                span,
+                            )
+                            .with_category(DiagnosticCategory::Type)
+                            .with_hint(format!("Missing required method(s): {missing_list}")),
+                        );
+                    }
+                }
+            }
+            InferredType::Dynamic => {
+                // Cannot verify conformance for Dynamic values — emit informational warning
+                let base_protocol = if let Some(open) = expected_protocol.find('(') {
+                    &expected_protocol[..open]
+                } else {
+                    expected_protocol
+                };
+
+                if protocol_registry.has_protocol(base_protocol) {
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!("Cannot verify {base_protocol} conformance for Dynamic value"),
+                            span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint("Add a type annotation to enable protocol conformance checking"),
+                    );
+                }
+            }
+            InferredType::Union(_) => {
+                // Union types — skip for now (Phase 2 extension)
+            }
+        }
+    }
+
+    /// Returns true if the given type name refers to a protocol (not a class).
+    ///
+    /// Used to determine whether a type annotation should trigger structural
+    /// conformance checking (protocol) or nominal subtyping (class).
+    pub(super) fn is_protocol_type(
+        type_name: &str,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) -> bool {
+        // Extract base name for generic types
+        let base_name = if let Some(open) = type_name.find('(') {
+            &type_name[..open]
+        } else {
+            type_name
+        };
+
+        // A protocol type is one that's in the registry and NOT a class name
+        protocol_registry.has_protocol(base_name) && !hierarchy.has_class(base_name)
     }
 }
