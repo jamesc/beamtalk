@@ -413,17 +413,59 @@ Tracing profile: [
 
 This would automatically enable tracing, execute the block, disable tracing, and return the captured results — eliminating the enable/disable lifecycle for the common case. The global mode (`Tracing enable`) remains necessary for the MCP agent workflow (enable → run tests in separate tool call → query results).
 
-### Future: Distributed Tracing via OpenTelemetry
+### Propagated Context Across Actor Boundaries
 
-The `telemetry` event bus in v1 is the foundation for a future upgrade to full distributed tracing (correlated parent/child spans across actor calls, exportable to Jaeger/Datadog/Grafana Tempo). The upgrade path:
+Actor messages carry a **propagated context map** as a third element: `{Selector, Args, PropagatedCtx}`. This context flows automatically through every `sync_send`, `async_send`, and `cast_send` — the user never sees it.
 
-1. **v1 (this ADR):** `telemetry` events emitted from send wrappers. Flat events — no parent/child correlation. Local storage only.
-2. **v2 (add bridge):** Users who need distributed tracing add `opentelemetry`, `opentelemetry_api`, and `opentelemetry_telemetry` to *their* project's deps (not bundled in Beamtalk's runtime). The bridge auto-subscribes to our existing `[beamtalk, actor, dispatch, ...]` telemetry events and creates OTel spans. Flat spans exported to external backends. Zero changes to Beamtalk itself.
-3. **v3 (context propagation — future ADR):** Attach OTel trace context to actor messages so spans across actor calls form a causal tree. This requires a runtime change to `beamtalk_actor.erl` (attach context in `sync_send`) and a codegen change to `callbacks.rs` (restore context in generated `handle_call`).
+```erlang
+%% In beamtalk_actor.erl — send side
+get_propagated_ctx() ->
+    #{otel => get_otel_ctx()}.   %% extensible map — future keys added here
 
-**Context propagation design (deferred):** The planned approach is always-include — every actor message carries trace context as a third element: `{Selector, Args, TraceCtx}`. When the OTel SDK is not loaded, `TraceCtx` is `undefined` and restoration is a no-op. This adds ~40-60ns per call (process dictionary read/write + 25 bytes extra in message copy) — negligible next to the gen_server call overhead (~5-10μs). The alternative (compile-time feature flag) is rejected because it would require recompilation to toggle and break hot code reload. The always-include approach means OTel becomes "just add the SDK" — context starts flowing immediately with no recompile.
+get_otel_ctx() ->
+    case erlang:function_exported(otel_ctx, get_current, 0) of
+        true -> otel_ctx:get_current();
+        false -> undefined
+    end.
 
-**Why `telemetry` matters for this path:** Without `telemetry`, the v2 step (flat export) requires reworking the instrumentation layer to emit OTel spans directly, coupling `beamtalk_actor.erl` to the OTel SDK. With `telemetry`, v2 is purely additive — one bridge package, zero instrumentation changes. This is the primary justification for adopting `telemetry` now rather than deferring it.
+%% In generated handle_call — actor side
+handle_call({Selector, Args, PropCtx}, _From, State) ->
+    restore_propagated_ctx(PropCtx),
+    dispatch(Selector, Args, State).
+
+restore_propagated_ctx(#{otel := Ctx}) when Ctx =/= undefined ->
+    otel_ctx:attach(Ctx);   %% only called if otel_ctx module is loaded
+restore_propagated_ctx(_) -> ok.
+```
+
+**No compile-time dependency on OpenTelemetry.** `erlang:function_exported/3` is cached by the VM (~10ns). When OTel isn't loaded, the context map contains `#{otel => undefined}` — restoration is a no-op pattern match.
+
+**Cost:**
+
+| Operation | Cost | When |
+|-----------|------|------|
+| `function_exported` check | ~10ns | Always |
+| Context map construction | ~10ns | Always |
+| Extra bytes in message copy | ~25 bytes | Always |
+| `otel_ctx:attach/1` | ~20ns | Only when OTel is loaded |
+| **Total** | **~20ns (no OTel) / ~40ns (with OTel)** | Negligible vs gen_server call (~5-10μs) |
+
+**User experience:** Add `opentelemetry` + `opentelemetry_telemetry` to your project's deps → correlated parent/child traces across actor calls work immediately. No Beamtalk upgrade, no recompile. The `telemetry` bridge auto-subscribes to our events, and the propagated context provides the parent/child span correlation.
+
+**Extensible context map — future uses:**
+
+The `PropagatedCtx` map is designed to carry more than OTel context. Future extensions (each a separate ADR):
+
+| Key | What it carries | Use case |
+|-----|----------------|----------|
+| `otel` | OTel trace context | Distributed tracing (this ADR) |
+| `request_id` | Correlation ID (string) | Log correlation — `Logger` auto-includes the ID in all logs from downstream actor calls, without the user threading it manually |
+| `deadline` | Monotonic time of expiry | Timeout propagation — like Go's `context.WithTimeout`. If A→B has a 5s timeout and B takes 3s, B→C automatically gets 2s |
+| `causality` | Logical clock / vector clock | Debugging message ordering in concurrent actor systems |
+
+The map starts with just `otel` in v1. Adding keys is additive — no message format change, no codegen change, no recompile.
+
+**Why `telemetry` matters for this path:** Without `telemetry`, exporting spans requires coupling `beamtalk_actor.erl` directly to the OTel SDK. With `telemetry`, the OTel bridge is a user-side dependency that auto-subscribes to our events — zero changes to Beamtalk. This is the primary justification for adopting `telemetry` now rather than deferring it.
 
 ## Prior Art
 
@@ -616,12 +658,14 @@ This spike should be a single branch with ~100 lines of test code. If the teleme
 3. Configure `telemetry_poller` for periodic VM measurements (feeds `Tracing systemHealth`)
 4. EUnit tests for trace store: direct insert, query, ring buffer eviction sweep, `counters`-based aggregates, clear, composite key uniqueness, gen_server crash recovery
 
-### Phase 2: Actor Instrumentation (S)
-**Affected components:** Runtime (`beamtalk_actor.erl`)
+### Phase 2: Actor Instrumentation + Context Propagation (M)
+**Affected components:** Runtime (`beamtalk_actor.erl`), Codegen (`callbacks.rs`)
 
 1. Instrument `sync_send/3`, `async_send/4`, `cast_send/3` with `telemetry:span/3`
 2. Wire aggregate updates (always on) and trace event capture (when enabled)
-3. EUnit tests: verify telemetry events are emitted, verify overhead is within budget
+3. Add propagated context: `get_propagated_ctx()` in send wrappers, `restore_propagated_ctx/1` in runtime
+4. Update codegen to generate 3-tuple `handle_call({Selector, Args, PropCtx}, ...)` with context restoration
+5. EUnit tests: verify telemetry events, verify overhead budget, verify context propagation (with and without OTel module present)
 
 ### Phase 3: Beamtalk API (M)
 **Affected components:** Stdlib (`Tracing.bt`), Runtime (`beamtalk_tracing.erl`)
