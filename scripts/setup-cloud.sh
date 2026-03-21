@@ -242,10 +242,21 @@ if have streamlinear-cli; then
   ok "streamlinear-cli already installed"
 else
   info "Installing streamlinear CLI..."
-  # simple-git-hooks is a build-time dep that fails when installed globally;
-  # pre-install it with --ignore-scripts so streamlinear's npm install succeeds.
-  npm install -g --ignore-scripts simple-git-hooks 2>/dev/null || true
-  if npm install -g streamlinear@github:obra/streamlinear 2>/dev/null; then
+  # npm install -g from a GitHub URL leaves dangling symlinks because npm clones
+  # into a temp dir that gets cleaned up. npm link fails because the prepare
+  # script calls simple-git-hooks. Instead, clone to a permanent location,
+  # install mcp deps, and manually symlink the binaries.
+  STREAMLINEAR_DIR="/opt/streamlinear"
+  if [[ ! -d "${STREAMLINEAR_DIR}" ]]; then
+    require_sudo
+    $SUDO git clone --depth 1 https://github.com/obra/streamlinear.git "${STREAMLINEAR_DIR}"
+  fi
+  if (cd "${STREAMLINEAR_DIR}/mcp" && npm install --ignore-scripts 2>/dev/null); then
+    NPM_PREFIX="$(npm prefix -g)"
+    ln -sf "${STREAMLINEAR_DIR}" "${NPM_PREFIX}/lib/node_modules/streamlinear"
+    ln -sf "${STREAMLINEAR_DIR}/mcp/dist/index.js" "${NPM_PREFIX}/bin/streamlinear"
+    ln -sf "${STREAMLINEAR_DIR}/mcp/dist/cli.js" "${NPM_PREFIX}/bin/streamlinear-cli"
+    chmod +x "${STREAMLINEAR_DIR}/mcp/dist/index.js" "${STREAMLINEAR_DIR}/mcp/dist/cli.js"
     ok "streamlinear-cli installed"
   else
     warn "streamlinear-cli installation failed — Linear skills won't be available"
