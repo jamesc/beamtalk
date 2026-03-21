@@ -514,7 +514,7 @@ No general-purpose "queryable in-memory telemetry store" exists for BEAM in pure
 
 ### Tension Points
 
-- **ADR 0064 consistency:** BEAM veterans and newcomers have a genuine argument that `Tracing enable` should live on `Beamtalk` per the ADR 0064 DDD precedent. The counter-argument is scale: logging config is ~5 methods, tracing is ~15. At that size, a standalone class is the Smalltalk-native solution. The planned `Logging` migration will retroactively make both subsystems consistent.
+- **ADR 0064 consistency:** BEAM veterans and newcomers have a genuine argument that `Tracing enable` should live on `Beamtalk` per the ADR 0064 DDD precedent. The counter-argument is scale: logging config is ~5 methods, tracing is ~15. At that size, a standalone class is the Smalltalk-native solution. The planned `Logging` migration will retroactively make both subsystems consistent. **Discoverability escape hatch:** if users struggle to find `Tracing`, we can add `Beamtalk tracing` (returns the `Tracing` singleton) and later `Beamtalk logging` — namespace delegation via one method per subsystem, not method duplication.
 - **BEAM veterans** would prefer OpenTelemetry-native for distributed tracing. The bridge via `opentelemetry_telemetry` is a good compromise but adds one more package when they need it.
 - **Purists** would prefer zero dependencies. The argument is genuine — `telemetry` is tiny and stable, but it IS a dependency. The composability benefit (user-added handlers, OTel bridge) justifies the cost.
 - **All cohorts agree** on: always-on aggregates, opt-in detailed tracing, structured output, ring-buffer bounded storage.
