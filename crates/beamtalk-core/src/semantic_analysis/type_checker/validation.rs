@@ -13,6 +13,8 @@
 //! - Field assignment and state default validation
 //! - "Did you mean?" suggestions for unknown selectors
 
+use std::collections::HashMap;
+
 use crate::ast::{Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::string_utils::edit_distance;
@@ -23,12 +25,19 @@ use super::{InferredType, TypeChecker, TypeEnv};
 
 impl TypeChecker {
     /// Check a class-side message send (e.g., `Counter spawn`, `Object new`).
+    ///
+    /// When `arg_types` is non-empty and the class has type parameters,
+    /// constructor inference (ADR 0068 Phase 1c) kicks in: the type checker
+    /// maps the class method's parameter types (e.g., `T`) against the concrete
+    /// argument types (e.g., `Integer`) to infer the class's type arguments.
+    /// Unresolved params default to `Dynamic`.
     pub(super) fn check_class_side_send(
         &mut self,
         class_name: &EcoString,
         selector: &str,
         span: Span,
         hierarchy: &ClassHierarchy,
+        arg_types: &[InferredType],
     ) -> InferredType {
         if !hierarchy.has_class(class_name) {
             return InferredType::Dynamic;
@@ -56,17 +65,20 @@ impl TypeChecker {
 
         // Infer return type for known factory methods
         match selector {
-            "spawn" | "spawnWith:" | "new" | "new:" => InferredType::known(class_name.clone()),
+            "spawn" | "spawnWith:" | "new" | "new:" => {
+                Self::infer_constructor_type(class_name, hierarchy, selector, arg_types)
+            }
             _ => {
                 if let Some(method) = hierarchy.find_class_method(class_name, selector) {
                     if let Some(ref ret_ty) = method.return_type {
-                        // `Self` resolves to the static receiver class
-                        let resolved = if ret_ty.as_str() == "Self" {
-                            class_name.clone()
-                        } else {
-                            ret_ty.clone()
-                        };
-                        return InferredType::known(resolved);
+                        // `Self` resolves to the static receiver class —
+                        // with constructor inference for generic classes (ADR 0068 Phase 1c)
+                        if ret_ty.as_str() == "Self" {
+                            return Self::infer_constructor_type(
+                                class_name, hierarchy, selector, arg_types,
+                            );
+                        }
+                        return InferredType::known(ret_ty.clone());
                     }
                 }
                 // BT-1047: Fall back to return types inferred earlier in this pass.
@@ -76,6 +88,56 @@ impl TypeChecker {
                 }
                 InferredType::Dynamic
             }
+        }
+    }
+
+    /// Infer the constructor return type for a generic class (ADR 0068 Phase 1c).
+    ///
+    /// Given a class method call like `GenResult ok: 42`, maps the method's
+    /// parameter types (e.g., `T`) against the concrete argument types (e.g.,
+    /// `Integer`) to produce `GenResult(Integer, Dynamic)`.
+    ///
+    /// For non-generic classes, returns `Known(class_name)` with no type args.
+    fn infer_constructor_type(
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+        selector: &str,
+        arg_types: &[InferredType],
+    ) -> InferredType {
+        let Some(class_info) = hierarchy.get_class(class_name) else {
+            return InferredType::known(class_name.clone());
+        };
+
+        // Non-generic class — no type args to infer
+        if class_info.type_params.is_empty() {
+            return InferredType::known(class_name.clone());
+        }
+
+        // Build inference map from class method param types → argument types
+        let mut inferred: HashMap<EcoString, InferredType> = HashMap::new();
+
+        if let Some(method) = hierarchy.find_class_method(class_name, selector) {
+            for (param_ty_opt, arg_ty) in method.param_types.iter().zip(arg_types.iter()) {
+                if let Some(param_ty) = param_ty_opt {
+                    // If param type is a class type param (e.g., "T"), map it to the arg type
+                    if class_info.type_params.contains(param_ty) {
+                        inferred.insert(param_ty.clone(), arg_ty.clone());
+                    }
+                }
+            }
+        }
+
+        // Build type_args in class param order, defaulting unresolved to Dynamic
+        let type_args: Vec<InferredType> = class_info
+            .type_params
+            .iter()
+            .map(|p| inferred.remove(p).unwrap_or(InferredType::Dynamic))
+            .collect();
+
+        InferredType::Known {
+            class_name: class_name.clone(),
+            type_args,
+            provenance: super::TypeProvenance::Inferred(Span::default()),
         }
     }
 
