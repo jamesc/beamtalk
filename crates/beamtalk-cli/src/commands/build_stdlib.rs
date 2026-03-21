@@ -337,6 +337,8 @@ struct ClassMeta {
     class_methods: Vec<MethodMeta>,
     /// Class variable names.
     class_variables: Vec<String>,
+    /// Type parameters for generic classes (e.g., `["T", "E"]` for `Result(T, E)`).
+    type_params: Vec<String>,
 }
 
 /// Metadata for a single method, extracted from the AST.
@@ -643,6 +645,12 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         mark_timer_spawns(&mut class_methods)?;
     }
 
+    let type_params = class
+        .type_params
+        .iter()
+        .map(|tp| tp.name.to_string())
+        .collect();
+
     Ok(ClassMeta {
         module_name: module_name.to_string(),
         class_name,
@@ -656,6 +664,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         methods,
         class_methods,
         class_variables,
+        type_params,
     })
 }
 
@@ -918,8 +927,19 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         code.push_str("],\n");
     }
 
-    // Type parameters (always empty for now — populated by parser for generic classes)
-    code.push_str("            type_params: vec![],\n");
+    // Type parameters
+    if meta.type_params.is_empty() {
+        code.push_str("            type_params: vec![],\n");
+    } else {
+        code.push_str("            type_params: vec![");
+        for (i, tp) in meta.type_params.iter().enumerate() {
+            if i > 0 {
+                code.push_str(", ");
+            }
+            let _ = write!(code, "\"{tp}\".into()");
+        }
+        code.push_str("],\n");
+    }
 
     code.push_str("        },\n    );\n\n");
 }
@@ -1172,6 +1192,7 @@ mod tests {
                 doc: None,
             }],
             class_variables: vec![],
+            type_params: vec![],
         }
     }
 
@@ -1217,6 +1238,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);
@@ -1249,6 +1271,7 @@ mod tests {
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
+                type_params: vec![],
             },
             ClassMeta {
                 module_name: "bt@stdlib@alpha".to_string(),
@@ -1263,6 +1286,7 @@ mod tests {
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
+                type_params: vec![],
             },
         ];
 

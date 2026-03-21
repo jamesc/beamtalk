@@ -200,6 +200,7 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
 /// Emits non-doc comments, then the optional doc comment, then the class header,
 /// state declarations, and methods.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -240,11 +241,34 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         modifiers.push(Document::Str("typed "));
     }
 
+    let class_name_doc = if class.type_params.is_empty() {
+        Document::String(class.name.name.to_string())
+    } else {
+        let params: Vec<Document<'static>> = class
+            .type_params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                if i == 0 {
+                    Document::String(p.name.to_string())
+                } else {
+                    docvec![", ", Document::String(p.name.to_string())]
+                }
+            })
+            .collect();
+        docvec![
+            Document::String(class.name.name.to_string()),
+            "(",
+            concat(params),
+            ")"
+        ]
+    };
+
     let class_header = docvec![
         concat(modifiers),
         Document::String(superclass),
         " subclass: ",
-        Document::String(class.name.name.to_string()),
+        class_name_doc,
     ];
 
     let header = if let Some(module) = &class.backing_module {

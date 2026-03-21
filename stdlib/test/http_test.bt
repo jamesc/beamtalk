@@ -16,8 +16,8 @@
 //   - HTTPS connections (requires network access)
 //
 // Note: HTTPClient methods return Result (ADR 0060). Successful responses are
-// unwrapped with `unwrap`. Method calls on the unwrapped Object use `@expect type`
-// at type-erasure boundaries (BT-1273).
+// unwrapped with `unwrap`. With generic Result(T, E) (BT-1576), unwrap returns
+// Dynamic for unparameterized Results, removing most DNU hints.
 
 TestCase subclass: HttpTest
   field: baseUrl = ""
@@ -33,69 +33,57 @@ TestCase subclass: HttpTest
   // ===== HTTPResponse — status =====
   testResponseStatusEquals200 =>
     resp := (HTTPClient get: self.baseUrl ++ "/get") unwrap
-    @expect type
     self assert: resp status equals: 200
 
   testResponseStatusEquals404 =>
     resp := (HTTPClient get: self.baseUrl ++ "/status/404") unwrap
-    @expect type
     self assert: resp status equals: 404
 
   testResponseStatusEquals500 =>
     resp := (HTTPClient get: self.baseUrl ++ "/status/500") unwrap
-    @expect type
     self assert: resp status equals: 500
 
   // ===== HTTPResponse — ok =====
   testResponseOkTrueForSuccessStatus =>
     resp := (HTTPClient get: self.baseUrl ++ "/get") unwrap
-    @expect type
     self assert: resp ok
 
   testResponseOkFalseForClientError =>
     resp := (HTTPClient get: self.baseUrl ++ "/status/404") unwrap
-    @expect type
     self deny: resp ok
 
   testResponseOkFalseForServerError =>
     resp := (HTTPClient get: self.baseUrl ++ "/status/500") unwrap
-    @expect type
     self deny: resp ok
 
   testResponseOkTrueFor201 =>
     // 201 Created is in the 2xx range
     resp := (HTTPClient get: self.baseUrl ++ "/status/201") unwrap
-    @expect type
     self assert: resp ok
 
   // ===== HTTPResponse — body =====
   testResponseBodyIsNonEmpty =>
     resp := (HTTPClient get: self.baseUrl ++ "/get") unwrap
-    @expect type
     self assert: (resp body size > 0)
 
   testResponseBodyIsString =>
     resp := (HTTPClient get: self.baseUrl ++ "/get") unwrap
-    @expect type
     self assert: (resp body class name) equals: #String
 
   // ===== HTTPResponse — headers =====
   testResponseHeadersIsList =>
     resp := (HTTPClient get: self.baseUrl ++ "/get") unwrap
-    @expect type
     self assert: (resp headers class name) equals: #List
 
   // ===== HTTPResponse — bodyAsJson =====
   testResponseBodyAsJsonReturnsDictionary =>
     resp := (HTTPClient get: self.baseUrl ++ "/json") unwrap
-    @expect type
     json := resp bodyAsJson
     // bodyAsJson -> Object; at: is valid on Dictionary at runtime
     self assert: (json at: "type") equals: "json"
 
   testResponseBodyAsJsonReturnsInteger =>
     resp := (HTTPClient get: self.baseUrl ++ "/json") unwrap
-    @expect type
     json := resp bodyAsJson
     // bodyAsJson -> Object; at: is valid on Dictionary at runtime
     self assert: (json at: "value") equals: 42
@@ -103,18 +91,15 @@ TestCase subclass: HttpTest
   testResponseBodyAsJsonRaisesParseErrorForEmptyBody =>
     // /status/204 returns an empty body; bodyAsJson must raise parse_error
     resp := (HTTPClient get: self.baseUrl ++ "/status/204") unwrap
-    @expect type
     self should: [resp bodyAsJson] raise: #parse_error
 
   // ===== HTTPClient class-side — get: =====
   testClassGetReturns200 =>
     resp := (HTTPClient get: self.baseUrl ++ "/get") unwrap
-    @expect type
     self assert: resp status equals: 200
 
   testClassGetBodyContainsMethod =>
     resp := (HTTPClient get: self.baseUrl ++ "/get") unwrap
-    @expect type
     json := resp bodyAsJson
     // json: Unknown at type level, Dictionary at runtime
     self assert: (json at: "method") equals: "GET"
@@ -122,34 +107,28 @@ TestCase subclass: HttpTest
   // ===== HTTPClient class-side — post:body: =====
   testClassPostBodyReturns200 =>
     resp := (HTTPClient post: self.baseUrl ++ "/post" body: "hello") unwrap
-    @expect type
     self assert: resp status equals: 200
 
   testClassPostBodyEchosRequestBody =>
     resp := (HTTPClient post: self.baseUrl ++ "/post" body: "beamtalk") unwrap
-    @expect type
     self assert: ((resp bodyAsJson) at: "body") equals: "beamtalk"
 
   // ===== HTTPClient class-side — put:body: =====
   testClassPutBodyReturns200 =>
     resp := (HTTPClient put: self.baseUrl ++ "/put" body: "update") unwrap
-    @expect type
     self assert: resp status equals: 200
 
   testClassPutBodyEchosRequestBody =>
     resp := (HTTPClient put: self.baseUrl ++ "/put" body: "updated-value") unwrap
-    @expect type
     self assert: ((resp bodyAsJson) at: "body") equals: "updated-value"
 
   // ===== HTTPClient class-side — delete: =====
   testClassDeleteReturns200 =>
     resp := (HTTPClient delete: self.baseUrl ++ "/delete") unwrap
-    @expect type
     self assert: resp status equals: 200
 
   testClassDeleteBodyContainsMethod =>
     resp := (HTTPClient delete: self.baseUrl ++ "/delete") unwrap
-    @expect type
     json := resp bodyAsJson
     // json: Unknown at type level, Dictionary at runtime
     self assert: (json at: "method") equals: "DELETE"
@@ -160,7 +139,6 @@ TestCase subclass: HttpTest
       request: #get
       url: self.baseUrl ++ "/get"
       options: #{}) unwrap
-    @expect type
     self assert: resp status equals: 200
 
   testClassRequestPostWithBodyOption =>
@@ -168,23 +146,19 @@ TestCase subclass: HttpTest
       request: #post
       url: self.baseUrl ++ "/post"
       options: #{#body => "payload"}) unwrap
-    @expect type
     self assert: resp status equals: 200
-    @expect type
     self assert: ((resp bodyAsJson) at: "body") equals: "payload"
 
   // ===== HTTPClient instance — get: =====
   testInstanceGetReturns200 =>
     client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
     resp := (client get: "/get") unwrap
-    @expect type
     self assert: resp status equals: 200
     self assert: client stop equals: #ok
 
   testInstanceGetBodyContainsMethod =>
     client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
     resp := (client get: "/get") unwrap
-    @expect type
     json := resp bodyAsJson
     // json: Unknown at type level, Dictionary at runtime
     self assert: (json at: "method") equals: "GET"
@@ -194,14 +168,12 @@ TestCase subclass: HttpTest
   testInstancePostBodyReturns200 =>
     client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
     resp := (client post: "/post" body: "instance-post") unwrap
-    @expect type
     self assert: resp status equals: 200
     self assert: client stop equals: #ok
 
   testInstancePostBodyEchosRequestBody =>
     client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
     resp := (client post: "/post" body: "data") unwrap
-    @expect type
     self assert: ((resp bodyAsJson) at: "body") equals: "data"
     self assert: client stop equals: #ok
 
@@ -209,7 +181,6 @@ TestCase subclass: HttpTest
   testInstancePutBodyReturns200 =>
     client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
     resp := (client put: "/put" body: "put-data") unwrap
-    @expect type
     self assert: resp status equals: 200
     self assert: client stop equals: #ok
 
@@ -217,7 +188,6 @@ TestCase subclass: HttpTest
   testInstanceDeleteReturns200 =>
     client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
     resp := (client delete: "/delete") unwrap
-    @expect type
     self assert: resp status equals: 200
     self assert: client stop equals: #ok
 
@@ -227,9 +197,7 @@ TestCase subclass: HttpTest
       request: #get
       url: self.baseUrl ++ "/echo-headers"
       options: #{#headers => #(#("x-test-key", "test-value"))}) unwrap
-    @expect type
     self assert: resp status equals: 200
-    @expect type
     headers := resp bodyAsJson
     // headers: Unknown at type level, Dictionary at runtime
     self assert: (headers at: "x-test-key") equals: "test-value"
@@ -240,9 +208,7 @@ TestCase subclass: HttpTest
       #headers => #(#("x-client-header", "persistent"))
     }
     resp := (client get: "/echo-headers") unwrap
-    @expect type
     self assert: resp status equals: 200
-    @expect type
     headers := resp bodyAsJson
     // headers: Unknown at type level, Dictionary at runtime
     self assert: (headers at: "x-client-header") equals: "persistent"
@@ -253,24 +219,18 @@ TestCase subclass: HttpTest
     // Generate a Json body, POST it, verify the server echoed it correctly
     jsonBody := Json generate: #{"message" => "hello"}
     resp := (HTTPClient post: self.baseUrl ++ "/post" body: jsonBody) unwrap
-    @expect type
     echoed := (resp bodyAsJson) at: "body"
-    @expect type
     self assert: ((Json parse: echoed) unwrap at: "message") equals: "hello"
 
   // ===== Non-2xx status codes =====
   testGet301StatusCode =>
     resp := (HTTPClient get: self.baseUrl ++ "/status/301") unwrap
-    @expect type
     self assert: resp status equals: 301
-    @expect type
     self deny: resp ok
 
   testGet400StatusCode =>
     resp := (HTTPClient get: self.baseUrl ++ "/status/400") unwrap
-    @expect type
     self assert: resp status equals: 400
-    @expect type
     self deny: resp ok
 
   // ===== Error cases =====
@@ -303,5 +263,4 @@ TestCase subclass: HttpTest
   // unreachable (e.g. offline CI).
   testHttpsGetReturnsOkStatus =>
     resp := (HTTPClient get: "https://httpbin.org/get") unwrap
-    @expect type
     self assert: resp ok

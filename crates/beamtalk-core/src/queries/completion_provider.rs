@@ -1863,19 +1863,22 @@ mod tests {
 
     #[test]
     fn resolve_expression_type_keyword_send_collect_returns_array() {
-        // #[1, 2, 3] collect: [:x | x * 2] — Array#collect: returns Array
+        // #[1, 2, 3] collect: [:x | x * 2] — Array(E)#collect: returns Array(R)
+        // BT-1576: Generic return types extract base class for completion.
         let hierarchy = ClassHierarchy::with_builtins();
         let result = resolve_expression_type("#[1, 2, 3] collect: [:x | x * 2]", &hierarchy);
         assert_eq!(result.as_deref(), Some("Array"));
     }
 
     #[test]
-    fn resolve_expression_type_keyword_send_inject_no_annotation_returns_none() {
-        // #[1, 2, 3] inject:into: has no return type annotation — graceful fallback
+    fn resolve_expression_type_keyword_send_inject_returns_type_param() {
+        // #[1, 2, 3] inject: 0 into: [...] — inject:into: returns type param A
+        // BT-1576: With generic annotations, inject:into: has return type "A"
+        // (a type param). Without substitution context, this resolves to "A".
         let hierarchy = ClassHierarchy::with_builtins();
         let result =
             resolve_expression_type("#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]", &hierarchy);
-        assert_eq!(result, None);
+        assert_eq!(result.as_deref(), Some("A"));
     }
 
     #[test]

@@ -45,48 +45,35 @@ TestCase subclass: HTTPServerTest
     ]
     url := "http://localhost:" ++ self.srv port asString ++ "/test"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp status equals: 200
-    @expect type
     self assert: resp body equals: "hello"
 
   testPostRequestWithBody =>
     self.srv := HTTPServer
       start: 0
       handler: [:req |
-        @expect type
         body := req body
         HTTPResponse new: #{#status => 200, #body => "echo: " ++ body}
       ]
     url := "http://localhost:" ++ self.srv port asString ++ "/echo"
     resp := (HTTPClient post: url body: "test data") unwrap
-    @expect type
     self assert: resp status equals: 200
-    @expect type
     self assert: resp body equals: "echo: test data"
 
   testHandlerReceivesMethod =>
-    self.srv := HTTPServer
-      start: 0
-      handler: [:req |
-        @expect type
-        HTTPResponse new: #{#status => 200, #body => req method}
-      ]
+    self.srv := HTTPServer start: 0 handler: [:req |
+      HTTPResponse new: #{#status => 200, #body => req method}
+    ]
     url := "http://localhost:" ++ self.srv port asString ++ "/method"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp body equals: "GET"
 
   testHandlerReceivesPath =>
-    self.srv := HTTPServer
-      start: 0
-      handler: [:req |
-        @expect type
-        HTTPResponse new: #{#status => 200, #body => req path}
-      ]
+    self.srv := HTTPServer start: 0 handler: [:req |
+      HTTPResponse new: #{#status => 200, #body => req path}
+    ]
     url := "http://localhost:" ++ self.srv port asString ++ "/hello/world"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp body equals: "/hello/world"
 
   // ===== Response codes =====
@@ -96,16 +83,13 @@ TestCase subclass: HTTPServerTest
     ]
     url := "http://localhost:" ++ self.srv port asString ++ "/missing"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: resp status equals: 404
-    @expect type
     self assert: resp body equals: "not found"
 
   testMethodBasedRouting =>
     self.srv := HTTPServer
       start: 0
       handler: [:req |
-        @expect type
         m := req method
         m == "GET" ifTrue: [
           HTTPResponse new: #{#status => 200, #body => "get ok"}
@@ -115,12 +99,9 @@ TestCase subclass: HTTPServerTest
       ]
     url := "http://localhost:" ++ self.srv port asString ++ "/route"
     getResp := (HTTPClient get: url) unwrap
-    @expect type
     self assert: getResp status equals: 200
-    @expect type
     self assert: getResp body equals: "get ok"
     deleteResp := (HTTPClient delete: url) unwrap
-    @expect type
     self assert: deleteResp status equals: 405
 
   // ===== Identity =====
@@ -134,14 +115,10 @@ TestCase subclass: HTTPServerTest
   testClassIdentity => self assert: HTTPServer superclass equals: Actor
 
   testHTTPRequestPrintString =>
-    self.srv := HTTPServer
-      start: 0
-      handler: [:req |
-        @expect type
-        HTTPResponse new: #{#status => 200, #body => req printString}
-      ]
+    self.srv := HTTPServer start: 0 handler: [:req |
+      HTTPResponse new: #{#status => 200, #body => req printString}
+    ]
     url := "http://localhost:" ++ self.srv port asString ++ "/identity"
     resp := (HTTPClient get: url) unwrap
-    @expect type
     ps := resp body
     self assert: (ps startsWith: "an HTTPRequest(")

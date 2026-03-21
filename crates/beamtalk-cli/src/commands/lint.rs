@@ -172,13 +172,15 @@ mod tests {
     fn expect_type_suppresses_dnu_hint_in_lint() {
         // BT-1547: @expect type must not be reported as stale when it
         // suppresses a real DNU hint from semantic analysis.
+        // BT-1576: Updated — Result now has generic annotations, so
+        // `Result ok: dict` infers unwrap -> Dictionary via constructor
+        // inference. Use String (known type without `sqrt`) to trigger DNU.
         let source = r#"Object subclass: LintTest
 
   class demo =>
-    r := Result ok: #{"key" => "value"}
-    data := r unwrap
+    s := "hello"
     @expect type
-    val := data at: "key"
+    val := s sqrt
     val
 "#;
         let diags = collect_lint_diagnostics(source);
@@ -192,12 +194,14 @@ mod tests {
     #[test]
     fn dnu_hint_shown_without_expect_type() {
         // Without @expect type, the DNU hint should appear in lint output.
+        // BT-1576: Updated — Result now has generic annotations, so
+        // `Result ok: dict` infers unwrap -> Dictionary via constructor
+        // inference. Use String (known type without `sqrt`) to trigger DNU.
         let source = r#"Object subclass: LintTest2
 
   class demo =>
-    r := Result ok: #{"key" => "value"}
-    data := r unwrap
-    val := data at: "key"
+    s := "hello"
+    val := s sqrt
     val
 "#;
         let diags = collect_lint_diagnostics(source);

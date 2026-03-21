@@ -11,10 +11,8 @@ TestCase subclass: YamlTest
     // Parse a YAML float
     self assert: (Yaml parse: "3.14") unwrap equals: 3.14
     // Parse YAML true
-    @expect type
     self assert: (Yaml parse: "true") unwrap
     // Parse YAML false
-    @expect type
     self deny: (Yaml parse: "false") unwrap
     // Parse YAML null to nil
     self assert: (Yaml parse: "null") unwrap equals: nil
@@ -29,44 +27,36 @@ TestCase subclass: YamlTest
     // Parse a nested sequence
     self assert: (Yaml parse: "[[1, 2], [3, 4]]") unwrap equals: #(#(1, 2), #(3, 4))
     // Parse a sequence of booleans
-    @expect type
     self assert: (Yaml parse: "[true, false]") unwrap size equals: 2
 
   testParsingMappingsViaRoundTrip =>
     // Parse a mapping by round-tripping through generate:
-    @expect type
     self assert: ((Yaml parse: (Yaml generate: #{
       "name" => "Ada"
     })) unwrap at: "name") equals: "Ada"
     // Mapping with integer value
-    @expect type
     self assert: ((Yaml parse: (Yaml generate: #{
       "age" => 36
     })) unwrap at: "age") equals: 36
     // Mapping with boolean value
-    @expect type
     self assert: ((Yaml parse: (Yaml generate: #{
       "active" => true
     })) unwrap at: "active")
     // Mapping with nil value
-    @expect type
     self assert: ((Yaml parse: (Yaml generate: #{
       "value" => nil
     })) unwrap at: "value") equals: nil
     // Mapping result has correct size
-    @expect type
     self assert: (Yaml parse: (Yaml generate: #{
       "x" => 1
     })) unwrap size equals: 1
 
   testParsingNestedStructures =>
     // Map containing a sequence (via round-trip)
-    @expect type
     self assert: ((Yaml parse: (Yaml generate: #{
       "items" => #(1, 2, 3)
     })) unwrap at: "items") equals: #(1, 2, 3)
     // Sequence containing a map (via round-trip)
-    @expect type
     self
       assert: (((Yaml parse: (Yaml generate: #(#{
         "x" => 1
@@ -75,13 +65,10 @@ TestCase subclass: YamlTest
 
   testParseAllSingleDocument =>
     // parseAll: with a single document returns a Result ok: list of size 1
-    @expect type
     self assert: (Yaml parseAll: "42") unwrap size equals: 1
     // The single document has the correct value
-    @expect type
     self assert: ((Yaml parseAll: "42") unwrap at: 1) equals: 42
     // parseAll: with a sequence returns a list containing the sequence
-    @expect type
     self assert: ((Yaml parseAll: "[1, 2, 3]") unwrap at: 1) equals: #(1, 2, 3)
 
   testGeneratingScalarValues =>
@@ -106,26 +93,22 @@ TestCase subclass: YamlTest
     // Round-trip an integer
     self assert: (Yaml parse: (Yaml generate: 42)) unwrap equals: 42
     // Round-trip a boolean
-    @expect type
     self assert: (Yaml parse: (Yaml generate: true)) unwrap
     // Round-trip null
     self assert: (Yaml parse: (Yaml generate: nil)) unwrap equals: nil
     // Round-trip a list
     self assert: (Yaml parse: (Yaml generate: #(1, 2, 3))) unwrap equals: #(1, 2, 3)
     // Round-trip a Dictionary with a string value
-    @expect type
     self assert: ((Yaml parse: (Yaml generate: #{
       "name" => "Ada"
     })) unwrap at: "name") equals: "Ada"
     // Round-trip nested structures
-    @expect type
     self
       assert: (((Yaml parse: (Yaml generate: #{
         "user" => #{"age" => 36}
       })) unwrap at: "user") at: "age")
       equals: 36
     // Round-trip empty dict
-    @expect type
     self assert: (Yaml parse: (Yaml generate: #{})) unwrap size equals: 0
 
   testErrorHandling =>

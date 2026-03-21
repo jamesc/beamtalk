@@ -697,6 +697,11 @@ impl TypeChecker {
                         return Self::substitute_return_type(ret_ty, &subst, &method_subst);
                     }
 
+                    // BT-1576: If the return type is a generic like "Array(R)",
+                    // extract the base class name so completion/chain resolution works.
+                    if let Some(open) = ret_ty.find('(') {
+                        return InferredType::known(EcoString::from(&ret_ty[..open]));
+                    }
                     return InferredType::known(ret_ty.clone());
                 }
             }
