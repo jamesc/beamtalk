@@ -35,6 +35,9 @@ start(_StartType, _StartArgs) ->
     %% BT-737: Create collision warnings ETS table at app startup.
     beamtalk_class_registry:ensure_class_warnings_table(),
 
+    %% ADR 0068 Phase 2c: Initialize protocol registry ETS table.
+    beamtalk_protocol_registry:init(),
+
     %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
     case beamtalk_runtime_sup:start_link() of

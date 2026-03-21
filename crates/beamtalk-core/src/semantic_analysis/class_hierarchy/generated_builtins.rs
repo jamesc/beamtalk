@@ -66,6 +66,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Pid"
             | "Port"
             | "ProtoObject"
+            | "Protocol"
             | "Queue"
             | "Random"
             | "ReactiveSubprocess"
@@ -335,6 +336,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "isBehaviour".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test whether this is a Behaviour (class-describing object).\n\n## Examples\n```beamtalk\nCounter isBehaviour   // => true\n42 isBehaviour        // => false\n```".into()) },
                 MethodInfo { selector: "isMeta".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test whether this is a metaclass. Returns false; overridden in Metaclass.\n\n## Examples\n```beamtalk\nCounter isMeta   // => false\n```".into()) },
                 MethodInfo { selector: "isMetaclass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test whether this is a Metaclass. Returns false; overridden in Metaclass.\n\n## Examples\n```beamtalk\nCounter isMetaclass   // => false\nInteger isMetaclass   // => false\n```".into()) },
+                MethodInfo { selector: "conformsTo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Symbol".into())], doc: Some("Test whether instances of the receiver conform to a protocol.\n\nStructural conformance: the class conforms if it responds to all\nrequired selectors of the protocol.\n\n## Examples\n```beamtalk\nInteger conformsTo: #Printable    // => true\nInteger conformsTo: #Sortable     // => false (if Sortable requires sortKey)\n```".into()) },
+                MethodInfo { selector: "protocols".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return the list of protocols this class conforms to.\n\nReturns a list of protocol name symbols, sorted alphabetically.\n\n## Examples\n```beamtalk\nInteger protocols   // => [#Printable, #Comparable, ...]\n```".into()) },
                 MethodInfo { selector: "sourceFile".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Return the path of the source file this class was compiled from, or nil.\n\nReturns nil for stdlib classes, bootstrap classes, and classes created\nvia ClassBuilder (dynamic classes with no backing file).\n\n## Examples\n```beamtalk\nCounter sourceFile   // => \"examples/counter.bt\"\nInteger sourceFile   // => nil (stdlib built-in)\n```".into()) },
                 MethodInfo { selector: "reload".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Behaviour".into()), param_types: vec![], doc: Some("Recompile this class from its source file and hot-swap the BEAM module.\n\nLive actors pick up new code on next message dispatch (BEAM two-version\ncode loading — no state migration needed for method changes).\n\nRaises an error if `sourceFile` is nil — stdlib and dynamic classes\n(created via ClassBuilder) cannot be reloaded from source.\n\n## Examples\n```beamtalk\nCounter reload              // recompile + hot-swap Counter\nInteger reload              // => Error: Integer has no source file — stdlib classes cannot be reloaded\n```".into()) },
                 MethodInfo { selector: "removeFromSystem".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Remove this class from the system, cleaning up all associated state.\n\nFollows Smalltalk convention (`Counter removeFromSystem`). Performs full\ncleanup: stops live actors of the class, terminates the class gen_server,\nremoves from class hierarchy ETS table and pg group, and purges the BEAM\nmodule.\n\nSafety checks:\n- Refuses to remove stdlib/sealed classes (Integer, String, Object, etc.)\n- Refuses if class has subclasses (must remove children first)\n- Stops all live actors of this class before removal\n\n## Examples\n```beamtalk\nCounter removeFromSystem   // => nil (Counter class removed)\nInteger removeFromSystem   // => Error: cannot remove stdlib class\n```".into()) },
@@ -1686,6 +1689,31 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "perform:withArguments:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None, None], doc: Some("Send a message dynamically with an arguments list.\n\n## Examples\n```beamtalk\n42 perform: #abs withArguments: #()   // => 42\n```".into()) },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Protocol".into(),
+        ClassInfo {
+            name: "Protocol".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "requiredMethods:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Protocol".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Symbol".into())], doc: Some("Return the required method selectors for a protocol.\n\nReturns a list of selector symbols. Includes methods from extended\nprotocols. Returns an empty list if the protocol is not registered.\n\n## Examples\n```beamtalk\nProtocol requiredMethods: #Printable   // => [#asString]\n```".into()) },
+                MethodInfo { selector: "conformingClasses:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Protocol".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Symbol".into())], doc: Some("Return the list of classes conforming to a protocol.\n\nReturns class objects for all registered classes that respond to all\nrequired selectors of the protocol. Returns an empty list if the\nprotocol is not registered.\n\n## Examples\n```beamtalk\nProtocol conformingClasses: #Printable   // => [Integer, String, ...]\n```".into()) },
+                MethodInfo { selector: "isProtocol:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Protocol".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Symbol".into())], doc: Some("Test whether a name is a registered protocol.\n\n## Examples\n```beamtalk\nProtocol isProtocol: #Printable   // => true\nProtocol isProtocol: #NotReal     // => false\n```".into()) },
+                MethodInfo { selector: "allProtocols".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Protocol".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return all registered protocol names.\n\n## Examples\n```beamtalk\nProtocol allProtocols   // => [#Printable, #Comparable, ...]\n```".into()) },
+            ],
             class_variables: vec![],
             type_params: vec![],
             superclass_type_args: vec![],
