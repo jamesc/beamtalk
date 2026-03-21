@@ -288,7 +288,8 @@ pub fn is_input_complete(source: &str) -> bool {
             TokenKind::Keyword(k) if k == "subclass:" => has_subclass_keyword = true,
             // Track protocol definition pattern (Protocol define: Name ...)
             TokenKind::Keyword(k) if k == "define:" => {
-                if matches!(last_meaningful_kind, Some(TokenKind::Identifier(name)) if name == "Protocol") {
+                if matches!(last_meaningful_kind, Some(TokenKind::Identifier(name)) if name == "Protocol")
+                {
                     has_protocol_define = true;
                 }
             }
