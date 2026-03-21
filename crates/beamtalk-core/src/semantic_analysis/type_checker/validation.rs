@@ -266,7 +266,10 @@ impl TypeChecker {
         };
 
         match &expected {
-            InferredType::Known { class_name: expected_ty, .. } => {
+            InferredType::Known {
+                class_name: expected_ty,
+                ..
+            } => {
                 if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
                     let selector = method.selector.name();
                     self.diagnostics.push(
