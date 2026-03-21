@@ -1327,6 +1327,23 @@ fn run_lint_structured(path: &str) -> LintResult {
             .collect();
         lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
 
+        // BT-1587: Run semantic analysis to collect type/DNU diagnostics,
+        // mirroring CLI `beamtalk lint`. Without this, compile-level warnings
+        // (e.g. "Object does not understand 'at:'", type mismatches) are missed.
+        let analysis_result = beamtalk_core::semantic_analysis::analyse(&module);
+        lint_diags.extend(
+            analysis_result
+                .diagnostics
+                .into_iter()
+                .filter(|d| d.category.is_some()),
+        );
+
+        // Apply @expect directives to suppress matching diagnostics (BT-1476).
+        beamtalk_core::queries::diagnostic_provider::apply_expect_directives(
+            &module,
+            &mut lint_diags,
+        );
+
         let file_name = file.to_string_lossy().into_owned();
         for diag in &lint_diags {
             let line = offset_to_line(&source, diag.span.start() as usize);
@@ -1441,6 +1458,71 @@ mod tests {
         assert_eq!(result.total, 1);
         assert!(result.errors.len() == 1);
         assert!(result.errors[0].message.contains(".bt source file"));
+    }
+
+    #[test]
+    fn run_lint_structured_includes_dnu_diagnostics() {
+        // BT-1587: MCP lint must include DNU diagnostics from semantic analysis,
+        // matching CLI `beamtalk lint` behavior.
+        let dir =
+            std::env::temp_dir().join(format!("beamtalk-mcp-lint-dnu-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("dnu_test.bt");
+        std::fs::write(
+            &file,
+            r#"Object subclass: DnuTest
+
+  class demo =>
+    s := "hello"
+    val := s sqrt
+    val
+"#,
+        )
+        .unwrap();
+        let result = run_lint_structured(file.to_str().unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+        let has_dnu = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            has_dnu,
+            "MCP lint should report DNU diagnostics from semantic analysis, got: {result:?}",
+        );
+    }
+
+    #[test]
+    fn run_lint_structured_expect_type_suppresses_dnu() {
+        // BT-1587: @expect type should suppress DNU diagnostics in MCP lint,
+        // just as it does in CLI lint.
+        let dir =
+            std::env::temp_dir().join(format!("beamtalk-mcp-lint-expect-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("expect_test.bt");
+        std::fs::write(
+            &file,
+            r#"Object subclass: ExpectTest
+
+  class demo =>
+    s := "hello"
+    @expect type
+    val := s sqrt
+    val
+"#,
+        )
+        .unwrap();
+        let result = run_lint_structured(file.to_str().unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+        let has_dnu = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !has_dnu,
+            "@expect type should suppress DNU in MCP lint, got: {result:?}",
+        );
     }
 
     // --- search_examples ---
