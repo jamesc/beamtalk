@@ -93,6 +93,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0066](0066-open-class-extension-methods.md) | Open Class Extension Methods (`>>` Syntax) | Accepted | 2026-03-18 |
 | [0067](0067-separate-state-field-keywords-by-class-kind.md) | Separate state:/field: Keywords by Class Kind | Accepted | 2026-03-18 |
 | [0068](0068-parametric-types-and-protocols.md) | Parametric Types and Protocols | Proposed | 2026-03-20 |
+| [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Proposed | 2026-03-21 |
 
 ## Creating New ADRs
 
