@@ -253,10 +253,12 @@ impl TypeChecker {
         };
 
         // For `-> Self`, the expected type is the class itself
+        // For `-> Generic(...)`, extract the base type name for compatibility checking
         let expected_ty: EcoString = match declared {
             TypeAnnotation::Simple(type_id) => type_id.name.clone(),
             TypeAnnotation::SelfType { .. } => class_name.clone(),
-            _ => return, // Phase 3 handles unions/generics
+            TypeAnnotation::Generic { base, .. } => base.name.clone(),
+            _ => return, // Phase 3 handles unions/singletons
         };
 
         if !Self::is_type_compatible(actual_ty, &expected_ty, hierarchy) {
@@ -505,9 +507,10 @@ impl TypeChecker {
     /// For example, Integer is assignable to Number because Integer's superclass
     /// chain includes Number.
     ///
-    /// Returns true (permissive) for complex type annotations (unions, generics)
-    /// that are not yet supported — full union type support is Phase 3.
-    fn is_assignable_to(
+    /// For generic types (`Result(Integer, Error)`), compares the base type name.
+    /// For union types and singletons, returns true (permissive) — full union
+    /// checking is Phase 3.
+    pub(super) fn is_assignable_to(
         value_type: &EcoString,
         declared_type: &EcoString,
         hierarchy: &ClassHierarchy,
@@ -515,20 +518,32 @@ impl TypeChecker {
         if value_type == declared_type {
             return true;
         }
-        // Skip checking for complex type annotations (unions, generics, singletons)
-        // that contain non-class-name characters. These need Phase 3 union support.
-        if declared_type.contains('|')
-            || declared_type.contains('<')
-            || declared_type.contains('(')
-            || declared_type.starts_with('#')
-        {
+        // Skip checking for union and singleton types — Phase 3
+        if declared_type.contains('|') || declared_type.starts_with('#') {
             return true;
         }
-        // Check if value_type is a subclass of declared_type
+        // For generic declared types like "Result(Integer, Error)", extract
+        // the base type name and compare structurally.
+        let declared_base = if let Some(open) = declared_type.find('(') {
+            &declared_type[..open]
+        } else {
+            declared_type.as_str()
+        };
+        let value_base = if let Some(open) = value_type.find('(') {
+            &value_type[..open]
+        } else {
+            value_type.as_str()
+        };
+        if value_base == declared_base {
+            return true;
+        }
+        // Check if value_type's base is a subclass of declared_type's base
+        let value_eco: EcoString = value_base.into();
+        let declared_eco: EcoString = declared_base.into();
         hierarchy
-            .superclass_chain(value_type)
+            .superclass_chain(&value_eco)
             .iter()
-            .any(|ancestor| ancestor == declared_type)
+            .any(|ancestor| ancestor == &declared_eco)
     }
 
     /// Emit a warning diagnostic for an unknown selector.
