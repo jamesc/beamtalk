@@ -1226,9 +1226,38 @@ impl CoreErlangGenerator {
         module: &Module,
         synthesize_supervision_spec: bool,
     ) -> Result<Document<'static>> {
-        // Skip if no class definitions
-        if module.classes.is_empty() {
+        // BT-1610: Skip only if there are no class definitions AND no protocols.
+        // Protocol-only files still need register_class/0 for protocol registration.
+        if module.classes.is_empty() && module.protocols.is_empty() {
             return Ok(Document::Nil);
+        }
+
+        // BT-1610: Protocol-only module — generate register_class/0 with only
+        // protocol registration calls, no class builder chain.
+        if module.classes.is_empty() {
+            let protocol_reg_doc = Self::generate_protocol_registrations(module);
+            return Ok(docvec![
+                "'register_class'/0 = fun () ->",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "try",
+                        nest(INDENT, docvec![protocol_reg_doc, line(), "'ok'", "\n",],),
+                    ]
+                ),
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "of _ProtoRegResult -> _ProtoRegResult",
+                        line(),
+                        "catch <CatchType, CatchError, CatchStack> -> primop \
+                         'raw_raise'(CatchType, CatchError, CatchStack)",
+                    ]
+                ),
+                "\n\n",
+            ]);
         }
 
         let mut class_docs = Vec::new();

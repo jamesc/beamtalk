@@ -3395,3 +3395,71 @@ fn test_class_method_self_send_in_block_local_assignment() {
         "Should not have double `in` from unclosed open scope. Got:\n{code}"
     );
 }
+
+/// BT-1610: A module with only Protocol definitions (no classes) should still
+/// generate `register_class/0` that registers the protocols.
+#[test]
+fn protocol_only_module_generates_register_class() {
+    let module = Module {
+        classes: vec![],
+        method_definitions: Vec::new(),
+        protocols: vec![ProtocolDefinition {
+            name: Identifier::new("Displayable", Span::new(0, 0)),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("asString".into()),
+                parameters: vec![],
+                return_type: None,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: Span::new(0, 0),
+            }],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: Span::new(0, 0),
+        }],
+        expressions: vec![],
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+
+    let result = generate_module(&module, CodegenOptions::new("bt@proto_only"));
+    assert!(
+        result.is_ok(),
+        "Protocol-only module should compile. Got: {:?}",
+        result.err()
+    );
+    let code = result.unwrap();
+
+    // Should have register_class/0 in exports
+    assert!(
+        code.contains("'register_class'/0"),
+        "Should export register_class/0. Got:\n{code}"
+    );
+
+    // Should have on_load attribute
+    assert!(
+        code.contains("'on_load' = [{'register_class', 0}]"),
+        "Should have on_load attribute. Got:\n{code}"
+    );
+
+    // Should call beamtalk_protocol_registry:register_protocol
+    assert!(
+        code.contains("'beamtalk_protocol_registry':'register_protocol'"),
+        "Should call register_protocol. Got:\n{code}"
+    );
+
+    // Should reference the Displayable protocol name
+    assert!(
+        code.contains("'Displayable'"),
+        "Should reference protocol name. Got:\n{code}"
+    );
+
+    // Should NOT have class builder calls (no classes)
+    assert!(
+        !code.contains("'beamtalk_class_builder':'register'"),
+        "Should not call class_builder:register. Got:\n{code}"
+    );
+}

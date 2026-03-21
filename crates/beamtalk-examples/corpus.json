@@ -15968,23 +15968,16 @@
     },
     {
       "id": "stdlib-test-fixtures-protocol-test-protos",
-      "title": "ProtocolTestProtoAnchor",
+      "title": "Protocol Test Protos",
       "category": "stdlib-fixtures",
       "tags": [
-        "ProtocolTestProtoAnchor",
-        "Value",
-        "extends",
-        "inherit",
-        "inheritance",
         "protocol_test_protos",
         "string conversion",
-        "subclassing",
         "toString",
-        "to_string",
-        "value"
+        "to_string"
       ],
-      "source": "// Test protocol definitions for protocol_queries_test.bt (ADR 0068 Phase 2c).\n// A dummy class is needed so the compiler generates register_class/0 which\n// includes the protocol registration calls.\nProtocol define: Displayable\n  asString -> String\n  printString -> String\nProtocol define: HasSize\n  size -> Integer\nValue subclass: ProtocolTestProtoAnchor",
-      "explanation": "Test protocol definitions for protocol_queries_test.bt (ADR 0068 Phase 2c). A dummy class is needed so the compiler generates register_class/0 which includes the protocol registration calls."
+      "source": "// Test protocol definitions for protocol_queries_test.bt (ADR 0068 Phase 2c).\n// BT-1610: Protocol-only files now generate register_class/0 for protocol\n// registration — no dummy anchor class needed.\nProtocol define: Displayable\n  asString -> String\n  printString -> String\nProtocol define: HasSize\n  size -> Integer",
+      "explanation": "Test protocol definitions for protocol_queries_test.bt (ADR 0068 Phase 2c). BT-1610: Protocol-only files now generate register_class/0 for protocol registration — no dummy anchor class needed."
     },
     {
       "id": "stdlib-test-fixtures-recursive-actor",
