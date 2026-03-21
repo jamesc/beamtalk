@@ -5,7 +5,7 @@
 // initialize: calls startChild — this verifies the hook runs and the supervisor
 // is responsive during the callback.
 
-DynamicSupervisor subclass: DynSupWithInitialize
+DynamicSupervisor(Counter) subclass: DynSupWithInitialize
 
   class childClass => Counter
 

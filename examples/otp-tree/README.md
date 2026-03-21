@@ -170,7 +170,7 @@ declares `#permanent`; `WorkerPool` is a `DynamicSupervisor` (treated as
 `WorkerPool` is a `DynamicSupervisor subclass:` that names the worker class:
 
 ```beamtalk
-DynamicSupervisor subclass: WorkerPool
+DynamicSupervisor(TaskWorker) subclass: WorkerPool
   class childClass => TaskWorker
 ```
 

@@ -4,6 +4,6 @@
 // E2E fixture: DynamicSupervisor subclass managing Counter workers.
 // Used by supervisor.btscript (BT-1223).
 
-DynamicSupervisor subclass: E2EWorkerPool
+DynamicSupervisor(Counter) subclass: E2EWorkerPool
 
   class childClass -> Class => Counter

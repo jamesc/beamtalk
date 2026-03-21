@@ -1528,7 +1528,7 @@ HttpServer supervisionSpec withShutdown: 30000   // 30s graceful shutdown
 Subclass `DynamicSupervisor` to manage pools of actors started at runtime. Override `class childClass` to declare which actor class the pool manages.
 
 ```beamtalk
-DynamicSupervisor subclass: WorkerPool
+DynamicSupervisor(Worker) subclass: WorkerPool
   class childClass => Worker
 ```
 
@@ -1572,7 +1572,7 @@ root which: DatabaseSupervisor      // => #Supervisor<DatabaseSupervisor,_>
 | Beamtalk | BEAM |
 |----------|------|
 | `Supervisor subclass:` | `-behaviour(supervisor)` with `one_for_one` |
-| `DynamicSupervisor subclass:` | `-behaviour(supervisor)` with `simple_one_for_one` |
+| `DynamicSupervisor(C) subclass:` | `-behaviour(supervisor)` with `simple_one_for_one` |
 | `supervise` | `supervisor:start_link({local, Module}, Module, [])` |
 | `current` | `whereis(Module)` |
 | `count` | `supervisor:count_children/1` (active count) |

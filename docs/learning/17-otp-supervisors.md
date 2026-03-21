@@ -167,7 +167,7 @@ TestCase subclass: Ch17DynamicSupervisor
 A `WorkerPool` is defined like this:
 
 ```beamtalk
-DynamicSupervisor subclass: WorkerPool
+DynamicSupervisor(Counter) subclass: WorkerPool
   class childClass => Counter
 ```
 
@@ -242,7 +242,7 @@ Supervisor subclass: MyApp
 Dynamic supervision tree:
 
 ```beamtalk
-DynamicSupervisor subclass: WorkerPool
+DynamicSupervisor(Counter) subclass: WorkerPool
   class childClass => Counter
 
 // pool := WorkerPool supervise
