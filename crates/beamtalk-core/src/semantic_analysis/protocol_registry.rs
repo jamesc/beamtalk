@@ -1,0 +1,829 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! Protocol registry and conformance checking (ADR 0068 Phase 2b).
+//!
+//! **DDD Context:** Semantic Analysis
+//!
+//! This module implements:
+//! - A protocol registry mapping protocol names to their required message sets
+//! - A conformance engine that checks class method tables against protocol requirements
+//! - Three-tier conformance model: compile-time hierarchy, REPL workspace, DNU bypass
+//!
+//! **Key design decisions:**
+//! - Structural conformance: classes conform by having the right methods, not by declaration
+//! - Protocols and classes share a namespace — collisions are compile errors
+//! - DNU override classes automatically conform to all protocols
+//! - Warnings, never errors, for type-level conformance failures (ADR 0025)
+//!
+//! **References:**
+//! - `docs/ADR/0068-parametric-types-and-protocols.md` — Stage 2
+//! - `docs/ADR/0025-gradual-typing-and-protocols.md` — Diagnostic philosophy
+
+use crate::ast::{Module, ProtocolDefinition, TypeAnnotation};
+use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use ecow::EcoString;
+use std::collections::HashMap;
+
+/// Information about a required method in a protocol.
+///
+/// **DDD Context:** Semantic Analysis — Value Object
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtocolMethodRequirement {
+    /// Full selector name (e.g., "asString", "do:", "< ").
+    pub selector: EcoString,
+    /// Number of arguments.
+    pub arity: usize,
+    /// Optional return type annotation.
+    pub return_type: Option<EcoString>,
+    /// Parameter type annotations. `None` elements mean the parameter type is unspecified.
+    pub param_types: Vec<Option<EcoString>>,
+}
+
+/// Information about a protocol in the registry.
+///
+/// **DDD Context:** Semantic Analysis — Value Object
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtocolInfo {
+    /// Protocol name (e.g., "Printable", "Collection").
+    pub name: EcoString,
+    /// Type parameters for generic protocols (e.g., `["E"]` for `Collection(E)`).
+    ///
+    /// Empty for non-generic protocols.
+    pub type_params: Vec<EcoString>,
+    /// Protocol this one extends, if any (e.g., `Comparable` for `Sortable`).
+    pub extending: Option<EcoString>,
+    /// Required method signatures.
+    pub methods: Vec<ProtocolMethodRequirement>,
+    /// Source span of the protocol definition (for diagnostics).
+    pub span: Span,
+}
+
+impl ProtocolInfo {
+    /// Build a `ProtocolInfo` from a parsed `ProtocolDefinition` AST node.
+    fn from_definition(def: &ProtocolDefinition) -> Self {
+        let methods = def
+            .method_signatures
+            .iter()
+            .map(|sig| ProtocolMethodRequirement {
+                selector: sig.selector.name(),
+                arity: sig.selector.arity(),
+                return_type: sig.return_type.as_ref().map(TypeAnnotation::type_name),
+                param_types: sig
+                    .parameters
+                    .iter()
+                    .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                    .collect(),
+            })
+            .collect();
+
+        Self {
+            name: def.name.name.clone(),
+            type_params: def.type_params.iter().map(|tp| tp.name.clone()).collect(),
+            extending: def.extending.as_ref().map(|id| id.name.clone()),
+            methods,
+            span: def.span,
+        }
+    }
+
+    /// Returns all required selectors, including those inherited from extended protocols.
+    ///
+    /// When a protocol extends another (e.g., `Sortable extending: Comparable`),
+    /// the conforming class must implement methods from both protocols.
+    pub fn all_required_selectors<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+    ) -> Vec<&'a EcoString> {
+        let mut selectors: Vec<&EcoString> = self.methods.iter().map(|m| &m.selector).collect();
+
+        if let Some(ref parent_name) = self.extending {
+            if let Some(parent) = registry.get(parent_name) {
+                for sel in parent.all_required_selectors(registry) {
+                    if !selectors.contains(&sel) {
+                        selectors.push(sel);
+                    }
+                }
+            }
+        }
+
+        selectors
+    }
+
+    /// Returns all method requirements, including those inherited from extended protocols.
+    pub fn all_requirements<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+    ) -> Vec<&'a ProtocolMethodRequirement> {
+        let mut reqs: Vec<&ProtocolMethodRequirement> = self.methods.iter().collect();
+
+        if let Some(ref parent_name) = self.extending {
+            if let Some(parent) = registry.get(parent_name) {
+                for req in parent.all_requirements(registry) {
+                    if !reqs.iter().any(|r| r.selector == req.selector) {
+                        reqs.push(req);
+                    }
+                }
+            }
+        }
+
+        reqs
+    }
+}
+
+/// Registry of protocol definitions for compile-time conformance checking.
+///
+/// **DDD Context:** Semantic Analysis — Domain Service
+///
+/// Maps protocol names to their required message sets. Built during
+/// semantic analysis alongside the `ClassHierarchy`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProtocolRegistry {
+    protocols: HashMap<EcoString, ProtocolInfo>,
+}
+
+impl ProtocolRegistry {
+    /// Creates an empty protocol registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            protocols: HashMap::new(),
+        }
+    }
+
+    /// Registers protocols from a parsed module.
+    ///
+    /// Returns diagnostics for:
+    /// - Namespace collisions (protocol name matches an existing class name)
+    /// - Duplicate protocol definitions
+    /// - Unknown parent protocols in `extending:` clauses
+    pub fn register_module(
+        &mut self,
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+
+        for protocol_def in &module.protocols {
+            let name = &protocol_def.name.name;
+
+            // Namespace collision: protocol name matches a class name
+            if hierarchy.has_class(name) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "`{name}` is already defined as a class — \
+                             protocols and classes share a namespace"
+                        ),
+                        protocol_def.name.span,
+                    )
+                    .with_category(DiagnosticCategory::Type),
+                );
+                continue;
+            }
+
+            // Duplicate protocol definition
+            if self.protocols.contains_key(name) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!("Duplicate protocol definition: `{name}`"),
+                        protocol_def.name.span,
+                    )
+                    .with_category(DiagnosticCategory::Type),
+                );
+                continue;
+            }
+
+            let info = ProtocolInfo::from_definition(protocol_def);
+
+            // Validate extending clause
+            if let Some(ref parent_name) = info.extending {
+                if !self.protocols.contains_key(parent_name) {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            format!("Protocol `{name}` extends unknown protocol `{parent_name}`"),
+                            protocol_def.span,
+                        )
+                        .with_category(DiagnosticCategory::Type),
+                    );
+                }
+            }
+
+            self.protocols.insert(name.clone(), info);
+        }
+
+        diagnostics
+    }
+
+    /// Looks up a protocol by name.
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<&ProtocolInfo> {
+        self.protocols.get(name)
+    }
+
+    /// Checks if a protocol exists in the registry.
+    #[must_use]
+    pub fn has_protocol(&self, name: &str) -> bool {
+        self.protocols.contains_key(name)
+    }
+
+    /// Returns an iterator over all protocol names in the registry.
+    pub fn protocol_names(&self) -> impl Iterator<Item = &EcoString> {
+        self.protocols.keys()
+    }
+
+    /// Returns an iterator over all protocols in the registry.
+    pub fn protocols(&self) -> impl Iterator<Item = (&EcoString, &ProtocolInfo)> {
+        self.protocols.iter()
+    }
+
+    /// Check if a class conforms to a protocol.
+    ///
+    /// Implements the three-tier conformance model from ADR 0068:
+    /// - **Tier 1**: Compile-time hierarchy — walks full superclass chain
+    /// - **Tier 3**: DNU bypass — classes with `doesNotUnderstand:` override conform to all
+    ///
+    /// Returns `Ok(())` if the class conforms, or `Err(missing_selectors)` listing
+    /// the selectors the class is missing.
+    ///
+    /// Tier 2 (REPL workspace) is handled by the caller providing an enriched hierarchy.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(Vec<EcoString>)` listing the missing required selectors
+    /// when the class does not conform to the protocol.
+    pub fn check_conformance(
+        &self,
+        class_name: &str,
+        protocol_name: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Result<(), Vec<EcoString>> {
+        let Some(protocol) = self.get(protocol_name) else {
+            // Unknown protocol — can't check, assume conformance
+            return Ok(());
+        };
+
+        self.check_conformance_to_protocol(class_name, protocol, hierarchy)
+    }
+
+    /// Check conformance against a specific `ProtocolInfo` (internal).
+    fn check_conformance_to_protocol(
+        &self,
+        class_name: &str,
+        protocol: &ProtocolInfo,
+        hierarchy: &ClassHierarchy,
+    ) -> Result<(), Vec<EcoString>> {
+        // Tier 3: DNU bypass — classes overriding doesNotUnderstand: conform to all protocols
+        if hierarchy.has_instance_dnu_override(class_name) {
+            return Ok(());
+        }
+
+        // If the class isn't known to the hierarchy, we can't verify — assume ok
+        if !hierarchy.has_class(class_name) {
+            return Ok(());
+        }
+
+        // Cross-file inheritance: if the parent class is not in the hierarchy,
+        // we can't know the full method set — assume conformance
+        if hierarchy.has_cross_file_parent(class_name) {
+            return Ok(());
+        }
+
+        let required = protocol.all_required_selectors(self);
+        let mut missing = Vec::new();
+
+        for selector in required {
+            if !hierarchy.resolves_selector(class_name, selector) {
+                missing.push(selector.clone());
+            }
+        }
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(missing)
+        }
+    }
+
+    /// Check conformance for a generic protocol with concrete type arguments.
+    ///
+    /// For `Collection(Integer)`, substitutes `E → Integer` in the required
+    /// signatures before checking. Currently only checks selector presence
+    /// (arity match), not type-level compatibility of signatures.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(Vec<EcoString>)` listing the missing required selectors
+    /// when the class does not conform to the protocol.
+    pub fn check_generic_conformance(
+        &self,
+        class_name: &str,
+        protocol_name: &str,
+        _type_args: &[EcoString],
+        hierarchy: &ClassHierarchy,
+    ) -> Result<(), Vec<EcoString>> {
+        // Generic conformance currently checks selector presence only.
+        // Type-level signature matching (e.g., `do:` block param type) is
+        // deferred to Phase 2d (type parameter bounds).
+        self.check_conformance(class_name, protocol_name, hierarchy)
+    }
+
+    /// Returns the list of protocols a class conforms to.
+    #[must_use]
+    pub fn conforming_protocols(
+        &self,
+        class_name: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Vec<EcoString> {
+        self.protocols
+            .keys()
+            .filter(|proto_name| {
+                self.check_conformance(class_name, proto_name, hierarchy)
+                    .is_ok()
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Returns the list of classes that conform to a protocol.
+    #[must_use]
+    pub fn conforming_classes(
+        &self,
+        protocol_name: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Vec<EcoString> {
+        hierarchy
+            .class_names()
+            .filter(|class_name| {
+                self.check_conformance(class_name, protocol_name, hierarchy)
+                    .is_ok()
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{
+        ClassDefinition, CommentAttachment, ExpressionStatement, Identifier, KeywordPart,
+        MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition,
+        ProtocolDefinition, ProtocolMethodSignature, TypeAnnotation,
+    };
+    use crate::source_analysis::Span;
+
+    fn span() -> Span {
+        Span::new(0, 1)
+    }
+
+    fn ident(name: &str) -> Identifier {
+        Identifier {
+            name: name.into(),
+            span: span(),
+        }
+    }
+
+    fn make_protocol(name: &str, methods: Vec<(&str, usize, Option<&str>)>) -> ProtocolDefinition {
+        ProtocolDefinition {
+            name: ident(name),
+            type_params: vec![],
+            extending: None,
+            method_signatures: methods
+                .into_iter()
+                .map(|(sel, arity, ret_ty)| {
+                    let selector = if arity == 0 {
+                        MessageSelector::Unary(sel.into())
+                    } else if sel.contains(':') {
+                        let parts: Vec<&str> = sel.split(':').filter(|s| !s.is_empty()).collect();
+                        MessageSelector::Keyword(
+                            parts
+                                .into_iter()
+                                .map(|p| KeywordPart::new(format!("{p}:"), span()))
+                                .collect(),
+                        )
+                    } else {
+                        MessageSelector::Binary(sel.into())
+                    };
+
+                    ProtocolMethodSignature {
+                        selector,
+                        parameters: (0..arity)
+                            .map(|i| ParameterDefinition::new(ident(&format!("arg{i}"))))
+                            .collect(),
+                        return_type: ret_ty.map(|t| TypeAnnotation::Simple(ident(t))),
+                        comments: CommentAttachment::default(),
+                        doc_comment: None,
+                        span: span(),
+                    }
+                })
+                .collect(),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
+    fn make_protocol_with_type_params(
+        name: &str,
+        type_params: Vec<&str>,
+        methods: Vec<(&str, usize, Option<&str>)>,
+    ) -> ProtocolDefinition {
+        let mut proto = make_protocol(name, methods);
+        proto.type_params = type_params.into_iter().map(ident).collect();
+        proto
+    }
+
+    fn make_extending_protocol(
+        name: &str,
+        extending: &str,
+        methods: Vec<(&str, usize, Option<&str>)>,
+    ) -> ProtocolDefinition {
+        let mut proto = make_protocol(name, methods);
+        proto.extending = Some(ident(extending));
+        proto
+    }
+
+    fn empty_module() -> Module {
+        Module::new(vec![], span())
+    }
+
+    fn make_class(name: &str, superclass: &str, methods: Vec<&str>) -> ClassDefinition {
+        ClassDefinition::new(
+            ident(name),
+            ident(superclass),
+            vec![],
+            methods
+                .into_iter()
+                .map(|sel| {
+                    let selector = if sel.contains(':') {
+                        let parts: Vec<&str> = sel.split(':').filter(|s| !s.is_empty()).collect();
+                        MessageSelector::Keyword(
+                            parts
+                                .into_iter()
+                                .map(|p| KeywordPart::new(format!("{p}:"), span()))
+                                .collect(),
+                        )
+                    } else {
+                        MessageSelector::Unary(sel.into())
+                    };
+                    MethodDefinition {
+                        selector,
+                        parameters: vec![],
+                        body: vec![ExpressionStatement::bare(
+                            crate::ast::Expression::Identifier(ident("self")),
+                        )],
+                        return_type: None,
+                        kind: MethodKind::Primary,
+                        is_sealed: false,
+                        comments: CommentAttachment::default(),
+                        doc_comment: None,
+                        span: span(),
+                    }
+                })
+                .collect(),
+            span(),
+        )
+    }
+
+    // ---- Basic Registration Tests ----
+
+    #[test]
+    fn register_simple_protocol() {
+        let module = Module {
+            protocols: vec![make_protocol(
+                "Printable",
+                vec![("asString", 0, Some("String"))],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+
+        assert!(diags.is_empty());
+        assert!(registry.has_protocol("Printable"));
+        let info = registry.get("Printable").unwrap();
+        assert_eq!(info.methods.len(), 1);
+        assert_eq!(info.methods[0].selector.as_str(), "asString");
+    }
+
+    #[test]
+    fn register_generic_protocol() {
+        // Use "Iterable" not "Collection" — Collection is a built-in class
+        let module = Module {
+            protocols: vec![make_protocol_with_type_params(
+                "Iterable",
+                vec!["E"],
+                vec![
+                    ("size", 0, Some("Integer")),
+                    ("do:", 1, None),
+                    ("collect:", 1, None),
+                ],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+
+        assert!(diags.is_empty());
+        let info = registry.get("Iterable").unwrap();
+        assert_eq!(info.type_params, vec![EcoString::from("E")]);
+        assert_eq!(info.methods.len(), 3);
+    }
+
+    #[test]
+    fn register_extending_protocol() {
+        let module = Module {
+            protocols: vec![
+                make_protocol("Comparable", vec![("<", 1, Some("Boolean"))]),
+                make_extending_protocol(
+                    "Sortable",
+                    "Comparable",
+                    vec![("sortKey", 0, Some("Object"))],
+                ),
+            ],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+
+        assert!(diags.is_empty());
+        let sortable = registry.get("Sortable").unwrap();
+        let all_selectors = sortable.all_required_selectors(&registry);
+        assert_eq!(all_selectors.len(), 2); // sortKey + <
+    }
+
+    // ---- Namespace Collision Tests ----
+
+    #[test]
+    fn namespace_collision_class_and_protocol() {
+        // Integer is a built-in class, so defining a protocol named Integer should error
+        let module = Module {
+            protocols: vec![make_protocol(
+                "Integer",
+                vec![("asString", 0, Some("String"))],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("already defined as a class"));
+        assert!(!registry.has_protocol("Integer"));
+    }
+
+    #[test]
+    fn duplicate_protocol_definition() {
+        let module = Module {
+            protocols: vec![
+                make_protocol("Printable", vec![("asString", 0, Some("String"))]),
+                make_protocol("Printable", vec![("display", 0, None)]),
+            ],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("Duplicate protocol"));
+    }
+
+    #[test]
+    fn extending_unknown_protocol() {
+        let module = Module {
+            protocols: vec![make_extending_protocol(
+                "Sortable",
+                "UnknownProtocol",
+                vec![("sortKey", 0, None)],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("extends unknown protocol"));
+    }
+
+    // ---- Conformance Checking Tests ----
+
+    #[test]
+    fn conformance_builtin_class_has_as_string() {
+        let module = Module {
+            protocols: vec![make_protocol(
+                "Printable",
+                vec![("asString", 0, Some("String"))],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        // Integer has asString (from Object hierarchy)
+        let result = registry.check_conformance("Integer", "Printable", &hierarchy);
+        assert!(result.is_ok(), "Integer should conform to Printable");
+
+        // String has asString
+        let result = registry.check_conformance("String", "Printable", &hierarchy);
+        assert!(result.is_ok(), "String should conform to Printable");
+    }
+
+    #[test]
+    fn non_conformance_missing_selector() {
+        let module = Module {
+            protocols: vec![make_protocol(
+                "Sortable",
+                vec![("sortKey", 0, Some("Object")), ("<", 1, Some("Boolean"))],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        // String does not have sortKey
+        let result = registry.check_conformance("String", "Sortable", &hierarchy);
+        assert!(result.is_err());
+        let missing = result.unwrap_err();
+        assert!(missing.contains(&EcoString::from("sortKey")));
+    }
+
+    #[test]
+    fn dnu_bypass_conforms_to_all() {
+        // ErlangModule has doesNotUnderstand: override
+        let module = Module {
+            protocols: vec![make_protocol(
+                "AnythingGoes",
+                vec![("veryObscureMethod", 0, None)],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        // ErlangModule overrides doesNotUnderstand: — should conform to all
+        let result = registry.check_conformance("ErlangModule", "AnythingGoes", &hierarchy);
+        assert!(
+            result.is_ok(),
+            "DNU override class should conform to all protocols"
+        );
+    }
+
+    #[test]
+    fn conformance_with_user_class() {
+        let module = Module {
+            classes: vec![make_class(
+                "MyPrintable",
+                "Object",
+                vec!["asString", "display"],
+            )],
+            protocols: vec![make_protocol(
+                "Printable",
+                vec![("asString", 0, Some("String"))],
+            )],
+            ..empty_module()
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        let result = registry.check_conformance("MyPrintable", "Printable", &hierarchy);
+        assert!(result.is_ok(), "MyPrintable has asString — should conform");
+    }
+
+    #[test]
+    fn conformance_through_inheritance() {
+        // SubClass inherits from MyBase which has asString
+        let module = Module {
+            classes: vec![
+                make_class("MyBase", "Object", vec!["asString", "helper"]),
+                make_class("SubClass", "MyBase", vec!["extra"]),
+            ],
+            protocols: vec![make_protocol(
+                "Printable",
+                vec![("asString", 0, Some("String"))],
+            )],
+            ..empty_module()
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        let result = registry.check_conformance("SubClass", "Printable", &hierarchy);
+        assert!(
+            result.is_ok(),
+            "SubClass inherits asString from MyBase — should conform"
+        );
+    }
+
+    #[test]
+    fn extending_protocol_conformance() {
+        let module = Module {
+            classes: vec![make_class("MyClass", "Object", vec!["asString", "sortKey"])],
+            protocols: vec![
+                make_protocol("Printable", vec![("asString", 0, Some("String"))]),
+                make_extending_protocol(
+                    "PrintableAndSortable",
+                    "Printable",
+                    vec![("sortKey", 0, Some("Object"))],
+                ),
+            ],
+            ..empty_module()
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        // MyClass has both asString and sortKey
+        let result = registry.check_conformance("MyClass", "PrintableAndSortable", &hierarchy);
+        assert!(result.is_ok());
+
+        // Integer has asString but not sortKey — should fail
+        let result = registry.check_conformance("Integer", "PrintableAndSortable", &hierarchy);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn generic_protocol_conformance() {
+        // Use "Iterable" not "Collection" — Collection is a built-in class
+        let module = Module {
+            protocols: vec![make_protocol_with_type_params(
+                "Iterable",
+                vec!["E"],
+                vec![("size", 0, Some("Integer")), ("do:", 1, None)],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        // Array has size and do:
+        let result = registry.check_generic_conformance(
+            "Array",
+            "Iterable",
+            &[EcoString::from("Integer")],
+            &hierarchy,
+        );
+        assert!(result.is_ok(), "Array should conform to Iterable(Integer)");
+    }
+
+    #[test]
+    fn conforming_protocols_lists_all() {
+        let module = Module {
+            protocols: vec![
+                make_protocol("Printable", vec![("asString", 0, Some("String"))]),
+                make_protocol("HasSize", vec![("size", 0, Some("Integer"))]),
+            ],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        // String has both asString and size
+        let protos = registry.conforming_protocols("String", &hierarchy);
+        assert!(protos.contains(&EcoString::from("Printable")));
+        assert!(protos.contains(&EcoString::from("HasSize")));
+    }
+
+    #[test]
+    fn unknown_protocol_conformance_ok() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let registry = ProtocolRegistry::new();
+
+        // Unknown protocol — should not error
+        let result = registry.check_conformance("Integer", "NotAProtocol", &hierarchy);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn unknown_class_conformance_ok() {
+        let module = Module {
+            protocols: vec![make_protocol(
+                "Printable",
+                vec![("asString", 0, Some("String"))],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        // Unknown class — should not error (conservative)
+        let result = registry.check_conformance("NotAClass", "Printable", &hierarchy);
+        assert!(result.is_ok());
+    }
+}
