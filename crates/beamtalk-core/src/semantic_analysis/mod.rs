@@ -31,6 +31,7 @@ pub mod module_validator;
 pub mod name_resolver;
 pub(crate) mod pattern_bindings;
 pub mod primitive_validator;
+pub mod protocol_registry;
 pub mod return_type_writeback;
 pub(crate) mod scope;
 pub(crate) mod string_utils;
@@ -52,6 +53,7 @@ pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};
+pub use protocol_registry::{ProtocolInfo, ProtocolRegistry};
 pub use return_type_writeback::apply_return_type_writeback;
 pub use scope::BindingKind;
 pub use supervisor_kind_writeback::apply_supervisor_kind_writeback;
@@ -82,6 +84,9 @@ pub struct AnalysisResult {
 
     /// Static class hierarchy (built-in + user-defined classes).
     pub class_hierarchy: ClassHierarchy,
+
+    /// Protocol registry (ADR 0068 Phase 2b).
+    pub protocol_registry: ProtocolRegistry,
 }
 
 impl AnalysisResult {
@@ -92,6 +97,7 @@ impl AnalysisResult {
             diagnostics: Vec::new(),
             block_info: HashMap::new(),
             class_hierarchy: ClassHierarchy::with_builtins(),
+            protocol_registry: ProtocolRegistry::new(),
         }
     }
 }
@@ -301,6 +307,17 @@ fn analyse_full(
         result.class_hierarchy.register_extensions(&ext_index);
     }
 
+    // Phase 0.5: Protocol Registration (ADR 0068 Phase 2b)
+    // Register protocol definitions from the module into the protocol registry.
+    // Must happen after the class hierarchy is fully built (for namespace collision
+    // checks) and before type checking (so protocol names resolve in type annotations).
+    if !module.protocols.is_empty() {
+        let proto_diags = result
+            .protocol_registry
+            .register_module(module, &result.class_hierarchy);
+        result.diagnostics.extend(proto_diags);
+    }
+
     // Phase 1: Name Resolution
     let mut name_resolver = NameResolver::new();
     name_resolver.define_known_vars(known_vars, module.span);
@@ -316,7 +333,11 @@ fn analyse_full(
 
     // Phase 2: Type Checking (ADR 0025 Phase 1 — zero-syntax inference)
     let mut type_checker = TypeChecker::new();
-    type_checker.check_module(module, &result.class_hierarchy);
+    type_checker.check_module_with_protocols(
+        module,
+        &result.class_hierarchy,
+        &result.protocol_registry,
+    );
     result.diagnostics.extend(type_checker.take_diagnostics());
     let type_map = type_checker.take_type_map();
 
@@ -1156,6 +1177,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1548,6 +1570,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1599,6 +1622,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1886,6 +1910,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1996,6 +2021,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2074,6 +2100,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2136,6 +2163,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2191,6 +2219,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2249,6 +2278,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2309,6 +2339,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2370,6 +2401,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2434,6 +2466,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2499,6 +2532,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2561,6 +2595,7 @@ mod tests {
             }],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2620,6 +2655,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2680,6 +2716,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2743,6 +2780,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2814,6 +2852,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2883,6 +2922,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2939,6 +2979,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3003,6 +3044,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3057,6 +3099,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3137,6 +3180,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3234,6 +3278,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3308,6 +3353,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3380,6 +3426,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3527,6 +3574,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3699,6 +3747,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3840,6 +3889,7 @@ Value subclass: Caller
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
         };
 
         let src = "42.";

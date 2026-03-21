@@ -22,6 +22,22 @@ use ecow::EcoString;
 
 use super::{InferredType, TypeChecker, TypeEnv};
 
+/// Describes a control-flow narrowing detected from a type-test expression.
+///
+/// When a Boolean-producing expression like `x class = Foo` or `x isNil` is used
+/// as the receiver of `ifTrue:`/`ifFalse:`, the type checker narrows the tested
+/// variable inside the block scope (ADR 0068 Phase 1g).
+#[derive(Debug, Clone)]
+pub(super) struct NarrowingInfo {
+    /// The variable name being narrowed.
+    pub(super) variable: EcoString,
+    /// The type the variable is narrowed to in the *true* branch.
+    pub(super) true_type: InferredType,
+    /// Whether this is a nil-check (`isNil`). If so, the *false* branch
+    /// narrows to non-nil and early-return narrowing applies.
+    pub(super) is_nil_check: bool,
+}
+
 impl TypeChecker {
     /// Checks types in a module using the class hierarchy for method resolution.
     ///
@@ -429,6 +445,7 @@ impl TypeChecker {
                                 &selector_name,
                                 msg.span,
                                 hierarchy,
+                                &[], // cascade return type is receiver, not send result
                             );
                         }
                     } else if let InferredType::Known { ref class_name, .. } = receiver_ty {
@@ -439,6 +456,7 @@ impl TypeChecker {
                                     &selector_name,
                                     msg.span,
                                     hierarchy,
+                                    &[], // cascade return type is receiver, not send result
                                 );
                             }
                         } else {
@@ -583,11 +601,35 @@ impl TypeChecker {
         let receiver_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
         let selector_name = selector.name();
 
-        // Infer argument types (for side effects / variable tracking)
-        let arg_types: Vec<InferredType> = arguments
-            .iter()
-            .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
-            .collect();
+        // Control-flow narrowing (ADR 0068 Phase 1g):
+        // When the selector is ifTrue:, ifFalse:, or ifTrue:ifFalse:, detect
+        // type-testing patterns in the receiver and narrow variable types inside
+        // block arguments.
+        let narrowing = if matches!(
+            selector_name.as_str(),
+            "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:"
+        ) {
+            Self::detect_narrowing(receiver)
+        } else {
+            None
+        };
+
+        // Infer argument types, applying narrowing to block arguments when detected.
+        let arg_types: Vec<InferredType> = if let Some(ref info) = narrowing {
+            self.infer_args_with_narrowing(
+                arguments,
+                &selector_name,
+                info,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
+        } else {
+            arguments
+                .iter()
+                .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
+                .collect()
+        };
 
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
         // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
@@ -629,7 +671,13 @@ impl TypeChecker {
                 hierarchy,
                 true,
             );
-            return self.check_class_side_send(class_name, &selector_name, span, hierarchy);
+            return self.check_class_side_send(
+                class_name,
+                &selector_name,
+                span,
+                hierarchy,
+                &arg_types,
+            );
         }
 
         // For instance-side sends on known types
@@ -650,7 +698,13 @@ impl TypeChecker {
                         hierarchy,
                         true,
                     );
-                    return self.check_class_side_send(class_name, &selector_name, span, hierarchy);
+                    return self.check_class_side_send(
+                        class_name,
+                        &selector_name,
+                        span,
+                        hierarchy,
+                        &arg_types,
+                    );
                 }
                 return InferredType::Dynamic;
             }
@@ -669,9 +723,6 @@ impl TypeChecker {
                 );
             }
 
-            // Build substitution map from receiver's type args (ADR 0068 Phase 1b)
-            let subst = Self::build_substitution_map(hierarchy, class_name, type_args);
-
             // Infer return type from method info
             if let Some(method) = hierarchy.find_method(class_name, &selector_name) {
                 if let Some(ref ret_ty) = method.return_type {
@@ -689,10 +740,23 @@ impl TypeChecker {
                         };
                     }
 
+                    // Build substitution map, composing through inheritance chain
+                    // if the method is inherited (ADR 0068 Phase 1b, BT-1577)
+                    let subst = Self::build_inherited_substitution_map(
+                        hierarchy,
+                        class_name,
+                        type_args,
+                        &method.defined_in,
+                    );
+
                     // Apply generic substitution if we have type args
                     if !subst.is_empty() {
                         let method_subst = Self::infer_method_local_params(
-                            &method, &arg_types, &subst, hierarchy, class_name,
+                            &method,
+                            &arg_types,
+                            &subst,
+                            hierarchy,
+                            &method.defined_in,
                         );
                         return Self::substitute_return_type(ret_ty, &subst, &method_subst);
                     }
@@ -809,6 +873,265 @@ impl TypeChecker {
         InferredType::union_of(&return_types)
     }
 
+    /// Detect control-flow narrowing from the receiver of `ifTrue:`/`ifFalse:`.
+    ///
+    /// Recognises a fixed set of type-testing patterns (ADR 0068 Phase 1g):
+    ///
+    /// | Pattern | Detected as |
+    /// |---|---|
+    /// | `x class = ClassName` / `x class =:= ClassName` | class identity check |
+    /// | `(x class) = ClassName` / `(x class) =:= ClassName` | class identity check (parens) |
+    /// | `x isKindOf: ClassName` | kind check |
+    /// | `x isNil` | nil check |
+    pub(super) fn detect_narrowing(receiver: &Expression) -> Option<NarrowingInfo> {
+        // Unwrap parentheses
+        let receiver = match receiver {
+            Expression::Parenthesized { expression, .. } => expression.as_ref(),
+            _ => receiver,
+        };
+
+        match receiver {
+            // Pattern: `x isNil`
+            Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Unary(sel),
+                ..
+            } if sel.as_str() == "isNil" => {
+                let var_name = Self::extract_variable_name(inner_recv)?;
+                Some(NarrowingInfo {
+                    variable: var_name,
+                    true_type: InferredType::known("UndefinedObject"),
+                    is_nil_check: true,
+                })
+            }
+
+            // Pattern: `x isKindOf: ClassName`
+            Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } if parts.len() == 1 && parts[0].keyword == "isKindOf:" => {
+                let var_name = Self::extract_variable_name(inner_recv)?;
+                if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
+                    Some(NarrowingInfo {
+                        variable: var_name,
+                        true_type: InferredType::known(name.name.clone()),
+                        is_nil_check: false,
+                    })
+                } else {
+                    None
+                }
+            }
+
+            // Pattern: `x class = ClassName` or `x class =:= ClassName`
+            // Also handles `(x class) = ClassName` via parenthesized unwrap
+            Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Binary(op),
+                arguments,
+                ..
+            } if op.as_str() == "=" || op.as_str() == "=:=" => {
+                // The inner receiver should be `x class` or `(x class)`
+                let class_send = match inner_recv.as_ref() {
+                    Expression::Parenthesized { expression, .. } => expression.as_ref(),
+                    other => other,
+                };
+                if let Expression::MessageSend {
+                    receiver: var_expr,
+                    selector: MessageSelector::Unary(sel),
+                    ..
+                } = class_send
+                {
+                    if sel.as_str() == "class" {
+                        let var_name = Self::extract_variable_name(var_expr)?;
+                        if let Some(Expression::ClassReference { name, .. }) = arguments.first() {
+                            return Some(NarrowingInfo {
+                                variable: var_name,
+                                true_type: InferredType::known(name.name.clone()),
+                                is_nil_check: false,
+                            });
+                        }
+                    }
+                }
+                None
+            }
+
+            _ => None,
+        }
+    }
+
+    /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` with
+    /// narrowed type environments for block arguments.
+    ///
+    /// For `ifTrue:`, the true-block gets the narrowed type.
+    /// For `ifFalse:`, the false-block gets the complement (non-nil for nil checks).
+    /// For `ifTrue:ifFalse:`, both blocks get their respective narrowings.
+    fn infer_args_with_narrowing(
+        &mut self,
+        arguments: &[Expression],
+        selector_name: &str,
+        info: &NarrowingInfo,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> Vec<InferredType> {
+        let mut arg_types = Vec::new();
+
+        match selector_name {
+            "ifTrue:" => {
+                // Single argument: narrow in the true branch
+                if let Some(arg) = arguments.first() {
+                    let ty = self.infer_block_with_narrowing(
+                        arg,
+                        &info.variable,
+                        &info.true_type,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    );
+                    arg_types.push(ty);
+                }
+            }
+            "ifFalse:" => {
+                // Single argument: narrow in the false branch (complement)
+                if let Some(arg) = arguments.first() {
+                    if info.is_nil_check {
+                        // isNil ifFalse: → variable is non-nil
+                        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+                        let non_nil = Self::non_nil_type(&current_ty);
+                        let ty = self.infer_block_with_narrowing(
+                            arg,
+                            &info.variable,
+                            &non_nil,
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        );
+                        arg_types.push(ty);
+                    } else {
+                        // class = / isKindOf: ifFalse: → no useful narrowing
+                        let ty = self.infer_expr(arg, hierarchy, env, in_abstract_method);
+                        arg_types.push(ty);
+                    }
+                }
+            }
+            "ifTrue:ifFalse:" => {
+                // Two arguments: true block then false block
+                if let Some(true_arg) = arguments.first() {
+                    let ty = self.infer_block_with_narrowing(
+                        true_arg,
+                        &info.variable,
+                        &info.true_type,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    );
+                    arg_types.push(ty);
+                }
+                if let Some(false_arg) = arguments.get(1) {
+                    if info.is_nil_check {
+                        // isNil ifTrue: [...] ifFalse: [block] → non-nil in false block
+                        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+                        let non_nil = Self::non_nil_type(&current_ty);
+                        let ty = self.infer_block_with_narrowing(
+                            false_arg,
+                            &info.variable,
+                            &non_nil,
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        );
+                        arg_types.push(ty);
+                    } else {
+                        // class = / isKindOf: ifTrue: [...] ifFalse: [...] — no useful narrowing for false block
+                        let ty = self.infer_expr(false_arg, hierarchy, env, in_abstract_method);
+                        arg_types.push(ty);
+                    }
+                }
+                // Handle any remaining arguments (shouldn't happen, but be safe)
+                for arg in arguments.iter().skip(2) {
+                    arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
+                }
+            }
+            _ => {
+                // Fallback: no narrowing
+                for arg in arguments {
+                    arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
+                }
+            }
+        }
+
+        arg_types
+    }
+
+    /// Type-check a block expression (or any expression) with a variable narrowed
+    /// to a specific type in a child environment.
+    fn infer_block_with_narrowing(
+        &mut self,
+        arg: &Expression,
+        var_name: &str,
+        narrowed_type: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        if let Expression::Block(block) = arg {
+            let mut block_env = env.child();
+            block_env.set(var_name, narrowed_type.clone());
+            for param in &block.parameters {
+                block_env.set(param.name.as_str(), InferredType::Dynamic);
+            }
+            self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+            let ty = InferredType::known("Block");
+            self.type_map.insert(arg.span(), ty.clone());
+            ty
+        } else {
+            // Not a block literal — just infer normally
+            self.infer_expr(arg, hierarchy, env, in_abstract_method)
+        }
+    }
+
+    /// Extract a variable name from an expression, supporting identifiers
+    /// and parenthesized identifiers.
+    fn extract_variable_name(expr: &Expression) -> Option<EcoString> {
+        match expr {
+            Expression::Identifier(ident) => Some(ident.name.clone()),
+            Expression::Parenthesized { expression, .. } => Self::extract_variable_name(expression),
+            _ => None,
+        }
+    }
+
+    /// Check whether a block contains a non-local return (`^`).
+    fn block_has_return(block: &crate::ast::Block) -> bool {
+        block
+            .body
+            .iter()
+            .any(|stmt| matches!(stmt.expression, Expression::Return { .. }))
+    }
+
+    /// Remove `UndefinedObject` (nil) from a union type or convert a known type
+    /// to itself if it is non-nil.
+    pub(super) fn non_nil_type(ty: &InferredType) -> InferredType {
+        match ty {
+            InferredType::Union(members) => {
+                let non_nil: Vec<EcoString> = members
+                    .iter()
+                    .filter(|m| m.as_str() != "UndefinedObject")
+                    .cloned()
+                    .collect();
+                match non_nil.len() {
+                    0 => InferredType::Dynamic,
+                    1 => InferredType::known(non_nil.into_iter().next().unwrap()),
+                    _ => InferredType::Union(non_nil),
+                }
+            }
+            // If the variable is not a union, narrowing away nil for a non-union
+            // type means it stays the same (we can't make it "more non-nil").
+            _ => ty.clone(),
+        }
+    }
+
     /// Infer types for a sequence of expression statements.
     ///
     /// Skips `@expect` directive nodes so they don't reset the inferred body type
@@ -838,12 +1161,51 @@ impl TypeChecker {
 
             body_type = self.infer_expr(expr, hierarchy, env, in_abstract_method);
 
+            // Early-return narrowing (ADR 0068 Phase 1g):
+            // After `x isNil ifTrue: [^...]`, narrow x to non-nil for the rest.
+            Self::apply_early_return_narrowing(expr, env);
+
             if matches!(expr, Expression::Return { .. }) {
                 break;
             }
         }
 
         body_type
+    }
+
+    /// Apply early-return narrowing to the environment after a statement.
+    ///
+    /// Detects `x isNil ifTrue: [^...]` — if the true-block contains a non-local
+    /// return, the variable must be non-nil in subsequent statements (because if
+    /// it were nil, we would have already returned).
+    fn apply_early_return_narrowing(expr: &Expression, env: &mut TypeEnv) {
+        // Match: `<receiver> ifTrue: [block with ^]`
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        {
+            // Only applies to `ifTrue:` (single block with early return)
+            if !(parts.len() == 1 && parts[0].keyword == "ifTrue:") {
+                return;
+            }
+            if let Some(info) = Self::detect_narrowing(receiver) {
+                if !info.is_nil_check {
+                    return;
+                }
+                // Check if the block contains a non-local return
+                if let Some(Expression::Block(block)) = arguments.first() {
+                    if Self::block_has_return(block) {
+                        // After this statement, the variable is non-nil
+                        let current_ty = env.get(&info.variable).unwrap_or(InferredType::Dynamic);
+                        let non_nil = Self::non_nil_type(&current_ty);
+                        env.set(&info.variable, non_nil);
+                    }
+                }
+            }
+        }
     }
 
     /// Build a substitution map from a class's type parameters and concrete type arguments.
@@ -867,6 +1229,124 @@ impl TypeChecker {
             }
         }
         map
+    }
+
+    /// Build a substitution map that composes through the inheritance chain.
+    ///
+    /// When a method is inherited from a superclass, the type parameter names in
+    /// the method signature refer to the superclass's type params, not the receiver's.
+    /// This method walks from `receiver_class` up to `method_class`, composing
+    /// the `superclass_type_args` at each level to produce a substitution map
+    /// whose keys are the `method_class`'s type params.
+    ///
+    /// Example: `Collection(E) subclass: Array(E)` with receiver `Array(Integer)`:
+    /// - Array's `type_args`: `[Integer]` produces Array's subst: `{E → Integer}`
+    /// - Array's `superclass_type_args`: `[ParamRef(0)]` produces Collection's args: `[Integer]`
+    /// - Collection's subst: `{E → Integer}` (returned)
+    ///
+    /// Falls back to `build_substitution_map(receiver_class, type_args)` when
+    /// `method_class == receiver_class` (no inheritance to compose through).
+    ///
+    /// **References:** ADR 0068 Challenge 4 (BT-1577)
+    fn build_inherited_substitution_map(
+        hierarchy: &ClassHierarchy,
+        receiver_class: &str,
+        receiver_type_args: &[InferredType],
+        method_class: &str,
+    ) -> HashMap<EcoString, InferredType> {
+        use crate::semantic_analysis::class_hierarchy::SuperclassTypeArg;
+
+        // Fast path: method is defined on the receiver class itself
+        if receiver_class == method_class {
+            return Self::build_substitution_map(hierarchy, receiver_class, receiver_type_args);
+        }
+
+        // Check if there's anything to compose — either receiver has type args,
+        // or some class in the chain has concrete superclass_type_args.
+        if receiver_type_args.is_empty() {
+            // Even without receiver type args, a non-generic class may have
+            // concrete superclass_type_args (e.g., IntArray extends Collection(Integer)).
+            let has_concrete_super_args = hierarchy
+                .get_class(receiver_class)
+                .is_some_and(|info| !info.superclass_type_args.is_empty());
+            if !has_concrete_super_args {
+                return HashMap::new();
+            }
+        }
+
+        // Walk the inheritance chain from receiver to method_class,
+        // composing type args at each level.
+        let mut current_class = receiver_class.to_string();
+        let mut current_args = receiver_type_args.to_vec();
+        let mut visited = std::collections::HashSet::new();
+
+        while current_class != method_class {
+            if !visited.insert(current_class.clone()) {
+                break; // cycle guard
+            }
+
+            let Some(info) = hierarchy.get_class(&current_class) else {
+                break;
+            };
+
+            let Some(ref superclass) = info.superclass else {
+                break;
+            };
+
+            if info.superclass_type_args.is_empty() {
+                // No type arg mapping at this level.
+                // Try direct name-based matching as fallback for same-named params
+                // (e.g., when both child and parent use `E` but no explicit mapping).
+                let receiver_subst =
+                    Self::build_substitution_map(hierarchy, receiver_class, receiver_type_args);
+                if !receiver_subst.is_empty() {
+                    if let Some(method_info) = hierarchy.get_class(method_class) {
+                        let mut result = HashMap::new();
+                        for param in &method_info.type_params {
+                            if let Some(val) = receiver_subst.get(param) {
+                                result.insert(param.clone(), val.clone());
+                            }
+                        }
+                        if !result.is_empty() {
+                            return result;
+                        }
+                    }
+                }
+                // Continue walking up — a higher ancestor might have type args
+                current_class = superclass.to_string();
+                continue;
+            }
+
+            // Compose: resolve each superclass_type_arg using current_args
+            let current_subst =
+                Self::build_substitution_map(hierarchy, &current_class, &current_args);
+            let mut super_args = Vec::new();
+            for sta in &info.superclass_type_args {
+                match sta {
+                    SuperclassTypeArg::ParamRef { param_index } => {
+                        if let Some(arg) = current_args.get(*param_index) {
+                            super_args.push(arg.clone());
+                        } else {
+                            super_args.push(InferredType::Dynamic);
+                        }
+                    }
+                    SuperclassTypeArg::Concrete { type_name } => {
+                        let eco_name: EcoString = type_name.clone();
+                        if let Some(resolved) = current_subst.get(&eco_name) {
+                            super_args.push(resolved.clone());
+                        } else {
+                            super_args.push(InferredType::known(eco_name));
+                        }
+                    }
+                }
+            }
+
+            current_class = superclass.to_string();
+            current_args = super_args;
+        }
+
+        // Build the final substitution map for the method's defining class
+        Self::build_substitution_map(hierarchy, method_class, &current_args)
     }
 
     /// Substitute type parameters in a return type string using the substitution map.

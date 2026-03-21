@@ -264,9 +264,24 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         ]
     };
 
+    // Emit superclass type args: `Collection(E)` or `Collection(Integer)`
+    let superclass_with_type_args = if class.superclass_type_args.is_empty() {
+        Document::String(superclass)
+    } else {
+        let mut parts = vec![Document::String(superclass), Document::Str("(")];
+        for (i, ta) in class.superclass_type_args.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(Document::String(ta.type_name().to_string()));
+        }
+        parts.push(Document::Str(")"));
+        concat(parts)
+    };
+
     let class_header = docvec![
         concat(modifiers),
-        Document::String(superclass),
+        superclass_with_type_args,
         " subclass: ",
         class_name_doc,
     ];

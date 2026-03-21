@@ -941,6 +941,9 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         code.push_str("],\n");
     }
 
+    // Superclass type args (always empty for now — populated by parser for generic inheritance)
+    code.push_str("            superclass_type_args: vec![],\n");
+
     code.push_str("        },\n    );\n\n");
 }
 
