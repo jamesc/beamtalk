@@ -671,6 +671,36 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Value")
     }
 
+    /// Returns true if the named generic class has covariant type parameters (ADR 0068 Phase 2f).
+    ///
+    /// A class is covariant in its type parameters when:
+    /// - It is a sealed Value subclass (immutable, no state mutation)
+    /// - It has type parameters
+    ///
+    /// Actor classes are always invariant because their state fields can be mutated,
+    /// which would break soundness if covariance were allowed.
+    ///
+    /// Non-sealed classes are treated as invariant (conservative) because subclasses
+    /// could add mutating methods on the type parameter.
+    ///
+    /// **References:** ADR 0068 Phase 2f
+    #[must_use]
+    pub fn is_covariant_class(&self, class_name: &str) -> bool {
+        let Some(class_info) = self.get_class(class_name) else {
+            return false;
+        };
+        // Must have type params to be relevant
+        if class_info.type_params.is_empty() {
+            return false;
+        }
+        // Actors are invariant — state mutation breaks covariance
+        if self.is_actor_subclass(class_name) {
+            return false;
+        }
+        // Sealed Value subclasses are covariant (immutable)
+        class_info.is_sealed && self.is_value_subclass(class_name)
+    }
+
     /// Returns true if the named class is `TestCase` or a subclass of `TestCase` (BT-1533).
     ///
     /// `TestCase` is a Value subclass with assertion methods that intentionally

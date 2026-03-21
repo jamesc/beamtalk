@@ -648,6 +648,111 @@ impl TypeChecker {
             .any(|ancestor| ancestor == &declared_eco)
     }
 
+    /// Returns true if `value_type` is assignable to `declared_type` with
+    /// variance-aware generic type argument checking (ADR 0068 Phase 2f).
+    ///
+    /// Extends [`is_assignable_to`] with covariance support for sealed Value classes:
+    /// when the declared type is generic (e.g., `Array(Printable)`) and the value type
+    /// is the same generic class with different type args (e.g., `Array(Integer)`),
+    /// checks each type argument covariantly — the value's type arg must be assignable
+    /// to the declared type arg. This is sound because sealed Value classes are immutable.
+    ///
+    /// Actor classes remain invariant: type args must match exactly.
+    ///
+    /// Falls back to [`is_assignable_to`] when no generic type args are present or
+    /// when the protocol registry is not needed.
+    pub(super) fn is_assignable_to_with_variance(
+        value_type: &EcoString,
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) -> bool {
+        // Delegate to the base check first for non-generic cases
+        if !declared_type.contains('(') || !value_type.contains('(') {
+            return Self::is_assignable_to(value_type, declared_type, hierarchy);
+        }
+
+        // Both are generic — extract base names and type arg strings
+        let (declared_base, declared_args) = Self::parse_generic_type_string(declared_type);
+        let (value_base, value_args) = Self::parse_generic_type_string(value_type);
+
+        // Different base types — check normal assignability
+        if value_base != declared_base {
+            return Self::is_assignable_to(value_type, declared_type, hierarchy);
+        }
+
+        // Same base, same args — trivially compatible
+        if value_args == declared_args {
+            return true;
+        }
+
+        // Same base, different args — check variance
+        if hierarchy.is_covariant_class(&declared_base) {
+            // Covariant: each value type arg must be compatible with declared type arg.
+            // A type arg is compatible if:
+            // 1. It's the same type or a subclass, OR
+            // 2. The declared type arg is a protocol and the value type conforms to it
+            for (val_arg, decl_arg) in value_args.iter().zip(declared_args.iter()) {
+                let val_eco: EcoString = val_arg.as_str().into();
+                let decl_eco: EcoString = decl_arg.as_str().into();
+                if val_eco == decl_eco {
+                    continue;
+                }
+                // Check protocol conformance first — the declared type arg might be a protocol.
+                // Protocol types are NOT classes in the hierarchy, so is_type_compatible
+                // would return true (conservative unknown-type fallback), masking real errors.
+                if Self::is_protocol_type(decl_arg, hierarchy, protocol_registry) {
+                    let base_protocol = if let Some(open) = decl_arg.find('(') {
+                        &decl_arg[..open]
+                    } else {
+                        decl_arg.as_str()
+                    };
+                    if protocol_registry
+                        .check_conformance(&val_eco, base_protocol, hierarchy)
+                        .is_ok()
+                    {
+                        continue;
+                    }
+                    // Value type does not conform to the protocol
+                    return false;
+                }
+                // Check class hierarchy compatibility (subclass check)
+                if Self::is_type_compatible(&val_eco, &decl_eco, hierarchy) {
+                    continue;
+                }
+                // Type arg is not compatible
+                return false;
+            }
+            true
+        } else {
+            // Invariant: type args must match exactly (already checked they differ above)
+            // Fall back to base-name-only compatibility (current behaviour)
+            Self::is_assignable_to(value_type, declared_type, hierarchy)
+        }
+    }
+
+    /// Parse a generic type string like `"Array(Integer)"` into base name and type arg strings.
+    ///
+    /// Returns `("Array", ["Integer"])` for `"Array(Integer)"`.
+    /// Returns `("Result", ["Integer", "Error"])` for `"Result(Integer, Error)"`.
+    /// For non-generic types, returns the full name and an empty vec.
+    ///
+    /// **Limitation:** Uses a simple comma-split, which does not handle nested generic
+    /// type args with multiple parameters (e.g., `Map(Result(A, B), C)` would be
+    /// incorrectly split). This is acceptable because Beamtalk's current type system
+    /// does not produce such deeply nested multi-parameter generic annotations in
+    /// string form.
+    pub(super) fn parse_generic_type_string(type_str: &str) -> (String, Vec<String>) {
+        if let Some(open) = type_str.find('(') {
+            let base = type_str[..open].to_string();
+            let args_str = &type_str[open + 1..type_str.len() - 1]; // strip parens
+            let args: Vec<String> = args_str.split(',').map(|s| s.trim().to_string()).collect();
+            (base, args)
+        } else {
+            (type_str.to_string(), vec![])
+        }
+    }
+
     /// Resolves type-position keywords to their class names (static version).
     ///
     /// Same as `resolve_type_keyword` but takes `&str` for use in validation contexts.
