@@ -262,7 +262,7 @@ impl TypeChecker {
             TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. } => {
                 Self::resolve_type_annotation(declared)
             }
-            _ => return, // Singleton — not yet supported
+            TypeAnnotation::Singleton { .. } => return, // Singleton — not yet supported
         };
 
         match &expected {
