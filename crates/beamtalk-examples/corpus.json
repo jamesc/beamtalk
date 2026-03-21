@@ -3862,7 +3862,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "DynamicSupervisor subclass: WorkerPool\n  class childClass => Counter\n\n// pool := WorkerPool supervise\n// pool startChild        // spawn a new Counter\n// pool startChild: args  // spawn with arguments\n// pool count             // how many children",
+      "source": "DynamicSupervisor(Counter) subclass: WorkerPool\n  class childClass => Counter\n\n// pool := WorkerPool supervise\n// pool startChild        // spawn a new Counter\n// pool startChild: args  // spawn with arguments\n// pool count             // how many children",
       "explanation": "Code example from docs/learning/17-otp-supervisors.md"
     },
     {
@@ -6271,7 +6271,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// Fixture for docs/learning/17-otp-supervisors.md\n\nDynamicSupervisor subclass: WorkerPool\n  class childClass => Counter",
+      "source": "// Fixture for docs/learning/17-otp-supervisors.md\n\nDynamicSupervisor(Counter) subclass: WorkerPool\n  class childClass => Counter",
       "explanation": "Fixture for docs/learning/17-otp-supervisors.md"
     },
     {
@@ -8996,7 +8996,7 @@
         "supervisionPolicy",
         "worker_pool"
       ],
-      "source": "// WorkerPool — DynamicSupervisor that manages TaskWorker children.\n// Workers are started on demand at runtime via `pool startChild`.\n// Each worker is supervised independently: a crash in one worker does not\n// affect the others or the rest of the tree.\n\nDynamicSupervisor subclass: WorkerPool\n\n  class supervisionPolicy -> Symbol => #permanent\n\n  class childClass => TaskWorker",
+      "source": "// WorkerPool — DynamicSupervisor that manages TaskWorker children.\n// Workers are started on demand at runtime via `pool startChild`.\n// Each worker is supervised independently: a crash in one worker does not\n// affect the others or the rest of the tree.\n\nDynamicSupervisor(TaskWorker) subclass: WorkerPool\n\n  class supervisionPolicy -> Symbol => #permanent\n\n  class childClass => TaskWorker",
       "explanation": "WorkerPool — DynamicSupervisor that manages TaskWorker children. Workers are started on demand at runtime via `pool startChild`. Each worker is supervised independently: a crash in one worker does not affect the others or the rest of the tree."
     },
     {
@@ -12215,13 +12215,24 @@
       "tags": [
         "DynamicSupervisorDefaultsTest",
         "TestCase",
+        "assign",
+        "assignment",
         "dynamic_supervisor_defaults_test",
         "extends",
         "fault tolerance",
+        "for each",
+        "for-each",
+        "forEach",
         "inherit",
         "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
         "object",
         "restart",
+        "set",
         "subclassing",
         "supervision",
         "testDynamicSupervisorIsSupervisorTrue",
@@ -12229,9 +12240,10 @@
         "testDynamicSupervisorRestartWindowDefault",
         "testDynamicSupervisorSubclassIsSupervisorTrue",
         "testDynamicSupervisorSubclassOverridesMaxRestarts",
-        "testDynamicSupervisorSubclassOverridesRestartWindow"
+        "testDynamicSupervisorSubclassOverridesRestartWindow",
+        "testStartChildReturnsTypedChild"
       ],
-      "source": "// BT-1222: Tests for DynamicSupervisor class-side defaults and subclass override.\n//\n// Fixtures: stdlib/test/fixtures/test_dynamic_supervisor_custom.bt\n\nTestCase subclass: DynamicSupervisorDefaultsTest\n\n  // === DynamicSupervisor class-side defaults ===\n  testDynamicSupervisorMaxRestartsDefault =>\n    self assert: DynamicSupervisor maxRestarts equals: 10\n\n  testDynamicSupervisorRestartWindowDefault =>\n    self assert: DynamicSupervisor restartWindow equals: 60\n\n  testDynamicSupervisorIsSupervisorTrue =>\n    self assert: DynamicSupervisor isSupervisor equals: true\n\n  // === DynamicSupervisor subclass can override defaults ===\n  testDynamicSupervisorSubclassOverridesMaxRestarts =>\n    self assert: TestDynamicSupervisorCustom maxRestarts equals: 5\n\n  testDynamicSupervisorSubclassOverridesRestartWindow =>\n    self assert: TestDynamicSupervisorCustom restartWindow equals: 120\n\n  testDynamicSupervisorSubclassIsSupervisorTrue =>\n    self assert: TestDynamicSupervisorCustom isSupervisor equals: true",
+      "source": "// BT-1222: Tests for DynamicSupervisor class-side defaults and subclass override.\n//\n// Fixtures: stdlib/test/fixtures/test_dynamic_supervisor_custom.bt\n\nTestCase subclass: DynamicSupervisorDefaultsTest\n\n  // === DynamicSupervisor class-side defaults ===\n  testDynamicSupervisorMaxRestartsDefault =>\n    self assert: DynamicSupervisor maxRestarts equals: 10\n\n  testDynamicSupervisorRestartWindowDefault =>\n    self assert: DynamicSupervisor restartWindow equals: 60\n\n  testDynamicSupervisorIsSupervisorTrue =>\n    self assert: DynamicSupervisor isSupervisor equals: true\n\n  // === DynamicSupervisor subclass can override defaults ===\n  testDynamicSupervisorSubclassOverridesMaxRestarts =>\n    self assert: TestDynamicSupervisorCustom maxRestarts equals: 5\n\n  testDynamicSupervisorSubclassOverridesRestartWindow =>\n    self assert: TestDynamicSupervisorCustom restartWindow equals: 120\n\n  testDynamicSupervisorSubclassIsSupervisorTrue =>\n    self assert: TestDynamicSupervisorCustom isSupervisor equals: true\n\n  // === Type parameter C narrows startChild return type ===\n  testStartChildReturnsTypedChild =>\n    pool := TestDynamicSupervisorCustom supervise\n    child := pool startChild\n    // If C=Counter resolves, child is typed as Counter and getValue compiles.\n    // Without the type parameter this would fail: \"Object does not understand 'getValue'\"\n    self assert: child getValue equals: 0\n    [pool stop] on: Error do: [:e | nil]",
       "explanation": "BT-1222: Tests for DynamicSupervisor class-side defaults and subclass override.  Fixtures: stdlib/test/fixtures/test_dynamic_supervisor_custom.bt"
     },
     {
@@ -14473,7 +14485,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// BT-1542: DynamicSupervisor with initialize: hook that pre-populates children.\n// initialize: calls startChild — this verifies the hook runs and the supervisor\n// is responsive during the callback.\n\nDynamicSupervisor subclass: DynSupWithInitialize\n\n  class childClass => Counter\n\n  class initialize: sup =>\n    sup startChild\n    sup startChild",
+      "source": "// BT-1542: DynamicSupervisor with initialize: hook that pre-populates children.\n// initialize: calls startChild — this verifies the hook runs and the supervisor\n// is responsive during the callback.\n\nDynamicSupervisor(Counter) subclass: DynSupWithInitialize\n\n  class childClass => Counter\n\n  class initialize: sup =>\n    sup startChild\n    sup startChild",
       "explanation": "BT-1542: DynamicSupervisor with initialize: hook that pre-populates children. initialize: calls startChild — this verifies the hook runs and the supervisor is responsive during the callback."
     },
     {
@@ -16700,7 +16712,7 @@
         "supervision",
         "test_dynamic_supervisor_custom"
       ],
-      "source": "// BT-1222: Concrete DynamicSupervisor subclass with overridden config — fixture for dynamic_supervisor_defaults_test.bt\n\nDynamicSupervisor subclass: TestDynamicSupervisorCustom\n\n  class childClass => Counter\n\n  class maxRestarts -> Integer => 5\n\n  class restartWindow -> Integer => 120",
+      "source": "// BT-1222: Concrete DynamicSupervisor subclass with overridden config — fixture for dynamic_supervisor_defaults_test.bt\n\nDynamicSupervisor(Counter) subclass: TestDynamicSupervisorCustom\n\n  class childClass => Counter\n\n  class maxRestarts -> Integer => 5\n\n  class restartWindow -> Integer => 120",
       "explanation": "BT-1222: Concrete DynamicSupervisor subclass with overridden config — fixture for dynamic_supervisor_defaults_test.bt"
     },
     {
@@ -21817,7 +21829,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// E2E fixture: DynamicSupervisor with initialize: hook that pre-populates (BT-1542).\n// initialize: calls startChild — verifies supervisor is responsive during callback.\n\nDynamicSupervisor subclass: E2EInitDynSupervisor\n\n  class childClass => Counter\n\n  class initialize: sup =>\n    sup startChild\n    sup startChild",
+      "source": "// E2E fixture: DynamicSupervisor with initialize: hook that pre-populates (BT-1542).\n// initialize: calls startChild — verifies supervisor is responsive during callback.\n\nDynamicSupervisor(Counter) subclass: E2EInitDynSupervisor\n\n  class childClass => Counter\n\n  class initialize: sup =>\n    sup startChild\n    sup startChild",
       "explanation": "E2E fixture: DynamicSupervisor with initialize: hook that pre-populates (BT-1542). initialize: calls startChild — verifies supervisor is responsive during callback."
     },
     {
@@ -21949,7 +21961,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// E2E fixture: DynamicSupervisor subclass managing Counter workers.\n// Used by supervisor.btscript (BT-1223).\n\nDynamicSupervisor subclass: E2EWorkerPool\n\n  class childClass -> Class => Counter",
+      "source": "// E2E fixture: DynamicSupervisor subclass managing Counter workers.\n// Used by supervisor.btscript (BT-1223).\n\nDynamicSupervisor(Counter) subclass: E2EWorkerPool\n\n  class childClass -> Class => Counter",
       "explanation": "E2E fixture: DynamicSupervisor subclass managing Counter workers. Used by supervisor.btscript (BT-1223)."
     },
     {
