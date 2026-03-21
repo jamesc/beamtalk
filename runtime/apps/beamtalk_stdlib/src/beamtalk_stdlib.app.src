@@ -13,7 +13,7 @@
             {'bt@stdlib@bag', 'Bag', 'Collection'},
             {'bt@stdlib@beamtalk_interface', 'BeamtalkInterface', 'Object'},
             {'bt@stdlib@behaviour', 'Behaviour', 'Object'},
-            {'bt@stdlib@binary', 'Binary', 'Object'},
+            {'bt@stdlib@binary', 'Binary', 'Collection'},
             {'bt@stdlib@block', 'Block', 'Object'},
             {'bt@stdlib@boolean', 'Boolean', 'Value'},
             {'bt@stdlib@character', 'Character', 'Integer'},

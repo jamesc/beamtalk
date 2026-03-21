@@ -10477,6 +10477,9 @@
         "subclassing",
         "testClassIdentity",
         "testDeserializeTypeError",
+        "testDeserializeWithUsed",
+        "testFromBytesCreatesValidBinary",
+        "testFromBytesEmptyList",
         "testFromIolist",
         "testFromIolistEmpty",
         "testSerializeAndDeserializeArray",
@@ -10484,13 +10487,10 @@
         "testSerializeAndDeserializeInteger",
         "testSerializeAndDeserializeNil",
         "testSerializeAndDeserializeString",
-        "testSerializeProducesBinary",
-        "testSizeOfEmptyString",
-        "testSizeOfString",
-        "testSizeTypeError"
+        "testSerializeProducesBinary"
       ],
-      "source": "// Stdlib tests for Binary class (BT-1554)\n\nTestCase subclass: BinaryTest\n\n  testSerializeAndDeserializeInteger =>\n    bin := Binary serialize: 42\n    self assert: (Binary deserialize: bin) equals: 42\n\n  testSerializeAndDeserializeString =>\n    bin := Binary serialize: \"hello\"\n    self assert: (Binary deserialize: bin) equals: \"hello\"\n\n  testSerializeAndDeserializeArray =>\n    bin := Binary serialize: #(1, 2, 3)\n    self assert: (Binary deserialize: bin) equals: #(1, 2, 3)\n\n  testSerializeAndDeserializeNil =>\n    bin := Binary serialize: nil\n    self assert: (Binary deserialize: bin) equals: nil\n\n  testSerializeAndDeserializeBoolean =>\n    binTrue := Binary serialize: true\n    @expect type\n    self assert: (Binary deserialize: binTrue)\n    binFalse := Binary serialize: false\n    @expect type\n    self deny: (Binary deserialize: binFalse)\n\n  testSerializeProducesBinary =>\n    bin := Binary serialize: 42\n    self assert: (Binary size: bin) > 0\n\n  testSizeOfString => self assert: (Binary size: \"hello\") equals: 5\n\n  testSizeOfEmptyString => self assert: (Binary size: \"\") equals: 0\n\n  testFromIolist =>\n    result := Binary fromIolist: #(\"hello\", \" \", \"world\")\n    self assert: result equals: \"hello world\"\n\n  testFromIolistEmpty =>\n    result := Binary fromIolist: #()\n    self assert: result equals: \"\"\n\n  testDeserializeTypeError =>\n    self should: [Binary deserialize: 42] raise: #type_error\n\n  testSizeTypeError => self should: [Binary size: 42] raise: #type_error\n\n  testClassIdentity =>\n    // BT-802 (ADR 0036): class on class returns a real metaclass object\n    self assert: (Binary class) isMeta equals: true",
-      "explanation": "Stdlib tests for Binary class (BT-1554)"
+      "source": "// Stdlib tests for Binary class (BT-1554, BT-1593)\n\nTestCase subclass: BinaryTest\n\n  testSerializeAndDeserializeInteger =>\n    bin := Binary serialize: 42\n    self assert: (Binary deserialize: bin) equals: 42\n\n  testSerializeAndDeserializeString =>\n    bin := Binary serialize: \"hello\"\n    self assert: (Binary deserialize: bin) equals: \"hello\"\n\n  testSerializeAndDeserializeArray =>\n    bin := Binary serialize: #(1, 2, 3)\n    self assert: (Binary deserialize: bin) equals: #(1, 2, 3)\n\n  testSerializeAndDeserializeNil =>\n    bin := Binary serialize: nil\n    self assert: (Binary deserialize: bin) equals: nil\n\n  testSerializeAndDeserializeBoolean =>\n    binTrue := Binary serialize: true\n    @expect type\n    self assert: (Binary deserialize: binTrue)\n    binFalse := Binary serialize: false\n    @expect type\n    self deny: (Binary deserialize: binFalse)\n\n  testSerializeProducesBinary =>\n    bin := Binary serialize: 42\n    self assert: (Binary deserialize: bin) equals: 42\n\n  testFromBytesCreatesValidBinary =>\n    bin := Binary fromBytes: #(104, 101, 108, 108, 111)\n    // UTF-8 binary can be compared as a string\n    self assert: bin equals: \"hello\"\n\n  testFromBytesEmptyList =>\n    bin := Binary fromBytes: #()\n    self assert: bin equals: \"\"\n\n  testFromIolist =>\n    result := Binary fromIolist: #(\"hello\", \" \", \"world\")\n    self assert: result equals: \"hello world\"\n\n  testFromIolistEmpty =>\n    result := Binary fromIolist: #()\n    self assert: result equals: \"\"\n\n  testDeserializeTypeError =>\n    self should: [Binary deserialize: 42] raise: #type_error\n\n  testDeserializeWithUsed =>\n    bin := Binary serialize: 42\n    result := Binary deserializeWithUsed: bin\n    // Result is a tuple {term, bytesUsed} — verify term via Tuple at:\n    @expect type\n    self assert: (result at: 1) equals: 42\n\n  testClassIdentity =>\n    // BT-802 (ADR 0036): class on class returns a real metaclass object\n    self assert: (Binary class) isMeta equals: true",
+      "explanation": "Stdlib tests for Binary class (BT-1554, BT-1593)"
     },
     {
       "id": "stdlib-test-block-evaluation-test",

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for Binary class (BT-1554)
+// Stdlib tests for Binary class (BT-1554, BT-1593)
 
 TestCase subclass: BinaryTest
 
@@ -31,11 +31,16 @@ TestCase subclass: BinaryTest
 
   testSerializeProducesBinary =>
     bin := Binary serialize: 42
-    self assert: (Binary size: bin) > 0
+    self assert: (Binary deserialize: bin) equals: 42
 
-  testSizeOfString => self assert: (Binary size: "hello") equals: 5
+  testFromBytesCreatesValidBinary =>
+    bin := Binary fromBytes: #(104, 101, 108, 108, 111)
+    // UTF-8 binary can be compared as a string
+    self assert: bin equals: "hello"
 
-  testSizeOfEmptyString => self assert: (Binary size: "") equals: 0
+  testFromBytesEmptyList =>
+    bin := Binary fromBytes: #()
+    self assert: bin equals: ""
 
   testFromIolist =>
     result := Binary fromIolist: #("hello", " ", "world")
@@ -48,7 +53,12 @@ TestCase subclass: BinaryTest
   testDeserializeTypeError =>
     self should: [Binary deserialize: 42] raise: #type_error
 
-  testSizeTypeError => self should: [Binary size: 42] raise: #type_error
+  testDeserializeWithUsed =>
+    bin := Binary serialize: 42
+    result := Binary deserializeWithUsed: bin
+    // Result is a tuple {term, bytesUsed} — verify term via Tuple at:
+    @expect type
+    self assert: (result at: 1) equals: 42
 
   testClassIdentity =>
     // BT-802 (ADR 0036): class on class returns a real metaclass object
