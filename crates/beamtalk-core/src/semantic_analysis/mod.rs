@@ -3889,6 +3889,7 @@ Value subclass: Caller
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         };
 

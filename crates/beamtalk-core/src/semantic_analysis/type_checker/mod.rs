@@ -342,6 +342,12 @@ impl TypeChecker {
         // When a parameter type annotation resolves to a protocol name, check
         // that the argument type (if known) conforms structurally.
         self.check_protocol_conformance_in_module(module, hierarchy, protocol_registry);
+
+        // Phase 2d: Type parameter bounds checking (ADR 0068).
+        // When a type annotation uses a generic class with bounded type params
+        // (e.g., `Logger(Integer)` where Logger has `T :: Printable`), check
+        // that the concrete type args conform to their bounds.
+        self.check_type_param_bounds_in_module(module, hierarchy, protocol_registry);
     }
 
     /// Check protocol conformance for type annotations across a module.
@@ -516,6 +522,108 @@ impl TypeChecker {
                 }
             }
             // Leaf expressions — no sub-expressions to recurse into
+            _ => {}
+        }
+    }
+
+    /// Check type parameter bounds for all generic type annotations in a module (ADR 0068 Phase 2d).
+    ///
+    /// Walks class definitions, standalone methods, and protocol definitions looking for
+    /// generic type annotations (e.g., `:: Logger(Integer)`). For each, checks that the
+    /// concrete type arguments conform to any protocol bounds declared on the type parameters.
+    fn check_type_param_bounds_in_module(
+        &mut self,
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        // Check type annotations in class state declarations, method params, and return types
+        for class in &module.classes {
+            // Check state field type annotations
+            for state_decl in &class.state {
+                if let Some(ref ann) = state_decl.type_annotation {
+                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                }
+            }
+
+            // Check method parameter and return type annotations
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                for param in &method.parameters {
+                    if let Some(ref ann) = param.type_annotation {
+                        self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                    }
+                }
+                if let Some(ref ann) = method.return_type {
+                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                }
+            }
+
+            // Check superclass type args (e.g., `Logger(Integer) subclass: SpecialLogger`)
+            for arg in &class.superclass_type_args {
+                self.check_bounds_in_type_annotation(arg, hierarchy, protocol_registry);
+            }
+        }
+
+        // Check standalone method definitions
+        for standalone in &module.method_definitions {
+            for param in &standalone.method.parameters {
+                if let Some(ref ann) = param.type_annotation {
+                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                }
+            }
+            if let Some(ref ann) = standalone.method.return_type {
+                self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+            }
+        }
+    }
+
+    /// Check type parameter bounds within a single type annotation.
+    ///
+    /// For `TypeAnnotation::Generic`, resolves the type args and checks each
+    /// against its corresponding bound (if any) from the class's `type_param_bounds`.
+    fn check_bounds_in_type_annotation(
+        &mut self,
+        ann: &crate::ast::TypeAnnotation,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        use crate::ast::TypeAnnotation;
+
+        match ann {
+            TypeAnnotation::Generic {
+                base,
+                parameters,
+                span,
+            } => {
+                // Resolve the type args to InferredTypes
+                let type_args: Vec<InferredType> = parameters
+                    .iter()
+                    .map(Self::resolve_type_annotation)
+                    .collect();
+
+                // Check bounds against the base class's type_param_bounds
+                self.check_type_param_bounds(
+                    &base.name,
+                    &type_args,
+                    *span,
+                    hierarchy,
+                    protocol_registry,
+                );
+
+                // Recurse into nested type annotations (e.g., `Result(Array(Integer), Error)`)
+                for param in parameters {
+                    self.check_bounds_in_type_annotation(param, hierarchy, protocol_registry);
+                }
+            }
+            TypeAnnotation::Union { types, .. } => {
+                for ty in types {
+                    self.check_bounds_in_type_annotation(ty, hierarchy, protocol_registry);
+                }
+            }
+            TypeAnnotation::FalseOr { inner, .. } => {
+                self.check_bounds_in_type_annotation(inner, hierarchy, protocol_registry);
+            }
+            // Simple, SelfType, Singleton — no nested generics to check
             _ => {}
         }
     }
@@ -4003,6 +4111,7 @@ Base subclass: Child
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         };
 
@@ -4483,6 +4592,7 @@ Base subclass: Child
             ],
             class_variables: vec![],
             type_params: vec![eco_string("T"), eco_string("E")],
+            type_param_bounds: vec![None, None],
             superclass_type_args: vec![],
         };
 
@@ -4833,10 +4943,10 @@ Base subclass: Child
         let mut checker = TypeChecker::new();
         let mut env = TypeEnv::new();
 
-        // Array new (non-generic in builtins — no type_params set)
+        // String new (non-generic class — no type_params)
         let result_ty = checker.infer_expr(
             &msg_send(
-                class_ref("Array"),
+                class_ref("String"),
                 MessageSelector::Unary("new".into()),
                 vec![],
             ),
@@ -5481,6 +5591,7 @@ Base subclass: Child
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![eco_string("E")],
+            type_param_bounds: vec![None],
             superclass_type_args: vec![],
         };
 
@@ -5508,6 +5619,7 @@ Base subclass: Child
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![eco_string("E")],
+            type_param_bounds: vec![None],
             superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
         };
 
@@ -5599,6 +5711,7 @@ Base subclass: Child
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![SuperclassTypeArg::Concrete {
                 type_name: eco_string("Integer"),
             }],
@@ -5698,6 +5811,7 @@ Base subclass: Child
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![eco_string("E")],
+            type_param_bounds: vec![None],
             superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
         };
         hierarchy.add_from_beam_meta(vec![sorted_info]);
@@ -5760,6 +5874,205 @@ Base subclass: Child
             result_ty.as_known().map(EcoString::as_str),
             Some("Integer"),
             "unwrap on GenResult(Integer, IOError) should still return Integer, got: {result_ty:?}"
+        );
+    }
+
+    // --- ADR 0068 Phase 2d: Type parameter bounds tests ---
+
+    #[test]
+    fn type_param_bounds_conforming_type_no_warning() {
+        // Logger(T :: Printable) where Integer conforms to Printable → no warning
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.add_from_beam_meta(vec![ClassInfo {
+            name: "BoundedLogger".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec!["T".into()],
+            type_param_bounds: vec![Some("Printable".into())],
+            superclass_type_args: vec![],
+        }]);
+
+        let mut registry = ProtocolRegistry::new();
+        // Define Printable protocol requiring asString
+        let proto_module = Module {
+            protocols: vec![crate::ast::ProtocolDefinition {
+                name: crate::ast::Identifier::new("Printable", span()),
+                type_params: vec![],
+                extending: None,
+                method_signatures: vec![crate::ast::ProtocolMethodSignature {
+                    selector: crate::ast::MessageSelector::Unary("asString".into()),
+                    parameters: vec![],
+                    return_type: Some(crate::ast::TypeAnnotation::simple("String", span())),
+                    comments: crate::ast::CommentAttachment::default(),
+                    doc_comment: None,
+                    span: span(),
+                }],
+                comments: crate::ast::CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            ..Module::new(vec![], span())
+        };
+        registry.register_module(&proto_module, &hierarchy);
+
+        let mut checker = TypeChecker::new();
+        checker.check_type_param_bounds(
+            &"BoundedLogger".into(),
+            &[InferredType::known("Integer")],
+            span(),
+            &hierarchy,
+            &registry,
+        );
+
+        // Integer has asString (built-in) → should conform → no warning
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Integer conforms to Printable, expected no warnings, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn type_param_bounds_non_conforming_type_warns() {
+        // Logger(T :: HasSortKey) where Integer does NOT have sortKey → warning
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.add_from_beam_meta(vec![ClassInfo {
+            name: "BoundedLogger".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec!["T".into()],
+            type_param_bounds: vec![Some("HasSortKey".into())],
+            superclass_type_args: vec![],
+        }]);
+
+        let mut registry = ProtocolRegistry::new();
+        let proto_module = Module {
+            protocols: vec![crate::ast::ProtocolDefinition {
+                name: crate::ast::Identifier::new("HasSortKey", span()),
+                type_params: vec![],
+                extending: None,
+                method_signatures: vec![crate::ast::ProtocolMethodSignature {
+                    selector: crate::ast::MessageSelector::Unary("sortKey".into()),
+                    parameters: vec![],
+                    return_type: None,
+                    comments: crate::ast::CommentAttachment::default(),
+                    doc_comment: None,
+                    span: span(),
+                }],
+                comments: crate::ast::CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            ..Module::new(vec![], span())
+        };
+        registry.register_module(&proto_module, &hierarchy);
+
+        let mut checker = TypeChecker::new();
+        checker.check_type_param_bounds(
+            &"BoundedLogger".into(),
+            &[InferredType::known("Integer")],
+            span(),
+            &hierarchy,
+            &registry,
+        );
+
+        // Integer does NOT have sortKey → should warn
+        assert_eq!(
+            checker.diagnostics().len(),
+            1,
+            "Expected 1 bound violation warning, got: {:?}",
+            checker.diagnostics()
+        );
+        assert!(
+            checker.diagnostics()[0]
+                .message
+                .contains("does not conform to HasSortKey")
+        );
+    }
+
+    #[test]
+    fn type_param_bounds_unbounded_param_no_check() {
+        // Result(T, E) with no bounds → no warnings for any type args
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let registry = ProtocolRegistry::new();
+        let mut checker = TypeChecker::new();
+        checker.check_type_param_bounds(
+            &"GenResult".into(),
+            &[
+                InferredType::known("Integer"),
+                InferredType::known("String"),
+            ],
+            span(),
+            &hierarchy,
+            &registry,
+        );
+
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Unbounded params should not warn, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn type_param_bounds_dynamic_skipped() {
+        // Logger(T :: Printable) where T is Dynamic → no warning (conservative)
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.add_from_beam_meta(vec![ClassInfo {
+            name: "BoundedLogger".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec!["T".into()],
+            type_param_bounds: vec![Some("Printable".into())],
+            superclass_type_args: vec![],
+        }]);
+
+        let registry = ProtocolRegistry::new();
+        let mut checker = TypeChecker::new();
+        checker.check_type_param_bounds(
+            &"BoundedLogger".into(),
+            &[InferredType::Dynamic],
+            span(),
+            &hierarchy,
+            &registry,
+        );
+
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Dynamic type arg should not trigger bound check, got: {:?}",
+            checker.diagnostics()
         );
     }
 }

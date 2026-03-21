@@ -2451,6 +2451,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
         class_methods: vec![],
         class_variables: vec![],
         type_params: vec![],
+        type_param_bounds: vec![],
         superclass_type_args: vec![],
     };
 

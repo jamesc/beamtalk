@@ -140,6 +140,12 @@ pub struct ClassInfo {
     ///
     /// Empty for non-generic classes.
     pub type_params: Vec<EcoString>,
+    /// Protocol bounds for each type parameter (ADR 0068 Phase 2d).
+    ///
+    /// Parallel to `type_params`: `type_param_bounds[i]` is the bound for `type_params[i]`.
+    /// `None` means the parameter is unbounded (accepts any type).
+    /// `Some("Printable")` means the concrete type arg must conform to that protocol.
+    pub type_param_bounds: Vec<Option<EcoString>>,
     /// How this class's type params (or concrete types) map to the superclass's type params.
     ///
     /// Empty when the superclass is not generic or no type args are applied.
@@ -238,10 +244,22 @@ impl ClassInfo {
                 .iter()
                 .map(|cv| cv.name.name.clone())
                 .collect(),
-            type_params: class.type_params.iter().map(|tp| tp.name.clone()).collect(),
+            type_params: class
+                .type_params
+                .iter()
+                .map(|tp| tp.name.name.clone())
+                .collect(),
+            type_param_bounds: class
+                .type_params
+                .iter()
+                .map(|tp| tp.bound.as_ref().map(|b| b.name.clone()))
+                .collect(),
             superclass_type_args: {
-                let own_params: Vec<EcoString> =
-                    class.type_params.iter().map(|tp| tp.name.clone()).collect();
+                let own_params: Vec<EcoString> = class
+                    .type_params
+                    .iter()
+                    .map(|tp| tp.name.name.clone())
+                    .collect();
                 class
                     .superclass_type_args
                     .iter()
@@ -394,6 +412,7 @@ impl ClassHierarchy {
                         class_methods: Vec::new(),
                         class_variables: Vec::new(),
                         type_params: Vec::new(),
+                        type_param_bounds: Vec::new(),
                         superclass_type_args: Vec::new(),
                     },
                 );
@@ -2608,6 +2627,7 @@ mod tests {
                 class_methods: vec![],
                 class_variables: vec![],
                 type_params: vec![],
+                type_param_bounds: vec![],
                 superclass_type_args: vec![],
             },
         );
@@ -2627,6 +2647,7 @@ mod tests {
                 class_methods: vec![],
                 class_variables: vec![],
                 type_params: vec![],
+                type_param_bounds: vec![],
                 superclass_type_args: vec![],
             },
         );
@@ -3898,6 +3919,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![info]);
@@ -3936,6 +3958,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         };
         h.classes.insert(EcoString::from("Counter"), ast_info);
@@ -3965,6 +3988,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![cache_info]);
@@ -3993,6 +4017,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![stub]);
@@ -4551,6 +4576,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![base_info]);

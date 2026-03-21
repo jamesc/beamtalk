@@ -11,8 +11,8 @@
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
-    Block, ClassDefinition, ClassKind, Expression, Identifier, Literal, MessageSelector,
-    MethodDefinition, MethodKind, Module, StateDeclaration,
+    Block, ClassDefinition, ClassKind, Expression, Literal, MessageSelector, MethodDefinition,
+    MethodKind, Module, StateDeclaration, TypeParamDecl,
 };
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
@@ -2317,7 +2317,7 @@ impl CoreErlangGenerator {
             &class
                 .type_params
                 .iter()
-                .map(|tp| tp.name.to_string())
+                .map(|tp| tp.name.name.to_string())
                 .collect::<Vec<_>>(),
         );
 
@@ -2526,7 +2526,7 @@ impl CoreErlangGenerator {
     fn meta_method_entry(
         m: &MethodDefinition,
         class_is_sealed: bool,
-        class_type_params: &[Identifier],
+        class_type_params: &[TypeParamDecl],
     ) -> MethodInfoEntry {
         let return_type = m.return_type.as_ref().map_or(MetaTypeRepr::None, |rt| {
             Self::type_annotation_to_meta_repr(rt, class_type_params)
@@ -2557,13 +2557,16 @@ impl CoreErlangGenerator {
     /// `class_type_params`) get index `-1`.
     fn type_annotation_to_meta_repr(
         ta: &crate::ast::TypeAnnotation,
-        class_type_params: &[Identifier],
+        class_type_params: &[TypeParamDecl],
     ) -> MetaTypeRepr {
         use crate::ast::TypeAnnotation;
         match ta {
             TypeAnnotation::Simple(id) => {
                 // Check if this is a class-level type parameter
-                if let Some(index) = class_type_params.iter().position(|tp| tp.name == id.name) {
+                if let Some(index) = class_type_params
+                    .iter()
+                    .position(|tp| tp.name.name == id.name)
+                {
                     MetaTypeRepr::TypeParam {
                         name: id.name.to_string(),
                         index: i32::try_from(index).unwrap_or(0),
@@ -2695,7 +2698,7 @@ impl CoreErlangGenerator {
 mod tests {
     use crate::ast::{
         ClassDefinition, Expression, ExpressionStatement, Identifier, Literal, MessageSelector,
-        MethodDefinition, Module,
+        MethodDefinition, Module, TypeParamDecl,
     };
     use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::source_analysis::Span;
@@ -2877,7 +2880,10 @@ mod tests {
     #[test]
     fn test_type_annotation_to_meta_repr_simple_type_param() {
         let ta = TypeAnnotation::simple("T", s());
-        let class_tp = vec![Identifier::new("T", s()), Identifier::new("E", s())];
+        let class_tp = vec![
+            TypeParamDecl::unbounded(Identifier::new("T", s())),
+            TypeParamDecl::unbounded(Identifier::new("E", s())),
+        ];
         let repr = CoreErlangGenerator::type_annotation_to_meta_repr(&ta, &class_tp);
         assert_eq!(
             repr,
@@ -2892,7 +2898,7 @@ mod tests {
     fn test_type_annotation_to_meta_repr_method_local_type_param() {
         // 'R' is a single uppercase letter not in class type_params → method-local
         let ta = TypeAnnotation::simple("R", s());
-        let class_tp = vec![Identifier::new("T", s())];
+        let class_tp = vec![TypeParamDecl::unbounded(Identifier::new("T", s()))];
         let repr = CoreErlangGenerator::type_annotation_to_meta_repr(&ta, &class_tp);
         assert_eq!(
             repr,
@@ -2914,7 +2920,10 @@ mod tests {
             ],
             s(),
         );
-        let class_tp = vec![Identifier::new("T", s()), Identifier::new("E", s())];
+        let class_tp = vec![
+            TypeParamDecl::unbounded(Identifier::new("T", s())),
+            TypeParamDecl::unbounded(Identifier::new("E", s())),
+        ];
         let repr = CoreErlangGenerator::type_annotation_to_meta_repr(&ta, &class_tp);
         assert_eq!(
             repr,
@@ -2958,7 +2967,10 @@ mod tests {
     fn test_meta_type_params_in_meta_map() {
         // Build a generic class and verify type_params appears in meta map
         let mut class = empty_actor_class("Container");
-        class.type_params = vec![Identifier::new("T", s()), Identifier::new("E", s())];
+        class.type_params = vec![
+            TypeParamDecl::unbounded(Identifier::new("T", s())),
+            TypeParamDecl::unbounded(Identifier::new("E", s())),
+        ];
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),

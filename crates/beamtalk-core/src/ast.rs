@@ -376,7 +376,8 @@ pub struct ClassDefinition {
     ///
     /// Empty for non-generic classes. Populated by the parser when parenthesized
     /// type parameters appear after the class name in the definition.
-    pub type_params: Vec<Identifier>,
+    /// Each parameter may optionally carry a protocol bound (ADR 0068 Phase 2d).
+    pub type_params: Vec<TypeParamDecl>,
     /// Type arguments applied to the superclass (e.g., `(E)` in `Collection(E) subclass: Array(E)`).
     ///
     /// Empty when the superclass is not parameterized. Each entry is a type annotation
@@ -511,7 +512,8 @@ pub struct ProtocolDefinition {
     /// Type parameters for generic protocols (e.g., `E` in `Collection(E)`).
     ///
     /// Empty for non-generic protocols.
-    pub type_params: Vec<Identifier>,
+    /// Each parameter may optionally carry a protocol bound (ADR 0068 Phase 2d).
+    pub type_params: Vec<TypeParamDecl>,
     /// The protocol this one extends, if any.
     ///
     /// Example: `extending: Comparable` in `Sortable`.
@@ -1381,6 +1383,52 @@ impl Identifier {
     pub fn new(name: impl Into<EcoString>, span: Span) -> Self {
         Self {
             name: name.into(),
+            span,
+        }
+    }
+}
+
+/// A type parameter declaration with an optional protocol bound (ADR 0068 Phase 2d).
+///
+/// In class/protocol definitions, type parameters may be bounded by a protocol:
+/// `T :: Printable` means "T must conform to Printable". Unbounded parameters
+/// accept any type.
+///
+/// Examples:
+/// - `Result(T, E)` — unbounded: `T` and `E` accept any type
+/// - `Logger(T :: Printable)` — bounded: `T` must conform to `Printable`
+/// - `SortedSet(E :: Comparable)` — bounded: `E` must conform to `Comparable`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeParamDecl {
+    /// The type parameter name (e.g., `T`, `E`, `K`, `V`).
+    pub name: Identifier,
+    /// Optional protocol bound (e.g., `Printable` in `T :: Printable`).
+    ///
+    /// When present, the type checker verifies that concrete type arguments
+    /// conform to this protocol. When absent, any type is accepted.
+    pub bound: Option<Identifier>,
+    /// Source location spanning the entire declaration (name through bound).
+    pub span: Span,
+}
+
+impl TypeParamDecl {
+    /// Creates an unbounded type parameter declaration.
+    #[must_use]
+    pub fn unbounded(name: Identifier) -> Self {
+        let span = name.span;
+        Self {
+            name,
+            bound: None,
+            span,
+        }
+    }
+
+    /// Creates a bounded type parameter declaration.
+    #[must_use]
+    pub fn bounded(name: Identifier, bound: Identifier, span: Span) -> Self {
+        Self {
+            name,
+            bound: Some(bound),
             span,
         }
     }

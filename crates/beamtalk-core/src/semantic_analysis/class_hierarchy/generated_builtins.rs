@@ -140,6 +140,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -175,6 +176,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec!["E".into()],
+            type_param_bounds: vec![None],
             superclass_type_args: vec![],
         },
     );
@@ -206,6 +208,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -226,6 +229,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -258,6 +262,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -298,6 +303,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec!["current".into()],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -342,6 +348,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -367,6 +374,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -399,6 +407,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -429,6 +438,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -469,6 +479,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -495,6 +506,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -524,6 +536,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -563,6 +576,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -590,6 +604,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -637,6 +652,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -674,6 +690,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec!["K".into(), "V".into()],
+            type_param_bounds: vec![None, None],
             superclass_type_args: vec![],
         },
     );
@@ -708,6 +725,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -730,6 +748,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -752,6 +771,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -772,6 +792,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -806,6 +827,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -839,6 +861,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -859,6 +882,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -887,6 +911,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -928,6 +953,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -950,6 +976,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1013,6 +1040,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1045,6 +1073,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1082,6 +1111,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1114,6 +1144,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1149,6 +1180,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1178,6 +1210,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1211,6 +1244,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1237,6 +1271,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1257,6 +1292,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1325,6 +1361,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1352,6 +1389,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1376,6 +1414,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1443,6 +1482,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1473,6 +1513,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1507,6 +1548,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1539,6 +1581,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1562,6 +1605,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1607,6 +1651,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1636,6 +1681,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1662,6 +1708,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1688,6 +1735,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1716,6 +1764,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1745,6 +1794,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1772,6 +1822,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1799,6 +1850,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1826,6 +1878,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1871,6 +1924,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec!["T".into(), "E".into()],
+            type_param_bounds: vec![None, None],
             superclass_type_args: vec![],
         },
     );
@@ -1891,6 +1945,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1913,6 +1968,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -1952,6 +2008,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec!["E".into()],
+            type_param_bounds: vec![None],
             superclass_type_args: vec![],
         },
     );
@@ -1981,6 +2038,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2019,6 +2077,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2105,6 +2164,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2139,6 +2199,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2177,6 +2238,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2212,6 +2274,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2240,6 +2303,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2272,6 +2336,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2310,6 +2375,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2340,6 +2406,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2364,6 +2431,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2384,6 +2452,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2408,6 +2477,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2436,6 +2506,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2467,6 +2538,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec!["current".into()],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2495,6 +2567,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2531,6 +2604,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2551,6 +2625,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2582,6 +2657,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2607,6 +2683,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2646,6 +2723,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec!["current".into()],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );
@@ -2671,6 +2749,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_variables: vec![],
             type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );

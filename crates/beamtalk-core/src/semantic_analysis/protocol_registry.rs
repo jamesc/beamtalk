@@ -52,6 +52,10 @@ pub struct ProtocolInfo {
     ///
     /// Empty for non-generic protocols.
     pub type_params: Vec<EcoString>,
+    /// Protocol bounds for each type parameter (ADR 0068 Phase 2d).
+    ///
+    /// Parallel to `type_params`. `None` = unbounded, `Some("Printable")` = bounded.
+    pub type_param_bounds: Vec<Option<EcoString>>,
     /// Protocol this one extends, if any (e.g., `Comparable` for `Sortable`).
     pub extending: Option<EcoString>,
     /// Required method signatures.
@@ -80,7 +84,16 @@ impl ProtocolInfo {
 
         Self {
             name: def.name.name.clone(),
-            type_params: def.type_params.iter().map(|tp| tp.name.clone()).collect(),
+            type_params: def
+                .type_params
+                .iter()
+                .map(|tp| tp.name.name.clone())
+                .collect(),
+            type_param_bounds: def
+                .type_params
+                .iter()
+                .map(|tp| tp.bound.as_ref().map(|b| b.name.clone()))
+                .collect(),
             extending: def.extending.as_ref().map(|id| id.name.clone()),
             methods,
             span: def.span,
@@ -369,7 +382,7 @@ mod tests {
     use crate::ast::{
         ClassDefinition, CommentAttachment, ExpressionStatement, Identifier, KeywordPart,
         MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition,
-        ProtocolDefinition, ProtocolMethodSignature, TypeAnnotation,
+        ProtocolDefinition, ProtocolMethodSignature, TypeAnnotation, TypeParamDecl,
     };
     use crate::source_analysis::Span;
 
@@ -430,7 +443,10 @@ mod tests {
         methods: Vec<(&str, usize, Option<&str>)>,
     ) -> ProtocolDefinition {
         let mut proto = make_protocol(name, methods);
-        proto.type_params = type_params.into_iter().map(ident).collect();
+        proto.type_params = type_params
+            .into_iter()
+            .map(|tp| TypeParamDecl::unbounded(ident(tp)))
+            .collect();
         proto
     }
 

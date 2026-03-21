@@ -12,7 +12,7 @@ use crate::ast::{
     ClassDefinition, CommentAttachment, DeclaredKeyword, Expression, ExpressionStatement,
     Identifier, KeywordPart, MessageSelector, MethodDefinition, MethodKind, ParameterDefinition,
     ProtocolDefinition, ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration,
-    TypeAnnotation,
+    TypeAnnotation, TypeParamDecl,
 };
 use crate::source_analysis::TokenKind;
 
@@ -185,20 +185,23 @@ impl Parser {
         class_def
     }
 
-    /// Parses optional type parameters: `(T, E)`.
+    /// Parses optional type parameters: `(T, E)` or `(T :: Printable, E)`.
     ///
+    /// Each type parameter may optionally have a protocol bound after `::`.
     /// Returns an empty `Vec` if no `(` follows the current position.
-    fn parse_optional_type_params(&mut self) -> Vec<Identifier> {
+    ///
+    /// **References:** ADR 0068 Phase 2d — type parameter bounds
+    fn parse_optional_type_params(&mut self) -> Vec<TypeParamDecl> {
         if !matches!(self.current_kind(), TokenKind::LeftParen) {
             return Vec::new();
         }
         self.advance(); // consume `(`
         let mut params = Vec::new();
         if !matches!(self.current_kind(), TokenKind::RightParen) {
-            params.push(self.parse_identifier("Expected type parameter name"));
+            params.push(self.parse_type_param_decl());
             while is_comma(self.current_kind()) {
                 self.advance(); // consume `,`
-                params.push(self.parse_identifier("Expected type parameter name"));
+                params.push(self.parse_type_param_decl());
             }
         }
         if matches!(self.current_kind(), TokenKind::RightParen) {
@@ -207,6 +210,23 @@ impl Parser {
             self.error("Expected ')' after type parameters");
         }
         params
+    }
+
+    /// Parses a single type parameter declaration: `T` or `T :: Printable`.
+    ///
+    /// The `::` syntax mirrors type annotations elsewhere in the language
+    /// (ADR 0053) and reads as "T conforms to Printable".
+    fn parse_type_param_decl(&mut self) -> TypeParamDecl {
+        let name = self.parse_identifier("Expected type parameter name");
+        // Check for `::` bound: `T :: Printable`
+        if matches!(self.current_kind(), TokenKind::DoubleColon) {
+            self.advance(); // consume `::`
+            let bound = self.parse_identifier("Expected protocol name after '::'");
+            let span = name.span.merge(bound.span);
+            TypeParamDecl::bounded(name, bound, span)
+        } else {
+            TypeParamDecl::unbounded(name)
+        }
     }
 
     /// Parses optional superclass type arguments: `(E)`, `(Integer)`, `(K, V)`.
@@ -444,6 +464,9 @@ impl Parser {
     /// Starting at the `(` token, advances past `(Type, Type, ...)` and returns
     /// the offset after the closing `)`. Returns `None` if the sequence is
     /// malformed (e.g., missing closing paren or non-identifier content).
+    ///
+    /// Also handles bounded type parameters: `(T :: Printable, E)` — skips the
+    /// `:: Bound` portion when present (ADR 0068 Phase 2d).
     pub(super) fn skip_paren_type_params(&self, offset: usize) -> Option<usize> {
         debug_assert!(matches!(self.peek_at(offset), Some(TokenKind::LeftParen)));
         let mut o = offset + 1; // past `(`
@@ -456,6 +479,8 @@ impl Parser {
             return None;
         }
         o += 1;
+        // Skip optional bound: `:: Protocol`
+        o = self.skip_optional_type_param_bound(o);
         // Nested generic: `Name(Type(...))`
         if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
             o = self.skip_paren_type_params(o)?;
@@ -478,6 +503,8 @@ impl Parser {
                 return None;
             }
             o += 1;
+            // Skip optional bound: `:: Protocol`
+            o = self.skip_optional_type_param_bound(o);
             // Nested generic
             if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
                 o = self.skip_paren_type_params(o)?;
@@ -498,6 +525,22 @@ impl Parser {
             Some(o + 1)
         } else {
             None
+        }
+    }
+
+    /// Skips an optional `:: Identifier` bound in lookahead context.
+    ///
+    /// If the token at `offset` is `::` (`TypeAnnotation`) followed by an identifier,
+    /// returns the offset past both. Otherwise returns `offset` unchanged.
+    ///
+    /// **References:** ADR 0068 Phase 2d — type parameter bounds in lookahead
+    fn skip_optional_type_param_bound(&self, offset: usize) -> usize {
+        if matches!(self.peek_at(offset), Some(TokenKind::DoubleColon))
+            && matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
+        {
+            offset + 2
+        } else {
+            offset
         }
     }
 
