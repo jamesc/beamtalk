@@ -32,17 +32,79 @@ mod validation;
 pub enum InferredType {
     /// A known concrete class type (e.g., "Integer", "Counter").
     Known(EcoString),
+    /// A union of known types (e.g., `String | UndefinedObject`).
+    ///
+    /// Members are stored as resolved class names (e.g., `nil` → `UndefinedObject`).
+    /// An empty member list is impossible — construction always requires ≥2 members.
+    Union(Vec<EcoString>),
     /// Type cannot be determined — skip all checking.
     Dynamic,
 }
 
 impl InferredType {
-    /// Returns the class name if this is a known type.
+    /// Returns the class name if this is a known single type.
+    ///
+    /// Returns `None` for `Dynamic` and `Union` variants. LSP providers that
+    /// need a display string for any variant should use [`display_name`] instead.
     #[must_use]
     pub fn as_known(&self) -> Option<&EcoString> {
         match self {
             Self::Known(name) => Some(name),
+            Self::Dynamic | Self::Union(_) => None,
+        }
+    }
+
+    /// Returns a human-readable display name for this type.
+    ///
+    /// - `Known("Integer")` → `"Integer"`
+    /// - `Union(["String", "UndefinedObject"])` → `"String | UndefinedObject"`
+    /// - `Dynamic` → `None`
+    #[must_use]
+    pub fn display_name(&self) -> Option<EcoString> {
+        match self {
+            Self::Known(name) => Some(name.clone()),
+            Self::Union(members) => {
+                let mut result = EcoString::new();
+                for (i, m) in members.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(" | ");
+                    }
+                    result.push_str(m);
+                }
+                Some(result)
+            }
             Self::Dynamic => None,
+        }
+    }
+
+    /// Builds a union type, simplifying when possible.
+    ///
+    /// - If all resolved members are the same type, returns `Known(that_type)`.
+    /// - If any member is `Dynamic`, returns `Dynamic` (can't validate).
+    /// - Otherwise returns `Union(deduped_members)`.
+    fn union_of(members: &[Self]) -> Self {
+        let mut names: Vec<EcoString> = Vec::new();
+        for m in members {
+            match m {
+                Self::Known(name) => {
+                    if !names.contains(name) {
+                        names.push(name.clone());
+                    }
+                }
+                Self::Union(inner) => {
+                    for name in inner {
+                        if !names.contains(name) {
+                            names.push(name.clone());
+                        }
+                    }
+                }
+                Self::Dynamic => return Self::Dynamic,
+            }
+        }
+        match names.len() {
+            0 => Self::Dynamic,
+            1 => Self::Known(names.into_iter().next().unwrap()),
+            _ => Self::Union(names),
         }
     }
 }
@@ -3677,5 +3739,362 @@ Base subclass: Child
 
     fn eco_string(s: &str) -> ecow::EcoString {
         ecow::EcoString::from(s)
+    }
+
+    // ── Union type tests (BT-1572) ──────────────────────────────────────────
+
+    #[test]
+    fn union_of_simplifies_single_type() {
+        let result = InferredType::union_of(&[
+            InferredType::Known("Integer".into()),
+            InferredType::Known("Integer".into()),
+        ]);
+        assert_eq!(result, InferredType::Known("Integer".into()));
+    }
+
+    #[test]
+    fn union_of_preserves_different_types() {
+        let result = InferredType::union_of(&[
+            InferredType::Known("String".into()),
+            InferredType::Known("UndefinedObject".into()),
+        ]);
+        assert_eq!(
+            result,
+            InferredType::Union(vec!["String".into(), "UndefinedObject".into()])
+        );
+    }
+
+    #[test]
+    fn union_of_returns_dynamic_if_any_dynamic() {
+        let result =
+            InferredType::union_of(&[InferredType::Known("String".into()), InferredType::Dynamic]);
+        assert_eq!(result, InferredType::Dynamic);
+    }
+
+    #[test]
+    fn union_display_name() {
+        let ty = InferredType::Union(vec!["String".into(), "UndefinedObject".into()]);
+        assert_eq!(ty.display_name(), Some("String | UndefinedObject".into()));
+    }
+
+    #[test]
+    fn known_display_name() {
+        let ty = InferredType::Known("Integer".into());
+        assert_eq!(ty.display_name(), Some("Integer".into()));
+    }
+
+    #[test]
+    fn dynamic_display_name() {
+        assert_eq!(InferredType::Dynamic.display_name(), None);
+    }
+
+    #[test]
+    fn resolve_type_annotation_simple() {
+        let ann = TypeAnnotation::Simple(ident("Integer"));
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(result, InferredType::Known("Integer".into()));
+    }
+
+    #[test]
+    fn resolve_type_annotation_nil_keyword() {
+        let ann = TypeAnnotation::Simple(ident("nil"));
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(result, InferredType::Known("UndefinedObject".into()));
+    }
+
+    #[test]
+    fn resolve_type_annotation_false_keyword() {
+        let ann = TypeAnnotation::Simple(ident("false"));
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(result, InferredType::Known("False".into()));
+    }
+
+    #[test]
+    fn resolve_type_annotation_true_keyword() {
+        let ann = TypeAnnotation::Simple(ident("true"));
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(result, InferredType::Known("True".into()));
+    }
+
+    #[test]
+    fn resolve_type_annotation_union() {
+        let ann = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Simple(ident("String")),
+                TypeAnnotation::Simple(ident("nil")),
+            ],
+            span: span(),
+        };
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(
+            result,
+            InferredType::Union(vec!["String".into(), "UndefinedObject".into()])
+        );
+    }
+
+    #[test]
+    fn resolve_type_annotation_false_or() {
+        let ann = TypeAnnotation::FalseOr {
+            inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
+            span: span(),
+        };
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(
+            result,
+            InferredType::Union(vec!["Integer".into(), "False".into()])
+        );
+    }
+
+    #[test]
+    fn resolve_type_name_string_simple() {
+        let result = TypeChecker::resolve_type_name_string(&"Integer".into());
+        assert_eq!(result, InferredType::Known("Integer".into()));
+    }
+
+    #[test]
+    fn resolve_type_name_string_union() {
+        let result = TypeChecker::resolve_type_name_string(&"String | nil".into());
+        assert_eq!(
+            result,
+            InferredType::Union(vec!["String".into(), "UndefinedObject".into()])
+        );
+    }
+
+    /// BT-1572: Message send on union receiver warns if any member lacks the selector.
+    #[test]
+    fn union_receiver_warns_when_member_lacks_selector() {
+        // String understands `size`, UndefinedObject does not.
+        // Sending `size` to a `String | nil` receiver should emit a DNU hint.
+        let module = Module::new(
+            vec![ExpressionStatement::bare(msg_send(
+                // We need a way to get a union-typed receiver. We'll use a class with
+                // a union-typed state field, then access it.
+                Expression::Identifier(ident("x")),
+                MessageSelector::Unary("size".into()),
+                vec![],
+            ))],
+            span(),
+        );
+
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+
+        // Manually set up a union-typed variable in the environment by calling
+        // infer_expr directly with a pre-configured env.
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            InferredType::Union(vec!["String".into(), "UndefinedObject".into()]),
+        );
+
+        let _ty = checker.infer_expr(
+            &module.expressions[0].expression,
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        let dnu_hints: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            dnu_hints.len(),
+            1,
+            "Should warn that UndefinedObject does not understand 'size'"
+        );
+        assert!(
+            dnu_hints[0].message.contains("UndefinedObject"),
+            "Warning should mention which member lacks the selector"
+        );
+    }
+
+    /// BT-1572: Nullable hint for nil in union.
+    #[test]
+    fn union_receiver_nullable_hint() {
+        let module = Module::new(
+            vec![ExpressionStatement::bare(msg_send(
+                Expression::Identifier(ident("x")),
+                MessageSelector::Unary("size".into()),
+                vec![],
+            ))],
+            span(),
+        );
+
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            InferredType::Union(vec!["String".into(), "UndefinedObject".into()]),
+        );
+
+        checker.infer_expr(
+            &module.expressions[0].expression,
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        let dnu_hints: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(dnu_hints.len(), 1);
+        assert!(
+            dnu_hints[0]
+                .hint
+                .as_ref()
+                .unwrap()
+                .contains("Check for nil"),
+            "Should provide nullable hint when UndefinedObject is in the union"
+        );
+    }
+
+    /// BT-1572: No warning when all union members understand the selector.
+    #[test]
+    fn union_receiver_no_warning_when_all_understand() {
+        // Both Integer and String understand `asString` (via Object hierarchy).
+        let module = Module::new(
+            vec![ExpressionStatement::bare(msg_send(
+                Expression::Identifier(ident("x")),
+                MessageSelector::Unary("asString".into()),
+                vec![],
+            ))],
+            span(),
+        );
+
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            InferredType::Union(vec!["Integer".into(), "String".into()]),
+        );
+
+        checker.infer_expr(
+            &module.expressions[0].expression,
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        let dnu_hints: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_hints.is_empty(),
+            "No warning when all union members understand the selector"
+        );
+    }
+
+    /// BT-1572: Integer | False (`FalseOr`) parameter resolution.
+    #[test]
+    fn false_or_param_resolves_to_union() {
+        // A method with parameter `x :: Integer | False` should infer x as Union.
+        let method = MethodDefinition {
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
+            parameters: vec![ParameterDefinition::with_type(
+                ident("x"),
+                TypeAnnotation::FalseOr {
+                    inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
+                    span: span(),
+                },
+            )],
+            body: vec![bare(msg_send(
+                Expression::Identifier(ident("x")),
+                MessageSelector::Unary("isNil".into()),
+                vec![],
+            ))],
+            return_type: None,
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        };
+
+        let class = ClassDefinition {
+            name: ident("MyClass"),
+            superclass: Some(ident("Object")),
+            class_kind: ClassKind::Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            supervisor_kind: None,
+            state: vec![],
+            methods: vec![method],
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            backing_module: None,
+            span: span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: vec![],
+        };
+
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // No DNU for isNil — both Integer and False understand it (via Object)
+        let dnu_hints: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_hints.is_empty(),
+            "FalseOr resolved as union; no DNU for universal messages: {dnu_hints:?}"
+        );
+    }
+
+    /// BT-1572: `is_assignable_to` with union declared type (via `type_name` string).
+    #[test]
+    fn is_assignable_to_union_string() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        // "String | nil" declared type should accept "String"
+        assert!(
+            TypeChecker::is_assignable_to(&"String".into(), &"String | nil".into(), &hierarchy),
+            "String should be assignable to String | nil"
+        );
+        // "Integer" should NOT be assignable to "String | nil"
+        assert!(
+            !TypeChecker::is_assignable_to(&"Integer".into(), &"String | nil".into(), &hierarchy),
+            "Integer should not be assignable to String | nil"
+        );
+    }
+
+    /// BT-1572: `is_assignable_to` with Integer | String union.
+    #[test]
+    fn is_assignable_to_integer_or_string() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        assert!(TypeChecker::is_assignable_to(
+            &"Integer".into(),
+            &"Integer | String".into(),
+            &hierarchy
+        ));
+        assert!(TypeChecker::is_assignable_to(
+            &"String".into(),
+            &"Integer | String".into(),
+            &hierarchy
+        ));
+        assert!(!TypeChecker::is_assignable_to(
+            &"Float".into(),
+            &"Integer | String".into(),
+            &hierarchy
+        ));
     }
 }

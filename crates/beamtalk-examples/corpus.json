@@ -91,6 +91,21 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
+      "id": "docs-beamtalk-language-features-block-14",
+      "title": "Equality (lowest precedence) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
       "id": "docs-beamtalk-language-features-block-15",
       "title": "Field Access and Assignment (beamtalk-language-features)",
       "category": "language-reference",
@@ -122,7 +137,7 @@
         "mutation",
         "set"
       ],
-      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\n^self.y",
+      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -138,13 +153,16 @@
         "callback",
         "closure",
         "conditional",
+        "exception",
         "if",
         "lambda",
         "mutate",
         "mutation",
-        "set"
+        "raise",
+        "set",
+        "throw"
       ],
-      "source": "// NOT SUPPORTED: field assignment inside stored blocks\nnestedBlock := [:m | self.x := m]\nnestedBlock value: 10\n\n// SUPPORTED: field mutation in control flow blocks\ntrue ifTrue: [self.x := 5]",
+      "source": "// ❌ ERROR: field assignment inside stored closure\nnestedBlock := [:m | self.x := m]\n\n// ✅ Field mutation in control flow blocks\ntrue ifTrue: [self.x := 5]\n\n// ✅ Local variable mutation in stored closure (Tier 2)\ncount := 0\nmyBlock := [count := count + 1]\n10 timesRepeat: myBlock   // count => 10",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -228,6 +246,147 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-21",
+      "title": "Class-Side Methods (ADR 0048) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "MathUtils",
+        "Object",
+        "async",
+        "beamtalk-language-features",
+        "branch",
+        "concurrent",
+        "conditional",
+        "extends",
+        "factorial:",
+        "fibonacci:",
+        "gen_server",
+        "genserver",
+        "if",
+        "if not",
+        "inherit",
+        "inheritance",
+        "negation",
+        "object",
+        "process",
+        "subclassing",
+        "unless"
+      ],
+      "source": "Object subclass: MathUtils\n  class factorial: n =>\n    n <= 1\n      ifTrue: [1]\n      ifFalse: [n * (self factorial: n - 1)]\n\n  class fibonacci: n =>\n    n <= 1\n      ifTrue: [n]\n      ifFalse: [(self fibonacci: n - 1) + (self fibonacci: n - 2)]\n\nMathUtils factorial: 10    // => 3628800\nMathUtils fibonacci: 10    // => 55",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-22",
+      "title": "Class-Side Methods (ADR 0048) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "MyRegistry",
+        "Object",
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "current",
+        "current:",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "sealed Object subclass: MyRegistry\n  classState: current = nil\n\n  class current => self.current\n  class current: instance => self.current := instance",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-23",
+      "title": "Doc Comments (///) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Actor",
+        "Counter",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "increment",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "/// Counter — A simple incrementing actor.\n///\n/// Demonstrates actor state and message passing.\n///\n/// ## Examples\n/// ```beamtalk\n/// c := Counter spawn\n/// c increment   // => 1\n/// ```\nActor subclass: Counter\n  state: value = 0\n\n  /// Increment the counter by 1 and return the new value.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// Counter spawn increment   // => 1\n  /// ```\n  increment => self.value := self.value + 1",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-24",
+      "title": "Doc Comments (///) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "process"
+      ],
+      "source": "Beamtalk help: Counter\n// => \"== Counter < Actor ==\\n  increment\\n  ...\"\n\nBeamtalk help: Counter selector: #increment\n// => \"Counter >> increment\\n  Increment the counter by 1...\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-25",
+      "title": "Erlang FFI (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Call any Erlang module function\nErlang lists reverse: #(3, 2, 1)      // => [1, 2, 3]\nErlang erlang node                     // => current node atom\nErlang maps merge: #{#a => 1} with: #{#b => 2}\n\n// Store a module proxy for repeated use\nproxy := Erlang crypto\nproxy strong_rand_bytes: 16            // => random binary",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-26",
+      "title": "Erlang FFI (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "File",
+        "Object",
+        "beamtalk-language-features",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "readAll:",
+        "subclassing"
+      ],
+      "source": "// How File.readAll: is implemented — a thin wrapper\nObject subclass: File\n  class readAll: path :: String -> String =>\n    (Erlang beamtalk_file) readAll: path",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-29",
       "title": "Typed Class Syntax (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -256,82 +415,7 @@
         "set",
         "subclassing"
       ],
-      "source": "typed Actor subclass: TypedAccount\n  state: balance :: Integer = 0\n  state: owner :: String = \"\"\n\n  deposit: amount :: Integer -> Integer =>\n    self.balance := self.balance + amount\n    ^self.balance\n\n  balance -> Integer => ^self.balance",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-23",
-      "title": "Local Variable Mutations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Simple counter\ncount := 0\n[count < 10] whileTrue: [count := count + 1]\n// count is now 10\n\n// Multiple variables\nsum := 0\nproduct := 1\ni := 1\n[i <= 5] whileTrue: [\n    sum := sum + i\n    product := product * i\n    i := i + 1\n]\n// sum = 15, product = 120, i = 6\n\n// Collection iteration\nnumbers := #(1, 2, 3, 4, 5)\ntotal := 0\nnumbers do: [:n | total := total + n]\n// total = 15\n\n// With index\nresult := 0\n1 to: 10 do: [:n | result := result + n]\n// result = 55 (sum of 1..10)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-24",
-      "title": "Field Mutations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Actor",
-        "Counter",
-        "actor",
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "extends",
-        "field",
-        "gen_server",
-        "genserver",
-        "increment",
-        "incrementBoth",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "mutate",
-        "mutation",
-        "process",
-        "property",
-        "set",
-        "subclassing"
-      ],
-      "source": "Actor subclass: Counter\n  state: value = 0\n  state: count = 0\n\n  // Field mutation in control flow\n  increment =>\n    [self.value < 10] whileTrue: [\n      self.value := self.value + 1\n    ]\n    ^self.value\n\n  // Multiple fields\n  incrementBoth =>\n    [self.value < 10] whileTrue: [\n      self.value := self.value + 1\n      self.count := self.count + 1\n    ]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-27",
-      "title": "Error Messages (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// This won't compile — stored closure can't mutate fields\nmyBlock := [:item | self.sum := self.sum + item]\nitems do: myBlock",
+      "source": "typed Actor subclass: TypedAccount\n  state: balance :: Integer = 0\n  state: owner :: String = \"\"\n\n  deposit: amount :: Integer -> Integer =>\n    self.balance := self.balance + amount\n    self.balance\n\n  balance -> Integer => self.balance",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -373,6 +457,96 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-31",
+      "title": "Local Variable Mutations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Simple counter\ncount := 0\n[count < 10] whileTrue: [count := count + 1]\n// count is now 10\n\n// Multiple variables\nsum := 0\nproduct := 1\ni := 1\n[i <= 5] whileTrue: [\n    sum := sum + i\n    product := product * i\n    i := i + 1\n]\n// sum = 15, product = 120, i = 6\n\n// Collection iteration\nnumbers := #(1, 2, 3, 4, 5)\ntotal := 0\nnumbers do: [:n | total := total + n]\n// total = 15\n\n// With index\nresult := 0\n1 to: 10 do: [:n | result := result + n]\n// result = 55 (sum of 1..10)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-32",
+      "title": "Field Mutations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Actor",
+        "Counter",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "increment",
+        "incrementBoth",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "Actor subclass: Counter\n  state: value = 0\n  state: count = 0\n\n  // Field mutation in control flow\n  increment =>\n    [self.value < 10] whileTrue: [\n      self.value := self.value + 1\n    ]\n    self.value\n\n  // Multiple fields\n  incrementBoth =>\n    [self.value < 10] whileTrue: [\n      self.value := self.value + 1\n      self.count := self.count + 1\n    ]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-34",
+      "title": "What Works and What Doesn't (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// ✅ Local mutation in stored closure — works via Tier 2 protocol\ncount := 0\nmyBlock := [count := count + 1]\n10 timesRepeat: myBlock\ncount  // => 10\n\n// ✅ Local mutation in user-defined HOM — works via Tier 2 protocol\ncount := 0\nitems myCustomLoop: [:x | count := count + x]\ncount  // => sum of items",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-36",
+      "title": "Error Messages (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// This won't compile — stored closure can't mutate fields\nmyBlock := [:item | self.sum := self.sum + item]\nitems do: myBlock",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-40",
       "title": "Actor-to-Actor Coordination (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -382,7 +556,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-32",
+      "id": "docs-beamtalk-language-features-block-41",
       "title": "Actor-to-Actor Coordination (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -392,7 +566,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-33",
+      "id": "docs-beamtalk-language-features-block-42",
       "title": "Defining a Server (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -421,7 +595,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-35",
+      "id": "docs-beamtalk-language-features-block-44",
       "title": "Timer Lifecycle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -461,7 +635,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-37",
+      "id": "docs-beamtalk-language-features-block-46",
       "title": "Static Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -479,7 +653,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-38",
+      "id": "docs-beamtalk-language-features-block-47",
       "title": "Static Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -497,7 +671,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-39",
+      "id": "docs-beamtalk-language-features-block-48",
       "title": "Class-Side Configuration Defaults (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -520,7 +694,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-40",
+      "id": "docs-beamtalk-language-features-block-49",
       "title": "Actor Supervision Policy (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -542,88 +716,6 @@
         "supervisionPolicy"
       ],
       "source": "Actor subclass: DatabasePool\n  class supervisionPolicy => #permanent   // always restart on crash\n\nActor subclass: RequestHandler\n  class supervisionPolicy => #transient   // restart only on abnormal exit\n\nActor subclass: BackgroundJob\n  class supervisionPolicy => #temporary   // never restart (default)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-44",
-      "title": "Dynamic Supervisor (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "fault tolerance",
-        "gen_server",
-        "genserver",
-        "mutate",
-        "mutation",
-        "process",
-        "restart",
-        "set",
-        "supervision"
-      ],
-      "source": "pool := WorkerPool supervise\n// => #DynamicSupervisor<WorkerPool,_>\n\n// Start children dynamically\nw1 := pool startChild          // => #Actor<Worker,_>\nw2 := pool startChild          // => #Actor<Worker,_>\npool count                     // => 2\n\n// Terminate a specific child\npool terminateChild: w1        // => nil\npool count                     // => 1\n\n// Stop the whole pool\npool stop\nWorkerPool current             // => nil",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-46",
-      "title": "Nested Supervisors (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "fault tolerance",
-        "mutate",
-        "mutation",
-        "restart",
-        "set",
-        "supervision"
-      ],
-      "source": "root := AppRoot supervise\nroot count                          // => 3\nroot which: DatabaseSupervisor      // => #Supervisor<DatabaseSupervisor,_>",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-47",
-      "title": "Match Expression (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "raise",
-        "throw"
-      ],
-      "source": "// Basic match with literals\nx match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]\n\n// Variable binding in patterns\n42 match: [n -> n + 1]\n// => 43\n\n// Symbol matching\nstatus match: [#ok -> \"success\"; #error -> \"failure\"; _ -> \"unknown\"]\n\n// String matching\ngreeting match: [\"hello\" -> \"hi\"; _ -> \"huh?\"]\n\n// Guard clauses with when:\nx match: [\n  n when: [n > 100] -> \"big\";\n  n when: [n > 10] -> \"medium\";\n  _ -> \"small\"\n]\n\n// Negative number patterns\ntemp match: [-1 -> \"minus one\"; 0 -> \"zero\"; _ -> \"other\"]\n\n// Match on computed expression\n(3 + 4) match: [7 -> \"correct\"; _ -> \"wrong\"]\n\n// Array destructuring in match arms (BT-1296)\n#[10, 20] match: [\n  #[h, t] -> h + t;\n  _ -> 0\n]\n// => 30\n\n// Dict/map destructuring in match arms (BT-1296)\n#{#event => \"click\", #x => 5} match: [\n  #{#event => evName} -> evName;\n  _ -> \"unknown\"\n]\n// => \"click\"\n\n// Nested array patterns\n#[#[1, 2], 3] match: [\n  #[#[a, b], c] -> a + b + c;\n  _ -> 0\n]\n// => 6\n\n// Constructor patterns (Result ok:/error: only in this release)\n(Result ok: 42) match: [\n  Result ok: v    -> v;\n  Result error: _ -> 0\n]\n// => 42",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-48",
-      "title": "Match Expression (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "raise",
-        "throw"
-      ],
-      "source": "// Compile error: missing error: arm\nr match: [Result ok: v -> v + 1]\n\n// Fine: all variants covered\nr match: [Result ok: v -> v + 1; Result error: _ -> 0]\n\n// Fine: wildcard suppresses the check\nr match: [Result ok: v -> v + 1; _ -> 0]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-49",
-      "title": "Destructuring in Match Arms (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Variable captures the matched value\n42 match: [x -> x + 1]\n// => 43\n\n// Variable binding with guard\n10 match: [x when: [x > 100] -> \"big\"; x when: [x > 5] -> \"medium\"; _ -> \"small\"]\n// => \"medium\"\n\n// Tuple destructuring in match arms\nt := Erlang erlang list_to_tuple: #(#ok, 42)\nt match: [{#ok, v} -> v; {#error, _} -> 0]\n// => 42",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -651,7 +743,89 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-50",
+      "id": "docs-beamtalk-language-features-block-53",
+      "title": "Dynamic Supervisor (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "fault tolerance",
+        "gen_server",
+        "genserver",
+        "mutate",
+        "mutation",
+        "process",
+        "restart",
+        "set",
+        "supervision"
+      ],
+      "source": "pool := WorkerPool supervise\n// => #DynamicSupervisor<WorkerPool,_>\n\n// Start children dynamically\nw1 := pool startChild          // => #Actor<Worker,_>\nw2 := pool startChild          // => #Actor<Worker,_>\npool count                     // => 2\n\n// Terminate a specific child\npool terminateChild: w1        // => nil\npool count                     // => 1\n\n// Stop the whole pool\npool stop\nWorkerPool current             // => nil",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-55",
+      "title": "Nested Supervisors (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "fault tolerance",
+        "mutate",
+        "mutation",
+        "restart",
+        "set",
+        "supervision"
+      ],
+      "source": "root := AppRoot supervise\nroot count                          // => 3\nroot which: DatabaseSupervisor      // => #Supervisor<DatabaseSupervisor,_>",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-56",
+      "title": "Match Expression (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "// Basic match with literals\nx match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]\n\n// Variable binding in patterns\n42 match: [n -> n + 1]\n// => 43\n\n// Symbol matching\nstatus match: [#ok -> \"success\"; #error -> \"failure\"; _ -> \"unknown\"]\n\n// String matching\ngreeting match: [\"hello\" -> \"hi\"; _ -> \"huh?\"]\n\n// Guard clauses with when:\nx match: [\n  n when: [n > 100] -> \"big\";\n  n when: [n > 10] -> \"medium\";\n  _ -> \"small\"\n]\n\n// Negative number patterns\ntemp match: [-1 -> \"minus one\"; 0 -> \"zero\"; _ -> \"other\"]\n\n// Match on computed expression\n(3 + 4) match: [7 -> \"correct\"; _ -> \"wrong\"]\n\n// Array destructuring in match arms (BT-1296)\n#[10, 20] match: [\n  #[h, t] -> h + t;\n  _ -> 0\n]\n// => 30\n\n// Dict/map destructuring in match arms (BT-1296)\n#{#event => \"click\", #x => 5} match: [\n  #{#event => evName} -> evName;\n  _ -> \"unknown\"\n]\n// => \"click\"\n\n// Nested array patterns\n#[#[1, 2], 3] match: [\n  #[#[a, b], c] -> a + b + c;\n  _ -> 0\n]\n// => 6\n\n// Constructor patterns (Result ok:/error: only in this release)\n(Result ok: 42) match: [\n  Result ok: v    -> v;\n  Result error: _ -> 0\n]\n// => 42",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-57",
+      "title": "Match Expression (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "// Compile error: missing error: arm\nr match: [Result ok: v -> v + 1]\n\n// Fine: all variants covered\nr match: [Result ok: v -> v + 1; Result error: _ -> 0]\n\n// Fine: wildcard suppresses the check\nr match: [Result ok: v -> v + 1; _ -> 0]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-58",
+      "title": "Destructuring in Match Arms (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Variable captures the matched value\n42 match: [x -> x + 1]\n// => 43\n\n// Variable binding with guard\n10 match: [x when: [x > 100] -> \"big\"; x when: [x > 5] -> \"medium\"; _ -> \"small\"]\n// => \"medium\"\n\n// Tuple destructuring in match arms\nt := Erlang erlang list_to_tuple: #(#ok, 42)\nt match: [{#ok, v} -> v; {#error, _} -> 0]\n// => 42",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-59",
       "title": "Rest Patterns in Destructuring (BT-1251) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -663,115 +837,6 @@
         "set"
       ],
       "source": "#[first, ...rest] := #[1, 2, 3, 4, 5]\n// first = 1, rest = #[2, 3, 4, 5]\n\n#[a, b, ...tail] := #[10, 20, 30, 40]\n// a = 10, b = 20, tail = #[30, 40]\n\n#[...all] := #[1, 2, 3]\n// all = #[1, 2, 3]\n\n#[head, ..._] := #[1, 2, 3]\n// head = 1 (rest discarded)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-51",
-      "title": "Live Patching (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Actor",
-        "Counter",
-        "actor",
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "extends",
-        "field",
-        "gen_server",
-        "genserver",
-        "getValue",
-        "increment",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "instantiate",
-        "member",
-        "mutate",
-        "mutation",
-        "process",
-        "property",
-        "set",
-        "subclassing"
-      ],
-      "source": "// Canonical Counter (already running in the workspace)\nActor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n  getValue => self.value\n\n// Replace a single method — existing instances pick it up immediately\nCounter >> increment =>\n  Telemetry log: \"incrementing\"\n  self.value := self.value + 1\n\n// Redefine the class to add state — new instances get the updated shape\nActor subclass: Counter\n  state: value = 0\n  state: lastModified = nil\n  increment =>\n    self.value := self.value + 1\n    self.lastModified := DateTime now\n  getValue => self.value",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-52",
-      "title": "Extension Methods (Open Classes) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "append",
-        "beamtalk-language-features",
-        "concat",
-        "concatenate",
-        "string join"
-      ],
-      "source": "// Instance method\nString >> shout => self uppercase ++ \"!\"\n\n// Class-side method\nString class >> fromJson: s => // ...parse JSON string\n\n// Keyword method with typed parameter\nArray >> chunksOf: n :: Integer => // ...split into n-sized chunks\n\n// Binary method\nPoint >> + other :: Point => Point x: self x + other x y: self y + other y",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-53",
-      "title": "Type annotations on extensions (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "async",
-        "beamtalk-language-features",
-        "branch",
-        "concurrent",
-        "conditional",
-        "gen_server",
-        "genserver",
-        "if",
-        "if not",
-        "negation",
-        "process",
-        "unless"
-      ],
-      "source": "// Standard return type syntax (same as inside a class)\nString >> reversed -> String => self reverse\n\n// Extension-style: `:: ->` separates selector from return type\nInteger >> factorial :: -> Integer =>\n  self <= 1\n    ifTrue: [1]\n    ifFalse: [self * (self - 1) factorial]\n\nString >> words :: -> Array => self split: \" \"\n\n// Typed parameters with :: -> return type\nMap >> at: key :: String put: value :: Integer :: -> Map => // ...",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-54",
-      "title": "Beamtalk — System reflection (BeamtalkInterface) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "Beamtalk version\n// => \"0.1.0\"\n\nBeamtalk allClasses includes: #Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\n(Beamtalk globals) at: #Integer\n// => Integer\n\n(Beamtalk help: Integer)\n// => \"== Integer < Number ==\\n...\"\n\n(Beamtalk help: Integer selector: #+)\n// => \"Integer >> +\\n...\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-55",
-      "title": "Workspace — Project operations (WorkspaceInterface) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
-        "process"
-      ],
-      "source": "(Workspace load: \"examples/counter.bt\")\n// => nil  (Counter is now registered)\n\n(Workspace classes) includes: Counter\n// => true\n\n(Workspace testClasses) includes: CounterTest\n// => true\n\n(Workspace test: CounterTest) failed\n// => 0  (all tests pass)\n\n(Workspace actors) size\n// => 3  (number of live actors)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-56",
-      "title": "Class-based reload via Behaviour >> reload (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "raise",
-        "throw"
-      ],
-      "source": "Counter sourceFile\n// => \"examples/counter.bt\"\n\nCounter reload\n// => Counter  (recompiled and hot-swapped)\n\nInteger sourceFile\n// => nil  (stdlib built-in, no source file)\n\nInteger reload\n// => Error: Integer has no source file — stdlib classes cannot be reloaded",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -810,7 +875,176 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
+      "id": "docs-beamtalk-language-features-block-60",
+      "title": "Live Patching (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Actor",
+        "Counter",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "getValue",
+        "increment",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "// Canonical Counter (already running in the workspace)\nActor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1\n  getValue => self.value\n\n// Replace a single method — existing instances pick it up immediately\nCounter >> increment =>\n  Telemetry log: \"incrementing\"\n  self.value := self.value + 1\n\n// Redefine the class to add state — new instances get the updated shape\nActor subclass: Counter\n  state: value = 0\n  state: lastModified = nil\n  increment =>\n    self.value := self.value + 1\n    self.lastModified := DateTime now\n  getValue => self.value",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
       "id": "docs-beamtalk-language-features-block-61",
+      "title": "Extension Methods (Open Classes) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "append",
+        "beamtalk-language-features",
+        "concat",
+        "concatenate",
+        "string join"
+      ],
+      "source": "// Instance method\nString >> shout => self uppercase ++ \"!\"\n\n// Class-side method\nString class >> fromJson: s => // ...parse JSON string\n\n// Keyword method with typed parameter\nArray >> chunksOf: n :: Integer => // ...split into n-sized chunks\n\n// Binary method\nPoint >> + other :: Point => Point x: self x + other x y: self y + other y",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-62",
+      "title": "Type annotations on extensions (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "branch",
+        "concurrent",
+        "conditional",
+        "gen_server",
+        "genserver",
+        "if",
+        "if not",
+        "negation",
+        "process",
+        "unless"
+      ],
+      "source": "// Standard return type syntax (same as inside a class)\nString >> reversed -> String => self reverse\n\n// Extension-style: `:: ->` separates selector from return type\nInteger >> factorial :: -> Integer =>\n  self <= 1\n    ifTrue: [1]\n    ifFalse: [self * (self - 1) factorial]\n\nString >> words :: -> Array => self split: \" \"\n\n// Typed parameters with :: -> return type\nMap >> at: key :: String put: value :: Integer :: -> Map => // ...",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-63",
+      "title": "Beamtalk — System reflection (BeamtalkInterface) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "Beamtalk version\n// => \"0.1.0\"\n\nBeamtalk allClasses includes: #Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\n(Beamtalk globals) at: #Integer\n// => Integer\n\n(Beamtalk help: Integer)\n// => \"== Integer < Number ==\\n...\"\n\n(Beamtalk help: Integer selector: #+)\n// => \"Integer >> +\\n...\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-64",
+      "title": "Workspace — Project operations (WorkspaceInterface) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "process"
+      ],
+      "source": "(Workspace load: \"examples/counter.bt\")\n// => nil  (Counter is now registered)\n\n(Workspace classes) includes: Counter\n// => true\n\n(Workspace testClasses) includes: CounterTest\n// => true\n\n(Workspace test: CounterTest) failed\n// => 0  (all tests pass)\n\n(Workspace actors) size\n// => 3  (number of live actors)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-65",
+      "title": "Class-based reload via Behaviour >> reload (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "Counter sourceFile\n// => \"examples/counter.bt\"\n\nCounter reload\n// => Counter  (recompiled and hot-swapped)\n\nInteger sourceFile\n// => nil  (stdlib built-in, no source file)\n\nInteger reload\n// => Error: Integer has no source file — stdlib classes cannot be reloaded",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-68",
+      "title": "Protected stdlib class names (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Integer",
+        "Value",
+        "beamtalk-language-features",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "property",
+        "subclassing",
+        "value"
+      ],
+      "source": "// ❌ Compile-time warning: Class name `Integer` conflicts with a stdlib class.\n//    Loading will fail because stdlib class names are protected.\nValue subclass: Integer\n  field: x = 0",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-69",
+      "title": "Protected stdlib class names (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Integer",
+        "SafeInteger",
+        "beamtalk-language-features",
+        "branch",
+        "conditional",
+        "divSafe:",
+        "extends",
+        "if",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing"
+      ],
+      "source": "// ✓ Subclass is fine\nInteger subclass: SafeInteger\n  divSafe: divisor =>\n    divisor == 0 ifTrue: [^0]\n    self / divisor",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-7",
+      "title": "Construction forms (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// 1. new — all slots get their declared defaults\np := Point new                       // => Point(0, 0)\n\n// 2. new: — provide a map of slot values; missing keys keep defaults\np := Point new: #{#x => 3, #y => 4}  // => Point(3, 4)\n\n// 3. Keyword constructor — auto-generated from slot names\np := Point x: 3 y: 4                 // => Point(3, 4)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-70",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -826,7 +1060,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-62",
+      "id": "docs-beamtalk-language-features-block-71",
       "title": "Bag — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -850,7 +1084,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-63",
+      "id": "docs-beamtalk-language-features-block-72",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -869,7 +1103,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-64",
+      "id": "docs-beamtalk-language-features-block-73",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -890,7 +1124,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-65",
+      "id": "docs-beamtalk-language-features-block-74",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -903,7 +1137,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-66",
+      "id": "docs-beamtalk-language-features-block-75",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -919,7 +1153,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-67",
+      "id": "docs-beamtalk-language-features-block-76",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -932,7 +1166,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-68",
+      "id": "docs-beamtalk-language-features-block-77",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -951,7 +1185,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-69",
+      "id": "docs-beamtalk-language-features-block-78",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -961,25 +1195,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-7",
-      "title": "Construction forms (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "constructor",
-        "create",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// 1. new — all slots get their declared defaults\np := Point new                       // => Point(0, 0)\n\n// 2. new: — provide a map of slot values; missing keys keep defaults\np := Point new: #{#x => 3, #y => 4}  // => Point(3, 4)\n\n// 3. Keyword constructor — auto-generated from slot names\np := Point x: 3 y: 4                 // => Point(3, 4)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-70",
+      "id": "docs-beamtalk-language-features-block-79",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -994,97 +1210,6 @@
         "transform"
       ],
       "source": "// This prints NOTHING — the pipeline is just a recipe\ns := (Stream on: #(1, 2, 3)) collect: [:n | Transcript show: n. n * 2]\n\n// This is when printing actually happens\ns asList\n// Transcript shows: 1, 2, 3\n// => [2,4,6]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-71",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-72",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Result.unwrap returns Object — the type system cannot verify 'size' exists\n@expect type\nself assert: someResult unwrap size equals: 10",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-75",
-      "title": "Creating a Table (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "gen_server",
-        "genserver",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Create a named public table\ncache := Ets new: #myCache type: #set\n\n// Table types\nEts new: #t1 type: #set          // one entry per key (unordered)\nEts new: #t2 type: #orderedSet   // one entry per key (sorted keys)\nEts new: #t3 type: #bag          // multiple entries per key, values differ\nEts new: #t4 type: #duplicateBag // multiple identical entries per key\n\n// Look up an existing named table from another actor\ncache := Ets named: #myCache",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-76",
-      "title": "Reading and Writing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "cache at: \"key\" put: 42         // insert or update\ncache at: \"key\"                 // => 42\ncache at: \"missing\"             // => nil (not an error)\ncache at: \"missing\" ifAbsent: [0]  // => 0 (evaluate block when absent)\ncache includesKey: \"key\"        // => true\ncache includesKey: \"other\"      // => false",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-77",
-      "title": "Other Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "cache size                      // => number of entries\ncache keys                      // => List of all keys (order unspecified for #set)\ncache removeKey: \"key\"          // delete entry; no-op if key is absent\ncache delete                    // destroy the table; frees all memory",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-78",
-      "title": "Cross-Actor Sharing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "gen_server",
-        "genserver",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Actor A — create the table\ncache := Ets new: #requestCache type: #set\ncache at: \"token\" put: \"abc123\"\n\n// Actor B — retrieve by name\ncache := Ets named: #requestCache\ncache at: \"token\"               // => \"abc123\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1107,6 +1232,97 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-80",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-81",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Result.unwrap returns Object — the type system cannot verify 'size' exists\n@expect type\nself assert: someResult unwrap size equals: 10",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-84",
+      "title": "Creating a Table (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "gen_server",
+        "genserver",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Create a named public table\ncache := Ets new: #myCache type: #set\n\n// Table types\nEts new: #t1 type: #set          // one entry per key (unordered)\nEts new: #t2 type: #orderedSet   // one entry per key (sorted keys)\nEts new: #t3 type: #bag          // multiple entries per key, values differ\nEts new: #t4 type: #duplicateBag // multiple identical entries per key\n\n// Look up an existing named table from another actor\ncache := Ets named: #myCache",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-85",
+      "title": "Reading and Writing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "cache at: \"key\" put: 42         // insert or update\ncache at: \"key\"                 // => 42\ncache at: \"missing\"             // => nil (not an error)\ncache at: \"missing\" ifAbsent: [0]  // => 0 (evaluate block when absent)\ncache includesKey: \"key\"        // => true\ncache includesKey: \"other\"      // => false",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-86",
+      "title": "Other Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "cache size                      // => number of entries\ncache keys                      // => List of all keys (order unspecified for #set)\ncache removeKey: \"key\"          // delete entry; no-op if key is absent\ncache delete                    // destroy the table; frees all memory",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-87",
+      "title": "Cross-Actor Sharing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "gen_server",
+        "genserver",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Actor A — create the table\ncache := Ets new: #requestCache type: #set\ncache at: \"token\" put: \"abc123\"\n\n// Actor B — retrieve by name\ncache := Ets named: #requestCache\ncache at: \"token\"               // => \"abc123\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-89",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1121,7 +1337,33 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-81",
+      "id": "docs-beamtalk-language-features-block-9",
+      "title": "Immutability enforcement (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "exception",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "property",
+        "raise",
+        "set",
+        "subclassing",
+        "throw"
+      ],
+      "source": "// Compile error — rejected before the code runs:\n// Value subclass: BadPoint\n//   field: x = 0\n//   badSetX: v => self.x := v   ← error: Cannot assign to slot\n\n// Runtime error:\np := Point x: 1 y: 2\np fieldAt: #x put: 99   // raises: immutable_value",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-90",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1131,7 +1373,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-83",
+      "id": "docs-beamtalk-language-features-block-92",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1144,7 +1386,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-84",
+      "id": "docs-beamtalk-language-features-block-93",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1167,7 +1409,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-85",
+      "id": "docs-beamtalk-language-features-block-94",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1190,7 +1432,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-86",
+      "id": "docs-beamtalk-language-features-block-95",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1213,7 +1455,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-87",
+      "id": "docs-beamtalk-language-features-block-96",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1241,32 +1483,6 @@
         "testQuery"
       ],
       "source": "TestCase subclass: DatabaseTest\n  field: conn = nil\n\n  setUpOnce => Database connect: \"test_db\"\n  tearDownOnce => self suiteFixture close\n\n  setUp => self withConn: self suiteFixture\n\n  testQuery =>\n    result := self.conn query: \"SELECT 1\"\n    self assert: result equals: 1\n\n  testInsert =>\n    self.conn execute: \"INSERT INTO t VALUES (1)\"\n    self assert: (self.conn query: \"SELECT count(*) FROM t\") equals: 1",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-9",
-      "title": "Immutability enforcement (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "exception",
-        "extends",
-        "field",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "mutate",
-        "mutation",
-        "property",
-        "raise",
-        "set",
-        "subclassing",
-        "throw"
-      ],
-      "source": "// Compile error — rejected before the code runs:\n// Value subclass: BadPoint\n//   field: x = 0\n//   badSetX: v => self.x := v   ← error: Cannot assign to slot\n\n// Runtime error:\np := Point x: 1 y: 2\np fieldAt: #x put: 99   // raises: immutable_value",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2274,7 +2490,7 @@
         "x",
         "y"
       ],
-      "source": "Value subclass: Point\n  state: x = 0\n  state: y = 0\n\n  // Read-only access (auto-generated for each slot too, but you can override):\n  x => self.x\n  y => self.y\n\n  // A method that computes from slots:\n  distanceSquared => (self.x * self.x) + (self.y * self.y)\n\n  // Methods return new instances for \"mutation\":\n  translateBy: dx and: dy =>\n    Point x: (self.x + dx) y: (self.y + dy)\n\n  // String representation:\n  printString => \"Point({self.x}, {self.y})\"",
+      "source": "Value subclass: Point\n  field: x = 0\n  field: y = 0\n\n  // Read-only access (auto-generated for each slot too, but you can override):\n  x => self.x\n  y => self.y\n\n  // A method that computes from slots:\n  distanceSquared => (self.x * self.x) + (self.y * self.y)\n\n  // Methods return new instances for \"mutation\":\n  translateBy: dx and: dy =>\n    Point x: (self.x + dx) y: (self.y + dy)\n\n  // String representation:\n  printString => \"Point({self.x}, {self.y})\"",
       "explanation": "Code example from docs/learning/10-value-classes.md"
     },
     {
@@ -2346,7 +2562,7 @@
         "unless",
         "value"
       ],
-      "source": "Value subclass: Money\n  state: amount = 0\n  state: currency = #USD\n\n  add: other =>\n    other currency =:= self.currency\n      ifFalse: [^self error: \"Currency mismatch\"]\n    Money amount: (self.amount + other amount) currency: self.currency\n\n  printString => \"{self.amount} {self.currency}\"\n\nTestCase subclass: Ch10MoneyExample\n\n  testMoneyAddition =>\n    a := Money amount: 10 currency: #USD\n    b := Money amount: 5 currency: #USD\n    c := a add: b\n    self assert: c amount equals: 15\n    self assert: c currency equals: #USD\n\n  testMoneyImmutable =>\n    a := Money amount: 10 currency: #USD\n    b := Money amount: 5 currency: #USD\n    a add: b\n    self assert: a amount equals: 10   // unchanged\n\n  testMoneyPrintString =>\n    m := Money amount: 42 currency: #EUR\n    self assert: m printString equals: \"42 EUR\"",
+      "source": "Value subclass: Money\n  field: amount = 0\n  field: currency = #USD\n\n  add: other =>\n    other currency =:= self.currency\n      ifFalse: [^self error: \"Currency mismatch\"]\n    Money amount: (self.amount + other amount) currency: self.currency\n\n  printString => \"{self.amount} {self.currency}\"\n\nTestCase subclass: Ch10MoneyExample\n\n  testMoneyAddition =>\n    a := Money amount: 10 currency: #USD\n    b := Money amount: 5 currency: #USD\n    c := a add: b\n    self assert: c amount equals: 15\n    self assert: c currency equals: #USD\n\n  testMoneyImmutable =>\n    a := Money amount: 10 currency: #USD\n    b := Money amount: 5 currency: #USD\n    a add: b\n    self assert: a amount equals: 10   // unchanged\n\n  testMoneyPrintString =>\n    m := Money amount: 42 currency: #EUR\n    self assert: m printString equals: \"42 EUR\"",
       "explanation": "Code example from docs/learning/10-value-classes.md"
     },
     {
@@ -2873,8 +3089,6 @@
         "13-testing",
         "Ch13SetupExample",
         "TestCase",
-        "assign",
-        "assignment",
         "branch",
         "conditional",
         "extends",
@@ -2884,11 +3098,8 @@
         "inheritance",
         "instance variable",
         "member",
-        "mutate",
-        "mutation",
         "object",
         "property",
-        "set",
         "setUp",
         "subclassing",
         "tearDown",
@@ -2896,7 +3107,7 @@
         "testCounterIsIndependentPerTest",
         "testCounterStartsAtZero"
       ],
-      "source": "TestCase subclass: Ch13SetupExample\n  state: counter = nil\n\n  setUp =>\n    self.counter := Counter spawn\n    self\n\n  tearDown =>\n    self.counter isAlive ifTrue: [self.counter stop]\n\n  testCounterStartsAtZero =>\n    self assert: self.counter getValue equals: 0\n\n  testCounterIncrements =>\n    self.counter increment\n    self assert: self.counter getValue equals: 1\n\n  testCounterIsIndependentPerTest =>\n    // Each test gets a fresh counter from setUp\n    self assert: self.counter getValue equals: 0\n    self.counter increment\n    self.counter increment\n    self assert: self.counter getValue equals: 2",
+      "source": "TestCase subclass: Ch13SetupExample\n  field: counter = nil\n\n  setUp =>\n    self withCounter: (Counter spawn)\n\n  tearDown =>\n    self.counter isAlive ifTrue: [self.counter stop]\n\n  testCounterStartsAtZero =>\n    self assert: self.counter getValue equals: 0\n\n  testCounterIncrements =>\n    self.counter increment\n    self assert: self.counter getValue equals: 1\n\n  testCounterIsIndependentPerTest =>\n    // Each test gets a fresh counter from setUp\n    self assert: self.counter getValue equals: 0\n    self.counter increment\n    self.counter increment\n    self assert: self.counter getValue equals: 2",
       "explanation": "Code example from docs/learning/13-testing.md"
     },
     {
@@ -2952,7 +3163,37 @@
         "testPushIncreasesSize",
         "throw"
       ],
-      "source": "Actor subclass: Stack\n  state: items = nil\n\n  initialize =>\n    self.items := #[]\n\n  push: item =>\n    self.items := self.items add: item\n\n  pop =>\n    self.items isEmpty ifTrue: [self error: \"Stack underflow\"]\n    top := self.items last\n    self.items := self.items copyFrom: 1 to: self.items size - 1\n    top\n\n  peek =>\n    self.items isEmpty ifTrue: [self error: \"Stack underflow\"]\n    self.items last\n\n  isEmpty => self.items isEmpty\n\n  size => self.items size\n\nTestCase subclass: StackTest\n  state: stack = nil\n\n  setUp =>\n    self.stack := Stack spawn\n    self.stack initialize\n    self\n\n  testNewStackIsEmpty =>\n    self assert: self.stack isEmpty\n\n  testPushIncreasesSize =>\n    self.stack push: 1\n    self assert: self.stack size equals: 1\n    self.stack push: 2\n    self assert: self.stack size equals: 2\n\n  testPopReturnsLastPushed =>\n    self.stack push: \"a\"\n    self.stack push: \"b\"\n    self.stack push: \"c\"\n    self assert: self.stack pop equals: \"c\"\n    self assert: self.stack pop equals: \"b\"\n    self assert: self.stack pop equals: \"a\"\n\n  testPeekDoesNotRemove =>\n    self.stack push: 42\n    self assert: self.stack peek equals: 42\n    self assert: self.stack size equals: 1\n\n  testPopFromEmptyRaises =>\n    self should: [self.stack pop] raise: #beamtalk_error\n\n  testPeekFromEmptyRaises =>\n    self should: [self.stack peek] raise: #beamtalk_error",
+      "source": "Actor subclass: Stack\n  state: items = nil\n\n  initialize =>\n    self.items := #[]\n\n  push: item =>\n    self.items := self.items add: item\n\n  pop =>\n    self.items isEmpty ifTrue: [self error: \"Stack underflow\"]\n    top := self.items last\n    self.items := self.items copyFrom: 1 to: self.items size - 1\n    top\n\n  peek =>\n    self.items isEmpty ifTrue: [self error: \"Stack underflow\"]\n    self.items last\n\n  isEmpty => self.items isEmpty\n\n  size => self.items size\n\nTestCase subclass: StackTest\n  field: stack = nil\n\n  setUp =>\n    self withStack: (Stack spawn)\n\n  testNewStackIsEmpty =>\n    self assert: self.stack isEmpty\n\n  testPushIncreasesSize =>\n    self.stack push: 1\n    self assert: self.stack size equals: 1\n    self.stack push: 2\n    self assert: self.stack size equals: 2\n\n  testPopReturnsLastPushed =>\n    self.stack push: \"a\"\n    self.stack push: \"b\"\n    self.stack push: \"c\"\n    self assert: self.stack pop equals: \"c\"\n    self assert: self.stack pop equals: \"b\"\n    self assert: self.stack pop equals: \"a\"\n\n  testPeekDoesNotRemove =>\n    self.stack push: 42\n    self assert: self.stack peek equals: 42\n    self assert: self.stack size equals: 1\n\n  testPopFromEmptyRaises =>\n    self should: [self.stack pop] raise: #beamtalk_error\n\n  testPeekFromEmptyRaises =>\n    self should: [self.stack peek] raise: #beamtalk_error",
+      "explanation": "Code example from docs/learning/13-testing.md"
+    },
+    {
+      "id": "docs-learning-13-testing-block-4",
+      "title": "Suite-level setup: setUpOnce / tearDownOnce (13-testing)",
+      "category": "learning",
+      "tags": [
+        "13-testing",
+        "DatabaseTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "setUp",
+        "setUpOnce",
+        "subclassing",
+        "tearDownOnce",
+        "testQuery"
+      ],
+      "source": "TestCase subclass: DatabaseTest\n  field: conn = nil\n\n  setUpOnce => Database connect: \"test_db\"\n  tearDownOnce => self suiteFixture close\n\n  setUp => self withConn: self suiteFixture\n\n  testQuery =>\n    result := self.conn query: \"SELECT 1\"\n    self assert: result equals: 1",
       "explanation": "Code example from docs/learning/13-testing.md"
     },
     {
@@ -3115,13 +3356,32 @@
       "explanation": "Code example from docs/learning/15-type-annotations.md"
     },
     {
+      "id": "docs-learning-15-type-annotations-block-1",
+      "title": "Data slot annotations (15-type-annotations)",
+      "category": "learning",
+      "tags": [
+        "15-type-annotations",
+        "async",
+        "concurrent",
+        "field",
+        "gen_server",
+        "genserver",
+        "instance variable",
+        "member",
+        "process",
+        "property"
+      ],
+      "source": "// Value subclass — use field:\n// field: x :: Integer = 0\n// field: name :: String = \"\"\n\n// Actor subclass — use state:\n// state: balance :: Integer = 0\n// state: owner :: String = \"\"",
+      "explanation": "Code example from docs/learning/15-type-annotations.md"
+    },
+    {
       "id": "docs-learning-15-type-annotations-block-5",
       "title": "A typed value class (15-type-annotations)",
       "category": "learning",
       "tags": [
         "15-type-annotations",
         "Ch15TypedPoint",
-        "Object",
+        "Value",
         "distanceSquared",
         "extends",
         "field",
@@ -3131,11 +3391,11 @@
         "inheritance",
         "instance variable",
         "member",
-        "object",
         "property",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "typed Object subclass: Ch15TypedPoint\n  state: x :: Integer = 0\n  state: y :: Integer = 0\n\n  getX -> Integer => self.x\n  getY -> Integer => self.y\n\n  distanceSquared -> Integer =>\n    (self.x * self.x) + (self.y * self.y)",
+      "source": "typed Value subclass: Ch15TypedPoint\n  field: x :: Integer = 0\n  field: y :: Integer = 0\n\n  getX -> Integer => self.x\n  getY -> Integer => self.y\n\n  distanceSquared -> Integer =>\n    (self.x * self.x) + (self.y * self.y)",
       "explanation": "Code example from docs/learning/15-type-annotations.md"
     },
     {
@@ -3646,7 +3906,7 @@
         "tearDown",
         "testWriteAndRead"
       ],
-      "source": "TestCase subclass: Ch18WriteRead\n  state: tmpDir = \"target/bt-doctest-tmp/ch18wr\"\n  setUp =>\n    File mkdirAll: self.tmpDir\n    self\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  testWriteAndRead =>\n    path := self.tmpDir ++ \"/greeting.txt\"\n    File writeAll: path contents: \"Hello, Beamtalk!\"\n    content := (File readAll: path) unwrap\n    self assert: content equals: \"Hello, Beamtalk!\"",
+      "source": "TestCase subclass: Ch18WriteRead\n  field: tmpDir = \"target/bt-doctest-tmp/ch18wr\"\n  setUp =>\n    File mkdirAll: self.tmpDir\n    self\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  testWriteAndRead =>\n    path := self.tmpDir ++ \"/greeting.txt\"\n    File writeAll: path contents: \"Hello, Beamtalk!\"\n    content := (File readAll: path) unwrap\n    self assert: content equals: \"Hello, Beamtalk!\"",
       "explanation": "Code example from docs/learning/18-file-io.md"
     },
     {
@@ -3719,7 +3979,7 @@
         "toString",
         "to_string"
       ],
-      "source": "TestCase subclass: Ch18Directories\n  state: tmpDir = \"target/bt-doctest-tmp/ch18dirs\"\n  setUp =>\n    File mkdirAll: self.tmpDir\n    self\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  testMkdirAndList =>\n    // Create a nested directory structure\n    File mkdirAll: self.tmpDir ++ \"/a/b\"\n\n    // Write some files\n    File writeAll: self.tmpDir ++ \"/readme.txt\" contents: \"hi\"\n    File writeAll: self.tmpDir ++ \"/notes.txt\" contents: \"note\"\n\n    // List directory contents (returns a list of filenames)\n    entries := (File listDirectory: self.tmpDir) unwrap\n    self assert: (entries printString includesSubstring: \"readme.txt\")\n    self assert: (entries printString includesSubstring: \"notes.txt\")\n\n  testDeleteAndRename =>\n    path := self.tmpDir ++ \"/temp.txt\"\n    File writeAll: path contents: \"temporary\"\n    self assert: (File exists: path)\n\n    // Delete a file\n    File delete: path\n    self deny: (File exists: path)\n\n    // Rename a file\n    src := self.tmpDir ++ \"/old.txt\"\n    dst := self.tmpDir ++ \"/new.txt\"\n    File writeAll: src contents: \"data\"\n    File rename: src to: dst\n    self assert: (File readAll: dst) unwrap equals: \"data\"",
+      "source": "TestCase subclass: Ch18Directories\n  field: tmpDir = \"target/bt-doctest-tmp/ch18dirs\"\n  setUp =>\n    File mkdirAll: self.tmpDir\n    self\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  testMkdirAndList =>\n    // Create a nested directory structure\n    File mkdirAll: self.tmpDir ++ \"/a/b\"\n\n    // Write some files\n    File writeAll: self.tmpDir ++ \"/readme.txt\" contents: \"hi\"\n    File writeAll: self.tmpDir ++ \"/notes.txt\" contents: \"note\"\n\n    // List directory contents (returns a list of filenames)\n    entries := (File listDirectory: self.tmpDir) unwrap\n    self assert: (entries printString includesSubstring: \"readme.txt\")\n    self assert: (entries printString includesSubstring: \"notes.txt\")\n\n  testDeleteAndRename =>\n    path := self.tmpDir ++ \"/temp.txt\"\n    File writeAll: path contents: \"temporary\"\n    self assert: (File exists: path)\n\n    // Delete a file\n    File delete: path\n    self deny: (File exists: path)\n\n    // Rename a file\n    src := self.tmpDir ++ \"/old.txt\"\n    dst := self.tmpDir ++ \"/new.txt\"\n    File writeAll: src contents: \"data\"\n    File rename: src to: dst\n    self assert: (File readAll: dst) unwrap equals: \"data\"",
       "explanation": "Code example from docs/learning/18-file-io.md"
     },
     {
@@ -3778,7 +4038,7 @@
         "testReadAllLines",
         "where"
       ],
-      "source": "TestCase subclass: Ch18Streams\n  state: tmpDir = \"target/bt-doctest-tmp/ch18streams\"\n  state: nl = \"\"\n  setUp =>\n    self.nl := String fromCodePoint: 10\n    File mkdirAll: self.tmpDir\n    File writeAll: self.tmpDir ++ \"/data.txt\"\n      contents: \"one\" ++ self.nl ++ \"two\" ++ self.nl ++ \"three\" ++ self.nl ++ \"four\" ++ self.nl ++ \"five\"\n    self\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  testReadAllLines =>\n    // Read all lines from a file\n    lines := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      h lines asList\n    ]) unwrap\n    self assert: lines size equals: 5\n    self assert: (lines at: 1) equals: \"one\"\n    self assert: (lines at: 5) equals: \"five\"\n\n  testLazyTake =>\n    // take: only reads the first N lines — lazy evaluation\n    count := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      (h lines take: 2) inject: 0 into: [:c :_ | c + 1]\n    ]) unwrap\n    self assert: count equals: 2\n\n  testFilterLines =>\n    // select: filters lazily\n    result := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      (h lines select: [:l | l size <= 3]) asList\n    ]) unwrap\n    self assert: result size equals: 3",
+      "source": "TestCase subclass: Ch18Streams\n  field: tmpDir = \"target/bt-doctest-tmp/ch18streams\"\n  field: nl = \"\"\n  setUp =>\n    updated := self withNl: (String fromCodePoint: 10)\n    File mkdirAll: updated tmpDir\n    File writeAll: updated tmpDir ++ \"/data.txt\"\n      contents: \"one\" ++ updated nl ++ \"two\" ++ updated nl ++ \"three\" ++ updated nl ++ \"four\" ++ updated nl ++ \"five\"\n    updated\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  testReadAllLines =>\n    // Read all lines from a file\n    lines := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      h lines asList\n    ]) unwrap\n    self assert: lines size equals: 5\n    self assert: (lines at: 1) equals: \"one\"\n    self assert: (lines at: 5) equals: \"five\"\n\n  testLazyTake =>\n    // take: only reads the first N lines — lazy evaluation\n    count := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      (h lines take: 2) inject: 0 into: [:c :_ | c + 1]\n    ]) unwrap\n    self assert: count equals: 2\n\n  testFilterLines =>\n    // select: filters lazily\n    result := (File open: self.tmpDir ++ \"/data.txt\" do: [:h |\n      (h lines select: [:l | l size <= 3]) asList\n    ]) unwrap\n    self assert: result size equals: 3",
       "explanation": "Code example from docs/learning/18-file-io.md"
     },
     {
@@ -4307,13 +4567,10 @@
         "24-reflection",
         "Ch24ClassRespondsTo",
         "TestCase",
-        "constructor",
-        "create",
         "duck typing",
         "extends",
         "inherit",
         "inheritance",
-        "instantiate",
         "interface",
         "method check",
         "object",
@@ -4321,7 +4578,7 @@
         "subclassing",
         "testClassRespondsTo"
       ],
-      "source": "TestCase subclass: Ch24ClassRespondsTo\n  testClassRespondsTo =>\n    self assert: (Point respondsTo: #new)\n    self assert: (Point respondsTo: #methods)",
+      "source": "TestCase subclass: Ch24ClassRespondsTo\n  testClassRespondsTo =>\n    self assert: (Point respondsTo: #name)\n    self assert: (Point respondsTo: #methods)",
       "explanation": "Code example from docs/learning/24-reflection.md"
     },
     {
@@ -5457,7 +5714,7 @@
       "category": "learning-fixtures",
       "tags": [
         "Ch15TypedPoint",
-        "Object",
+        "Value",
         "ch15typed_point",
         "distanceSquared",
         "extends",
@@ -5468,11 +5725,11 @@
         "inheritance",
         "instance variable",
         "member",
-        "object",
         "property",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "// Typed value class fixture for docs/learning/15-type-annotations.md\n\ntyped Object subclass: Ch15TypedPoint\n  state: x :: Integer = 0\n  state: y :: Integer = 0\n\n  getX -> Integer => self.x\n  getY -> Integer => self.y\n\n  distanceSquared -> Integer =>\n    (self.x * self.x) + (self.y * self.y)",
+      "source": "// Typed value class fixture for docs/learning/15-type-annotations.md\n\ntyped Value subclass: Ch15TypedPoint\n  field: x :: Integer = 0\n  field: y :: Integer = 0\n\n  getX -> Integer => self.x\n  getY -> Integer => self.y\n\n  distanceSquared -> Integer =>\n    (self.x * self.x) + (self.y * self.y)",
       "explanation": "Typed value class fixture for docs/learning/15-type-annotations.md"
     },
     {
@@ -5904,7 +6161,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// BUnit tests for docs/learning/18-file-io.md\n\nTestCase subclass: Ch18FileIO\n  field: tmpDir = \"target/bt-doctest-tmp/ch18\"\n  field: nl = \"\"\n\n  setUp =>\n    updated := self withNl: (String fromCodePoint: 10)\n    File mkdirAll: updated tmpDir\n    updated\n\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  // — Reading and writing —\n\n  testWriteAndRead =>\n    path := self.tmpDir ++ \"/hello.txt\"\n    File writeAll: path contents: \"Hello, Beamtalk!\"\n    result := File readAll: path\n    self assert: result isOk\n    self assert: result unwrap equals: \"Hello, Beamtalk!\"\n\n  testReadMissingFile =>\n    result := File readAll: self.tmpDir ++ \"/missing.txt\"\n    self assert: result isError\n\n  testOverwrite =>\n    path := self.tmpDir ++ \"/overwrite.txt\"\n    File writeAll: path contents: \"first\"\n    File writeAll: path contents: \"second\"\n    self assert: (File readAll: path) unwrap equals: \"second\"\n\n  testFileExists =>\n    path := self.tmpDir ++ \"/exists.txt\"\n    self deny: (File exists: path)\n    File writeAll: path contents: \"data\"\n    self assert: (File exists: path)\n\n  // — Directory operations —\n\n  testMkdir =>\n    dir := self.tmpDir ++ \"/subdir\"\n    result := File mkdir: dir\n    self assert: result isOk\n    self assert: (File isDirectory: dir)\n\n  testMkdirAll =>\n    dir := self.tmpDir ++ \"/a/b/c\"\n    result := File mkdirAll: dir\n    self assert: result isOk\n    self assert: (File isDirectory: dir)\n\n  testListDirectory =>\n    File writeAll: self.tmpDir ++ \"/a.txt\" contents: \"a\"\n    File writeAll: self.tmpDir ++ \"/b.txt\" contents: \"b\"\n    entries := (File listDirectory: self.tmpDir) unwrap\n    self assert: (entries printString includesSubstring: \"a.txt\")\n    self assert: (entries printString includesSubstring: \"b.txt\")\n\n  testIsFileAndIsDirectory =>\n    path := self.tmpDir ++ \"/check.txt\"\n    File writeAll: path contents: \"data\"\n    self assert: (File isFile: path)\n    self deny: (File isDirectory: path)\n    self assert: (File isDirectory: self.tmpDir)\n    self deny: (File isFile: self.tmpDir)\n\n  testDelete =>\n    path := self.tmpDir ++ \"/deleteme.txt\"\n    File writeAll: path contents: \"bye\"\n    self assert: (File exists: path)\n    File delete: path\n    self deny: (File exists: path)\n\n  testRename =>\n    src := self.tmpDir ++ \"/old.txt\"\n    dst := self.tmpDir ++ \"/new.txt\"\n    File writeAll: src contents: \"moved\"\n    File rename: src to: dst\n    self deny: (File exists: src)\n    self assert: (File readAll: dst) unwrap equals: \"moved\"\n\n  testCwd =>\n    cwd := File cwd\n    self assert: (cwd isKindOf: String)\n    self assert: cwd size > 0\n\n  // — File streams —\n\n  testLinesStream =>\n    path := self.tmpDir ++ \"/lines.txt\"\n    content := \"one\" ++ self.nl ++ \"two\" ++ self.nl ++ \"three\"\n    File writeAll: path contents: content\n    count := (File open: path do: [:h |\n      h lines asList size\n    ]) unwrap\n    self assert: count equals: 3\n\n  testOpenDoReadLines =>\n    path := self.tmpDir ++ \"/stream.txt\"\n    content := \"alpha\" ++ self.nl ++ \"beta\" ++ self.nl ++ \"gamma\"\n    File writeAll: path contents: content\n    lines := (File open: path do: [:h |\n      h lines asList\n    ]) unwrap\n    self assert: lines size equals: 3\n    self assert: (lines at: 1) equals: \"alpha\"\n    self assert: (lines at: 3) equals: \"gamma\"\n\n  testLazyTake =>\n    path := self.tmpDir ++ \"/many.txt\"\n    content := \"1\" ++ self.nl ++ \"2\" ++ self.nl ++ \"3\" ++ self.nl ++ \"4\" ++ self.nl ++ \"5\"\n    File writeAll: path contents: content\n    count := (File open: path do: [:h |\n      (h lines take: 2) inject: 0 into: [:c :_ | c + 1]\n    ]) unwrap\n    self assert: count equals: 2",
+      "source": "// BUnit tests for docs/learning/18-file-io.md\n\nTestCase subclass: Ch18FileIO\n  field: tmpDir = \"target/bt-doctest-tmp/ch18\"\n  field: nl = \"\"\n\n  setUp =>\n    updated := self withNl: (String fromCodePoint: 10)\n    File mkdirAll: updated tmpDir\n    updated\n\n  tearDown =>\n    File deleteAll: self.tmpDir\n    self\n\n  // — Reading and writing —\n\n  testWriteAndRead =>\n    path := self.tmpDir ++ \"/hello.txt\"\n    File writeAll: path contents: \"Hello, Beamtalk!\"\n    result := File readAll: path\n    self assert: result isOk\n    self assert: result unwrap equals: \"Hello, Beamtalk!\"\n\n  testReadMissingFile =>\n    result := File readAll: self.tmpDir ++ \"/missing.txt\"\n    self assert: result isError\n\n  testOverwrite =>\n    path := self.tmpDir ++ \"/overwrite.txt\"\n    File writeAll: path contents: \"first\"\n    File writeAll: path contents: \"second\"\n    self assert: (File readAll: path) unwrap equals: \"second\"\n\n  testFileExists =>\n    path := self.tmpDir ++ \"/exists.txt\"\n    self deny: (File exists: path)\n    File writeAll: path contents: \"data\"\n    self assert: (File exists: path)\n\n  // — Directory operations —\n\n  testMkdir =>\n    dir := self.tmpDir ++ \"/subdir\"\n    result := File mkdir: dir\n    self assert: result isOk\n    self assert: (File isDirectory: dir)\n\n  testMkdirAll =>\n    dir := self.tmpDir ++ \"/a/b/c\"\n    result := File mkdirAll: dir\n    self assert: result isOk\n    self assert: (File isDirectory: dir)\n\n  testListDirectory =>\n    File writeAll: self.tmpDir ++ \"/a.txt\" contents: \"a\"\n    File writeAll: self.tmpDir ++ \"/b.txt\" contents: \"b\"\n    entries := (File listDirectory: self.tmpDir) unwrap\n    self assert: (entries printString includesSubstring: \"a.txt\")\n    self assert: (entries printString includesSubstring: \"b.txt\")\n\n  testIsFileAndIsDirectory =>\n    path := self.tmpDir ++ \"/check.txt\"\n    File writeAll: path contents: \"data\"\n    self assert: (File isFile: path)\n    self deny: (File isDirectory: path)\n    self assert: (File isDirectory: self.tmpDir)\n    self deny: (File isFile: self.tmpDir)\n\n  testDelete =>\n    path := self.tmpDir ++ \"/deleteme.txt\"\n    File writeAll: path contents: \"bye\"\n    self assert: (File exists: path)\n    File delete: path\n    self deny: (File exists: path)\n\n  testRename =>\n    src := self.tmpDir ++ \"/old.txt\"\n    dst := self.tmpDir ++ \"/new.txt\"\n    File writeAll: src contents: \"moved\"\n    File rename: src to: dst\n    self deny: (File exists: src)\n    self assert: (File readAll: dst) unwrap equals: \"moved\"\n\n  testCwd =>\n    cwd := File cwd\n    self assert: (cwd isKindOf: String)\n    self assert: cwd size > 0\n\n  // — File streams —\n\n  testLinesStream =>\n    path := self.tmpDir ++ \"/lines.txt\"\n    content := \"one\" ++ self.nl ++ \"two\" ++ self.nl ++ \"three\"\n    File writeAll: path contents: content\n    count := (File open: path do: [:h |\n      h lines asList size\n    ]) unwrap\n    self assert: count equals: 3\n\n  testOpenDoReadLines =>\n    path := self.tmpDir ++ \"/stream.txt\"\n    content := \"alpha\" ++ self.nl ++ \"beta\" ++ self.nl ++ \"gamma\"\n    File writeAll: path contents: content\n    lines := (File open: path do: [:h |\n      h lines asList\n    ]) unwrap\n    @expect type\n    self assert: lines size equals: 3\n    @expect type\n    self assert: (lines at: 1) equals: \"alpha\"\n    @expect type\n    self assert: (lines at: 3) equals: \"gamma\"\n\n  testLazyTake =>\n    path := self.tmpDir ++ \"/many.txt\"\n    content := \"1\" ++ self.nl ++ \"2\" ++ self.nl ++ \"3\" ++ self.nl ++ \"4\" ++ self.nl ++ \"5\"\n    File writeAll: path contents: content\n    count := (File open: path do: [:h |\n      (h lines take: 2) inject: 0 into: [:c :_ | c + 1]\n    ]) unwrap\n    self assert: count equals: 2",
       "explanation": "BUnit tests for docs/learning/18-file-io.md"
     },
     {
@@ -5917,13 +6174,10 @@
         "assign",
         "assignment",
         "ch24reflection",
-        "constructor",
-        "create",
         "duck typing",
         "extends",
         "inherit",
         "inheritance",
-        "instantiate",
         "interface",
         "method check",
         "mutate",
@@ -5944,7 +6198,7 @@
         "testSuperclass",
         "testValueFieldNames"
       ],
-      "source": "// BUnit tests for docs/learning/24-reflection.md\n\nTestCase subclass: Ch24Reflection\n\n  // — fieldNames —\n\n  testValueFieldNames =>\n    p := Point x: 3 y: 4\n    names := p fieldNames\n    self assert: (names includes: #x)\n    self assert: (names includes: #y)\n\n  // — fieldAt: —\n\n  testReadField =>\n    p := Point x: 10 y: 20\n    self assert: (p fieldAt: #x) equals: 10\n    self assert: (p fieldAt: #y) equals: 20\n\n  testPrimitiveFieldAccess =>\n    self should: [42 fieldAt: #x] raise: #immutable_value\n    self should: [\"hello\" fieldAt: #x] raise: #immutable_value\n    self should: [42 fieldAt: #x put: 10] raise: #immutable_value\n\n  // — Class introspection —\n\n  testMethods =>\n    methods := Point methods\n    self assert: (methods includes: #x)\n    self assert: (methods includes: #y)\n\n  testAllMethods =>\n    all := Point allMethods\n    self assert: (all includes: #x)\n    self assert: (all includes: #class)\n\n  testSuperclass =>\n    self assert: Point superclass equals: Value\n\n  testClassRespondsTo =>\n    self assert: (Point respondsTo: #new)\n    self assert: (Point respondsTo: #methods)\n\n  // — Metaclass —\n\n  testMetaclass =>\n    meta := Point class\n    self assert: meta isMeta\n    self deny: meta isClass\n\n  testMetaclassName =>\n    name := Point class name\n    self assert: (name includesSubstring: \"class\")\n\n  testSelfGrounding =>\n    m1 := Point class class\n    m2 := Point class class class\n    self assert: m1 equals: m2\n\n  // — Generic inspector —\n\n  testInspectValue =>\n    p := Point x: 5 y: 10\n\n    self assert: p class equals: Point\n    self assert: (p fieldNames includes: #x)\n    self assert: (p fieldAt: #x) equals: 5",
+      "source": "// BUnit tests for docs/learning/24-reflection.md\n\nTestCase subclass: Ch24Reflection\n\n  // — fieldNames —\n\n  testValueFieldNames =>\n    p := Point x: 3 y: 4\n    names := p fieldNames\n    self assert: (names includes: #x)\n    self assert: (names includes: #y)\n\n  // — fieldAt: —\n\n  testReadField =>\n    p := Point x: 10 y: 20\n    self assert: (p fieldAt: #x) equals: 10\n    self assert: (p fieldAt: #y) equals: 20\n\n  testPrimitiveFieldAccess =>\n    self should: [42 fieldAt: #x] raise: #immutable_value\n    self should: [\"hello\" fieldAt: #x] raise: #immutable_value\n    @expect type\n    self should: [42 fieldAt: #x put: 10] raise: #immutable_value\n\n  // — Class introspection —\n\n  testMethods =>\n    methods := Point methods\n    self assert: (methods includes: #x)\n    self assert: (methods includes: #y)\n\n  testAllMethods =>\n    all := Point allMethods\n    self assert: (all includes: #x)\n    self assert: (all includes: #class)\n\n  testSuperclass =>\n    self assert: Point superclass equals: Value\n\n  testClassRespondsTo =>\n    self assert: (Point respondsTo: #name)\n    self assert: (Point respondsTo: #methods)\n\n  // — Metaclass —\n\n  testMetaclass =>\n    meta := Point class\n    self assert: meta isMeta\n    self deny: meta isClass\n\n  testMetaclassName =>\n    name := Point class name\n    self assert: (name includesSubstring: \"class\")\n\n  testSelfGrounding =>\n    m1 := Point class class\n    m2 := Point class class class\n    self assert: m1 equals: m2\n\n  // — Generic inspector —\n\n  testInspectValue =>\n    p := Point x: 5 y: 10\n\n    self assert: p class equals: Point\n    self assert: (p fieldNames includes: #x)\n    self assert: (p fieldAt: #x) equals: 5",
       "explanation": "BUnit tests for docs/learning/24-reflection.md"
     },
     {
@@ -6050,7 +6304,7 @@
         "unless",
         "value"
       ],
-      "source": "// Fixture for docs/learning/10-value-classes.md\n\nValue subclass: Money\n  state: amount = 0\n  state: currency = #USD\n\n  amount => self.amount\n\n  currency => self.currency\n\n  add: other =>\n    other currency =:= self.currency ifFalse: [^self error: \"Currency mismatch\"]\n    Money amount: (self.amount + other amount) currency: self.currency\n\n  printString => \"{self.amount} {self.currency}\"",
+      "source": "// Fixture for docs/learning/10-value-classes.md\n\nValue subclass: Money\n  field: amount = 0\n  field: currency = #USD\n\n  amount => self.amount\n\n  currency => self.currency\n\n  add: other =>\n    other currency =:= self.currency ifFalse: [^self error: \"Currency mismatch\"]\n    Money amount: (self.amount + other amount) currency: self.currency\n\n  printString => \"{self.amount} {self.currency}\"",
       "explanation": "Fixture for docs/learning/10-value-classes.md"
     },
     {
@@ -6106,7 +6360,7 @@
         "x",
         "y"
       ],
-      "source": "// Fixture for docs/learning/10-value-classes.md\n\nValue subclass: Point\n  state: x = 0\n  state: y = 0\n\n  x => self.x\n\n  y => self.y\n\n  distanceSquared => (self.x * self.x) + (self.y * self.y)\n\n  translateBy: dx and: dy => Point x: (self.x + dx) y: (self.y + dy)\n\n  printString => \"Point({self.x}, {self.y})\"",
+      "source": "// Fixture for docs/learning/10-value-classes.md\n\nValue subclass: Point\n  field: x = 0\n  field: y = 0\n\n  x => self.x\n\n  y => self.y\n\n  distanceSquared => (self.x * self.x) + (self.y * self.y)\n\n  translateBy: dx and: dy => Point x: (self.x + dx) y: (self.y + dy)\n\n  printString => \"Point({self.x}, {self.y})\"",
       "explanation": "Fixture for docs/learning/10-value-classes.md"
     },
     {
@@ -6875,7 +7129,7 @@
       "category": "examples-getting-started",
       "tags": [
         "Hanoi",
-        "Object",
+        "Value",
         "append",
         "assign",
         "assignment",
@@ -6895,14 +7149,14 @@
         "mutate",
         "mutation",
         "negation",
-        "object",
         "set",
         "solve:from:to:via:",
         "string join",
         "subclassing",
-        "unless"
+        "unless",
+        "value"
       ],
-      "source": "/// Towers of Hanoi\n/// A classic recursive algorithm that moves n disks between three pegs\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load examples/hanoi.bt\n///   > h := Hanoi new\n///   > h solve: 3 from: \"A\" to: \"C\" via: \"B\"\n///   Move disk from A to C\n///   Move disk from A to B\n///   Move disk from C to B\n///   Move disk from A to C\n///   Move disk from B to A\n///   Move disk from B to C\n///   Move disk from A to C\n///   nil\nObject subclass: Hanoi\n\n  solve: n from: source to: target via: auxiliary =>\n    (n > 0)\n      ifTrue: [\n        self\n          solve: n - 1\n          from: source\n          to: auxiliary\n          via: target\n        self traceCr: \"Move disk from \" ++ source ++ \" to \" ++ target\n        self\n          solve: n - 1\n          from: auxiliary\n          to: target\n          via: source\n      ]\n      ifFalse: [nil]",
+      "source": "/// Towers of Hanoi\n/// A classic recursive algorithm that moves n disks between three pegs\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load examples/hanoi.bt\n///   > h := Hanoi new\n///   > h solve: 3 from: \"A\" to: \"C\" via: \"B\"\n///   Move disk from A to C\n///   Move disk from A to B\n///   Move disk from C to B\n///   Move disk from A to C\n///   Move disk from B to A\n///   Move disk from B to C\n///   Move disk from A to C\n///   nil\nValue subclass: Hanoi\n\n  solve: n from: source to: target via: auxiliary =>\n    (n > 0)\n      ifTrue: [\n        self\n          solve: n - 1\n          from: source\n          to: auxiliary\n          via: target\n        self traceCr: \"Move disk from \" ++ source ++ \" to \" ++ target\n        self\n          solve: n - 1\n          from: auxiliary\n          to: target\n          via: source\n      ]\n      ifFalse: [nil]",
       "explanation": ""
     },
     {
@@ -6911,7 +7165,7 @@
       "category": "examples-getting-started",
       "tags": [
         "Hello",
-        "Object",
+        "Value",
         "constructor",
         "create",
         "extends",
@@ -6920,10 +7174,10 @@
         "inherit",
         "inheritance",
         "instantiate",
-        "object",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "/// Simple hello world example\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load \"examples/getting-started/src/hello.bt\"\n///   nil\n///   > Hello new greeting\n///   │ Hello, World!\n///   a Hello\nObject subclass: Hello\n\n  greeting => self traceCr: \"Hello, World!\"",
+      "source": "/// Simple hello world example\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load \"examples/getting-started/src/hello.bt\"\n///   nil\n///   > Hello new greeting\n///   │ Hello, World!\n///   a Hello\nValue subclass: Hello\n\n  greeting => self traceCr: \"Hello, World!\"",
       "explanation": ""
     },
     {
@@ -7061,7 +7315,7 @@
         "testInitialValue",
         "testMultipleIncrements"
       ],
-      "source": "// Example: BUnit test for Counter actor (ADR 0014)\n//\n// Demonstrates TestCase subclass with assertion methods\n// Run interactively in the REPL:\n//   > :load examples/counter.bt\n//   > :load examples/counter_test.bt\n//   > ExampleCounterTest runAll\n//\n// Note: Each test runs in a fresh TestCase instance, so there is no shared\n// state between tests; use setUp to initialize per-test instance fields\n\nTestCase subclass: ExampleCounterTest\n\n  testInitialValue => self assert: Counter spawn getValue equals: 0\n\n  testIncrement => self assert: Counter spawn increment equals: 1\n\n  testDecrement => self assert: Counter spawn decrement equals: -1\n\n  testMultipleIncrements =>\n    counter := Counter spawn\n    3 timesRepeat: [counter increment]\n    self assert: counter getValue equals: 3\n\n  testIncrementAndDecrement =>\n    counter := Counter spawn\n    counter increment; increment; decrement\n    self assert: counter getValue equals: 1\n\n  testDenyInitialNonPositive => self deny: Counter spawn getValue > 0",
+      "source": "// Example: BUnit test for Counter actor (ADR 0014)\n//\n// Demonstrates TestCase subclass with assertion methods\n// Run interactively in the REPL:\n//   > :load examples/counter.bt\n//   > :load examples/counter_test.bt\n//   > ExampleCounterTest runAll\n//\n// Note: Each test runs in a fresh TestCase instance, so there is no shared\n// state between tests; use setUp to initialize per-test instance fields\n\nTestCase subclass: ExampleCounterTest\n\n  testInitialValue => self assert: Counter spawn getValue equals: 0\n\n  testIncrement => self assert: Counter spawn increment equals: 1\n\n  testDecrement => self assert: Counter spawn decrement equals: -1\n\n  testMultipleIncrements =>\n    counter := Counter spawn\n    3 timesRepeat: [counter increment]\n    self assert: counter getValue equals: 3\n\n  testIncrementAndDecrement =>\n    counter := Counter spawn\n    counter increment\n    counter increment\n    counter decrement\n    self assert: counter getValue equals: 1\n\n  testDenyInitialNonPositive => self deny: Counter spawn getValue > 0",
       "explanation": "Example: BUnit test for Counter actor (ADR 0014)  Demonstrates TestCase subclass with assertion methods Run interactively in the REPL:   > :load examples/counter.bt   > :load examples/counter_test.bt   > ExampleCounterTest runAll  Note: Each test runs in a fresh TestCase instance, so there is no shared state between tests; use setUp to initialize per-test instance fields"
     },
     {
@@ -7218,7 +7472,7 @@
         "subclassing",
         "wrap:"
       ],
-      "source": "/// Adapter Pattern — CelsiusToFahrenheitAdapter\n/// Wraps a CelsiusThermometer (adaptee) and exposes the FahrenheitThermometer\n/// interface (target), translating units on the fly.\n///\n/// Usage:\n///   sensor  := CelsiusThermometer withCelsius: 100.0.\n///   adapted := CelsiusToFahrenheitAdapter wrap: sensor.\n///   adapted readFahrenheit   // => 212.0\n///   adapted readCelsius      // => 100.0\nFahrenheitThermometer subclass: CelsiusToFahrenheitAdapter\n  state: adaptee = nil\n\n  /// Wrap a CelsiusThermometer so it can be used as a FahrenheitThermometer.\n  class wrap: thermometer => self new: #{#adaptee => thermometer}\n\n  /// Return the adaptee's reading in degrees Celsius (pass-through).\n  readCelsius => self.adaptee readCelsius\n\n  /// Convert the adaptee's Celsius reading to Fahrenheit.\n  readFahrenheit => self.adaptee readCelsius * 9.0 / 5.0 + 32.0",
+      "source": "/// Adapter Pattern — CelsiusToFahrenheitAdapter\n/// Wraps a CelsiusThermometer (adaptee) and exposes the FahrenheitThermometer\n/// interface (target), translating units on the fly.\n///\n/// Usage:\n///   sensor  := CelsiusThermometer withCelsius: 100.0.\n///   adapted := CelsiusToFahrenheitAdapter wrap: sensor.\n///   adapted readFahrenheit   // => 212.0\n///   adapted readCelsius      // => 100.0\nFahrenheitThermometer subclass: CelsiusToFahrenheitAdapter\n  field: adaptee = nil\n\n  /// Wrap a CelsiusThermometer so it can be used as a FahrenheitThermometer.\n  class wrap: thermometer => self new: #{#adaptee => thermometer}\n\n  /// Return the adaptee's reading in degrees Celsius (pass-through).\n  readCelsius => self.adaptee readCelsius\n\n  /// Convert the adaptee's Celsius reading to Fahrenheit.\n  readFahrenheit => self.adaptee readCelsius * 9.0 / 5.0 + 32.0",
       "explanation": ""
     },
     {
@@ -7227,17 +7481,17 @@
       "category": "examples-gof-patterns",
       "tags": [
         "FahrenheitThermometer",
-        "Object",
+        "Value",
         "extends",
         "fahrenheit_thermometer",
         "inherit",
         "inheritance",
-        "object",
         "readCelsius",
         "readFahrenheit",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "/// Adapter Pattern — FahrenheitThermometer (target interface)\n/// The interface that client code expects: readings in both Fahrenheit and Celsius.\nObject subclass: FahrenheitThermometer\n\n  /// Return the current temperature in degrees Fahrenheit.\n  readFahrenheit => self subclassResponsibility\n\n  /// Return the current temperature in degrees Celsius.\n  readCelsius => self subclassResponsibility",
+      "source": "/// Adapter Pattern — FahrenheitThermometer (target interface)\n/// The interface that client code expects: readings in both Fahrenheit and Celsius.\nValue subclass: FahrenheitThermometer\n\n  /// Return the current temperature in degrees Fahrenheit.\n  readFahrenheit => self subclassResponsibility\n\n  /// Return the current temperature in degrees Celsius.\n  readCelsius => self subclassResponsibility",
       "explanation": ""
     },
     {
@@ -7370,7 +7624,7 @@
         "property",
         "subclassing"
       ],
-      "source": "/// Command Pattern — DeleteCommand (concrete command)\n/// Deletes len characters starting at pos (1-based).\n/// Undo is provided by CommandHistory snapshot rollback, not by this class.\nTextCommand subclass: DeleteCommand\n  state: position = 1\n  state: length = 0\n\n  /// Create a command that will delete len characters starting at 1-based position pos.\n  class from: pos length: len => self new: #{#position => pos, #length => len}\n\n  /// Delete this command's character range from buffer.\n  execute: buffer => buffer deleteFrom: self.position length: self.length",
+      "source": "/// Command Pattern — DeleteCommand (concrete command)\n/// Deletes len characters starting at pos (1-based).\n/// Undo is provided by CommandHistory snapshot rollback, not by this class.\nTextCommand subclass: DeleteCommand\n  field: position = 1\n  field: length = 0\n\n  /// Create a command that will delete len characters starting at 1-based position pos.\n  class from: pos length: len => self new: #{#position => pos, #length => len}\n\n  /// Delete this command's character range from buffer.\n  execute: buffer => buffer deleteFrom: self.position length: self.length",
       "explanation": ""
     },
     {
@@ -7396,7 +7650,7 @@
         "property",
         "subclassing"
       ],
-      "source": "/// Command Pattern — InsertCommand (concrete command)\n/// Inserts a string at a given position (1-based).\nTextCommand subclass: InsertCommand\n  state: position = 1\n  state: text = \"\"\n\n  /// Create a command that will insert str at 1-based position pos.\n  class at: pos insert: str => self new: #{#position => pos, #text => str}\n\n  /// Insert this command's text into buffer at the stored position.\n  execute: buffer => buffer insertAt: self.position text: self.text",
+      "source": "/// Command Pattern — InsertCommand (concrete command)\n/// Inserts a string at a given position (1-based).\nTextCommand subclass: InsertCommand\n  field: position = 1\n  field: text = \"\"\n\n  /// Create a command that will insert str at 1-based position pos.\n  class at: pos insert: str => self new: #{#position => pos, #text => str}\n\n  /// Insert this command's text into buffer at the stored position.\n  execute: buffer => buffer insertAt: self.position text: self.text",
       "explanation": ""
     },
     {
@@ -7447,8 +7701,8 @@
       "title": "TextCommand",
       "category": "examples-gof-patterns",
       "tags": [
-        "Object",
         "TextCommand",
+        "Value",
         "constructor",
         "create",
         "execute:",
@@ -7456,11 +7710,11 @@
         "inherit",
         "inheritance",
         "instantiate",
-        "object",
         "subclassing",
-        "text_command"
+        "text_command",
+        "value"
       ],
-      "source": "/// Command Pattern — TextCommand (abstract command)\n/// Declares execute:, which takes a TextBuffer and returns a new TextBuffer.\n/// Undo is handled by CommandHistory, which saves buffer snapshots before each\n/// command so no command needs to implement its own reverse logic.\nObject subclass: TextCommand\n\n  /// Apply this command to buffer and return the resulting buffer.\n  execute: _buffer => self subclassResponsibility",
+      "source": "/// Command Pattern — TextCommand (abstract command)\n/// Declares execute:, which takes a TextBuffer and returns a new TextBuffer.\n/// Undo is handled by CommandHistory, which saves buffer snapshots before each\n/// command so no command needs to implement its own reverse logic.\nValue subclass: TextCommand\n\n  /// Apply this command to buffer and return the resulting buffer.\n  execute: _buffer => self subclassResponsibility",
       "explanation": ""
     },
     {
@@ -7498,7 +7752,7 @@
         "string join",
         "subclassing"
       ],
-      "source": "/// Composite Pattern — FsDir (composite)\n/// A directory that holds any number of FsEntry objects (files or subdirectories).\n/// Because value objects are immutable, add: returns a new FsDir.\n/// Implements the same interface as FsFile (name, size, describe:) via duck typing.\n///\n/// Usage:\n///   f1  := FsFile name: \"main.bt\" size: 120.\n///   f2  := FsFile name: \"lib.bt\"  size: 340.\n///   src := ((FsDir name: \"src\") add: f1) add: f2.\n///   src size          // => 460\n///   src describe: \"\"\n///   // => \"src/ (460 bytes)\\n  main.bt (120 bytes)\\n  lib.bt (340 bytes)\"\nFsEntry subclass: FsDir\n  state: name = \"\"\n  state: children = #()\n\n  /// Create an empty directory with the given name.\n  class name: n => self new: #{#name => n}\n\n  /// Return the directory name.\n  name => self.name\n\n  /// Return a new FsDir with entry appended to children.\n  add: entry =>\n    self.children := self.children add: entry\n    self\n\n  /// Total size is the recursive sum of all children.\n  size => self.children inject: 0 into: [:acc :child | acc + child size]\n\n  /// Return a multi-line tree string; each child is indented two spaces beyond indent.\n  describe: indent =>\n    total := self size\n    childLines := self.children inject: \"\" into: [:acc :child |\n      acc ++ \"\\n\" ++ (child describe: indent ++ \"  \")\n    ]\n    \"{indent}{self.name}/ ({total} bytes){childLines}\"",
+      "source": "/// Composite Pattern — FsDir (composite)\n/// A directory that holds any number of FsEntry objects (files or subdirectories).\n/// Because value objects are immutable, add: returns a new FsDir.\n/// Implements the same interface as FsFile (name, size, describe:) via duck typing.\n///\n/// Usage:\n///   f1  := FsFile name: \"main.bt\" size: 120.\n///   f2  := FsFile name: \"lib.bt\"  size: 340.\n///   src := ((FsDir name: \"src\") add: f1) add: f2.\n///   src size          // => 460\n///   src describe: \"\"\n///   // => \"src/ (460 bytes)\\n  main.bt (120 bytes)\\n  lib.bt (340 bytes)\"\nFsEntry subclass: FsDir\n  field: name = \"\"\n  field: children = #()\n\n  /// Create an empty directory with the given name.\n  class name: n => self new: #{#name => n}\n\n  /// Return the directory name.\n  name => self.name\n\n  /// Return a new FsDir with entry appended to children.\n  add: entry => self withChildren: (self.children add: entry)\n\n  /// Total size is the recursive sum of all children.\n  size => self.children inject: 0 into: [:acc :child | acc + child size]\n\n  /// Return a multi-line tree string; each child is indented two spaces beyond indent.\n  describe: indent =>\n    total := self size\n    childLines := self.children inject: \"\" into: [:acc :child |\n      acc ++ \"\\n\" ++ (child describe: indent ++ \"  \")\n    ]\n    \"{indent}{self.name}/ ({total} bytes){childLines}\"",
       "explanation": ""
     },
     {
@@ -7507,18 +7761,18 @@
       "category": "examples-gof-patterns",
       "tags": [
         "FsEntry",
-        "Object",
+        "Value",
         "describe:",
         "extends",
         "fs_entry",
         "inherit",
         "inheritance",
         "name",
-        "object",
         "size",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "/// Composite Pattern — FsEntry (abstract component)\n/// Intent: Compose objects into tree structures to represent part-whole hierarchies.\n/// Composite lets clients treat individual objects (FsFile) and compositions\n/// (FsDir) uniformly through a single interface.\nObject subclass: FsEntry\n\n  /// Return the name of this entry (file or directory name, without path).\n  name => self subclassResponsibility\n\n  /// Return the total byte size of this entry (recursive for directories).\n  size => self subclassResponsibility\n\n  /// Return a human-readable string representation, indented by indent.\n  describe: _indent => self subclassResponsibility",
+      "source": "/// Composite Pattern — FsEntry (abstract component)\n/// Intent: Compose objects into tree structures to represent part-whole hierarchies.\n/// Composite lets clients treat individual objects (FsFile) and compositions\n/// (FsDir) uniformly through a single interface.\nValue subclass: FsEntry\n\n  /// Return the name of this entry (file or directory name, without path).\n  name => self subclassResponsibility\n\n  /// Return the total byte size of this entry (recursive for directories).\n  size => self subclassResponsibility\n\n  /// Return a human-readable string representation, indented by indent.\n  describe: _indent => self subclassResponsibility",
       "explanation": ""
     },
     {
@@ -7551,7 +7805,7 @@
         "size",
         "subclassing"
       ],
-      "source": "/// Composite Pattern — FsFile (leaf)\n/// A single file with a fixed name and byte size. Has no children.\n/// Implements the same interface as FsDir (name, size, describe:) via duck typing.\n///\n/// Usage:\n///   f := FsFile name: \"main.bt\" size: 120.\n///   f size            // => 120\n///   f describe: \"\"    // => \"main.bt (120 bytes)\"\nFsEntry subclass: FsFile\n  state: name = \"\"\n  state: size = 0\n\n  /// Create a file entry with the given name and byte size.\n  class name: n size: s => self new: #{#name => n, #size => s}\n\n  /// Return the file name.\n  name => self.name\n\n  /// Return the file size in bytes.\n  size => self.size\n\n  /// Return \"indent<name> (<size> bytes)\".\n  describe: indent => \"{indent}{self.name} ({self.size} bytes)\"",
+      "source": "/// Composite Pattern — FsFile (leaf)\n/// A single file with a fixed name and byte size. Has no children.\n/// Implements the same interface as FsDir (name, size, describe:) via duck typing.\n///\n/// Usage:\n///   f := FsFile name: \"main.bt\" size: 120.\n///   f size            // => 120\n///   f describe: \"\"    // => \"main.bt (120 bytes)\"\nFsEntry subclass: FsFile\n  field: name = \"\"\n  field: size = 0\n\n  /// Create a file entry with the given name and byte size.\n  class name: n size: s => self new: #{#name => n, #size => s}\n\n  /// Return the file name.\n  name => self.name\n\n  /// Return the file size in bytes.\n  size => self.size\n\n  /// Return \"indent<name> (<size> bytes)\".\n  describe: indent => \"{indent}{self.name} ({self.size} bytes)\"",
       "explanation": ""
     },
     {
@@ -7560,17 +7814,17 @@
       "category": "examples-gof-patterns",
       "tags": [
         "Beverage",
-        "Object",
+        "Value",
         "beverage",
         "cost",
         "description",
         "extends",
         "inherit",
         "inheritance",
-        "object",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "/// Decorator Pattern — Beverage (abstract component)\n/// Intent: Attach additional responsibilities to an object dynamically.\n/// Decorators provide a flexible alternative to subclassing for extending\n/// functionality by wrapping objects rather than changing their class.\n///\n/// Any Beverage has a description and a cost. Both concrete beverages and\n/// condiment decorators satisfy this interface.\nObject subclass: Beverage\n\n  /// Return a human-readable description of this beverage and its condiments.\n  description => self subclassResponsibility\n\n  /// Return the total price in dollars.\n  cost => self subclassResponsibility",
+      "source": "/// Decorator Pattern — Beverage (abstract component)\n/// Intent: Attach additional responsibilities to an object dynamically.\n/// Decorators provide a flexible alternative to subclassing for extending\n/// functionality by wrapping objects rather than changing their class.\n///\n/// Any Beverage has a description and a cost. Both concrete beverages and\n/// condiment decorators satisfy this interface.\nValue subclass: Beverage\n\n  /// Return a human-readable description of this beverage and its condiments.\n  description => self subclassResponsibility\n\n  /// Return the total price in dollars.\n  cost => self subclassResponsibility",
       "explanation": ""
     },
     {
@@ -7595,7 +7849,7 @@
         "subclassing",
         "wrap:"
       ],
-      "source": "/// Decorator Pattern — CondimentDecorator (abstract decorator)\n/// Wraps any beverage object. Concrete subclasses override description and cost to\n/// add their own contribution on top of the wrapped drink's values.\nBeverage subclass: CondimentDecorator\n  state: beverage = nil\n\n  /// Wrap aBeverage so this condiment's description and cost are layered on top.\n  class wrap: aBeverage => self new: #{#beverage => aBeverage}",
+      "source": "/// Decorator Pattern — CondimentDecorator (abstract decorator)\n/// Wraps any beverage object. Concrete subclasses override description and cost to\n/// add their own contribution on top of the wrapped drink's values.\nBeverage subclass: CondimentDecorator\n  field: beverage = nil\n\n  /// Wrap aBeverage so this condiment's description and cost are layered on top.\n  class wrap: aBeverage => self new: #{#beverage => aBeverage}",
       "explanation": ""
     },
     {
@@ -7723,7 +7977,7 @@
         "subclassing",
         "withRadius:"
       ],
-      "source": "/// Factory Method Pattern — Circle (concrete product)\nShape subclass: Circle\n  state: radius = 1.0\n\n  /// Create a circle with the given radius.\n  class withRadius: r => self new: #{#radius => r}\n\n  /// Return π * r².\n  area => 3.14159 * self.radius * self.radius\n\n  /// Return 2 * π * r.\n  perimeter => 2.0 * 3.14159 * self.radius\n\n  /// Return \"Circle(r=<radius>)\".\n  describe => \"Circle(r={self.radius})\"",
+      "source": "/// Factory Method Pattern — Circle (concrete product)\nShape subclass: Circle\n  field: radius = 1.0\n\n  /// Create a circle with the given radius.\n  class withRadius: r => self new: #{#radius => r}\n\n  /// Return π * r².\n  area => 3.14159 * self.radius * self.radius\n\n  /// Return 2 * π * r.\n  perimeter => 2.0 * 3.14159 * self.radius\n\n  /// Return \"Circle(r=<radius>)\".\n  describe => \"Circle(r={self.radius})\"",
       "explanation": ""
     },
     {
@@ -7754,7 +8008,7 @@
         "subclassing",
         "withRadius:"
       ],
-      "source": "/// Factory Method Pattern — CircleFactory (concrete creator)\nShapeFactory subclass: CircleFactory\n  state: radius = 1.0\n\n  /// Create a factory configured to produce circles with the given radius.\n  class withRadius: r => self new: #{#radius => r}\n\n  /// Produce a Circle with this factory's configured radius.\n  createShape => Circle withRadius: self.radius",
+      "source": "/// Factory Method Pattern — CircleFactory (concrete creator)\nShapeFactory subclass: CircleFactory\n  field: radius = 1.0\n\n  /// Create a factory configured to produce circles with the given radius.\n  class withRadius: r => self new: #{#radius => r}\n\n  /// Produce a Circle with this factory's configured radius.\n  createShape => Circle withRadius: self.radius",
       "explanation": ""
     },
     {
@@ -7787,7 +8041,7 @@
         "subclassing",
         "width:height:"
       ],
-      "source": "/// Factory Method Pattern — Rectangle (concrete product)\nShape subclass: Rectangle\n  state: width = 1.0\n  state: height = 1.0\n\n  /// Create a rectangle with the given width and height.\n  class width: w height: h => self new: #{#width => w, #height => h}\n\n  /// Return width * height.\n  area => self.width * self.height\n\n  /// Return 2 * (width + height).\n  perimeter => 2.0 * (self.width + self.height)\n\n  /// Return \"Rectangle(<width>x<height>)\".\n  describe => \"Rectangle({self.width}x{self.height})\"",
+      "source": "/// Factory Method Pattern — Rectangle (concrete product)\nShape subclass: Rectangle\n  field: width = 1.0\n  field: height = 1.0\n\n  /// Create a rectangle with the given width and height.\n  class width: w height: h => self new: #{#width => w, #height => h}\n\n  /// Return width * height.\n  area => self.width * self.height\n\n  /// Return 2 * (width + height).\n  perimeter => 2.0 * (self.width + self.height)\n\n  /// Return \"Rectangle(<width>x<height>)\".\n  describe => \"Rectangle({self.width}x{self.height})\"",
       "explanation": ""
     },
     {
@@ -7818,7 +8072,7 @@
         "subclassing",
         "width:height:"
       ],
-      "source": "/// Factory Method Pattern — RectangleFactory (concrete creator)\nShapeFactory subclass: RectangleFactory\n  state: width = 1.0\n  state: height = 1.0\n\n  /// Create a factory configured to produce rectangles with the given dimensions.\n  class width: w height: h => self new: #{#width => w, #height => h}\n\n  /// Produce a Rectangle with this factory's configured width and height.\n  createShape => Rectangle width: self.width height: self.height",
+      "source": "/// Factory Method Pattern — RectangleFactory (concrete creator)\nShapeFactory subclass: RectangleFactory\n  field: width = 1.0\n  field: height = 1.0\n\n  /// Create a factory configured to produce rectangles with the given dimensions.\n  class width: w height: h => self new: #{#width => w, #height => h}\n\n  /// Produce a Rectangle with this factory's configured width and height.\n  createShape => Rectangle width: self.width height: self.height",
       "explanation": ""
     },
     {
@@ -7826,8 +8080,8 @@
       "title": "Shape",
       "category": "examples-gof-patterns",
       "tags": [
-        "Object",
         "Shape",
+        "Value",
         "area",
         "async",
         "concurrent",
@@ -7837,13 +8091,13 @@
         "genserver",
         "inherit",
         "inheritance",
-        "object",
         "perimeter",
         "process",
         "shape",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "/// Factory Method Pattern — Shape (abstract product)\n/// Intent: Define the common product interface implemented by concrete shapes\n/// created by factory method creators.\nObject subclass: Shape\n\n  /// Return the area of this shape.\n  area => self subclassResponsibility\n\n  /// Return the perimeter (circumference) of this shape.\n  perimeter => self subclassResponsibility\n\n  /// Return a short human-readable label for this shape, e.g. \"Circle(r=5.0)\".\n  describe => self subclassResponsibility",
+      "source": "/// Factory Method Pattern — Shape (abstract product)\n/// Intent: Define the common product interface implemented by concrete shapes\n/// created by factory method creators.\nValue subclass: Shape\n\n  /// Return the area of this shape.\n  area => self subclassResponsibility\n\n  /// Return the perimeter (circumference) of this shape.\n  perimeter => self subclassResponsibility\n\n  /// Return a short human-readable label for this shape, e.g. \"Circle(r=5.0)\".\n  describe => self subclassResponsibility",
       "explanation": ""
     },
     {
@@ -7851,8 +8105,8 @@
       "title": "ShapeFactory",
       "category": "examples-gof-patterns",
       "tags": [
-        "Object",
         "ShapeFactory",
+        "Value",
         "assign",
         "assignment",
         "async",
@@ -7866,13 +8120,13 @@
         "inheritance",
         "mutate",
         "mutation",
-        "object",
         "process",
         "set",
         "shape_factory",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "/// Factory Method Pattern — ShapeFactory (abstract creator)\n/// Declares the factory method createShape and a template method describeShape\n/// that uses it, demonstrating that the base class can call the factory method\n/// without knowing which concrete product will be returned.\nObject subclass: ShapeFactory\n\n  /// Factory method — subclasses override this to return the appropriate Shape.\n  createShape => self subclassResponsibility\n\n  /// Template method — uses the factory method without knowing the concrete type.\n  describeShape =>\n    shape := self createShape\n    \"{shape describe}, area={shape area}\"",
+      "source": "/// Factory Method Pattern — ShapeFactory (abstract creator)\n/// Declares the factory method createShape and a template method describeShape\n/// that uses it, demonstrating that the base class can call the factory method\n/// without knowing which concrete product will be returned.\nValue subclass: ShapeFactory\n\n  /// Factory method — subclasses override this to return the appropriate Shape.\n  createShape => self subclassResponsibility\n\n  /// Template method — uses the factory method without knowing the concrete type.\n  describeShape =>\n    shape := self createShape\n    \"{shape describe}, area={shape area}\"",
       "explanation": ""
     },
     {
@@ -7881,7 +8135,7 @@
       "category": "examples-gof-patterns",
       "tags": [
         "Main",
-        "Object",
+        "Value",
         "constructor",
         "create",
         "extends",
@@ -7889,11 +8143,11 @@
         "inheritance",
         "instantiate",
         "main",
-        "object",
         "run",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "/// Main entry point for gang_of_four.\n/// Auto-runs via [run].entry in beamtalk.toml when you start `beamtalk repl`.\n/// Or load manually: :load src/main.bt\nObject subclass: Main\n\n  class run => self new run\n\n  run =>\n    self traceCr: \"Hello from gang_of_four!\"\n    self",
+      "source": "/// Main entry point for gang_of_four.\n/// Auto-runs via [run].entry in beamtalk.toml when you start `beamtalk repl`.\n/// Or load manually: :load src/main.bt\nValue subclass: Main\n\n  class run => self new run\n\n  run =>\n    self traceCr: \"Hello from gang_of_four!\"\n    self",
       "explanation": ""
     },
     {
@@ -8090,7 +8344,7 @@
       "category": "examples-gof-patterns",
       "tags": [
         "DataExporter",
-        "Object",
+        "Value",
         "append",
         "assign",
         "assignment",
@@ -8108,13 +8362,13 @@
         "mapping",
         "mutate",
         "mutation",
-        "object",
         "set",
         "string join",
         "subclassing",
-        "transform"
+        "transform",
+        "value"
       ],
-      "source": "/// Template Method Pattern — DataExporter (abstract base)\n/// Intent: Define the skeleton of an algorithm in a base-class method, deferring\n/// specific steps to subclasses. The overall structure stays fixed; only the\n/// customisable steps change.\n///\n/// export: is the template method. It calls header, formatRow:, and footer in\n/// order. Subclasses (CsvExporter, HtmlExporter) implement those three hooks.\nObject subclass: DataExporter\n\n  /// Template method — fixed algorithm skeleton.\n  /// Do not override this in subclasses; override the hooks below instead.\n  export: rows =>\n    formatted := rows collect: [:row | self formatRow: row]\n    self header ++ formatted join ++ self footer\n\n  /// Hook: text placed before all rows. Subclasses must override.\n  header => self subclassResponsibility\n\n  /// Hook: text placed after all rows. Subclasses must override.\n  footer => self subclassResponsibility\n\n  /// Hook: format a single row (a List of cell strings). Subclasses must override.\n  formatRow: _row => self subclassResponsibility",
+      "source": "/// Template Method Pattern — DataExporter (abstract base)\n/// Intent: Define the skeleton of an algorithm in a base-class method, deferring\n/// specific steps to subclasses. The overall structure stays fixed; only the\n/// customisable steps change.\n///\n/// export: is the template method. It calls header, formatRow:, and footer in\n/// order. Subclasses (CsvExporter, HtmlExporter) implement those three hooks.\nValue subclass: DataExporter\n\n  /// Template method — fixed algorithm skeleton.\n  /// Do not override this in subclasses; override the hooks below instead.\n  export: rows =>\n    formatted := rows collect: [:row | self formatRow: row]\n    self header ++ formatted join ++ self footer\n\n  /// Hook: text placed before all rows. Subclasses must override.\n  header => self subclassResponsibility\n\n  /// Hook: text placed after all rows. Subclasses must override.\n  footer => self subclassResponsibility\n\n  /// Hook: format a single row (a List of cell strings). Subclasses must override.\n  formatRow: _row => self subclassResponsibility",
       "explanation": ""
     },
     {
@@ -8333,7 +8587,7 @@
         "testRectangleFactoryCreatesRectangle",
         "testRectanglePerimeter"
       ],
-      "source": "// Tests for Factory Method Pattern — ShapeFactory, CircleFactory, RectangleFactory\n\nTestCase subclass: ShapeFactoryTest\n\n  testCircleArea =>\n    c := Circle withRadius: 2.0\n    self assert: c area equals: 3.14159 * 4.0\n\n  testCirclePerimeter =>\n    c := Circle withRadius: 1.0\n    self assert: c perimeter equals: 2.0 * 3.14159\n\n  testRectangleArea =>\n    r := Rectangle width: 3.0 height: 4.0\n    self assert: r area equals: 12.0\n\n  testRectanglePerimeter =>\n    r := Rectangle width: 3.0 height: 4.0\n    self assert: r perimeter equals: 14.0\n\n  testCircleFactoryCreatesCircle =>\n    f := CircleFactory withRadius: 5.0\n    shape := f createShape\n    self assert: shape area equals: 3.14159 * 25.0\n\n  testRectangleFactoryCreatesRectangle =>\n    f := RectangleFactory width: 2.0 height: 3.0\n    shape := f createShape\n    self assert: shape area equals: 6.0\n\n  testCircleDescribeShape =>\n    f := CircleFactory withRadius: 1.0\n    self assert: f describeShape equals: \"Circle(r=1), area=3.14159\"\n\n  testRectangleDescribeShape =>\n    f := RectangleFactory width: 2.0 height: 3.0\n    self assert: f describeShape equals: \"Rectangle(2x3), area=6\"",
+      "source": "// Tests for Factory Method Pattern — ShapeFactory, CircleFactory, RectangleFactory\n\nTestCase subclass: ShapeFactoryTest\n\n  testCircleArea =>\n    c := Circle withRadius: 2.0\n    self assert: c area equals: 3.14159 * 4.0\n\n  testCirclePerimeter =>\n    c := Circle withRadius: 1.0\n    self assert: c perimeter equals: 2.0 * 3.14159\n\n  testRectangleArea =>\n    r := Rectangle width: 3.0 height: 4.0\n    self assert: r area equals: 12.0\n\n  testRectanglePerimeter =>\n    r := Rectangle width: 3.0 height: 4.0\n    self assert: r perimeter equals: 14.0\n\n  testCircleFactoryCreatesCircle =>\n    f := CircleFactory withRadius: 5.0\n    shape := f createShape\n    self assert: shape area equals: 3.14159 * 25.0\n\n  testRectangleFactoryCreatesRectangle =>\n    f := RectangleFactory width: 2.0 height: 3.0\n    shape := f createShape\n    self assert: shape area equals: 6.0\n\n  testCircleDescribeShape =>\n    f := CircleFactory withRadius: 1.0\n    self assert: f describeShape equals: \"Circle(r=1.0), area=3.14159\"\n\n  testRectangleDescribeShape =>\n    f := RectangleFactory width: 2.0 height: 3.0\n    self assert: f describeShape equals: \"Rectangle(2.0x3.0), area=6.0\"",
       "explanation": "Tests for Factory Method Pattern — ShapeFactory, CircleFactory, RectangleFactory"
     },
     {
@@ -8662,7 +8916,7 @@
       "category": "examples-sicp",
       "tags": [
         "Main",
-        "Object",
+        "Value",
         "assign",
         "assignment",
         "constructor",
@@ -8674,12 +8928,12 @@
         "main",
         "mutate",
         "mutation",
-        "object",
         "run",
         "set",
-        "subclassing"
+        "subclassing",
+        "value"
       ],
-      "source": "Object subclass: Main\n\n  class run => self new run\n\n  run =>\n    reader := SchemeReader new\n    ev := SchemeEval new\n    printer := SchemePrinter new\n    env := ev defaultEnv\n\n    eval := [:src | printer print: (ev eval: (reader read: src) in: env)]\n    (WorkspaceInterface current) bind: eval as: #eval\n\n    self traceCr: \"Run: eval value: \"\"(* 6 7)\"\".\"\n    self",
+      "source": "Value subclass: Main\n\n  class run => self new run\n\n  run =>\n    reader := SchemeReader new\n    ev := SchemeEval new\n    printer := SchemePrinter new\n    env := ev defaultEnv\n\n    eval := [:src | printer print: (ev eval: (reader read: src) in: env)]\n    (WorkspaceInterface current) bind: eval as: #eval\n\n    self traceCr: \"Run: eval value: \"\"(* 6 7)\"\".\"\n    self",
       "explanation": ""
     },
     {
@@ -8742,8 +8996,8 @@
       "title": "SchemeEval",
       "category": "examples-sicp",
       "tags": [
-        "Object",
         "SchemeEval",
+        "Value",
         "append",
         "apply:args:in:",
         "assign",
@@ -8775,7 +9029,6 @@
         "mutate",
         "mutation",
         "negation",
-        "object",
         "raise",
         "set",
         "string conversion",
@@ -8785,9 +9038,10 @@
         "toString",
         "to_string",
         "transform",
-        "unless"
+        "unless",
+        "value"
       ],
-      "source": "/// SchemeEval — the metacircular evaluator.\n///\n/// `eval:in:` dispatches on expression type following the classic SICP\n/// eval/apply loop:\n///\n/// - **Self-evaluating** — integers, booleans, strings, nil are returned as-is.\n/// - **Symbols** — looked up in the environment via `SchemeEnv>>lookup:`.\n/// - **Lists** — special forms or function application.\n///\n/// Special forms: `quote`, `define`, `lambda`, `if`, `cond`, `let`, `and`, `or`.\n///\n/// Built-in procedures are `Block` values stored directly in the environment\n/// dictionary, so no separate primitive dispatch table is needed.\n///\n/// ## Examples\n/// ```beamtalk\n/// reader := SchemeReader new\n/// eval   := SchemeEval new\n/// env    := eval defaultEnv\n///\n/// eval eval: (reader read: \"(* 6 7)\") in: env      // => 42\n/// eval eval: (reader read: \"(define x 10)\") in: env  // => nil\n/// eval eval: (reader read: \"x\") in: env            // => 10\n/// ```\nObject subclass: SchemeEval\n\n  /// Build a fresh `SchemeEnv` pre-loaded with standard arithmetic and\n  /// list primitives: `+`, `-`, `*`, `/`, `=`, `<`, `>`, `<=`, `>=`,\n  /// `car`, `cdr`, `cons`, `list`, `not`, `null?`.\n  ///\n  /// Each primitive is a `Block` that receives the full evaluated argument\n  /// list and returns the result.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// env := SchemeEval new defaultEnv\n  /// (env lookup: \"+\")   // => a Block\n  /// ```\n  defaultEnv =>\n    SchemeEnv\n      spawnWith: #{\n        #bindings => #{\n          \"+\" => [:args | (args at: 1) + (args at: 2)],\n          \"-\" => [:args | (args at: 1) - (args at: 2)],\n          \"*\" => [:args | (args at: 1) * (args at: 2)],\n          \"/\" => [:args | (args at: 1) div: (args at: 2)],\n          \"=\" => [:args | (args at: 1) =:= (args at: 2)],\n          \"<\" => [:args | (args at: 1) < (args at: 2)],\n          \">\" => [:args | (args at: 1) > (args at: 2)],\n          \"<=\" => [:args | (args at: 1) <= (args at: 2)],\n          \">=\" => [:args | (args at: 1) >= (args at: 2)],\n          \"car\" => [:args | (args at: 1) first],\n          \"cdr\" => [:args | (args at: 1) rest],\n          \"cons\" => [:args | (#() add: (args at: 1)) ++ (args at: 2)],\n          \"list\" => [:args | args],\n          \"not\" => [:args | (args at: 1) not],\n          \"null?\" => [:args |\n            v := args at: 1\n            v isNil or: [v class =:= List and: [v isEmpty]]\n          ]\n        },\n        #parent => nil\n      }\n\n  /// Evaluate `expr` in `env` and return the result.\n  ///\n  /// Dispatches on expression type: self-evaluating atoms are returned\n  /// immediately; symbols trigger an environment lookup; lists are processed\n  /// as special forms or function application.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// ev  := SchemeEval new\n  /// env := ev defaultEnv\n  /// ev eval: 42 in: env                          // => 42\n  /// ev eval: (SchemeSymbol withName: \"+\") in: env  // => a Block\n  /// ```\n  eval: expr in: env =>\n    // Self-evaluating atomic types\n    (expr isNil or: [\n      #(Integer, True, False, String) includes: expr class\n    ]) ifTrue: [^expr]\n\n    // Symbol: look up the name in the environment\n    (expr class =:= SchemeSymbol) ifTrue: [^(env lookup: expr name)]\n\n    // Must be a list — special form or function application\n    (expr class =:= List) ifFalse: [^self error: \"Unknown expression type\"]\n    expr isEmpty ifTrue: [^#()]\n\n    head := expr first\n    tail := expr rest\n\n    // Special form dispatch (symbols) or function application\n    (head class =:= SchemeSymbol)\n      ifTrue: [\n        ^self\n          evalSpecialOrApply: head\n          tail: tail\n          in: env\n      ]\n    self\n      evalApply: head\n      tail: tail\n      in: env\n\n  /// Dispatch `head` as a special form or function application.\n  /// Called when `head` is a `SchemeSymbol`; `tail` is the rest of the list.\n  evalSpecialOrApply: head tail: tail in: env =>\n    sym := head name\n    sym match: [\n      // (quote expr) — return unevaluated\n      \"quote\" -> tail first;\n\n      // (define name expr) — bind name in the current environment\n      \"define\" -> [\n        varName := (tail at: 1) name\n        defVal := self eval: (tail at: 2) in: env\n        env define: varName value: defVal\n        nil\n      ] value;\n\n      // (lambda (params...) body) — create a closure\n      \"lambda\" -> [\n        params := (tail at: 1) collect: [:p | p name]\n        SchemeLambda\n          withParams: params\n          body: (tail at: 2)\n          env: env\n      ] value;\n\n      // (if test then else?) — conditional branch\n      \"if\" -> [\n        condVal := self eval: (tail at: 1) in: env\n        isFalsy := self isFalsy: condVal\n        isFalsy ifTrue: [\n          (tail size > 2) ifTrue: [\n            self eval: (tail at: 3) in: env\n          ] ifFalse: [nil]\n        ] ifFalse: [self eval: (tail at: 2) in: env]\n      ] value;\n\n      // (cond (test expr) ... (else expr))\n      \"cond\" -> self evalCond: tail in: env;\n\n      // (and expr ...) — short-circuit conjunction\n      \"and\" -> self evalAnd: tail in: env;\n\n      // (or expr ...) — short-circuit disjunction\n      \"or\" -> self evalOr: tail in: env;\n\n      // (let ((var expr) ...) body) — local bindings\n      \"let\" -> [\n        binds := tail at: 1\n        letBody := tail at: 2\n        params := binds collect: [:b | (b at: 1) name]\n        argVals := binds collect: [:b | self eval: (b at: 2) in: env]\n        childEnv := env extend: params values: argVals\n        self eval: letBody in: childEnv\n      ] value;\n\n      // Not a special form — evaluate head as a function and apply\n      _ -> [\n        self\n          evalApply: head\n          tail: tail\n          in: env\n      ] value\n    ]\n\n  /// Evaluate `head` as a procedure and apply it to the evaluated `tail` args.\n  evalApply: head tail: tail in: env =>\n    func := self eval: head in: env\n    evalArgs := tail collect: [:a | self eval: a in: env]\n    self\n      apply: func\n      args: evalArgs\n      in: env\n\n  /// Apply `func` to the evaluated argument list `args`.\n  ///\n  /// - `SchemeLambda` — extends the closure env with parameter bindings\n  ///   and recurses into the body.\n  /// - `Block` — calls the block with `args` as a single list argument\n  ///   (the convention for all built-in primitives).\n  /// - Anything else — raises `\"Not a procedure: <value>\"`.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// ev apply: [:a | (a at: 1) + (a at: 2)] args: #(3, 4) in: env   // => 7\n  /// ```\n  apply: func args: args in: _env =>\n    (func class =:= SchemeLambda)\n      ifTrue: [\n        childEnv := func closureEnv extend: func params values: args\n        ^self eval: func body in: childEnv\n      ]\n    (func class =:= Block) ifFalse: [\n      ^self error: \"Not a procedure: \" ++ func printString\n    ]\n    // Built-in: block takes the full args list as its single argument\n    func value: args\n\n  /// Return true if `val` is Scheme-falsy (i.e. `false` or `nil`).\n  isFalsy: val => val == false or: [val isNil]\n\n  /// Evaluate `cond` clauses in order; return the first truthy branch.\n  /// An `else` clause always matches. Returns `nil` if all tests fail.\n  evalCond: clauses in: env =>\n    clauses isEmpty ifTrue: [^nil]\n    clause := clauses first\n    ((clause first class =:= SchemeSymbol) and: [\n      clause first name =:= \"else\"\n    ]) ifTrue: [^self eval: clause last in: env]\n    condVal := self eval: clause first in: env\n    (self isFalsy: condVal) ifTrue: [\n      self evalCond: clauses rest in: env\n    ] ifFalse: [self eval: clause last in: env]\n\n  /// Evaluate `(and ...)` — return `false` on the first falsy value,\n  /// otherwise return the last value.\n  evalAnd: exprs in: env =>\n    exprs isEmpty ifTrue: [^true]\n    val := self eval: exprs first in: env\n    (self isFalsy: val) ifTrue: [^false]\n    exprs size =:= 1 ifTrue: [^val]\n    self evalAnd: exprs rest in: env\n\n  /// Evaluate `(or ...)` — return the first truthy value,\n  /// or `false` if all expressions are falsy.\n  evalOr: exprs in: env =>\n    exprs isEmpty ifTrue: [^false]\n    val := self eval: exprs first in: env\n    (self isFalsy: val) ifFalse: [^val]\n    self evalOr: exprs rest in: env",
+      "source": "/// SchemeEval — the metacircular evaluator.\n///\n/// `eval:in:` dispatches on expression type following the classic SICP\n/// eval/apply loop:\n///\n/// - **Self-evaluating** — integers, booleans, strings, nil are returned as-is.\n/// - **Symbols** — looked up in the environment via `SchemeEnv>>lookup:`.\n/// - **Lists** — special forms or function application.\n///\n/// Special forms: `quote`, `define`, `lambda`, `if`, `cond`, `let`, `and`, `or`.\n///\n/// Built-in procedures are `Block` values stored directly in the environment\n/// dictionary, so no separate primitive dispatch table is needed.\n///\n/// ## Examples\n/// ```beamtalk\n/// reader := SchemeReader new\n/// eval   := SchemeEval new\n/// env    := eval defaultEnv\n///\n/// eval eval: (reader read: \"(* 6 7)\") in: env      // => 42\n/// eval eval: (reader read: \"(define x 10)\") in: env  // => nil\n/// eval eval: (reader read: \"x\") in: env            // => 10\n/// ```\nValue subclass: SchemeEval\n\n  /// Build a fresh `SchemeEnv` pre-loaded with standard arithmetic and\n  /// list primitives: `+`, `-`, `*`, `/`, `=`, `<`, `>`, `<=`, `>=`,\n  /// `car`, `cdr`, `cons`, `list`, `not`, `null?`.\n  ///\n  /// Each primitive is a `Block` that receives the full evaluated argument\n  /// list and returns the result.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// env := SchemeEval new defaultEnv\n  /// (env lookup: \"+\")   // => a Block\n  /// ```\n  defaultEnv =>\n    SchemeEnv\n      spawnWith: #{\n        #bindings => #{\n          \"+\" => [:args | (args at: 1) + (args at: 2)],\n          \"-\" => [:args | (args at: 1) - (args at: 2)],\n          \"*\" => [:args | (args at: 1) * (args at: 2)],\n          \"/\" => [:args | (args at: 1) div: (args at: 2)],\n          \"=\" => [:args | (args at: 1) =:= (args at: 2)],\n          \"<\" => [:args | (args at: 1) < (args at: 2)],\n          \">\" => [:args | (args at: 1) > (args at: 2)],\n          \"<=\" => [:args | (args at: 1) <= (args at: 2)],\n          \">=\" => [:args | (args at: 1) >= (args at: 2)],\n          \"car\" => [:args | (args at: 1) first],\n          \"cdr\" => [:args | (args at: 1) rest],\n          \"cons\" => [:args | (#() add: (args at: 1)) ++ (args at: 2)],\n          \"list\" => [:args | args],\n          \"not\" => [:args | (args at: 1) not],\n          \"null?\" => [:args |\n            v := args at: 1\n            v isNil or: [v class =:= List and: [v isEmpty]]\n          ]\n        },\n        #parent => nil\n      }\n\n  /// Evaluate `expr` in `env` and return the result.\n  ///\n  /// Dispatches on expression type: self-evaluating atoms are returned\n  /// immediately; symbols trigger an environment lookup; lists are processed\n  /// as special forms or function application.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// ev  := SchemeEval new\n  /// env := ev defaultEnv\n  /// ev eval: 42 in: env                          // => 42\n  /// ev eval: (SchemeSymbol withName: \"+\") in: env  // => a Block\n  /// ```\n  eval: expr in: env =>\n    // Self-evaluating atomic types\n    (expr isNil or: [\n      #(Integer, True, False, String) includes: expr class\n    ]) ifTrue: [^expr]\n\n    // Symbol: look up the name in the environment\n    (expr class =:= SchemeSymbol) ifTrue: [^(env lookup: expr name)]\n\n    // Must be a list — special form or function application\n    (expr class =:= List) ifFalse: [^self error: \"Unknown expression type\"]\n    expr isEmpty ifTrue: [^#()]\n\n    head := expr first\n    tail := expr rest\n\n    // Special form dispatch (symbols) or function application\n    (head class =:= SchemeSymbol)\n      ifTrue: [\n        ^self\n          evalSpecialOrApply: head\n          tail: tail\n          in: env\n      ]\n    self\n      evalApply: head\n      tail: tail\n      in: env\n\n  /// Dispatch `head` as a special form or function application.\n  /// Called when `head` is a `SchemeSymbol`; `tail` is the rest of the list.\n  evalSpecialOrApply: head tail: tail in: env =>\n    sym := head name\n    sym match: [\n      // (quote expr) — return unevaluated\n      \"quote\" -> tail first;\n\n      // (define name expr) — bind name in the current environment\n      \"define\" -> [\n        varName := (tail at: 1) name\n        defVal := self eval: (tail at: 2) in: env\n        env define: varName value: defVal\n        nil\n      ] value;\n\n      // (lambda (params...) body) — create a closure\n      \"lambda\" -> [\n        params := (tail at: 1) collect: [:p | p name]\n        SchemeLambda\n          withParams: params\n          body: (tail at: 2)\n          env: env\n      ] value;\n\n      // (if test then else?) — conditional branch\n      \"if\" -> [\n        condVal := self eval: (tail at: 1) in: env\n        isFalsy := self isFalsy: condVal\n        isFalsy ifTrue: [\n          (tail size > 2) ifTrue: [\n            self eval: (tail at: 3) in: env\n          ] ifFalse: [nil]\n        ] ifFalse: [self eval: (tail at: 2) in: env]\n      ] value;\n\n      // (cond (test expr) ... (else expr))\n      \"cond\" -> self evalCond: tail in: env;\n\n      // (and expr ...) — short-circuit conjunction\n      \"and\" -> self evalAnd: tail in: env;\n\n      // (or expr ...) — short-circuit disjunction\n      \"or\" -> self evalOr: tail in: env;\n\n      // (let ((var expr) ...) body) — local bindings\n      \"let\" -> [\n        binds := tail at: 1\n        letBody := tail at: 2\n        params := binds collect: [:b | (b at: 1) name]\n        argVals := binds collect: [:b | self eval: (b at: 2) in: env]\n        childEnv := env extend: params values: argVals\n        self eval: letBody in: childEnv\n      ] value;\n\n      // Not a special form — evaluate head as a function and apply\n      _ -> [\n        self\n          evalApply: head\n          tail: tail\n          in: env\n      ] value\n    ]\n\n  /// Evaluate `head` as a procedure and apply it to the evaluated `tail` args.\n  evalApply: head tail: tail in: env =>\n    func := self eval: head in: env\n    evalArgs := tail collect: [:a | self eval: a in: env]\n    self\n      apply: func\n      args: evalArgs\n      in: env\n\n  /// Apply `func` to the evaluated argument list `args`.\n  ///\n  /// - `SchemeLambda` — extends the closure env with parameter bindings\n  ///   and recurses into the body.\n  /// - `Block` — calls the block with `args` as a single list argument\n  ///   (the convention for all built-in primitives).\n  /// - Anything else — raises `\"Not a procedure: <value>\"`.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// ev apply: [:a | (a at: 1) + (a at: 2)] args: #(3, 4) in: env   // => 7\n  /// ```\n  apply: func args: args in: _env =>\n    (func class =:= SchemeLambda)\n      ifTrue: [\n        childEnv := func closureEnv extend: func params values: args\n        ^self eval: func body in: childEnv\n      ]\n    (func class =:= Block) ifFalse: [\n      ^self error: \"Not a procedure: \" ++ func printString\n    ]\n    // Built-in: block takes the full args list as its single argument\n    func value: args\n\n  /// Return true if `val` is Scheme-falsy (i.e. `false` or `nil`).\n  isFalsy: val => val == false or: [val isNil]\n\n  /// Evaluate `cond` clauses in order; return the first truthy branch.\n  /// An `else` clause always matches. Returns `nil` if all tests fail.\n  evalCond: clauses in: env =>\n    clauses isEmpty ifTrue: [^nil]\n    clause := clauses first\n    ((clause first class =:= SchemeSymbol) and: [\n      clause first name =:= \"else\"\n    ]) ifTrue: [^self eval: clause last in: env]\n    condVal := self eval: clause first in: env\n    (self isFalsy: condVal) ifTrue: [\n      self evalCond: clauses rest in: env\n    ] ifFalse: [self eval: clause last in: env]\n\n  /// Evaluate `(and ...)` — return `false` on the first falsy value,\n  /// otherwise return the last value.\n  evalAnd: exprs in: env =>\n    exprs isEmpty ifTrue: [^true]\n    val := self eval: exprs first in: env\n    (self isFalsy: val) ifTrue: [^false]\n    exprs size =:= 1 ifTrue: [^val]\n    self evalAnd: exprs rest in: env\n\n  /// Evaluate `(or ...)` — return the first truthy value,\n  /// or `false` if all expressions are falsy.\n  evalOr: exprs in: env =>\n    exprs isEmpty ifTrue: [^false]\n    val := self eval: exprs first in: env\n    (self isFalsy: val) ifFalse: [^val]\n    self evalOr: exprs rest in: env",
       "explanation": ""
     },
     {
@@ -8830,8 +9084,8 @@
       "title": "SchemePrinter",
       "category": "examples-sicp",
       "tags": [
-        "Object",
         "SchemePrinter",
+        "Value",
         "append",
         "assign",
         "assignment",
@@ -8848,7 +9102,6 @@
         "instantiate",
         "mutate",
         "mutation",
-        "object",
         "print:",
         "printElems:",
         "printList:",
@@ -8858,9 +9111,10 @@
         "string join",
         "subclassing",
         "toString",
-        "to_string"
+        "to_string",
+        "value"
       ],
-      "source": "/// SchemePrinter — converts Beamtalk values back to Scheme notation.\n///\n/// Handles every type produced by `SchemeEval`: integers, booleans, strings,\n/// nil, `SchemeSymbol`, `SchemeLambda`, and `List`. The main entry point is\n/// `print:`, which dispatches on the value's class.\n///\n/// ## Examples\n/// ```beamtalk\n/// printer := SchemePrinter new\n/// printer print: 42          // => \"42\"\n/// printer print: true        // => \"#t\"\n/// printer print: false       // => \"#f\"\n/// printer print: nil         // => \"()\"\n/// printer print: #(1, 2, 3)    // => \"(1 2 3)\"\n/// ```\nObject subclass: SchemePrinter\n\n  /// Convert `val` to its Scheme string representation.\n  ///\n  /// Dispatches on `val class`: nil → `\"()\"`, booleans → `\"#t\"`/`\"#f\"`,\n  /// integers → decimal string, strings → double-quoted, symbols → name,\n  /// lambdas → `\"#<lambda>\"`, lists → `\"(elem ...)\"`.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemePrinter new print: 0          // => \"0\"\n  /// SchemePrinter new print: \"hi\"       // => \"\\\"hi\\\"\"\n  /// SchemePrinter new print: nil        // => \"()\"\n  /// ```\n  print: val =>\n    val isNil ifTrue: [^\"()\"]\n    (val class =:= True) ifTrue: [^\"#t\"]\n    (val class =:= False) ifTrue: [^\"#f\"]\n    (val class =:= Integer) ifTrue: [^val printString]\n    (val class =:= String) ifTrue: [^\"\"\"\" ++ val ++ \"\"\"\"]\n    (val class =:= SchemeSymbol) ifTrue: [^val name]\n    (val class =:= SchemeLambda) ifTrue: [^\"#<lambda>\"]\n    (val class =:= List) ifTrue: [^self printList: val]\n    \"#<unknown>\"\n\n  /// Format a list as a Scheme-style `(elem ...)` string.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemePrinter new printList: #()        // => \"()\"\n  /// SchemePrinter new printList: #(1, 2, 3)   // => \"(1 2 3)\"\n  /// ```\n  printList: lst =>\n    lst isEmpty ifTrue: [^\"()\"]\n    inner := self printElems: lst\n    \"(\" ++ inner ++ \")\"\n\n  /// Recursively format list elements separated by spaces.\n  printElems: lst =>\n    lst size =:= 1 ifTrue: [^self print: lst first]\n    (self print: lst first) ++ \" \" ++ (self printElems: lst rest)",
+      "source": "/// SchemePrinter — converts Beamtalk values back to Scheme notation.\n///\n/// Handles every type produced by `SchemeEval`: integers, booleans, strings,\n/// nil, `SchemeSymbol`, `SchemeLambda`, and `List`. The main entry point is\n/// `print:`, which dispatches on the value's class.\n///\n/// ## Examples\n/// ```beamtalk\n/// printer := SchemePrinter new\n/// printer print: 42          // => \"42\"\n/// printer print: true        // => \"#t\"\n/// printer print: false       // => \"#f\"\n/// printer print: nil         // => \"()\"\n/// printer print: #(1, 2, 3)    // => \"(1 2 3)\"\n/// ```\nValue subclass: SchemePrinter\n\n  /// Convert `val` to its Scheme string representation.\n  ///\n  /// Dispatches on `val class`: nil → `\"()\"`, booleans → `\"#t\"`/`\"#f\"`,\n  /// integers → decimal string, strings → double-quoted, symbols → name,\n  /// lambdas → `\"#<lambda>\"`, lists → `\"(elem ...)\"`.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemePrinter new print: 0          // => \"0\"\n  /// SchemePrinter new print: \"hi\"       // => \"\\\"hi\\\"\"\n  /// SchemePrinter new print: nil        // => \"()\"\n  /// ```\n  print: val =>\n    val isNil ifTrue: [^\"()\"]\n    (val class =:= True) ifTrue: [^\"#t\"]\n    (val class =:= False) ifTrue: [^\"#f\"]\n    (val class =:= Integer) ifTrue: [^val printString]\n    (val class =:= String) ifTrue: [^\"\"\"\" ++ val ++ \"\"\"\"]\n    (val class =:= SchemeSymbol) ifTrue: [^val name]\n    (val class =:= SchemeLambda) ifTrue: [^\"#<lambda>\"]\n    (val class =:= List) ifTrue: [^self printList: val]\n    \"#<unknown>\"\n\n  /// Format a list as a Scheme-style `(elem ...)` string.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemePrinter new printList: #()        // => \"()\"\n  /// SchemePrinter new printList: #(1, 2, 3)   // => \"(1 2 3)\"\n  /// ```\n  printList: lst =>\n    lst isEmpty ifTrue: [^\"()\"]\n    inner := self printElems: lst\n    \"(\" ++ inner ++ \")\"\n\n  /// Recursively format list elements separated by spaces.\n  printElems: lst =>\n    lst size =:= 1 ifTrue: [^self print: lst first]\n    (self print: lst first) ++ \" \" ++ (self printElems: lst rest)",
       "explanation": ""
     },
     {
@@ -8868,8 +9122,8 @@
       "title": "SchemeReader",
       "category": "examples-sicp",
       "tags": [
-        "Object",
         "SchemeReader",
+        "Value",
         "append",
         "assign",
         "assignment",
@@ -8892,7 +9146,6 @@
         "mutate",
         "mutation",
         "negation",
-        "object",
         "pairOf:rest:",
         "parseBool:",
         "parseExpr:",
@@ -8907,9 +9160,10 @@
         "string join",
         "subclassing",
         "throw",
-        "unless"
+        "unless",
+        "value"
       ],
-      "source": "/// SchemeReader — tokenises and parses s-expression strings into Beamtalk values.\n///\n/// Uses a functional char-list approach: each internal parse method receives a\n/// List of single-character String values (from `String>>asList`) and returns a\n/// 2-element `#(parsedValue, remainingChars)` pair. The public `read:` entry\n/// point extracts just the value.\n///\n/// Supported syntax:\n/// - **atoms** — symbols, integers, booleans (`#t` / `#f`), strings (`\"...\"`)\n/// - **lists** — `(elem ...)` including nested lists\n///\n/// String escaping: a doubled delimiter `\"\"` produces a literal `\"` character.\n///\n/// ## Examples\n/// ```beamtalk\n/// reader := SchemeReader new\n/// reader read: \"(+ 1 2)\"    // => #(SchemeSymbol(+), 1, 2)\n/// reader read: \"42\"         // => 42\n/// reader read: \"#t\"         // => true\n/// reader read: \"()\"         // => #()\n/// ```\nObject subclass: SchemeReader\n\n  /// Parse a Scheme expression string and return its AST value.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemeReader new read: \"(* 6 7)\"   // => #(SchemeSymbol(*), 6, 7)\n  /// SchemeReader new read: \"hello\"     // => SchemeSymbol(\"hello\")\n  /// ```\n  read: str =>\n    chars := str asList\n    pair := self parseExpr: (self dropWs: chars)\n    rest := self dropWs: pair last\n    rest isEmpty ifFalse: [^self error: \"Unexpected trailing input\"]\n    pair first\n\n  /// Return true if `ch` is a whitespace character (space, newline, tab, carriage return).\n  isWs: ch => #(\" \", \"\\n\", \"\\t\", \"\\r\") includes: ch\n\n  /// Drop leading whitespace characters from a char list.\n  dropWs: chars =>\n    chars isEmpty ifTrue: [^chars]\n    (self isWs: chars first) ifFalse: [^chars]\n    self dropWs: chars rest\n\n  /// Wrap `val` and `chars` into a 2-element `#(val, remainingChars)` pair.\n  pairOf: val rest: chars => (#() add: val) add: chars\n\n  /// Return true if `ch` is a token delimiter (whitespace, `(`, or `)`).\n  isDelim: ch => (self isWs: ch) or: [#(\"(\", \")\") includes: ch]\n\n  /// Dispatch to the appropriate sub-parser based on the leading character.\n  ///\n  /// - `(` → list\n  /// - `#` → boolean\n  /// - digit → integer\n  /// - `\"` → string\n  /// - anything else → symbol\n  parseExpr: chars =>\n    chars isEmpty ifTrue: [^self error: \"Unexpected end of input\"]\n    ch := chars first\n    (ch =:= \"(\") ifTrue: [^self parseListElems: chars rest]\n    (ch =:= \"#\") ifTrue: [^self parseBool: chars rest]\n    ch isDigit ifTrue: [^self parseNum: chars acc: \"\"]\n    (ch =:= \"\"\"\") ifTrue: [^self parseString: chars rest acc: \"\"]\n    self parseSym: chars acc: \"\"\n\n  /// Parse list elements after the opening `(` has been consumed.\n  /// Recursively parses elements until `)` is reached.\n  parseListElems: chars =>\n    trimmed := self dropWs: chars\n    trimmed isEmpty ifTrue: [^self error: \"Missing ')'\"]\n    (trimmed first =:= \")\") ifTrue: [^self pairOf: #() rest: trimmed rest]\n    headPair := self parseExpr: trimmed\n    head := headPair first\n    tailPair := self parseListElems: (self dropWs: headPair last)\n    tail := tailPair first\n    self pairOf: ((#() add: head) ++ tail) rest: tailPair last\n\n  /// Parse `#t` or `#f`; `chars` is positioned after the `#`.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemeReader new read: \"#t\"   // => true\n  /// SchemeReader new read: \"#f\"   // => false\n  /// ```\n  parseBool: chars =>\n    chars isEmpty ifTrue: [^self error: \"Unexpected '#'\"]\n    (chars first =:= \"t\") ifTrue: [^self pairOf: true rest: chars rest]\n    (chars first =:= \"f\") ifTrue: [^self pairOf: false rest: chars rest]\n    self error: \"Unknown # token\"\n\n  /// Parse an integer by accumulating digit characters until a delimiter.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemeReader new read: \"42\"    // => 42\n  /// ```\n  parseNum: chars acc: acc =>\n    (chars isEmpty or: [\n      self isDelim: chars first\n    ]) ifTrue: [^self pairOf: acc asInteger rest: chars]\n    self parseNum: chars rest acc: acc ++ chars first\n\n  /// Parse a string literal; `chars` is positioned after the opening `\"`.\n  /// A doubled delimiter `\"\"` represents a single literal `\"` character.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemeReader new read: \"\"\"hello\"\"\"     // => \"hello\"\n  /// ```\n  parseString: chars acc: acc =>\n    chars isEmpty ifTrue: [^self error: \"Unterminated string literal\"]\n    (chars first =:= \"\"\"\")\n      ifTrue: [\n        (chars rest isEmpty not and: [\n          chars rest first =:= \"\"\"\"\n        ]) ifTrue: [^self parseString: chars rest rest acc: acc ++ \"\"\"\"]\n        ^self pairOf: acc rest: chars rest\n      ]\n    self parseString: chars rest acc: acc ++ chars first\n\n  /// Parse a symbol by accumulating non-delimiter characters.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemeReader new read: \"define\"   // => SchemeSymbol(\"define\")\n  /// SchemeReader new read: \"+\"        // => SchemeSymbol(\"+\")\n  /// ```\n  parseSym: chars acc: acc =>\n    (chars isEmpty or: [\n      self isDelim: chars first\n    ]) ifTrue: [^self pairOf: (SchemeSymbol withName: acc) rest: chars]\n    self parseSym: chars rest acc: acc ++ chars first",
+      "source": "/// SchemeReader — tokenises and parses s-expression strings into Beamtalk values.\n///\n/// Uses a functional char-list approach: each internal parse method receives a\n/// List of single-character String values (from `String>>asList`) and returns a\n/// 2-element `#(parsedValue, remainingChars)` pair. The public `read:` entry\n/// point extracts just the value.\n///\n/// Supported syntax:\n/// - **atoms** — symbols, integers, booleans (`#t` / `#f`), strings (`\"...\"`)\n/// - **lists** — `(elem ...)` including nested lists\n///\n/// String escaping: a doubled delimiter `\"\"` produces a literal `\"` character.\n///\n/// ## Examples\n/// ```beamtalk\n/// reader := SchemeReader new\n/// reader read: \"(+ 1 2)\"    // => #(SchemeSymbol(+), 1, 2)\n/// reader read: \"42\"         // => 42\n/// reader read: \"#t\"         // => true\n/// reader read: \"()\"         // => #()\n/// ```\nValue subclass: SchemeReader\n\n  /// Parse a Scheme expression string and return its AST value.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemeReader new read: \"(* 6 7)\"   // => #(SchemeSymbol(*), 6, 7)\n  /// SchemeReader new read: \"hello\"     // => SchemeSymbol(\"hello\")\n  /// ```\n  read: str =>\n    chars := str asList\n    pair := self parseExpr: (self dropWs: chars)\n    rest := self dropWs: pair last\n    rest isEmpty ifFalse: [^self error: \"Unexpected trailing input\"]\n    pair first\n\n  /// Return true if `ch` is a whitespace character (space, newline, tab, carriage return).\n  isWs: ch => #(\" \", \"\\n\", \"\\t\", \"\\r\") includes: ch\n\n  /// Drop leading whitespace characters from a char list.\n  dropWs: chars =>\n    chars isEmpty ifTrue: [^chars]\n    (self isWs: chars first) ifFalse: [^chars]\n    self dropWs: chars rest\n\n  /// Wrap `val` and `chars` into a 2-element `#(val, remainingChars)` pair.\n  pairOf: val rest: chars => (#() add: val) add: chars\n\n  /// Return true if `ch` is a token delimiter (whitespace, `(`, or `)`).\n  isDelim: ch => (self isWs: ch) or: [#(\"(\", \")\") includes: ch]\n\n  /// Dispatch to the appropriate sub-parser based on the leading character.\n  ///\n  /// - `(` → list\n  /// - `#` → boolean\n  /// - digit → integer\n  /// - `\"` → string\n  /// - anything else → symbol\n  parseExpr: chars =>\n    chars isEmpty ifTrue: [^self error: \"Unexpected end of input\"]\n    ch := chars first\n    (ch =:= \"(\") ifTrue: [^self parseListElems: chars rest]\n    (ch =:= \"#\") ifTrue: [^self parseBool: chars rest]\n    ch isDigit ifTrue: [^self parseNum: chars acc: \"\"]\n    (ch =:= \"\"\"\") ifTrue: [^self parseString: chars rest acc: \"\"]\n    self parseSym: chars acc: \"\"\n\n  /// Parse list elements after the opening `(` has been consumed.\n  /// Recursively parses elements until `)` is reached.\n  parseListElems: chars =>\n    trimmed := self dropWs: chars\n    trimmed isEmpty ifTrue: [^self error: \"Missing ')'\"]\n    (trimmed first =:= \")\") ifTrue: [^self pairOf: #() rest: trimmed rest]\n    headPair := self parseExpr: trimmed\n    head := headPair first\n    tailPair := self parseListElems: (self dropWs: headPair last)\n    tail := tailPair first\n    self pairOf: ((#() add: head) ++ tail) rest: tailPair last\n\n  /// Parse `#t` or `#f`; `chars` is positioned after the `#`.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemeReader new read: \"#t\"   // => true\n  /// SchemeReader new read: \"#f\"   // => false\n  /// ```\n  parseBool: chars =>\n    chars isEmpty ifTrue: [^self error: \"Unexpected '#'\"]\n    (chars first =:= \"t\") ifTrue: [^self pairOf: true rest: chars rest]\n    (chars first =:= \"f\") ifTrue: [^self pairOf: false rest: chars rest]\n    self error: \"Unknown # token\"\n\n  /// Parse an integer by accumulating digit characters until a delimiter.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemeReader new read: \"42\"    // => 42\n  /// ```\n  parseNum: chars acc: acc =>\n    (chars isEmpty or: [\n      self isDelim: chars first\n    ]) ifTrue: [^self pairOf: acc asInteger rest: chars]\n    self parseNum: chars rest acc: acc ++ chars first\n\n  /// Parse a string literal; `chars` is positioned after the opening `\"`.\n  /// A doubled delimiter `\"\"` represents a single literal `\"` character.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemeReader new read: \"\"\"hello\"\"\"     // => \"hello\"\n  /// ```\n  parseString: chars acc: acc =>\n    chars isEmpty ifTrue: [^self error: \"Unterminated string literal\"]\n    (chars first =:= \"\"\"\")\n      ifTrue: [\n        (chars rest isEmpty not and: [\n          chars rest first =:= \"\"\"\"\n        ]) ifTrue: [^self parseString: chars rest rest acc: acc ++ \"\"\"\"]\n        ^self pairOf: acc rest: chars rest\n      ]\n    self parseString: chars rest acc: acc ++ chars first\n\n  /// Parse a symbol by accumulating non-delimiter characters.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// SchemeReader new read: \"define\"   // => SchemeSymbol(\"define\")\n  /// SchemeReader new read: \"+\"        // => SchemeSymbol(\"+\")\n  /// ```\n  parseSym: chars acc: acc =>\n    (chars isEmpty or: [\n      self isDelim: chars first\n    ]) ifTrue: [^self pairOf: (SchemeSymbol withName: acc) rest: chars]\n    self parseSym: chars rest acc: acc ++ chars first",
       "explanation": ""
     },
     {
@@ -10069,6 +10323,41 @@
       ],
       "source": "// BT-663: Tests for binary pattern matching in match: expressions.\n// Covers integer segments, binary segments, and guards.\n\nTestCase subclass: BinaryPatternsTest\n\n  testMatchFirstByteOfString =>\n    // Strings are UTF-8 binaries; \"A\" is byte 65\n    result := \"ABC\" match: [\n      <<first:8, _/binary>> -> first;\n      _ -> 0\n    ]\n    self assert: result equals: 65\n\n  testMatchRestBinary =>\n    // Extract the tail of a binary after the first byte\n    result := \"ABC\" match: [\n      <<_:8, rest/binary>> -> rest size;\n      _ -> 0\n    ]\n    self assert: result equals: 2\n\n  testMatchWildcardBinary =>\n    // Wildcard binary segment matches any binary\n    result := \"hello\" match: [\n      <<_/binary>> -> true;\n      _ -> false\n    ]\n    self assert: result\n\n  testMatchIntegerSegmentFallthrough =>\n    // When no arm matches, fall through to wildcard\n    result := \"X\" match: [\n      <<first:8, _/binary>> when: [first > 200] -> \"high\";\n      _ -> \"low\"\n    ]\n    self assert: result equals: \"low\"",
       "explanation": "BT-663: Tests for binary pattern matching in match: expressions. Covers integer segments, binary segments, and guards."
+    },
+    {
+      "id": "stdlib-test-binary-test",
+      "title": "BinaryTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "BinaryTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "binary_test",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testClassIdentity",
+        "testDeserializeTypeError",
+        "testFromIolist",
+        "testFromIolistEmpty",
+        "testSerializeAndDeserializeArray",
+        "testSerializeAndDeserializeBoolean",
+        "testSerializeAndDeserializeInteger",
+        "testSerializeAndDeserializeNil",
+        "testSerializeAndDeserializeString",
+        "testSerializeProducesBinary",
+        "testSizeOfEmptyString",
+        "testSizeOfString",
+        "testSizeTypeError"
+      ],
+      "source": "// Stdlib tests for Binary class (BT-1554)\n\nTestCase subclass: BinaryTest\n\n  testSerializeAndDeserializeInteger =>\n    bin := Binary serialize: 42\n    self assert: (Binary deserialize: bin) equals: 42\n\n  testSerializeAndDeserializeString =>\n    bin := Binary serialize: \"hello\"\n    self assert: (Binary deserialize: bin) equals: \"hello\"\n\n  testSerializeAndDeserializeArray =>\n    bin := Binary serialize: #(1, 2, 3)\n    self assert: (Binary deserialize: bin) equals: #(1, 2, 3)\n\n  testSerializeAndDeserializeNil =>\n    bin := Binary serialize: nil\n    self assert: (Binary deserialize: bin) equals: nil\n\n  testSerializeAndDeserializeBoolean =>\n    binTrue := Binary serialize: true\n    @expect type\n    self assert: (Binary deserialize: binTrue)\n    binFalse := Binary serialize: false\n    @expect type\n    self deny: (Binary deserialize: binFalse)\n\n  testSerializeProducesBinary =>\n    bin := Binary serialize: 42\n    self assert: (Binary size: bin) > 0\n\n  testSizeOfString => self assert: (Binary size: \"hello\") equals: 5\n\n  testSizeOfEmptyString => self assert: (Binary size: \"\") equals: 0\n\n  testFromIolist =>\n    result := Binary fromIolist: #(\"hello\", \" \", \"world\")\n    self assert: result equals: \"hello world\"\n\n  testFromIolistEmpty =>\n    result := Binary fromIolist: #()\n    self assert: result equals: \"\"\n\n  testDeserializeTypeError =>\n    self should: [Binary deserialize: 42] raise: #type_error\n\n  testSizeTypeError => self should: [Binary size: 42] raise: #type_error\n\n  testClassIdentity =>\n    // BT-802 (ADR 0036): class on class returns a real metaclass object\n    self assert: (Binary class) isMeta equals: true",
+      "explanation": "Stdlib tests for Binary class (BT-1554)"
     },
     {
       "id": "stdlib-test-block-evaluation-test",
@@ -12003,6 +12292,46 @@
       ],
       "source": "// BT-98: Tests that actor field mutations inside do: loops and inject:into: blocks\n// are correctly threaded through the state monad — setValue, sumArray via do:,\n// sumWithInject:, and multi-field accumulation (sum, count, product)\n\nTestCase subclass: FieldMutationsDoTest\n\n  testFieldMutationsWithSetAndDo =>\n    counter := FieldMutationCounter spawn\n    self assert: counter getValue equals: 0\n    self assert: (counter setValue: 5) equals: 5\n    self assert: counter getValue equals: 5\n    self assert: (counter setValue: 10) equals: 10\n    self assert: counter getValue equals: 10\n    self assert: (counter setValue: 0) equals: 0\n    self assert: (counter sumArray: #(1, 2, 3)) equals: 6\n    self assert: counter getValue equals: 6\n    self assert: (counter setValue: 0) equals: 0\n    self assert: (counter sumArray: #(10, 20, 30)) equals: 60\n    self assert: counter getValue equals: 60\n    self assert: (counter sumWithInject: #(1, 2, 3)) equals: 6\n    self assert: (counter sumWithInject: #(100, 200, 300)) equals: 600\n    acc := FieldMutationAccumulator spawn\n    self assert: (acc processArray: #(2, 3, 4)) equals: #{\n      #count => 3,\n      #product => 24,\n      #sum => 9\n    }\n    self assert: acc getSum equals: 9\n    self assert: acc getProduct equals: 24\n    self assert: acc getCount equals: 3",
       "explanation": "BT-98: Tests that actor field mutations inside do: loops and inject:into: blocks are correctly threaded through the state monad — setValue, sumArray via do:, sumWithInject:, and multi-field accumulation (sum, count, product)"
+    },
+    {
+      "id": "stdlib-test-file-binary-io-test",
+      "title": "FileBinaryIoTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "FileBinaryIoTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "constructor",
+        "create",
+        "extends",
+        "file_binary_io_test",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "string conversion",
+        "subclassing",
+        "testAppendBinaryAppendsToExisting",
+        "testAppendBinaryCreatesFile",
+        "testAppendBinaryTypeErrorContents",
+        "testAppendBinaryTypeErrorPath",
+        "testReadBinaryFileNotFound",
+        "testReadBinarySuccess",
+        "testReadBinaryTypeError",
+        "testWriteBinaryCreatesSubdirectory",
+        "testWriteBinaryOverwrites",
+        "testWriteBinarySuccess",
+        "testWriteBinaryTypeErrorContents",
+        "testWriteBinaryTypeErrorPath",
+        "toString",
+        "to_string"
+      ],
+      "source": "// File binary I/O tests (BT-1555)\n\nTestCase subclass: FileBinaryIoTest\n\n  testReadBinarySuccess =>\n    @expect type\n    File writeBinary: \"target/bt-test-tmp/binary_read.dat\" contents: \"hello\"\n    result := File readBinary: \"target/bt-test-tmp/binary_read.dat\"\n    self assert: result isOk\n    self assert: result unwrap equals: \"hello\"\n\n  testReadBinaryFileNotFound =>\n    result := File readBinary: \"target/bt-test-tmp/no_such_file_xyz.bin\"\n    self assert: result isError\n    self assert: (result error printString includesSubstring: \"file not found\")\n\n  testReadBinaryTypeError =>\n    @expect type\n    self should: [File readBinary: 42] raise: #type_error\n\n  testWriteBinarySuccess =>\n    @expect type\n    self assert: (File writeBinary: \"target/bt-test-tmp/binary_write.dat\" contents: \"binary data\") isOk\n    self assert: (File readBinary: \"target/bt-test-tmp/binary_write.dat\") unwrap equals: \"binary data\"\n\n  testWriteBinaryOverwrites =>\n    @expect type\n    File writeBinary: \"target/bt-test-tmp/binary_overwrite.dat\" contents: \"first\"\n    @expect type\n    File writeBinary: \"target/bt-test-tmp/binary_overwrite.dat\" contents: \"second\"\n    self assert: (File readBinary: \"target/bt-test-tmp/binary_overwrite.dat\") unwrap equals: \"second\"\n\n  testWriteBinaryTypeErrorPath =>\n    @expect type\n    self should: [File writeBinary: 42 contents: \"data\"] raise: #type_error\n\n  testWriteBinaryTypeErrorContents =>\n    @expect type\n    self should: [\n      File writeBinary: \"target/bt-test-tmp/test.dat\" contents: 42\n    ] raise: #type_error\n\n  testWriteBinaryCreatesSubdirectory =>\n    @expect type\n    self assert: (File writeBinary: \"target/bt-test-tmp/bin-subdir/nested.dat\" contents: \"nested\") isOk\n    self assert: (File readBinary: \"target/bt-test-tmp/bin-subdir/nested.dat\") unwrap equals: \"nested\"\n\n  testAppendBinaryCreatesFile =>\n    // Ensure the file doesn't exist first\n    File delete: \"target/bt-test-tmp/binary_append_new.dat\"\n    @expect type\n    self assert: (File appendBinary: \"target/bt-test-tmp/binary_append_new.dat\" contents: \"first\") isOk\n    self assert: (File readBinary: \"target/bt-test-tmp/binary_append_new.dat\") unwrap equals: \"first\"\n\n  testAppendBinaryAppendsToExisting =>\n    @expect type\n    File writeBinary: \"target/bt-test-tmp/binary_append.dat\" contents: \"hello\"\n    @expect type\n    File appendBinary: \"target/bt-test-tmp/binary_append.dat\" contents: \" world\"\n    self assert: (File readBinary: \"target/bt-test-tmp/binary_append.dat\") unwrap equals: \"hello world\"\n\n  testAppendBinaryTypeErrorPath =>\n    @expect type\n    self should: [File appendBinary: 42 contents: \"data\"] raise: #type_error\n\n  testAppendBinaryTypeErrorContents =>\n    @expect type\n    self should: [\n      File appendBinary: \"target/bt-test-tmp/test.dat\" contents: 42\n    ] raise: #type_error",
+      "explanation": "File binary I/O tests (BT-1555)"
     },
     {
       "id": "stdlib-test-file-directory-test",
@@ -15932,9 +16261,10 @@
         "setValue:",
         "subclassing",
         "sup_init_child_a",
-        "supervision"
+        "supervision",
+        "supervisionPolicy"
       ],
-      "source": "// BT-1542: Simple actor child for supervisor initialize: test.\n\nActor subclass: SupInitChildA\n  state: value = 0\n\n  getValue => self.value\n\n  setValue: v => self.value := v",
+      "source": "// BT-1542: Simple actor child for supervisor initialize: test.\n\nActor subclass: SupInitChildA\n  state: value = 0\n\n  class supervisionPolicy => #temporary\n\n  getValue => self.value\n\n  setValue: v => self.value := v",
       "explanation": "BT-1542: Simple actor child for supervisor initialize: test."
     },
     {
@@ -15968,9 +16298,10 @@
         "setValue:",
         "subclassing",
         "sup_init_child_b",
-        "supervision"
+        "supervision",
+        "supervisionPolicy"
       ],
-      "source": "// BT-1542: Simple actor child for supervisor initialize: test.\n\nActor subclass: SupInitChildB\n  state: value = 0\n\n  getValue => self.value\n\n  setValue: v => self.value := v",
+      "source": "// BT-1542: Simple actor child for supervisor initialize: test.\n\nActor subclass: SupInitChildB\n  state: value = 0\n\n  class supervisionPolicy => #temporary\n\n  getValue => self.value\n\n  setValue: v => self.value := v",
       "explanation": "BT-1542: Simple actor child for supervisor initialize: test."
     },
     {
@@ -16398,6 +16729,27 @@
       "explanation": "Test fixture: Validator value type with error: usage"
     },
     {
+      "id": "stdlib-test-fixtures-value-base-shape",
+      "title": "ValueBaseShape",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Value",
+        "ValueBaseShape",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "property",
+        "subclassing",
+        "value",
+        "value_base_shape"
+      ],
+      "source": "// BT-1559: Abstract base for Value sub-subclass inheritance tests.\n// Direct Value subclass with one field. Concrete children inherit this field\n// and add their own, exercising the sub-subclass constructor chain.\n\nValue subclass: ValueBaseShape\n  field: color = \"black\"",
+      "explanation": "BT-1559: Abstract base for Value sub-subclass inheritance tests. Direct Value subclass with one field. Concrete children inherit this field and add their own, exercising the sub-subclass constructor chain."
+    },
+    {
       "id": "stdlib-test-fixtures-value-many-fields",
       "title": "ValueManyFields",
       "category": "stdlib-fixtures",
@@ -16439,6 +16791,37 @@
       ],
       "source": "// ValuePoint — a Point class declared with `Value subclass:` (BT-923)\n// Tests auto-generated getters, with*: setters, and keyword constructor\n\nValue subclass: ValuePoint\n  field: x = 0\n  field: y = 0\n\n  // User-defined method: distance squared from origin\n  distanceSquared => (self.x * self.x) + (self.y * self.y)",
       "explanation": "ValuePoint — a Point class declared with `Value subclass:` (BT-923) Tests auto-generated getters, with*: setters, and keyword constructor"
+    },
+    {
+      "id": "stdlib-test-fixtures-value-sub-circle",
+      "title": "ValueSubCircle",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "ValueBaseShape",
+        "ValueSubCircle",
+        "async",
+        "concurrent",
+        "constructor",
+        "create",
+        "describe",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "object",
+        "process",
+        "property",
+        "subclassing",
+        "value_sub_circle",
+        "withRadius:"
+      ],
+      "source": "// BT-1559: Concrete Value sub-subclass for inheritance tests.\n// Extends ValueBaseShape (which extends Value), adding its own field.\n// Exercises: new, new:, keyword constructor, inherited field access,\n// and withX: setters on both own and inherited fields.\n\nValueBaseShape subclass: ValueSubCircle\n  field: radius = 1.0\n\n  // Class-side factory using new:\n  class withRadius: r =>\n    // DNU false positive: new: is on Value ancestor, resolved via cross-file hierarchy\n    // at runtime. Fixture compilation doesn't inject sibling fixture class infos to\n    // avoid cascading DNU warnings across unrelated fixtures (e.g. >> operator).\n    @expect dnu\n    self new: #{#radius => r}\n\n  // User-defined method using both inherited and own fields\n  describe => \"{self.color} circle r={self.radius}\"",
+      "explanation": "BT-1559: Concrete Value sub-subclass for inheritance tests. Extends ValueBaseShape (which extends Value), adding its own field. Exercises: new, new:, keyword constructor, inherited field access, and withX: setters on both own and inherited fields."
     },
     {
       "id": "stdlib-test-fixtures-value-type-builder",
@@ -18981,6 +19364,49 @@
       "explanation": "Tests the Stream class — from:, from:by:, on: constructors; lazy pipeline ops (select:, collect:, reject:, drop:); terminals (take:, asList, do:, inject:into:, detect:, anySatisfy:, allSatisfy:); and empty-stream behaviour"
     },
     {
+      "id": "stdlib-test-strict-equality-test",
+      "title": "StrictEqualityTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "StrictEqualityTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "strict_equality_test",
+        "subclassing",
+        "testFloatInequalityDifferentValues",
+        "testFloatInequalitySameValue",
+        "testFloatStrictEqualsSameFloat",
+        "testFloatStrictNotEqualsInteger",
+        "testIntegerInequalityDifferentValues",
+        "testIntegerInequalityIntVsFloat",
+        "testIntegerInequalitySameValue",
+        "testIntegerStrictEqualsSameInteger",
+        "testIntegerStrictNotEqualsFloat",
+        "testLooseEqualityCoercesIntFloat",
+        "testNegativeIntNotStrictEqualsNegativeFloat",
+        "testStringInequalityDifferent",
+        "testStringInequalitySame",
+        "testStringStrictEqualsSameString",
+        "testStringStrictNotEqualsDifferent",
+        "testSymbolInequalityDifferent",
+        "testSymbolInequalitySame",
+        "testSymbolStrictEqualsSame",
+        "testSymbolStrictNotEqualsDifferent",
+        "testZeroIntNotStrictEqualsZeroFloat",
+        "testZeroIntStrictInequalityZeroFloat"
+      ],
+      "source": "// BT-1562: Strict equality (=:=) and strict inequality (=/=).\n// Erlang's =:= is exact equality — 5 =:= 5.0 is false because they are\n// different types. =/= is the complement: (x =/= y) iff not (x =:= y).\n// Loose equality (==) coerces, so 5 == 5.0 is true.\n\nTestCase subclass: StrictEqualityTest\n\n  // --- Integer =:= / =/= ---\n  testIntegerStrictEqualsSameInteger => self assert: (5 =:= 5)\n\n  testIntegerStrictNotEqualsFloat => self deny: (5 =:= 5.0)\n\n  testIntegerInequalityDifferentValues =>\n    @expect type\n    self assert: (1 =/= 2)\n\n  testIntegerInequalitySameValue =>\n    @expect type\n    self deny: (5 =/= 5)\n\n  testIntegerInequalityIntVsFloat =>\n    @expect type\n    self assert: (5 =/= 5.0)\n\n  // --- Float =:= / =/= ---\n  testFloatStrictEqualsSameFloat => self assert: (5.0 =:= 5.0)\n\n  testFloatStrictNotEqualsInteger => self deny: (5.0 =:= 5)\n\n  testFloatInequalityDifferentValues =>\n    @expect type\n    self assert: (1.0 =/= 2.0)\n\n  testFloatInequalitySameValue =>\n    @expect type\n    self deny: (3.14 =/= 3.14)\n\n  // --- Loose equality (==) coerces across int/float ---\n  testLooseEqualityCoercesIntFloat => self assert: (5 == 5.0)\n\n  // --- Zero and negative edge cases ---\n  testZeroIntNotStrictEqualsZeroFloat => self deny: (0 =:= 0.0)\n\n  testZeroIntStrictInequalityZeroFloat =>\n    @expect type\n    self assert: (0 =/= 0.0)\n\n  testNegativeIntNotStrictEqualsNegativeFloat => self deny: (-1 =:= -1.0)\n\n  // --- String =:= / =/= ---\n  testStringStrictEqualsSameString => self assert: (\"abc\" =:= \"abc\")\n\n  testStringStrictNotEqualsDifferent => self deny: (\"abc\" =:= \"xyz\")\n\n  testStringInequalityDifferent =>\n    @expect type\n    self assert: (\"abc\" =/= \"xyz\")\n\n  testStringInequalitySame =>\n    @expect type\n    self deny: (\"abc\" =/= \"abc\")\n\n  // --- Symbol =:= / =/= ---\n  testSymbolStrictEqualsSame => self assert: (#hello =:= #hello)\n\n  testSymbolStrictNotEqualsDifferent => self deny: (#hello =:= #world)\n\n  testSymbolInequalityDifferent =>\n    @expect type\n    self assert: (#hello =/= #world)\n\n  testSymbolInequalitySame =>\n    @expect type\n    self deny: (#hello =/= #hello)",
+      "explanation": "BT-1562: Strict equality (=:=) and strict inequality (=/=). Erlang's =:= is exact equality — 5 =:= 5.0 is false because they are different types. =/= is the complement: (x =/= y) iff not (x =:= y). Loose equality (==) coerces, so 5 == 5.0 is true."
+    },
+    {
       "id": "stdlib-test-string-advanced-methods-test",
       "title": "StringAdvancedMethodsTest",
       "category": "stdlib-tests",
@@ -19928,6 +20354,46 @@
       ],
       "source": "// BT-926: Comprehensive BUnit tests for Value subclass: construction forms,\n// with*: functional setters, immutability enforcement, value equality,\n// and value objects in collections\n//\n// Fixture: stdlib/test/fixtures/value_point.bt (ValuePoint — x, y slots)\n//\n// See also:\n//   value_subclass_test.bt — auto-generated getter/setter/reflection tests\n//   value_type_update_test.bt — multi-field update semantics\n\nTestCase subclass: ValueObjectTest\n\n  // =========================================================================\n  // CONSTRUCTION FORMS\n  // =========================================================================\n\n  // new — default-initialises all slots to their declared defaults\n  testNewDefaultValues =>\n    p := ValuePoint new\n    self assert: p x equals: 0\n    self assert: p y equals: 0\n\n  // new: — initialises from a map; missing keys keep defaults\n  testNewWithMap =>\n    p := ValuePoint new: #{#x => 5, #y => 10}\n    self assert: p x equals: 5\n    self assert: p y equals: 10\n\n  testNewWithPartialMap =>\n    p := ValuePoint new: #{#x => 7}\n    self assert: p x equals: 7\n    // y keeps its declared default\n    self assert: p y equals: 0\n\n  // Keyword constructor — auto-generated from slot names\n  testKeywordConstructor =>\n    p := ValuePoint x: 3 y: 4\n    self assert: p x equals: 3\n    self assert: p y equals: 4\n\n  testKeywordConstructorZeroValues =>\n    p := ValuePoint x: 0 y: 0\n    self assert: p x equals: 0\n    self assert: p y equals: 0\n\n  // =========================================================================\n  // with*: FUNCTIONAL SETTERS\n  // =========================================================================\n\n  // with*: returns a new instance with one field changed\n  testWithXReturnsNewInstance =>\n    p := ValuePoint x: 1 y: 2\n    p2 := p withX: 99\n    self assert: p2 x equals: 99\n    // y is preserved from the original\n    self assert: p2 y equals: 2\n\n  testWithYReturnsNewInstance =>\n    p := ValuePoint x: 1 y: 2\n    p2 := p withY: 99\n    // x is preserved from the original\n    self assert: p2 x equals: 1\n    self assert: p2 y equals: 99\n\n  // Original object is unchanged after with*:\n  testWithSetterDoesNotMutateOriginal =>\n    p := ValuePoint x: 10 y: 20\n    p withX: 999\n    self assert: p x equals: 10\n    self assert: p y equals: 20\n\n  // Chaining with*: calls produces cumulative result\n  testChainedWithSetters =>\n    p := ValuePoint new\n    p2 := (p withX: 5) withY: 7\n    self assert: p2 x equals: 5\n    self assert: p2 y equals: 7\n\n  // with*: preserves class identity\n  testWithSetterPreservesClass =>\n    p := ValuePoint x: 1 y: 2\n    p2 := p withX: 99\n    self assert: p2 class equals: ValuePoint\n\n  // User-defined methods coexist with auto-generated ones\n  testUserDefinedMethodWithAutoGetters =>\n    p := ValuePoint x: 3 y: 4\n    self assert: p distanceSquared equals: 25\n\n  // =========================================================================\n  // IMMUTABILITY ENFORCEMENT\n  // =========================================================================\n\n  // fieldAt:put: raises immutable_value — direct slot mutation is rejected\n  testFieldAtPutRaisesImmutableValue =>\n    p := ValuePoint x: 1 y: 2\n    self should: [p fieldAt: #x put: 99] raise: #immutable_value\n\n  testFieldAtPutRaisesForAnySlot =>\n    p := ValuePoint x: 0 y: 0\n    self should: [p fieldAt: #y put: 42] raise: #immutable_value\n\n  // self.slot := is rejected at compile time (tested in E2E via @load-error)\n\n  // =========================================================================\n  // VALUE EQUALITY\n  // =========================================================================\n\n  // Two value objects with identical field values are equal (structural equality)\n  testTwoPointsWithSameFieldsAreEqual =>\n    p1 := ValuePoint x: 3 y: 4\n    p2 := ValuePoint x: 3 y: 4\n    self assert: (p1 == p2)\n\n  // Two value objects with different field values are not equal\n  testTwoPointsWithDifferentFieldsAreNotEqual =>\n    p1 := ValuePoint x: 1 y: 2\n    p2 := ValuePoint x: 9 y: 9\n    self deny: (p1 == p2)\n\n  // Inequality operator agrees with equality\n  testInequalityOperator =>\n    p1 := ValuePoint x: 1 y: 2\n    p2 := ValuePoint x: 1 y: 2\n    p3 := ValuePoint x: 5 y: 6\n    self deny: (p1 /= p2)\n    self assert: (p1 /= p3)\n\n  // with*: result equals a fresh object with the same values\n  testWithSetterResultEqualsManualConstruct =>\n    p := ValuePoint x: 1 y: 2\n    p2 := p withX: 10\n    p3 := ValuePoint x: 10 y: 2\n    self assert: (p2 == p3)\n\n  // Default (new) equals keyword constructor with zeros\n  testNewEqualsKeywordConstructorWithDefaults =>\n    p1 := ValuePoint new\n    p2 := ValuePoint x: 0 y: 0\n    self assert: (p1 == p2)\n\n  // =========================================================================\n  // VALUE OBJECTS IN COLLECTIONS\n  // =========================================================================\n\n  // collect: transforms a collection of value objects\n  testCollectOnValueObjects =>\n    points := #((ValuePoint x: 1 y: 1), (ValuePoint x: 2 y: 2), (ValuePoint x: 3 y: 3))\n    xs := points collect: [:p | p x]\n    self assert: xs equals: #(1, 2, 3)\n\n  // collect: can produce new value objects from old ones\n  testCollectProducesNewValueObjects =>\n    points := #((ValuePoint x: 1 y: 10), (ValuePoint x: 2 y: 20))\n    doubled := points collect: [:p | p withX: p x * 2]\n    self assert: (doubled at: 1) x equals: 2\n    self assert: (doubled at: 2) x equals: 4\n\n  // select: filters a collection of value objects by a predicate\n  testSelectOnValueObjects =>\n    points := #((ValuePoint x: 1 y: 1), (ValuePoint x: 5 y: 5), (ValuePoint x: 2 y: 2))\n    big := points select: [:p | p x > 2]\n    self assert: big size equals: 1\n    self assert: (big at: 1) x equals: 5\n\n  // inject:into: folds over a collection of value objects\n  testInjectIntoOnValueObjects =>\n    points := #((ValuePoint x: 1 y: 0), (ValuePoint x: 2 y: 0), (ValuePoint x: 3 y: 0))\n    total := points inject: 0 into: [:sum :p | sum + p x]\n    self assert: total equals: 6\n\n  // Size of a collection of value objects\n  testCollectionSizeWithValueObjects =>\n    points := #((ValuePoint x: 0 y: 0), (ValuePoint x: 1 y: 1))\n    self assert: points size equals: 2\n\n  // Value objects can be used as elements in detect:\n  testDetectOnValueObjects =>\n    points := #((ValuePoint x: 1 y: 1), (ValuePoint x: 7 y: 3), (ValuePoint x: 2 y: 2))\n    found := points detect: [:p | p x == 7]\n    self assert: found x equals: 7\n    self assert: found y equals: 3",
       "explanation": "BT-926: Comprehensive BUnit tests for Value subclass: construction forms, with*: functional setters, immutability enforcement, value equality, and value objects in collections  Fixture: stdlib/test/fixtures/value_point.bt (ValuePoint — x, y slots)  See also:   value_subclass_test.bt — auto-generated getter/setter/reflection tests   value_type_update_test.bt — multi-field update semantics"
+    },
+    {
+      "id": "stdlib-test-value-sub-subclass-test",
+      "title": "ValueSubSubclassTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "TestCase",
+        "ValueSubSubclassTest",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "set",
+        "subclassing",
+        "testClassSideFactory",
+        "testKeywordConstructorOwnField",
+        "testNewClassIsCorrect",
+        "testNewCreatesInstanceWithDefaults",
+        "testNewWithMapSetsBothFields",
+        "testNewWithMapSetsInheritedField",
+        "testNewWithMapSetsOwnField",
+        "testUserMethodUsesBothFields",
+        "testWithInheritedFieldSetter",
+        "testWithOwnFieldSetter",
+        "value_sub_subclass_test"
+      ],
+      "source": "// BT-1559: Tests for Value sub-subclass instantiation.\n// ValueBaseShape (Value subclass) → ValueSubCircle (sub-subclass).\n// Exercises: new, new:, keyword constructor, inherited getters/setters.\n//\n// Fixtures: stdlib/test/fixtures/value_base_shape.bt (ValueBaseShape)\n//           stdlib/test/fixtures/value_sub_circle.bt (ValueSubCircle)\n\nTestCase subclass: ValueSubSubclassTest\n\n  // --- new ---\n  testNewCreatesInstanceWithDefaults =>\n    c := ValueSubCircle new\n    self assert: c radius equals: 1.0\n    self assert: c color equals: \"black\"\n\n  testNewClassIsCorrect =>\n    c := ValueSubCircle new\n    self assert: c class equals: ValueSubCircle\n\n  // --- new: ---\n  testNewWithMapSetsOwnField =>\n    c := ValueSubCircle new: #{#radius => 5.0}\n    self assert: c radius equals: 5.0\n    self assert: c color equals: \"black\"\n\n  testNewWithMapSetsInheritedField =>\n    c := ValueSubCircle new: #{#color => \"red\"}\n    self assert: c color equals: \"red\"\n    self assert: c radius equals: 1.0\n\n  testNewWithMapSetsBothFields =>\n    c := ValueSubCircle new: #{#radius => 3.0, #color => \"blue\"}\n    self assert: c radius equals: 3.0\n    self assert: c color equals: \"blue\"\n\n  // --- keyword constructor ---\n  testKeywordConstructorOwnField =>\n    c := ValueSubCircle radius: 7.0\n    self assert: c radius equals: 7.0\n    self assert: c color equals: \"black\"\n\n  // --- class-side factory ---\n  testClassSideFactory =>\n    c := ValueSubCircle withRadius: 9.0\n    self assert: c radius equals: 9.0\n    self assert: c class equals: ValueSubCircle\n\n  // --- withX: setters ---\n  testWithOwnFieldSetter =>\n    c := ValueSubCircle new\n    c2 := c withRadius: 42.0\n    self assert: c2 radius equals: 42.0\n    // Original unchanged\n    self assert: c radius equals: 1.0\n\n  testWithInheritedFieldSetter =>\n    c := ValueSubCircle new\n    c2 := c withColor: \"green\"\n    self assert: c2 color equals: \"green\"\n    // Original unchanged\n    self assert: c color equals: \"black\"\n\n  // --- user-defined method using both fields ---\n  testUserMethodUsesBothFields =>\n    c := ValueSubCircle new: #{#color => \"red\", #radius => 2.5}\n    self assert: c describe equals: \"red circle r=2.5\"",
+      "explanation": "BT-1559: Tests for Value sub-subclass instantiation. ValueBaseShape (Value subclass) → ValueSubCircle (sub-subclass). Exercises: new, new:, keyword constructor, inherited getters/setters.  Fixtures: stdlib/test/fixtures/value_base_shape.bt (ValueBaseShape)           stdlib/test/fixtures/value_sub_circle.bt (ValueSubCircle)"
     },
     {
       "id": "stdlib-test-value-subclass-test",

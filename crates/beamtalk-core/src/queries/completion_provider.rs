@@ -603,7 +603,7 @@ fn find_receiver_in_expr(
                 }
                 return type_map.get(*span).and_then(|ty| match ty {
                     InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
-                    InferredType::Dynamic => None,
+                    InferredType::Dynamic | InferredType::Union(_) => None,
                 });
             }
             None
@@ -613,7 +613,7 @@ fn find_receiver_in_expr(
             if offset >= ident.span.end() && offset <= ident.span.end() + 1 {
                 type_map.get(ident.span).and_then(|ty| match ty {
                     InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
-                    InferredType::Dynamic => None,
+                    InferredType::Dynamic | InferredType::Union(_) => None,
                 })
             } else {
                 None
@@ -632,7 +632,7 @@ fn find_receiver_in_expr(
             if offset >= span.end() && offset <= span.end() + 1 {
                 type_map.get(*span).and_then(|ty| match ty {
                     InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
-                    InferredType::Dynamic => None,
+                    InferredType::Dynamic | InferredType::Union(_) => None,
                 })
             } else {
                 None
@@ -648,7 +648,7 @@ fn find_receiver_in_expr(
             if offset >= span.end() && offset <= span.end() + 1 {
                 type_map.get(*span).and_then(|ty| match ty {
                     InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
-                    InferredType::Dynamic => None,
+                    InferredType::Dynamic | InferredType::Union(_) => None,
                 })
             } else {
                 find_receiver_in_expr(expression, offset, type_map)
