@@ -12,7 +12,7 @@
 /// (Set new add: 1) includes: 1    // => true
 /// (Set new add: 1) size           // => 1
 /// ```
-sealed Collection subclass: Set
+sealed Collection subclass: Set(E)
   field: elements = #()
 
   /// Create a Set from a list, deduplicating elements.
@@ -24,7 +24,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// Set class withAll: #(1, 2, 2, 3)  // => a Set with 1, 2, 3
   /// ```
-  class withAll: list :: List -> Set => @primitive "withAll:"
+  class withAll: list :: List -> Set(E) => @primitive "withAll:"
 
   /// Create a Set from a list, deduplicating elements. Convenience alias for `withAll:`.
   ///
@@ -32,7 +32,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// Set new: #(1, 2, 2, 3)           // => Set(1, 2, 3)
   /// ```
-  class new: elements :: List -> Set => self withAll: elements
+  class new: elements :: List -> Set(E) => self withAll: elements
 
   /// Number of elements in the set.
   ///
@@ -58,7 +58,7 @@ sealed Collection subclass: Set
   /// (Set new add: 1) includes: 1   // => true
   /// (Set new add: 1) includes: 2   // => false
   /// ```
-  includes: element -> Boolean => @primitive "includes:"
+  includes: element :: E -> Boolean => @primitive "includes:"
 
   /// Return a new set with the element added.
   ///
@@ -66,7 +66,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// (Set new add: 1) size          // => 1
   /// ```
-  add: element -> Set => @primitive "add:"
+  add: element :: E -> Set(E) => @primitive "add:"
 
   /// Return a new set with the element removed.
   ///
@@ -74,7 +74,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// ((Set new add: 1) remove: 1) isEmpty   // => true
   /// ```
-  remove: element -> Set => @primitive "remove:"
+  remove: element :: E -> Set(E) => @primitive "remove:"
 
   /// Return a new set with elements from both sets.
   ///
@@ -82,7 +82,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// (Set new add: 1) union: (Set new add: 2)
   /// ```
-  union: other :: Set -> Set => @primitive "union:"
+  union: other :: Set(E) -> Set(E) => @primitive "union:"
 
   /// Return a new set with only elements present in both sets.
   ///
@@ -90,7 +90,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// ((Set new add: 1) add: 2) intersection: ((Set new add: 2) add: 3)
   /// ```
-  intersection: other :: Set -> Set => @primitive "intersection:"
+  intersection: other :: Set(E) -> Set(E) => @primitive "intersection:"
 
   /// Return a new set with elements in the receiver but not in `other`.
   ///
@@ -98,7 +98,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// ((Set new add: 1) add: 2) difference: (Set new add: 2)
   /// ```
-  difference: other :: Set -> Set => @primitive "difference:"
+  difference: other :: Set(E) -> Set(E) => @primitive "difference:"
 
   /// Test if all elements of the receiver are in `other`.
   ///
@@ -106,7 +106,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// (Set new add: 1) isSubsetOf: ((Set new add: 1) add: 2)   // => true
   /// ```
-  isSubsetOf: other :: Set -> Boolean => @primitive "isSubsetOf:"
+  isSubsetOf: other :: Set(E) -> Boolean => @primitive "isSubsetOf:"
 
   /// Convert the set to a list of elements.
   ///
@@ -122,7 +122,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// Set new fromList: #(1, 2, 2, 3)
   /// ```
-  fromList: list :: List -> Set => @primitive "fromList:"
+  fromList: list :: List -> Set(E) => @primitive "fromList:"
 
   /// Iterate over each element, evaluating `block` with each one.
   ///
@@ -130,7 +130,7 @@ sealed Collection subclass: Set
   /// ```beamtalk
   /// (Set new add: 1) do: [:x | Transcript show: x]
   /// ```
-  do: block :: Block -> Nil => @primitive "do:"
+  do: block :: Block(E, Object) -> Nil => @primitive "do:"
 
   /// Return a developer-readable string representation.
   ///

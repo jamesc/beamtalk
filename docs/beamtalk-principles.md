@@ -1,6 +1,6 @@
 # Beamtalk Design Principles
 
-**Status:** Complete - Core design philosophy
+**Status:** Complete — Core design philosophy. Updated 2026-03-20 to reflect ADR 0004 (persistent workspaces), ADR 0036 (metaclass tower), ADR 0059 (supervision trees), MCP server, and multi-interface architecture.
 
 Core philosophy guiding beamtalk design. These inform all implementation decisions.
 
@@ -17,7 +17,7 @@ Beamtalk is a **live environment**, not a batch compiler.
 - Feedback is immediate - no compile-deploy-restart cycle
 - The compiler exists to support the live environment, not the other way around
 
-**Implication:** REPL and workspace tooling are first-class, not afterthoughts.
+**Implication:** Workspace tooling is first-class, not an afterthought. The same live workspace serves REPL, VS Code, and AI agents (via MCP) over one WebSocket protocol.
 
 ---
 
@@ -36,15 +36,15 @@ Code changes apply to the **running system** without restart.
 
 ## 3. Actors for Concurrency, Values for Data
 
-Beamtalk has two kinds of objects: **value types** and **actors**.
+Object is the root — two specializations map to natural BEAM concepts ([ADR 0067](ADR/0067-separate-state-field-keywords-by-class-kind.md)):
 
-- **Value types** (Integer, String, Point, etc.) are plain BEAM terms — no process, no mailbox
-- **Actors** (Counter, Worker, etc.) are BEAM processes with state and a mailbox
-- Both respond to messages with the same syntax — the distinction is transparent to the sender
-- Actors get fault isolation — one actor crashing doesn't take down others
+- **Value** (`Value subclass:` with `field:`) — immutable data, compiled to plain BEAM maps. No process, no mailbox.
+- **Actor** (`Actor subclass:` with `state:`) — mutable state, compiled to BEAM processes (gen_server). Fault-isolated, message-passing concurrency.
+- **Object** (`Object subclass:`) — the base. No `field:` or `state:` declarations. Often class-methods-only (FFI namespaces like `File`, `Json`), but can have instances with runtime-backed state — e.g. `Ets`, `AtomicCounter`, `FileHandle` have constructors and instance methods where state lives in ETS or Erlang handles rather than Beamtalk-managed maps.
+- All respond to messages with the same syntax — the distinction is transparent to the sender
 - Unknown messages trigger `doesNotUnderstand:` for metaprogramming
 
-**Implication:** Actor instantiation creates processes; value types compile to direct BEAM operations.
+**Implication:** The data keyword (`field:` vs `state:`) signals which BEAM concept the class maps to. Actor instantiation creates processes; value types compile to direct operations; plain Object subclasses are method containers.
 
 ---
 
@@ -53,11 +53,13 @@ Beamtalk has two kinds of objects: **value types** and **actors**.
 State persists in **running processes**, not a monolithic snapshot file.
 
 - Unlike traditional Smalltalk, no single image file to save/load
-- State is distributed across processes (and potentially nodes)
+- Workspaces are detached BEAM nodes that survive REPL disconnections ([ADR 0004](ADR/0004-persistent-workspace-management.md))
+- Actors keep running between sessions; variable bindings are session-local
 - Persistence via OTP patterns: ETS, DETS, Mnesia, or external stores
 - System can be reconstructed from code + persisted state
+- Multiple workspaces can run simultaneously for different projects
 
-**Implication:** Need clear patterns for state persistence and system bootstrap.
+**Implication:** The workspace is the live system. Reconnecting picks up where you left off — actors, state, loaded modules all persist.
 
 ---
 
@@ -69,8 +71,8 @@ Source code lives in the **filesystem**, not in a binary image.
 - Standard directory structure: `src/`, `test/`, `lib/`
 - Git-friendly: meaningful diffs, branches, pull requests work naturally
 - Tool-friendly: editors, grep, sed, AI agents can read/write code
-- No opaque binary blobs - the filesystem IS the source of truth
-- Live system and files stay in sync via tooling
+- No opaque binary blobs — the filesystem IS the source of truth
+- Live system and files stay in sync: `Workspace load:` bootstraps from files, `>>` live-patches individual methods, `Counter reload` recompiles from source
 
 **Why this matters:**
 - Traditional Smalltalk images are opaque to external tools
@@ -111,11 +113,14 @@ Inter-actor `.` message sends are **synchronous** (gen_server:call) — they blo
 
 **Full runtime introspection** is a language feature, not a library.
 
-- Inspect any actor's state and behavior at runtime
-- Query and modify methods dynamically
-- The system is self-describing: code is data, data is code
+- `Beamtalk` singleton: class registry, documentation, globals
+- `Workspace` singleton: live actors, file loading, testing, namespace binding
+- `CompiledMethod`: inspect source, selector, argument count at runtime
+- Full metaclass tower (ADR 0036): `Counter class`, `Counter methods`, `Counter superclass`
+- `///` doc comments flow to runtime — `Beamtalk help: Counter` returns formatted docs
+- `respondsTo:` — ask any object if it understands a message before sending it
 
-**Implication:** Compiler must preserve enough metadata for full introspection.
+**Implication:** Compiler preserves metadata for full introspection. The system is self-describing — code is queryable, not just readable.
 
 ---
 
@@ -148,11 +153,11 @@ Embrace BEAM's "let it crash" philosophy — actors crash independently, the sup
 
 - Actors are automatically supervised by OTP on spawn
 - No defensive programming — let the runtime handle failures
-- Default restart behavior applies automatically
+- Declarative supervision trees: `Supervisor subclass:` and `DynamicSupervisor subclass:` ([ADR 0059](ADR/0059-supervision-tree-syntax.md))
+- `class children`, `class strategy`, `class supervisionPolicy` configure restart behaviour
+- Nested supervisors compose into full OTP supervision hierarchies
 
-**Current state:** Actors restart on crash via OTP defaults. A declarative supervision tree DSL (custom restart strategies, supervision hierarchies) is planned but not yet available from Beamtalk syntax (tracked [BT-448](https://linear.app/beamtalk/issue/BT-448)).
-
-**Implication:** Fault isolation is guaranteed; supervision configuration requires Erlang FFI for now.
+**Implication:** Fault isolation is guaranteed. Supervision is native Beamtalk syntax — no Erlang FFI needed.
 
 ---
 
@@ -201,7 +206,7 @@ Following Anders Hejlsberg's TypeScript principle: the compiler IS the language 
 - **Full Smalltalk compatibility** - We're Smalltalk-**like**, not Smalltalk-**compatible**. We take inspiration but make pragmatic changes for BEAM and modern development.
 - **Image snapshots** - BEAM's approach to persistence is different and better for distributed systems
 - **Single-threaded semantics** - BEAM is concurrent by nature; embrace it
-- **Mandatory static typing** - Dynamic by default; optional types come later
+- **Mandatory static typing** — Dynamic by default with optional gradual typing ([ADR 0025](ADR/0025-gradual-typing-and-protocols.md)). `typed` classes require annotations; untyped classes work freely. Type mismatches are warnings, not errors — interactive workflows are never blocked
 
 ---
 

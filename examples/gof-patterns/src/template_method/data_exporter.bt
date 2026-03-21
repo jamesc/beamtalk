@@ -8,7 +8,7 @@
 ///
 /// export: is the template method. It calls header, formatRow:, and footer in
 /// order. Subclasses (CsvExporter, HtmlExporter) implement those three hooks.
-Object subclass: DataExporter
+Value subclass: DataExporter
 
   /// Template method — fixed algorithm skeleton.
   /// Do not override this in subclasses; override the hooks below instead.

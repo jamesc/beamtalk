@@ -162,7 +162,7 @@ test-examples: build-stdlib
             continue
         fi
         echo "  Testing ${name}..."
-        if (cd "${dir}" && cargo run --bin beamtalk --quiet -- test 2>&1); then
+        if (cd "${dir}" && cargo run --bin beamtalk --quiet -- test --warnings-as-errors 2>&1); then
             passed=$((passed + 1))
         else
             echo "❌ ${name} tests failed"
@@ -259,8 +259,8 @@ lint-beamtalk: fmt-check-beamtalk
 # Lint Rust: clippy + formatting check
 lint-rust: clippy fmt-check-rust
 
-# Lint Erlang: Dialyzer type checking + format check
-lint-erlang: dialyzer fmt-check-erlang
+# Lint Erlang: Dialyzer type checking + format check + generated spec validation
+lint-erlang: dialyzer dialyzer-specs fmt-check-erlang
 
 # Lint JS/TS: Biome lint + format check
 [working-directory: 'editors/vscode']
@@ -347,6 +347,29 @@ fmt-check-beamtalk:
 dialyzer:
     @echo "🔬 Running Dialyzer type checking..."
     rebar3 dialyzer
+
+# Validate Dialyzer -spec attributes generated from Beamtalk type annotations.
+# Compiles stdlib .bt sources to Core Erlang, extracts spec attributes, builds
+# BEAM stubs with those specs embedded, and runs Dialyzer to verify well-formedness.
+[unix]
+dialyzer-specs: build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔬 Validating generated -spec attributes..."
+    # Compile stdlib to Core Erlang (preserves .core files)
+    CORE_DIR=$(mktemp -d)
+    trap 'rm -rf "$CORE_DIR"' EXIT
+    # Copy .bt sources and build in temp dir to get .core files
+    cp stdlib/src/*.bt "$CORE_DIR/"
+    cargo run --bin beamtalk --quiet -- build --stdlib-mode "$CORE_DIR/"
+    # Run spec validation on the generated .core files
+    escript scripts/validate_specs.escript "$CORE_DIR/build/"
+    echo "✅ All generated specs are valid"
+
+# Dialyzer spec validation (no-op on Windows — escript / bash not available)
+[windows]
+dialyzer-specs:
+    @echo "⏭️  Skipping spec validation on Windows"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Testing
@@ -456,7 +479,7 @@ test-install: build-release build-stdlib
 [working-directory: 'stdlib']
 test-stdlib *ARGS: build-stdlib
     @echo "🧪 Running stdlib tests..."
-    @cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings --quiet {{ ARGS }}
+    @cargo run --bin beamtalk --quiet -- test-stdlib --warnings-as-errors --quiet {{ ARGS }}
     @echo "✅ Stdlib tests complete"
 
 # Run BUnit TestCase tests (ADR 0014 Phase 2)
@@ -471,7 +494,7 @@ test-bunit *ARGS: build-stdlib
 # Extracts ```beamtalk blocks from Markdown chapters and runs them via test-docs
 test-learn: build-stdlib
     @echo "📚 Running learning guide doctests..."
-    @cargo run --bin beamtalk --quiet -- test-docs --no-warnings --quiet docs/learning/
+    @cargo run --bin beamtalk --quiet -- test-docs --warnings-as-errors --quiet docs/learning/
     @echo "✅ Learning guide tests complete"
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
@@ -633,7 +656,7 @@ coverage-stdlib: build-stdlib
     set -euo pipefail
     echo "📊 Running stdlib tests with Erlang cover instrumentation..."
     echo "   (This is slower than normal stdlib tests due to cover overhead)"
-    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib --no-warnings bootstrap-test || true
+    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib --warnings-as-errors bootstrap-test || true
     if [ -f ../runtime/_build/test/cover/stdlib.coverdata ]; then
         SIZE=$(wc -c < ../runtime/_build/test/cover/stdlib.coverdata)
         echo "  📁 Coverdata: runtime/_build/test/cover/stdlib.coverdata (${SIZE} bytes)"

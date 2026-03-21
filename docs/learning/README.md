@@ -4,7 +4,7 @@ A progressive language guide with runnable examples. Each chapter includes
 exercises with collapsible solution hints to help you practice.
 
 Most code examples in these chapters are tested automatically — if an example
-is wrong, CI catches it. A few chapters (22 and 25) are documentation-only
+is wrong, CI catches it. A few chapters (22, 25, and 27) are documentation-only
 and not executable.
 
 ## How to use this guide
@@ -98,6 +98,7 @@ Lazy evaluation, metaprogramming, and real-world networking.
 | [23](23-streams.md) | Streams | Lazy evaluation, infinite sequences, stream pipelines, collection interop |
 | [24](24-reflection.md) | Reflection & Metaprogramming | `respondsTo:`, `fieldAt:`, `perform:`, metaclasses, class hierarchy |
 | [25](25-http.md) | HTTP Client | GET/POST/PUT/DELETE, response parsing, JSON APIs, configurable client actor |
+| [27](27-generics-and-protocols.md) | Generics & Protocols | Parametric types `Result(T, E)`, structural protocols, union types, narrowing |
 
 ### Appendix
 
@@ -143,4 +144,4 @@ Error assertions:
 
 - [`docs/beamtalk-language-features.md`](../beamtalk-language-features.md) — full language reference
 - [`docs/beamtalk-syntax-rationale.md`](../beamtalk-syntax-rationale.md) — why the syntax is the way it is
-- [`stdlib/test/`](../../stdlib/test/) — the full test suite
+- [`docs/beamtalk-tooling.md`](../beamtalk-tooling.md) — CLI, REPL, VS Code, MCP, and testing

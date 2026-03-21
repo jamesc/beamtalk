@@ -41,6 +41,8 @@
 %%% | classRemoveFromSystem/1     | Remove class and cleanup runtime state                    |
 %%% | classSourceFile/1           | Source file path from beamtalk_source module attr (BT-845)|
 %%% | classReload/1               | Recompile from sourceFile + hot-swap (BT-845)             |
+%%% | classConformsTo/2           | Check if class conforms to a protocol (ADR 0068 Phase 2c) |
+%%% | classProtocols/1            | List protocols the class conforms to (ADR 0068 Phase 2c)  |
 
 -module(beamtalk_behaviour_intrinsics).
 
@@ -83,7 +85,10 @@
     classRemoveFromSystemByName/1,
     %% BT-845: ADR 0040 Phase 2 — class-based reload
     classSourceFile/1,
-    classReload/1
+    classReload/1,
+    %% ADR 0068 Phase 2c: Runtime protocol queries
+    classConformsTo/2,
+    classProtocols/1
 ]).
 
 %%% ============================================================================
@@ -611,6 +616,33 @@ classReload(Self) ->
                     )
             end
     end.
+
+%%% ============================================================================
+%%% Protocol Query Primitives (ADR 0068 Phase 2c)
+%%% ============================================================================
+
+%% @doc Check if the receiver class conforms to a protocol.
+%%
+%% ADR 0068 Phase 2c: Backs `@primitive "classConformsTo"` in Behaviour.bt.
+%% Structural conformance — the class conforms if it responds to all required
+%% selectors of the protocol.
+%%
+%% The protocol argument is expected to be a Symbol (atom) naming the protocol.
+-spec classConformsTo(#beamtalk_object{}, atom()) -> boolean().
+classConformsTo(Self, ProtocolName) ->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    beamtalk_protocol_registry:conforms_to(ClassName, ProtocolName).
+
+%% @doc Return the list of protocols the receiver class conforms to.
+%%
+%% ADR 0068 Phase 2c: Backs `@primitive "classProtocols"` in Behaviour.bt.
+%% Returns a list of protocol name atoms, sorted alphabetically.
+-spec classProtocols(#beamtalk_object{}) -> [atom()].
+classProtocols(Self) ->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    beamtalk_protocol_registry:protocols_for_class(ClassName).
 
 %%% ============================================================================
 %%% Metaclass Primitives (ADR 0036 Phase 1)

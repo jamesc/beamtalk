@@ -16,6 +16,7 @@
 mod actor_types;
 mod array;
 mod behaviour;
+mod binary;
 mod block;
 mod character;
 mod collection;
@@ -25,6 +26,7 @@ mod float;
 mod integer;
 mod list;
 mod metaclass;
+mod protocol;
 mod reflection;
 mod string;
 mod value_types;
@@ -57,6 +59,7 @@ pub fn generate_primitive_bif(
 ) -> Option<Document<'static>> {
     match class_name {
         "Array" => array::generate_array_bif(selector, params),
+        "Binary" => binary::generate_binary_bif(selector, params),
         "Integer" => integer::generate_integer_bif(selector, params),
         "Float" => float::generate_float_bif(selector, params),
         "String" => string::generate_string_bif(selector, params),
@@ -75,6 +78,7 @@ pub fn generate_primitive_bif(
         "Behaviour" => behaviour::generate_behaviour_bif(selector, params),
         "Class" => behaviour::generate_class_bif(selector, params),
         "Metaclass" => metaclass::generate_metaclass_bif(selector, params),
+        "Protocol" => protocol::generate_protocol_bif(selector, params),
         "StackFrame" => error_handling::generate_stack_frame_bif(selector, params),
         "Pid" => actor_types::generate_opaque_bif(
             selector,

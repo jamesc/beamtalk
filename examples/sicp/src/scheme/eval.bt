@@ -25,7 +25,7 @@
 /// eval eval: (reader read: "(define x 10)") in: env  // => nil
 /// eval eval: (reader read: "x") in: env            // => 10
 /// ```
-Object subclass: SchemeEval
+Value subclass: SchemeEval
 
   /// Build a fresh `SchemeEnv` pre-loaded with standard arithmetic and
   /// list primitives: `+`, `-`, `*`, `/`, `=`, `<`, `>`, `<=`, `>=`,

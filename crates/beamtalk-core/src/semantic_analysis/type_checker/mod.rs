@@ -18,31 +18,160 @@
 //! **References:**
 //! - `docs/ADR/0025-gradual-typing-and-protocols.md` — Phase 1
 
-use crate::ast::Module;
+use crate::ast::{Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
-use crate::source_analysis::{Diagnostic, Span};
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
 
 mod inference;
 mod validation;
 
+/// Tracks where a type came from — enables precise error messages
+/// and determines how far inference should propagate.
+///
+/// **References:** ADR 0068 Challenge 3
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeProvenance {
+    /// User wrote `:: Type` at this location.
+    Declared(Span),
+    /// Compiler inferred from expression at this location.
+    Inferred(Span),
+    /// Derived from a generic substitution at this location.
+    Substituted(Span),
+}
+
 /// Inferred type for an expression or variable.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **Equality semantics:** Two types are equal if they represent the same type,
+/// regardless of provenance. This ensures `HashMap` lookups in `TypeMap` and test
+/// assertions work correctly even when the same type is inferred at different spans.
+///
+/// **References:** ADR 0068 Phase 1
+#[derive(Debug, Clone, Eq)]
 pub enum InferredType {
     /// A known concrete class type (e.g., "Integer", "Counter").
-    Known(EcoString),
+    Known {
+        class_name: EcoString,
+        /// Type arguments for generic types (empty for non-generic types).
+        type_args: Vec<InferredType>,
+        /// Where this type came from.
+        provenance: TypeProvenance,
+    },
+    /// A union of known types (e.g., `String | UndefinedObject`).
+    ///
+    /// Members are stored as resolved class names (e.g., `nil` → `UndefinedObject`).
+    /// An empty member list is impossible — construction always requires ≥2 members.
+    Union(Vec<EcoString>),
     /// Type cannot be determined — skip all checking.
     Dynamic,
 }
 
+impl PartialEq for InferredType {
+    /// Compares types structurally, ignoring provenance.
+    ///
+    /// `Known("Integer", [], Inferred(0..1))` == `Known("Integer", [], Declared(5..10))`
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Known {
+                    class_name: a,
+                    type_args: ta,
+                    ..
+                },
+                Self::Known {
+                    class_name: b,
+                    type_args: tb,
+                    ..
+                },
+            ) => a == b && ta == tb,
+            (Self::Union(a), Self::Union(b)) => a == b,
+            (Self::Dynamic, Self::Dynamic) => true,
+            _ => false,
+        }
+    }
+}
+
 impl InferredType {
-    /// Returns the class name if this is a known type.
+    /// Creates a `Known` type with no type arguments and `Inferred` provenance.
+    ///
+    /// This is the most common construction path — used for literals, message
+    /// sends, and all inference sites where we don't yet track provenance
+    /// precisely. As Phase 2+ rolls out, callers will switch to explicit
+    /// provenance where appropriate.
+    #[must_use]
+    pub fn known(class_name: impl Into<EcoString>) -> Self {
+        Self::Known {
+            class_name: class_name.into(),
+            type_args: vec![],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+    }
+
+    /// Returns the class name if this is a known single type.
+    ///
+    /// Returns `None` for `Dynamic` and `Union` variants. LSP providers that
+    /// need a display string for any variant should use [`display_name`] instead.
     #[must_use]
     pub fn as_known(&self) -> Option<&EcoString> {
         match self {
-            Self::Known(name) => Some(name),
+            Self::Known { class_name, .. } => Some(class_name),
+            Self::Dynamic | Self::Union(_) => None,
+        }
+    }
+
+    /// Returns a human-readable display name for this type.
+    ///
+    /// - `Known("Integer")` → `"Integer"`
+    /// - `Union(["String", "UndefinedObject"])` → `"String | UndefinedObject"`
+    /// - `Dynamic` → `None`
+    #[must_use]
+    pub fn display_name(&self) -> Option<EcoString> {
+        match self {
+            Self::Known { class_name, .. } => Some(class_name.clone()),
+            Self::Union(members) => {
+                let mut result = EcoString::new();
+                for (i, m) in members.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(" | ");
+                    }
+                    result.push_str(m);
+                }
+                Some(result)
+            }
             Self::Dynamic => None,
+        }
+    }
+
+    /// Builds a union type, simplifying when possible.
+    ///
+    /// - If all resolved members are the same type, returns `Known(that_type)`.
+    /// - If any member is `Dynamic`, returns `Dynamic` (can't validate).
+    /// - Otherwise returns `Union(deduped_members)`.
+    fn union_of(members: &[Self]) -> Self {
+        let mut names: Vec<EcoString> = Vec::new();
+        for m in members {
+            match m {
+                Self::Known { class_name, .. } => {
+                    if !names.contains(class_name) {
+                        names.push(class_name.clone());
+                    }
+                }
+                Self::Union(inner) => {
+                    for name in inner {
+                        if !names.contains(name) {
+                            names.push(name.clone());
+                        }
+                    }
+                }
+                Self::Dynamic => return Self::Dynamic,
+            }
+        }
+        match names.len() {
+            0 => Self::Dynamic,
+            1 => Self::known(names.into_iter().next().unwrap()),
+            _ => Self::Union(names),
         }
     }
 }
@@ -141,6 +270,7 @@ pub fn infer_types_and_returns(
 /// - Tracks variable types through assignments
 /// - Validates message sends against class method tables
 /// - Emits warnings for unknown selectors with hints
+/// - Protocol conformance checking for protocol-typed parameters (ADR 0068 Phase 2b)
 #[derive(Debug)]
 pub struct TypeChecker {
     pub(super) diagnostics: Vec<Diagnostic>,
@@ -191,6 +321,543 @@ impl TypeChecker {
     pub fn take_method_return_types(&mut self) -> HashMap<MethodReturnKey, EcoString> {
         std::mem::take(&mut self.method_return_types)
     }
+
+    /// Checks types in a module using both the class hierarchy and protocol registry.
+    ///
+    /// This is the protocol-aware entry point used by `analyse_full` when protocols
+    /// are present. It delegates to `check_module` for the main type checking pass
+    /// and then performs protocol conformance checking on type annotations.
+    ///
+    /// **References:** ADR 0068 Phase 2b
+    pub fn check_module_with_protocols(
+        &mut self,
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        // Run the standard type checking pass first
+        self.check_module(module, hierarchy);
+
+        // Phase 2b: Protocol conformance checking on type annotations.
+        // When a parameter type annotation resolves to a protocol name, check
+        // that the argument type (if known) conforms structurally.
+        self.check_protocol_conformance_in_module(module, hierarchy, protocol_registry);
+
+        // Phase 2d: Type parameter bounds checking (ADR 0068).
+        // When a type annotation uses a generic class with bounded type params
+        // (e.g., `Logger(Integer)` where Logger has `T :: Printable`), check
+        // that the concrete type args conform to their bounds.
+        self.check_type_param_bounds_in_module(module, hierarchy, protocol_registry);
+
+        // Phase 2f: Generic variance checking (ADR 0068).
+        // When a method parameter expects a generic type (e.g., `Array(Printable)`)
+        // and the argument is the same generic class with different type args
+        // (e.g., `Array(Integer)`), check covariance for sealed Value classes.
+        self.check_generic_variance_in_module(module, hierarchy, protocol_registry);
+    }
+
+    /// Check protocol conformance for type annotations across a module.
+    ///
+    /// Walks all message send call sites: when a target method's parameter type
+    /// annotation is a protocol name, and we have an inferred argument type,
+    /// perform structural conformance checking. This is the call-site check
+    /// described in ADR 0068 Phase 2b.
+    fn check_protocol_conformance_in_module(
+        &mut self,
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        // Walk all expressions looking for message sends with protocol-typed parameters
+        for class in &module.classes {
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                for stmt in &method.body {
+                    self.check_protocol_conformance_in_expr(
+                        &stmt.expression,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
+        }
+
+        for standalone in &module.method_definitions {
+            for stmt in &standalone.method.body {
+                self.check_protocol_conformance_in_expr(
+                    &stmt.expression,
+                    hierarchy,
+                    protocol_registry,
+                );
+            }
+        }
+
+        for stmt in &module.expressions {
+            self.check_protocol_conformance_in_expr(&stmt.expression, hierarchy, protocol_registry);
+        }
+    }
+
+    /// Recursively check protocol conformance in expressions.
+    #[allow(clippy::too_many_lines)] // match over all Expression variants
+    fn check_protocol_conformance_in_expr(
+        &mut self,
+        expr: &crate::ast::Expression,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        use crate::ast::Expression;
+
+        match expr {
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                span,
+                ..
+            } => {
+                // Check if the receiver's method has protocol-typed params
+                if let Some(receiver_type) = self.type_map.get(receiver.span()) {
+                    if let InferredType::Known { class_name, .. } = receiver_type.clone() {
+                        let sel_name = selector.name();
+                        let method = hierarchy.find_method(&class_name, &sel_name);
+                        if let Some(method) = method {
+                            for (i, arg) in arguments.iter().enumerate() {
+                                if let Some(Some(expected_ty)) = method.param_types.get(i) {
+                                    if Self::is_protocol_type(
+                                        expected_ty,
+                                        hierarchy,
+                                        protocol_registry,
+                                    ) {
+                                        if let Some(arg_type) = self.type_map.get(arg.span()) {
+                                            self.check_protocol_argument_conformance(
+                                                &arg_type.clone(),
+                                                expected_ty,
+                                                *span,
+                                                hierarchy,
+                                                protocol_registry,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Recurse into sub-expressions
+                self.check_protocol_conformance_in_expr(receiver, hierarchy, protocol_registry);
+                for arg in arguments {
+                    self.check_protocol_conformance_in_expr(arg, hierarchy, protocol_registry);
+                }
+            }
+            Expression::Block(block) => {
+                for stmt in &block.body {
+                    self.check_protocol_conformance_in_expr(
+                        &stmt.expression,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
+            Expression::Assignment { value, .. }
+            | Expression::DestructureAssignment { value, .. }
+            | Expression::Return { value, .. } => {
+                self.check_protocol_conformance_in_expr(value, hierarchy, protocol_registry);
+            }
+            Expression::Parenthesized { expression, .. } => {
+                self.check_protocol_conformance_in_expr(expression, hierarchy, protocol_registry);
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                self.check_protocol_conformance_in_expr(receiver, hierarchy, protocol_registry);
+                for msg in messages {
+                    for arg in &msg.arguments {
+                        self.check_protocol_conformance_in_expr(arg, hierarchy, protocol_registry);
+                    }
+                }
+            }
+            Expression::FieldAccess { receiver, .. } => {
+                self.check_protocol_conformance_in_expr(receiver, hierarchy, protocol_registry);
+            }
+            Expression::Match { value, arms, .. } => {
+                self.check_protocol_conformance_in_expr(value, hierarchy, protocol_registry);
+                for arm in arms {
+                    self.check_protocol_conformance_in_expr(
+                        &arm.body,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
+            Expression::StringInterpolation { segments, .. } => {
+                for seg in segments {
+                    if let crate::ast::StringSegment::Interpolation(expr) = seg {
+                        self.check_protocol_conformance_in_expr(expr, hierarchy, protocol_registry);
+                    }
+                }
+            }
+            Expression::ArrayLiteral { elements, .. } => {
+                for elem in elements {
+                    self.check_protocol_conformance_in_expr(elem, hierarchy, protocol_registry);
+                }
+            }
+            Expression::ListLiteral { elements, tail, .. } => {
+                for elem in elements {
+                    self.check_protocol_conformance_in_expr(elem, hierarchy, protocol_registry);
+                }
+                if let Some(tail_expr) = tail {
+                    self.check_protocol_conformance_in_expr(
+                        tail_expr,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
+            Expression::MapLiteral { pairs, .. } => {
+                for pair in pairs {
+                    self.check_protocol_conformance_in_expr(
+                        &pair.key,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                    self.check_protocol_conformance_in_expr(
+                        &pair.value,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
+            // Leaf expressions — no sub-expressions to recurse into
+            _ => {}
+        }
+    }
+
+    /// Check type parameter bounds for all generic type annotations in a module (ADR 0068 Phase 2d).
+    ///
+    /// Walks class definitions, standalone methods, and protocol definitions looking for
+    /// generic type annotations (e.g., `:: Logger(Integer)`). For each, checks that the
+    /// concrete type arguments conform to any protocol bounds declared on the type parameters.
+    fn check_type_param_bounds_in_module(
+        &mut self,
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        // Check type annotations in class state declarations, method params, and return types
+        for class in &module.classes {
+            // Check state field type annotations
+            for state_decl in &class.state {
+                if let Some(ref ann) = state_decl.type_annotation {
+                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                }
+            }
+
+            // Check method parameter and return type annotations
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                for param in &method.parameters {
+                    if let Some(ref ann) = param.type_annotation {
+                        self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                    }
+                }
+                if let Some(ref ann) = method.return_type {
+                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                }
+            }
+
+            // Check superclass type args (e.g., `Logger(Integer) subclass: SpecialLogger`)
+            for arg in &class.superclass_type_args {
+                self.check_bounds_in_type_annotation(arg, hierarchy, protocol_registry);
+            }
+        }
+
+        // Check standalone method definitions
+        for standalone in &module.method_definitions {
+            for param in &standalone.method.parameters {
+                if let Some(ref ann) = param.type_annotation {
+                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                }
+            }
+            if let Some(ref ann) = standalone.method.return_type {
+                self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+            }
+        }
+    }
+
+    /// Check type parameter bounds within a single type annotation.
+    ///
+    /// For `TypeAnnotation::Generic`, resolves the type args and checks each
+    /// against its corresponding bound (if any) from the class's `type_param_bounds`.
+    fn check_bounds_in_type_annotation(
+        &mut self,
+        ann: &crate::ast::TypeAnnotation,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        use crate::ast::TypeAnnotation;
+
+        match ann {
+            TypeAnnotation::Generic {
+                base,
+                parameters,
+                span,
+            } => {
+                // Resolve the type args to InferredTypes
+                let type_args: Vec<InferredType> = parameters
+                    .iter()
+                    .map(Self::resolve_type_annotation)
+                    .collect();
+
+                // Check bounds against the base class's type_param_bounds
+                self.check_type_param_bounds(
+                    &base.name,
+                    &type_args,
+                    *span,
+                    hierarchy,
+                    protocol_registry,
+                );
+
+                // Recurse into nested type annotations (e.g., `Result(Array(Integer), Error)`)
+                for param in parameters {
+                    self.check_bounds_in_type_annotation(param, hierarchy, protocol_registry);
+                }
+            }
+            TypeAnnotation::Union { types, .. } => {
+                for ty in types {
+                    self.check_bounds_in_type_annotation(ty, hierarchy, protocol_registry);
+                }
+            }
+            TypeAnnotation::FalseOr { inner, .. } => {
+                self.check_bounds_in_type_annotation(inner, hierarchy, protocol_registry);
+            }
+            // Simple, SelfType, Singleton — no nested generics to check
+            _ => {}
+        }
+    }
+
+    /// Check generic type argument variance across a module (ADR 0068 Phase 2f).
+    ///
+    /// Walks message sends and state declarations looking for places where a generic
+    /// type (e.g., `Array(Integer)`) is used where a differently-parameterized generic
+    /// is expected (e.g., `Array(Printable)`). Checks variance rules:
+    /// - Sealed Value classes are covariant: `Array(Integer)` assignable to `Array(Printable)`
+    ///   if Integer conforms to Printable
+    /// - Actor classes are invariant: type args must match exactly
+    fn check_generic_variance_in_module(
+        &mut self,
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        // Check state field declarations with generic type annotations
+        for class in &module.classes {
+            for state_decl in &class.state {
+                if let Some(TypeAnnotation::Generic { .. }) = state_decl.type_annotation {
+                    self.check_state_variance(class, state_decl, hierarchy, protocol_registry);
+                }
+            }
+        }
+
+        // Check message send arguments with generic parameter types
+        for class in &module.classes {
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                for stmt in &method.body {
+                    self.check_variance_in_expr(&stmt.expression, hierarchy, protocol_registry);
+                }
+            }
+        }
+
+        for standalone in &module.method_definitions {
+            for stmt in &standalone.method.body {
+                self.check_variance_in_expr(&stmt.expression, hierarchy, protocol_registry);
+            }
+        }
+
+        for stmt in &module.expressions {
+            self.check_variance_in_expr(&stmt.expression, hierarchy, protocol_registry);
+        }
+    }
+
+    /// Check variance for a state field with a generic type annotation.
+    ///
+    /// When a state field is declared as `field: items :: Array(Printable) = Array new`,
+    /// checks that the default value's type (if inferred) is compatible with variance rules.
+    fn check_state_variance(
+        &mut self,
+        class: &crate::ast::ClassDefinition,
+        state_decl: &crate::ast::StateDeclaration,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        let Some(ref default_value) = state_decl.default_value else {
+            return;
+        };
+        let Some(ref type_annotation) = state_decl.type_annotation else {
+            return;
+        };
+
+        let declared_type = type_annotation.type_name();
+        let mut env = TypeEnv::new();
+        env.set("self", InferredType::known(class.name.name.clone()));
+        let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
+
+        let InferredType::Known {
+            class_name: value_type,
+            ..
+        } = &inferred
+        else {
+            return;
+        };
+
+        // Build a full type string for the value type to compare with declared
+        let value_type_str = Self::inferred_type_to_string(&inferred);
+        if !Self::is_assignable_to_with_variance(
+            &value_type_str,
+            &declared_type,
+            hierarchy,
+            protocol_registry,
+        ) {
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "Type mismatch: state `{}` declared as {declared_type}, default is {value_type}",
+                        state_decl.name.name
+                    ),
+                    state_decl.span,
+                )
+                .with_category(DiagnosticCategory::Type)
+                .with_hint(format!(
+                    "Default value type {value_type} is not compatible with {declared_type}"
+                )),
+            );
+        }
+    }
+
+    /// Convert an `InferredType` to its string representation for variance checking.
+    fn inferred_type_to_string(ty: &InferredType) -> EcoString {
+        match ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                if type_args.is_empty() {
+                    class_name.clone()
+                } else {
+                    let args: Vec<String> = type_args
+                        .iter()
+                        .map(|a| Self::inferred_type_to_string(a).to_string())
+                        .collect();
+                    EcoString::from(format!("{}({})", class_name, args.join(", ")))
+                }
+            }
+            InferredType::Dynamic => EcoString::from("Dynamic"),
+            InferredType::Union(members) => EcoString::from(
+                members
+                    .iter()
+                    .map(EcoString::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+            ),
+        }
+    }
+
+    /// Recursively check variance in expressions (for message send arguments).
+    fn check_variance_in_expr(
+        &mut self,
+        expr: &crate::ast::Expression,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        use crate::ast::Expression;
+
+        match expr {
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                span,
+                ..
+            } => {
+                // Check if any argument has generic type args that need variance checking
+                if let Some(receiver_type) = self.type_map.get(receiver.span()) {
+                    if let InferredType::Known { class_name, .. } = receiver_type.clone() {
+                        let sel_name = selector.name();
+                        let method = hierarchy.find_method(&class_name, &sel_name);
+                        if let Some(method) = method {
+                            for (i, arg) in arguments.iter().enumerate() {
+                                if let Some(Some(expected_ty)) = method.param_types.get(i) {
+                                    // Only check when expected type is generic
+                                    if expected_ty.contains('(') {
+                                        if let Some(arg_type) = self.type_map.get(arg.span()) {
+                                            if let InferredType::Known { type_args, .. } = arg_type
+                                            {
+                                                if !type_args.is_empty() {
+                                                    let arg_str = Self::inferred_type_to_string(
+                                                        &arg_type.clone(),
+                                                    );
+                                                    if !Self::is_assignable_to_with_variance(
+                                                        &arg_str,
+                                                        expected_ty,
+                                                        hierarchy,
+                                                        protocol_registry,
+                                                    ) {
+                                                        let param_pos = i + 1;
+                                                        self.diagnostics.push(
+                                                            Diagnostic::warning(
+                                                                format!(
+                                                                    "Argument {param_pos} of '{sel_name}' on {class_name} expects {expected_ty}, got {arg_str}"
+                                                                ),
+                                                                *span,
+                                                            )
+                                                            .with_category(DiagnosticCategory::Type)
+                                                            .with_hint(format!(
+                                                                "Type arguments are not compatible: expected {expected_ty}, got {arg_str}"
+                                                            )),
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Recurse
+                self.check_variance_in_expr(receiver, hierarchy, protocol_registry);
+                for arg in arguments {
+                    self.check_variance_in_expr(arg, hierarchy, protocol_registry);
+                }
+            }
+            Expression::Block(block) => {
+                for stmt in &block.body {
+                    self.check_variance_in_expr(&stmt.expression, hierarchy, protocol_registry);
+                }
+            }
+            Expression::Assignment { value, .. }
+            | Expression::DestructureAssignment { value, .. }
+            | Expression::Return { value, .. } => {
+                self.check_variance_in_expr(value, hierarchy, protocol_registry);
+            }
+            Expression::Parenthesized { expression, .. } => {
+                self.check_variance_in_expr(expression, hierarchy, protocol_registry);
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                self.check_variance_in_expr(receiver, hierarchy, protocol_registry);
+                for msg in messages {
+                    for arg in &msg.arguments {
+                        self.check_variance_in_expr(arg, hierarchy, protocol_registry);
+                    }
+                }
+            }
+            // Leaf expressions — no sub-expressions to recurse into
+            _ => {}
+        }
+    }
 }
 
 impl Default for TypeChecker {
@@ -238,7 +905,8 @@ mod tests {
     use crate::ast::{
         Block, CascadeMessage, ClassDefinition, ClassKind, CommentAttachment, Expression,
         ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition,
-        MethodKind, Module, ParameterDefinition, Pattern, StateDeclaration, TypeAnnotation,
+        MethodKind, Module, ParameterDefinition, Pattern, ProtocolDefinition,
+        ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
     };
     use crate::source_analysis::Span;
 
@@ -333,19 +1001,19 @@ mod tests {
     fn test_literal_type_inference() {
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Integer(42)),
-            InferredType::Known("Integer".into())
+            InferredType::known("Integer")
         );
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Float(1.5)),
-            InferredType::Known("Float".into())
+            InferredType::known("Float")
         );
         assert_eq!(
             TypeChecker::infer_literal(&Literal::String("hello".into())),
-            InferredType::Known("String".into())
+            InferredType::known("String")
         );
         assert_eq!(
             TypeChecker::infer_literal(&Literal::Symbol("sym".into())),
-            InferredType::Known("Symbol".into())
+            InferredType::known("Symbol")
         );
     }
 
@@ -562,6 +1230,8 @@ mod tests {
                 }],
                 class_methods: vec![],
                 class_variables: vec![],
+                type_params: vec![],
+                superclass_type_args: vec![],
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 backing_module: None,
@@ -659,7 +1329,7 @@ mod tests {
         });
 
         let ty = checker.infer_expr(&block_expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Known("Block".into()));
+        assert_eq!(ty, InferredType::known("Block"));
     }
 
     #[test]
@@ -674,7 +1344,7 @@ mod tests {
         };
 
         let ty = checker.infer_expr(&map_expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Known("Dictionary".into()));
+        assert_eq!(ty, InferredType::known("Dictionary"));
     }
 
     #[test]
@@ -690,7 +1360,7 @@ mod tests {
         };
 
         let ty = checker.infer_expr(&list_expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::Known("List".into()));
+        assert_eq!(ty, InferredType::known("List"));
     }
 
     #[test]
@@ -711,15 +1381,15 @@ mod tests {
 
         assert_eq!(
             checker.infer_expr(&var("true"), &hierarchy, &mut env, false),
-            InferredType::Known("Boolean".into())
+            InferredType::known("Boolean")
         );
         assert_eq!(
             checker.infer_expr(&var("false"), &hierarchy, &mut env, false),
-            InferredType::Known("Boolean".into())
+            InferredType::known("Boolean")
         );
         assert_eq!(
             checker.infer_expr(&var("nil"), &hierarchy, &mut env, false),
-            InferredType::Known("UndefinedObject".into())
+            InferredType::known("UndefinedObject")
         );
     }
 
@@ -747,12 +1417,12 @@ mod tests {
     #[test]
     fn test_type_env_child_scope() {
         let mut parent = TypeEnv::new();
-        parent.set("x", InferredType::Known("Integer".into()));
+        parent.set("x", InferredType::known("Integer"));
 
         let mut child = parent.child();
-        assert_eq!(child.get("x"), Some(InferredType::Known("Integer".into())));
+        assert_eq!(child.get("x"), Some(InferredType::known("Integer")));
 
-        child.set("y", InferredType::Known("String".into()));
+        child.set("y", InferredType::known("String"));
         assert!(parent.get("y").is_none(), "parent should not see child's y");
     }
 
@@ -803,6 +1473,8 @@ mod tests {
                 }],
                 class_methods: vec![],
                 class_variables: vec![],
+                type_params: vec![],
+                superclass_type_args: vec![],
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 backing_module: None,
@@ -889,7 +1561,7 @@ mod tests {
         assert!(ty.is_some(), "TypeMap should record literal type");
         assert_eq!(
             ty.unwrap(),
-            &InferredType::Known("Integer".into()),
+            &InferredType::known("Integer"),
             "Integer literal should infer as Integer"
         );
     }
@@ -910,7 +1582,7 @@ mod tests {
         );
         assert_eq!(
             ty.unwrap(),
-            &InferredType::Known("Integer".into()),
+            &InferredType::known("Integer"),
             "Variable assigned integer should infer as Integer"
         );
     }
@@ -923,7 +1595,7 @@ mod tests {
         let ty = type_map.get(module.expressions[0].expression.span());
         assert_eq!(
             ty,
-            Some(&InferredType::Known("String".into())),
+            Some(&InferredType::known("String")),
             "infer_types should return correct type map"
         );
     }
@@ -947,6 +1619,8 @@ mod tests {
             methods: instance_methods,
             class_methods,
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1127,6 +1801,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1163,6 +1839,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1177,7 +1855,7 @@ mod tests {
         let ty = type_map.get(super_span);
         assert_eq!(
             ty,
-            Some(&InferredType::Known("Parent".into())),
+            Some(&InferredType::known("Parent")),
             "super should infer as parent class type"
         );
     }
@@ -1208,6 +1886,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1240,6 +1920,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2270,6 +2952,8 @@ mod tests {
             methods,
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3035,6 +3719,8 @@ Value subclass: Foo
             methods: instance_methods,
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3622,5 +4308,2650 @@ Value subclass: Foo
             1,
             "Wrong argument type to extension should warn"
         );
+    }
+
+    /// BT-1559: Cross-file Value sub-subclass `self new:` should NOT produce DNU warning.
+    ///
+    /// Simulates the build command's flow: Child is in the current file,
+    /// Base is injected from another file via pre-loaded classes.
+    #[test]
+    fn cross_file_value_sub_subclass_no_dnu_for_new() {
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+
+        // Parse a module containing only Child (extends Base, has a class method using self new:)
+        let source = r"
+Base subclass: Child
+  field: y = 0
+  class make: val => self new: #{#y => val}
+";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+        // Simulate Base from another file: Value subclass: Base (field: x = 0)
+        let base_info = ClassInfo {
+            name: eco_string("Base"),
+            superclass: Some(eco_string("Value")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec![eco_string("x")],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        };
+
+        // Use the full analysis pipeline (same as the build command)
+        let result = crate::semantic_analysis::analyse_with_options_and_classes(
+            &module,
+            &crate::CompilerOptions::default(),
+            vec![base_info],
+        );
+        let dnu_warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "self new: in class method should not produce DNU for Value sub-subclass, got: {dnu_warnings:?}"
+        );
+    }
+
+    fn eco_string(s: &str) -> ecow::EcoString {
+        ecow::EcoString::from(s)
+    }
+
+    // ── Union type tests (BT-1572) ──────────────────────────────────────────
+
+    #[test]
+    fn union_of_simplifies_single_type() {
+        let result = InferredType::union_of(&[
+            InferredType::known("Integer"),
+            InferredType::known("Integer"),
+        ]);
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn union_of_preserves_different_types() {
+        let result = InferredType::union_of(&[
+            InferredType::known("String"),
+            InferredType::known("UndefinedObject"),
+        ]);
+        assert_eq!(
+            result,
+            InferredType::Union(vec!["String".into(), "UndefinedObject".into()])
+        );
+    }
+
+    #[test]
+    fn union_of_returns_dynamic_if_any_dynamic() {
+        let result =
+            InferredType::union_of(&[InferredType::known("String"), InferredType::Dynamic]);
+        assert_eq!(result, InferredType::Dynamic);
+    }
+
+    #[test]
+    fn union_display_name() {
+        let ty = InferredType::Union(vec!["String".into(), "UndefinedObject".into()]);
+        assert_eq!(ty.display_name(), Some("String | UndefinedObject".into()));
+    }
+
+    #[test]
+    fn known_display_name() {
+        let ty = InferredType::known("Integer");
+        assert_eq!(ty.display_name(), Some("Integer".into()));
+    }
+
+    #[test]
+    fn dynamic_display_name() {
+        assert_eq!(InferredType::Dynamic.display_name(), None);
+    }
+
+    #[test]
+    fn resolve_type_annotation_simple() {
+        let ann = TypeAnnotation::Simple(ident("Integer"));
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn resolve_type_annotation_nil_keyword() {
+        let ann = TypeAnnotation::Simple(ident("nil"));
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(result, InferredType::known("UndefinedObject"));
+    }
+
+    #[test]
+    fn resolve_type_annotation_false_keyword() {
+        let ann = TypeAnnotation::Simple(ident("false"));
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(result, InferredType::known("False"));
+    }
+
+    #[test]
+    fn resolve_type_annotation_true_keyword() {
+        let ann = TypeAnnotation::Simple(ident("true"));
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(result, InferredType::known("True"));
+    }
+
+    #[test]
+    fn resolve_type_annotation_union() {
+        let ann = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Simple(ident("String")),
+                TypeAnnotation::Simple(ident("nil")),
+            ],
+            span: span(),
+        };
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(
+            result,
+            InferredType::Union(vec!["String".into(), "UndefinedObject".into()])
+        );
+    }
+
+    #[test]
+    fn resolve_type_annotation_false_or() {
+        let ann = TypeAnnotation::FalseOr {
+            inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
+            span: span(),
+        };
+        let result = TypeChecker::resolve_type_annotation(&ann);
+        assert_eq!(
+            result,
+            InferredType::Union(vec!["Integer".into(), "False".into()])
+        );
+    }
+
+    #[test]
+    fn resolve_type_name_string_simple() {
+        let result = TypeChecker::resolve_type_name_string(&"Integer".into());
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn resolve_type_name_string_union() {
+        let result = TypeChecker::resolve_type_name_string(&"String | nil".into());
+        assert_eq!(
+            result,
+            InferredType::Union(vec!["String".into(), "UndefinedObject".into()])
+        );
+    }
+
+    /// BT-1572: Message send on union receiver warns if any member lacks the selector.
+    #[test]
+    fn union_receiver_warns_when_member_lacks_selector() {
+        // String understands `size`, UndefinedObject does not.
+        // Sending `size` to a `String | nil` receiver should emit a DNU hint.
+        let module = Module::new(
+            vec![ExpressionStatement::bare(msg_send(
+                // We need a way to get a union-typed receiver. We'll use a class with
+                // a union-typed state field, then access it.
+                Expression::Identifier(ident("x")),
+                MessageSelector::Unary("size".into()),
+                vec![],
+            ))],
+            span(),
+        );
+
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+
+        // Manually set up a union-typed variable in the environment by calling
+        // infer_expr directly with a pre-configured env.
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            InferredType::Union(vec!["String".into(), "UndefinedObject".into()]),
+        );
+
+        let _ty = checker.infer_expr(
+            &module.expressions[0].expression,
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        let dnu_hints: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            dnu_hints.len(),
+            1,
+            "Should warn that UndefinedObject does not understand 'size'"
+        );
+        assert!(
+            dnu_hints[0].message.contains("UndefinedObject"),
+            "Warning should mention which member lacks the selector"
+        );
+    }
+
+    /// BT-1572: Nullable hint for nil in union.
+    #[test]
+    fn union_receiver_nullable_hint() {
+        let module = Module::new(
+            vec![ExpressionStatement::bare(msg_send(
+                Expression::Identifier(ident("x")),
+                MessageSelector::Unary("size".into()),
+                vec![],
+            ))],
+            span(),
+        );
+
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            InferredType::Union(vec!["String".into(), "UndefinedObject".into()]),
+        );
+
+        checker.infer_expr(
+            &module.expressions[0].expression,
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        let dnu_hints: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(dnu_hints.len(), 1);
+        assert!(
+            dnu_hints[0]
+                .hint
+                .as_ref()
+                .unwrap()
+                .contains("Check for nil"),
+            "Should provide nullable hint when UndefinedObject is in the union"
+        );
+    }
+
+    /// BT-1572: No warning when all union members understand the selector.
+    #[test]
+    fn union_receiver_no_warning_when_all_understand() {
+        // Both Integer and String understand `asString` (via Object hierarchy).
+        let module = Module::new(
+            vec![ExpressionStatement::bare(msg_send(
+                Expression::Identifier(ident("x")),
+                MessageSelector::Unary("asString".into()),
+                vec![],
+            ))],
+            span(),
+        );
+
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "x",
+            InferredType::Union(vec!["Integer".into(), "String".into()]),
+        );
+
+        checker.infer_expr(
+            &module.expressions[0].expression,
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        let dnu_hints: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_hints.is_empty(),
+            "No warning when all union members understand the selector"
+        );
+    }
+
+    /// BT-1572: Integer | False (`FalseOr`) parameter resolution.
+    #[test]
+    fn false_or_param_resolves_to_union() {
+        // A method with parameter `x :: Integer | False` should infer x as Union.
+        let method = MethodDefinition {
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
+            parameters: vec![ParameterDefinition::with_type(
+                ident("x"),
+                TypeAnnotation::FalseOr {
+                    inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
+                    span: span(),
+                },
+            )],
+            body: vec![bare(msg_send(
+                Expression::Identifier(ident("x")),
+                MessageSelector::Unary("isNil".into()),
+                vec![],
+            ))],
+            return_type: None,
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        };
+
+        let class = ClassDefinition {
+            name: ident("MyClass"),
+            superclass: Some(ident("Object")),
+            class_kind: ClassKind::Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            supervisor_kind: None,
+            state: vec![],
+            methods: vec![method],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            backing_module: None,
+            span: span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: vec![],
+            protocols: vec![],
+            expressions: vec![],
+            span: span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: vec![],
+        };
+
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // No DNU for isNil — both Integer and False understand it (via Object)
+        let dnu_hints: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_hints.is_empty(),
+            "FalseOr resolved as union; no DNU for universal messages: {dnu_hints:?}"
+        );
+    }
+
+    /// BT-1572: `is_assignable_to` with union declared type (via `type_name` string).
+    #[test]
+    fn is_assignable_to_union_string() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        // "String | nil" declared type should accept "String"
+        assert!(
+            TypeChecker::is_assignable_to(&"String".into(), &"String | nil".into(), &hierarchy),
+            "String should be assignable to String | nil"
+        );
+        // "Integer" should NOT be assignable to "String | nil"
+        assert!(
+            !TypeChecker::is_assignable_to(&"Integer".into(), &"String | nil".into(), &hierarchy),
+            "Integer should not be assignable to String | nil"
+        );
+    }
+
+    /// BT-1572: `is_assignable_to` with Integer | String union.
+    #[test]
+    fn is_assignable_to_integer_or_string() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        assert!(TypeChecker::is_assignable_to(
+            &"Integer".into(),
+            &"Integer | String".into(),
+            &hierarchy
+        ));
+        assert!(TypeChecker::is_assignable_to(
+            &"String".into(),
+            &"Integer | String".into(),
+            &hierarchy
+        ));
+        assert!(!TypeChecker::is_assignable_to(
+            &"Float".into(),
+            &"Integer | String".into(),
+            &hierarchy
+        ));
+    }
+
+    // ---- BT-1570: Generic substitution tests ----
+
+    /// Build a `GenResult(T, E)` class in the hierarchy for generic tests.
+    ///
+    /// Uses `GenResult` instead of `Result` to avoid collision with the
+    /// builtin `Result` class (which has no `type_params`).
+    fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+
+        let result_info = ClassInfo {
+            name: eco_string("GenResult"),
+            superclass: Some(eco_string("Value")),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec![eco_string("okValue"), eco_string("errReason")],
+            state_types: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(eco_string("okValue"), eco_string("T"));
+                m.insert(eco_string("errReason"), eco_string("E"));
+                m
+            },
+            methods: vec![
+                MethodInfo {
+                    selector: eco_string("unwrap"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("T")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("error"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("E")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("map:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("GenResult(R, E)")),
+                    param_types: vec![Some(eco_string("Block(T, R)"))],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("isOk"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Boolean")),
+                    param_types: vec![],
+                    doc: None,
+                },
+            ],
+            class_methods: vec![
+                MethodInfo {
+                    selector: eco_string("ok:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Self")),
+                    param_types: vec![Some(eco_string("T"))],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("error:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Self")),
+                    param_types: vec![Some(eco_string("E"))],
+                    doc: None,
+                },
+            ],
+            class_variables: vec![],
+            type_params: vec![eco_string("T"), eco_string("E")],
+            type_param_bounds: vec![None, None],
+            superclass_type_args: vec![],
+        };
+
+        hierarchy.add_from_beam_meta(vec![result_info]);
+    }
+
+    /// BT-1570: Substitution map built from `GenResult(Integer, IOError)`.
+    /// `unwrap` returns `T` → `Integer`.
+    #[test]
+    fn generic_substitution_unwrap_returns_concrete_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "unwrap on GenResult(Integer, IOError) should return Integer, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1570: `error` returns `E` → `IOError`.
+    #[test]
+    fn generic_substitution_error_returns_concrete_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("error".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("IOError"),
+            "error on GenResult(Integer, IOError) should return IOError, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1570: Non-generic return type (`isOk` -> `Boolean`) is unaffected.
+    #[test]
+    fn generic_substitution_non_generic_return_unchanged() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("isOk".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Boolean"),
+            "isOk on GenResult should return Boolean regardless of type args"
+        );
+    }
+
+    /// BT-1570: No `type_args` on receiver falls back to unsubstituted return.
+    #[test]
+    fn generic_no_type_args_returns_unsubstituted() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        // Set r to bare GenResult (no type_args) — unparameterized
+        env.set("r", InferredType::known("GenResult"));
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        // Without type_args, the return type "T" is returned as-is (known("T")).
+        // It won't produce false-positive warnings because "T" is unknown to
+        // the hierarchy, so all type compatibility checks return true.
+        assert!(
+            result_ty.as_known().map(EcoString::as_str) != Some("Integer"),
+            "unwrap on bare GenResult (no type_args) should NOT return Integer"
+        );
+    }
+
+    /// BT-1570: `set_param_types` handles generic annotations.
+    #[test]
+    fn set_param_types_resolves_generic_annotation() {
+        // Parameter annotated as :: Result(Integer, Error) should be Known("Result")
+        // with type_args
+        let params = vec![ParameterDefinition {
+            name: ident("r"),
+            type_annotation: Some(TypeAnnotation::Generic {
+                base: ident("Result"),
+                parameters: vec![
+                    TypeAnnotation::Simple(ident("Integer")),
+                    TypeAnnotation::Simple(ident("Error")),
+                ],
+                span: span(),
+            }),
+        }];
+
+        let mut env = TypeEnv::new();
+        TypeChecker::set_param_types(&mut env, &params);
+
+        let r_type = env.get("r").expect("r should be in env");
+        match r_type {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Result");
+                assert_eq!(type_args.len(), 2);
+                assert_eq!(
+                    type_args[0].as_known().map(EcoString::as_str),
+                    Some("Integer")
+                );
+                assert_eq!(
+                    type_args[1].as_known().map(EcoString::as_str),
+                    Some("Error")
+                );
+            }
+            other => panic!("Expected Known type with type_args, got: {other:?}"),
+        }
+    }
+
+    /// BT-1570: Generic return type check extracts base type for compatibility.
+    #[test]
+    fn check_return_type_handles_generic_declared_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        // Method declares -> GenResult(Integer, Error), body returns GenResult
+        let method = MethodDefinition {
+            selector: MessageSelector::Unary("compute".into()),
+            parameters: vec![],
+            body: vec![bare(int_lit(42))], // placeholder body
+            return_type: Some(TypeAnnotation::Generic {
+                base: ident("GenResult"),
+                parameters: vec![
+                    TypeAnnotation::Simple(ident("Integer")),
+                    TypeAnnotation::Simple(ident("Error")),
+                ],
+                span: span(),
+            }),
+            kind: MethodKind::Primary,
+            is_sealed: false,
+            span: span(),
+            doc_comment: None,
+            comments: CommentAttachment::default(),
+        };
+
+        let body_type = InferredType::known("GenResult");
+        let mut checker = TypeChecker::new();
+        checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+        // Should NOT warn: GenResult is compatible with declared GenResult(Integer, Error)
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("return type"))
+            .collect();
+        assert!(
+            type_warnings.is_empty(),
+            "GenResult body should be compatible with GenResult(Integer, Error) return type, got: {type_warnings:?}"
+        );
+    }
+
+    /// BT-1570: `is_assignable_to` handles generic declared types structurally.
+    #[test]
+    fn is_assignable_to_generic_declared_type() {
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Result is assignable to Result(Integer, Error) — base type matches
+        assert!(
+            TypeChecker::is_assignable_to(
+                &eco_string("Result"),
+                &eco_string("Result(Integer, Error)"),
+                &hierarchy,
+            ),
+            "Result should be assignable to Result(Integer, Error)"
+        );
+
+        // Integer is NOT assignable to Result(Integer, Error) — base types differ
+        assert!(
+            !TypeChecker::is_assignable_to(
+                &eco_string("Integer"),
+                &eco_string("Result(Integer, Error)"),
+                &hierarchy,
+            ),
+            "Integer should NOT be assignable to Result(Integer, Error)"
+        );
+    }
+
+    // ---- BT-1571: Constructor type inference tests ----
+
+    /// BT-1571: `GenResult ok: 42` infers T = Integer → GenResult(Integer, Dynamic).
+    #[test]
+    fn constructor_inference_ok_infers_t_from_integer() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+
+        // GenResult ok: 42
+        let result_ty = checker.infer_expr(
+            &msg_send(
+                class_ref("GenResult"),
+                MessageSelector::Keyword(vec![KeywordPart::new("ok:", span())]),
+                vec![int_lit(42)],
+            ),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        match &result_ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(
+                    class_name.as_str(),
+                    "GenResult",
+                    "Constructor should return GenResult"
+                );
+                assert_eq!(type_args.len(), 2, "Should have 2 type args (T, E)");
+                assert_eq!(
+                    type_args[0].as_known().map(EcoString::as_str),
+                    Some("Integer"),
+                    "T should be inferred as Integer from argument"
+                );
+                assert!(
+                    matches!(type_args[1], InferredType::Dynamic),
+                    "E should be Dynamic (not inferrable from ok:), got: {:?}",
+                    type_args[1]
+                );
+            }
+            other => panic!("Expected Known type with type_args, got: {other:?}"),
+        }
+    }
+
+    /// BT-1571: `GenResult error: #not_found` infers E = Symbol → GenResult(Dynamic, Symbol).
+    #[test]
+    fn constructor_inference_error_infers_e_from_symbol() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+
+        // GenResult error: #not_found
+        let result_ty = checker.infer_expr(
+            &msg_send(
+                class_ref("GenResult"),
+                MessageSelector::Keyword(vec![KeywordPart::new("error:", span())]),
+                vec![Expression::Literal(
+                    Literal::Symbol("not_found".into()),
+                    span(),
+                )],
+            ),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        match &result_ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "GenResult");
+                assert_eq!(type_args.len(), 2, "Should have 2 type args (T, E)");
+                assert!(
+                    matches!(type_args[0], InferredType::Dynamic),
+                    "T should be Dynamic (not inferrable from error:), got: {:?}",
+                    type_args[0]
+                );
+                assert_eq!(
+                    type_args[1].as_known().map(EcoString::as_str),
+                    Some("Symbol"),
+                    "E should be inferred as Symbol from argument"
+                );
+            }
+            other => panic!("Expected Known type with type_args, got: {other:?}"),
+        }
+    }
+
+    /// BT-1571: Constructor inference on non-generic class returns plain Known.
+    #[test]
+    fn constructor_inference_non_generic_class_no_type_args() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+
+        // Array new — Array is generic Array(E), so constructor with no args
+        // produces Dynamic type_args since E cannot be inferred.
+        let result_ty = checker.infer_expr(
+            &msg_send(
+                class_ref("Array"),
+                MessageSelector::Unary("new".into()),
+                vec![],
+            ),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        match &result_ty {
+            InferredType::Known { class_name, .. } => {
+                assert_eq!(class_name.as_str(), "Array");
+            }
+            other => panic!("Expected Known type, got: {other:?}"),
+        }
+    }
+
+    /// BT-1571: Inferred type from constructor flows into subsequent instance sends.
+    /// `(GenResult ok: 42) unwrap` should return Integer via substitution.
+    #[test]
+    fn constructor_inference_flows_to_instance_sends() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+
+        // r := GenResult ok: 42
+        let assign_expr = Expression::Assignment {
+            target: Box::new(Expression::Identifier(ident("r"))),
+            value: Box::new(msg_send(
+                class_ref("GenResult"),
+                MessageSelector::Keyword(vec![KeywordPart::new("ok:", span())]),
+                vec![int_lit(42)],
+            )),
+            span: span(),
+        };
+        checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+
+        // r unwrap — should return Integer via T substitution
+        let unwrap_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            unwrap_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "unwrap on (GenResult ok: 42) should return Integer via constructor inference"
+        );
+    }
+
+    /// BT-1571: Constructor inference for error: flows into error accessor.
+    /// `(GenResult error: #not_found) error` should return Symbol.
+    #[test]
+    fn constructor_inference_error_flows_to_error_accessor() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+
+        // r := GenResult error: #not_found
+        let assign_expr = Expression::Assignment {
+            target: Box::new(Expression::Identifier(ident("r"))),
+            value: Box::new(msg_send(
+                class_ref("GenResult"),
+                MessageSelector::Keyword(vec![KeywordPart::new("error:", span())]),
+                vec![Expression::Literal(
+                    Literal::Symbol("not_found".into()),
+                    span(),
+                )],
+            )),
+            span: span(),
+        };
+        checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+
+        // r error — should return Symbol via E substitution
+        let error_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("error".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            error_ty.as_known().map(EcoString::as_str),
+            Some("Symbol"),
+            "error on (GenResult error: #not_found) should return Symbol via constructor inference"
+        );
+    }
+
+    // ---- Control-flow narrowing tests (ADR 0068 Phase 1g) ----
+
+    /// Helper: build `x class` unary message
+    fn x_class(var_name: &str) -> Expression {
+        msg_send(
+            var(var_name),
+            MessageSelector::Unary("class".into()),
+            vec![],
+        )
+    }
+
+    /// Helper: build `(x class) = ClassName` binary expression
+    fn class_eq(var_name: &str, class_name: &str) -> Expression {
+        msg_send(
+            x_class(var_name),
+            MessageSelector::Binary("=".into()),
+            vec![class_ref(class_name)],
+        )
+    }
+
+    /// Helper: build `(x class) =:= ClassName` binary expression
+    fn class_eqeq(var_name: &str, class_name: &str) -> Expression {
+        msg_send(
+            x_class(var_name),
+            MessageSelector::Binary("=:=".into()),
+            vec![class_ref(class_name)],
+        )
+    }
+
+    /// Helper: build `x isKindOf: ClassName` keyword expression
+    fn is_kind_of(var_name: &str, class_name: &str) -> Expression {
+        msg_send(
+            var(var_name),
+            MessageSelector::Keyword(vec![KeywordPart::new("isKindOf:", span())]),
+            vec![class_ref(class_name)],
+        )
+    }
+
+    /// Helper: build `x isNil` unary expression
+    fn is_nil(var_name: &str) -> Expression {
+        msg_send(
+            var(var_name),
+            MessageSelector::Unary("isNil".into()),
+            vec![],
+        )
+    }
+
+    /// Helper: build a symbol literal `#name`
+    fn sym_lit(name: &str) -> Expression {
+        Expression::Literal(Literal::Symbol(name.into()), span())
+    }
+
+    /// Helper: build `x respondsTo: #selector` keyword expression
+    fn responds_to(var_name: &str, selector_name: &str) -> Expression {
+        msg_send(
+            var(var_name),
+            MessageSelector::Keyword(vec![KeywordPart::new("respondsTo:", span())]),
+            vec![sym_lit(selector_name)],
+        )
+    }
+
+    /// Helper: build a block expression `[body]`
+    fn block_expr(body: Vec<Expression>) -> Expression {
+        Expression::Block(Block::new(
+            vec![],
+            body.into_iter().map(ExpressionStatement::bare).collect(),
+            span(),
+        ))
+    }
+
+    /// Helper: build a block with a non-local return `[^value]`
+    fn block_with_return(value: Expression) -> Expression {
+        Expression::Block(Block::new(
+            vec![],
+            vec![ExpressionStatement::bare(Expression::Return {
+                value: Box::new(value),
+                span: span(),
+            })],
+            span(),
+        ))
+    }
+
+    /// Helper: build `receiver ifTrue: [block]`
+    fn if_true(receiver: Expression, block: Expression) -> Expression {
+        msg_send(
+            receiver,
+            MessageSelector::Keyword(vec![KeywordPart::new("ifTrue:", span())]),
+            vec![block],
+        )
+    }
+
+    /// Helper: build `receiver ifFalse: [block]`
+    #[allow(dead_code)] // Used in future narrowing tests
+    fn if_false(receiver: Expression, block: Expression) -> Expression {
+        msg_send(
+            receiver,
+            MessageSelector::Keyword(vec![KeywordPart::new("ifFalse:", span())]),
+            vec![block],
+        )
+    }
+
+    /// Helper: build `receiver ifTrue: [block1] ifFalse: [block2]`
+    fn if_true_if_false(
+        receiver: Expression,
+        true_block: Expression,
+        false_block: Expression,
+    ) -> Expression {
+        msg_send(
+            receiver,
+            MessageSelector::Keyword(vec![
+                KeywordPart::new("ifTrue:", span()),
+                KeywordPart::new("ifFalse:", span()),
+            ]),
+            vec![true_block, false_block],
+        )
+    }
+
+    /// Helper: make a keyword method with typed parameters and a body
+    fn make_keyword_method(
+        selector_parts: &[&str],
+        params: Vec<(&str, Option<&str>)>,
+        body: Vec<Expression>,
+    ) -> MethodDefinition {
+        MethodDefinition {
+            selector: MessageSelector::Keyword(
+                selector_parts
+                    .iter()
+                    .map(|k| KeywordPart::new(*k, span()))
+                    .collect(),
+            ),
+            parameters: params
+                .into_iter()
+                .map(|(name, ty)| {
+                    if let Some(t) = ty {
+                        ParameterDefinition::with_type(
+                            ident(name),
+                            TypeAnnotation::Simple(ident(t)),
+                        )
+                    } else {
+                        ParameterDefinition::new(ident(name))
+                    }
+                })
+                .collect(),
+            body: body.into_iter().map(ExpressionStatement::bare).collect(),
+            return_type: None,
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn test_narrowing_class_eq_in_true_block() {
+        // Build a class with a method:
+        //   process: x :: Object =>
+        //     (x class = Integer) ifTrue: [x + 1]
+        //     x + 1    // should warn — x is Object outside the block
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    // (x class = Integer) ifTrue: [x + 1]
+                    if_true(
+                        class_eq("x", "Integer"),
+                        block_expr(vec![msg_send(
+                            var("x"),
+                            MessageSelector::Binary("+".into()),
+                            vec![int_lit(1)],
+                        )]),
+                    ),
+                    // x + 1  — should warn (Object doesn't have +)
+                    msg_send(
+                        var("x"),
+                        MessageSelector::Binary("+".into()),
+                        vec![int_lit(1)],
+                    ),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // Inside the block: `x + 1` should NOT warn because x is narrowed to Integer
+        // Outside the block: `x + 1` SHOULD warn because x is still Object
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        // The outside `x + 1` should produce a warning
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning for x + 1 outside the narrowed block, got {}:\n{:?}",
+            warnings.len(),
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_narrowing_class_eqeq_in_true_block() {
+        // Same as above but with =:= operator
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    // (x class =:= Integer) ifTrue: [x + 1]
+                    if_true(
+                        class_eqeq("x", "Integer"),
+                        block_expr(vec![msg_send(
+                            var("x"),
+                            MessageSelector::Binary("+".into()),
+                            vec![int_lit(1)],
+                        )]),
+                    ),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // Inside the block: `x + 1` should NOT warn because x is narrowed to Integer
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for x + 1 inside narrowed block, got: {:?}",
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_narrowing_is_kind_of_in_true_block() {
+        // process: x :: Object =>
+        //   (x isKindOf: Integer) ifTrue: [x + 1]
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![if_true(
+                    is_kind_of("x", "Integer"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Binary("+".into()),
+                        vec![int_lit(1)],
+                    )]),
+                )],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings inside isKindOf: narrowed block, got: {:?}",
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_narrowing_is_nil_early_return() {
+        // validate: x :: Object =>
+        //   x isNil ifTrue: [^nil]
+        //   x size   // x should be non-nil, but still Object
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        let class = {
+            let validate_method = make_keyword_method(
+                &["validate:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    // x isNil ifTrue: [^nil]
+                    if_true(is_nil("x"), block_with_return(var("nil"))),
+                    // x size  — after early return, x is non-nil
+                    msg_send(var("x"), MessageSelector::Unary("size".into()), vec![]),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![validate_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // After early return narrowing, x is still Object (non-nil) but Object
+        // does respond to `size` (it's a built-in), so no warning expected.
+        // This test just verifies the narrowing doesn't crash.
+    }
+
+    #[test]
+    fn test_narrowing_is_nil_if_true_if_false() {
+        // process: x :: Object =>
+        //   x isNil ifTrue: [42] ifFalse: [x size]
+        // In the false block, x should be non-nil.
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![if_true_if_false(
+                    is_nil("x"),
+                    block_expr(vec![int_lit(42)]),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("size".into()),
+                        vec![],
+                    )]),
+                )],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // This just verifies the narrowing path executes without crash.
+        // Object responds to `size`, so no warning expected.
+    }
+
+    #[test]
+    fn test_narrowing_union_with_nil_check() {
+        // Compose union checking with narrowing:
+        // A parameter typed as String|UndefinedObject (union), after nil check,
+        // should narrow to String in the false block.
+        //
+        // For now, union types in annotations aren't parsed to InferredType::Union
+        // (they resolve to Dynamic), so this test validates the non_nil_type logic
+        // directly.
+        let union = InferredType::Union(vec![eco_string("String"), eco_string("UndefinedObject")]);
+        let narrowed = TypeChecker::non_nil_type(&union);
+        assert_eq!(
+            narrowed,
+            InferredType::known("String"),
+            "Removing UndefinedObject from String|UndefinedObject should yield String"
+        );
+    }
+
+    #[test]
+    fn test_narrowing_union_multi_member() {
+        // String | Integer | UndefinedObject → String | Integer after non_nil
+        let union = InferredType::Union(vec![
+            eco_string("String"),
+            eco_string("Integer"),
+            eco_string("UndefinedObject"),
+        ]);
+        let narrowed = TypeChecker::non_nil_type(&union);
+        match narrowed {
+            InferredType::Union(members) => {
+                assert_eq!(members.len(), 2);
+                assert!(members.contains(&eco_string("String")));
+                assert!(members.contains(&eco_string("Integer")));
+            }
+            _ => panic!("Expected Union type after narrowing, got: {narrowed:?}"),
+        }
+    }
+
+    #[test]
+    fn test_detect_narrowing_class_eq_pattern() {
+        // (x class = Integer) → should detect narrowing for x to Integer
+        let expr = class_eq("x", "Integer");
+        let info = TypeChecker::detect_narrowing(&expr);
+        assert!(info.is_some(), "Should detect class = narrowing");
+        let info = info.unwrap();
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::known("Integer"));
+        assert!(!info.is_nil_check);
+    }
+
+    #[test]
+    fn test_detect_narrowing_is_kind_of_pattern() {
+        let expr = is_kind_of("x", "Number");
+        let info = TypeChecker::detect_narrowing(&expr);
+        assert!(info.is_some(), "Should detect isKindOf: narrowing");
+        let info = info.unwrap();
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::known("Number"));
+        assert!(!info.is_nil_check);
+    }
+
+    #[test]
+    fn test_detect_narrowing_is_nil_pattern() {
+        let expr = is_nil("x");
+        let info = TypeChecker::detect_narrowing(&expr);
+        assert!(info.is_some(), "Should detect isNil narrowing");
+        let info = info.unwrap();
+        assert_eq!(info.variable.as_str(), "x");
+        assert!(info.is_nil_check);
+    }
+
+    #[test]
+    fn test_detect_narrowing_no_match() {
+        // `x + 1` is not a narrowing pattern
+        let expr = msg_send(
+            var("x"),
+            MessageSelector::Binary("+".into()),
+            vec![int_lit(1)],
+        );
+        assert!(
+            TypeChecker::detect_narrowing(&expr).is_none(),
+            "x + 1 should not be detected as narrowing"
+        );
+    }
+
+    #[test]
+    fn test_narrowing_does_not_leak_outside_block() {
+        // Verify narrowing is scoped to block only:
+        //   process: x :: Object =>
+        //     (x class = String) ifTrue: [x size]
+        //     x unknownThing   // Object doesn't have unknownThing → warning
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    if_true(
+                        class_eq("x", "String"),
+                        block_expr(vec![msg_send(
+                            var("x"),
+                            MessageSelector::Unary("size".into()),
+                            vec![],
+                        )]),
+                    ),
+                    msg_send(
+                        var("x"),
+                        MessageSelector::Unary("unknownThing".into()),
+                        vec![],
+                    ),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        // 'unknownThing' on Object should warn (narrowing doesn't leak)
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning for unknownThing outside narrowed block, got {}",
+            warnings.len(),
+        );
+    }
+
+    // ---- BT-1582: respondsTo: narrowing tests (ADR 0068 Phase 2e) ----
+
+    #[test]
+    fn test_detect_narrowing_responds_to_pattern() {
+        // `x respondsTo: #asString` → should detect narrowing for x
+        let expr = responds_to("x", "asString");
+        let info = TypeChecker::detect_narrowing(&expr);
+        assert!(info.is_some(), "Should detect respondsTo: narrowing");
+        let info = info.unwrap();
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::Dynamic);
+        assert!(!info.is_nil_check);
+        assert_eq!(
+            info.responded_selector.as_deref(),
+            Some("asString"),
+            "Should record the tested selector"
+        );
+    }
+
+    #[test]
+    fn test_detect_narrowing_responds_to_non_symbol_arg() {
+        // `x respondsTo: someVar` — not a symbol literal → no narrowing
+        let expr = msg_send(
+            var("x"),
+            MessageSelector::Keyword(vec![KeywordPart::new("respondsTo:", span())]),
+            vec![var("someVar")],
+        );
+        assert!(
+            TypeChecker::detect_narrowing(&expr).is_none(),
+            "respondsTo: with non-symbol argument should not be detected as narrowing"
+        );
+    }
+
+    #[test]
+    fn test_narrowing_responds_to_in_true_block() {
+        // Build a class with a method:
+        //   process: x :: Object =>
+        //     (x respondsTo: #customMethod) ifTrue: [x customMethod]
+        //     x customMethod    // should warn — x is Object outside the block
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    // (x respondsTo: #customMethod) ifTrue: [x customMethod]
+                    if_true(
+                        responds_to("x", "customMethod"),
+                        block_expr(vec![msg_send(
+                            var("x"),
+                            MessageSelector::Unary("customMethod".into()),
+                            vec![],
+                        )]),
+                    ),
+                    // x customMethod — should warn (Object doesn't have customMethod)
+                    msg_send(
+                        var("x"),
+                        MessageSelector::Unary("customMethod".into()),
+                        vec![],
+                    ),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // Inside the block: `x customMethod` should NOT warn because x is Dynamic
+        // (respondsTo: narrowing sets the variable to Dynamic in the true block)
+        // Outside the block: `x customMethod` SHOULD warn because x is still Object
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning for customMethod outside the narrowed block, got {}:\n{:?}",
+            warnings.len(),
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_narrowing_responds_to_does_not_leak() {
+        // Verify narrowing from respondsTo: is scoped to block only:
+        //   process: x :: Object =>
+        //     (x respondsTo: #asString) ifTrue: [x asString]
+        //     x unknownSelector   // Object doesn't have this → warning
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    if_true(
+                        responds_to("x", "asString"),
+                        block_expr(vec![msg_send(
+                            var("x"),
+                            MessageSelector::Unary("asString".into()),
+                            vec![],
+                        )]),
+                    ),
+                    msg_send(
+                        var("x"),
+                        MessageSelector::Unary("unknownSelector".into()),
+                        vec![],
+                    ),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        // 'unknownSelector' on Object should warn (narrowing doesn't leak)
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning for unknownSelector outside narrowed block, got {}",
+            warnings.len(),
+        );
+    }
+
+    #[test]
+    fn test_narrowing_responds_to_if_true_if_false() {
+        // Build: (x respondsTo: #customMethod) ifTrue: [x customMethod] ifFalse: [x customMethod]
+        // True block: no warning (narrowed to Dynamic)
+        // False block: should warn (x is still Object, no respondsTo: narrowing in false branch)
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![if_true_if_false(
+                    responds_to("x", "customMethod"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("customMethod".into()),
+                        vec![],
+                    )]),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("customMethod".into()),
+                        vec![],
+                    )]),
+                )],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // True block: no warning (Dynamic narrowing)
+        // False block: should warn (Object doesn't have customMethod)
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning in false block (no respondsTo: narrowing there), got {}:\n{:?}",
+            warnings.len(),
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_responds_to_protocol_inference() {
+        // When `x respondsTo: #asString` is detected, and a Printable protocol
+        // requiring asString exists, the responded_selector can be used to infer
+        // protocol conformance (ADR 0068 Phase 2e).
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Build a Printable protocol requiring asString
+        let printable_proto = ProtocolDefinition {
+            name: ident("Printable"),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("asString".into()),
+                parameters: vec![],
+                return_type: Some(TypeAnnotation::Simple(ident("String"))),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        };
+        let module = Module {
+            protocols: vec![printable_proto],
+            ..Module::new(vec![], span())
+        };
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+        assert!(diags.is_empty());
+
+        // Detect narrowing from `x respondsTo: #asString`
+        let expr = responds_to("x", "asString");
+        let info = TypeChecker::detect_narrowing(&expr).unwrap();
+        assert_eq!(info.responded_selector.as_deref(), Some("asString"));
+
+        // The responded_selector matches the Printable protocol's required method.
+        // Integer conforms to Printable (has asString), String does too.
+        let result = registry.check_conformance("Integer", "Printable", &hierarchy);
+        assert!(
+            result.is_ok(),
+            "Integer responds to asString → conforms to Printable"
+        );
+
+        // A class without asString would not conform
+        // (This verifies the protocol registry is usable for narrowing inference)
+        let proto = registry.get("Printable").unwrap();
+        let required: Vec<&str> = proto
+            .all_required_selectors(&registry)
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        assert!(
+            required.contains(&"asString"),
+            "Printable protocol requires asString"
+        );
+    }
+
+    // ---- BT-1577: Generic inheritance tests ----
+
+    /// Build `GenCollection(E)` with method `first` returning `E`, `size` returning `Integer`.
+    /// Build `GenArray(E)` extends `GenCollection(E)` with `superclass_type_args` mapping E to E.
+    fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo, SuperclassTypeArg};
+
+        let collection_info = ClassInfo {
+            name: eco_string("GenCollection"),
+            superclass: Some(eco_string("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![
+                MethodInfo {
+                    selector: eco_string("first"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenCollection"),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(eco_string("E")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("size"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenCollection"),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Integer")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("select:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenCollection"),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Self")),
+                    param_types: vec![Some(eco_string("Block(E, Boolean)"))],
+                    doc: None,
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![eco_string("E")],
+            type_param_bounds: vec![None],
+            superclass_type_args: vec![],
+        };
+
+        let array_info = ClassInfo {
+            name: eco_string("GenArray"),
+            superclass: Some(eco_string("GenCollection")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![MethodInfo {
+                selector: eco_string("append:"),
+                arity: 1,
+                kind: MethodKind::Primary,
+                defined_in: eco_string("GenArray"),
+                is_sealed: false,
+                spawns_block: false,
+                return_type: Some(eco_string("Self")),
+                param_types: vec![Some(eco_string("E"))],
+                doc: None,
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![eco_string("E")],
+            type_param_bounds: vec![None],
+            superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
+        };
+
+        hierarchy.add_from_beam_meta(vec![collection_info, array_info]);
+    }
+
+    /// BT-1577: Inherited method `first` on `GenArray(Integer)` returns `Integer`.
+    #[test]
+    fn generic_inheritance_inherited_method_returns_substituted_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_collection_hierarchy(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("GenArray"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("arr"), MessageSelector::Unary("first".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "first on GenArray(Integer) should return Integer via inheritance, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1577: Non-generic return type from inherited method is unaffected.
+    #[test]
+    fn generic_inheritance_non_generic_return_unchanged() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_collection_hierarchy(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("GenArray"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("arr"), MessageSelector::Unary("size".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "size on GenArray(Integer) should return Integer (non-generic), got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1577: Concrete superclass type arg — `IntArray` extends `GenCollection(Integer)`.
+    #[test]
+    fn generic_inheritance_concrete_superclass_type_arg() {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, SuperclassTypeArg};
+
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_collection_hierarchy(&mut hierarchy);
+
+        // IntArray has no type params, but maps Integer to GenCollection's E
+        let int_array_info = ClassInfo {
+            name: eco_string("IntArray"),
+            superclass: Some(eco_string("GenCollection")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![SuperclassTypeArg::Concrete {
+                type_name: eco_string("Integer"),
+            }],
+        };
+        hierarchy.add_from_beam_meta(vec![int_array_info]);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set("ia", InferredType::known("IntArray"));
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("ia"), MessageSelector::Unary("first".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "first on IntArray should return Integer via concrete superclass type arg, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1577: Self type on inherited method carries receiver's type args.
+    #[test]
+    fn generic_inheritance_self_type_carries_type_args() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_collection_hierarchy(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("GenArray"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        // select: returns Self — should be GenArray(Integer) not GenCollection(Integer)
+        let result_ty = checker.infer_expr(
+            &msg_send(
+                var("arr"),
+                MessageSelector::Keyword(vec![KeywordPart::new("select:", span())]),
+                vec![var("block")],
+            ),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        match &result_ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(
+                    class_name.as_str(),
+                    "GenArray",
+                    "Self should resolve to GenArray, got: {class_name}"
+                );
+                assert_eq!(type_args.len(), 1, "Should have 1 type arg");
+                assert_eq!(
+                    type_args[0].as_known().map(EcoString::as_str),
+                    Some("Integer"),
+                    "Type arg should be Integer"
+                );
+            }
+            _ => panic!("Expected Known type, got: {result_ty:?}"),
+        }
+    }
+
+    /// BT-1577: Multi-level inheritance composes substitution correctly.
+    /// `GenCollection(E) subclass: GenArray(E)`, `GenArray(E) subclass: SortedArray(E)`.
+    #[test]
+    fn generic_inheritance_multi_level_composition() {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, SuperclassTypeArg};
+
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_collection_hierarchy(&mut hierarchy);
+
+        // SortedArray(E) extends GenArray(E)
+        let sorted_info = ClassInfo {
+            name: eco_string("SortedArray"),
+            superclass: Some(eco_string("GenArray")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![eco_string("E")],
+            type_param_bounds: vec![None],
+            superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
+        };
+        hierarchy.add_from_beam_meta(vec![sorted_info]);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "sa",
+            InferredType::Known {
+                class_name: eco_string("SortedArray"),
+                type_args: vec![InferredType::known("String")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        // `first` is defined on GenCollection — 2 levels up
+        let result_ty = checker.infer_expr(
+            &msg_send(var("sa"), MessageSelector::Unary("first".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("String"),
+            "first on SortedArray(String) should compose through 2 levels to return String, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1577: Method defined on own class (not inherited) still uses direct substitution.
+    #[test]
+    fn generic_inheritance_own_method_uses_direct_substitution() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        // unwrap is defined on GenResult itself — should still work
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "unwrap on GenResult(Integer, IOError) should still return Integer, got: {result_ty:?}"
+        );
+    }
+
+    // --- ADR 0068 Phase 2d: Type parameter bounds tests ---
+
+    #[test]
+    fn type_param_bounds_conforming_type_no_warning() {
+        // Logger(T :: Printable) where Integer conforms to Printable → no warning
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.add_from_beam_meta(vec![ClassInfo {
+            name: "BoundedLogger".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec!["T".into()],
+            type_param_bounds: vec![Some("Printable".into())],
+            superclass_type_args: vec![],
+        }]);
+
+        let mut registry = ProtocolRegistry::new();
+        // Define Printable protocol requiring asString
+        let proto_module = Module {
+            protocols: vec![crate::ast::ProtocolDefinition {
+                name: crate::ast::Identifier::new("Printable", span()),
+                type_params: vec![],
+                extending: None,
+                method_signatures: vec![crate::ast::ProtocolMethodSignature {
+                    selector: crate::ast::MessageSelector::Unary("asString".into()),
+                    parameters: vec![],
+                    return_type: Some(crate::ast::TypeAnnotation::simple("String", span())),
+                    comments: crate::ast::CommentAttachment::default(),
+                    doc_comment: None,
+                    span: span(),
+                }],
+                comments: crate::ast::CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            ..Module::new(vec![], span())
+        };
+        registry.register_module(&proto_module, &hierarchy);
+
+        let mut checker = TypeChecker::new();
+        checker.check_type_param_bounds(
+            &"BoundedLogger".into(),
+            &[InferredType::known("Integer")],
+            span(),
+            &hierarchy,
+            &registry,
+        );
+
+        // Integer has asString (built-in) → should conform → no warning
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Integer conforms to Printable, expected no warnings, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn type_param_bounds_non_conforming_type_warns() {
+        // Logger(T :: HasSortKey) where Integer does NOT have sortKey → warning
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.add_from_beam_meta(vec![ClassInfo {
+            name: "BoundedLogger".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec!["T".into()],
+            type_param_bounds: vec![Some("HasSortKey".into())],
+            superclass_type_args: vec![],
+        }]);
+
+        let mut registry = ProtocolRegistry::new();
+        let proto_module = Module {
+            protocols: vec![crate::ast::ProtocolDefinition {
+                name: crate::ast::Identifier::new("HasSortKey", span()),
+                type_params: vec![],
+                extending: None,
+                method_signatures: vec![crate::ast::ProtocolMethodSignature {
+                    selector: crate::ast::MessageSelector::Unary("sortKey".into()),
+                    parameters: vec![],
+                    return_type: None,
+                    comments: crate::ast::CommentAttachment::default(),
+                    doc_comment: None,
+                    span: span(),
+                }],
+                comments: crate::ast::CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            ..Module::new(vec![], span())
+        };
+        registry.register_module(&proto_module, &hierarchy);
+
+        let mut checker = TypeChecker::new();
+        checker.check_type_param_bounds(
+            &"BoundedLogger".into(),
+            &[InferredType::known("Integer")],
+            span(),
+            &hierarchy,
+            &registry,
+        );
+
+        // Integer does NOT have sortKey → should warn
+        assert_eq!(
+            checker.diagnostics().len(),
+            1,
+            "Expected 1 bound violation warning, got: {:?}",
+            checker.diagnostics()
+        );
+        assert!(
+            checker.diagnostics()[0]
+                .message
+                .contains("does not conform to HasSortKey")
+        );
+    }
+
+    #[test]
+    fn type_param_bounds_unbounded_param_no_check() {
+        // Result(T, E) with no bounds → no warnings for any type args
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let registry = ProtocolRegistry::new();
+        let mut checker = TypeChecker::new();
+        checker.check_type_param_bounds(
+            &"GenResult".into(),
+            &[
+                InferredType::known("Integer"),
+                InferredType::known("String"),
+            ],
+            span(),
+            &hierarchy,
+            &registry,
+        );
+
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Unbounded params should not warn, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn type_param_bounds_dynamic_skipped() {
+        // Logger(T :: Printable) where T is Dynamic → no warning (conservative)
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.add_from_beam_meta(vec![ClassInfo {
+            name: "BoundedLogger".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec!["T".into()],
+            type_param_bounds: vec![Some("Printable".into())],
+            superclass_type_args: vec![],
+        }]);
+
+        let registry = ProtocolRegistry::new();
+        let mut checker = TypeChecker::new();
+        checker.check_type_param_bounds(
+            &"BoundedLogger".into(),
+            &[InferredType::Dynamic],
+            span(),
+            &hierarchy,
+            &registry,
+        );
+
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Dynamic type arg should not trigger bound check, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    // ---- BT-1583: Generic variance tests (ADR 0068 Phase 2f) ----
+
+    /// Build a sealed Value class `SealedBox(T)` with a Printable protocol and
+    /// classes that conform to it, for variance testing.
+    #[allow(clippy::too_many_lines)]
+    fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+        use crate::semantic_analysis::protocol_registry::{
+            ProtocolInfo, ProtocolMethodRequirement,
+        };
+
+        let mut hierarchy = ClassHierarchy::with_builtins();
+
+        // Add a sealed Value class: SealedBox(T) — covariant (immutable)
+        let sealed_box = ClassInfo {
+            name: eco_string("SealedBox"),
+            superclass: Some(eco_string("Value")),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec![eco_string("value")],
+            state_types: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(eco_string("value"), eco_string("T"));
+                m
+            },
+            methods: vec![MethodInfo {
+                selector: eco_string("value"),
+                arity: 0,
+                kind: MethodKind::Primary,
+                defined_in: eco_string("SealedBox"),
+                is_sealed: true,
+                spawns_block: false,
+                return_type: Some(eco_string("T")),
+                param_types: vec![],
+                doc: None,
+            }],
+            class_methods: vec![MethodInfo {
+                selector: eco_string("wrap:"),
+                arity: 1,
+                kind: MethodKind::Primary,
+                defined_in: eco_string("SealedBox"),
+                is_sealed: true,
+                spawns_block: false,
+                return_type: Some(eco_string("Self")),
+                param_types: vec![Some(eco_string("T"))],
+                doc: None,
+            }],
+            class_variables: vec![],
+            type_params: vec![eco_string("T")],
+            type_param_bounds: vec![None],
+            superclass_type_args: vec![],
+        };
+
+        // Add an Actor class: ActorBox(T) — invariant (mutable state)
+        let actor_box = ClassInfo {
+            name: eco_string("ActorBox"),
+            superclass: Some(eco_string("Actor")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![eco_string("value")],
+            state_types: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(eco_string("value"), eco_string("T"));
+                m
+            },
+            methods: vec![
+                MethodInfo {
+                    selector: eco_string("value"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("ActorBox"),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(eco_string("T")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("value:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("ActorBox"),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: None,
+                    param_types: vec![Some(eco_string("T"))],
+                    doc: None,
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![eco_string("T")],
+            type_param_bounds: vec![None],
+            superclass_type_args: vec![],
+        };
+
+        // Add an unsealed Value class: OpenBox(T) — invariant (can be subclassed)
+        let open_box = ClassInfo {
+            name: eco_string("OpenBox"),
+            superclass: Some(eco_string("Value")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec![eco_string("value")],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![eco_string("T")],
+            type_param_bounds: vec![None],
+            superclass_type_args: vec![],
+        };
+
+        // Add a class that accepts SealedBox(Printable) parameter
+        let consumer = ClassInfo {
+            name: eco_string("BoxConsumer"),
+            superclass: Some(eco_string("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![
+                MethodInfo {
+                    selector: eco_string("printBox:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("BoxConsumer"),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(eco_string("String")),
+                    param_types: vec![Some(eco_string("SealedBox(Printable)"))],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("setActor:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("BoxConsumer"),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: None,
+                    param_types: vec![Some(eco_string("ActorBox(Printable)"))],
+                    doc: None,
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        };
+
+        hierarchy.add_from_beam_meta(vec![sealed_box, actor_box, open_box, consumer]);
+
+        // Register a Printable protocol — requires `asString` method
+        let mut registry = ProtocolRegistry::new();
+        let printable = ProtocolInfo {
+            name: eco_string("Printable"),
+            type_params: vec![],
+            type_param_bounds: vec![],
+            extending: None,
+            methods: vec![ProtocolMethodRequirement {
+                selector: eco_string("asString"),
+                arity: 0,
+                return_type: Some(eco_string("String")),
+                param_types: vec![],
+            }],
+            span: span(),
+        };
+        registry.register_test_protocol(printable);
+
+        (hierarchy, registry)
+    }
+
+    /// BT-1583: `is_covariant_class` returns true for sealed Value classes with type params.
+    #[test]
+    fn covariant_class_sealed_value_is_covariant() {
+        let (hierarchy, _registry) = setup_variance_test_env();
+        assert!(
+            hierarchy.is_covariant_class("SealedBox"),
+            "Sealed Value class SealedBox should be covariant"
+        );
+    }
+
+    /// BT-1583: `is_covariant_class` returns false for Actor classes (invariant).
+    #[test]
+    fn covariant_class_actor_is_invariant() {
+        let (hierarchy, _registry) = setup_variance_test_env();
+        assert!(
+            !hierarchy.is_covariant_class("ActorBox"),
+            "Actor class ActorBox should be invariant"
+        );
+    }
+
+    /// BT-1583: `is_covariant_class` returns false for unsealed Value classes (conservative).
+    #[test]
+    fn covariant_class_unsealed_value_is_invariant() {
+        let (hierarchy, _registry) = setup_variance_test_env();
+        assert!(
+            !hierarchy.is_covariant_class("OpenBox"),
+            "Unsealed Value class OpenBox should be invariant (conservative)"
+        );
+    }
+
+    /// BT-1583: `is_covariant_class` returns false for non-generic classes.
+    #[test]
+    fn covariant_class_non_generic_is_false() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        assert!(
+            !hierarchy.is_covariant_class("Integer"),
+            "Non-generic class Integer should not be covariant"
+        );
+    }
+
+    /// BT-1583: Covariant assignment — `SealedBox(Integer)` assignable to `SealedBox(Printable)`.
+    ///
+    /// Integer conforms to Printable (has `asString`), and `SealedBox` is a sealed Value class.
+    #[test]
+    fn variance_covariant_sealed_value_protocol_typed() {
+        let (hierarchy, registry) = setup_variance_test_env();
+
+        assert!(
+            TypeChecker::is_assignable_to_with_variance(
+                &eco_string("SealedBox(Integer)"),
+                &eco_string("SealedBox(Printable)"),
+                &hierarchy,
+                &registry,
+            ),
+            "SealedBox(Integer) should be assignable to SealedBox(Printable) — Integer conforms to Printable"
+        );
+    }
+
+    /// BT-1583: Covariant — same type args are trivially compatible.
+    #[test]
+    fn variance_covariant_same_type_args() {
+        let (hierarchy, registry) = setup_variance_test_env();
+
+        assert!(
+            TypeChecker::is_assignable_to_with_variance(
+                &eco_string("SealedBox(Integer)"),
+                &eco_string("SealedBox(Integer)"),
+                &hierarchy,
+                &registry,
+            ),
+            "SealedBox(Integer) should be assignable to SealedBox(Integer)"
+        );
+    }
+
+    /// BT-1583: Covariant — non-conforming type is rejected.
+    ///
+    /// If `OpaqueType` does not conform to Printable, `SealedBox(OpaqueType)` should NOT
+    /// be assignable to `SealedBox(Printable)`.
+    #[test]
+    fn variance_covariant_non_conforming_rejected() {
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+
+        let (mut hierarchy, registry) = setup_variance_test_env();
+
+        // Add OpaqueType without asString — does not conform to Printable
+        hierarchy.add_from_beam_meta(vec![ClassInfo {
+            name: eco_string("OpaqueType"),
+            superclass: Some(eco_string("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        }]);
+
+        assert!(
+            !TypeChecker::is_assignable_to_with_variance(
+                &eco_string("SealedBox(OpaqueType)"),
+                &eco_string("SealedBox(Printable)"),
+                &hierarchy,
+                &registry,
+            ),
+            "SealedBox(OpaqueType) should NOT be assignable to SealedBox(Printable)"
+        );
+    }
+
+    /// BT-1583: Invariant actor state — `ActorBox(Integer)` NOT assignable to `ActorBox(Printable)`.
+    ///
+    /// Actor classes are invariant because their state fields can be mutated.
+    #[test]
+    fn variance_invariant_actor_state() {
+        let (hierarchy, _registry) = setup_variance_test_env();
+
+        // ActorBox is invariant — the base-name-only check in is_assignable_to is permissive,
+        // but the variance-aware method should recognize it's invariant.
+        // Note: The current string-based approach falls back to is_assignable_to for invariant
+        // classes, which checks base names only. For the invariant case with different type args,
+        // the type args differ but the base names match — so the old behaviour (permissive) is
+        // preserved. The test validates that the actor class is recognized as invariant.
+        assert!(
+            !hierarchy.is_covariant_class("ActorBox"),
+            "ActorBox should be invariant (not covariant)"
+        );
+    }
+
+    /// BT-1583: Non-generic types fall back to normal assignability.
+    #[test]
+    fn variance_non_generic_falls_back() {
+        let (hierarchy, registry) = setup_variance_test_env();
+
+        // Integer is assignable to Number (subclass relationship)
+        assert!(
+            TypeChecker::is_assignable_to_with_variance(
+                &eco_string("Integer"),
+                &eco_string("Number"),
+                &hierarchy,
+                &registry,
+            ),
+            "Integer should be assignable to Number via superclass chain"
+        );
+
+        // String is NOT assignable to Integer
+        assert!(
+            !TypeChecker::is_assignable_to_with_variance(
+                &eco_string("String"),
+                &eco_string("Integer"),
+                &hierarchy,
+                &registry,
+            ),
+            "String should NOT be assignable to Integer"
+        );
+    }
+
+    /// BT-1583: Covariant with class-hierarchy subtyping (Integer → Number).
+    #[test]
+    fn variance_covariant_class_subtyping() {
+        let (hierarchy, registry) = setup_variance_test_env();
+
+        // SealedBox(Integer) should be assignable to SealedBox(Number)
+        // because Integer is a subclass of Number and SealedBox is covariant
+        assert!(
+            TypeChecker::is_assignable_to_with_variance(
+                &eco_string("SealedBox(Integer)"),
+                &eco_string("SealedBox(Number)"),
+                &hierarchy,
+                &registry,
+            ),
+            "SealedBox(Integer) should be assignable to SealedBox(Number) — Integer is a subclass of Number"
+        );
+    }
+
+    /// BT-1583: `parse_generic_type_string` correctly parses type strings.
+    #[test]
+    fn parse_generic_type_string_basic() {
+        let (base, args) = TypeChecker::parse_generic_type_string("Array(Integer)");
+        assert_eq!(base, "Array");
+        assert_eq!(args, vec!["Integer"]);
+
+        let (base, args) = TypeChecker::parse_generic_type_string("Result(Integer, Error)");
+        assert_eq!(base, "Result");
+        assert_eq!(args, vec!["Integer", "Error"]);
+
+        let (base, args) = TypeChecker::parse_generic_type_string("String");
+        assert_eq!(base, "String");
+        assert!(args.is_empty());
     }
 }

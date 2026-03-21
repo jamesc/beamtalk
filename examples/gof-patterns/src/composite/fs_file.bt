@@ -10,8 +10,8 @@
 ///   f size            // => 120
 ///   f describe: ""    // => "main.bt (120 bytes)"
 FsEntry subclass: FsFile
-  state: name = ""
-  state: size = 0
+  field: name = ""
+  field: size = 0
 
   /// Create a file entry with the given name and byte size.
   class name: n size: s => self new: #{#name => n, #size => s}

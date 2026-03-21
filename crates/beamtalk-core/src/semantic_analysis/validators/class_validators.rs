@@ -165,7 +165,8 @@ fn visit_actor_new(
                         ),
                         *span,
                     )
-                    .with_hint("Actors are processes — use spawn/spawnWith: instead of new/new:"),
+                    .with_hint("Actors are processes — use spawn/spawnWith: instead of new/new:")
+                    .with_category(DiagnosticCategory::ActorNew),
                 );
             }
         }
@@ -191,7 +192,8 @@ fn visit_actor_new(
                         )
                         .with_hint(
                             "Actors are processes — use spawn/spawnWith: instead of new/new:",
-                        ),
+                        )
+                        .with_category(DiagnosticCategory::ActorNew),
                     );
                 }
             }
@@ -797,8 +799,11 @@ fn check_method_nil_return(
     // Exempt iteration/callback methods that accept a Block parameter.
     // These methods delegate side-effects to the block rather than performing
     // them directly on the Value — consistent with Value-type semantics.
-    let has_block_param = method.parameters.iter().any(|p| {
-        matches!(&p.type_annotation, Some(crate::ast::TypeAnnotation::Simple(id)) if id.name.as_str() == "Block")
+    // Handles both `:: Block` (Simple) and `:: Block(E, R)` (Generic).
+    let has_block_param = method.parameters.iter().any(|p| match &p.type_annotation {
+        Some(crate::ast::TypeAnnotation::Simple(id)) => id.name.as_str() == "Block",
+        Some(crate::ast::TypeAnnotation::Generic { base, .. }) => base.name.as_str() == "Block",
+        _ => false,
     });
     if has_block_param {
         return;

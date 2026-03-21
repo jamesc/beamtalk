@@ -20,8 +20,8 @@ Examples: coordinates, money amounts, colours, dates, config records.
 
 ```beamtalk
 Value subclass: Point
-  state: x = 0
-  state: y = 0
+  field: x = 0
+  field: y = 0
 
   // Read-only access (auto-generated for each slot too, but you can override):
   x => self.x
@@ -180,8 +180,8 @@ Two value objects with the same class and slot values are equal (`=:=`).
 
 ```beamtalk
 Value subclass: Money
-  state: amount = 0
-  state: currency = #USD
+  field: amount = 0
+  field: currency = #USD
 
   add: other =>
     other currency =:= self.currency

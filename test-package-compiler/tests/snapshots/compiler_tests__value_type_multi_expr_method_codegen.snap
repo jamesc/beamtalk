@@ -107,6 +107,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
       'is_abstract' => 'false',
       'is_value' => 'false',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{}~,
       'method_info' => ~{'addAndDouble:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'tripleStep:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
@@ -119,7 +120,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
 
         in _Reg0
 
-    of RegResult -> RegResult
+    of _ClassRegResult -> _ClassRegResult
     catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
 
@@ -131,6 +132,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
       'is_abstract' => 'false',
       'is_value' => 'false',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{}~,
       'method_info' => ~{'addAndDouble:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'tripleStep:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~

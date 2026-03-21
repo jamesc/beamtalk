@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -780,6 +779,8 @@ Module {
             },
             doc_comment: None,
             backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
             span: Span {
                 start: 215,
                 end: 903,
@@ -787,6 +788,7 @@ Module {
         },
     ],
     method_definitions: [],
+    protocols: [],
     expressions: [],
     span: Span {
         start: 215,

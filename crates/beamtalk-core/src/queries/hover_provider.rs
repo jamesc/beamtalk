@@ -426,7 +426,7 @@ fn type_annotation_label(type_annotation: &crate::ast::TypeAnnotation) -> String
                 .map(type_annotation_label)
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{}<{params}>", base.name)
+            format!("{}({params})", base.name)
         }
         crate::ast::TypeAnnotation::FalseOr { inner, .. } => {
             format!("{}?", type_annotation_label(inner))
@@ -546,7 +546,9 @@ fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> 
     match pattern {
         Pattern::Variable(ident) => {
             if offset >= ident.span.start() && offset < ident.span.end() {
-                let type_info = type_map.get(ident.span).and_then(InferredType::as_known);
+                let type_info = type_map
+                    .get(ident.span)
+                    .and_then(InferredType::display_name);
                 let contents = if let Some(ty) = type_info {
                     format!("Pattern variable: `{}` — Type: {ty}", ident.name)
                 } else {
@@ -619,7 +621,9 @@ fn find_hover_in_expr(
                     return Some(self_hover_info(ident.span, context));
                 }
                 // Show inferred type if available
-                let type_info = type_map.get(ident.span).and_then(InferredType::as_known);
+                let type_info = type_map
+                    .get(ident.span)
+                    .and_then(InferredType::display_name);
                 let contents = if let Some(ty) = type_info {
                     format!("Identifier: `{}` — Type: {ty}", ident.name)
                 } else {

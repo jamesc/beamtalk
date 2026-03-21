@@ -58,7 +58,16 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ca
     && cargo binstall -y cargo-watch cargo-nextest cargo-insta cargo-llvm-cov cargo-fuzz just
 
 # Install streamlinear CLI for Linear issue management (used by Copilot skill)
-RUN npm install -g streamlinear@github:obra/streamlinear --ignore-scripts
+# npm install -g from a GitHub URL leaves dangling symlinks to a cleaned-up temp dir,
+# and npm link fails because the prepare script calls simple-git-hooks.
+# Clone to /opt, install mcp deps, and manually symlink the binaries.
+RUN git clone --depth 1 https://github.com/obra/streamlinear.git /opt/streamlinear \
+    && cd /opt/streamlinear/mcp && npm install --ignore-scripts \
+    && NPM_PREFIX="$(npm prefix -g)" \
+    && ln -sf /opt/streamlinear "${NPM_PREFIX}/lib/node_modules/streamlinear" \
+    && ln -sf /opt/streamlinear/mcp/dist/index.js "${NPM_PREFIX}/bin/streamlinear" \
+    && ln -sf /opt/streamlinear/mcp/dist/cli.js "${NPM_PREFIX}/bin/streamlinear-cli" \
+    && chmod +x /opt/streamlinear/mcp/dist/index.js /opt/streamlinear/mcp/dist/cli.js
 
 # Install Sourcegraph Amp CLI (as vscode user so it lands in the right home dir)
 USER vscode

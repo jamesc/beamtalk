@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0068 Phase 2c: Runtime protocol query tests.
+// Protocol definitions (Displayable, HasSize) are in
+// fixtures/protocol_test_protos.bt.
+
+TestCase subclass: ProtocolQueriesTest
+
+  // --- Protocol.isProtocol: ---
+  testIsProtocolTrue =>
+    self assert: (Protocol isProtocol: #Displayable) equals: true
+
+  testIsProtocolFalse =>
+    self assert: (Protocol isProtocol: #NotARealProtocol) equals: false
+
+  // --- Protocol.requiredMethods: ---
+  testRequiredMethodsDisplayable =>
+    methods := Protocol requiredMethods: #Displayable
+    self assert: (methods includes: #asString) equals: true
+    self assert: (methods includes: #printString) equals: true
+    self assert: methods size equals: 2
+
+  testRequiredMethodsUnknown =>
+    methods := Protocol requiredMethods: #Unknown
+    self assert: methods size equals: 0
+
+  // --- Protocol.allProtocols ---
+  testAllProtocolsIncludesRegistered =>
+    protos := Protocol allProtocols
+    self assert: (protos includes: #Displayable) equals: true
+    self assert: (protos includes: #HasSize) equals: true
+
+  // --- conformsTo: (Behaviour method on class objects) ---
+  testStringConformsToDisplayable =>
+    self assert: (String conformsTo: #Displayable) equals: true
+
+  testIntegerConformsToDisplayable =>
+    self assert: (Integer conformsTo: #Displayable) equals: true
+
+  testStringConformsToHasSize =>
+    self assert: (String conformsTo: #HasSize) equals: true
+
+  testIntegerConformsToHasSize =>
+    // Integer does not have size
+    self assert: (Integer conformsTo: #HasSize) equals: false
+
+  // --- protocols (Behaviour method on class objects) ---
+  testStringProtocolsIncludesDisplayable =>
+    protos := String protocols
+    self assert: (protos includes: #Displayable) equals: true
+
+  testStringProtocolsIncludesHasSize =>
+    protos := String protocols
+    self assert: (protos includes: #HasSize) equals: true
+
+  // --- Protocol.conformingClasses: ---
+
+  // Note: conformingClasses with a known protocol is tested via EUnit
+  // (beamtalk_protocol_registry_tests.erl). The BUnit test environment
+  // makes iterating all live class processes unreliable due to gen_server
+  // timeouts during hierarchy walks.
+  testConformingClassesUnknownReturnsEmpty =>
+    // Unknown protocol returns empty list
+    classes := Protocol conformingClasses: #NonExistentProtocol
+    self assert: classes size equals: 0

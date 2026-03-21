@@ -436,6 +436,7 @@ fn test_codegen_allows_stored_closure_with_field_assignment() {
     let module = Module {
         classes: vec![],
         method_definitions: Vec::new(),
+        protocols: Vec::new(),
         expressions: vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "test",
@@ -501,6 +502,7 @@ fn test_codegen_allows_stored_closure_with_local_mutation() {
     let module = Module {
         classes: vec![],
         method_definitions: Vec::new(),
+        protocols: Vec::new(),
         expressions: vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "test",

@@ -14,7 +14,7 @@
 
 use crate::commands::build::collect_source_files_from_dir;
 use crate::diagnostic::CompileDiagnostic;
-use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use miette::{IntoDiagnostic, Result};
 
@@ -35,14 +35,18 @@ fn collect_diagnostics(
         .collect();
     lint_diags.extend(beamtalk_core::lint::run_lint_passes(module));
 
-    // BT-1547: Run semantic analysis to collect DNU hint diagnostics.
-    // Without these, `@expect type` annotations that suppress DNU hints
-    // during `beamtalk build` would be reported as stale by lint.
+    // BT-1547: Run semantic analysis to collect all categorised diagnostics
+    // so that `@expect` directives can match them. Without this, `@expect type`
+    // annotations that suppress real type/DNU diagnostics during build would be
+    // reported as stale by lint. We include every diagnostic that has a category
+    // (Type, Dnu, Unused, etc.) — this keeps lint in sync with `category_matches`
+    // in diagnostic_provider.rs without manually mirroring its match arms.
     let analysis_result = beamtalk_core::semantic_analysis::analyse(module);
     lint_diags.extend(
-        analysis_result.diagnostics.into_iter().filter(|d| {
-            d.severity == Severity::Hint && d.category == Some(DiagnosticCategory::Dnu)
-        }),
+        analysis_result
+            .diagnostics
+            .into_iter()
+            .filter(|d| d.category.is_some()),
     );
 
     // BT-1476: Apply @expect directives to suppress matching lint diagnostics.
@@ -168,13 +172,15 @@ mod tests {
     fn expect_type_suppresses_dnu_hint_in_lint() {
         // BT-1547: @expect type must not be reported as stale when it
         // suppresses a real DNU hint from semantic analysis.
+        // BT-1576: Updated — Result now has generic annotations, so
+        // `Result ok: dict` infers unwrap -> Dictionary via constructor
+        // inference. Use String (known type without `sqrt`) to trigger DNU.
         let source = r#"Object subclass: LintTest
 
   class demo =>
-    r := Result ok: #{"key" => "value"}
-    data := r unwrap
+    s := "hello"
     @expect type
-    val := data at: "key"
+    val := s sqrt
     val
 "#;
         let diags = collect_lint_diagnostics(source);
@@ -188,12 +194,14 @@ mod tests {
     #[test]
     fn dnu_hint_shown_without_expect_type() {
         // Without @expect type, the DNU hint should appear in lint output.
+        // BT-1576: Updated — Result now has generic annotations, so
+        // `Result ok: dict` infers unwrap -> Dictionary via constructor
+        // inference. Use String (known type without `sqrt`) to trigger DNU.
         let source = r#"Object subclass: LintTest2
 
   class demo =>
-    r := Result ok: #{"key" => "value"}
-    data := r unwrap
-    val := data at: "key"
+    s := "hello"
+    val := s sqrt
     val
 "#;
         let diags = collect_lint_diagnostics(source);

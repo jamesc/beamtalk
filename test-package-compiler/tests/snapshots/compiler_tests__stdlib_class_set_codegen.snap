@@ -178,6 +178,7 @@ call 'beamtalk_set':'do'(Self, _block9)
       'is_abstract' => 'false',
       'is_value' => 'true',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{'elements' => 'none'}~,
       'method_info' => ~{'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'isEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'includes:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'add:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'remove:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'union:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'intersection:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'difference:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'isSubsetOf:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'asList' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'fromList:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'do:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'elements' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'withElements:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~}~,
       'class_method_info' => ~{'elements:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~}~
@@ -190,7 +191,7 @@ call 'beamtalk_set':'do'(Self, _block9)
 
         in _Reg0
 
-    of RegResult -> RegResult
+    of _ClassRegResult -> _ClassRegResult
     catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
 
@@ -202,6 +203,7 @@ call 'beamtalk_set':'do'(Self, _block9)
       'is_abstract' => 'false',
       'is_value' => 'true',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{'elements' => 'none'}~,
       'method_info' => ~{'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'isEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'includes:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'add:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'remove:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'union:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'intersection:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'difference:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'isSubsetOf:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'asList' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'fromList:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'do:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'elements' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true'}~, 'withElements:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~}~,
       'class_method_info' => ~{'elements:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true'}~}~

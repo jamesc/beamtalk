@@ -111,6 +111,8 @@ Module {
             },
             doc_comment: None,
             backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
             span: Span {
                 start: 203,
                 end: 249,
@@ -185,6 +187,8 @@ Module {
             },
             doc_comment: None,
             backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
             span: Span {
                 start: 250,
                 end: 295,
@@ -259,6 +263,8 @@ Module {
             },
             doc_comment: None,
             backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
             span: Span {
                 start: 296,
                 end: 334,
@@ -266,6 +272,7 @@ Module {
         },
     ],
     method_definitions: [],
+    protocols: [],
     expressions: [],
     span: Span {
         start: 203,

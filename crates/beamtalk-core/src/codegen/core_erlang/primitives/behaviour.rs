@@ -26,6 +26,8 @@ const BEHAVIOUR_ZERO_ARG: &[&str] = &[
     "classSourceFile",
     "classReload",
     "classDoc",
+    // ADR 0068 Phase 2c: Protocol queries
+    "classProtocols",
 ];
 
 /// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self)` Document.
@@ -66,7 +68,8 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
         | "classDocForMethod"
         | "classInheritsFrom"
         | "classIncludesBehaviour"
-        | "classSetDoc" => {
+        | "classSetDoc"
+        | "classConformsTo" => {
             let arg = params.first()?;
             Some(intrinsic_self_arg(selector, arg))
         }

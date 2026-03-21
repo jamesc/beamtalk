@@ -4,7 +4,7 @@
 /// Main entry point for gang_of_four.
 /// Auto-runs via [run].entry in beamtalk.toml when you start `beamtalk repl`.
 /// Or load manually: :load src/main.bt
-Object subclass: Main
+Value subclass: Main
 
   class run => self new run
 

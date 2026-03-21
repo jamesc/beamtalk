@@ -163,10 +163,10 @@ Symbol to string:
 
 ## Character access
 
-Collect characters into a new collection (returns a List):
+Collect applies a block to each character and joins the results back into a string:
 
 ```beamtalk
-"hello" collect: [:ch | ch uppercase]  // => ["H","E","L","L","O"]
+"hello" collect: [:ch | ch uppercase]  // => HELLO
 ```
 
 ## Multiline strings

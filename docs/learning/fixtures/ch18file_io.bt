@@ -108,8 +108,11 @@ TestCase subclass: Ch18FileIO
     lines := (File open: path do: [:h |
       h lines asList
     ]) unwrap
+    @expect type
     self assert: lines size equals: 3
+    @expect type
     self assert: (lines at: 1) equals: "alpha"
+    @expect type
     self assert: (lines at: 3) equals: "gamma"
 
   testLazyTake =>

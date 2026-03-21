@@ -2460,6 +2460,8 @@ Module {
             },
             doc_comment: None,
             backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
             span: Span {
                 start: 208,
                 end: 2111,
@@ -2467,6 +2469,7 @@ Module {
         },
     ],
     method_definitions: [],
+    protocols: [],
     expressions: [],
     span: Span {
         start: 208,

@@ -102,6 +102,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
       'is_abstract' => 'false',
       'is_value' => 'false',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{}~,
       'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
@@ -114,7 +115,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
 
         in _Reg0
 
-    of RegResult -> RegResult
+    of _ClassRegResult -> _ClassRegResult
     catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
 
@@ -126,6 +127,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
       'is_abstract' => 'false',
       'is_value' => 'false',
       'is_typed' => 'false',
+      'type_params' => [],
       'field_types' => ~{}~,
       'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~

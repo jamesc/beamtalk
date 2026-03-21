@@ -93,15 +93,14 @@ TestCase subclass: Ch13Assertions
 
 `setUp` runs before each test method.
 `tearDown` runs after each test method.
-Instance variables must be declared as `state:` to persist across `setUp` → test.
+TestCase is a `Value subclass:` — fields are declared with `field:` and setUp returns a new self via `with<Field>:` methods.
 
 ```beamtalk
 TestCase subclass: Ch13SetupExample
-  state: counter = nil
+  field: counter = nil
 
   setUp =>
-    self.counter := Counter spawn
-    self
+    self withCounter: (Counter spawn)
 
   tearDown =>
     self.counter isAlive ifTrue: [self.counter stop]
@@ -123,12 +122,12 @@ TestCase subclass: Ch13SetupExample
 
 ### Key rules for setUp/tearDown
 
-1. **Declare state variables** with `state: varName = default` in the class
-   header. Without the declaration, `self.varName :=` in setUp doesn't
-   persist to test methods.
+1. **Declare fields** with `field: varName = default` in the class
+   header. Each field gets an auto-generated `with<Field>:` setter.
 
-2. **setUp must return self** — the return value is used as the test
-   receiver.
+2. **setUp returns a new self** via `with<Field>:` — the return value
+   becomes `self` in each test method. Don't use `self.field :=`
+   (that's a compile error on Value types).
 
 3. **tearDown** is for cleanup: stop actors, close files, release resources.
    It runs even if the test fails.
@@ -168,12 +167,10 @@ Actor subclass: Stack
   size => self.items size
 
 TestCase subclass: StackTest
-  state: stack = nil
+  field: stack = nil
 
   setUp =>
-    self.stack := Stack spawn
-    self.stack initialize
-    self
+    self withStack: (Stack spawn)
 
   testNewStackIsEmpty =>
     self assert: self.stack isEmpty
@@ -247,16 +244,40 @@ Object subclass: Greeter
 This keeps examples right next to the code they document and ensures
 they stay correct as the code evolves.
 
+## Suite-level setup: setUpOnce / tearDownOnce
+
+For expensive fixtures shared across all tests in a class (database connections,
+ETS tables, supervisor trees), override `setUpOnce` and `tearDownOnce`. These
+run once per class, not once per test.
+
+`setUpOnce` returns a fixture value accessible in each test via `self suiteFixture`:
+
+```beamtalk
+TestCase subclass: DatabaseTest
+  field: conn = nil
+
+  setUpOnce => Database connect: "test_db"
+  tearDownOnce => self suiteFixture close
+
+  setUp => self withConn: self suiteFixture
+
+  testQuery =>
+    result := self.conn query: "SELECT 1"
+    self assert: result equals: 1
+```
+
+**Lifecycle order:** `setUpOnce → (setUp → test → tearDown)* → tearDownOnce`
+
 ## Summary
 
 Define a test class:
 
 ```beamtalk
 TestCase subclass: MyTest
-  state: fixture = nil
-  setUp => ...          // runs before each test
-  tearDown => ...       // runs after each test
-  testSomething => ...  // any method starting with test
+  field: fixture = nil
+  setUp => self withFixture: (...)  // runs before each test, returns new self
+  tearDown => ...                   // runs after each test
+  testSomething => ...              // any method starting with test
 ```
 
 Key assertions:
@@ -308,27 +329,27 @@ TestCase subclass: ArithTest
 ```
 </details>
 
-**3. setUp pattern.** Write a TestCase with a `state: items` variable. In
-`setUp`, initialize it to `#[1, 2, 3]`. Write two tests: one checking the size
-is 3, another checking `includes: 2`. Why must `state:` be declared?
+**3. setUp pattern.** Write a TestCase with a `field: items` variable. In
+`setUp`, return `self withItems: #[1, 2, 3]`. Write two tests: one checking the size
+is 3, another checking `includes: 2`. Why must `field:` be declared?
 
 <details>
 <summary>Hint</summary>
 
 ```text
 TestCase subclass: ArraySetupTest
-  state: items = nil
+  field: items = nil
   setUp =>
-    self.items := #[1, 2, 3]
-    self
+    self withItems: #[1, 2, 3]
   testSize =>
     self assert: self.items size equals: 3
   testIncludes =>
     self assert: (self.items includes: 2)
 ```
 
-`state:` must be declared because without it, `self.items :=` in setUp does
-not persist to the test methods — instance variables need slot declarations.
+`field:` must be declared because it generates the `withItems:` setter method
+and makes `self.items` accessible in test methods. TestCase is a Value — use
+`withField:` to set fixture state, not `self.field :=`.
 </details>
 
 Next: Chapter 14 — Pattern Matching

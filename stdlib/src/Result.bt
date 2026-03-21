@@ -36,9 +36,9 @@
 ///
 /// @see Exception (for exception-based error handling)
 /// @see Error (for exception subclass with reason codes)
-sealed Value subclass: Result
-  field: okValue :: Object = nil
-  field: errReason :: Object = nil
+sealed Value subclass: Result(T, E)
+  field: okValue :: T = nil
+  field: errReason :: E = nil
   field: isOk :: Boolean = true
 
   // ===== Class Methods — Construction =====
@@ -113,7 +113,7 @@ sealed Value subclass: Result
   /// (Result ok: 42) value     // => 42
   /// (Result error: #x) value  // => Exception: Cannot access 'value'...
   /// ```
-  sealed value -> Object =>
+  sealed value -> T =>
     self.isOk
       ifTrue: [self.okValue]
       ifFalse: [
@@ -129,7 +129,7 @@ sealed Value subclass: Result
   /// (Result error: #x) error  // => #x
   /// (Result ok: 42) error     // => Exception: Cannot access 'error'...
   /// ```
-  sealed error -> Object =>
+  sealed error -> E =>
     self.isOk
       ifTrue: [
         Exception signal: "Cannot access 'error' on Result ok — use ifOk:ifError: or mapError:"
@@ -145,7 +145,7 @@ sealed Value subclass: Result
   /// (Result ok: 42) valueOr: 0    // => 42
   /// (Result error: #x) valueOr: 0 // => 0
   /// ```
-  sealed valueOr: default -> Object =>
+  sealed valueOr: default :: T -> T =>
     self.isOk ifTrue: [self.okValue] ifFalse: [default]
 
   /// Unwrap the success value, or evaluate a block with the error reason.
@@ -155,7 +155,7 @@ sealed Value subclass: Result
   /// (Result ok: 42) valueOrDo: [:e | 0]       // => 42
   /// (Result error: #x) valueOrDo: [:e | -1]   // => -1
   /// ```
-  sealed valueOrDo: block -> Object =>
+  sealed valueOrDo: block :: Block(E, T) -> T =>
     self.isOk ifTrue: [self.okValue] ifFalse: [block value: self.errReason]
 
   /// Unwrap the success value, or raise an exception.
@@ -168,7 +168,7 @@ sealed Value subclass: Result
   /// (Result ok: 42) unwrap         // => 42
   /// (Result error: #x) unwrap      // => Exception: unwrap called on Result error: #x
   /// ```
-  sealed unwrap -> Object =>
+  sealed unwrap -> T =>
     self.isOk ifTrue: [
       self.okValue
     ] ifFalse: [(Erlang beamtalk_result) unwrapError: self.errReason]
@@ -183,7 +183,7 @@ sealed Value subclass: Result
   /// (Result ok: 42) map: [:v | v + 1]        // => Result ok: 43
   /// (Result error: #x) map: [:v | v + 1]     // => Result error: #x
   /// ```
-  sealed map: block -> Result =>
+  sealed map: block :: Block(T, R) -> Result(R, E) =>
     self.isOk ifTrue: [Result ok: (block value: self.okValue)] ifFalse: [self]
 
   /// Apply a block that returns a Result. Flattens the nesting.
@@ -194,7 +194,7 @@ sealed Value subclass: Result
   /// (Result ok: 42) andThen: [:v | Result ok: v * 2]   // => Result ok: 84
   /// (Result error: #x) andThen: [:v | Result ok: v]    // => Result error: #x
   /// ```
-  sealed andThen: block -> Result =>
+  sealed andThen: block :: Block(T, Result(R, E)) -> Result(R, E) =>
     self.isOk ifTrue: [block value: self.okValue] ifFalse: [self]
 
   /// Apply a block to the error reason, wrapping result in a new error Result.
@@ -206,7 +206,7 @@ sealed Value subclass: Result
   ///   // => Result error: "wrapped: #x"
   /// (Result ok: 42) mapError: [:e | "oops"]   // => Result ok: 42
   /// ```
-  sealed mapError: block -> Result =>
+  sealed mapError: block :: Block(E, F) -> Result(T, F) =>
     self.isOk ifTrue: [
       self
     ] ifFalse: [Result error: (block value: self.errReason)]
@@ -223,7 +223,7 @@ sealed Value subclass: Result
   /// chain := (Result ok: 1) andThen: [:v | Result error: #fail].
   /// chain ifError: [:_ | "handled"]                // => "handled"
   /// ```
-  sealed ifError: block -> Object =>
+  sealed ifError: block :: Block(E, Object) -> Object =>
     self.isOk ifTrue: [self] ifFalse: [block value: self.errReason]
 
   // ===== Instance Methods — Pattern Matching =====
@@ -235,7 +235,7 @@ sealed Value subclass: Result
   /// (Result ok: 42) ifOk: [:v | v + 1] ifError: [:e | -1]    // => 43
   /// (Result error: #x) ifOk: [:v | v] ifError: [:e | 0]      // => 0
   /// ```
-  sealed ifOk: okBlock ifError: errorBlock -> Object =>
+  sealed ifOk: okBlock :: Block(T, R) ifError: errorBlock :: Block(E, R) -> R =>
     self.isOk ifTrue: [
       okBlock value: self.okValue
     ] ifFalse: [errorBlock value: self.errReason]

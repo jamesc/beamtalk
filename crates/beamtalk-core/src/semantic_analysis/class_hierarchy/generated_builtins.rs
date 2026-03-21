@@ -66,6 +66,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Pid"
             | "Port"
             | "ProtoObject"
+            | "Protocol"
             | "Queue"
             | "Random"
             | "ReactiveSubprocess"
@@ -139,6 +140,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "supervisionSpec".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![], doc: Some("Return a SupervisionSpec for this actor class with default settings.\n\nCreates a SupervisionSpec with `actorClass` set to the receiver and\n`restart` set from `supervisionPolicy`. Use the fluent `with*:` API to\noverride per-child settings:\n\n## Examples\n```beamtalk\nDatabasePool supervisionSpec\n    // => SupervisionSpec with actorClass: DatabasePool, restart: #temporary\n\nDatabasePool supervisionSpec withId: #primary withArgs: #{#role => #primary}\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -157,21 +161,24 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of elements in the array.\n\n## Examples\n```beamtalk\n#[1, 2, 3] size              // => 3\n#[] size                     // => 0\n```".into()) },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test if the array has no elements.\n\n## Examples\n```beamtalk\n#[] isEmpty                  // => true\n#[1] isEmpty                 // => false\n```".into()) },
-                MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![Some("Integer".into())], doc: Some("Return the element at the given 1-based index.\n\nRaises `index_out_of_bounds` if the index is out of range.\n\n## Examples\n```beamtalk\n#[10, 20, 30] at: 2          // => 20\n#[10, 20, 30] at: 1          // => 10\n```".into()) },
-                MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array".into()), param_types: vec![Some("Integer".into()), None], doc: Some("Return a new array with the element at `index` replaced by `value`.\n\nRaises `index_out_of_bounds` if the index is out of range.\n\n## Examples\n```beamtalk\n(#[1, 2, 3] at: 2 put: 99)  // => #[1, 99, 3]\n```".into()) },
-                MethodInfo { selector: "includes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test if the array contains the given element.\n\n## Examples\n```beamtalk\n#[1, 2, 3] includes: 2       // => true\n#[1, 2, 3] includes: 9       // => false\n```".into()) },
-                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each element, evaluating `block` with each one.\n\n## Examples\n```beamtalk\n#[1, 2, 3] do: [:x | Transcript show: x]\n```".into()) },
-                MethodInfo { selector: "collect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array".into()), param_types: vec![Some("Block".into())], doc: Some("Map a block over the array, returning a new Array.\n\n## Examples\n```beamtalk\n#[1, 2, 3] collect: [:x | x * 2]   // => #[2, 4, 6]\n```".into()) },
-                MethodInfo { selector: "select:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array".into()), param_types: vec![Some("Block".into())], doc: Some("Select elements for which `block` returns true, returning a new Array.\n\n## Examples\n```beamtalk\n#[1, 2, 3, 4] select: [:x | x > 2]  // => #[3, 4]\n```".into()) },
-                MethodInfo { selector: "inject:into:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None, Some("Block".into())], doc: Some("Reduce the array with an accumulator.\n\n## Examples\n```beamtalk\n#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]   // => 6\n```".into()) },
+                MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("E".into()), param_types: vec![Some("Integer".into())], doc: Some("Return the element at the given 1-based index.\n\nRaises `index_out_of_bounds` if the index is out of range.\n\n## Examples\n```beamtalk\n#[10, 20, 30] at: 2          // => 20\n#[10, 20, 30] at: 1          // => 10\n```".into()) },
+                MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array(E)".into()), param_types: vec![Some("Integer".into()), Some("E".into())], doc: Some("Return a new array with the element at `index` replaced by `value`.\n\nRaises `index_out_of_bounds` if the index is out of range.\n\n## Examples\n```beamtalk\n(#[1, 2, 3] at: 2 put: 99)  // => #[1, 99, 3]\n```".into()) },
+                MethodInfo { selector: "includes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("E".into())], doc: Some("Test if the array contains the given element.\n\n## Examples\n```beamtalk\n#[1, 2, 3] includes: 2       // => true\n#[1, 2, 3] includes: 9       // => false\n```".into()) },
+                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block(E, Object)".into())], doc: Some("Iterate over each element, evaluating `block` with each one.\n\n## Examples\n```beamtalk\n#[1, 2, 3] do: [:x | Transcript show: x]\n```".into()) },
+                MethodInfo { selector: "collect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array(R)".into()), param_types: vec![Some("Block(E, R)".into())], doc: Some("Map a block over the array, returning a new Array.\n\n## Examples\n```beamtalk\n#[1, 2, 3] collect: [:x | x * 2]   // => #[2, 4, 6]\n```".into()) },
+                MethodInfo { selector: "select:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array(E)".into()), param_types: vec![Some("Block(E, Boolean)".into())], doc: Some("Select elements for which `block` returns true, returning a new Array.\n\n## Examples\n```beamtalk\n#[1, 2, 3, 4] select: [:x | x > 2]  // => #[3, 4]\n```".into()) },
+                MethodInfo { selector: "inject:into:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("A".into()), param_types: vec![Some("A".into()), Some("Block(A, E, A)".into())], doc: Some("Reduce the array with an accumulator.\n\n## Examples\n```beamtalk\n#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]   // => 6\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\n#[1, 2, 3] printString       // => \"#[1, 2, 3]\"\n```".into()) },
                 MethodInfo { selector: "inspect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Override inspect to use printString rather than the field-based\nformat defined in Value. Arrays are primitives, not map-based value objects.".into()) },
             ],
             class_methods: vec![
-                MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array".into()), param_types: vec![Some("List".into())], doc: Some("Create an Array from a list of elements.\n\n## Examples\n```beamtalk\nArray withAll: #(1, 2, 3)   // => #[1, 2, 3]\n```".into()) },
-                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array".into()), param_types: vec![Some("List".into())], doc: Some("Create an Array from a list. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nArray new: #(1, 2, 3)            // => #[1, 2, 3]\n```".into()) },
+                MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array(E)".into()), param_types: vec![Some("List".into())], doc: Some("Create an Array from a list of elements.\n\n## Examples\n```beamtalk\nArray withAll: #(1, 2, 3)   // => #[1, 2, 3]\n```".into()) },
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, spawns_block: false, return_type: Some("Array(E)".into()), param_types: vec![Some("List".into())], doc: Some("Create an Array from a list. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nArray new: #(1, 2, 3)            // => #[1, 2, 3]\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec!["E".into()],
+            type_param_bounds: vec![None],
+            superclass_type_args: vec![],
         },
     );
 
@@ -201,6 +208,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "named:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: true, spawns_block: false, return_type: Some("AtomicCounter".into()), param_types: vec![Some("Symbol".into())], doc: Some("Look up an existing counter by name (class method).\n\nRaises `not_found` if no counter with this name exists.\nRaises `type_error` if the argument is not a Symbol.\n\n## Examples\n```beamtalk\nc := AtomicCounter named: #requests\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -219,6 +229,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -249,6 +262,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, spawns_block: false, return_type: Some("Bag".into()), param_types: vec![Some("List".into())], doc: Some("Create a Bag containing all elements from a list.\n\n## Examples\n```beamtalk\nBag withAll: #(1, 2, 1, 3)   // => a Bag\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -287,6 +303,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("BeamtalkInterface".into())], doc: Some("Set the current singleton instance.".into()) },
             ],
             class_variables: vec!["current".into()],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -323,12 +342,17 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "isBehaviour".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test whether this is a Behaviour (class-describing object).\n\n## Examples\n```beamtalk\nCounter isBehaviour   // => true\n42 isBehaviour        // => false\n```".into()) },
                 MethodInfo { selector: "isMeta".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test whether this is a metaclass. Returns false; overridden in Metaclass.\n\n## Examples\n```beamtalk\nCounter isMeta   // => false\n```".into()) },
                 MethodInfo { selector: "isMetaclass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test whether this is a Metaclass. Returns false; overridden in Metaclass.\n\n## Examples\n```beamtalk\nCounter isMetaclass   // => false\nInteger isMetaclass   // => false\n```".into()) },
+                MethodInfo { selector: "conformsTo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Symbol".into())], doc: Some("Test whether instances of the receiver conform to a protocol.\n\nStructural conformance: the class conforms if it responds to all\nrequired selectors of the protocol.\n\n## Examples\n```beamtalk\nInteger conformsTo: #Printable    // => true\nInteger conformsTo: #Sortable     // => false (if Sortable requires sortKey)\n```".into()) },
+                MethodInfo { selector: "protocols".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return the list of protocols this class conforms to.\n\nReturns a list of protocol name symbols, sorted alphabetically.\n\n## Examples\n```beamtalk\nInteger protocols   // => [#Printable, #Comparable, ...]\n```".into()) },
                 MethodInfo { selector: "sourceFile".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Return the path of the source file this class was compiled from, or nil.\n\nReturns nil for stdlib classes, bootstrap classes, and classes created\nvia ClassBuilder (dynamic classes with no backing file).\n\n## Examples\n```beamtalk\nCounter sourceFile   // => \"examples/counter.bt\"\nInteger sourceFile   // => nil (stdlib built-in)\n```".into()) },
                 MethodInfo { selector: "reload".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Behaviour".into()), param_types: vec![], doc: Some("Recompile this class from its source file and hot-swap the BEAM module.\n\nLive actors pick up new code on next message dispatch (BEAM two-version\ncode loading — no state migration needed for method changes).\n\nRaises an error if `sourceFile` is nil — stdlib and dynamic classes\n(created via ClassBuilder) cannot be reloaded from source.\n\n## Examples\n```beamtalk\nCounter reload              // recompile + hot-swap Counter\nInteger reload              // => Error: Integer has no source file — stdlib classes cannot be reloaded\n```".into()) },
                 MethodInfo { selector: "removeFromSystem".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Remove this class from the system, cleaning up all associated state.\n\nFollows Smalltalk convention (`Counter removeFromSystem`). Performs full\ncleanup: stops live actors of the class, terminates the class gen_server,\nremoves from class hierarchy ETS table and pg group, and purges the BEAM\nmodule.\n\nSafety checks:\n- Refuses to remove stdlib/sealed classes (Integer, String, Object, etc.)\n- Refuses if class has subclasses (must remove children first)\n- Stops all live actors of this class before removal\n\n## Examples\n```beamtalk\nCounter removeFromSystem   // => nil (Counter class removed)\nInteger removeFromSystem   // => Error: cannot remove stdlib class\n```".into()) },
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -336,22 +360,37 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Binary".into(),
         ClassInfo {
             name: "Binary".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Collection".into()),
             is_sealed: true,
             is_abstract: false,
-            is_typed: false,
+            is_typed: true,
             is_value: false,
             is_native: false,
             state: vec![],
             state_types: HashMap::new(),
-            methods: vec![],
+            methods: vec![
+                MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the byte count of this binary.\n\n## Examples\n```beamtalk\n(Binary serialize: 42) size   // => _\n```".into()) },
+                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each byte (Integer 0-255), evaluating `block` with each one.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101)) do: [:b | Transcript show: b]\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\nDisplays hex representation for non-UTF-8 binaries, or quoted string\nfor valid UTF-8 binaries.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101)) printString   // => _\n```".into()) },
+                MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())], doc: Some("Return the byte value (0-255) at the given 1-based index.\n\nRaises `index_out_of_bounds` if the index is out of range.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108)) at: 1   // => 104\n```".into()) },
+                MethodInfo { selector: "byteAt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())], doc: Some("Return the byte value (0-255) at the given 0-based offset.\n\nUses 0-based indexing to match Erlang's `binary:at/2`.\nRaises `index_out_of_bounds` if the offset is out of range.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108)) byteAt: 0   // => 104\n```".into()) },
+                MethodInfo { selector: "byteSize".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the byte count of this binary.\n\nAlias for `size` on Binary. On String, provides unambiguous byte count\n(since String overrides `size` with grapheme count).\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108)) byteSize   // => 3\n```".into()) },
+                MethodInfo { selector: "part:size:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("Integer".into()), Some("Integer".into())], doc: Some("Return a zero-copy slice of this binary.\n\nTakes a 0-based offset and length. Raises `index_out_of_bounds`\nif the range is invalid.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(1, 2, 3, 4, 5)) part: 1 size: 3   // => _\n```".into()) },
+                MethodInfo { selector: "concat:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("Binary".into())], doc: Some("Concatenate this binary with another binary.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(1, 2)) concat: (Binary fromBytes: #(3, 4))   // => _\n```".into()) },
+                MethodInfo { selector: "toBytes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Convert this binary to a list of byte integers (0-255).\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101)) toBytes   // => #(104, 101)\n```".into()) },
+                MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Validate UTF-8 and return the binary as a String.\n\nReturns a Result: success gives a String, failure gives an error\nwith the byte offset of the invalid sequence.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108, 108, 111)) asString   // => _\n```".into()) },
+                MethodInfo { selector: "asStringUnchecked".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return this binary as a String without UTF-8 validation.\n\nUse when you trust the source data is valid UTF-8.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked   // => \"hello\"\n```".into()) },
+            ],
             class_methods: vec![
                 MethodInfo { selector: "serialize:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("Object".into())], doc: Some("Serialize any value to a binary (class method).\n\nConverts a Beamtalk value to its binary representation using\nErlang's external term format.\n\n## Examples\n```beamtalk\n(Binary serialize: 42) class name   // => \"Binary\"\n```".into()) },
                 MethodInfo { selector: "deserialize:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Object".into())], doc: Some("Deserialize a binary back to the original value (class method).\n\nUses safe mode to prevent atom table exhaustion from untrusted\ninput. Atoms not already in the atom table will cause an error.\n\n## Examples\n```beamtalk\nBinary deserialize: (Binary serialize: #(1, 2, 3))\n// => _\n```".into()) },
-                MethodInfo { selector: "size:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Object".into())], doc: Some("Return the byte size of a binary (class method).\n\n## Examples\n```beamtalk\nBinary size: \"hello\"   // => 5\nBinary size: \"\"        // => 0\n```".into()) },
                 MethodInfo { selector: "fromIolist:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("Object".into())], doc: Some("Convert an iolist to a flat binary (class method).\n\nAn iolist is a (possibly nested) list of binaries and integers\n(0-255). This flattens it into a single binary.\n\n## Examples\n```beamtalk\nBinary fromIolist: #(\"hello\", \" \", \"world\")\n// => _\n```".into()) },
+                MethodInfo { selector: "fromBytes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("List".into())], doc: Some("Create a binary from a list of byte integers (0-255).\n\n## Examples\n```beamtalk\nBinary fromBytes: #(104, 101, 108, 108, 111)   // => _\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -382,6 +421,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -410,6 +452,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -448,6 +493,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "value:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Character".into(), is_sealed: true, spawns_block: false, return_type: Some("Character".into()), param_types: vec![Some("Integer".into())], doc: Some("Create a Character from a Unicode codepoint integer (class method).\n\n## Examples\n```beamtalk\nCharacter value: 65      // => $A\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -472,6 +520,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -499,6 +550,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -536,6 +590,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, spawns_block: false, return_type: Some("Self".into()), param_types: vec![Some("List".into())], doc: Some("Factory method — create a collection of this type from a list.\n\nDefault implementation returns the list as-is, giving `List` results\nfor custom user-defined Collection subclasses. Sealed built-in types\n(List, Set, Array, Tuple, String) override this to produce their own type.\n\n## Examples\n```beamtalk\nList withAll: #(1, 2, 3)         // => #(1, 2, 3)\nArray withAll: #(1, 2, 3)        // => #[1, 2, 3]\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -561,6 +618,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -606,6 +666,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "fromString:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, spawns_block: false, return_type: Some("DateTime".into()), param_types: vec![Some("String".into())], doc: Some("Parse an ISO 8601 string.\n\n## Examples\n```beamtalk\nDateTime fromString: '2026-02-18T10:30:00Z'\n// => a DateTime(2026-02-18T10:30:00Z)\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -625,22 +688,25 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of key-value pairs.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} size                   // => 2\n```".into()) },
                 MethodInfo { selector: "keys".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return a list of all keys.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} keys\n```".into()) },
                 MethodInfo { selector: "values".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return a list of all values.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} values\n```".into()) },
-                MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Return the value associated with `key`. Raises an error if not found.\n\n## Examples\n```beamtalk\n#{#name => \"Alice\"} at: #name              // => \"Alice\"\n```".into()) },
-                MethodInfo { selector: "at:ifAbsent:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None, Some("Block".into())], doc: Some("Return the value for `key`, or evaluate `block` if absent.\n\n## Examples\n```beamtalk\n#{#a => 1} at: #b ifAbsent: [0]            // => 0\n```".into()) },
-                MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![None, None], doc: Some("Return a new dictionary with `key` mapped to `value`.\n\n## Examples\n```beamtalk\n#{#a => 1} at: #b put: 2                   // => #{#a => 1, #b => 2}\n```".into()) },
-                MethodInfo { selector: "includesKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test if the dictionary contains the given key.\n\n## Examples\n```beamtalk\n#{#a => 1} includesKey: #a                 // => true\n#{#a => 1} includesKey: #b                 // => false\n```".into()) },
-                MethodInfo { selector: "removeKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![None], doc: Some("Return a new dictionary without the given key.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} removeKey: #a          // => #{#b => 2}\n```".into()) },
-                MethodInfo { selector: "merge:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![Some("Dictionary".into())], doc: Some("Merge another dictionary into the receiver (other's values win on conflict).\n\n## Examples\n```beamtalk\n#{#a => 1} merge: #{#b => 2}               // => #{#a => 1, #b => 2}\n```".into()) },
-                MethodInfo { selector: "includes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test if the dictionary contains the given value.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} includes: 1     // => true\n#{#a => 1} includes: 3              // => false\n```".into()) },
-                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each value, evaluating `block` with each one.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} do: [:v | Transcript show: v]\n```".into()) },
-                MethodInfo { selector: "collect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![Some("Block".into())], doc: Some("Map `block` over each value, returning a new Dictionary with the\nsame keys and transformed values.\n\nOverrides `Collection>>collect:` — for a Dictionary, the result\npreserves keys rather than collecting values into a list.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} collect: [:v | v * 10]  // => #{#a => 10, #b => 20}\n```".into()) },
-                MethodInfo { selector: "doWithKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each key-value pair, evaluating `block` with key and value.\n\n## Examples\n```beamtalk\n#{#a => 1} doWithKey: [:k :v | Transcript show: k]\n```".into()) },
-                MethodInfo { selector: "keysAndValuesDo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each key-value pair, evaluating `block` with key and value.\n\n## Examples\n```beamtalk\n#{#a => 1} keysAndValuesDo: [:k :v | Transcript show: k]\n```".into()) },
+                MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("V".into()), param_types: vec![Some("K".into())], doc: Some("Return the value associated with `key`. Raises an error if not found.\n\n## Examples\n```beamtalk\n#{#name => \"Alice\"} at: #name              // => \"Alice\"\n```".into()) },
+                MethodInfo { selector: "at:ifAbsent:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("V".into()), param_types: vec![Some("K".into()), Some("Block(V)".into())], doc: Some("Return the value for `key`, or evaluate `block` if absent.\n\n## Examples\n```beamtalk\n#{#a => 1} at: #b ifAbsent: [0]            // => 0\n```".into()) },
+                MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Dictionary(K, V)".into()), param_types: vec![Some("K".into()), Some("V".into())], doc: Some("Return a new dictionary with `key` mapped to `value`.\n\n## Examples\n```beamtalk\n#{#a => 1} at: #b put: 2                   // => #{#a => 1, #b => 2}\n```".into()) },
+                MethodInfo { selector: "includesKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("K".into())], doc: Some("Test if the dictionary contains the given key.\n\n## Examples\n```beamtalk\n#{#a => 1} includesKey: #a                 // => true\n#{#a => 1} includesKey: #b                 // => false\n```".into()) },
+                MethodInfo { selector: "removeKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Dictionary(K, V)".into()), param_types: vec![Some("K".into())], doc: Some("Return a new dictionary without the given key.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} removeKey: #a          // => #{#b => 2}\n```".into()) },
+                MethodInfo { selector: "merge:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Dictionary(K, V)".into()), param_types: vec![Some("Dictionary(K, V)".into())], doc: Some("Merge another dictionary into the receiver (other's values win on conflict).\n\n## Examples\n```beamtalk\n#{#a => 1} merge: #{#b => 2}               // => #{#a => 1, #b => 2}\n```".into()) },
+                MethodInfo { selector: "includes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("V".into())], doc: Some("Test if the dictionary contains the given value.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} includes: 1     // => true\n#{#a => 1} includes: 3              // => false\n```".into()) },
+                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block(V, Object)".into())], doc: Some("Iterate over each value, evaluating `block` with each one.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} do: [:v | Transcript show: v]\n```".into()) },
+                MethodInfo { selector: "collect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Dictionary(K, R)".into()), param_types: vec![Some("Block(V, R)".into())], doc: Some("Map `block` over each value, returning a new Dictionary with the\nsame keys and transformed values.\n\nOverrides `Collection>>collect:` — for a Dictionary, the result\npreserves keys rather than collecting values into a list.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} collect: [:v | v * 10]  // => #{#a => 10, #b => 20}\n```".into()) },
+                MethodInfo { selector: "doWithKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block(K, V, Object)".into())], doc: Some("Iterate over each key-value pair, evaluating `block` with key and value.\n\n## Examples\n```beamtalk\n#{#a => 1} doWithKey: [:k :v | Transcript show: k]\n```".into()) },
+                MethodInfo { selector: "keysAndValuesDo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block(K, V, Object)".into())], doc: Some("Iterate over each key-value pair, evaluating `block` with key and value.\n\n## Examples\n```beamtalk\n#{#a => 1} keysAndValuesDo: [:k :v | Transcript show: k]\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a string representation using Beamtalk syntax.\n\n## Examples\n```beamtalk\n#{#a => 1} printString                     // => \"#{#a => 1}\"\n```".into()) },
                 MethodInfo { selector: "inspect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Override inspect to use printString rather than the field-based\nformat defined in Value. Dictionaries are primitives, not map-based value objects.".into()) },
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec!["K".into(), "V".into()],
+            type_param_bounds: vec![None, None],
+            superclass_type_args: vec![],
         },
     );
 
@@ -673,6 +739,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Return the running supervisor instance, or nil if not started.".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -693,6 +762,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Erlang".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None, None], doc: Some("Look up an Erlang module by name, returning an ErlangModule proxy.\n\nInvoked automatically when an unknown unary message is sent to `Erlang`.\nThe `selector` becomes the module name; `arguments` is always empty.\nCompiled via `@intrinsic erlangModuleLookup` — no gen_server roundtrip.\n\n## Examples\n```beamtalk\nErlang lists       // => #ErlangModule<lists>\nErlang maps        // => #ErlangModule<maps>\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -713,6 +785,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -731,6 +806,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -763,6 +841,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "newOrExisting:type:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: true, spawns_block: false, return_type: Some("Ets".into()), param_types: vec![Some("Symbol".into()), Some("Symbol".into())], doc: Some("Create a named table or return the existing one.\n\nIf a table with the given name already exists, returns an `Ets` instance\nwrapping it. Otherwise creates a new table with the specified type.\nThis is useful in setUp/tearDown cycles where the previous owner may\nstill be alive.\n\n## Examples\n```beamtalk\ntable := Ets newOrExisting: #events type: #set\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -794,6 +875,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "signal".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Create and raise a new exception with the class name as the message.\n\n## Examples\n```beamtalk\nException signal\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -812,6 +896,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -838,6 +925,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -877,6 +967,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "tempDirectory".into(), arity: 0, kind: MethodKind::Primary, defined_in: "File".into(), is_sealed: true, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the OS temporary directory path (class method).\n\n## Examples\n```beamtalk\nFile tempDirectory\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -897,6 +990,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -958,6 +1054,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "infinity".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, spawns_block: false, return_type: Some("Float".into()), param_types: vec![], doc: Some("Positive infinity.\n\nNote: BEAM does not support IEEE 754 infinity. This method\nis provided for API completeness but will raise an error.\nUse `isInfinite` to check (always returns false on BEAM).\n\n## Examples\n```beamtalk\nFloat infinity       // => ERROR: _\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -988,6 +1087,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "request:url:options:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None, Some("String".into()), Some("Dictionary".into())], doc: Some("Perform a one-shot generic request (class method).\n\nOptions dict may contain:\n  - `#headers` — List of [name, value] binary pairs\n  - `#body`    — Request body String\n  - `#timeout` — Timeout in milliseconds (default 30000)\n\n## Examples\n```beamtalk\nresp := HTTPClient request: #patch url: \"https://httpbin.org/patch\"\n  options: #{#body => \"{}\", #timeout => 5000}\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1023,6 +1125,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "method:path:headers:body:queryParams:params:".into(), arity: 6, kind: MethodKind::Primary, defined_in: "HTTPRequest".into(), is_sealed: false, spawns_block: false, return_type: Some("HTTPRequest".into()), param_types: vec![Some("String".into()), Some("String".into()), Some("List".into()), Some("String".into()), Some("Dictionary".into()), Some("Dictionary".into())], doc: Some("Creates a new `HTTPRequest`. Args: method (default: \"\"), path (default: \"/\"), headers (default: ...), body (default: \"\"), queryParams (default: ...), params (default: ...).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1053,6 +1158,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "status:headers:body:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: false, spawns_block: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("Integer".into()), Some("List".into()), Some("String".into())], doc: Some("Creates a new `HTTPResponse`. Args: status (default: 0), headers (default: ...), body (default: \"\").\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1086,6 +1194,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "method:path:handler:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPRoute".into(), is_sealed: false, spawns_block: false, return_type: Some("HTTPRoute".into()), param_types: vec![Some("String".into()), Some("String".into()), None], doc: Some("Creates a new `HTTPRoute`. Args: method (default: \"\"), path (default: \"/\"), handler (default: nil).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1113,6 +1224,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1144,6 +1258,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "compiledRoutes:notFoundHandler:routeCount:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPRouter".into(), is_sealed: false, spawns_block: false, return_type: Some("HTTPRouter".into()), param_types: vec![None, None, Some("Integer".into())], doc: Some("Creates a new `HTTPRouter`. Args: compiledRoutes (default: nil), notFoundHandler (default: nil), routeCount (default: 0).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1168,6 +1285,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "start:handler:options:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPServer".into(), is_sealed: false, spawns_block: false, return_type: Some("HTTPServer".into()), param_types: vec![Some("Integer".into()), None, Some("Dictionary".into())], doc: Some("Start an HTTP server with additional options.\n\nOptions:\n  - `#bind` — IP address to bind to (default `\"127.0.0.1\"`)\n\n## Examples\n```beamtalk\nsrv := HTTPServer start: 0 handler: handler\n  options: #{ #bind => \"0.0.0.0\" }\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1186,6 +1306,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1252,6 +1375,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1277,6 +1403,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1299,6 +1428,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "prettyPrint:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Json".into(), is_sealed: true, spawns_block: false, return_type: Some("String".into()), param_types: vec![Some("Object".into())], doc: Some("Generate a pretty-printed JSON string with indentation (class method).\n\n## Examples\n```beamtalk\nJson prettyPrint: #{\"name\" => \"Ada\", \"age\" => 36}\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1364,6 +1496,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("List".into())], doc: Some("Create a List from a list. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nList new: #(1, 2, 3)             // => #(1, 2, 3)\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1392,6 +1527,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "setLevel:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Symbol".into())], doc: Some("Set the primary log level at runtime.\n\nValid levels: #emergency, #alert, #critical, #error,\n#warning, #notice, #info, #debug\n\n## Examples\n```beamtalk\nLogger setLevel: #debug\n// => nil\nLogger setLevel: #warning\n// => nil\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1424,6 +1562,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Raises an error — metaclasses cannot be constructed directly.\n\nUse `x class class` to obtain a metaclass for a class `x`.\n\n## Examples\n```beamtalk\nMetaclass new   // => Error: 'Use x class class to obtain a metaclass'\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1454,6 +1595,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1475,6 +1619,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "run:timeout:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "OS".into(), is_sealed: true, spawns_block: false, return_type: Some("String".into()), param_types: vec![Some("String".into()), Some("Integer".into())], doc: Some("Execute a shell command with an explicit wall-clock timeout in milliseconds.\n\nBehaves like `run:` but the caller controls the deadline.\nRaises a `#timeout` error if the command has not exited within `ms` milliseconds.\n\n## Examples\n```beamtalk\nOS run: \"sleep 1\" timeout: 5000   // => \"\"\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1518,6 +1665,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1545,6 +1695,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1569,6 +1722,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1593,6 +1749,35 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Protocol".into(),
+        ClassInfo {
+            name: "Protocol".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "requiredMethods:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Protocol".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Symbol".into())], doc: Some("Return the required method selectors for a protocol.\n\nReturns a list of selector symbols. Includes methods from extended\nprotocols. Returns an empty list if the protocol is not registered.\n\n## Examples\n```beamtalk\nProtocol requiredMethods: #Printable   // => [#asString]\n```".into()) },
+                MethodInfo { selector: "conformingClasses:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Protocol".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Symbol".into())], doc: Some("Return the list of classes conforming to a protocol.\n\nReturns class objects for all registered classes that respond to all\nrequired selectors of the protocol. Returns an empty list if the\nprotocol is not registered.\n\n## Examples\n```beamtalk\nProtocol conformingClasses: #Printable   // => [Integer, String, ...]\n```".into()) },
+                MethodInfo { selector: "isProtocol:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Protocol".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Symbol".into())], doc: Some("Test whether a name is a registered protocol.\n\n## Examples\n```beamtalk\nProtocol isProtocol: #Printable   // => true\nProtocol isProtocol: #NotReal     // => false\n```".into()) },
+                MethodInfo { selector: "allProtocols".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Protocol".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return all registered protocol names.\n\n## Examples\n```beamtalk\nProtocol allProtocols   // => [#Printable, #Comparable, ...]\n```".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1619,6 +1804,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: true, spawns_block: false, return_type: Some("Queue".into()), param_types: vec![], doc: Some("Create an empty Queue (class method).\n\n## Examples\n```beamtalk\nq := Queue new\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1646,6 +1834,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "seed:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: true, spawns_block: false, return_type: Some("Random".into()), param_types: vec![Some("Integer".into())], doc: Some("Create a new Random instance with a specific seed for reproducibility.\n\nTwo instances created with the same seed will produce the same\ndeterministic values for `next` and `nextInteger:` (for a given max).\n\n## Examples\n```beamtalk\nrng := Random seed: 42\nrng next                     // => deterministic value\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1671,6 +1862,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "open:args:env:dir:notify:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None, None, None, None, None], doc: Some("Open a subprocess with environment and working directory, delivering lines to `notify`.\n\n## Examples\n```beamtalk\nproc := (ReactiveSubprocess\n  open: \"make\" args: #(\"test\")\n  env: #{#\"CI\" => #\"true\"} dir: #\"/tmp\"\n  notify: delegate) unwrap\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1696,6 +1890,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1721,6 +1918,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "from:options:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: true, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("String".into()), Some("List".into())], doc: Some("Compile a regex pattern with PCRE options (class method).\n\nOptions: caseless, multiline, dotall, extended, ungreedy.\n\n## Examples\n```beamtalk\nRegex from: \"[a-z]+\" options: #(#caseless)\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1735,25 +1935,25 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_value: true,
             is_native: false,
             state: vec!["okValue".into(), "errReason".into(), "isOk".into()],
-            state_types: HashMap::from([("okValue".into(), "Object".into()), ("errReason".into(), "Object".into()), ("isOk".into(), "Boolean".into())]),
+            state_types: HashMap::from([("okValue".into(), "T".into()), ("errReason".into(), "E".into()), ("isOk".into(), "Boolean".into())]),
             methods: vec![
                 MethodInfo { selector: "ok".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("True if this Result holds a success value.\n\n## Examples\n```beamtalk\n(Result ok: 42) ok      // => true\n(Result error: #x) ok   // => false\n```".into()) },
                 MethodInfo { selector: "isError".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("True if this Result holds an error.\n\n## Examples\n```beamtalk\n(Result ok: 42) isError      // => false\n(Result error: #x) isError   // => true\n```".into()) },
-                MethodInfo { selector: "value".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("The success value. Raises if this is an error Result.\n\nPrefer `valueOr:`, `valueOrDo:`, or `ifOk:ifError:` for safe access.\n\n## Examples\n```beamtalk\n(Result ok: 42) value     // => 42\n(Result error: #x) value  // => Exception: Cannot access 'value'...\n```".into()) },
-                MethodInfo { selector: "error".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("The error reason. Raises if this is an ok Result.\n\nPrefer `ifOk:ifError:` or `mapError:` for safe access.\n\n## Examples\n```beamtalk\n(Result error: #x) error  // => #x\n(Result ok: 42) error     // => Exception: Cannot access 'error'...\n```".into()) },
-                MethodInfo { selector: "valueOr:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Object".into()), param_types: vec![None], doc: Some("Unwrap the success value, or return the default if error.\n\n## Examples\n```beamtalk\n(Result ok: 42) valueOr: 0    // => 42\n(Result error: #x) valueOr: 0 // => 0\n```".into()) },
-                MethodInfo { selector: "valueOrDo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Object".into()), param_types: vec![None], doc: Some("Unwrap the success value, or evaluate a block with the error reason.\n\n## Examples\n```beamtalk\n(Result ok: 42) valueOrDo: [:e | 0]       // => 42\n(Result error: #x) valueOrDo: [:e | -1]   // => -1\n```".into()) },
-                MethodInfo { selector: "unwrap".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Unwrap the success value, or raise an exception.\n\nRe-raises the `errReason` directly if it is an Exception (preserving\nclass, message, and hints). For raw values, signals a generic Error.\n\n## Examples\n```beamtalk\n(Result ok: 42) unwrap         // => 42\n(Result error: #x) unwrap      // => Exception: unwrap called on Result error: #x\n```".into()) },
-                MethodInfo { selector: "map:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None], doc: Some("Apply a block to the success value, wrapping result in a new ok Result.\nIf this is an error, returns self unchanged.\n\n## Examples\n```beamtalk\n(Result ok: 42) map: [:v | v + 1]        // => Result ok: 43\n(Result error: #x) map: [:v | v + 1]     // => Result error: #x\n```".into()) },
-                MethodInfo { selector: "andThen:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None], doc: Some("Apply a block that returns a Result. Flattens the nesting.\nIf this is an error, returns self unchanged.\n\n## Examples\n```beamtalk\n(Result ok: 42) andThen: [:v | Result ok: v * 2]   // => Result ok: 84\n(Result error: #x) andThen: [:v | Result ok: v]    // => Result error: #x\n```".into()) },
-                MethodInfo { selector: "mapError:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None], doc: Some("Apply a block to the error reason, wrapping result in a new error Result.\nIf this is ok, returns self unchanged.\n\n## Examples\n```beamtalk\n(Result error: #x) mapError: [:e | \"wrapped: \" ++ e printString]\n  // => Result error: \"wrapped: #x\"\n(Result ok: 42) mapError: [:e | \"oops\"]   // => Result ok: 42\n```".into()) },
-                MethodInfo { selector: "ifError:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Object".into()), param_types: vec![None], doc: Some("Evaluate a block with the error reason if this is an error; return self if ok.\n\nUse at the end of an `andThen:`/`map:` chain as a shared terminal error handler.\nThe error case is handled by the block; the ok case is passed through unchanged.\n\n## Examples\n```beamtalk\n(Result ok: 42) ifError: [:e | 0]             // => Result ok: 42\n(Result error: #oops) ifError: [:e | e]        // => #oops\nchain := (Result ok: 1) andThen: [:v | Result error: #fail].\nchain ifError: [:_ | \"handled\"]                // => \"handled\"\n```".into()) },
-                MethodInfo { selector: "ifOk:ifError:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Object".into()), param_types: vec![None, None], doc: Some("Handle both ok and error cases with blocks.\n\n## Examples\n```beamtalk\n(Result ok: 42) ifOk: [:v | v + 1] ifError: [:e | -1]    // => 43\n(Result error: #x) ifOk: [:v | v] ifError: [:e | 0]      // => 0\n```".into()) },
+                MethodInfo { selector: "value".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("T".into()), param_types: vec![], doc: Some("The success value. Raises if this is an error Result.\n\nPrefer `valueOr:`, `valueOrDo:`, or `ifOk:ifError:` for safe access.\n\n## Examples\n```beamtalk\n(Result ok: 42) value     // => 42\n(Result error: #x) value  // => Exception: Cannot access 'value'...\n```".into()) },
+                MethodInfo { selector: "error".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("E".into()), param_types: vec![], doc: Some("The error reason. Raises if this is an ok Result.\n\nPrefer `ifOk:ifError:` or `mapError:` for safe access.\n\n## Examples\n```beamtalk\n(Result error: #x) error  // => #x\n(Result ok: 42) error     // => Exception: Cannot access 'error'...\n```".into()) },
+                MethodInfo { selector: "valueOr:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("T".into()), param_types: vec![Some("T".into())], doc: Some("Unwrap the success value, or return the default if error.\n\n## Examples\n```beamtalk\n(Result ok: 42) valueOr: 0    // => 42\n(Result error: #x) valueOr: 0 // => 0\n```".into()) },
+                MethodInfo { selector: "valueOrDo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("T".into()), param_types: vec![Some("Block(E, T)".into())], doc: Some("Unwrap the success value, or evaluate a block with the error reason.\n\n## Examples\n```beamtalk\n(Result ok: 42) valueOrDo: [:e | 0]       // => 42\n(Result error: #x) valueOrDo: [:e | -1]   // => -1\n```".into()) },
+                MethodInfo { selector: "unwrap".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("T".into()), param_types: vec![], doc: Some("Unwrap the success value, or raise an exception.\n\nRe-raises the `errReason` directly if it is an Exception (preserving\nclass, message, and hints). For raw values, signals a generic Error.\n\n## Examples\n```beamtalk\n(Result ok: 42) unwrap         // => 42\n(Result error: #x) unwrap      // => Exception: unwrap called on Result error: #x\n```".into()) },
+                MethodInfo { selector: "map:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Result(R, E)".into()), param_types: vec![Some("Block(T, R)".into())], doc: Some("Apply a block to the success value, wrapping result in a new ok Result.\nIf this is an error, returns self unchanged.\n\n## Examples\n```beamtalk\n(Result ok: 42) map: [:v | v + 1]        // => Result ok: 43\n(Result error: #x) map: [:v | v + 1]     // => Result error: #x\n```".into()) },
+                MethodInfo { selector: "andThen:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Result(R, E)".into()), param_types: vec![Some("Block(T, Result(R, E))".into())], doc: Some("Apply a block that returns a Result. Flattens the nesting.\nIf this is an error, returns self unchanged.\n\n## Examples\n```beamtalk\n(Result ok: 42) andThen: [:v | Result ok: v * 2]   // => Result ok: 84\n(Result error: #x) andThen: [:v | Result ok: v]    // => Result error: #x\n```".into()) },
+                MethodInfo { selector: "mapError:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Result(T, F)".into()), param_types: vec![Some("Block(E, F)".into())], doc: Some("Apply a block to the error reason, wrapping result in a new error Result.\nIf this is ok, returns self unchanged.\n\n## Examples\n```beamtalk\n(Result error: #x) mapError: [:e | \"wrapped: \" ++ e printString]\n  // => Result error: \"wrapped: #x\"\n(Result ok: 42) mapError: [:e | \"oops\"]   // => Result ok: 42\n```".into()) },
+                MethodInfo { selector: "ifError:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Block(E, Object)".into())], doc: Some("Evaluate a block with the error reason if this is an error; return self if ok.\n\nUse at the end of an `andThen:`/`map:` chain as a shared terminal error handler.\nThe error case is handled by the block; the ok case is passed through unchanged.\n\n## Examples\n```beamtalk\n(Result ok: 42) ifError: [:e | 0]             // => Result ok: 42\n(Result error: #oops) ifError: [:e | e]        // => #oops\nchain := (Result ok: 1) andThen: [:v | Result error: #fail].\nchain ifError: [:_ | \"handled\"]                // => \"handled\"\n```".into()) },
+                MethodInfo { selector: "ifOk:ifError:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("R".into()), param_types: vec![Some("Block(T, R)".into()), Some("Block(E, R)".into())], doc: Some("Handle both ok and error cases with blocks.\n\n## Examples\n```beamtalk\n(Result ok: 42) ifOk: [:v | v + 1] ifError: [:e | -1]    // => 43\n(Result error: #x) ifOk: [:v | v] ifError: [:e | 0]      // => 0\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable representation: \"Result ok: value\" or \"Result error: reason\".\n\n## Examples\n```beamtalk\n(Result ok: 42) printString       // => \"Result ok: 42\"\n(Result error: #x) printString    // => \"Result error: #x\"\n```".into()) },
-                MethodInfo { selector: "okValue".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Returns the `okValue` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
-                MethodInfo { selector: "withOkValue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("Object".into())], doc: Some("Returns a new `Result` with `okValue` set to the given value.\n\n*(compiler-generated)*".into()) },
-                MethodInfo { selector: "errReason".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Returns the `errReason` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
-                MethodInfo { selector: "withErrReason:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("Object".into())], doc: Some("Returns a new `Result` with `errReason` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "okValue".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("T".into()), param_types: vec![], doc: Some("Returns the `okValue` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withOkValue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("T".into())], doc: Some("Returns a new `Result` with `okValue` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "errReason".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("E".into()), param_types: vec![], doc: Some("Returns the `errReason` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withErrReason:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("E".into())], doc: Some("Returns a new `Result` with `errReason` set to the given value.\n\n*(compiler-generated)*".into()) },
                 MethodInfo { selector: "isOk".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Returns the `isOk` field value. Default: `true`.\n\n*(compiler-generated)*".into()) },
                 MethodInfo { selector: "withIsOk:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("Boolean".into())], doc: Some("Returns a new `Result` with `isOk` set to the given value.\n\n*(compiler-generated)*".into()) },
             ],
@@ -1761,9 +1961,12 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "ok:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None], doc: Some("Create a successful Result wrapping a value (class method).\n\n## Examples\n```beamtalk\nResult ok: 42          // => Result ok: 42\nResult ok: \"hello\"     // => Result ok: \"hello\"\nResult ok: nil         // => Result ok: nil\n```".into()) },
                 MethodInfo { selector: "error:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None], doc: Some("Create a failed Result wrapping an error reason (class method).\n\nThe `reason` should be a structured error (Exception subclass instance or\n`#beamtalk_error{}`). Bare symbols are accepted for convenience but FFI\nwrappers must provide structured errors at public boundaries.\n\n## Examples\n```beamtalk\nResult error: #not_found   // => Result error: #not_found\nResult error: Error new    // => Result error: <Error>\n```\nTo capture a raised exception as a Result, use `Result tryDo: [Error signal: \"oops\"]`.".into()) },
                 MethodInfo { selector: "tryDo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("Block".into())], doc: Some("Evaluate a block and return a Result (class method).\n\nIf the block succeeds, returns `Result ok: value`.\nIf the block raises an exception, returns `Result error: theException`.\nBridges between exception-raising legacy code and Result combinators.\n\n## Examples\n```beamtalk\nResult tryDo: [42]                          // => Result ok: 42\nResult tryDo: [Exception signal: \"oops\"]   // => Result error: <Exception>\nResult tryDo: [(File readAll: \"missing.txt\") unwrap] // => Result error: <Exception>\n```".into()) },
-                MethodInfo { selector: "okValue:errReason:isOk:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("Object".into()), Some("Object".into()), Some("Boolean".into())], doc: Some("Creates a new `Result`. Args: okValue (default: nil), errReason (default: nil), isOk (default: true).\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "okValue:errReason:isOk:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("T".into()), Some("E".into()), Some("Boolean".into())], doc: Some("Creates a new `Result`. Args: okValue (default: nil), errReason (default: nil), isOk (default: true).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec!["T".into(), "E".into()],
+            type_param_bounds: vec![None, None],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1782,6 +1985,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1802,6 +2008,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1820,25 +2029,28 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of elements in the set.\n\n## Examples\n```beamtalk\n(Set new add: 1) size           // => 1\nSet new size                    // => 0\n```".into()) },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Test if the set has no elements.\n\n## Examples\n```beamtalk\nSet new isEmpty                 // => true\n```".into()) },
-                MethodInfo { selector: "includes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test if the set contains the given element.\n\n## Examples\n```beamtalk\n(Set new add: 1) includes: 1   // => true\n(Set new add: 1) includes: 2   // => false\n```".into()) },
-                MethodInfo { selector: "add:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set".into()), param_types: vec![None], doc: Some("Return a new set with the element added.\n\n## Examples\n```beamtalk\n(Set new add: 1) size          // => 1\n```".into()) },
-                MethodInfo { selector: "remove:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set".into()), param_types: vec![None], doc: Some("Return a new set with the element removed.\n\n## Examples\n```beamtalk\n((Set new add: 1) remove: 1) isEmpty   // => true\n```".into()) },
-                MethodInfo { selector: "union:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set".into()), param_types: vec![Some("Set".into())], doc: Some("Return a new set with elements from both sets.\n\n## Examples\n```beamtalk\n(Set new add: 1) union: (Set new add: 2)\n```".into()) },
-                MethodInfo { selector: "intersection:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set".into()), param_types: vec![Some("Set".into())], doc: Some("Return a new set with only elements present in both sets.\n\n## Examples\n```beamtalk\n((Set new add: 1) add: 2) intersection: ((Set new add: 2) add: 3)\n```".into()) },
-                MethodInfo { selector: "difference:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set".into()), param_types: vec![Some("Set".into())], doc: Some("Return a new set with elements in the receiver but not in `other`.\n\n## Examples\n```beamtalk\n((Set new add: 1) add: 2) difference: (Set new add: 2)\n```".into()) },
-                MethodInfo { selector: "isSubsetOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Set".into())], doc: Some("Test if all elements of the receiver are in `other`.\n\n## Examples\n```beamtalk\n(Set new add: 1) isSubsetOf: ((Set new add: 1) add: 2)   // => true\n```".into()) },
+                MethodInfo { selector: "includes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("E".into())], doc: Some("Test if the set contains the given element.\n\n## Examples\n```beamtalk\n(Set new add: 1) includes: 1   // => true\n(Set new add: 1) includes: 2   // => false\n```".into()) },
+                MethodInfo { selector: "add:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set(E)".into()), param_types: vec![Some("E".into())], doc: Some("Return a new set with the element added.\n\n## Examples\n```beamtalk\n(Set new add: 1) size          // => 1\n```".into()) },
+                MethodInfo { selector: "remove:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set(E)".into()), param_types: vec![Some("E".into())], doc: Some("Return a new set with the element removed.\n\n## Examples\n```beamtalk\n((Set new add: 1) remove: 1) isEmpty   // => true\n```".into()) },
+                MethodInfo { selector: "union:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set(E)".into()), param_types: vec![Some("Set(E)".into())], doc: Some("Return a new set with elements from both sets.\n\n## Examples\n```beamtalk\n(Set new add: 1) union: (Set new add: 2)\n```".into()) },
+                MethodInfo { selector: "intersection:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set(E)".into()), param_types: vec![Some("Set(E)".into())], doc: Some("Return a new set with only elements present in both sets.\n\n## Examples\n```beamtalk\n((Set new add: 1) add: 2) intersection: ((Set new add: 2) add: 3)\n```".into()) },
+                MethodInfo { selector: "difference:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set(E)".into()), param_types: vec![Some("Set(E)".into())], doc: Some("Return a new set with elements in the receiver but not in `other`.\n\n## Examples\n```beamtalk\n((Set new add: 1) add: 2) difference: (Set new add: 2)\n```".into()) },
+                MethodInfo { selector: "isSubsetOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Set(E)".into())], doc: Some("Test if all elements of the receiver are in `other`.\n\n## Examples\n```beamtalk\n(Set new add: 1) isSubsetOf: ((Set new add: 1) add: 2)   // => true\n```".into()) },
                 MethodInfo { selector: "asList".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Convert the set to a list of elements.\n\n## Examples\n```beamtalk\n(Set new add: 1) asList        // => #(1)\n```".into()) },
-                MethodInfo { selector: "fromList:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set".into()), param_types: vec![Some("List".into())], doc: Some("Create a set from a list of elements.\n\n## Examples\n```beamtalk\nSet new fromList: #(1, 2, 2, 3)\n```".into()) },
-                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each element, evaluating `block` with each one.\n\n## Examples\n```beamtalk\n(Set new add: 1) do: [:x | Transcript show: x]\n```".into()) },
+                MethodInfo { selector: "fromList:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set(E)".into()), param_types: vec![Some("List".into())], doc: Some("Create a set from a list of elements.\n\n## Examples\n```beamtalk\nSet new fromList: #(1, 2, 2, 3)\n```".into()) },
+                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block(E, Object)".into())], doc: Some("Iterate over each element, evaluating `block` with each one.\n\n## Examples\n```beamtalk\n(Set new add: 1) do: [:x | Transcript show: x]\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\nSet new printString\n```".into()) },
                 MethodInfo { selector: "inspect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Override inspect to use printString rather than the field-based\nformat defined in Value. Sets are primitives, not map-based value objects.".into()) },
                 MethodInfo { selector: "stream".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Stream".into()), param_types: vec![], doc: Some("Return a lazy Stream over the set elements.\n\n## Examples\n```beamtalk\n((Set new add: 1) stream) asList   // => #(1)\n```".into()) },
             ],
             class_methods: vec![
-                MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set".into()), param_types: vec![Some("List".into())], doc: Some("Create a Set from a list, deduplicating elements.\n\nUsed by the species pattern on Collection so that `collect:` and\n`select:` on a Set return a Set.\n\n## Examples\n```beamtalk\nSet class withAll: #(1, 2, 2, 3)  // => a Set with 1, 2, 3\n```".into()) },
-                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set".into()), param_types: vec![Some("List".into())], doc: Some("Create a Set from a list, deduplicating elements. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nSet new: #(1, 2, 2, 3)           // => Set(1, 2, 3)\n```".into()) },
+                MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set(E)".into()), param_types: vec![Some("List".into())], doc: Some("Create a Set from a list, deduplicating elements.\n\nUsed by the species pattern on Collection so that `collect:` and\n`select:` on a Set return a Set.\n\n## Examples\n```beamtalk\nSet class withAll: #(1, 2, 2, 3)  // => a Set with 1, 2, 3\n```".into()) },
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, spawns_block: false, return_type: Some("Set(E)".into()), param_types: vec![Some("List".into())], doc: Some("Create a Set from a list, deduplicating elements. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nSet new: #(1, 2, 2, 3)           // => Set(1, 2, 3)\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec!["E".into()],
+            type_param_bounds: vec![None],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1866,6 +2078,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1902,6 +2117,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "on:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: true, spawns_block: false, return_type: Some("Stream".into()), param_types: vec![None], doc: Some("Create a Stream from a collection (list).\n\n## Examples\n```beamtalk\n(Stream on: #(1, 2, 3)) asList     // => #(1, 2, 3)\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -1909,7 +2127,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "String".into(),
         ClassInfo {
             name: "String".into(),
-            superclass: Some("Collection".into()),
+            superclass: Some("Binary".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: true,
@@ -1986,6 +2204,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "fromIolist:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![None], doc: Some("Convert an Erlang iolist or charlist to a String binary.\n\nUseful for coercing the result of Erlang FFI calls that return\niolists (nested lists of binaries and integers) into a plain String.\n\n## Examples\n```beamtalk\nString fromIolist: #(104, 105)   // => \"hi\"\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2018,6 +2239,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "open:args:env:dir:".into(), arity: 4, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![None, None, None, None], doc: Some("Convenience factory — open a subprocess with command, args, environment, and working directory.\n\n## Examples\n```beamtalk\nagent := (Subprocess open: \"make\" args: #(\"test\") env: #{#\"CI\" => #\"true\"} dir: #\"/tmp\") unwrap\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2054,6 +2278,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "id:actorClass:restart:args:shutdown:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None, None, Some("Symbol".into()), None, None], doc: Some("Creates a new `SupervisionSpec`. Args: id (default: nil), actorClass (default: nil), restart (default: #temporary), args (default: nil), shutdown (default: nil).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2087,6 +2314,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Return the running supervisor instance, or nil if not started.".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2113,6 +2343,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2143,6 +2376,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "uniqueId".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return a unique positive monotonic integer.\n\nEach call returns a value strictly greater than any previous call\nwithin this VM instance. Useful for generating unique IDs.\n\n## Examples\n```beamtalk\nSystem uniqueId\n// => _\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2179,6 +2415,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![None], doc: Some("Run the named test method in this class and print a summary.\n\n## Examples\n```beamtalk\nCounterTest run: #testIncrement\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2207,6 +2446,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2229,6 +2471,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "run:method:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "TestRunner".into(), is_sealed: false, spawns_block: false, return_type: Some("TestResult".into()), param_types: vec![None, None], doc: Some("Run a single named test method in `testClass`.\nReturns a TestResult containing just that method's outcome.\n\n## Examples\n```beamtalk\nresult := TestRunner run: CounterTest method: #testIncrement\nresult hasPassed       // => true\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2247,6 +2492,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2269,6 +2517,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "nowUs".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in microseconds since the Unix epoch.\n\nWraps `erlang:system_time(microsecond)`.\n\n## Examples\n```beamtalk\nTime nowUs   // => _\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2295,6 +2546,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "sleep:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Integer".into())], doc: Some("Block the current process for `ms` milliseconds.\n\n## Examples\n```beamtalk\nTimer sleep: 10    // => nil\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2324,6 +2578,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "resetCurrent".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Clear the current singleton instance (reset to nil).".into()) },
             ],
             class_variables: vec!["current".into()],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2350,6 +2607,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2384,6 +2644,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false, spawns_block: false, return_type: Some("Tuple".into()), param_types: vec![Some("List".into())], doc: Some("Create a Tuple from a list. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nTuple new: #(1, 2, 3)            // => {1, 2, 3}\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2402,6 +2665,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2431,6 +2697,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2454,6 +2723,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Value".into(), is_sealed: true, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Create a new instance with initialization arguments.\n\n## Examples\n```beamtalk\nPoint new: #{#x => 3, #y => 4}\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2491,6 +2763,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("WorkspaceInterface".into())], doc: Some("Set the current singleton instance.".into()) },
             ],
             class_variables: vec!["current".into()],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -2514,6 +2789,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "parseFile:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Yaml".into(), is_sealed: true, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("String".into())], doc: Some("Parse a YAML file into a Beamtalk value (class method).\n\nReads the file at the given path and parses it as YAML.\nReturns the first document from the file.\n\n## Examples\n```beamtalk\n(Yaml parseFile: \"/etc/myapp.yaml\") unwrap   // => _\n```".into()) },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 

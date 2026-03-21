@@ -3,7 +3,7 @@
 
 /// Factory Method Pattern — Circle (concrete product)
 Shape subclass: Circle
-  state: radius = 1.0
+  field: radius = 1.0
 
   /// Create a circle with the given radius.
   class withRadius: r => self new: #{#radius => r}

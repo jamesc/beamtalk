@@ -73,7 +73,6 @@ TestCase subclass: ReactiveSubprocessTest
     self waitForExit: delegate from: proc
     self assert: delegate stdoutLines equals: #("alpha", "beta", "gamma")
     self assert: delegate stop equals: #ok
-    @expect type
     self assert: proc stop equals: #ok
 
   testStderrLinesPushedToNotify =>
@@ -86,7 +85,6 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: delegate stderrLines equals: #("x", "y", "z")
     self assert: delegate stdoutLines equals: #()
     self assert: delegate stop equals: #ok
-    @expect type
     self assert: proc stop equals: #ok
 
   testExitCodePushedToNotify =>
@@ -98,7 +96,6 @@ TestCase subclass: ReactiveSubprocessTest
     self waitForExit: delegate from: proc
     self assert: delegate exitCode equals: 0
     self assert: delegate stop equals: #ok
-    @expect type
     self assert: proc stop equals: #ok
 
   testPartialLineFlushedOnExit =>
@@ -110,7 +107,6 @@ TestCase subclass: ReactiveSubprocessTest
     self waitForExit: delegate from: proc
     self assert: delegate stdoutLines equals: #("hello")
     self assert: delegate stop equals: #ok
-    @expect type
     self assert: proc stop equals: #ok
 
   testStdoutAndStderrIndependent =>
@@ -123,7 +119,6 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: delegate stdoutLines equals: #("out")
     self assert: delegate stderrLines equals: #("err")
     self assert: delegate stop equals: #ok
-    @expect type
     self assert: proc stop equals: #ok
 
   testWriteLineDeliversThroughCat =>
@@ -132,17 +127,14 @@ TestCase subclass: ReactiveSubprocessTest
       open: self catExe
       args: self catArgs
       notify: delegate) unwrap
-    @expect type
     proc writeLine: "hello"
     // Poll up to 500 ms (50 × 10 ms) for cat to echo back
     50 timesRepeat: [
       (delegate stdoutLines includes: "hello") ifFalse: [Timer sleep: 10]
     ]
     self assert: (delegate stdoutLines includes: "hello")
-    @expect type
     proc close
     self assert: delegate stop equals: #ok
-    @expect type
     self assert: proc stop equals: #ok
 
   testExitCodeNilWhileRunning =>
@@ -151,12 +143,9 @@ TestCase subclass: ReactiveSubprocessTest
       open: self sleepExe
       args: self sleepArgs
       notify: delegate) unwrap
-    @expect type
     self assert: proc exitCode equals: nil
-    @expect type
     proc close
     self assert: delegate stop equals: #ok
-    @expect type
     self assert: proc stop equals: #ok
 
   testCloseIsIdempotent =>
@@ -165,12 +154,9 @@ TestCase subclass: ReactiveSubprocessTest
       open: self sleepExe
       args: self sleepArgs
       notify: delegate) unwrap
-    @expect type
     self assert: proc close equals: nil
-    @expect type
     self assert: proc close equals: nil
     self assert: delegate stop equals: #ok
-    @expect type
     self assert: proc stop equals: #ok
 
   testOpenWithEnvAndDir =>
@@ -190,7 +176,6 @@ TestCase subclass: ReactiveSubprocessTest
       line includesSubstring: dir
     ])
     self assert: delegate stop equals: #ok
-    @expect type
     self assert: proc stop equals: #ok
 
   // Helper: poll up to 50 times (10ms each) for delegate exitReceived.

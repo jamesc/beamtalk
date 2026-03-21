@@ -32,8 +32,9 @@ use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair, MapPatternKey,
-    MatchArm, MessageSelector, MethodDefinition, Module, Pattern, StandaloneMethodDefinition,
-    StateDeclaration, StringSegment, TypeAnnotation,
+    MatchArm, MessageSelector, MethodDefinition, Module, Pattern, ProtocolDefinition,
+    ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration, StringSegment,
+    TypeAnnotation,
 };
 use crate::codegen::core_erlang::document::{Document, break_, concat, group, line, nest, nil};
 use crate::docvec;
@@ -159,6 +160,12 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         docs.push(line());
     }
 
+    // ADR 0068 Phase 2a: Protocol definitions
+    for protocol in &module.protocols {
+        docs.push(unparse_protocol_definition(protocol));
+        docs.push(line());
+    }
+
     // Classes
     for class in &module.classes {
         docs.push(unparse_class_definition(class));
@@ -200,6 +207,7 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
 /// Emits non-doc comments, then the optional doc comment, then the class header,
 /// state declarations, and methods.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -240,11 +248,58 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         modifiers.push(Document::Str("typed "));
     }
 
+    let class_name_doc = if class.type_params.is_empty() {
+        Document::String(class.name.name.to_string())
+    } else {
+        let params: Vec<Document<'static>> = class
+            .type_params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let param_doc = if let Some(ref bound) = p.bound {
+                    docvec![
+                        Document::String(p.name.name.to_string()),
+                        " :: ",
+                        Document::String(bound.name.to_string())
+                    ]
+                } else {
+                    Document::String(p.name.name.to_string())
+                };
+                if i == 0 {
+                    param_doc
+                } else {
+                    docvec![", ", param_doc]
+                }
+            })
+            .collect();
+        docvec![
+            Document::String(class.name.name.to_string()),
+            "(",
+            concat(params),
+            ")"
+        ]
+    };
+
+    // Emit superclass type args: `Collection(E)` or `Collection(Integer)`
+    let superclass_with_type_args = if class.superclass_type_args.is_empty() {
+        Document::String(superclass)
+    } else {
+        let mut parts = vec![Document::String(superclass), Document::Str("(")];
+        for (i, ta) in class.superclass_type_args.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(Document::String(ta.type_name().to_string()));
+        }
+        parts.push(Document::Str(")"));
+        concat(parts)
+    };
+
     let class_header = docvec![
         concat(modifiers),
-        Document::String(superclass),
+        superclass_with_type_args,
         " subclass: ",
-        Document::String(class.name.name.to_string()),
+        class_name_doc,
     ];
 
     let header = if let Some(module) = &class.backing_module {
@@ -334,6 +389,124 @@ pub(crate) fn unparse_standalone_method_definition(
         Document::Str(" >> ")
     };
     docvec![class, separator, unparse_method_definition(&smd.method)]
+}
+
+/// Builds a [`Document`] for a [`ProtocolDefinition`] (ADR 0068 Phase 2a).
+///
+/// Emits the protocol header (`Protocol define: Name`) followed by
+/// optional type parameters, `extending:` clause, and method signatures.
+#[must_use]
+fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+
+    // Non-doc leading comments
+    docs.extend(unparse_comment_attachment_leading(&protocol.comments));
+
+    // Doc comment
+    if let Some(doc) = &protocol.doc_comment {
+        for line_text in doc.lines() {
+            if line_text.is_empty() {
+                docs.push(Document::Str("///"));
+            } else {
+                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            }
+            docs.push(line());
+        }
+    }
+
+    // Protocol header: `Protocol define: Name`
+    let mut header: Vec<Document<'static>> = vec![
+        Document::Str("Protocol define: "),
+        Document::String(protocol.name.name.to_string()),
+    ];
+
+    // Type parameters: `(E)`, `(K, V)`
+    if !protocol.type_params.is_empty() {
+        header.push(Document::Str("("));
+        for (i, tp) in protocol.type_params.iter().enumerate() {
+            if i > 0 {
+                header.push(Document::Str(", "));
+            }
+            header.push(Document::String(tp.name.name.to_string()));
+        }
+        header.push(Document::Str(")"));
+    }
+
+    docs.push(Document::Vec(header));
+
+    // `extending: ParentProtocol`
+    if let Some(ext) = &protocol.extending {
+        docs.push(line());
+        docs.push(docvec![
+            "  extending: ",
+            Document::String(ext.name.to_string())
+        ]);
+    }
+
+    // Method signatures (indented by 2 spaces)
+    for sig in &protocol.method_signatures {
+        docs.push(line());
+        docs.push(Document::Str("  "));
+        docs.push(unparse_protocol_method_signature(sig));
+    }
+
+    concat(docs)
+}
+
+/// Builds a [`Document`] for a [`ProtocolMethodSignature`].
+///
+/// Protocol method signatures look like method definitions without `=>` and body:
+/// `asString -> String`, `do: block :: Block(E, Object)`
+fn unparse_protocol_method_signature(sig: &ProtocolMethodSignature) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+
+    // Doc comment
+    if let Some(doc) = &sig.doc_comment {
+        for line_text in doc.lines() {
+            if line_text.is_empty() {
+                docs.push(Document::Str("///"));
+            } else {
+                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            }
+            docs.push(line());
+        }
+    }
+
+    // Selector and parameters
+    match &sig.selector {
+        MessageSelector::Unary(name) => {
+            docs.push(Document::String(name.to_string()));
+        }
+        MessageSelector::Binary(op) => {
+            docs.push(Document::String(op.to_string()));
+            if let Some(param) = sig.parameters.first() {
+                docs.push(Document::Str(" "));
+                docs.push(Document::String(param.name.name.to_string()));
+                docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
+            }
+        }
+        MessageSelector::Keyword(parts) => {
+            for (i, part) in parts.iter().enumerate() {
+                if i > 0 {
+                    docs.push(Document::Str(" "));
+                }
+                docs.push(Document::String(part.keyword.to_string()));
+                if let Some(param) = sig.parameters.get(i) {
+                    docs.push(Document::Str(" "));
+                    docs.push(Document::String(param.name.name.to_string()));
+                    docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
+                }
+            }
+        }
+    }
+
+    // Return type
+    if let Some(ref ret) = sig.return_type {
+        docs.push(Document::Str(" -> "));
+        docs.push(unparse_type_annotation(ret));
+    }
+
+    concat(docs)
 }
 
 /// Builds a [`Document`] for a [`MethodDefinition`].
@@ -1338,7 +1511,7 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
             let param_docs: Vec<Document<'static>> =
                 parameters.iter().map(unparse_type_annotation).collect();
             let joined = join_docs(param_docs, ", ");
-            docvec![Document::String(base.name.to_string()), "<", joined, ">"]
+            docvec![Document::String(base.name.to_string()), "(", joined, ")"]
         }
         TypeAnnotation::FalseOr { inner, .. } => {
             docvec![unparse_type_annotation(inner), " | False"]

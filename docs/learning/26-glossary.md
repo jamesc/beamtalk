@@ -56,10 +56,11 @@ principles for building fault-tolerant systems. Beamtalk actors map directly to
 OTP gen_servers, and supervisors use OTP supervision trees. See
 [Chapter 17](17-otp-supervisors.md).
 
-**Slot** — An instance variable of a class, declared with `state: name = default`.
-In value classes, slots are immutable (updates return a new object via `with*:`
-setters). In actors, slots are mutable with `self.name := value`. See
-[Chapter 10](10-value-classes.md) and [Chapter 11](11-actors.md).
+**Slot** — An instance variable of a class. Value classes declare slots with
+`field: name = default` (immutable — updates return a new object via `with*:`
+setters). Actors declare slots with `state: name = default` (mutable with
+`self.name := value`). See [Chapter 10](10-value-classes.md) and
+[Chapter 11](11-actors.md).
 
 **Unary message** — A message with no arguments, written as `receiver selector`.
 Examples: `42 class`, `"hello" size`, `-5 abs`. Unary messages have the highest

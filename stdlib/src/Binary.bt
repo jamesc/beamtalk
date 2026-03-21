@@ -1,21 +1,26 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// Binary — serialization and byte-level operations.
+/// Binary — byte-level data and serialization.
 ///
-/// Provides class methods for serializing Beamtalk values to binary
-/// format and deserializing them back, as well as byte-size queries
-/// and iolist flattening.
+/// Binary is a Collection of bytes. Each element is an Integer (0-255).
+/// String is a subclass of Binary that adds grapheme-aware text operations.
+///
+/// ## BEAM Mapping
+/// Beamtalk binaries map directly to Erlang binaries (`binary()`).
 ///
 /// ## Examples
 /// ```beamtalk
 /// bin := Binary serialize: 42
 /// Binary deserialize: bin             // => 42
-/// Binary size: "hello"               // => 5
 /// Binary fromIolist: #("hello", " ", "world")
 /// // => _
 /// ```
-sealed Object subclass: Binary
+sealed typed Collection subclass: Binary
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Class methods
+  // ═══════════════════════════════════════════════════════════════════
 
   /// Serialize any value to a binary (class method).
   ///
@@ -42,16 +47,6 @@ sealed Object subclass: Binary
   class sealed deserialize: binary :: Object -> Object =>
     (Erlang beamtalk_binary) deserialize: binary
 
-  /// Return the byte size of a binary (class method).
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Binary size: "hello"   // => 5
-  /// Binary size: ""        // => 0
-  /// ```
-  class sealed size: binary :: Object -> Integer =>
-    (Erlang beamtalk_binary) size: binary
-
   /// Convert an iolist to a flat binary (class method).
   ///
   /// An iolist is a (possibly nested) list of binaries and integers
@@ -64,3 +59,136 @@ sealed Object subclass: Binary
   /// ```
   class sealed fromIolist: iolist :: Object -> Binary =>
     (Erlang beamtalk_binary) fromIolist: iolist
+
+  /// Create a binary from a list of byte integers (0-255).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Binary fromBytes: #(104, 101, 108, 108, 111)   // => _
+  /// ```
+  class sealed fromBytes: bytes :: List -> Binary =>
+    (Erlang beamtalk_binary) fromBytes: bytes
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Collection subclass-responsibility methods
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Return the byte count of this binary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary serialize: 42) size   // => _
+  /// ```
+  size -> Integer => @primitive "size"
+
+  /// Iterate over each byte (Integer 0-255), evaluating `block` with each one.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101)) do: [:b | Transcript show: b]
+  /// ```
+  do: block :: Block -> Nil => @primitive "do:"
+
+  /// Return a developer-readable string representation.
+  ///
+  /// Displays hex representation for non-UTF-8 binaries, or quoted string
+  /// for valid UTF-8 binaries.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101)) printString   // => _
+  /// ```
+  printString -> String => @primitive "printString"
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Byte-level access
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Return the byte value (0-255) at the given 1-based index.
+  ///
+  /// Raises `index_out_of_bounds` if the index is out of range.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101, 108)) at: 1   // => 104
+  /// ```
+  at: index :: Integer -> Integer => @primitive "at:"
+
+  /// Return the byte value (0-255) at the given 0-based offset.
+  ///
+  /// Uses 0-based indexing to match Erlang's `binary:at/2`.
+  /// Raises `index_out_of_bounds` if the offset is out of range.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101, 108)) byteAt: 0   // => 104
+  /// ```
+  byteAt: offset :: Integer -> Integer => @primitive "byteAt:"
+
+  /// Return the byte count of this binary.
+  ///
+  /// Alias for `size` on Binary. On String, provides unambiguous byte count
+  /// (since String overrides `size` with grapheme count).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101, 108)) byteSize   // => 3
+  /// ```
+  byteSize -> Integer => @primitive "byteSize"
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Slicing and concatenation
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Return a zero-copy slice of this binary.
+  ///
+  /// Takes a 0-based offset and length. Raises `index_out_of_bounds`
+  /// if the range is invalid.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(1, 2, 3, 4, 5)) part: 1 size: 3   // => _
+  /// ```
+  part: offset :: Integer size: length :: Integer -> Binary =>
+    @primitive "part:size:"
+
+  /// Concatenate this binary with another binary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(1, 2)) concat: (Binary fromBytes: #(3, 4))   // => _
+  /// ```
+  concat: other :: Binary -> Binary => @primitive "concat:"
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Conversion
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Convert this binary to a list of byte integers (0-255).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101)) toBytes   // => #(104, 101)
+  /// ```
+  toBytes -> List => @primitive "toBytes"
+
+  /// Validate UTF-8 and return the binary as a String.
+  ///
+  /// Returns a Result: success gives a String, failure gives an error
+  /// with the byte offset of the invalid sequence.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asString   // => _
+  /// ```
+  asString -> Object => @primitive "asString"
+
+  /// Return this binary as a String without UTF-8 validation.
+  ///
+  /// Use when you trust the source data is valid UTF-8.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked   // => "hello"
+  /// ```
+  asStringUnchecked -> String => @primitive "asStringUnchecked"

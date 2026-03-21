@@ -71,6 +71,32 @@ impl MethodInfo {
     }
 }
 
+/// How a subclass maps one of its type parameters (or a concrete type) to a
+/// superclass type parameter position.
+///
+/// Used in `ClassInfo::superclass_type_args` to track the mapping established by
+/// `Collection(E) subclass: Array(E)` or `Collection(Integer) subclass: IntArray`.
+///
+/// **References:** ADR 0068 Challenge 4
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SuperclassTypeArg {
+    /// The subclass forwards one of its own type params to the superclass.
+    ///
+    /// Example: `Collection(E) subclass: Array(E)` — Array's `E` (at `param_index` 0)
+    /// maps to Collection's position 0.
+    ParamRef {
+        /// Index into this class's `type_params` vec.
+        param_index: usize,
+    },
+    /// A concrete (fixed) type is supplied to the superclass.
+    ///
+    /// Example: `Collection(Integer) subclass: IntArray` — `Integer` is fixed.
+    Concrete {
+        /// The concrete type name (e.g., "Integer").
+        type_name: EcoString,
+    },
+}
+
 /// Information about a class in the hierarchy.
 ///
 /// **DDD Context:** Semantic Analysis — Value Object
@@ -110,6 +136,25 @@ pub struct ClassInfo {
     pub class_methods: Vec<MethodInfo>,
     /// Class variable names (declared with `classState:`).
     pub class_variables: Vec<EcoString>,
+    /// Type parameters for generic classes (e.g., `["T", "E"]` for `Result(T, E)`).
+    ///
+    /// Empty for non-generic classes.
+    pub type_params: Vec<EcoString>,
+    /// Protocol bounds for each type parameter (ADR 0068 Phase 2d).
+    ///
+    /// Parallel to `type_params`: `type_param_bounds[i]` is the bound for `type_params[i]`.
+    /// `None` means the parameter is unbounded (accepts any type).
+    /// `Some("Printable")` means the concrete type arg must conform to that protocol.
+    pub type_param_bounds: Vec<Option<EcoString>>,
+    /// How this class's type params (or concrete types) map to the superclass's type params.
+    ///
+    /// Empty when the superclass is not generic or no type args are applied.
+    ///
+    /// Example: `Collection(E) subclass: Array(E)` → `[ParamRef { param_index: 0 }]`
+    /// Example: `Collection(Integer) subclass: IntArray` → `[Concrete { type_name: "Integer" }]`
+    ///
+    /// **References:** ADR 0068 Challenge 4
+    pub superclass_type_args: Vec<SuperclassTypeArg>,
 }
 
 impl ClassInfo {
@@ -199,6 +244,35 @@ impl ClassInfo {
                 .iter()
                 .map(|cv| cv.name.name.clone())
                 .collect(),
+            type_params: class
+                .type_params
+                .iter()
+                .map(|tp| tp.name.name.clone())
+                .collect(),
+            type_param_bounds: class
+                .type_params
+                .iter()
+                .map(|tp| tp.bound.as_ref().map(|b| b.name.clone()))
+                .collect(),
+            superclass_type_args: {
+                let own_params: Vec<EcoString> = class
+                    .type_params
+                    .iter()
+                    .map(|tp| tp.name.name.clone())
+                    .collect();
+                class
+                    .superclass_type_args
+                    .iter()
+                    .map(|ta| {
+                        let name = ta.type_name();
+                        if let Some(idx) = own_params.iter().position(|p| p == &name) {
+                            SuperclassTypeArg::ParamRef { param_index: idx }
+                        } else {
+                            SuperclassTypeArg::Concrete { type_name: name }
+                        }
+                    })
+                    .collect()
+            },
         }
     }
 }
@@ -337,6 +411,9 @@ impl ClassHierarchy {
                         methods: Vec::new(),
                         class_methods: Vec::new(),
                         class_variables: Vec::new(),
+                        type_params: Vec::new(),
+                        type_param_bounds: Vec::new(),
+                        superclass_type_args: Vec::new(),
                     },
                 );
             }
@@ -594,6 +671,36 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Value")
     }
 
+    /// Returns true if the named generic class has covariant type parameters (ADR 0068 Phase 2f).
+    ///
+    /// A class is covariant in its type parameters when:
+    /// - It is a sealed Value subclass (immutable, no state mutation)
+    /// - It has type parameters
+    ///
+    /// Actor classes are always invariant because their state fields can be mutated,
+    /// which would break soundness if covariance were allowed.
+    ///
+    /// Non-sealed classes are treated as invariant (conservative) because subclasses
+    /// could add mutating methods on the type parameter.
+    ///
+    /// **References:** ADR 0068 Phase 2f
+    #[must_use]
+    pub fn is_covariant_class(&self, class_name: &str) -> bool {
+        let Some(class_info) = self.get_class(class_name) else {
+            return false;
+        };
+        // Must have type params to be relevant
+        if class_info.type_params.is_empty() {
+            return false;
+        }
+        // Actors are invariant — state mutation breaks covariance
+        if self.is_actor_subclass(class_name) {
+            return false;
+        }
+        // Sealed Value subclasses are covariant (immutable)
+        class_info.is_sealed && self.is_value_subclass(class_name)
+    }
+
     /// Returns true if the named class is `TestCase` or a subclass of `TestCase` (BT-1533).
     ///
     /// `TestCase` is a Value subclass with assertion methods that intentionally
@@ -646,7 +753,7 @@ impl ClassHierarchy {
     /// from Value (e.g. `Value subclass: MyBase` then `MyBase subclass: MyChild`)
     /// get their `is_value` flag corrected and their auto-slot methods
     /// synthesized.
-    fn propagate_class_kind(&mut self, module: &Module) {
+    pub(crate) fn propagate_class_kind(&mut self, module: &Module) {
         // Collect names of classes that need is_value = true but don't have it yet.
         let classes_to_fix: Vec<EcoString> = module
             .classes
@@ -671,6 +778,175 @@ impl ClassHierarchy {
                 if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
                     Self::add_value_auto_methods(class, &mut info.methods, &mut info.class_methods);
                 }
+            }
+        }
+    }
+
+    /// BT-1559: Re-propagate `is_value` for ALL classes in the hierarchy,
+    /// including cross-file classes injected via `add_from_beam_meta`.
+    ///
+    /// Unlike `propagate_class_kind` which only processes the current module's
+    /// AST classes, this method uses the already-stored `ClassInfo::state` to
+    /// synthesize auto-slot methods for newly-discovered Value subclasses.
+    pub(crate) fn propagate_cross_file_class_kind(&mut self) {
+        // Pass 1: Collect all classes that need is_value fixup.
+        let classes_to_fix: Vec<EcoString> = self
+            .classes
+            .iter()
+            .filter(|(_, info)| {
+                !info.is_value && self.ancestors_include_value(info.superclass.as_ref())
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        if classes_to_fix.is_empty() {
+            return;
+        }
+
+        // Pass 2: Set is_value flag.
+        for class_name in &classes_to_fix {
+            if let Some(info) = self.classes.get_mut(class_name.as_str()) {
+                info.is_value = true;
+            }
+        }
+
+        // Pass 3: Synthesize auto-slot methods from stored state fields.
+        // We don't have the AST, so we build synthetic slot info from ClassInfo.
+        for class_name in &classes_to_fix {
+            // Extract state and existing selectors without holding a mutable borrow.
+            let slot_data: Option<Vec<(EcoString, Option<EcoString>)>> =
+                self.classes.get(class_name.as_str()).map(|info| {
+                    info.state
+                        .iter()
+                        .map(|s| {
+                            let ty = info.state_types.get(s).cloned();
+                            (s.clone(), ty)
+                        })
+                        .collect()
+                });
+            let existing_instance: Option<HashSet<EcoString>> = self
+                .classes
+                .get(class_name.as_str())
+                .map(|info| info.methods.iter().map(|m| m.selector.clone()).collect());
+            let existing_class: Option<HashSet<EcoString>> =
+                self.classes.get(class_name.as_str()).map(|info| {
+                    info.class_methods
+                        .iter()
+                        .map(|m| m.selector.clone())
+                        .collect()
+                });
+
+            if let (Some(slots), Some(inst_sels), Some(cls_sels)) =
+                (slot_data, existing_instance, existing_class)
+            {
+                let info = self.classes.get_mut(class_name.as_str()).unwrap();
+                Self::synthesize_auto_methods_from_state(
+                    class_name,
+                    &slots,
+                    &inst_sels,
+                    &cls_sels,
+                    &mut info.methods,
+                    &mut info.class_methods,
+                );
+            }
+        }
+    }
+
+    /// Check if the superclass chain includes Value.
+    fn ancestors_include_value(&self, superclass: Option<&EcoString>) -> bool {
+        let mut current = superclass.map(ToString::to_string);
+        let mut visited = HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if name == "Value" {
+                return true;
+            }
+            current = self
+                .classes
+                .get(name.as_str())
+                .and_then(|info| info.superclass.as_ref().map(ToString::to_string));
+        }
+        false
+    }
+
+    /// Synthesize auto-generated slot methods from `ClassInfo` state fields.
+    ///
+    /// This is the `ClassInfo`-only equivalent of `add_value_auto_methods` which
+    /// works from the AST `ClassDefinition`.
+    fn synthesize_auto_methods_from_state(
+        class_name: &EcoString,
+        slots: &[(EcoString, Option<EcoString>)],
+        existing_instance_selectors: &HashSet<EcoString>,
+        existing_class_selectors: &HashSet<EcoString>,
+        instance_methods: &mut Vec<MethodInfo>,
+        class_methods: &mut Vec<MethodInfo>,
+    ) {
+        for (slot_name, slot_type) in slots {
+            // Auto-getter
+            if !existing_instance_selectors.contains(slot_name) {
+                instance_methods.push(MethodInfo {
+                    selector: slot_name.clone(),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: class_name.clone(),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: slot_type.clone(),
+                    param_types: vec![],
+                    doc: Some(EcoString::from("*(compiler-generated)*")),
+                });
+            }
+
+            // Auto with*: setter
+            let with_sel = {
+                let mut chars = slot_name.chars();
+                match chars.next() {
+                    None => EcoString::from("with:"),
+                    Some(first) => {
+                        let cap: String = first.to_uppercase().collect();
+                        EcoString::from(format!("with{}{}:", cap, chars.as_str()))
+                    }
+                }
+            };
+            if !existing_instance_selectors.contains(&with_sel) {
+                instance_methods.push(MethodInfo {
+                    selector: with_sel,
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: class_name.clone(),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(class_name.clone()),
+                    param_types: vec![None],
+                    doc: Some(EcoString::from("*(compiler-generated)*")),
+                });
+            }
+        }
+
+        // Keyword constructor (class method)
+        if !slots.is_empty() {
+            let kw_sel: EcoString = {
+                let mut s = String::new();
+                for (name, _) in slots {
+                    s.push_str(name);
+                    s.push(':');
+                }
+                EcoString::from(s)
+            };
+            if !existing_class_selectors.contains(&kw_sel) {
+                class_methods.push(MethodInfo {
+                    selector: kw_sel,
+                    arity: slots.len(),
+                    kind: MethodKind::Primary,
+                    defined_in: class_name.clone(),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(class_name.clone()),
+                    param_types: vec![None; slots.len()],
+                    doc: Some(EcoString::from("*(compiler-generated)*")),
+                });
             }
         }
     }
@@ -1807,6 +2083,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("CondimentDecorator", "Beverage")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1871,6 +2148,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1883,6 +2162,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1905,6 +2185,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1928,6 +2209,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1957,6 +2239,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("MyInt", "Integer")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1977,6 +2260,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("MyString", "String")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1992,6 +2276,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("MyActor", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2011,6 +2296,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Character", "Integer")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2031,6 +2317,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Character", "Integer")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2051,6 +2338,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("MyCustomClass", "Integer")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2150,6 +2438,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2185,6 +2475,8 @@ mod tests {
                 span: test_span(),
             }],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2201,6 +2493,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2226,6 +2519,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2245,6 +2539,7 @@ mod tests {
         let module = Module {
             classes: vec![grandparent, parent, grandchild],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2268,6 +2563,7 @@ mod tests {
         let module = Module {
             classes: vec![child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2291,6 +2587,7 @@ mod tests {
         let module = Module {
             classes: vec![child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2314,6 +2611,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2358,6 +2656,9 @@ mod tests {
                 methods: vec![builtin_method("methodA", 0, "A")],
                 class_methods: vec![],
                 class_variables: vec![],
+                type_params: vec![],
+                type_param_bounds: vec![],
+                superclass_type_args: vec![],
             },
         );
         h.classes.insert(
@@ -2375,6 +2676,9 @@ mod tests {
                 methods: vec![builtin_method("methodB", 0, "B")],
                 class_methods: vec![],
                 class_variables: vec![],
+                type_params: vec![],
+                type_param_bounds: vec![],
+                superclass_type_args: vec![],
             },
         );
 
@@ -2413,6 +2717,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2440,6 +2746,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2449,6 +2757,7 @@ mod tests {
         let module = Module {
             classes: vec![base, derived],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2476,6 +2785,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Orphan", "NonExistent")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2534,6 +2844,8 @@ mod tests {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2543,6 +2855,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2595,6 +2908,8 @@ mod tests {
                 },
             ],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2604,6 +2919,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2653,6 +2969,8 @@ mod tests {
             ],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2662,6 +2980,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2682,6 +3001,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2705,6 +3025,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2731,6 +3052,7 @@ mod tests {
         let module = Module {
             classes: vec![child, parent],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2754,6 +3076,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2814,6 +3137,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
@@ -2827,6 +3152,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2865,6 +3191,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
@@ -2878,6 +3206,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2913,6 +3242,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2925,6 +3256,7 @@ mod tests {
         let module = Module {
             classes: vec![make_typed_state_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2944,6 +3276,7 @@ mod tests {
         let module = Module {
             classes: vec![make_typed_state_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2958,6 +3291,7 @@ mod tests {
         let module = Module {
             classes: vec![make_typed_state_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2992,6 +3326,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3001,6 +3337,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3052,6 +3389,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3061,6 +3400,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3224,6 +3564,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3257,6 +3599,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3265,6 +3609,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3326,6 +3671,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3334,6 +3681,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3415,6 +3763,8 @@ mod tests {
             )],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3423,6 +3773,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3449,6 +3800,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3492,6 +3844,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3522,6 +3876,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3531,6 +3887,7 @@ mod tests {
         let module = Module {
             classes: vec![sealed_base, override_class],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3591,6 +3948,9 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![info]);
         assert!(h.has_class("Counter"));
@@ -3627,6 +3987,9 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         };
         h.classes.insert(EcoString::from("Counter"), ast_info);
 
@@ -3654,6 +4017,9 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![cache_info]);
 
@@ -3680,6 +4046,9 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![stub]);
         // Built-in should be unchanged
@@ -3994,6 +4363,7 @@ mod tests {
                 make_user_class("MyValueChild", "MyValueBase"),
             ],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4030,6 +4400,7 @@ mod tests {
                 make_user_class("MyValueChild", "MyValueBase"),
             ],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4069,6 +4440,7 @@ mod tests {
                 make_user_class("MyTest", "TestCase"),
             ],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4093,6 +4465,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("WebApp", "Supervisor")],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4121,6 +4494,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("MyChild", "MyValueBase")],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4180,5 +4554,91 @@ mod tests {
             child_info.is_value,
             "MyValueChild (indirect Value subclass) should have is_value = true via external superclasses"
         );
+    }
+
+    /// BT-1559: Cross-file Value sub-subclass should find `new:` via hierarchy walk
+    /// and `propagate_cross_file_class_kind` should synthesize auto-slot methods.
+    ///
+    /// Simulates: file1 has `Value subclass: Base`, file2 has `Base subclass: Child`.
+    /// When Child's file is compiled, Base is injected via `add_from_beam_meta`.
+    #[test]
+    fn cross_file_value_sub_subclass_finds_new() {
+        // Build hierarchy from a module containing only Child (extends Base)
+        // Give Child a field so auto-slot methods can be verified.
+        let mut child_class = make_user_class("Child", "Base");
+        child_class.state.push(crate::ast::StateDeclaration {
+            name: crate::ast::Identifier {
+                name: EcoString::from("count"),
+                span: test_span(),
+            },
+            default_value: None,
+            type_annotation: None,
+            declared_keyword: crate::ast::DeclaredKeyword::Field,
+            comments: crate::ast::CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        });
+        let module = Module {
+            classes: vec![child_class],
+            method_definitions: vec![],
+            protocols: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+
+        // Inject cross-file Base class (from another file: Value subclass: Base)
+        let base_info = ClassInfo {
+            name: EcoString::from("Base"),
+            superclass: Some(EcoString::from("Value")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec![EcoString::from("x")],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        };
+        h.add_from_beam_meta(vec![base_info]);
+
+        // Before propagation, Child should NOT be marked as Value
+        let child_before = h.get_class("Child").unwrap();
+        assert!(
+            !child_before.is_value,
+            "Child should not be is_value before propagation"
+        );
+
+        // Run cross-file propagation
+        h.propagate_cross_file_class_kind();
+
+        // After propagation, Child should be marked as Value with auto-slot methods
+        let child = h.get_class("Child").unwrap();
+        assert!(child.is_value, "Child should be is_value after propagation");
+        assert!(
+            child.methods.iter().any(|m| m.selector == "count"),
+            "Child should have auto-generated 'count' getter"
+        );
+        assert!(
+            child.methods.iter().any(|m| m.selector == "withCount:"),
+            "Child should have auto-generated 'withCount:' setter"
+        );
+
+        // find_class_method should walk: Child → Base → Value and find new:
+        let result = h.find_class_method("Child", "new:");
+        assert!(
+            result.is_some(),
+            "find_class_method('Child', 'new:') should find new: on Value via Base"
+        );
+        assert_eq!(result.unwrap().defined_in.as_str(), "Value");
     }
 }

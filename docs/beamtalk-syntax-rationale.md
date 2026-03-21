@@ -1,6 +1,6 @@
 # Beamtalk Syntax Rationale
 
-**Status:** Complete - Syntax design decisions finalized
+**Status:** Complete — Syntax design decisions finalized. Updated 2026-03-20 to reflect ADR 0041 (universal block mutations), ADR 0036 (metaclass tower), ADR 0059 (supervision), and REPL inline class support.
 
 > **tl;dr** — Beamtalk is Smalltalk-**like**, not Smalltalk-**compatible**. We use Smalltalk's message-passing syntax with modern pragmatic improvements: `//` comments, standard math precedence, optional statement terminators, field access, and string interpolation. This makes Beamtalk familiar to Smalltalkers while removing friction for modern developers.
 
@@ -129,7 +129,7 @@ count := 0  // inline comment
 
 **Note:** `&&`, `||`, `and`, `or` are **not** binary operators - they are keyword messages that take blocks for short-circuit evaluation:
 ```
-result := condition and: [expensiveCheck()]  // block only evaluated if condition is true
+result := condition and: [self expensiveCheck]  // block only evaluated if condition is true
 ```
 
 ### Statement Terminator: Required `.` → Optional (Newlines Work)
@@ -276,35 +276,30 @@ count := 0.
 
 **Why change:**
 
-1. **Smalltalk idioms require it** - `whileTrue:`, `timesRepeat:`, `do:` are central to Smalltalk style
-2. **BEAM enables it** - We compile to tail-recursive loops with state threading
-3. **Clear boundary** - Only literal blocks in control flow can mutate; stored closures cannot
+1. **Smalltalk idioms require it** — `whileTrue:`, `timesRepeat:`, `do:` are central to Smalltalk style
+2. **BEAM enables it** — We compile to tail-recursive loops with state threading
+3. **Universal composability** — User-defined higher-order methods work with mutating blocks, not just stdlib control flow
 4. **Better than alternatives:**
    - **C-style loops** (`for`, `while`) lose message-passing elegance
    - **Immutable-only** makes simple counters painful
    - **Mutable-everywhere** loses reasoning guarantees
 
-**The simple rule:**
+**How it works ([ADR 0041](ADR/0041-universal-state-threading-block-protocol.md)):**
 
-> **Literal blocks in control flow positions can mutate. Stored/passed closures cannot.**
+The compiler uses a two-tier optimization:
+
+- **Tier 1 (stdlib control flow):** `whileTrue:`, `do:`, `collect:`, `timesRepeat:`, etc. — the compiler generates inlined tail-recursive loops with versioned state variables. Zero overhead.
+- **Tier 2 (user-defined HOMs):** All other methods that accept blocks — the compiler uses a universal `{Result, StateAcc}` protocol. Blocks that actually mutate pay ~65ns overhead per invocation; pure blocks (no mutations) compile to plain funs with no overhead.
 
 ```
-// ✅ Literal block in control flow
+// ✅ Stdlib control flow (Tier 1 — zero overhead)
 [count < 10] whileTrue: [count := count + 1]
 
-// ❌ Stored closure cannot mutate
-myBlock := [count := count + 1]  // WARNING or ERROR
-10 timesRepeat: myBlock          // count won't change
+// ✅ User-defined higher-order methods also work (Tier 2)
+items myCustomLoop: [:x | count := count + x]  // mutations propagate
 ```
 
-This gives us Smalltalk's elegant control flow WITH mutations that actually work, while maintaining clear semantics for closures.
-
-**Detected control flow constructs:**
-- `whileTrue:`, `whileFalse:` - loops
-- `timesRepeat:` - repeat N times
-- `to:do:` - range iteration
-- `do:`, `collect:`, `select:`, `reject:` - collection iteration
-- `inject:into:` - reduction with accumulator
+This gives us Smalltalk's elegant control flow WITH mutations that actually work — universally, not just for a hardcoded set of selectors.
 
 See [beamtalk-language-features.md](beamtalk-language-features.md#control-flow-and-mutations-bt-90) for full specification.
 
@@ -327,20 +322,23 @@ Object subclass: Counter
   increment => self.value := self.value + 1
 ```
 
-In Beamtalk, `Object subclass: Counter` is **parsed as syntax**, not a message send. The parser recognizes this pattern and produces a `ClassDefinition` AST node. The class is compiled to a BEAM module — there is no runtime class creation.
+In Beamtalk, `Object subclass: Counter` is **parsed as syntax**, not a message send. The parser recognizes this pattern and produces a `ClassDefinition` AST node. The class is compiled to a BEAM module.
 
-**Why change:**
-- BEAM modules are compiled artifacts, not runtime-created objects
-- Erlang has no concept of "create a module at runtime" (hot code loading swaps entire modules, but doesn't create them from scratch)
+**Why syntax, not a message send:**
 - Compile-time class definitions enable static analysis, better error messages, and IDE support
-- The `subclass:` syntax is familiar to Smalltalk developers while being honest about the compile-time semantics
+- The `subclass:` syntax is familiar to Smalltalk developers
+- The compiler generates BEAM modules from class definitions — the parser needs to know the full class structure upfront
 
-**What this means:**
-- You cannot create classes dynamically in the REPL (unlike Smalltalk's workspace)
-- Class hierarchy is fixed at compile time
-- No metaclass protocol (yet) — `Counter class` returns a name, not a mutable class object
+**But the dynamic semantics work too:**
 
-**Future consideration:** If Beamtalk gains a full metaclass protocol, `subclass:` could potentially become a real message send that creates classes at runtime via dynamic module generation. This would require significant runtime infrastructure but would restore full Smalltalk semantics.
+Despite being parsed as syntax, the compiler and runtime support dynamic class creation and modification:
+
+- **REPL inline classes** — typing `Actor subclass: Counter ...` at the REPL compiles and hot-loads the class immediately. Redefining it replaces the live class; existing actors pick up new code on next dispatch.
+- **Hot code reload** — `Counter reload` or `:reload Counter` recompiles from source and hot-swaps the module.
+- **Live patching** — `Counter >> increment => ...` replaces individual methods without redefining the whole class.
+- **Full metaclass tower** — `Counter class` returns a metaclass object (ADR 0036). Classes are first-class objects with `methods`, `superclass`, `allMethods`, and `respondsTo:`.
+
+The design is: **syntax for ergonomics, dynamic semantics for liveness.** The parser treats `subclass:` as syntax to enable static analysis and fast compilation, but the runtime supports the dynamic class creation and modification that Smalltalk developers expect.
 
 ---
 
@@ -412,20 +410,17 @@ Actor subclass: Counter
   incrementBy: delta => self.value := self.value + delta
 ```
 
-### Async Message Passing
+### Sync and Async Message Passing
 
 ```
-// Returns immediately with a future
+// Synchronous (default) — blocks until reply
 result := agent analyze: data
 
-// Wait for value
-value := result await
-
-// Continuation style
-agent analyze: data
-  whenResolved: [:value | self process: value]
-  whenRejected: [:error | self handle: error]
+// Asynchronous (fire-and-forget) — returns nil immediately
+agent logEvent: data!       // ! sends via gen_server:cast
 ```
+
+Synchronous sends (`.`) use `gen_server:call`; async sends (`!`) use `gen_server:cast`. See [beamtalk-language-features.md](beamtalk-language-features.md#actor-message-passing) for full messaging semantics.
 
 ### Pattern Matching
 
@@ -435,11 +430,16 @@ status match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]
 42 match: [n -> n + 1]  // => 43
 ```
 
-> **Planned:** Method-level tuple dispatch (`handle: {#ok, value} => ...`) and destructuring assignment (`{x, y, z} := expr`) are not yet implemented. See [known-limitations.md](known-limitations.md).
+Destructuring assignment is also supported: `{x, y} := expr` for tuples, `#[a, ...rest] := expr` for arrays. See [beamtalk-language-features.md](beamtalk-language-features.md#pattern-matching) for the full pattern matching specification.
 
-### Supervision
+### Supervision Trees
 
-> **Planned:** A Beamtalk-level supervision DSL is not yet implemented. Actors are supervised internally via OTP defaults; custom supervision requires Erlang FFI. See [known-limitations.md](known-limitations.md).
+Beamtalk provides declarative OTP supervision via `Supervisor subclass:` and `DynamicSupervisor subclass:` (ADR 0059). See [beamtalk-language-features.md](beamtalk-language-features.md#supervision-trees-adr-0059) for the full specification.
+
+```
+Supervisor subclass: WebApp
+  class children => #(Database, HttpServer, WorkerPool)
+```
 
 ---
 

@@ -33,6 +33,7 @@
 //! let module = Module {
 //!     classes: Vec::new(),
 //!     method_definitions: Vec::new(),
+//!     protocols: Vec::new(),
 //!     expressions: vec![
 //!         ExpressionStatement::bare(Expression::Assignment {
 //!             target: Box::new(Expression::Identifier(Identifier {
@@ -96,6 +97,8 @@ pub struct Module {
     pub classes: Vec<ClassDefinition>,
     /// Standalone method definitions (Tonel-style `Class >> method => body`).
     pub method_definitions: Vec<StandaloneMethodDefinition>,
+    /// Protocol definitions (ADR 0068, Phase 2a).
+    pub protocols: Vec<ProtocolDefinition>,
     /// Top-level expressions (scripts, REPL input).
     pub expressions: Vec<ExpressionStatement>,
     /// Source location spanning the entire module.
@@ -117,6 +120,7 @@ impl Module {
         Self {
             classes: Vec::new(),
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions,
             span,
             file_leading_comments: Vec::new(),
@@ -130,6 +134,7 @@ impl Module {
         Self {
             classes,
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span,
             file_leading_comments: Vec::new(),
@@ -147,6 +152,7 @@ impl Module {
         Self {
             classes: Vec::new(),
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions,
             span,
             file_leading_comments,
@@ -366,6 +372,18 @@ pub struct ClassDefinition {
     /// Set by the parser when `native: <module>` appears on the `subclass:` declaration.
     /// `None` for all ordinary Beamtalk classes.
     pub backing_module: Option<Identifier>,
+    /// Type parameters for generic classes (e.g., `T`, `E` in `Result(T, E)`).
+    ///
+    /// Empty for non-generic classes. Populated by the parser when parenthesized
+    /// type parameters appear after the class name in the definition.
+    /// Each parameter may optionally carry a protocol bound (ADR 0068 Phase 2d).
+    pub type_params: Vec<TypeParamDecl>,
+    /// Type arguments applied to the superclass (e.g., `(E)` in `Collection(E) subclass: Array(E)`).
+    ///
+    /// Empty when the superclass is not parameterized. Each entry is a type annotation
+    /// that may reference this class's own type params (forwarded) or be a concrete type
+    /// (e.g., `Integer` in `Collection(Integer) subclass: IntArray`).
+    pub superclass_type_args: Vec<TypeAnnotation>,
     /// Source location of the entire class definition.
     pub span: Span,
 }
@@ -393,6 +411,8 @@ impl ClassDefinition {
             methods,
             class_methods: Vec::new(),
             class_variables: Vec::new(),
+            type_params: Vec::new(),
+            superclass_type_args: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -426,6 +446,8 @@ impl ClassDefinition {
             methods,
             class_methods: Vec::new(),
             class_variables: Vec::new(),
+            type_params: Vec::new(),
+            superclass_type_args: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -456,6 +478,79 @@ pub struct StandaloneMethodDefinition {
     /// The method definition.
     pub method: MethodDefinition,
     /// Source location of the entire standalone method definition.
+    pub span: Span,
+}
+
+/// A protocol definition (ADR 0068, Phase 2a).
+///
+/// Protocols define named message sets. A class conforms to a protocol if it
+/// responds to all required messages — no explicit `implements:` declaration needed.
+///
+/// Example:
+/// ```text
+/// Protocol define: Printable
+///   /// Return a human-readable string representation.
+///   asString -> String
+///
+/// Protocol define: Collection(E)
+///   size -> Integer
+///   do: block :: Block(E, Object)
+///   collect: block :: Block(E, Object) -> Self
+///
+/// Protocol define: Sortable
+///   extending: Comparable
+///   sortKey -> Object
+/// ```
+///
+/// Protocol names are bare identifiers (uppercase, like class names). Protocols
+/// and classes share a single namespace — having both a class and a protocol
+/// with the same name is a compile error.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProtocolDefinition {
+    /// The protocol name (e.g., `Printable`, `Collection`).
+    pub name: Identifier,
+    /// Type parameters for generic protocols (e.g., `E` in `Collection(E)`).
+    ///
+    /// Empty for non-generic protocols.
+    /// Each parameter may optionally carry a protocol bound (ADR 0068 Phase 2d).
+    pub type_params: Vec<TypeParamDecl>,
+    /// The protocol this one extends, if any.
+    ///
+    /// Example: `extending: Comparable` in `Sortable`.
+    pub extending: Option<Identifier>,
+    /// Required method signatures.
+    pub method_signatures: Vec<ProtocolMethodSignature>,
+    /// Non-doc comments (`//` and `/* */`) appearing before this protocol.
+    pub comments: CommentAttachment,
+    /// Doc comment attached to this protocol (`///` lines).
+    pub doc_comment: Option<String>,
+    /// Source location of the entire protocol definition.
+    pub span: Span,
+}
+
+/// A required method signature in a protocol definition (ADR 0068, Phase 2a).
+///
+/// Protocol method signatures are like method definitions but without a body
+/// (`=>` and implementation). They declare the shape a conforming class must have.
+///
+/// Examples:
+/// - Unary: `asString -> String`
+/// - Binary: `< other :: Self -> Boolean`
+/// - Keyword: `do: block :: Block(E, Object)`
+/// - With doc comment: `/// The number of elements.\n  size -> Integer`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProtocolMethodSignature {
+    /// The method selector (name).
+    pub selector: MessageSelector,
+    /// Method parameters with optional type annotations.
+    pub parameters: Vec<ParameterDefinition>,
+    /// Optional return type annotation.
+    pub return_type: Option<TypeAnnotation>,
+    /// Non-doc comments (`//` and `/* */`) appearing before this signature.
+    pub comments: CommentAttachment,
+    /// Doc comment attached to this signature (`///` lines).
+    pub doc_comment: Option<String>,
+    /// Source location.
     pub span: Span,
 }
 
@@ -762,7 +857,7 @@ pub enum TypeAnnotation {
         /// Source location.
         span: Span,
     },
-    /// A generic type (e.g., `Collection<Integer>`).
+    /// A generic type (e.g., `Collection(Integer)`, `Result(T, E)`).
     Generic {
         /// The base type name.
         base: Identifier,
@@ -867,14 +962,14 @@ impl TypeAnnotation {
             Self::Generic {
                 base, parameters, ..
             } => {
-                let mut result = eco_format!("{}<", base.name);
+                let mut result = eco_format!("{}(", base.name);
                 for (i, ty) in parameters.iter().enumerate() {
                     if i > 0 {
                         result.push_str(", ");
                     }
                     result.push_str(&ty.type_name());
                 }
-                result.push('>');
+                result.push(')');
                 result
             }
             Self::FalseOr { inner, .. } => {
@@ -904,6 +999,8 @@ pub enum ExpectCategory {
     DeadAssignment,
     /// Suppress deprecation warnings — wrong keyword/class-kind (BT-1529).
     Deprecation,
+    /// Suppress actor-new errors — using `new`/`new:` on an Actor subclass (BT-1559).
+    ActorNew,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -918,6 +1015,7 @@ impl ExpectCategory {
             "unused" => Some(Self::Unused),
             "dead_assignment" => Some(Self::DeadAssignment),
             "deprecation" => Some(Self::Deprecation),
+            "actor_new" => Some(Self::ActorNew),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -932,6 +1030,7 @@ impl ExpectCategory {
             Self::Unused => "unused",
             Self::DeadAssignment => "dead_assignment",
             Self::Deprecation => "deprecation",
+            Self::ActorNew => "actor_new",
             Self::All => "all",
         }
     }
@@ -945,6 +1044,7 @@ impl ExpectCategory {
             "unused",
             "dead_assignment",
             "deprecation",
+            "actor_new",
             "all",
         ]
     }
@@ -1283,6 +1383,52 @@ impl Identifier {
     pub fn new(name: impl Into<EcoString>, span: Span) -> Self {
         Self {
             name: name.into(),
+            span,
+        }
+    }
+}
+
+/// A type parameter declaration with an optional protocol bound (ADR 0068 Phase 2d).
+///
+/// In class/protocol definitions, type parameters may be bounded by a protocol:
+/// `T :: Printable` means "T must conform to Printable". Unbounded parameters
+/// accept any type.
+///
+/// Examples:
+/// - `Result(T, E)` — unbounded: `T` and `E` accept any type
+/// - `Logger(T :: Printable)` — bounded: `T` must conform to `Printable`
+/// - `SortedSet(E :: Comparable)` — bounded: `E` must conform to `Comparable`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeParamDecl {
+    /// The type parameter name (e.g., `T`, `E`, `K`, `V`).
+    pub name: Identifier,
+    /// Optional protocol bound (e.g., `Printable` in `T :: Printable`).
+    ///
+    /// When present, the type checker verifies that concrete type arguments
+    /// conform to this protocol. When absent, any type is accepted.
+    pub bound: Option<Identifier>,
+    /// Source location spanning the entire declaration (name through bound).
+    pub span: Span,
+}
+
+impl TypeParamDecl {
+    /// Creates an unbounded type parameter declaration.
+    #[must_use]
+    pub fn unbounded(name: Identifier) -> Self {
+        let span = name.span;
+        Self {
+            name,
+            bound: None,
+            span,
+        }
+    }
+
+    /// Creates a bounded type parameter declaration.
+    #[must_use]
+    pub fn bounded(name: Identifier, bound: Identifier, span: Span) -> Self {
+        Self {
+            name,
+            bound: Some(bound),
             span,
         }
     }
@@ -2095,7 +2241,7 @@ mod tests {
             vec![TypeAnnotation::simple("Integer", Span::new(11, 18))],
             Span::new(0, 19),
         );
-        assert_eq!(generic.type_name(), "Collection<Integer>");
+        assert_eq!(generic.type_name(), "Collection(Integer)");
 
         let false_or = TypeAnnotation::false_or(
             TypeAnnotation::simple("Integer", Span::new(0, 7)),

@@ -96,6 +96,12 @@ pub(crate) fn print_help() {
     println!("  counter increment    # Send a message (auto-awaits result)");
     println!("  counter getValue     # Query actor state (auto-awaits)");
     println!();
+    println!("Type information:");
+    println!("  :help Result         # Shows class docs and method signatures");
+    println!("  :help Result unwrap  # Shows method documentation and return type");
+    println!("  Type annotations use :: (e.g., amount :: Integer -> Integer)");
+    println!("  Generic types use parentheses: Result(T, E), Array(E)");
+    println!();
     println!("Multi-line input:");
     println!("  Expressions with unclosed brackets, strings, trailing operators,");
     println!("  keywords (e.g. at:), or := continue on the next line (..> prompt).");
@@ -107,8 +113,7 @@ pub(crate) fn print_help() {
     println!("  Workspace actorsOf: Counter # All actors of a class");
     println!();
     println!("Actor message sends return Futures, which are automatically");
-    println!("awaited for synchronous REPL experience. If you store a Future");
-    println!("in a binding before it resolves, you'll see #Future<pending>.");
+    println!("awaited for a synchronous REPL experience.");
 }
 
 /// Display generated Core Erlang source (BT-724).

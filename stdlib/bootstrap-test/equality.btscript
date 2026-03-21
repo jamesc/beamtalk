@@ -46,19 +46,16 @@ true /= false
 1 =:= 1
 // => true
 
-// Strict vs loose equality
-// Note: 1.0 compiles to integer 1 in Core Erlang (Rust format! truncates .0)
-// so 1.0 =:= 1 is true due to compilation artifact
-// Use values like 1.5 to demonstrate real strict equality behavior
-1.5 =:= 1
+// Strict vs loose equality — BT-1562: int and float are distinct types
+1.0 =:= 1
 // => false
 
-// Note: 1.5 and 1 are NOT loosely equal (different numeric values)
-1.5 == 1
-// => false
+// Loose equality coerces, so int/float with same numeric value are equal
+1.0 == 1
+// => true
 
 // Strict inequality operator: =/=
-1.5 =/= 1
+1.0 =/= 1
 // => true
 1.0 =/= 1.0
 // => false

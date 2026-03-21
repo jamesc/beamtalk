@@ -31,6 +31,7 @@ pub mod module_validator;
 pub mod name_resolver;
 pub(crate) mod pattern_bindings;
 pub mod primitive_validator;
+pub mod protocol_registry;
 pub mod return_type_writeback;
 pub(crate) mod scope;
 pub(crate) mod string_utils;
@@ -52,12 +53,13 @@ pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};
+pub use protocol_registry::{ProtocolInfo, ProtocolRegistry};
 pub use return_type_writeback::apply_return_type_writeback;
 pub use scope::BindingKind;
 pub use supervisor_kind_writeback::apply_supervisor_kind_writeback;
 pub use type_checker::{
-    InferredType, MethodReturnKey, TypeChecker, TypeMap, infer_method_return_types, infer_types,
-    infer_types_and_returns,
+    InferredType, MethodReturnKey, TypeChecker, TypeMap, TypeProvenance, infer_method_return_types,
+    infer_types, infer_types_and_returns,
 };
 
 /// BT-738: Warn when a user-defined class name shadows a stdlib built-in.
@@ -82,6 +84,9 @@ pub struct AnalysisResult {
 
     /// Static class hierarchy (built-in + user-defined classes).
     pub class_hierarchy: ClassHierarchy,
+
+    /// Protocol registry (ADR 0068 Phase 2b).
+    pub protocol_registry: ProtocolRegistry,
 }
 
 impl AnalysisResult {
@@ -92,6 +97,7 @@ impl AnalysisResult {
             diagnostics: Vec::new(),
             block_info: HashMap::new(),
             class_hierarchy: ClassHierarchy::with_builtins(),
+            protocol_registry: ProtocolRegistry::new(),
         }
     }
 }
@@ -282,6 +288,13 @@ fn analyse_full(
         result
             .class_hierarchy
             .add_from_beam_meta(pre_loaded_classes);
+        // BT-1559: Re-propagate class kind after cross-file classes are injected.
+        // Both module-local classes (whose superclass is in another file) and
+        // cross-file classes (whose is_value wasn't set at extraction time) may
+        // need fixup. propagate_class_kind handles AST classes from this module;
+        // propagate_cross_file_class_kind handles all remaining classes.
+        result.class_hierarchy.propagate_class_kind(module);
+        result.class_hierarchy.propagate_cross_file_class_kind();
     }
 
     // ADR 0066 Phase 4: Register extension methods into the class hierarchy
@@ -292,6 +305,17 @@ fn analyse_full(
         let mut ext_index = crate::compilation::extension_index::ExtensionIndex::new();
         ext_index.add_module(module, std::path::Path::new("<current>"));
         result.class_hierarchy.register_extensions(&ext_index);
+    }
+
+    // Phase 0.5: Protocol Registration (ADR 0068 Phase 2b)
+    // Register protocol definitions from the module into the protocol registry.
+    // Must happen after the class hierarchy is fully built (for namespace collision
+    // checks) and before type checking (so protocol names resolve in type annotations).
+    if !module.protocols.is_empty() {
+        let proto_diags = result
+            .protocol_registry
+            .register_module(module, &result.class_hierarchy);
+        result.diagnostics.extend(proto_diags);
     }
 
     // Phase 1: Name Resolution
@@ -309,7 +333,11 @@ fn analyse_full(
 
     // Phase 2: Type Checking (ADR 0025 Phase 1 — zero-syntax inference)
     let mut type_checker = TypeChecker::new();
-    type_checker.check_module(module, &result.class_hierarchy);
+    type_checker.check_module_with_protocols(
+        module,
+        &result.class_hierarchy,
+        &result.protocol_registry,
+    );
     result.diagnostics.extend(type_checker.take_diagnostics());
     let type_map = type_checker.take_type_map();
 
@@ -1148,6 +1176,8 @@ mod tests {
             methods: vec![get_value_method],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1157,6 +1187,7 @@ mod tests {
         let module = Module {
             classes: vec![class_def],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             file_leading_comments: vec![],
             file_trailing_comments: Vec::new(),
@@ -1538,6 +1569,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1547,6 +1580,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1587,6 +1621,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1596,6 +1632,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1872,6 +1909,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1893,6 +1932,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![bare(spawn_expr)],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1980,6 +2020,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1989,6 +2031,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2056,6 +2099,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2065,6 +2110,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2116,6 +2162,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2125,6 +2173,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2169,6 +2218,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2178,6 +2229,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2225,6 +2277,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2234,6 +2288,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2283,6 +2338,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2292,6 +2349,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2342,6 +2400,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2351,6 +2411,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2404,6 +2465,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2412,6 +2475,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2467,6 +2531,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2475,6 +2541,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2527,6 +2594,8 @@ mod tests {
                 span: test_span(),
             }],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2536,6 +2605,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2584,6 +2654,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2593,6 +2665,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2642,6 +2715,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2651,6 +2726,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2703,6 +2779,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2712,6 +2790,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2772,6 +2851,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2781,6 +2862,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2839,6 +2921,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2848,6 +2932,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2893,6 +2978,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2902,6 +2989,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2955,6 +3043,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2964,6 +3054,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3007,6 +3098,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3016,6 +3109,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3085,6 +3179,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3094,6 +3190,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3180,6 +3277,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3189,6 +3288,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3252,6 +3352,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3261,6 +3363,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3322,6 +3425,8 @@ mod tests {
             }],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3331,6 +3436,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3467,6 +3573,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3509,6 +3617,7 @@ mod tests {
         let module = Module {
             classes: vec![shape],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span: test_span(),
             file_leading_comments: vec![],
@@ -3547,6 +3656,7 @@ mod tests {
         let module = Module {
             classes: vec![shape],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![bare(interp)],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3596,6 +3706,7 @@ mod tests {
         let module = Module {
             classes: vec![shape],
             method_definitions: vec![standalone],
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span: test_span(),
             file_leading_comments: vec![],
@@ -3635,6 +3746,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3673,6 +3786,7 @@ mod tests {
         let module = Module {
             classes: vec![counter],
             method_definitions: vec![standalone],
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span: test_span(),
             file_leading_comments: vec![],
@@ -3774,6 +3888,9 @@ Value subclass: Caller
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         };
 
         let src = "42.";

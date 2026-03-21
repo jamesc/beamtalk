@@ -4,8 +4,8 @@
 /// Command Pattern — InsertCommand (concrete command)
 /// Inserts a string at a given position (1-based).
 TextCommand subclass: InsertCommand
-  state: position = 1
-  state: text = ""
+  field: position = 1
+  field: text = ""
 
   /// Create a command that will insert str at 1-based position pos.
   class at: pos insert: str => self new: #{#position => pos, #text => str}

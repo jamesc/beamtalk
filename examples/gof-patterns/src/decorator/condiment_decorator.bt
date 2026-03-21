@@ -5,7 +5,7 @@
 /// Wraps any beverage object. Concrete subclasses override description and cost to
 /// add their own contribution on top of the wrapped drink's values.
 Beverage subclass: CondimentDecorator
-  state: beverage = nil
+  field: beverage = nil
 
   /// Wrap aBeverage so this condiment's description and cost are layered on top.
   class wrap: aBeverage => self new: #{#beverage => aBeverage}

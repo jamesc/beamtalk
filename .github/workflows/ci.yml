@@ -70,16 +70,8 @@ jobs:
           cache: 'npm'
           cache-dependency-path: editors/vscode/package-lock.json
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Cache Erlang/rebar3 artifacts (Unix)
         if: runner.os != 'Windows'
@@ -155,16 +147,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dialyzer-otp-27.0-
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Build Rust
         run: just build-rust
@@ -197,12 +181,21 @@ jobs:
       - name: Test stdlib (compiled language features)
         run: just test-stdlib
 
+      - name: Test BUnit (TestCase tests)
+        run: just test-bunit
+
+      - name: Test examples
+        run: just test-examples
+
       - name: Test Erlang runtime (unit tests)
         run: just test-runtime
 
       - name: Dialyzer type checking (Erlang runtime)
         if: steps.erlang-changes.outputs.changed == 'true'
         run: just dialyzer
+
+      - name: Dialyzer spec validation (generated -spec attributes)
+        run: just dialyzer-specs
 
       - name: Test workspace integration
         run: just test-integration
@@ -249,17 +242,8 @@ jobs:
             ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
             ${{ runner.os }}-erlang-otp-27.0-
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-coverage-
-            ${{ runner.os }}-cargo-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov

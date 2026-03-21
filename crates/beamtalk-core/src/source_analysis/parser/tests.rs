@@ -3,7 +3,8 @@
 
 //! Tests for the Beamtalk recursive descent parser.
 use super::*;
-use crate::ast::DeclaredKeyword;
+use crate::ast::{DeclaredKeyword, Identifier, MessageSelector, TypeAnnotation};
+use crate::source_analysis::Span;
 use crate::source_analysis::lex_with_eof;
 
 /// Helper to parse a string and check for errors.
@@ -5183,4 +5184,612 @@ fn mixed_state_and_field_declarations() {
         module.classes[0].state[1].declared_keyword,
         DeclaredKeyword::Field
     );
+}
+
+// ==========================================================================
+// Generic type annotation parsing (ADR 0068, BT-1568)
+// ==========================================================================
+
+#[test]
+fn parse_generic_class_definition_single_param() {
+    let module = parse_ok(
+        "Value subclass: Stack(E)
+  state: items = #[]",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Stack");
+    assert_eq!(class.type_params.len(), 1);
+    assert_eq!(class.type_params[0].name.name, "E");
+}
+
+#[test]
+fn parse_generic_class_definition_two_params() {
+    let module = parse_ok(
+        "sealed Value subclass: Result(T, E)
+  state: okValue = nil
+  state: errReason = nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Result");
+    assert!(class.is_sealed);
+    assert_eq!(class.type_params.len(), 2);
+    assert_eq!(class.type_params[0].name.name, "T");
+    assert_eq!(class.type_params[1].name.name, "E");
+    assert_eq!(class.state.len(), 2);
+}
+
+#[test]
+fn parse_generic_class_definition_no_params() {
+    let module = parse_ok(
+        "Actor subclass: Counter
+  state: value = 0",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Counter");
+    assert!(class.type_params.is_empty());
+}
+
+// --- ADR 0068 Phase 2d: Bounded type parameters ---
+
+#[test]
+fn parse_bounded_type_param_single() {
+    let module = parse_ok(
+        "Actor subclass: Logger(T :: Printable)
+  log: item :: T => item asString",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Logger");
+    assert_eq!(class.type_params.len(), 1);
+    assert_eq!(class.type_params[0].name.name, "T");
+    assert!(class.type_params[0].bound.is_some());
+    assert_eq!(
+        class.type_params[0].bound.as_ref().unwrap().name,
+        "Printable"
+    );
+}
+
+#[test]
+fn parse_bounded_type_param_mixed() {
+    // T is bounded, E is unbounded
+    let module = parse_ok(
+        "Value subclass: Container(T :: Printable, E)
+  state: item :: T = nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.type_params.len(), 2);
+    assert_eq!(class.type_params[0].name.name, "T");
+    assert!(class.type_params[0].bound.is_some());
+    assert_eq!(
+        class.type_params[0].bound.as_ref().unwrap().name,
+        "Printable"
+    );
+    assert_eq!(class.type_params[1].name.name, "E");
+    assert!(class.type_params[1].bound.is_none());
+}
+
+#[test]
+fn parse_bounded_type_param_all_bounded() {
+    let module = parse_ok(
+        "Value subclass: SortedMap(K :: Comparable, V :: Printable)
+  state: items = #[]",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.type_params.len(), 2);
+    assert_eq!(class.type_params[0].name.name, "K");
+    assert_eq!(
+        class.type_params[0].bound.as_ref().unwrap().name,
+        "Comparable"
+    );
+    assert_eq!(class.type_params[1].name.name, "V");
+    assert_eq!(
+        class.type_params[1].bound.as_ref().unwrap().name,
+        "Printable"
+    );
+}
+
+#[test]
+fn parse_bounded_type_param_protocol() {
+    // Protocol with bounded type params
+    let module = parse_ok(
+        "Protocol define: Mapper(T :: Printable)
+  map: block :: Block(T, Object) -> Object",
+    );
+    let proto = &module.protocols[0];
+    assert_eq!(proto.type_params.len(), 1);
+    assert_eq!(proto.type_params[0].name.name, "T");
+    assert!(proto.type_params[0].bound.is_some());
+    assert_eq!(
+        proto.type_params[0].bound.as_ref().unwrap().name,
+        "Printable"
+    );
+}
+
+#[test]
+fn parse_generic_type_annotation_single() {
+    // `Array(Integer)` in a type annotation
+    let module = parse_ok(
+        "Actor subclass: Foo
+  state: items :: Array(Integer) = #[]",
+    );
+    let class = &module.classes[0];
+    let state = &class.state[0];
+    let ty = state.type_annotation.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ty
+    {
+        assert_eq!(base.name, "Array");
+        assert_eq!(parameters.len(), 1);
+        assert!(matches!(&parameters[0], TypeAnnotation::Simple(id) if id.name == "Integer"));
+    } else {
+        panic!("Expected Generic type annotation, got: {ty:?}");
+    }
+}
+
+#[test]
+fn parse_generic_type_annotation_result() {
+    // `Result(T, E)` in a type annotation
+    let module = parse_ok(
+        "Actor subclass: Foo
+  state: result :: Result(String, IOError) = nil",
+    );
+    let ty = module.classes[0].state[0].type_annotation.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ty
+    {
+        assert_eq!(base.name, "Result");
+        assert_eq!(parameters.len(), 2);
+        assert!(matches!(&parameters[0], TypeAnnotation::Simple(id) if id.name == "String"));
+        assert!(matches!(&parameters[1], TypeAnnotation::Simple(id) if id.name == "IOError"));
+    } else {
+        panic!("Expected Generic type annotation, got: {ty:?}");
+    }
+}
+
+#[test]
+fn parse_generic_type_annotation_nested() {
+    // `Block(T, Result(R, E))` — nested generic type
+    let module = parse_ok(
+        "Actor subclass: Foo
+  state: handler :: Block(T, Result(R, E)) = nil",
+    );
+    let ty = module.classes[0].state[0].type_annotation.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base,
+        parameters: params,
+        ..
+    } = ty
+    {
+        assert_eq!(base.name, "Block");
+        assert_eq!(params.len(), 2);
+        assert!(matches!(&params[0], TypeAnnotation::Simple(id) if id.name == "T"));
+        if let TypeAnnotation::Generic {
+            base: inner_base,
+            parameters: inner_params,
+            ..
+        } = &params[1]
+        {
+            assert_eq!(inner_base.name, "Result");
+            assert_eq!(inner_params.len(), 2);
+            assert!(matches!(&inner_params[0], TypeAnnotation::Simple(id) if id.name == "R"));
+            assert!(matches!(&inner_params[1], TypeAnnotation::Simple(id) if id.name == "E"));
+        } else {
+            panic!("Expected nested Generic, got: {:?}", params[1]);
+        }
+    } else {
+        panic!("Expected Generic type annotation, got: {ty:?}");
+    }
+}
+
+#[test]
+fn parse_generic_type_in_method_return_type() {
+    // Method with `-> Result(Integer, Error)` return type
+    let module = parse_ok(
+        "Actor subclass: Foo
+  compute -> Result(Integer, Error) => nil",
+    );
+    let method = &module.classes[0].methods[0];
+    let ret_ty = method.return_type.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ret_ty
+    {
+        assert_eq!(base.name, "Result");
+        assert_eq!(parameters.len(), 2);
+    } else {
+        panic!("Expected Generic return type, got: {ret_ty:?}");
+    }
+}
+
+#[test]
+fn parse_generic_type_in_method_param() {
+    // Method with `block :: Block(T, R)` parameter type
+    let module = parse_ok(
+        "Actor subclass: Foo
+  map: block :: Block(T, R) -> Result(R, E) => nil",
+    );
+    let method = &module.classes[0].methods[0];
+    let param_ty = method.parameters[0].type_annotation.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = param_ty
+    {
+        assert_eq!(base.name, "Block");
+        assert_eq!(parameters.len(), 2);
+    } else {
+        panic!("Expected Generic param type, got: {param_ty:?}");
+    }
+    let ret_ty = method.return_type.as_ref().unwrap();
+    if let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ret_ty
+    {
+        assert_eq!(base.name, "Result");
+        assert_eq!(parameters.len(), 2);
+    } else {
+        panic!("Expected Generic return type, got: {ret_ty:?}");
+    }
+}
+
+#[test]
+fn parse_generic_type_name_uses_parentheses() {
+    // `type_name()` should produce `Collection(Integer)` not `Collection<Integer>`
+    let ty = TypeAnnotation::generic(
+        Identifier::new("Collection", Span::new(0, 10)),
+        vec![TypeAnnotation::simple("Integer", Span::new(11, 18))],
+        Span::new(0, 19),
+    );
+    assert_eq!(ty.type_name(), "Collection(Integer)");
+
+    let ty2 = TypeAnnotation::generic(
+        Identifier::new("Result", Span::new(0, 6)),
+        vec![
+            TypeAnnotation::simple("String", Span::new(7, 13)),
+            TypeAnnotation::simple("Error", Span::new(15, 20)),
+        ],
+        Span::new(0, 21),
+    );
+    assert_eq!(ty2.type_name(), "Result(String, Error)");
+}
+
+#[test]
+fn parse_generic_class_with_native_module() {
+    // Generic class with native: backing module
+    let module = parse_ok(
+        "Actor subclass: Cache(K, V) native: beamtalk_cache
+  getValue: key :: K -> V => nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Cache");
+    assert_eq!(class.type_params.len(), 2);
+    assert_eq!(class.type_params[0].name.name, "K");
+    assert_eq!(class.type_params[1].name.name, "V");
+    assert!(class.backing_module.is_some());
+    assert_eq!(
+        class.backing_module.as_ref().unwrap().name,
+        "beamtalk_cache"
+    );
+}
+
+#[test]
+fn parse_generic_union_with_generic_member() {
+    // `Result(Integer, Error) | nil` — union with a generic member
+    let module = parse_ok(
+        "Actor subclass: Foo
+  state: result :: Result(Integer, Error) | nil = nil",
+    );
+    let ty = module.classes[0].state[0].type_annotation.as_ref().unwrap();
+    if let TypeAnnotation::Union { types, .. } = ty {
+        assert_eq!(types.len(), 2);
+        assert!(
+            matches!(&types[0], TypeAnnotation::Generic { base, parameters, .. }
+            if base.name == "Result" && parameters.len() == 2)
+        );
+    } else {
+        panic!("Expected Union type, got: {ty:?}");
+    }
+}
+
+// ========================================================================
+// Protocol Definition Tests (ADR 0068, Phase 2a — BT-1578)
+// ========================================================================
+
+#[test]
+fn parse_protocol_printable() {
+    let module = parse_ok(
+        "Protocol define: Printable
+  /// Return a human-readable string representation.
+  asString -> String",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Printable");
+    assert!(proto.type_params.is_empty());
+    assert!(proto.extending.is_none());
+    assert_eq!(proto.method_signatures.len(), 1);
+
+    let sig = &proto.method_signatures[0];
+    assert_eq!(sig.selector.name(), "asString");
+    assert!(sig.parameters.is_empty());
+    let ret_ty = sig.return_type.as_ref().unwrap();
+    assert!(matches!(ret_ty, TypeAnnotation::Simple(id) if id.name == "String"));
+    assert!(sig.doc_comment.is_some());
+}
+
+#[test]
+fn parse_protocol_comparable() {
+    let module = parse_ok(
+        "Protocol define: Comparable
+  < other :: Self -> Boolean
+  > other :: Self -> Boolean
+  <= other :: Self -> Boolean
+  >= other :: Self -> Boolean",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Comparable");
+    assert_eq!(proto.method_signatures.len(), 4);
+
+    // Check first signature: `< other :: Self -> Boolean`
+    let sig = &proto.method_signatures[0];
+    assert!(matches!(&sig.selector, MessageSelector::Binary(op) if op == "<"));
+    assert_eq!(sig.parameters.len(), 1);
+    assert_eq!(sig.parameters[0].name.name, "other");
+    let param_ty = sig.parameters[0].type_annotation.as_ref().unwrap();
+    assert!(matches!(param_ty, TypeAnnotation::SelfType { .. }));
+    let ret_ty = sig.return_type.as_ref().unwrap();
+    assert!(matches!(ret_ty, TypeAnnotation::Simple(id) if id.name == "Boolean"));
+}
+
+#[test]
+fn parse_protocol_generic_collection() {
+    let module = parse_ok(
+        "Protocol define: Collection(E)
+  /// The number of elements in this collection.
+  size -> Integer
+  /// Iterate over each element.
+  do: block :: Block(E, Object)
+  /// Transform each element.
+  collect: block :: Block(E, Object) -> Self
+  /// Return elements matching the predicate.
+  select: block :: Block(E, Boolean) -> Self",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Collection");
+    assert_eq!(proto.type_params.len(), 1);
+    assert_eq!(proto.type_params[0].name.name, "E");
+    assert_eq!(proto.method_signatures.len(), 4);
+
+    // Check `size -> Integer`
+    let sig_size = &proto.method_signatures[0];
+    assert_eq!(sig_size.selector.name(), "size");
+    assert!(sig_size.parameters.is_empty());
+    assert!(matches!(
+        sig_size.return_type.as_ref().unwrap(),
+        TypeAnnotation::Simple(id) if id.name == "Integer"
+    ));
+
+    // Check `do: block :: Block(E, Object)`
+    let sig_do = &proto.method_signatures[1];
+    assert_eq!(sig_do.selector.name(), "do:");
+    assert_eq!(sig_do.parameters.len(), 1);
+    let param_ty = sig_do.parameters[0].type_annotation.as_ref().unwrap();
+    assert!(
+        matches!(param_ty, TypeAnnotation::Generic { base, parameters, .. }
+        if base.name == "Block" && parameters.len() == 2)
+    );
+    assert!(sig_do.return_type.is_none());
+
+    // Check `collect: block :: Block(E, Object) -> Self`
+    let sig_collect = &proto.method_signatures[2];
+    assert_eq!(sig_collect.selector.name(), "collect:");
+    let ret_ty = sig_collect.return_type.as_ref().unwrap();
+    assert!(matches!(ret_ty, TypeAnnotation::SelfType { .. }));
+}
+
+#[test]
+fn parse_protocol_extending() {
+    let module = parse_ok(
+        "Protocol define: Sortable
+  extending: Comparable
+  /// The key used for sort ordering.
+  sortKey -> Object",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Sortable");
+    assert!(proto.type_params.is_empty());
+    let extending = proto.extending.as_ref().unwrap();
+    assert_eq!(extending.name, "Comparable");
+    assert_eq!(proto.method_signatures.len(), 1);
+    assert_eq!(proto.method_signatures[0].selector.name(), "sortKey");
+}
+
+#[test]
+fn parse_protocol_no_methods() {
+    // A protocol with no method signatures (just the definition)
+    let module = parse_ok("Protocol define: Marker");
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Marker");
+    assert!(proto.method_signatures.is_empty());
+}
+
+#[test]
+fn parse_protocol_multiple_type_params() {
+    let module = parse_ok(
+        "Protocol define: Mapping(K, V)
+  at: key :: K -> V
+  put: key :: K value: val :: V",
+    );
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Mapping");
+    assert_eq!(proto.type_params.len(), 2);
+    assert_eq!(proto.type_params[0].name.name, "K");
+    assert_eq!(proto.type_params[1].name.name, "V");
+    assert_eq!(proto.method_signatures.len(), 2);
+
+    // Check `at: key :: K -> V`
+    let sig_at = &proto.method_signatures[0];
+    assert_eq!(sig_at.selector.name(), "at:");
+    assert_eq!(sig_at.parameters.len(), 1);
+    let ret_ty = sig_at.return_type.as_ref().unwrap();
+    assert!(matches!(ret_ty, TypeAnnotation::Simple(id) if id.name == "V"));
+
+    // Check `put: key :: K value: val :: V`
+    let sig_put = &proto.method_signatures[1];
+    assert_eq!(sig_put.selector.name(), "put:value:");
+    assert_eq!(sig_put.parameters.len(), 2);
+}
+
+#[test]
+fn parse_protocol_followed_by_class() {
+    // Protocol definition followed by a class definition
+    let module = parse_ok(
+        "Protocol define: Printable
+  asString -> String
+
+Object subclass: Foo
+  toString => \"hello\"",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    assert_eq!(module.protocols[0].name.name, "Printable");
+    assert_eq!(module.classes.len(), 1);
+    assert_eq!(module.classes[0].name.name, "Foo");
+}
+
+#[test]
+fn parse_multiple_protocols() {
+    let module = parse_ok(
+        "Protocol define: Printable
+  asString -> String
+
+Protocol define: Comparable
+  < other :: Self -> Boolean",
+    );
+    assert_eq!(module.protocols.len(), 2);
+    assert_eq!(module.protocols[0].name.name, "Printable");
+    assert_eq!(module.protocols[1].name.name, "Comparable");
+}
+
+#[test]
+fn parse_protocol_with_impl_body_error() {
+    // Protocol method signatures should NOT have `=>`
+    let diagnostics = parse_err(
+        "Protocol define: Bad
+  asString => \"hello\"",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d
+            .message
+            .contains("Protocol method signatures cannot have implementations")),
+        "Expected error about protocol implementations, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_protocol_unary_no_return_type() {
+    // Unary method without a return type
+    let module = parse_ok(
+        "Protocol define: Hashable
+  hash",
+    );
+    let proto = &module.protocols[0];
+    assert_eq!(proto.method_signatures.len(), 1);
+    assert_eq!(proto.method_signatures[0].selector.name(), "hash");
+    assert!(proto.method_signatures[0].return_type.is_none());
+}
+
+#[test]
+fn parse_protocol_identifier_in_expression_context() {
+    // `Protocol` used as a variable name should not trigger protocol parsing
+    let module = parse_ok("x := Protocol");
+    assert!(module.protocols.is_empty());
+    assert_eq!(module.expressions.len(), 1);
+}
+
+#[test]
+fn parse_protocol_class_definition_named_protocol() {
+    // A class named `Protocol` should parse as a class, not a protocol
+    // because the keyword after `Protocol` is `subclass:`, not `define:`
+    let module = parse_ok(
+        "Object subclass: Protocol
+  doSomething => nil",
+    );
+    assert!(module.protocols.is_empty());
+    assert_eq!(module.classes.len(), 1);
+    assert_eq!(module.classes[0].name.name, "Protocol");
+}
+
+// ---- BT-1577: Superclass type argument parsing ----
+
+#[test]
+fn parse_superclass_type_args_single_param() {
+    // Collection(E) subclass: Array(E)
+    let module = parse_ok(
+        "Collection(E) subclass: Array(E)
+  append: item => nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Array");
+    assert_eq!(class.superclass.as_ref().unwrap().name, "Collection");
+    assert_eq!(class.type_params.len(), 1);
+    assert_eq!(class.type_params[0].name.name, "E");
+    assert_eq!(class.superclass_type_args.len(), 1);
+    match &class.superclass_type_args[0] {
+        TypeAnnotation::Simple(id) => assert_eq!(id.name, "E"),
+        other => panic!("Expected Simple(E), got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_superclass_type_args_concrete_type() {
+    // Collection(Integer) subclass: IntArray
+    let module = parse_ok(
+        "Collection(Integer) subclass: IntArray
+  append: item => nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "IntArray");
+    assert!(class.type_params.is_empty());
+    assert_eq!(class.superclass_type_args.len(), 1);
+    match &class.superclass_type_args[0] {
+        TypeAnnotation::Simple(id) => assert_eq!(id.name, "Integer"),
+        other => panic!("Expected Simple(Integer), got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_superclass_type_args_two_params() {
+    // Mapping(K, V) subclass: SortedMap(K, V)
+    let module = parse_ok(
+        "Mapping(K, V) subclass: SortedMap(K, V)
+  size => 0",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "SortedMap");
+    assert_eq!(class.type_params.len(), 2);
+    assert_eq!(class.superclass_type_args.len(), 2);
+    match &class.superclass_type_args[0] {
+        TypeAnnotation::Simple(id) => assert_eq!(id.name, "K"),
+        other => panic!("Expected Simple(K), got: {other:?}"),
+    }
+    match &class.superclass_type_args[1] {
+        TypeAnnotation::Simple(id) => assert_eq!(id.name, "V"),
+        other => panic!("Expected Simple(V), got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_superclass_no_type_args() {
+    // Actor subclass: Counter — no superclass type args
+    let module = parse_ok(
+        "Actor subclass: Counter
+  state: value = 0",
+    );
+    let class = &module.classes[0];
+    assert!(class.superclass_type_args.is_empty());
 }

@@ -51,6 +51,8 @@ pub(crate) fn make_value_subclass_point() -> Module {
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
@@ -59,6 +61,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
     Module {
         classes: vec![class],
         method_definitions: Vec::new(),
+        protocols: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],

@@ -1,12 +1,17 @@
 # Copyright 2026 James Casey
 # SPDX-License-Identifier: Apache-2.0
 #
-# Nightly Cross-Platform Test Suite
-# ===================================
+# Nightly Cross-Platform Test Suite + Distribution Builds
+# =========================================================
 # Runs the full test suite on macOS and Windows to catch platform-specific
 # issues that PR CI (Linux + macOS/Windows-minimal) would miss.
 #
-# Linux is excluded — it already gets full coverage on every PR via ci.yml.
+# After tests pass, builds distribution archives for all platforms and uploads
+# them to the rolling "nightly" GitHub Release. install.sh --nightly picks
+# these up.
+#
+# Linux is excluded from testing — it already gets full coverage on every PR
+# via ci.yml — but is included for distribution builds.
 # Linting (clippy, fmt, dialyzer) is skipped — platform-independent, Linux covers it.
 #
 # Skips if no commits landed in the last 24 hours.
@@ -24,7 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -35,6 +40,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has_commits: ${{ steps.check.outputs.has_commits }}
+      nightly_date: ${{ steps.meta.outputs.date }}
+      nightly_sha: ${{ steps.meta.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -51,6 +58,12 @@ jobs:
             echo "has_commits=false" >> "$GITHUB_OUTPUT"
             echo "No commits in last 24h — skipping nightly run"
           fi
+
+      - name: Nightly metadata
+        id: meta
+        run: |
+          echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
   # ─── macOS ARM64 (Apple Silicon) ────────────────────────────────────
   macos:
@@ -74,16 +87,8 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@v3
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: nightly-${{ runner.os }}-arm64-cargo-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            nightly-${{ runner.os }}-arm64-cargo-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
@@ -120,6 +125,25 @@ jobs:
       - name: Test E2E
         run: just test-e2e
 
+      - name: Build distribution
+        run: just install dist
+
+      - name: Smoke test
+        run: just test-install
+
+      - name: Package tarball
+        id: package
+        run: scripts/ci/package-release.sh nightly macos-arm64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: beamtalk-nightly-macos-arm64
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+          retention-days: 7
+
   # ─── Windows x86_64 (full suite) ───────────────────────────────────
   windows:
     needs: check-activity
@@ -143,16 +167,8 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@v3
 
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: nightly-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            nightly-${{ runner.os }}-cargo-
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
@@ -187,3 +203,173 @@ jobs:
 
       - name: Test E2E
         run: just test-e2e
+
+      - name: Build Rust (release)
+        run: cargo build --all-targets --release --quiet
+
+      - name: Build standard library (release)
+        shell: bash
+        run: ./target/release/beamtalk.exe build-stdlib
+
+      - name: Package zip
+        id: package
+        shell: bash
+        run: scripts/ci/package-release.sh nightly windows-x86_64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: beamtalk-nightly-windows-x86_64
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+          retention-days: 7
+
+  # ─── macOS x86_64 (dist only) ──────────────────────────────────────
+  macos-x86_64:
+    needs: check-activity
+    if: needs.check-activity.outputs.has_commits == 'true'
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: nightly-${{ runner.os }}-x86_64-erlang-otp-27.0-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          restore-keys: |
+            nightly-${{ runner.os }}-x86_64-erlang-otp-27.0-
+
+      - name: Build and install distribution
+        run: just install dist
+
+      - name: Smoke test
+        run: just test-install
+
+      - name: Package tarball
+        id: package
+        run: scripts/ci/package-release.sh nightly macos-x86_64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: beamtalk-nightly-macos-x86_64
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+          retention-days: 7
+
+  # ─── Linux x86_64 (dist only, testing covered by PR CI) ────────────
+  linux:
+    needs: check-activity
+    if: needs.check-activity.outputs.has_commits == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: nightly-${{ runner.os }}-erlang-otp-27.0-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          restore-keys: |
+            nightly-${{ runner.os }}-erlang-otp-27.0-
+
+      - name: Build distribution
+        run: just dist
+
+      - name: Smoke test
+        run: just test-install
+
+      - name: Package tarball
+        id: package
+        run: scripts/ci/package-release.sh nightly linux-x86_64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: beamtalk-nightly-linux-x86_64
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+          retention-days: 7
+
+  # ─── Publish nightly release ────────────────────────────────────────
+  publish-nightly:
+    needs: [check-activity, macos, macos-x86_64, windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: dist-artifacts
+          merge-multiple: true
+
+      - name: Create or update nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_DATE: ${{ needs.check-activity.outputs.nightly_date }}
+          NIGHTLY_SHA: ${{ needs.check-activity.outputs.nightly_sha }}
+        run: |
+          # Delete existing nightly release if present
+          gh release delete nightly --yes 2>/dev/null || true
+          git push origin :refs/tags/nightly 2>/dev/null || true
+
+          # Create new nightly release
+          gh release create nightly \
+            --title "Nightly Build (${NIGHTLY_DATE}, ${NIGHTLY_SHA})" \
+            --notes "Automated nightly build from \`main\` at ${NIGHTLY_DATE}.
+
+          **Commit:** ${NIGHTLY_SHA}
+          **Full SHA:** $(git rev-parse HEAD)
+
+          > [!WARNING]
+          > Nightly builds are untested beyond the standard test suite. Use \`--nightly\` with install.sh:
+          > \`\`\`sh
+          > curl -fsSL https://jamesc.github.io/beamtalk/install.sh | sh -s -- --nightly
+          > \`\`\`" \
+            --prerelease \
+            dist-artifacts/*

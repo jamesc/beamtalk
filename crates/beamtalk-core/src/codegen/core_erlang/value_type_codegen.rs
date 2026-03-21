@@ -303,6 +303,11 @@ impl CoreErlangGenerator {
         }
 
         // BT-923: Auto-generate keyword constructor for Value subclass:
+        // BT-1559: Value sub-subclasses delegate to new: to include inherited fields.
+        let is_sub_subclass = class.class_kind == ClassKind::Value && {
+            let sc = class.superclass_name();
+            sc != "Value" && sc != "none"
+        };
         if let Some(ref auto) = auto_methods {
             if let Some(ref kw_sel) = auto.keyword_constructor {
                 let slots: Vec<String> = class
@@ -314,6 +319,8 @@ impl CoreErlangGenerator {
                     &class_name_for_kw,
                     kw_sel,
                     &slots,
+                    is_sub_subclass,
+                    &self.module_name,
                 ));
                 docs.push(Document::Str("\n"));
             }
@@ -468,7 +475,40 @@ impl CoreErlangGenerator {
             return Ok(Self::generate_collection_new(empty_val));
         }
 
-        // Start building the document
+        // BT-1559: For Value sub-subclasses (superclass is not "Value" itself),
+        // chain to the parent's new/0 and merge own fields on top.  This ensures
+        // inherited fields are included in the default instance map.
+        // Only applies to ClassKind::Value — Object subclasses don't chain.
+        let superclass_name = class.superclass_name();
+        if class.class_kind == ClassKind::Value
+            && superclass_name != "Value"
+            && superclass_name != "none"
+        {
+            if let Some(super_mod) = self.superclass_module_name(superclass_name) {
+                let mut own_field_parts = Vec::new();
+                own_field_parts.push(format!("'$beamtalk_class' => '{class_name}'"));
+                for field in &class.state {
+                    let default_code = if let Some(default_value) = &field.default_value {
+                        self.capture_expression(default_value)?
+                    } else {
+                        "'nil'".to_string()
+                    };
+                    own_field_parts.push(format!("'{}' => {}", field.name.name, default_code));
+                }
+                return Ok(docvec![
+                    "'new'/0 = fun () ->\n",
+                    "    let ParentState = call '",
+                    Document::String(super_mod),
+                    "':'new'() in\n",
+                    "    call 'maps':'merge'(ParentState, ~{",
+                    Document::String(own_field_parts.join(", ")),
+                    "}~)\n",
+                    "\n",
+                ]);
+            }
+        }
+
+        // Direct Value subclass: build a flat map with all own fields.
         let mut field_parts = Vec::new();
 
         // Add each field with its default value
@@ -691,14 +731,24 @@ impl CoreErlangGenerator {
 
     /// Generates the all-fields keyword constructor class method (BT-923).
     ///
+    /// For direct `Value subclass:` classes, builds a flat map:
     /// ```erlang
     /// 'class_x:y:'/4 = fun (ClassSelf, ClassVars, X, Y) ->
     ///     ~{'$beamtalk_class' => 'Point', 'x' => X, 'y' => Y}~
+    /// ```
+    ///
+    /// For sub-subclasses (BT-1559), delegates to `new:` so inherited fields
+    /// from the parent are included:
+    /// ```erlang
+    /// 'class_y:'/3 = fun (_ClassSelf, _ClassVars, SlotArg0) ->
+    ///     call 'child':'new'(~{'y' => SlotArg0}~)
     /// ```
     fn generate_keyword_constructor_fn(
         class_name: &str,
         kw_selector: &str,
         slots: &[String],
+        is_sub_subclass: bool,
+        module_name: &str,
     ) -> Document<'static> {
         let arity = slots.len() + 2; // _ClassSelf + _ClassVars + N slot args
 
@@ -709,7 +759,44 @@ impl CoreErlangGenerator {
             .flat_map(|(i, _)| [Document::Str(", "), Document::String(format!("SlotArg{i}"))])
             .collect();
 
-        // Map literal body: '$beamtalk_class' => 'ClassName', 'x' => SlotArg0, ...
+        // BT-1408: Hash long keyword constructor atoms to stay within Erlang's
+        // 255-char atom limit.
+        let safe_fn_name = super::selector_mangler::safe_class_method_fn_name(kw_selector);
+
+        // BT-1559: Sub-subclasses delegate to new: to include inherited fields.
+        if is_sub_subclass {
+            // Build a map of own slot args: ~{'slot0' => SlotArg0, 'slot1' => SlotArg1}~
+            let mut map_parts: Vec<Document<'static>> = Vec::new();
+            for (i, slot_name) in slots.iter().enumerate() {
+                if i > 0 {
+                    map_parts.push(Document::Str(", "));
+                }
+                map_parts.extend([
+                    Document::Str("'"),
+                    Document::String(slot_name.clone()),
+                    Document::Str("' => "),
+                    Document::String(format!("SlotArg{i}")),
+                ]);
+            }
+
+            return docvec![
+                "'",
+                Document::String(safe_fn_name),
+                "'/",
+                Document::String(arity.to_string()),
+                " = fun (_ClassSelf, _ClassVars",
+                concat(slot_param_docs),
+                ") ->\n",
+                "    call '",
+                Document::String(module_name.to_string()),
+                "':'new'(~{",
+                concat(map_parts),
+                "}~)\n",
+                "\n",
+            ];
+        }
+
+        // Direct Value subclass: build a flat map with all own fields.
         let mut map_field_docs: Vec<Document<'static>> = vec![
             Document::Str("'$beamtalk_class' => '"),
             Document::String(class_name.to_string()),
@@ -723,10 +810,6 @@ impl CoreErlangGenerator {
                 Document::String(format!("SlotArg{i}")),
             ]);
         }
-
-        // BT-1408: Hash long keyword constructor atoms to stay within Erlang's
-        // 255-char atom limit.
-        let safe_fn_name = super::selector_mangler::safe_class_method_fn_name(kw_selector);
 
         docvec![
             "'",
@@ -2612,6 +2695,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],

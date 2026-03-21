@@ -9,9 +9,10 @@
 //! - Method definitions with optional `sealed` modifier
 
 use crate::ast::{
-    ClassDefinition, DeclaredKeyword, Expression, ExpressionStatement, Identifier, KeywordPart,
-    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition, StandaloneMethodDefinition,
-    StateDeclaration, TypeAnnotation,
+    ClassDefinition, CommentAttachment, DeclaredKeyword, Expression, ExpressionStatement,
+    Identifier, KeywordPart, MessageSelector, MethodDefinition, MethodKind, ParameterDefinition,
+    ProtocolDefinition, ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration,
+    TypeAnnotation, TypeParamDecl,
 };
 use crate::source_analysis::TokenKind;
 
@@ -31,6 +32,16 @@ pub(super) enum DoubleColonSkip {
     /// `::` was present but the type name (or union element) was missing or invalid.
     /// Contains the offset just after `::` for error-recovery lookahead.
     Malformed(usize),
+}
+
+/// Returns `true` if the token kind is a comma binary selector.
+fn is_comma(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::BinarySelector(s) if s.as_str() == ",")
+}
+
+/// Returns `true` if the optional token kind is a comma binary selector.
+fn is_comma_opt(kind: Option<&TokenKind>) -> bool {
+    kind.is_some_and(is_comma)
 }
 
 impl Parser {
@@ -86,6 +97,9 @@ impl Parser {
             Some(superclass_id)
         };
 
+        // Parse optional superclass type arguments: `Collection(E) subclass: ...`
+        let superclass_type_args = self.parse_optional_superclass_type_args();
+
         // Expect `subclass:` keyword
         if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "subclass:") {
             self.error("Expected 'subclass:' keyword");
@@ -103,6 +117,9 @@ impl Parser {
 
         // Parse class name
         let name = self.parse_identifier("Expected class name");
+
+        // Parse optional type parameters: `ClassName(T, E)`
+        let type_params = self.parse_optional_type_params();
 
         // Parse optional `native: module_name` (ADR 0056)
         let backing_module = if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "native:")
@@ -158,12 +175,87 @@ impl Parser {
             span,
         );
         class_def.is_typed = is_typed;
+        class_def.type_params = type_params;
+        class_def.superclass_type_args = superclass_type_args;
         class_def.class_methods = class_methods;
         class_def.class_variables = class_variables;
         class_def.doc_comment = doc_comment;
         class_def.comments = comments;
         class_def.backing_module = backing_module;
         class_def
+    }
+
+    /// Parses optional type parameters: `(T, E)` or `(T :: Printable, E)`.
+    ///
+    /// Each type parameter may optionally have a protocol bound after `::`.
+    /// Returns an empty `Vec` if no `(` follows the current position.
+    ///
+    /// **References:** ADR 0068 Phase 2d — type parameter bounds
+    fn parse_optional_type_params(&mut self) -> Vec<TypeParamDecl> {
+        if !matches!(self.current_kind(), TokenKind::LeftParen) {
+            return Vec::new();
+        }
+        self.advance(); // consume `(`
+        let mut params = Vec::new();
+        if !matches!(self.current_kind(), TokenKind::RightParen) {
+            params.push(self.parse_type_param_decl());
+            while is_comma(self.current_kind()) {
+                self.advance(); // consume `,`
+                params.push(self.parse_type_param_decl());
+            }
+        }
+        if matches!(self.current_kind(), TokenKind::RightParen) {
+            self.advance(); // consume `)`
+        } else {
+            self.error("Expected ')' after type parameters");
+        }
+        params
+    }
+
+    /// Parses a single type parameter declaration: `T` or `T :: Printable`.
+    ///
+    /// The `::` syntax mirrors type annotations elsewhere in the language
+    /// (ADR 0053) and reads as "T conforms to Printable".
+    fn parse_type_param_decl(&mut self) -> TypeParamDecl {
+        let name = self.parse_identifier("Expected type parameter name");
+        // Check for `::` bound: `T :: Printable`
+        if matches!(self.current_kind(), TokenKind::DoubleColon) {
+            self.advance(); // consume `::`
+            let bound = self.parse_identifier("Expected protocol name after '::'");
+            let span = name.span.merge(bound.span);
+            TypeParamDecl::bounded(name, bound, span)
+        } else {
+            TypeParamDecl::unbounded(name)
+        }
+    }
+
+    /// Parses optional superclass type arguments: `(E)`, `(Integer)`, `(K, V)`.
+    ///
+    /// Used for `Collection(E) subclass: Array(E)` — the `(E)` after `Collection`.
+    /// Returns an empty `Vec` if no `(` follows the superclass name.
+    ///
+    /// Unlike `parse_optional_type_params` which produces bare `Identifier`s,
+    /// this produces `TypeAnnotation`s since the arguments may be concrete types,
+    /// type param references, or even nested generics.
+    fn parse_optional_superclass_type_args(&mut self) -> Vec<TypeAnnotation> {
+        if !matches!(self.current_kind(), TokenKind::LeftParen) {
+            return Vec::new();
+        }
+        self.advance(); // consume `(`
+        let mut args = Vec::new();
+        if !matches!(self.current_kind(), TokenKind::RightParen) {
+            args.push(self.parse_type_annotation());
+            while is_comma(self.current_kind()) {
+                self.advance(); // consume `,`
+                args.push(self.parse_type_annotation());
+            }
+        }
+        if matches!(self.current_kind(), TokenKind::RightParen) {
+            self.advance(); // consume `)`
+        } else {
+            self.error("Expected ')' after superclass type arguments");
+        }
+        args
     }
 
     /// Helper to parse an identifier, reporting an error if not found.
@@ -207,6 +299,7 @@ impl Parser {
 
         while !self.is_at_end()
             && !self.is_at_class_definition()
+            && !self.is_at_protocol_definition()
             && !self.is_at_standalone_method_definition()
         {
             // Check for state/field declaration: `state: fieldName ...` or `field: fieldName ...`
@@ -343,6 +436,12 @@ impl Parser {
             return DoubleColonSkip::Malformed(o);
         }
         o += 1;
+        // Skip generic type parameters: `Name(Type, Type, ...)`
+        if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+            if let Some(after) = self.skip_paren_type_params(o) {
+                o = after;
+            }
+        }
         // Skip union types: `| Type`
         while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
             o += 1;
@@ -350,8 +449,99 @@ impl Parser {
                 return DoubleColonSkip::Malformed(o);
             }
             o += 1;
+            // Skip generic type parameters on union member
+            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                if let Some(after) = self.skip_paren_type_params(o) {
+                    o = after;
+                }
+            }
         }
         DoubleColonSkip::Valid(o)
+    }
+
+    /// Skips a parenthesized type parameter list in lookahead context.
+    ///
+    /// Starting at the `(` token, advances past `(Type, Type, ...)` and returns
+    /// the offset after the closing `)`. Returns `None` if the sequence is
+    /// malformed (e.g., missing closing paren or non-identifier content).
+    ///
+    /// Also handles bounded type parameters: `(T :: Printable, E)` — skips the
+    /// `:: Bound` portion when present (ADR 0068 Phase 2d).
+    pub(super) fn skip_paren_type_params(&self, offset: usize) -> Option<usize> {
+        debug_assert!(matches!(self.peek_at(offset), Some(TokenKind::LeftParen)));
+        let mut o = offset + 1; // past `(`
+        // Handle empty parens `()`
+        if matches!(self.peek_at(o), Some(TokenKind::RightParen)) {
+            return Some(o + 1);
+        }
+        // First type param
+        if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+            return None;
+        }
+        o += 1;
+        // Skip optional bound: `:: Protocol`
+        o = self.skip_optional_type_param_bound(o);
+        // Nested generic: `Name(Type(...))`
+        if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+            o = self.skip_paren_type_params(o)?;
+        }
+        // Union in type param position: `Type | Type`
+        while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
+            o += 1;
+            if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+                return None;
+            }
+            o += 1;
+            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                o = self.skip_paren_type_params(o)?;
+            }
+        }
+        // Additional type params: `, Type`
+        while is_comma_opt(self.peek_at(o)) {
+            o += 1;
+            if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+                return None;
+            }
+            o += 1;
+            // Skip optional bound: `:: Protocol`
+            o = self.skip_optional_type_param_bound(o);
+            // Nested generic
+            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                o = self.skip_paren_type_params(o)?;
+            }
+            // Union
+            while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
+                o += 1;
+                if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+                    return None;
+                }
+                o += 1;
+                if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                    o = self.skip_paren_type_params(o)?;
+                }
+            }
+        }
+        if matches!(self.peek_at(o), Some(TokenKind::RightParen)) {
+            Some(o + 1)
+        } else {
+            None
+        }
+    }
+
+    /// Skips an optional `:: Identifier` bound in lookahead context.
+    ///
+    /// If the token at `offset` is `::` (`TypeAnnotation`) followed by an identifier,
+    /// returns the offset past both. Otherwise returns `offset` unchanged.
+    ///
+    /// **References:** ADR 0068 Phase 2d — type parameter bounds in lookahead
+    fn skip_optional_type_param_bound(&self, offset: usize) -> usize {
+        if matches!(self.peek_at(offset), Some(TokenKind::DoubleColon))
+            && matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
+        {
+            offset + 2
+        } else {
+            offset
+        }
     }
 
     /// Checks if the token at `offset` starts a `=>` or `-> Type =>` pattern.
@@ -387,7 +577,7 @@ impl Parser {
         if !matches!(self.peek_at(offset), Some(TokenKind::Arrow)) {
             return false;
         }
-        // Skip -> Type (and possible | Type unions)
+        // Skip -> Type (and possible | Type unions, generic params)
         let mut o = offset + 1;
         // Allow `-> =>` (missing type) for error recovery
         if matches!(self.peek_at(o), Some(TokenKind::FatArrow)) {
@@ -398,6 +588,12 @@ impl Parser {
             return false;
         }
         o += 1;
+        // Skip generic type parameters: `Type(T, E)`
+        if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+            if let Some(after) = self.skip_paren_type_params(o) {
+                o = after;
+            }
+        }
         // Skip union types: `| Type`
         while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
             o += 1;
@@ -405,6 +601,12 @@ impl Parser {
                 return false;
             }
             o += 1;
+            // Skip generic params on union member
+            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                if let Some(after) = self.skip_paren_type_params(o) {
+                    o = after;
+                }
+            }
         }
         matches!(self.peek_at(o), Some(TokenKind::FatArrow))
     }
@@ -591,6 +793,11 @@ impl Parser {
     }
 
     /// Parses a single type annotation (no unions).
+    ///
+    /// Handles:
+    /// - Simple types: `Integer`, `String`
+    /// - Generic types: `Result(T, E)`, `Array(Integer)`, `Block(T, Result(R, E))`
+    /// - Self type: `Self`
     fn parse_single_type_annotation(&mut self) -> TypeAnnotation {
         if let TokenKind::Identifier(name) = self.current_kind() {
             let span = self.current_token().span();
@@ -600,7 +807,32 @@ impl Parser {
             } else {
                 let ident = Identifier::new(name.clone(), span);
                 self.advance();
-                TypeAnnotation::Simple(ident)
+
+                // Check for generic type parameters: `Name(Type, Type)`
+                if matches!(self.current_kind(), TokenKind::LeftParen) {
+                    self.advance(); // consume `(`
+                    let mut parameters = Vec::new();
+                    if !matches!(self.current_kind(), TokenKind::RightParen) {
+                        parameters.push(self.parse_type_annotation());
+                        while is_comma(self.current_kind()) {
+                            self.advance(); // consume `,`
+                            parameters.push(self.parse_type_annotation());
+                        }
+                    }
+                    let end_span = self.current_token().span();
+                    if matches!(self.current_kind(), TokenKind::RightParen) {
+                        self.advance(); // consume `)`
+                    } else {
+                        self.error("Expected ')' after generic type parameters");
+                    }
+                    TypeAnnotation::Generic {
+                        base: ident,
+                        parameters,
+                        span: span.merge(end_span),
+                    }
+                } else {
+                    TypeAnnotation::Simple(ident)
+                }
             }
         } else {
             let span = self.current_token().span();
@@ -815,6 +1047,7 @@ impl Parser {
         #[allow(clippy::nonminimal_bool)]
         while !self.is_at_end()
             && !self.is_at_class_definition()
+            && !self.is_at_protocol_definition()
             && !(
                 // Only test is_at_method_definition when the token could plausibly
                 // be a class member (indentation <= 2). Deeper tokens are continuation
@@ -862,6 +1095,7 @@ impl Parser {
                 // If synchronize stopped at a method/class/state boundary, break
                 if self.is_at_end()
                     || self.is_at_class_definition()
+                    || self.is_at_protocol_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
@@ -878,6 +1112,7 @@ impl Parser {
                 let period_span = self.tokens[self.current - 1].span();
                 if self.is_at_end()
                     || self.is_at_class_definition()
+                    || self.is_at_protocol_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
@@ -916,6 +1151,7 @@ impl Parser {
                 // Check if next token starts a new method/state/class (same as period)
                 if self.is_at_end()
                     || self.is_at_class_definition()
+                    || self.is_at_protocol_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
@@ -1003,5 +1239,256 @@ impl Parser {
             method,
             span,
         }
+    }
+
+    // ========================================================================
+    // Protocol Definition Parsing (ADR 0068, Phase 2a)
+    // ========================================================================
+
+    /// Parses a protocol definition.
+    ///
+    /// Syntax:
+    /// ```text
+    /// Protocol define: <Name>
+    ///   extending: <OtherProtocol>        // optional
+    ///   selectorName -> ReturnType
+    ///   + other :: Self -> Boolean
+    ///   doSomething: arg :: Type -> ReturnType
+    /// ```
+    ///
+    /// Protocol method signatures are like method definitions but without `=>` bodies.
+    /// The parser distinguishes them from class methods by the absence of `=>`.
+    pub(super) fn parse_protocol_definition(&mut self) -> ProtocolDefinition {
+        let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
+
+        // Consume `Protocol`
+        self.advance();
+
+        // Expect `define:` keyword
+        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "define:") {
+            self.error("Expected 'define:' after 'Protocol'");
+            return ProtocolDefinition {
+                name: Identifier::new("Error", start),
+                type_params: Vec::new(),
+                extending: None,
+                method_signatures: Vec::new(),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: start,
+            };
+        }
+        self.advance(); // consume `define:`
+
+        // Parse protocol name
+        let name = self.parse_identifier("Expected protocol name after 'Protocol define:'");
+
+        // Parse optional type parameters: `Collection(E)`, `Mapping(K, V)`
+        let type_params = self.parse_optional_type_params();
+
+        // Parse optional `extending:` clause
+        let extending = if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "extending:")
+        {
+            self.advance(); // consume `extending:`
+            Some(self.parse_identifier("Expected protocol name after 'extending:'"))
+        } else {
+            None
+        };
+
+        // Parse protocol body (method signatures without =>)
+        let method_signatures = self.parse_protocol_body();
+
+        // Determine end span
+        let mut end = name.span;
+        if let Some(tp) = type_params.last() {
+            end = end.merge(tp.span);
+        }
+        if let Some(ref ext) = extending {
+            end = end.merge(ext.span);
+        }
+        if let Some(sig) = method_signatures.last() {
+            end = end.merge(sig.span);
+        }
+        let span = start.merge(end);
+
+        ProtocolDefinition {
+            name,
+            type_params,
+            extending,
+            method_signatures,
+            comments,
+            doc_comment,
+            span,
+        }
+    }
+
+    /// Parses the body of a protocol definition (method signatures without `=>`).
+    ///
+    /// Protocol method signatures have the same selector and parameter syntax as
+    /// class methods, but end before `=>`. They may include optional type annotations
+    /// and return types.
+    ///
+    /// The body ends when we hit:
+    /// - EOF
+    /// - Another protocol definition (`Protocol define:`)
+    /// - A class definition (`Superclass subclass:`)
+    /// - A standalone method definition (`Class >>`)
+    fn parse_protocol_body(&mut self) -> Vec<ProtocolMethodSignature> {
+        let mut signatures = Vec::new();
+
+        // Skip any periods/statement terminators
+        while self.match_token(&TokenKind::Period) {}
+
+        while !self.is_at_end()
+            && !self.is_at_protocol_definition()
+            && !self.is_at_class_definition()
+            && !self.is_at_standalone_method_definition()
+        {
+            if let Some(sig) = self.parse_protocol_method_signature() {
+                signatures.push(sig);
+            } else {
+                // Not a valid signature start — end of protocol body
+                break;
+            }
+
+            // Skip any periods/statement terminators
+            while self.match_token(&TokenKind::Period) {}
+        }
+
+        signatures
+    }
+
+    /// Parses a single protocol method signature (no `=>` body).
+    ///
+    /// Returns `None` if the current position doesn't look like a method signature.
+    ///
+    /// Syntax:
+    /// - Unary: `asString -> String`
+    /// - Binary: `< other :: Self -> Boolean`
+    /// - Keyword: `do: block :: Block(E, Object)`
+    fn parse_protocol_method_signature(&mut self) -> Option<ProtocolMethodSignature> {
+        let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
+
+        // Determine what kind of signature this is
+        let (selector, parameters) = match self.current_kind() {
+            // Unary: identifier (not followed by `=>`, not a known delimiter keyword)
+            TokenKind::Identifier(name) => {
+                // Guard against consuming non-signature identifiers
+                // (e.g., `Protocol` starting the next definition)
+                if name == "Protocol" || name == "abstract" || name == "sealed" || name == "typed" {
+                    return None;
+                }
+                let selector = MessageSelector::Unary(name.clone());
+                self.advance();
+                (selector, Vec::new())
+            }
+            // Binary: `+ other`, `< other`, etc.
+            TokenKind::BinarySelector(op) => {
+                let selector = MessageSelector::Binary(op.clone());
+                self.advance();
+
+                let param_name =
+                    self.parse_identifier("Expected parameter name after binary selector");
+                let type_annotation = self.parse_optional_param_type();
+                let param = match type_annotation {
+                    Some(ta) => ParameterDefinition::with_type(param_name, ta),
+                    None => ParameterDefinition::new(param_name),
+                };
+                (selector, vec![param])
+            }
+            // Arrow (`->`) is also a valid binary method selector (ADR 0047)
+            TokenKind::Arrow => {
+                let selector = MessageSelector::Binary("->".into());
+                self.advance();
+
+                let param_name =
+                    self.parse_identifier("Expected parameter name after binary selector");
+                let type_annotation = self.parse_optional_param_type();
+                let param = match type_annotation {
+                    Some(ta) => ParameterDefinition::with_type(param_name, ta),
+                    None => ParameterDefinition::new(param_name),
+                };
+                (selector, vec![param])
+            }
+            // Keyword: `do: block :: Block(E, Object)`
+            TokenKind::Keyword(kw) => {
+                // Guard: `extending:` is the protocol extension keyword, not a selector
+                if kw == "extending:" {
+                    return None;
+                }
+                let mut keywords = Vec::new();
+                let mut parameters = Vec::new();
+
+                while let TokenKind::Keyword(keyword) = self.current_kind() {
+                    // In protocol bodies, keywords on a new line are separate
+                    // signatures. Only continue if the keyword is on the same
+                    // line as the previous one (i.e., a multi-keyword selector
+                    // like `at: key put: value`).
+                    if !keywords.is_empty() && self.current_token().has_leading_newline() {
+                        break;
+                    }
+                    let span = self.current_token().span();
+                    keywords.push(KeywordPart::new(keyword.clone(), span));
+                    self.advance();
+
+                    let param_name = self.parse_identifier("Expected parameter name after keyword");
+                    let type_annotation = self.parse_optional_param_type();
+                    let param = match type_annotation {
+                        Some(ta) => ParameterDefinition::with_type(param_name, ta),
+                        None => ParameterDefinition::new(param_name),
+                    };
+                    parameters.push(param);
+                }
+
+                let selector = MessageSelector::Keyword(keywords);
+                (selector, parameters)
+            }
+            _ => return None,
+        };
+
+        // Parse optional return type: `-> Type`
+        let return_type = self.parse_optional_return_type();
+
+        // Protocol signatures must NOT have `=>`; if we see one, that's
+        // a user error — they probably meant a class method.
+        if matches!(self.current_kind(), TokenKind::FatArrow) {
+            let span = self.current_token().span();
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "Protocol method signatures cannot have implementations ('=>')",
+                    span,
+                )
+                .with_hint("Remove '=>' and the method body — protocols only declare signatures"),
+            );
+            // Consume the `=>` and skip to the next line/signature for recovery
+            self.advance();
+            // Skip tokens until newline or next signature-like token
+            while !self.is_at_end()
+                && !self.current_token().has_leading_newline()
+                && !matches!(self.current_kind(), TokenKind::Period)
+            {
+                self.advance();
+            }
+        }
+
+        // Determine end span
+        let end = return_type
+            .as_ref()
+            .map(TypeAnnotation::span)
+            .or(parameters.last().map(ParameterDefinition::span))
+            .unwrap_or(start);
+        let span = start.merge(end);
+
+        Some(ProtocolMethodSignature {
+            selector,
+            parameters,
+            return_type,
+            comments,
+            doc_comment,
+            span,
+        })
     }
 }

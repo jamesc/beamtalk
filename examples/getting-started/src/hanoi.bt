@@ -17,7 +17,7 @@
 ///   Move disk from B to C
 ///   Move disk from A to C
 ///   nil
-Object subclass: Hanoi
+Value subclass: Hanoi
 
   solve: n from: source to: target via: auxiliary =>
     (n > 0)

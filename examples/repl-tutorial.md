@@ -11,7 +11,7 @@ beamtalk repl
 You should see:
 
 ```
-Beamtalk v0.1.0
+Beamtalk v0.2.0
 Type :help for available commands, :exit to quit.
 
 >
@@ -28,7 +28,7 @@ Try some simple expressions:
 > 10 * 5
 50
 
-> "Hello, " + "Beamtalk!"
+> "Hello, " ++ "Beamtalk!"
 Hello, Beamtalk!
 ```
 
@@ -91,7 +91,7 @@ Variable bindings:
 Load a Beamtalk source file and compile it as a module:
 
 ```beamtalk
-> :load examples/hello.bt
+> :load examples/getting-started/src/hello.bt
 Loaded Hello
 ```
 
@@ -110,7 +110,7 @@ Reload after editing:
 
 ```beamtalk
 > :reload
-Reloaded examples/hello.bt
+Reloaded examples/getting-started/src/hello.bt
 ```
 
 ## Working with Actors
@@ -120,8 +120,8 @@ Beamtalk is built on the actor model. Actors are objects that run concurrently a
 **Note:** To try the examples below, you'll first need to load an actor class. The Counter actor is available in the examples:
 
 ```beamtalk
-> :load examples/counter.bt
-Loaded examples/counter.bt
+> :load examples/getting-started/src/counter.bt
+Loaded examples/getting-started/src/counter.bt
 ```
 
 Now you can create and interact with Counter actors:
@@ -152,15 +152,6 @@ Send messages to actors:
 
 **Auto-await:** Message sends return Futures, but the REPL automatically awaits them for a synchronous experience.
 
-### List Running Actors
-
-```beamtalk
-> :actors
-Running actors:
-  <0.123.0> - Counter (counter) - spawned 2m ago
-  <0.124.0> - Counter (counter) - spawned 1m ago
-```
-
 ## Blocks (Closures)
 
 Blocks are Beamtalk's closures:
@@ -172,11 +163,11 @@ Blocks are Beamtalk's closures:
 > double value: 21
 42
 
-> numbers := [1, 2, 3, 4, 5]
-[1, 2, 3, 4, 5]
+> numbers := #(1, 2, 3, 4, 5)
+#(1, 2, 3, 4, 5)
 
-> numbers do: [ :n | n * n ]
-[1, 4, 9, 16, 25]
+> numbers collect: [ :n | n * n ]
+#(1, 4, 9, 16, 25)
 ```
 
 ## Control Flow
@@ -205,15 +196,20 @@ Use `:help` to see all available commands:
 > :help
 Beamtalk REPL Commands:
 
-  :help, :h       Show this help message
+  :help, :h               Show this help message
+  :help <Class>           Show instance-side class docs and methods
+  :help <Class> <sel>     Show instance-side method documentation
   :exit, :q       Exit the REPL
   :clear          Clear all variable bindings
   :bindings       Show current variable bindings
-  :load <path>    Load a .bt file
-  :reload         Reload the last loaded file
-  :unload <name>  Unload a class (fails if actors exist)
-  :actors         List running actors
-  :kill <pid>     Kill an actor by PID
+  :load <path>    Load a .bt file or directory
+  :reload         Reload the last loaded file or directory
+  :reload <Class> Reload a class by name
+  :unload <Class> Unload a class from the workspace
+  :test           Run all test classes
+  :test <Class>   Run a test class
+  :show-codegen <expr>  Show generated Core Erlang for an expression
+  :sc <expr>      Short alias for :show-codegen
 ```
 
 ### :clear - Reset Bindings
@@ -229,26 +225,25 @@ Beamtalk REPL Commands:
 Error: Undefined variable: x
 ```
 
+<<<<<<< HEAD
+=======
+### Workspace classes - List Loaded Classes
+
+```beamtalk
+> Workspace classes
+#(Counter)
+
+> Workspace testClasses
+#()
+```
+
 ### :reload - Reload Last File
 
 After editing a file:
 
 ```beamtalk
 > :reload
-✓ Reloaded examples/counter.bt
-```
-
-### :kill - Stop an Actor
-
-```beamtalk
-> myCounter := Counter spawn
-#Actor<Counter, pid=<0.125.0>>
-
-> :kill <0.125.0>
-✓ Actor <0.125.0> killed
-
-> myCounter getValue
-Error: Actor process <0.125.0> is not alive
+✓ Reloaded examples/getting-started/src/counter.bt
 ```
 
 ## Streams — Lazy Data Pipelines
@@ -313,17 +308,17 @@ a Stream
 Read files lazily — constant memory, safe for large files:
 
 ```beamtalk
-> (File lines: "examples/hello.bt") take: 3
+> (File lines: "examples/getting-started/src/hello.bt") take: 3
 ["// Copyright 2026 James Casey","// SPDX-License-Identifier: Apache-2.0",""]
 
-> (File lines: "examples/hello.bt") inject: 0 into: [:count :line | count + 1]
+> (File lines: "examples/getting-started/src/hello.bt") inject: 0 into: [:count :line | count + 1]
 15
 ```
 
 Block-scoped handles close automatically:
 
 ```beamtalk
-> File open: "examples/hello.bt" do: [:handle | handle lines take: 2]
+> (File open: "examples/getting-started/src/hello.bt" do: [:handle | handle lines take: 2]) unwrap
 ["// Copyright 2026 James Casey","// SPDX-License-Identifier: Apache-2.0"]
 ```
 
@@ -400,7 +395,7 @@ Here's a complete example session exploring basic expressions:
 
 ```beamtalk
 $ beamtalk repl
-Beamtalk v0.1.0
+Beamtalk v0.2.0
 Type :help for available commands, :exit to quit.
 
 > x := 42
@@ -418,7 +413,7 @@ Variable bindings:
   y = 52
   z = 2184
 
-> :load examples/hello.bt
+> :load examples/getting-started/src/hello.bt
 Loaded Hello
 
 > Workspace classes
@@ -431,7 +426,6 @@ Goodbye!
 ## Next Steps
 
 - Explore the `examples/` directory for more sample programs
-- Try `examples/stream.bt` for lazy pipeline and file streaming examples
 - Read `docs/beamtalk-language-features.md` for full language syntax
 - Check out `docs/beamtalk-principles.md` to understand the design philosophy
 - Review `docs/known-limitations.md` for what's not yet supported

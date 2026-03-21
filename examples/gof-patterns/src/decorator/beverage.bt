@@ -8,7 +8,7 @@
 ///
 /// Any Beverage has a description and a cost. Both concrete beverages and
 /// condiment decorators satisfy this interface.
-Object subclass: Beverage
+Value subclass: Beverage
 
   /// Return a human-readable description of this beverage and its condiments.
   description => self subclassResponsibility

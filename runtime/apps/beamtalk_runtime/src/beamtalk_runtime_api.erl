@@ -170,11 +170,11 @@ drain_class_warnings_by_names(Names) ->
 drain_pending_load_errors_by_names(Names) ->
     beamtalk_class_registry:drain_pending_load_errors_by_names(Names).
 
--spec get_method_return_type(atom(), atom()) -> {ok, atom()} | {error, not_found}.
+-spec get_method_return_type(atom(), atom()) -> {ok, atom() | tuple()} | {error, not_found}.
 get_method_return_type(ClassName, Selector) ->
     beamtalk_class_registry:get_method_return_type(ClassName, Selector).
 
--spec get_class_method_return_type(atom(), atom()) -> {ok, atom()} | {error, not_found}.
+-spec get_class_method_return_type(atom(), atom()) -> {ok, atom() | tuple()} | {error, not_found}.
 get_class_method_return_type(ClassName, Selector) ->
     beamtalk_class_registry:get_class_method_return_type(ClassName, Selector).
 

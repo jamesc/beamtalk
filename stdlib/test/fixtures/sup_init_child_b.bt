@@ -6,6 +6,8 @@
 Actor subclass: SupInitChildB
   state: value = 0
 
+  class supervisionPolicy => #temporary
+
   getValue => self.value
 
   setValue: v => self.value := v

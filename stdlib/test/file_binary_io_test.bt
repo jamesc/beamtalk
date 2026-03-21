@@ -34,6 +34,7 @@ TestCase subclass: FileBinaryIoTest
     self should: [File writeBinary: 42 contents: "data"] raise: #type_error
 
   testWriteBinaryTypeErrorContents =>
+    @expect type
     self should: [
       File writeBinary: "target/bt-test-tmp/test.dat" contents: 42
     ] raise: #type_error
@@ -58,6 +59,7 @@ TestCase subclass: FileBinaryIoTest
     self should: [File appendBinary: 42 contents: "data"] raise: #type_error
 
   testAppendBinaryTypeErrorContents =>
+    @expect type
     self should: [
       File appendBinary: "target/bt-test-tmp/test.dat" contents: 42
     ] raise: #type_error

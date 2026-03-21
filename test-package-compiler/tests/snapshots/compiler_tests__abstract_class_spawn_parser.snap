@@ -113,6 +113,8 @@ Module {
             },
             doc_comment: None,
             backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
             span: Span {
                 start: 145,
                 end: 214,
@@ -120,6 +122,7 @@ Module {
         },
     ],
     method_definitions: [],
+    protocols: [],
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {

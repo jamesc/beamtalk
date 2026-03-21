@@ -13,8 +13,11 @@
 //! - Field assignment and state default validation
 //! - "Did you mean?" suggestions for unknown selectors
 
+use std::collections::HashMap;
+
 use crate::ast::{Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -23,12 +26,19 @@ use super::{InferredType, TypeChecker, TypeEnv};
 
 impl TypeChecker {
     /// Check a class-side message send (e.g., `Counter spawn`, `Object new`).
+    ///
+    /// When `arg_types` is non-empty and the class has type parameters,
+    /// constructor inference (ADR 0068 Phase 1c) kicks in: the type checker
+    /// maps the class method's parameter types (e.g., `T`) against the concrete
+    /// argument types (e.g., `Integer`) to infer the class's type arguments.
+    /// Unresolved params default to `Dynamic`.
     pub(super) fn check_class_side_send(
         &mut self,
         class_name: &EcoString,
         selector: &str,
         span: Span,
         hierarchy: &ClassHierarchy,
+        arg_types: &[InferredType],
     ) -> InferredType {
         if !hierarchy.has_class(class_name) {
             return InferredType::Dynamic;
@@ -56,26 +66,79 @@ impl TypeChecker {
 
         // Infer return type for known factory methods
         match selector {
-            "spawn" | "spawnWith:" | "new" | "new:" => InferredType::Known(class_name.clone()),
+            "spawn" | "spawnWith:" | "new" | "new:" => {
+                Self::infer_constructor_type(class_name, hierarchy, selector, arg_types)
+            }
             _ => {
                 if let Some(method) = hierarchy.find_class_method(class_name, selector) {
                     if let Some(ref ret_ty) = method.return_type {
-                        // `Self` resolves to the static receiver class
-                        let resolved = if ret_ty.as_str() == "Self" {
-                            class_name.clone()
-                        } else {
-                            ret_ty.clone()
-                        };
-                        return InferredType::Known(resolved);
+                        // `Self` resolves to the static receiver class —
+                        // with constructor inference for generic classes (ADR 0068 Phase 1c)
+                        if ret_ty.as_str() == "Self" {
+                            return Self::infer_constructor_type(
+                                class_name, hierarchy, selector, arg_types,
+                            );
+                        }
+                        return InferredType::known(ret_ty.clone());
                     }
                 }
                 // BT-1047: Fall back to return types inferred earlier in this pass.
                 let key = (class_name.clone(), EcoString::from(selector), true);
                 if let Some(ret_ty) = self.method_return_types.get(&key) {
-                    return InferredType::Known(ret_ty.clone());
+                    return InferredType::known(ret_ty.clone());
                 }
                 InferredType::Dynamic
             }
+        }
+    }
+
+    /// Infer the constructor return type for a generic class (ADR 0068 Phase 1c).
+    ///
+    /// Given a class method call like `GenResult ok: 42`, maps the method's
+    /// parameter types (e.g., `T`) against the concrete argument types (e.g.,
+    /// `Integer`) to produce `GenResult(Integer, Dynamic)`.
+    ///
+    /// For non-generic classes, returns `Known(class_name)` with no type args.
+    fn infer_constructor_type(
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+        selector: &str,
+        arg_types: &[InferredType],
+    ) -> InferredType {
+        let Some(class_info) = hierarchy.get_class(class_name) else {
+            return InferredType::known(class_name.clone());
+        };
+
+        // Non-generic class — no type args to infer
+        if class_info.type_params.is_empty() {
+            return InferredType::known(class_name.clone());
+        }
+
+        // Build inference map from class method param types → argument types
+        let mut inferred: HashMap<EcoString, InferredType> = HashMap::new();
+
+        if let Some(method) = hierarchy.find_class_method(class_name, selector) {
+            for (param_ty_opt, arg_ty) in method.param_types.iter().zip(arg_types.iter()) {
+                if let Some(param_ty) = param_ty_opt {
+                    // If param type is a class type param (e.g., "T"), map it to the arg type
+                    if class_info.type_params.contains(param_ty) {
+                        inferred.insert(param_ty.clone(), arg_ty.clone());
+                    }
+                }
+            }
+        }
+
+        // Build type_args in class param order, defaulting unresolved to Dynamic
+        let type_args: Vec<InferredType> = class_info
+            .type_params
+            .iter()
+            .map(|p| inferred.remove(p).unwrap_or(InferredType::Dynamic))
+            .collect();
+
+        InferredType::Known {
+            class_name: class_name.clone(),
+            type_args,
+            provenance: super::TypeProvenance::Inferred(Span::default()),
         }
     }
 
@@ -201,8 +264,12 @@ impl TypeChecker {
             let Some(expected_ty) = expected else {
                 continue;
             };
-            let InferredType::Known(actual_ty) = arg_ty else {
-                continue; // Dynamic arguments never produce warnings
+            let InferredType::Known {
+                class_name: actual_ty,
+                ..
+            } = arg_ty
+            else {
+                continue; // Dynamic or Union arguments — skip (conservative)
             };
             if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
                 let param_pos = i + 1;
@@ -240,29 +307,67 @@ impl TypeChecker {
         let Some(ref declared) = method.return_type else {
             return;
         };
-        let InferredType::Known(actual_ty) = body_type else {
-            return; // Dynamic body — can't check
+        let InferredType::Known {
+            class_name: actual_ty,
+            ..
+        } = body_type
+        else {
+            return; // Dynamic or Union body — can't reliably check
         };
 
         // For `-> Self`, the expected type is the class itself
-        let expected_ty: EcoString = match declared {
-            TypeAnnotation::Simple(type_id) => type_id.name.clone(),
-            TypeAnnotation::SelfType { .. } => class_name.clone(),
-            _ => return, // Phase 3 handles unions/generics
+        // For `-> Generic(...)`, extract the base type name for compatibility checking
+        // For `-> Union` / `-> FalseOr`, resolve via resolve_type_annotation
+        let expected = match declared {
+            TypeAnnotation::Simple(type_id) => InferredType::known(type_id.name.clone()),
+            TypeAnnotation::SelfType { .. } => InferredType::known(class_name.clone()),
+            TypeAnnotation::Generic { base, .. } => InferredType::known(base.name.clone()),
+            TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. } => {
+                Self::resolve_type_annotation(declared)
+            }
+            TypeAnnotation::Singleton { .. } => return, // Singleton — not yet supported
         };
 
-        if !Self::is_type_compatible(actual_ty, &expected_ty, hierarchy) {
-            let selector = method.selector.name();
-            self.diagnostics.push(
-                Diagnostic::warning(
-                    format!(
-                        "Method '{selector}' in {class_name} declares return type {expected_ty}, but body returns {actual_ty}"
-                    ),
-                    method.span,
-                )
-                .with_category(DiagnosticCategory::Type)
-                .with_hint(format!("Declared -> {expected_ty}, inferred body type is {actual_ty}")),
-            );
+        match &expected {
+            InferredType::Known {
+                class_name: expected_ty,
+                ..
+            } => {
+                if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
+                    let selector = method.selector.name();
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Method '{selector}' in {class_name} declares return type {expected_ty}, but body returns {actual_ty}"
+                            ),
+                            method.span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint(format!("Declared -> {expected_ty}, inferred body type is {actual_ty}")),
+                    );
+                }
+            }
+            InferredType::Union(members) => {
+                // Body type must be compatible with at least one union member
+                let compatible = members
+                    .iter()
+                    .any(|member| Self::is_type_compatible(actual_ty, member, hierarchy));
+                if !compatible {
+                    let selector = method.selector.name();
+                    let union_display = members.join(" | ");
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Method '{selector}' in {class_name} declares return type {union_display}, but body returns {actual_ty}"
+                            ),
+                            method.span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint(format!("Declared -> {union_display}, inferred body type is {actual_ty}")),
+                    );
+                }
+            }
+            InferredType::Dynamic => {} // Can't check
         }
     }
 
@@ -419,10 +524,14 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         env: &TypeEnv,
     ) {
-        let InferredType::Known(value_type) = value_ty else {
-            return; // Dynamic expressions never produce warnings
+        let InferredType::Known {
+            class_name: value_type,
+            ..
+        } = value_ty
+        else {
+            return; // Dynamic or Union values — skip (conservative)
         };
-        let Some(InferredType::Known(class_name)) = env.get("self") else {
+        let Some(InferredType::Known { class_name, .. }) = env.get("self") else {
             return;
         };
         let Some(declared_type) = hierarchy.state_field_type(&class_name, &field.name) else {
@@ -460,9 +569,13 @@ impl TypeChecker {
             };
             let declared_type = type_annotation.type_name();
             let mut env = TypeEnv::new();
-            env.set("self", InferredType::Known(class.name.name.clone()));
+            env.set("self", InferredType::known(class.name.name.clone()));
             let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
-            let InferredType::Known(value_type) = &inferred else {
+            let InferredType::Known {
+                class_name: value_type,
+                ..
+            } = &inferred
+            else {
                 continue; // Dynamic defaults are fine
             };
             if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
@@ -489,9 +602,10 @@ impl TypeChecker {
     /// For example, Integer is assignable to Number because Integer's superclass
     /// chain includes Number.
     ///
-    /// Returns true (permissive) for complex type annotations (unions, generics)
-    /// that are not yet supported — full union type support is Phase 3.
-    fn is_assignable_to(
+    /// For union declared types (containing `|`), the value is assignable if it's
+    /// compatible with any member. For generic types (`Result(Integer, Error)`),
+    /// compares the base type name. Singleton (`#`) types are still permissive.
+    pub(super) fn is_assignable_to(
         value_type: &EcoString,
         declared_type: &EcoString,
         hierarchy: &ClassHierarchy,
@@ -499,19 +613,156 @@ impl TypeChecker {
         if value_type == declared_type {
             return true;
         }
-        // Skip checking for complex type annotations (unions, generics, singletons)
-        // that contain non-class-name characters. These need Phase 3 union support.
-        if declared_type.contains('|')
-            || declared_type.contains('<')
-            || declared_type.starts_with('#')
-        {
+        // Singleton types — permissive until that phase lands
+        if declared_type.starts_with('#') {
             return true;
         }
-        // Check if value_type is a subclass of declared_type
+        // Union declared types: value must be compatible with at least one member
+        if declared_type.contains('|') {
+            return declared_type.split('|').map(str::trim).any(|member| {
+                let member_eco: EcoString = Self::resolve_type_keyword_static(member);
+                Self::is_type_compatible(value_type, &member_eco, hierarchy)
+            });
+        }
+        // For generic declared types like "Result(Integer, Error)", extract
+        // the base type name and compare structurally.
+        let declared_base = if let Some(open) = declared_type.find('(') {
+            &declared_type[..open]
+        } else {
+            declared_type.as_str()
+        };
+        let value_base = if let Some(open) = value_type.find('(') {
+            &value_type[..open]
+        } else {
+            value_type.as_str()
+        };
+        if value_base == declared_base {
+            return true;
+        }
+        // Check if value_type's base is a subclass of declared_type's base
+        let value_eco: EcoString = value_base.into();
+        let declared_eco: EcoString = declared_base.into();
         hierarchy
-            .superclass_chain(value_type)
+            .superclass_chain(&value_eco)
             .iter()
-            .any(|ancestor| ancestor == declared_type)
+            .any(|ancestor| ancestor == &declared_eco)
+    }
+
+    /// Returns true if `value_type` is assignable to `declared_type` with
+    /// variance-aware generic type argument checking (ADR 0068 Phase 2f).
+    ///
+    /// Extends [`is_assignable_to`] with covariance support for sealed Value classes:
+    /// when the declared type is generic (e.g., `Array(Printable)`) and the value type
+    /// is the same generic class with different type args (e.g., `Array(Integer)`),
+    /// checks each type argument covariantly — the value's type arg must be assignable
+    /// to the declared type arg. This is sound because sealed Value classes are immutable.
+    ///
+    /// Actor classes remain invariant: type args must match exactly.
+    ///
+    /// Falls back to [`is_assignable_to`] when no generic type args are present or
+    /// when the protocol registry is not needed.
+    pub(super) fn is_assignable_to_with_variance(
+        value_type: &EcoString,
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) -> bool {
+        // Delegate to the base check first for non-generic cases
+        if !declared_type.contains('(') || !value_type.contains('(') {
+            return Self::is_assignable_to(value_type, declared_type, hierarchy);
+        }
+
+        // Both are generic — extract base names and type arg strings
+        let (declared_base, declared_args) = Self::parse_generic_type_string(declared_type);
+        let (value_base, value_args) = Self::parse_generic_type_string(value_type);
+
+        // Different base types — check normal assignability
+        if value_base != declared_base {
+            return Self::is_assignable_to(value_type, declared_type, hierarchy);
+        }
+
+        // Same base, same args — trivially compatible
+        if value_args == declared_args {
+            return true;
+        }
+
+        // Same base, different args — check variance
+        if hierarchy.is_covariant_class(&declared_base) {
+            // Covariant: each value type arg must be compatible with declared type arg.
+            // A type arg is compatible if:
+            // 1. It's the same type or a subclass, OR
+            // 2. The declared type arg is a protocol and the value type conforms to it
+            for (val_arg, decl_arg) in value_args.iter().zip(declared_args.iter()) {
+                let val_eco: EcoString = val_arg.as_str().into();
+                let decl_eco: EcoString = decl_arg.as_str().into();
+                if val_eco == decl_eco {
+                    continue;
+                }
+                // Check protocol conformance first — the declared type arg might be a protocol.
+                // Protocol types are NOT classes in the hierarchy, so is_type_compatible
+                // would return true (conservative unknown-type fallback), masking real errors.
+                if Self::is_protocol_type(decl_arg, hierarchy, protocol_registry) {
+                    let base_protocol = if let Some(open) = decl_arg.find('(') {
+                        &decl_arg[..open]
+                    } else {
+                        decl_arg.as_str()
+                    };
+                    if protocol_registry
+                        .check_conformance(&val_eco, base_protocol, hierarchy)
+                        .is_ok()
+                    {
+                        continue;
+                    }
+                    // Value type does not conform to the protocol
+                    return false;
+                }
+                // Check class hierarchy compatibility (subclass check)
+                if Self::is_type_compatible(&val_eco, &decl_eco, hierarchy) {
+                    continue;
+                }
+                // Type arg is not compatible
+                return false;
+            }
+            true
+        } else {
+            // Invariant: type args must match exactly (already checked they differ above)
+            // Fall back to base-name-only compatibility (current behaviour)
+            Self::is_assignable_to(value_type, declared_type, hierarchy)
+        }
+    }
+
+    /// Parse a generic type string like `"Array(Integer)"` into base name and type arg strings.
+    ///
+    /// Returns `("Array", ["Integer"])` for `"Array(Integer)"`.
+    /// Returns `("Result", ["Integer", "Error"])` for `"Result(Integer, Error)"`.
+    /// For non-generic types, returns the full name and an empty vec.
+    ///
+    /// **Limitation:** Uses a simple comma-split, which does not handle nested generic
+    /// type args with multiple parameters (e.g., `Map(Result(A, B), C)` would be
+    /// incorrectly split). This is acceptable because Beamtalk's current type system
+    /// does not produce such deeply nested multi-parameter generic annotations in
+    /// string form.
+    pub(super) fn parse_generic_type_string(type_str: &str) -> (String, Vec<String>) {
+        if let Some(open) = type_str.find('(') {
+            let base = type_str[..open].to_string();
+            let args_str = &type_str[open + 1..type_str.len() - 1]; // strip parens
+            let args: Vec<String> = args_str.split(',').map(|s| s.trim().to_string()).collect();
+            (base, args)
+        } else {
+            (type_str.to_string(), vec![])
+        }
+    }
+
+    /// Resolves type-position keywords to their class names (static version).
+    ///
+    /// Same as `resolve_type_keyword` but takes `&str` for use in validation contexts.
+    fn resolve_type_keyword_static(name: &str) -> EcoString {
+        match name {
+            "nil" => "UndefinedObject".into(),
+            "false" => "False".into(),
+            "true" => "True".into(),
+            _ => EcoString::from(name),
+        }
     }
 
     /// Emit a warning diagnostic for an unknown selector.
@@ -565,5 +816,180 @@ impl TypeChecker {
         }
 
         best.map(|(sel, _)| sel)
+    }
+
+    /// Check protocol conformance for a call-site argument.
+    ///
+    /// When a parameter type is a protocol name and the argument type is a known
+    /// class, checks structural conformance. Emits a warning if the class does
+    /// not conform to the protocol.
+    ///
+    /// **References:** ADR 0068 Phase 2b — "Type checker: protocol name in type
+    /// annotation → structural conformance check"
+    pub(super) fn check_protocol_argument_conformance(
+        &mut self,
+        arg_type: &InferredType,
+        expected_protocol: &str,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        match arg_type {
+            InferredType::Known { class_name, .. } => {
+                // Extract base protocol name for generic protocols
+                let base_protocol = if let Some(open) = expected_protocol.find('(') {
+                    &expected_protocol[..open]
+                } else {
+                    expected_protocol
+                };
+
+                let Some(_protocol) = protocol_registry.get(base_protocol) else {
+                    return; // Not a protocol — handled by normal type checking
+                };
+
+                match protocol_registry.check_conformance(class_name, base_protocol, hierarchy) {
+                    Ok(()) => {} // Conforms — no warning
+                    Err(missing) => {
+                        let missing_list = missing
+                            .iter()
+                            .map(|s| format!("'{s}'"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        self.diagnostics.push(
+                            Diagnostic::warning(
+                                format!(
+                                    "{class_name} does not conform to protocol {base_protocol}"
+                                ),
+                                span,
+                            )
+                            .with_category(DiagnosticCategory::Type)
+                            .with_hint(format!("Missing required method(s): {missing_list}")),
+                        );
+                    }
+                }
+            }
+            InferredType::Dynamic => {
+                // Cannot verify conformance for Dynamic values — emit informational warning
+                let base_protocol = if let Some(open) = expected_protocol.find('(') {
+                    &expected_protocol[..open]
+                } else {
+                    expected_protocol
+                };
+
+                if protocol_registry.has_protocol(base_protocol) {
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!("Cannot verify {base_protocol} conformance for Dynamic value"),
+                            span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint("Add a type annotation to enable protocol conformance checking"),
+                    );
+                }
+            }
+            InferredType::Union(_) => {
+                // Union types — skip for now (Phase 2 extension)
+            }
+        }
+    }
+
+    /// Returns true if the given type name refers to a protocol (not a class).
+    ///
+    /// Used to determine whether a type annotation should trigger structural
+    /// conformance checking (protocol) or nominal subtyping (class).
+    pub(super) fn is_protocol_type(
+        type_name: &str,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) -> bool {
+        // Extract base name for generic types
+        let base_name = if let Some(open) = type_name.find('(') {
+            &type_name[..open]
+        } else {
+            type_name
+        };
+
+        // A protocol type is one that's in the registry and NOT a class name
+        protocol_registry.has_protocol(base_name) && !hierarchy.has_class(base_name)
+    }
+
+    /// Check type parameter bounds for a generic type application (ADR 0068 Phase 2d).
+    ///
+    /// When a generic class has bounded type parameters (e.g., `Logger(T :: Printable)`),
+    /// this checks that the concrete type arguments conform to those bounds.
+    ///
+    /// For example, `Logger(Integer)` is valid because `Integer` conforms to `Printable`,
+    /// but `Logger(SomeOpaqueType)` would warn if `SomeOpaqueType` does not.
+    ///
+    /// Only emits warnings (not errors) per ADR 0025 gradual typing philosophy.
+    pub(super) fn check_type_param_bounds(
+        &mut self,
+        class_name: &EcoString,
+        type_args: &[InferredType],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        // Resolve type param names and bounds from either ClassInfo or ProtocolInfo
+        let (param_names, param_bounds): (Vec<&EcoString>, Vec<&Option<EcoString>>) =
+            if let Some(class_info) = hierarchy.get_class(class_name) {
+                (
+                    class_info.type_params.iter().collect(),
+                    class_info.type_param_bounds.iter().collect(),
+                )
+            } else if let Some(proto_info) = protocol_registry.get(class_name) {
+                (
+                    proto_info.type_params.iter().collect(),
+                    proto_info.type_param_bounds.iter().collect(),
+                )
+            } else {
+                return; // Unknown type — can't check bounds
+            };
+
+        if param_bounds.is_empty() || param_bounds.iter().all(|b| b.is_none()) {
+            return;
+        }
+
+        for (i, (arg, bound_opt)) in type_args.iter().zip(param_bounds.iter()).enumerate() {
+            let Some(bound_protocol) = bound_opt else {
+                continue; // Unbounded — any type is accepted
+            };
+
+            match arg {
+                InferredType::Known {
+                    class_name: arg_class,
+                    ..
+                } => {
+                    // Check if the concrete type arg conforms to the bound protocol
+                    match protocol_registry.check_conformance(arg_class, bound_protocol, hierarchy)
+                    {
+                        Ok(()) => {} // Conforms — no warning
+                        Err(missing) => {
+                            let param_name = param_names.get(i).map_or("?", |p| p.as_str());
+                            let missing_list = missing
+                                .iter()
+                                .map(|s| format!("'{s}'"))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            self.diagnostics.push(
+                                Diagnostic::warning(
+                                    format!(
+                                        "Type argument {arg_class} for {param_name} in {class_name} does not conform to {bound_protocol}"
+                                    ),
+                                    span,
+                                )
+                                .with_category(DiagnosticCategory::Type)
+                                .with_hint(format!(
+                                    "{arg_class} is missing required method(s): {missing_list}"
+                                )),
+                            );
+                        }
+                    }
+                }
+                // Dynamic values: can't verify bounds (skip silently).
+                // Union types: deferred to future phase.
+                InferredType::Dynamic | InferredType::Union(_) => {}
+            }
+        }
     }
 }
