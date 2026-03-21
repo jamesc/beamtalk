@@ -27,6 +27,11 @@ use super::{InferredType, TypeChecker, TypeEnv};
 /// When a Boolean-producing expression like `x class = Foo` or `x isNil` is used
 /// as the receiver of `ifTrue:`/`ifFalse:`, the type checker narrows the tested
 /// variable inside the block scope (ADR 0068 Phase 1g).
+///
+/// The `respondsTo:` variant (ADR 0068 Phase 2e) narrows to `Dynamic` in the
+/// true block, suppressing DNU warnings for the tested selector. If a protocol
+/// in the registry requires exactly that selector, protocol conformance can be
+/// inferred.
 #[derive(Debug, Clone)]
 pub(super) struct NarrowingInfo {
     /// The variable name being narrowed.
@@ -36,6 +41,14 @@ pub(super) struct NarrowingInfo {
     /// Whether this is a nil-check (`isNil`). If so, the *false* branch
     /// narrows to non-nil and early-return narrowing applies.
     pub(super) is_nil_check: bool,
+    /// The selector tested in a `respondsTo:` narrowing (ADR 0068 Phase 2e).
+    ///
+    /// When set, the narrowing was detected from `x respondsTo: #selector`
+    /// and the variable is narrowed to `Dynamic` in the true block.
+    /// Read by tests and reserved for future protocol inference integration
+    /// (e.g., matching `responded_selector` to protocol required methods).
+    #[allow(dead_code)]
+    pub(super) responded_selector: Option<EcoString>,
 }
 
 impl TypeChecker {
@@ -902,7 +915,31 @@ impl TypeChecker {
                     variable: var_name,
                     true_type: InferredType::known("UndefinedObject"),
                     is_nil_check: true,
+                    responded_selector: None,
                 })
+            }
+
+            // Pattern: `x respondsTo: #selector` (ADR 0068 Phase 2e)
+            Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } if parts.len() == 1 && parts[0].keyword == "respondsTo:" => {
+                let var_name = Self::extract_variable_name(inner_recv)?;
+                // Extract the selector name from a symbol literal argument (#selector)
+                if let Some(Expression::Literal(Literal::Symbol(sel_name), _)) = arguments.first() {
+                    Some(NarrowingInfo {
+                        variable: var_name,
+                        // Narrow to Dynamic — we know the object responds to the selector,
+                        // but not its concrete class. Dynamic suppresses DNU warnings.
+                        true_type: InferredType::Dynamic,
+                        is_nil_check: false,
+                        responded_selector: Some(sel_name.clone()),
+                    })
+                } else {
+                    None
+                }
             }
 
             // Pattern: `x isKindOf: ClassName`
@@ -918,6 +955,7 @@ impl TypeChecker {
                         variable: var_name,
                         true_type: InferredType::known(name.name.clone()),
                         is_nil_check: false,
+                        responded_selector: None,
                     })
                 } else {
                     None
@@ -950,6 +988,7 @@ impl TypeChecker {
                                 variable: var_name,
                                 true_type: InferredType::known(name.name.clone()),
                                 is_nil_check: false,
+                                responded_selector: None,
                             });
                         }
                     }
