@@ -118,13 +118,21 @@ impl InferredType {
     /// Creates a `Union` from simple class names with `Inferred` provenance.
     ///
     /// Convenience for the common case of `String | nil` style unions where
-    /// members don't carry generic type args.
+    /// members don't carry generic type args.  Resolves type keywords
+    /// (`nil` → `UndefinedObject`, `true` → `True`, `false` → `False`)
+    /// and deduplicates via `union_of`.
     #[must_use]
     pub fn simple_union(names: &[&str]) -> Self {
-        Self::Union {
-            members: names.iter().map(|n| Self::known(*n)).collect(),
-            provenance: TypeProvenance::Inferred(Span::default()),
-        }
+        let members: Vec<Self> = names
+            .iter()
+            .map(|name| match *name {
+                "nil" => Self::known("UndefinedObject"),
+                "true" => Self::known("True"),
+                "false" => Self::known("False"),
+                other => Self::known(other),
+            })
+            .collect();
+        Self::union_of(&members)
     }
 
     /// Returns the class name if this is a known single type.
