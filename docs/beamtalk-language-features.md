@@ -1909,7 +1909,6 @@ The REPL `:` commands are convenience aliases that desugar to the native message
 |---------------|---------------------------|
 | `:load path` | `Workspace load: "path"` |
 | `:reload Counter` | `Counter reload` |
-| `:modules` | `Workspace classes` |
 | `:test` | `Workspace test` |
 | `:test CounterTest` | `Workspace test: CounterTest` |
 | `:help Counter` | `Beamtalk help: Counter` |

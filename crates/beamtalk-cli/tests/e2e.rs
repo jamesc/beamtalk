@@ -958,34 +958,6 @@ impl ReplClient {
         Ok(entries.join("\n"))
     }
 
-    /// Get list of loaded modules formatted as a readable string.
-    fn get_modules(&mut self) -> Result<String, String> {
-        let response = self.send_op(&serde_json::json!({
-            "op": "modules",
-            "id": "e2e-modules"
-        }))?;
-        let modules = response
-            .get("modules")
-            .and_then(|m| m.as_array())
-            .cloned()
-            .unwrap_or_default();
-        if modules.is_empty() {
-            return Ok("No modules".to_string());
-        }
-        let entries: Vec<String> = modules
-            .iter()
-            .map(|m| {
-                let name = m.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                let actors = m
-                    .get("actor_count")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(0);
-                format!("{name} ({actors} actors)")
-            })
-            .collect();
-        Ok(entries.join("\n"))
-    }
-
     /// Request completions for `code` (cursor at end) and return a comma-separated
     /// sorted list of completion strings.  Returns an empty string for no completions.
     ///
@@ -1374,8 +1346,6 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
             client.get_bindings()
         } else if case.expression == ":actors" {
             client.get_actors()
-        } else if case.expression == ":modules" {
-            client.get_modules()
         } else if case.expression.starts_with(":load ") || case.expression.starts_with(":l ") {
             let path = case
                 .expression

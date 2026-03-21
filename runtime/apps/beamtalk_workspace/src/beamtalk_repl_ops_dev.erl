@@ -1575,7 +1575,7 @@ make_class_not_found_error(ClassName) ->
     ),
     beamtalk_error:with_hint(
         Err1,
-        <<"Use Workspace classes or :modules to see loaded classes.">>
+        <<"Use Workspace classes to see loaded classes.">>
     ).
 
 %% @private

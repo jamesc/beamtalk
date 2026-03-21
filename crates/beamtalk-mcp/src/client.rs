@@ -505,18 +505,6 @@ impl ReplClient {
         self.send(&request).await
     }
 
-    /// Send a load-file operation.
-    ///
-    /// **Deprecated:** Use [`load_source`] or evaluate `Workspace load: "path"` instead.
-    ///
-    /// Uses [`send_once`] (no retry) because loading a file defines classes on
-    /// the server. A retry after partial success would redefine already-loaded
-    /// classes and produce duplicate errors.
-    pub async fn load_file(&self, path: &str) -> Result<ReplResponse, String> {
-        self.send_once(&Self::request_with_param("load-file", "path", path))
-            .await
-    }
-
     /// Send a load-source operation to compile inline Beamtalk source.
     ///
     /// Uses [`send_once`] (no retry) because loading source defines classes on
@@ -539,23 +527,9 @@ impl ReplClient {
         self.send(&Self::request("actors")).await
     }
 
-    /// Send a modules operation.
-    pub async fn modules(&self) -> Result<ReplResponse, String> {
-        self.send(&Self::request("modules")).await
-    }
-
     /// Send a bindings operation.
     pub async fn bindings(&self) -> Result<ReplResponse, String> {
         self.send(&Self::request("bindings")).await
-    }
-
-    /// Send a reload operation.
-    ///
-    /// Uses [`send_once`] (no retry) — reloading a module is a mutating operation;
-    /// a retry could reload an already-updated module with stale bytecode.
-    pub async fn reload(&self, module: &str) -> Result<ReplResponse, String> {
-        self.send_once(&Self::request_with_param("reload", "module", module))
-            .await
     }
 
     /// Send a clear operation to reset REPL bindings.
@@ -566,9 +540,9 @@ impl ReplClient {
         self.send_once(&Self::request("clear")).await
     }
 
-    /// Send an unload operation to remove a module from the workspace.
+    /// Send an unload operation to remove a class from the workspace.
     ///
-    /// Uses [`send_once`] (no retry) — a retry after the module was already
+    /// Uses [`send_once`] (no retry) — a retry after the class was already
     /// unloaded would produce a not-found error.
     pub async fn unload(&self, module: &str) -> Result<ReplResponse, String> {
         self.send_once(&Self::request_with_param("unload", "module", module))
@@ -794,19 +768,6 @@ impl ReplClient {
         req
     }
 
-    /// Send a docs operation.
-    pub async fn docs(&self, class: &str, selector: Option<&str>) -> Result<ReplResponse, String> {
-        let mut request = serde_json::json!({
-            "op": "docs",
-            "id": next_msg_id(),
-            "class": class
-        });
-        if let Some(sel) = selector {
-            request["selector"] = serde_json::Value::String(sel.to_string());
-        }
-        self.send(&request).await
-    }
-
     /// Send a list-classes operation (BT-1404).
     ///
     /// Returns all available classes with one-line descriptions. The optional
@@ -847,8 +808,6 @@ pub struct ReplResponse {
     pub class_list: Option<Vec<ClassInfo>>,
     /// Actor list.
     pub actors: Option<Vec<ActorInfo>>,
-    /// Module list.
-    pub modules: Option<Vec<ModuleInfo>>,
     /// Completion suggestions.
     pub completions: Option<Vec<String>>,
     /// Symbol info.
@@ -926,21 +885,6 @@ pub struct ActorInfo {
     pub module: String,
     /// Unix timestamp (seconds) when the actor was spawned.
     pub spawned_at: i64,
-}
-
-/// Module information from the REPL.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ModuleInfo {
-    /// Module name (e.g., `"Counter"`).
-    pub name: String,
-    /// Path to the `.bt` source file that defined this module.
-    pub source_file: String,
-    /// Number of live actors currently running from this module.
-    pub actor_count: u32,
-    /// Unix timestamp (seconds) when the module was last loaded.
-    pub load_time: i64,
-    /// Human-readable relative time since load (e.g., `"2m ago"`).
-    pub time_ago: String,
 }
 
 /// Spawn a background task that sends WebSocket Ping frames at [`KEEPALIVE_INTERVAL`].
@@ -1362,18 +1306,6 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "integration test"]
-    async fn test_modules_list() -> Result<(), Box<dyn std::error::Error>> {
-        let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie, None).await?;
-        let resp = client.modules().await.unwrap();
-        assert!(!resp.is_error());
-        assert!(resp.modules.is_some(), "should return modules list");
-        client.close().await;
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore = "integration test"]
     async fn test_complete() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie, None).await?;
@@ -1411,15 +1343,13 @@ mod tests {
 
         // Load counter
         let resp = client
-            .load_file("examples/getting-started/src/counter.bt")
+            .evaluate_with_options(
+                "Workspace load: \"examples/getting-started/src/counter.bt\"",
+                false,
+            )
             .await
             .unwrap();
         assert!(!resp.is_error(), "load should succeed: {:?}", resp.error);
-        let classes = resp.classes.unwrap_or_default();
-        assert!(
-            classes.contains(&"Counter".to_string()),
-            "Counter should be loaded"
-        );
 
         // Spawn actor
         let resp = client.eval("testCounter := Counter spawn").await.unwrap();
@@ -1456,7 +1386,10 @@ mod tests {
     async fn test_docs() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie, None).await?;
-        let resp = client.docs("Integer", None).await.unwrap();
+        let resp = client
+            .evaluate_with_options("Beamtalk help: Integer", false)
+            .await
+            .unwrap();
         if resp.is_error() {
             // Some test environments may not have stdlib classes loaded; accept
             // a missing-class error as a soft skip.
@@ -1469,8 +1402,7 @@ mod tests {
             }
         }
         assert!(!resp.is_error(), "docs should succeed: {:?}", resp.error);
-        assert!(resp.docs.is_some(), "should return docs");
-        let docs = resp.docs.unwrap();
+        let docs = resp.value_string();
         assert!(!docs.is_empty(), "docs should not be empty");
         client.close().await;
         Ok(())
@@ -1598,7 +1530,7 @@ mod tests {
 
         // Load a test fixture first so there is at least one test class to run
         let load_resp = client
-            .load_file("stdlib/test/arithmetic_test.bt")
+            .evaluate_with_options("Workspace load: \"stdlib/test/arithmetic_test.bt\"", false)
             .await
             .unwrap();
         assert!(
@@ -1635,7 +1567,7 @@ mod tests {
 
         // Load BUnit test fixture first
         let load_resp = client
-            .load_file("stdlib/test/arithmetic_test.bt")
+            .evaluate_with_options("Workspace load: \"stdlib/test/arithmetic_test.bt\"", false)
             .await
             .unwrap();
         assert!(

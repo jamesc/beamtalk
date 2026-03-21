@@ -71,6 +71,65 @@ fn error_result(msg: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![Content::text(msg.into())])
 }
 
+/// Validate that a string is a valid Beamtalk class name (uppercase-starting identifier).
+fn validate_class_name(name: &str) -> Result<(), rmcp::ErrorData> {
+    if name.is_empty()
+        || !name.starts_with(|c: char| c.is_ascii_uppercase())
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(rmcp::ErrorData::invalid_params(
+            format!("Invalid class name: '{name}'. Must be an uppercase-starting identifier."),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+/// Validate that a string is a valid Beamtalk selector.
+///
+/// Accepts keyword/unary selectors (`increment`, `at:put:`) and binary operator
+/// selectors (`+`, `>=`, `**`) matching the lexer's `is_binary_selector_char`.
+fn validate_selector(sel: &str) -> Result<(), rmcp::ErrorData> {
+    fn is_binary_selector_char(c: char) -> bool {
+        matches!(
+            c,
+            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
+        )
+    }
+
+    if sel.is_empty() {
+        return Err(rmcp::ErrorData::invalid_params(
+            "Selector must not be empty.",
+            None,
+        ));
+    }
+
+    // Binary operator selectors: all chars are operator chars
+    let first = sel.chars().next().unwrap();
+    if is_binary_selector_char(first) {
+        if sel.chars().all(is_binary_selector_char) {
+            return Ok(());
+        }
+        return Err(rmcp::ErrorData::invalid_params(
+            format!("Invalid binary selector: '{sel}'."),
+            None,
+        ));
+    }
+
+    // Keyword/unary selectors: alphanumeric, underscores, and colons
+    if sel
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+    {
+        return Ok(());
+    }
+
+    Err(rmcp::ErrorData::invalid_params(
+        format!("Invalid selector: '{sel}'."),
+        None,
+    ))
+}
+
 /// Pretty-print a JSON value, falling back to `Display` on serialization error.
 fn pretty_json(value: &serde_json::Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
@@ -139,12 +198,12 @@ pub struct InspectParams {
     pub actor: String,
 }
 
-/// Parameters for the `reload_module` MCP tool.
+/// Parameters for the `reload_class` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct ReloadModuleParams {
-    /// Module name to reload.
-    #[schemars(description = "Name of the beamtalk module to reload (hot code reload)")]
-    pub module: String,
+pub struct ReloadClassParams {
+    /// Class name to reload.
+    #[schemars(description = "Name of the beamtalk class to reload (hot code reload)")]
+    pub class: String,
 }
 
 /// Parameters for the `docs` MCP tool.
@@ -175,9 +234,9 @@ pub struct ShowCodegenParams {
         description = "Name of a loaded Beamtalk class to show generated Core Erlang for. Takes priority over 'code' when both are provided."
     )]
     pub class: Option<String>,
-    /// Optional method selector when using `class`. If omitted, shows the full module.
+    /// Optional method selector when using `class`. If omitted, shows the full class.
     #[schemars(
-        description = "Optional method selector when inspecting a class. Narrows context but full module Core Erlang is returned."
+        description = "Optional method selector when inspecting a class. Narrows context but full class Core Erlang is returned."
     )]
     pub selector: Option<String>,
 }
@@ -200,9 +259,9 @@ pub struct TestParams {
 /// Parameters for the `unload` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct UnloadParams {
-    /// Name of the module to unload from the workspace.
-    #[schemars(description = "Name of the beamtalk module to unload from the workspace")]
-    pub module: String,
+    /// Name of the class to unload from the workspace.
+    #[schemars(description = "Name of the beamtalk class to unload from the workspace")]
+    pub class: String,
 }
 
 /// Parameters for the `load_project` MCP tool.
@@ -481,19 +540,30 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("load_file");
         tracing::debug!(tool = "load_file", path = %params.path, "tool invoked");
+        // Use native Beamtalk API: Workspace load: "path"
+        let expr = format!(
+            "Workspace load: \"{}\"",
+            params
+                .path
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('{', "\\{")
+        );
         let response = self
             .client
-            .load_file(&params.path)
+            .evaluate_with_options(&expr, false)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
         check_response!(response, "Failed to load file");
 
-        let classes = response.classes.unwrap_or_default();
-        let text = if classes.is_empty() {
-            "File loaded (no classes defined)".to_string()
-        } else {
-            format!("Loaded classes: {}", classes.join(", "))
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                "File loaded".to_string()
+            } else {
+                v
+            }
         };
 
         let mut parts = vec![Content::text(text)];
@@ -539,7 +609,7 @@ impl BeamtalkMcp {
 
     /// List all running actors in the workspace.
     #[tool(
-        description = "List all running actors in the workspace. Returns each actor's PID, class, and module."
+        description = "List all running actors in the workspace. Returns each actor's PID and class."
     )]
     async fn list_actors(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("list_actors");
@@ -558,42 +628,7 @@ impl BeamtalkMcp {
         } else {
             actors
                 .iter()
-                .map(|a| format!("{} ({}) — pid: {}", a.class, a.module, a.pid))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
-    }
-
-    /// List all loaded modules in the workspace.
-    #[tool(
-        description = "List all loaded modules in the workspace. Returns each module's name, source file, actor count, and when it was loaded."
-    )]
-    async fn list_modules(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("list_modules");
-        tracing::debug!(tool = "list_modules", "tool invoked");
-        let response = self
-            .client
-            .modules()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-
-        check_response!(response, "Failed to list modules");
-
-        let modules = response.modules.unwrap_or_default();
-        let text = if modules.is_empty() {
-            "No modules loaded".to_string()
-        } else {
-            modules
-                .iter()
-                .map(|m| {
-                    format!(
-                        "{} — {} ({} actors, loaded {})",
-                        m.name, m.source_file, m.actor_count, m.time_ago
-                    )
-                })
+                .map(|a| format!("{} — pid: {}", a.class, a.pid))
                 .collect::<Vec<_>>()
                 .join("\n")
         };
@@ -688,37 +723,38 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
-    /// Hot-reload a module, migrating running actors to the new code.
+    /// Hot-reload a class, migrating running actors to the new code.
     #[tool(
-        description = "Hot-reload a module. Recompiles and reloads the module, migrating any running actors to the new code. Returns the number of affected actors and any migration failures."
+        description = "Hot-reload a class. Recompiles and reloads the class, migrating any running actors to the new code."
     )]
-    async fn reload_module(
+    async fn reload_class(
         &self,
-        Parameters(params): Parameters<ReloadModuleParams>,
+        Parameters(params): Parameters<ReloadClassParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("reload_module");
-        tracing::debug!(tool = "reload_module", module = %params.module, "tool invoked");
+        let mut timer = ToolTimer::new("reload_class");
+        tracing::debug!(tool = "reload_class", class = %params.class, "tool invoked");
+        validate_class_name(&params.class)?;
+        // Use native Beamtalk API: ClassName reload
+        let expr = format!("{} reload", params.class);
         let response = self
             .client
-            .reload(&params.module)
+            .evaluate_with_options(&expr, false)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        check_response!(response, "Failed to reload module");
+        check_response!(response, "Failed to reload class");
 
-        let mut parts = vec![Content::text("Module reloaded successfully")];
-
-        if let Some(affected) = response.affected_actors {
-            parts.push(Content::text(format!("Affected actors: {affected}")));
-        }
-        if let Some(failures) = response.migration_failures {
-            if failures > 0 {
-                parts.push(Content::text(format!("Migration failures: {failures}")));
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                "Class reloaded successfully".to_string()
+            } else {
+                v
             }
-        }
+        };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(parts))
+        Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
     /// Get documentation for a beamtalk class or method.
@@ -731,17 +767,32 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("docs");
         tracing::debug!(tool = "docs", class = %params.class, selector = ?params.selector, "tool invoked");
+        validate_class_name(&params.class)?;
+        // Use native Beamtalk API: Beamtalk help: ClassName [selector: #sel]
+        let expr = match params.selector.as_deref() {
+            Some(sel) => {
+                let sel = sel.strip_prefix('#').unwrap_or(sel);
+                validate_selector(sel)?;
+                format!("Beamtalk help: {} selector: #{}", params.class, sel)
+            }
+            None => format!("Beamtalk help: {}", params.class),
+        };
         let response = self
             .client
-            .docs(&params.class, params.selector.as_deref())
+            .evaluate_with_options(&expr, false)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
         check_response!(response, "No documentation found");
 
-        let text = response
-            .docs
-            .unwrap_or_else(|| "No documentation available".to_string());
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                "No documentation available".to_string()
+            } else {
+                v
+            }
+        };
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
@@ -768,28 +819,29 @@ impl BeamtalkMcp {
         )]))
     }
 
-    /// Unload a module from the workspace.
+    /// Unload a class from the workspace.
     #[tool(
-        description = "Unload a module from the workspace. Removes the module and its classes. Does not affect running actors."
+        description = "Unload a class from the workspace. Removes the class. Does not affect running actors."
     )]
     async fn unload(
         &self,
         Parameters(params): Parameters<UnloadParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("unload");
-        tracing::debug!(tool = "unload", module = %params.module, "tool invoked");
+        validate_class_name(&params.class)?;
+        tracing::debug!(tool = "unload", class = %params.class, "tool invoked");
         let response = self
             .client
-            .unload(&params.module)
+            .unload(&params.class)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
-        check_response!(response, "Failed to unload module");
+        check_response!(response, "Failed to unload class");
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "Module '{}' unloaded",
-            params.module
+            "Class '{}' unloaded",
+            params.class
         ))]))
     }
 
@@ -1315,13 +1367,13 @@ impl ServerHandler for BeamtalkMcp {
                  from a project in dependency order, 'load_file' to load a single source file, \
                  'list_actors' to see running actors, 'list_classes' for a class overview with optional superclass/scope filter, \
                  'inspect' to examine actor state, \
-                 'reload_module' for hot code reloading, 'test' to run BUnit tests, \
+                 'reload_class' for hot code reloading, 'test' to run BUnit tests, \
                  'lint' to run style/redundancy checks on .bt source files, \
                  'search_classes' to discover Beamtalk classes by keyword or concept (works offline, no REPL needed), \
                  'search_examples' to find Beamtalk code examples by keyword (works offline, no REPL needed), \
                  'show_codegen' to inspect generated Core Erlang (use class+selector for loaded classes), 'info' for symbol details, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
-                 'unload' to remove a module, and 'interrupt' to cancel evaluations.",
+                 'unload' to remove a class, and 'interrupt' to cancel evaluations.",
             )
     }
 }
@@ -1494,6 +1546,178 @@ mod tests {
         assert!(
             tool_names.contains(&"list_classes"),
             "list_classes should be in tool list, found: {tool_names:?}"
+        );
+    }
+
+    // --- validate_class_name ---
+
+    #[test]
+    fn validate_class_name_valid_simple() {
+        assert!(validate_class_name("Counter").is_ok());
+    }
+
+    #[test]
+    fn validate_class_name_valid_with_digits() {
+        assert!(validate_class_name("Counter2").is_ok());
+    }
+
+    #[test]
+    fn validate_class_name_valid_with_underscore() {
+        assert!(validate_class_name("My_Class").is_ok());
+    }
+
+    #[test]
+    fn validate_class_name_valid_single_char() {
+        assert!(validate_class_name("A").is_ok());
+    }
+
+    #[test]
+    fn validate_class_name_empty_is_error() {
+        assert!(validate_class_name("").is_err());
+    }
+
+    #[test]
+    fn validate_class_name_lowercase_start_is_error() {
+        let err = validate_class_name("counter");
+        assert!(err.is_err());
+        let msg = err.unwrap_err().message;
+        assert!(msg.contains("counter"), "error should mention the name");
+    }
+
+    #[test]
+    fn validate_class_name_digit_start_is_error() {
+        assert!(validate_class_name("1Counter").is_err());
+    }
+
+    #[test]
+    fn validate_class_name_space_is_error() {
+        assert!(validate_class_name("My Class").is_err());
+    }
+
+    #[test]
+    fn validate_class_name_hyphen_is_error() {
+        assert!(validate_class_name("My-Class").is_err());
+    }
+
+    #[test]
+    fn validate_class_name_colon_is_error() {
+        // Colons are not allowed in class names (only selectors)
+        assert!(validate_class_name("My:Class").is_err());
+    }
+
+    #[test]
+    fn validate_class_name_unicode_is_error() {
+        // Non-ASCII chars are not valid
+        assert!(validate_class_name("Clàss").is_err());
+    }
+
+    #[test]
+    fn validate_class_name_error_message_contains_name() {
+        let err = validate_class_name("bad name").unwrap_err();
+        assert!(
+            err.message.contains("bad name"),
+            "error message should include the invalid name: {}",
+            err.message
+        );
+    }
+
+    // --- validate_selector ---
+
+    #[test]
+    fn validate_selector_empty_is_error() {
+        assert!(validate_selector("").is_err());
+    }
+
+    #[test]
+    fn validate_selector_unary_valid() {
+        assert!(validate_selector("increment").is_ok());
+        assert!(validate_selector("size").is_ok());
+        assert!(validate_selector("isEmpty").is_ok());
+    }
+
+    #[test]
+    fn validate_selector_keyword_valid() {
+        assert!(validate_selector("at:").is_ok());
+        assert!(validate_selector("at:put:").is_ok());
+        assert!(validate_selector("ifTrue:ifFalse:").is_ok());
+    }
+
+    #[test]
+    fn validate_selector_binary_operator_valid() {
+        assert!(validate_selector("+").is_ok());
+        assert!(validate_selector("-").is_ok());
+        assert!(validate_selector("*").is_ok());
+        assert!(validate_selector("/").is_ok());
+        assert!(validate_selector("<").is_ok());
+        assert!(validate_selector(">").is_ok());
+        assert!(validate_selector("=").is_ok());
+        assert!(validate_selector(">=").is_ok());
+        assert!(validate_selector("<=").is_ok());
+        assert!(validate_selector("**").is_ok());
+        assert!(validate_selector("~=").is_ok());
+    }
+
+    #[test]
+    fn validate_selector_binary_with_alphanumeric_is_error() {
+        // Starts with operator char but mixes in alphanumeric — invalid binary
+        let err = validate_selector("+foo");
+        assert!(err.is_err());
+        let msg = err.unwrap_err().message;
+        assert!(msg.contains("+foo"), "error should mention the selector");
+    }
+
+    #[test]
+    fn validate_selector_keyword_with_space_is_error() {
+        assert!(validate_selector("at: put:").is_err());
+    }
+
+    #[test]
+    fn validate_selector_keyword_with_hash_is_error() {
+        assert!(validate_selector("#size").is_err());
+    }
+
+    #[test]
+    fn validate_selector_keyword_starting_with_digit_is_ok() {
+        // digits are alphanumeric — "1x:" is technically accepted by current impl
+        // (no leading-char restriction on selectors, only on class names)
+        assert!(validate_selector("at1:").is_ok());
+    }
+
+    #[test]
+    fn validate_selector_error_message_contains_selector() {
+        let err = validate_selector("bad selector!").unwrap_err();
+        assert!(
+            err.message.contains("bad selector!"),
+            "error message should include the invalid selector: {}",
+            err.message
+        );
+    }
+
+    // --- tool registration: reload_class replaces reload_module ---
+
+    #[test]
+    fn reload_class_tool_registered() {
+        let router = BeamtalkMcp::tool_router();
+        let tools = router.list_all();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        assert!(
+            tool_names.contains(&"reload_class"),
+            "reload_class should be in tool list, found: {tool_names:?}"
+        );
+        assert!(
+            !tool_names.contains(&"reload_module"),
+            "reload_module should not be in tool list (replaced by reload_class)"
+        );
+    }
+
+    #[test]
+    fn list_modules_tool_not_registered() {
+        let router = BeamtalkMcp::tool_router();
+        let tools = router.list_all();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        assert!(
+            !tool_names.contains(&"list_modules"),
+            "list_modules should not be in tool list (removed in this PR)"
         );
     }
 }
