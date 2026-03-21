@@ -243,7 +243,9 @@ pub fn is_input_complete(source: &str) -> bool {
     let mut binary_depth: i32 = 0; // << >>
     let mut last_meaningful_kind: Option<&TokenKind> = None;
     let mut has_subclass_keyword = false;
+    let mut has_protocol_define = false;
     let mut has_method_arrow = false;
+    let mut has_thin_arrow = false;
 
     for token in &tokens {
         let kind = token.kind();
@@ -284,10 +286,20 @@ pub fn is_input_complete(source: &str) -> bool {
 
             // Track class definition pattern
             TokenKind::Keyword(k) if k == "subclass:" => has_subclass_keyword = true,
+            // Track protocol definition pattern (Protocol define: Name ...)
+            TokenKind::Keyword(k) if k == "define:" => {
+                if matches!(last_meaningful_kind, Some(TokenKind::Identifier(name)) if name == "Protocol") {
+                    has_protocol_define = true;
+                }
+            }
             // Only count `=>` as a method arrow when not nested inside delimiters
             // (e.g., `#{key => value}` in state initializers should not count)
             TokenKind::FatArrow if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 => {
                 has_method_arrow = true;
+            }
+            // Track `->` for protocol method signatures (e.g., `greet -> String`)
+            TokenKind::Arrow if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 => {
+                has_thin_arrow = true;
             }
 
             TokenKind::Eof => break,
@@ -338,6 +350,13 @@ pub fn is_input_complete(source: &str) -> bool {
     // In the REPL, user presses Enter on a blank line to submit; in E2E tests,
     // the assertion line `// =>` follows immediately after the last method.
     if has_subclass_keyword && !has_method_arrow {
+        return false;
+    }
+
+    // Protocol definition: incomplete until at least one method signature is defined.
+    // "Protocol define: Greetable" alone is incomplete — waiting for method sigs.
+    // "Protocol define: Greetable\n  greet -> String" is complete.
+    if has_protocol_define && !has_thin_arrow {
         return false;
     }
 
