@@ -702,10 +702,11 @@ fn generate_app_file(
         .collect::<Vec<_>>()
         .join(",\n                    ");
 
+    let version = env!("BEAMTALK_VERSION");
     let app_content = format!(
         "{{application, beamtalk_stdlib, [\n\
          \x20   {{description, \"Beamtalk Standard Library - compiled from lib/*.bt\"}},\n\
-         \x20   {{vsn, \"0.1.0\"}},\n\
+         \x20   {{vsn, \"{version}\"}},\n\
          \x20   {{modules, [{modules_list}]}},\n\
          \x20   {{registered, []}},\n\
          \x20   {{applications, [kernel, stdlib, ssl, gun, beamtalk_runtime]}},\n\
@@ -745,7 +746,7 @@ fn generate_app_src_file(src_dir: &Utf8Path, class_metadata: &[ClassMeta]) -> Re
     let app_src_content = format!(
         "{{application, beamtalk_stdlib, [\n\
          \x20   {{description, \"Beamtalk Standard Library - compiled from lib/*.bt\"}},\n\
-         \x20   {{vsn, \"0.1.0\"}},\n\
+         \x20   {{vsn, {{cmd, \"escript ../../../scripts/version.escript\"}}}},\n\
          \x20   {{modules, []}},\n\
          \x20   {{registered, []}},\n\
          \x20   {{applications, [kernel, stdlib, ssl, gun, beamtalk_runtime]}},\n\

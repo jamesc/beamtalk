@@ -54,6 +54,27 @@ Prefer `stdlib/test/*.bt` (BUnit TestCase) for new tests. Only use `stdlib/boots
 - **Never** panic on user input, use `unwrap()` on user input, or add deps without justification
 - **Always** return `(Result, Vec<Diagnostic>)` for user-facing operations
 
+## Versioning & Releases
+
+**Single source of truth:** `VERSION` file at repo root (e.g., `0.2.0`).
+
+Version flows automatically at build time:
+- **Rust:** `build.rs` reads `VERSION` + git state → `BEAMTALK_VERSION` compile-time env var
+- **Erlang:** `.app.src` files use `{vsn, {cmd, "escript ../../../scripts/version.escript"}}`
+- **Dev builds** (not on a git tag): version becomes `0.2.0-dev+<short sha>`
+- **Release builds** (on a git tag): version is the clean `0.2.0`
+
+**Rust toolchain** is pinned in `rust-toolchain.toml`. Update there when upgrading Rust.
+
+**To release a new version:**
+1. Update `VERSION` with the new version number
+2. Update `Cargo.toml` workspace `version` to match (required by Cargo)
+3. Update `CHANGELOG.md` — add a new section following the existing format (Language, Standard Library, Runtime, Tooling, Internal subsections as needed)
+4. Update version references in docs (`README.md`, `docs/beamtalk-tooling.md`, `docs/beamtalk-language-features.md`, `docs/repl-protocol.md`, `docs/beamtalk-ddd-model.md`, `crates/beamtalk-examples/corpus.json`)
+5. Tag the release commit: `git tag v<version>`
+
+**Do not** manually edit version strings in `.app.src` files or `build_stdlib.rs` — they are derived from `VERSION` at build time.
+
 ## Issue Workflow (Linear)
 
 Project prefix: `BT`. Always set labels: `agent-state`, `item-area`, `issue-type`, `item-size`. Establish blocking relationships for dependencies. Include context, acceptance criteria, files to modify, and references in issues.
