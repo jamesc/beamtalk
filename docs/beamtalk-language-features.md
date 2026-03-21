@@ -35,7 +35,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 
 ## String Encoding and UTF-8
 
-**Beamtalk strings are UTF-8 by default.** This follows modern BEAM conventions and matches Elixir's approach.
+**Beamtalk strings are UTF-8 by default.** This follows modern BEAM conventions and matches Elixir's approach. String is a subclass of Binary (`Collection > Binary > String`) — see [Binary — Byte-Level Data](#binary--byte-level-data) for byte-level operations inherited by String.
 
 ### String Types
 
@@ -89,6 +89,28 @@ String operations respect Unicode grapheme clusters (user-perceived characters):
 "HELLO" lowercase     // => "hello"
 "straße" uppercase    // => "STRASSE" (German ß → SS)
 ```
+
+### Inherited Byte-Level Methods
+
+String inherits byte-level methods from Binary. These provide unambiguous byte access regardless of grapheme semantics:
+
+```beamtalk
+// Byte access (inherited from Binary)
+"hello" byteAt: 0      // => 104 (byte value, 0-based)
+"hello" byteSize       // => 5 (byte count)
+"café" byteSize        // => 5 (bytes — more than 4 graphemes due to UTF-8)
+
+// Byte-level slicing returns Binary, not String
+"hello" part: 0 size: 3  // => Binary (raw bytes, not String)
+
+// Byte-level concatenation returns Binary
+"hello" concat: " world"  // => Binary (use ++ for String concatenation)
+
+// Byte list conversion
+"hello" toBytes        // => #(104, 101, 108, 108, 111)
+```
+
+See [Binary — Byte-Level Data](#binary--byte-level-data) for the full Binary API.
 
 ### BEAM Mapping
 
@@ -2040,7 +2062,7 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 | Class | Description |
 |-------|-------------|
 | **Integer**, **Float**, **Number** | Arbitrary precision arithmetic |
-| **String**, **Symbol**, **Character** | UTF-8 text, interned symbols, Unicode characters |
+| **String**, **Symbol**, **Character** | UTF-8 text (String is a subclass of Binary), interned symbols, Unicode characters |
 | **Boolean**, **True**, **False** | Boolean values with control flow |
 | **Nil** (UndefinedObject) | Null object pattern |
 | **Block** | First-class closures |
@@ -2049,6 +2071,7 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 
 | Class | Description |
 |-------|-------------|
+| **Binary** | Byte-level data — Collection subclass, parent of String ([ADR 0069](ADR/0069-string-subclass-of-binary.md)) |
 | **Array** | Fixed-size indexed collection |
 | **List** | Linked list with fast prepend (`#()` syntax) |
 | **Dictionary** | Key-value map |
@@ -2109,6 +2132,70 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 | **CompiledMethod** | Method introspection |
 | **StackFrame** | Stack trace inspection |
 | **TestCase**, **TestResult**, **TestRunner** | BUnit test framework — TestCase is a Value subclass with functional setUp ([ADR 0014](ADR/0014-beamtalk-test-framework.md)) |
+
+### Binary — Byte-Level Data
+
+Binary is a sealed Collection subclass for byte-level data. String is a subclass of Binary that adds grapheme-aware text operations. The class hierarchy is `Collection > Binary > String` ([ADR 0069](ADR/0069-string-subclass-of-binary.md)).
+
+On BEAM, Beamtalk binaries map directly to Erlang binaries (`binary()`). All strings are binaries at runtime — the type system uses the subclass relationship so that String is accepted wherever Binary is expected (e.g. `File writeBinary:contents:` accepts strings without type warnings).
+
+```beamtalk
+// Construction
+bin := Binary fromBytes: #(104, 101, 108, 108, 111)
+bin := Binary fromIolist: #("hello", " ", "world")
+
+// Byte access (1-based, Collection protocol)
+bin := Binary fromBytes: #(104, 101, 108)
+bin at: 1                    // => "h" (grapheme — runtime dispatches via String)
+bin size                     // => 3
+
+// Byte access (0-based, Erlang-compatible)
+bin byteAt: 0                // => 104 (byte value)
+bin byteSize                 // => 3 (byte count)
+
+// Zero-copy slicing
+bin := Binary fromBytes: #(1, 2, 3, 4, 5)
+bin part: 1 size: 3          // => Binary (bytes 2, 3, 4)
+
+// Concatenation
+a := Binary fromBytes: #(1, 2)
+b := Binary fromBytes: #(3, 4)
+a concat: b                  // => Binary (1, 2, 3, 4)
+
+// Byte list conversion
+bin toBytes                   // => #(1, 2, 3, 4, 5)
+Binary fromBytes: #(65, 66)  // => Binary
+
+// UTF-8 decoding (Binary → String)
+(Binary fromBytes: #(104, 101, 108, 108, 111)) asString           // => "hello"
+(Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked  // => "hello"
+
+// Serialization (class methods)
+etf := Binary serialize: #(1, 2, 3)
+Binary deserialize: etf               // => #(1, 2, 3)
+Binary deserializeWithUsed: etf       // => #(value, bytesConsumed)
+
+// Collection protocol — Binary is a collection of bytes
+bin := Binary fromBytes: #(65, 66, 67, 68, 69)
+bin collect: [:ch | ch]       // => "ABCDE" (via String species)
+bin select: [:ch | ch /= "C"]  // => "ABDE"
+bin includes: "B"             // => true
+bin isEmpty                   // => false
+```
+
+**Method override table (Binary vs String):**
+
+| Method | On Binary | On String |
+|--------|-----------|-----------|
+| `at: index` | grapheme (1-based, via String at runtime) | grapheme (1-based) |
+| `size` | element count (via String at runtime) | grapheme count |
+| `byteAt: offset` | byte value (0-based) | inherited — byte value (0-based) |
+| `byteSize` | byte count | inherited — byte count |
+| `do: block` | iterate elements (via String at runtime) | iterate graphemes |
+| `part: offset size: n` | byte-level slice, returns Binary | inherited — byte-level slice, returns Binary |
+| `concat:` | byte concatenation, returns Binary | inherited — byte concatenation, returns Binary |
+| `asString` | UTF-8 validation, returns String | no-op, returns self |
+| `asStringUnchecked` | unchecked cast to String | no-op, returns self |
 
 ### Interval — Arithmetic Sequences
 
