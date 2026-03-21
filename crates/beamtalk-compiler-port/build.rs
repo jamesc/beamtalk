@@ -44,6 +44,12 @@ fn emit_beamtalk_version(workspace_root: &Path) {
         "VERSION file is empty: {}",
         version_file.display()
     );
+    assert!(
+        base.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')),
+        "VERSION contains invalid characters (allowed: [A-Za-z0-9.+-]): {}",
+        version_file.display()
+    );
 
     let version = if git_on_tag() {
         base.to_string()
