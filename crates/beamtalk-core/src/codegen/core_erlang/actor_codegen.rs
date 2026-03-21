@@ -68,6 +68,9 @@ impl CoreErlangGenerator {
 
         // Check if module has class definitions for registration
         let has_classes = !module.classes.is_empty();
+        // BT-1610: Protocol-only files also need register_class/0 for protocol registration
+        let has_protocols = !module.protocols.is_empty();
+        let needs_register_class = has_classes || has_protocols;
         // BT-403: Build sealed method exports
         let sealed_export_doc = self.build_sealed_export_doc(module);
         // BT-411: Build class method exports
@@ -132,7 +135,9 @@ impl CoreErlangGenerator {
         let file_attr = self.file_attr();
 
         // Module header with exports and attributes
-        let module_header = if has_classes {
+        // BT-1610: Include register_class/0 export and on_load attribute when
+        // the module has classes OR protocols (protocol-only files need it too).
+        let module_header = if needs_register_class {
             docvec![
                 "module '",
                 Document::String(self.module_name.clone()),
@@ -261,6 +266,11 @@ impl CoreErlangGenerator {
             docs.push(self.generate_meta_function(module, needs_spec_synthesis)?);
             // BT-218: Generate register_class/0 for class system registration
             docs.push(self.generate_register_class(module, needs_spec_synthesis)?);
+        } else if has_protocols {
+            // BT-1610: Protocol-only modules need register_class/0 for protocol
+            // registration even though there are no classes to register.
+            docs.push(Document::Str("\n"));
+            docs.push(self.generate_register_class(module, false)?);
         }
 
         // Module end

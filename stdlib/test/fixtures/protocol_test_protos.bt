@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Test protocol definitions for protocol_queries_test.bt (ADR 0068 Phase 2c).
-// A dummy class is needed so the compiler generates register_class/0 which
-// includes the protocol registration calls.
+// BT-1610: Protocol-only files now generate register_class/0 for protocol
+// registration — no dummy anchor class needed.
 Protocol define: Displayable
   asString -> String
   printString -> String
 Protocol define: HasSize
   size -> Integer
-Value subclass: ProtocolTestProtoAnchor
