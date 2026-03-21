@@ -225,7 +225,7 @@ If your stdlib source files are outside the project root, set:
 **New to Beamtalk?** See the [REPL Tutorial](examples/repl-tutorial.md) for a complete beginner's guide!
 
 ```text
-Beamtalk v0.2.0
+Beamtalk v0.3.0
 Type :help for available commands, :exit to quit.
 
 > message := "Hello, Beamtalk!"

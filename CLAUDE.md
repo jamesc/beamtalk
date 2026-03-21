@@ -56,13 +56,13 @@ Prefer `stdlib/test/*.bt` (BUnit TestCase) for new tests. Only use `stdlib/boots
 
 ## Versioning & Releases
 
-**Single source of truth:** `VERSION` file at repo root (e.g., `0.2.0`).
+**Single source of truth:** `VERSION` file at repo root (e.g., `0.3.0`).
 
 Version flows automatically at build time:
 - **Rust:** `build.rs` reads `VERSION` + git state → `BEAMTALK_VERSION` compile-time env var
 - **Erlang:** `.app.src` files use `{vsn, {cmd, "escript ../../../scripts/version.escript"}}`
-- **Dev builds** (not on a git tag): version becomes `0.2.0-dev+<short sha>`
-- **Release builds** (on a git tag): version is the clean `0.2.0`
+- **Dev builds** (not on a git tag): version becomes `0.3.0-dev+<short sha>`
+- **Release builds** (on a git tag): version is the clean `0.3.0`
 
 **Rust toolchain** is pinned in `rust-toolchain.toml`. Update there when upgrading Rust.
 
