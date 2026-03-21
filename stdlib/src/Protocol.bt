@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Protocol — Runtime protocol registry queries (ADR 0068 Phase 2c).
+///
+/// Provides class-side methods for querying the protocol registry.
+/// Protocols are registered at compile time and queried at runtime
+/// for introspection and conformance checking.
+///
+/// Class-side queries about a specific class's conformance are on
+/// Behaviour (`conformsTo:`, `protocols`). This class provides
+/// queries about protocol definitions themselves.
+///
+/// ## Examples
+/// ```beamtalk
+/// Protocol requiredMethods: #Printable    // => [#asString]
+/// Protocol conformingClasses: #Printable  // => [Integer, String, ...]
+/// Protocol isProtocol: #Printable         // => true
+/// Protocol allProtocols                   // => [#Printable, #Comparable, ...]
+/// ```
+sealed Object subclass: Protocol
+
+  /// Return the required method selectors for a protocol.
+  ///
+  /// Returns a list of selector symbols. Includes methods from extended
+  /// protocols. Returns an empty list if the protocol is not registered.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Protocol requiredMethods: #Printable   // => [#asString]
+  /// ```
+  class sealed requiredMethods: protocolName :: Symbol -> List =>
+    @primitive "protocolRequiredMethods"
+
+  /// Return the list of classes conforming to a protocol.
+  ///
+  /// Returns class objects for all registered classes that respond to all
+  /// required selectors of the protocol. Returns an empty list if the
+  /// protocol is not registered.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Protocol conformingClasses: #Printable   // => [Integer, String, ...]
+  /// ```
+  class sealed conformingClasses: protocolName :: Symbol -> List =>
+    @primitive "protocolConformingClasses"
+
+  /// Test whether a name is a registered protocol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Protocol isProtocol: #Printable   // => true
+  /// Protocol isProtocol: #NotReal     // => false
+  /// ```
+  class sealed isProtocol: name :: Symbol -> Boolean =>
+    @primitive "protocolIsProtocol"
+
+  /// Return all registered protocol names.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Protocol allProtocols   // => [#Printable, #Comparable, ...]
+  /// ```
+  class sealed allProtocols -> List => @primitive "protocolAllProtocols"

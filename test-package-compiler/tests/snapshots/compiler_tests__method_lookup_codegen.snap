@@ -115,7 +115,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
 
         in _Reg0
 
-    of RegResult -> RegResult
+    of _ClassRegResult -> _ClassRegResult
     catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
 

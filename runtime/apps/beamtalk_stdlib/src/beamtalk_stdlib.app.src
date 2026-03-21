@@ -54,6 +54,7 @@
             {'bt@stdlib@pid', 'Pid', 'Object'},
             {'bt@stdlib@port', 'Port', 'Object'},
             {'bt@stdlib@proto_object', 'ProtoObject', 'none'},
+            {'bt@stdlib@protocol', 'Protocol', 'Object'},
             {'bt@stdlib@queue', 'Queue', 'Value'},
             {'bt@stdlib@random', 'Random', 'Value'},
             {'bt@stdlib@reactive_subprocess', 'ReactiveSubprocess', 'Actor'},

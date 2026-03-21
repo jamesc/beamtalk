@@ -177,7 +177,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
                 end
         end
 
-    of RegResult -> RegResult
+    of _ClassRegResult -> _ClassRegResult
     catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
 
