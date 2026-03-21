@@ -1057,8 +1057,14 @@ walk_mixed_chain(ClassName, [{unary, class} | Rest], _Depth) ->
     walk_mixed_chain_class(ClassName, Rest);
 walk_mixed_chain(ClassName, [{_Kind, Sel} | Rest], Depth) ->
     case beamtalk_class_registry:get_method_return_type(ClassName, Sel) of
-        {ok, NextClass} -> walk_mixed_chain(NextClass, Rest, Depth + 1);
-        {error, not_found} -> undefined
+        {ok, NextClass} when is_atom(NextClass) ->
+            walk_mixed_chain(NextClass, Rest, Depth + 1);
+        %% ADR 0068: Tagged tuple return types (type_param, generic) cannot be
+        %% resolved without caller annotation context — graceful fallback.
+        {ok, _TaggedTuple} ->
+            undefined;
+        {error, not_found} ->
+            undefined
     end.
 
 %% @private
@@ -1074,8 +1080,13 @@ walk_mixed_chain_class(ClassName, [{unary, class} | Rest]) ->
     walk_mixed_chain_class(ClassName, Rest);
 walk_mixed_chain_class(ClassName, [{_Kind, Sel} | Rest]) ->
     case beamtalk_class_registry:get_class_method_return_type(ClassName, Sel) of
-        {ok, NextClass} -> walk_mixed_chain(NextClass, Rest, 1);
-        {error, not_found} -> undefined
+        {ok, NextClass} when is_atom(NextClass) ->
+            walk_mixed_chain(NextClass, Rest, 1);
+        %% ADR 0068: Tagged tuple return types — graceful fallback.
+        {ok, _TaggedTuple} ->
+            undefined;
+        {error, not_found} ->
+            undefined
     end.
 
 %% @private
@@ -1149,8 +1160,13 @@ walk_chain(ClassName, [class | Rest], _Depth) ->
     walk_chain_class(ClassName, Rest);
 walk_chain(ClassName, [Selector | Rest], Depth) ->
     case beamtalk_runtime_api:get_method_return_type(ClassName, Selector) of
-        {ok, NextClass} -> walk_chain(NextClass, Rest, Depth + 1);
-        {error, not_found} -> undefined
+        {ok, NextClass} when is_atom(NextClass) ->
+            walk_chain(NextClass, Rest, Depth + 1);
+        %% ADR 0068: Tagged tuple return types — graceful fallback.
+        {ok, _TaggedTuple} ->
+            undefined;
+        {error, not_found} ->
+            undefined
     end.
 
 %% @private
@@ -1171,8 +1187,13 @@ walk_chain_class(ClassName, [class | Rest]) ->
     walk_chain_class(ClassName, Rest);
 walk_chain_class(ClassName, [Selector | Rest]) ->
     case beamtalk_runtime_api:get_class_method_return_type(ClassName, Selector) of
-        {ok, NextClass} -> walk_chain(NextClass, Rest, 1);
-        {error, not_found} -> undefined
+        {ok, NextClass} when is_atom(NextClass) ->
+            walk_chain(NextClass, Rest, 1);
+        %% ADR 0068: Tagged tuple return types — graceful fallback.
+        {ok, _TaggedTuple} ->
+            undefined;
+        {error, not_found} ->
+            undefined
     end.
 
 %% @private

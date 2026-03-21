@@ -451,7 +451,7 @@ class_display_name(ClassName) when is_atom(ClassName) ->
 %%
 %% Absence means "dynamic" — the REPL should not rely on a specific type.
 %% Chain walking follows the same superclass order as method dispatch.
--spec get_method_return_type(atom(), atom()) -> {ok, atom()} | {error, not_found}.
+-spec get_method_return_type(atom(), atom()) -> {ok, atom() | tuple()} | {error, not_found}.
 get_method_return_type(none, _Selector) ->
     {error, not_found};
 get_method_return_type(ClassName, Selector) ->
@@ -490,7 +490,7 @@ get_method_return_type(ClassName, Selector) ->
 %% @doc Look up the return type for a class-side method, walking the superclass chain.
 %%
 %% Same semantics as `get_method_return_type/2` but consults `class_method_return_types`.
--spec get_class_method_return_type(atom(), atom()) -> {ok, atom()} | {error, not_found}.
+-spec get_class_method_return_type(atom(), atom()) -> {ok, atom() | tuple()} | {error, not_found}.
 get_class_method_return_type(none, _Selector) ->
     {error, not_found};
 get_class_method_return_type(ClassName, Selector) ->
