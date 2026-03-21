@@ -1148,6 +1148,7 @@ mod tests {
 
     /// Single attempt to start the REPL workspace. Extracted from the
     /// `LazyLock` initializer so retry logic can call it in a loop.
+    #[allow(clippy::too_many_lines)]
     fn try_start_repl(attempt: usize) -> Result<ReplWorkspace, String> {
         let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
         let bin = find_binary(&bin_name).ok_or_else(|| {
@@ -1200,14 +1201,10 @@ mod tests {
                 // Collect remaining output
                 if let Ok(content) = std::fs::read_to_string(&stdout_file) {
                     for line in content.lines().skip(last_line_count) {
-                        let line_str = line.to_string();
                         if line.contains("port") {
                             found_port = true;
                         }
-                        if line.contains("Workspace:") {
-                            found_ws_id = true;
-                        }
-                        stdout_lines.push(line_str);
+                        stdout_lines.push(line.to_string());
                     }
                 }
                 if status.success() && found_port {
