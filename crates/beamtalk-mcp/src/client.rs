@@ -1191,14 +1191,32 @@ mod tests {
         let mut last_line_count = 0;
 
         while std::time::Instant::now() < deadline {
-            // Check if the child process exited early (crash / resource error)
+            // Check if the child process exited early (crash / resource error).
+            // A clean exit (status 0) with stdin=null is normal — the REPL
+            // connects to the workspace, prints port info, and exits because
+            // there's no interactive input. In that case, read remaining output
+            // and continue to port parsing below instead of failing.
             if let Ok(Some(status)) = child.try_wait() {
-                // Process already exited — collect remaining output and fail
+                // Collect remaining output
                 if let Ok(content) = std::fs::read_to_string(&stdout_file) {
                     for line in content.lines().skip(last_line_count) {
-                        stdout_lines.push(line.to_string());
+                        let line_str = line.to_string();
+                        if line.contains("port") {
+                            found_port = true;
+                        }
+                        if line.contains("Workspace:") {
+                            found_ws_id = true;
+                        }
+                        stdout_lines.push(line_str);
                     }
                 }
+                if status.success() && found_port {
+                    // Clean exit with port info — the workspace is running,
+                    // REPL just exited because stdin was null. Break out to
+                    // parse the port from collected output.
+                    break;
+                }
+                // Non-zero exit or no port found — genuine failure
                 let stdout = stdout_lines.join("\n");
                 let stderr = std::fs::read_to_string(&stderr_file).unwrap_or_default();
                 let _ = std::fs::remove_file(&stdout_file);
