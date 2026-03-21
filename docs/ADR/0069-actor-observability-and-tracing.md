@@ -37,7 +37,7 @@ This must work for both human developers in the REPL and AI agents via MCP tools
 
 - Must expose a **Beamtalk-level API** — MCP tools wrap thin Erlang shims, following the established pattern (System, Logger, Workspace)
 - Must not overload `Beamtalk` or `Object` with additional methods
-- Always-on aggregate stats must have negligible overhead (~200ns/call budget)
+- Always-on aggregate stats must have negligible overhead (~150ns/call budget)
 - Trace event capture must be opt-in with zero cost when disabled
 - Data must persist after actor death (the test workflow: enable → run tests → actors die → query results)
 - Should use standards-based telemetry infrastructure where viable, not reinvent the wheel
@@ -390,7 +390,7 @@ The MCP tools add filtering parameters (e.g., `actor`, `selector`, `limit`) that
 - **Trace events**: Bounded by ring buffer (100k default). Oldest dropped on overflow via batch eviction. Explicit `Tracing clear` resets.
 - **Aggregate stats**: Persist until `Tracing clear`. Size is proportional to unique `{Pid, Selector}` combinations, not call volume — bounded by the number of actors × methods seen.
 - **Actor death**: Stats and traces for dead actors are **retained** for post-mortem analysis. This is essential for the test workflow where actors spawn, run, and die before results are queried.
-- **`beamtalk_trace_store` gen_server**: Supervised under `beamtalk_runtime_sup`. Owns both ETS tables. Crash recovery: tables are lost (acceptable — tracing data is ephemeral by nature).
+- **`beamtalk_trace_store` gen_server**: Supervised under `beamtalk_runtime_sup`. Owns ETS tables and counter references. Crash recovery: data is lost but actor dispatch is unaffected (gen_server is not in the write path). Acceptable — tracing data is ephemeral by nature.
 
 ### Future: Block-Scoped Profiling
 
@@ -433,6 +433,16 @@ Pony's runtime supports a **flight recorder** mode: a circular in-memory buffer 
 
 **What we learn:** Our ring buffer design is essentially a flight recorder. The Pony model of "always capturing, only materializing on demand" aligns with our approach of always-on aggregates + opt-in trace capture.
 
+### BEAM Telemetry Ecosystem — In-Memory Storage
+No general-purpose "queryable in-memory telemetry store" exists for BEAM in pure Erlang. The ecosystem is optimized for emission and export, not local querying. Relevant prior art:
+
+- **`Mobius`** (Elixir, [github.com/mattludwigs/mobius](https://github.com/mattludwigs/mobius)) — The closest to what we're building. ETS circular buffer with `Mobius.query/1` for historical metric retrieval. Designed for Nerves (resource-constrained devices). Elixir-only.
+- **`peep`** (Elixir, [github.com/rkallos/peep](https://github.com/rkallos/peep)) — High-performance `telemetry_metrics` reporter using `atomics`/`persistent_term`. Validates our `counters`-based approach for lock-free aggregation. Elixir-only.
+- **`telemetry_metrics_prometheus_core`** (Erlang) — Stores aggregated metrics in ETS for Prometheus scraping. Pure Erlang but only queryable via Prometheus text format, not ad-hoc queries.
+- **Phoenix LiveDashboard** — Stores recent data points in a GenServer's process state (small circular buffer) for real-time charting. Not designed for historical queries.
+
+**What we learn:** Our requirement for a queryable in-memory store (for REPL + MCP) is unique in the BEAM ecosystem — it's the gap between "emit events" (telemetry) and "export to dashboard" (LiveDashboard, Prometheus). We must build the store; the question was only which plumbing sits between event and store. `peep`'s success with `atomics`/`counters` validates our lock-free aggregate design.
+
 ## User Impact
 
 ### Newcomer (from Python/JS/Ruby)
@@ -454,7 +464,7 @@ Pony's runtime supports a **flight recorder** mode: a circular in-memory buffer 
 - OpenTelemetry integration is available via the standard `opentelemetry_telemetry` bridge
 
 ### Production Operator
-- Always-on aggregates with ~200ns overhead are safe for production
+- Always-on aggregates with ~150ns overhead are safe for production (lock-free `counters` module)
 - Trace capture is opt-in — zero overhead when disabled
 - `Tracing systemHealth` provides the VM overview they need for capacity planning
 - Structured output integrates with existing monitoring pipelines via custom telemetry handlers
@@ -615,5 +625,5 @@ This spike should be a single branch with ~100 lines of test code. If the teleme
 - Related ADRs: ADR 0064 (Runtime Logging Control — complementary), ADR 0065 (OTP Primitives — Actor/Server hierarchy), ADR 0043 (Sync-by-Default Messaging)
 - Code: `beamtalk_actor.erl` (sync_send, async_send, cast_send), `server.rs` (MCP tool pattern)
 - External: [beam-telemetry/telemetry](https://github.com/beam-telemetry/telemetry), [beam-telemetry/telemetry_poller](https://github.com/beam-telemetry/telemetry_poller), [opentelemetry_telemetry bridge](https://github.com/open-telemetry/opentelemetry-erlang-contrib)
-- Prior art: Erlang sys/recon, Elixir telemetry/LiveDashboard, Akka Insights, Pharo MessageTally/PerformanceProfiler, Pony flight recorder
+- Prior art: Erlang sys/recon, Elixir telemetry/LiveDashboard, Akka Insights, Pharo MessageTally/PerformanceProfiler, Pony flight recorder, Mobius (Elixir in-memory store), peep (lock-free counters)
 - Design document: `issue-adr-actor-observability.md` on branch `claude/erlang-genserver-tracing-DfzoF`
