@@ -90,7 +90,7 @@ telemetry_poller (periodic VM stats for systemHealth)
 **Design principle: no bottlenecks on the hot path.** Aggregate updates use the `counters` module (truly lock-free, ~50ns). Trace event inserts go directly to ETS from the calling process. The gen_server only handles control operations (enable/disable/clear) and periodic maintenance (ring buffer eviction). A crash of the gen_server loses accumulated data but does not affect actor dispatch.
 
 **Why `telemetry` + `telemetry_poller`?**
-- `telemetry`: Single dependency, zero transitive deps, pure Erlang (~500 LOC). De facto BEAM ecosystem standard (Phoenix, Ecto, Broadway). Composable — users can attach their own handlers (export to StatsD, Datadog, etc.) without modifying Beamtalk internals. Bridge to OpenTelemetry available via `opentelemetry_telemetry` when distributed tracing is needed.
+- `telemetry`: Single dependency, zero transitive deps, pure Erlang (~500 LOC). De facto BEAM ecosystem standard (Phoenix, Ecto, Broadway). Composable — users can attach their own handlers (export to StatsD, Datadog, etc.) without modifying Beamtalk internals. Critically, adopting `telemetry` now means the future upgrade to distributed tracing (OpenTelemetry) is purely additive — one bridge package, zero changes to instrumentation code. Without `telemetry`, that upgrade requires reworking the instrumentation layer (see "Future: Distributed Tracing via OpenTelemetry").
 - `telemetry_poller`: Periodic VM measurements (scheduler utilization, memory, run queues) — eliminates custom implementation for `Tracing systemHealth`. Pure Erlang, zero transitive deps beyond `telemetry`.
 
 **Why not OpenTelemetry directly?**
@@ -405,6 +405,18 @@ Tracing profile: [
 ```
 
 This would automatically enable tracing, execute the block, disable tracing, and return the captured results — eliminating the enable/disable lifecycle for the common case. The global mode (`Tracing enable`) remains necessary for the MCP agent workflow (enable → run tests in separate tool call → query results).
+
+### Future: Distributed Tracing via OpenTelemetry
+
+The `telemetry` event bus in v1 is the foundation for a future upgrade to full distributed tracing (correlated parent/child spans across actor calls, exportable to Jaeger/Datadog/Grafana Tempo). The upgrade path:
+
+1. **v1 (this ADR):** `telemetry` events emitted from send wrappers. Flat events — no parent/child correlation. Local storage only.
+2. **v2 (add bridge):** Add `opentelemetry_telemetry` package — it subscribes to our existing telemetry events and creates OTel spans. Flat spans exported to external backends. Zero changes to instrumentation code.
+3. **v3 (context propagation — future ADR):** Attach OTel trace context to actor messages so spans across actor calls form a causal tree. This requires a runtime change to `beamtalk_actor.erl` (attach context in `sync_send`) and a codegen change to `callbacks.rs` (restore context in generated `handle_call`).
+
+**Context propagation design (deferred):** The planned approach is always-include — every actor message carries trace context as a third element: `{Selector, Args, TraceCtx}`. When the OTel SDK is not loaded, `TraceCtx` is `undefined` and restoration is a no-op. This adds ~40-60ns per call (process dictionary read/write + 25 bytes extra in message copy) — negligible next to the gen_server call overhead (~5-10μs). The alternative (compile-time feature flag) is rejected because it would require recompilation to toggle and break hot code reload. The always-include approach means OTel becomes "just add the SDK" — context starts flowing immediately with no recompile.
+
+**Why `telemetry` matters for this path:** Without `telemetry`, the v2 step (flat export) requires reworking the instrumentation layer to emit OTel spans directly, coupling `beamtalk_actor.erl` to the OTel SDK. With `telemetry`, v2 is purely additive — one bridge package, zero instrumentation changes. This is the primary justification for adopting `telemetry` now rather than deferring it.
 
 ## Prior Art
 
