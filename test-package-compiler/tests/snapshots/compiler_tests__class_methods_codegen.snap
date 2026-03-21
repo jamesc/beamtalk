@@ -266,7 +266,7 @@ module 'class_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
 
         in _Reg0
 
-    of RegResult -> RegResult
+    of _ClassRegResult -> _ClassRegResult
     catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
 end
