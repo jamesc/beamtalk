@@ -487,15 +487,19 @@ No general-purpose "queryable in-memory telemetry store" exists for BEAM in pure
 | Cohort | Best argument |
 |--------|---------------|
 | **Newcomer** | "OpenTelemetry is the industry standard I learned in my distributed systems class. I can export Beamtalk traces to Jaeger and see them in the same dashboard as my Go microservices." |
+| **Smalltalk purist** | "If you're going to add an external dependency anyway, pick the one that gives you distributed tracing. `telemetry` is a half-measure — a BEAM-only event bus that still needs a custom store. OTel is the complete package." |
 | **BEAM veteran** | "If we're going to add observability, do it once with the standard. `telemetry` is BEAM-only — OpenTelemetry gives us cross-service distributed tracing from day one." |
-| **Operator** | "Every APM tool I use (Datadog, New Relic, Grafana Tempo) speaks OTLP. Native OpenTelemetry means zero custom integration work." |
+| **Operator** | "I already have OTel collectors running in production. One more service that speaks OTLP is zero ops effort. A custom ETS store is one more bespoke thing I have to learn and monitor." |
+| **Language designer** | "OTel's span model gives you parent/child tracing across actor calls for free — if Counter.increment calls DatabasePool.query:, the span hierarchy shows the causal chain. `telemetry` events are flat; you'd have to build correlation yourself." |
 
 ### Alternative C: Tracing methods on `Beamtalk` (ADR 0064 pattern)
 
 | Cohort | Best argument |
 |--------|---------------|
 | **Newcomer** | "One place for system tools. I already know `Beamtalk logLevel:` and `Beamtalk enableDebug:` — `Beamtalk enableTracing` is the obvious next thing I'd try." |
+| **Smalltalk purist** | "Smalltalk's `Smalltalk` global is the ONE place you go for system tools. That's the beauty — one entry point, everything discoverable via `help:`. Splitting across classes means I have to know `Tracing` exists." |
 | **BEAM veteran** | "DDD consistency. ADR 0064 said runtime configuration goes on `Beamtalk`. Tracing enable/disable is runtime configuration. Splitting it to a new class contradicts the precedent." |
+| **Operator** | "One object to query from MCP. `Beamtalk` is already exposed — I don't need to discover that `Tracing` exists as a separate entry point." |
 | **Language designer** | "Fewer top-level names in the namespace. `Beamtalk` is already known; `Tracing` is a new name to discover. Discoverability is better when tools are co-located." |
 
 ### Decided: `telemetry` + `Tracing` class (hybrid)
