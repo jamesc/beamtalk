@@ -1,6 +1,6 @@
 {application, beamtalk_stdlib, [
     {description, "Beamtalk Standard Library - compiled from lib/*.bt"},
-    {vsn, "0.1.0"},
+    {vsn, {cmd, "escript ../../../scripts/version.escript"}},
     {modules, []},
     {registered, []},
     {applications, [kernel, stdlib, ssl, gun, beamtalk_runtime]},

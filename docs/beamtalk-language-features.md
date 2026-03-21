@@ -1820,7 +1820,7 @@ Analogous to Pharo's `Smalltalk` image facade.
 
 ```beamtalk
 Beamtalk version
-// => "0.1.0"
+// => "0.2.0"
 
 Beamtalk allClasses includes: #Integer
 // => true

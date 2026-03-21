@@ -1078,7 +1078,7 @@ do_eval(Expression, State, Subscriber) ->
 Beamtalk allClasses          // => #('Counter', 'Logger', 'Actor', 'Object', ...)
 Beamtalk classNamed: #Counter // => <ClassInfo for Counter>
 Beamtalk actors               // => #(<0.123.0> Counter, <0.124.0> Logger)
-Beamtalk version              // => '0.1.0'
+Beamtalk version              // => '0.2.0'
 ```
 
 ```erlang
