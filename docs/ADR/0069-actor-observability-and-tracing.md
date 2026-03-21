@@ -31,12 +31,12 @@ This must work for both human developers in the REPL and AI agents via MCP tools
 - `sys:statistics/2` — basic counters (reductions, messages_in, messages_out)
 - `erlang:process_info/2` — message queue length, memory, status (point-in-time snapshot)
 
-**No Beamtalk-level API exists** — there is no `Tracer` class, no `profile:` method, nothing discoverable from the REPL.
+**No Beamtalk-level API exists** — there is no tracing class, no `profile:` method, nothing discoverable from the REPL.
 
 ### Constraints
 
-- Must expose a **Beamtalk-level API** (dedicated `Tracer` class) — MCP tools wrap thin Erlang shims, following the established pattern (System, Logger, Workspace)
-- Must not overload `Beamtalk` or `Object` with additional methods — the `Tracer` class owns this surface
+- Must expose a **Beamtalk-level API** — MCP tools wrap thin Erlang shims, following the established pattern (System, Logger, Workspace)
+- Must not overload `Beamtalk` or `Object` with additional methods
 - Always-on aggregate stats must have negligible overhead (~200ns/call budget)
 - Trace event capture must be opt-in with zero cost when disabled
 - Data must persist after actor death (the test workflow: enable → run tests → actors die → query results)
@@ -45,14 +45,30 @@ This must work for both human developers in the REPL and AI agents via MCP tools
 
 ## Decision
 
+### Class Design: `Tracing` as a Standalone Observability Facade
+
+Tracing is exposed via a dedicated `Tracing` class — a sealed, class-only facade following the System/Logger pattern.
+
+**Why a standalone class, not methods on `Beamtalk`?**
+
+ADR 0064 placed logging *configuration* on `Beamtalk`, arguing that runtime configuration belongs on the system facade (DDD boundary: Logger is stdlib, logging config is Runtime Context). That decision was sound for a small surface (~5 methods) that naturally extended `Beamtalk`'s existing system introspection role.
+
+Tracing is different in scale: ~15 methods spanning control, queries, analysis, and live health. Adding these to `Beamtalk` would double its method count and blur its identity from "system introspection" to "system introspection + performance telemetry." The Smalltalk precedent confirms this separation — Pharo's `MessageTally` and VisualWorks' `PerformanceProfiler` are standalone classes, not methods on the `Smalltalk` global. Profiling has always been a distinct tool in Smalltalk environments.
+
+**Why `Tracing`, not `Tracer`?**
+
+The gerund form (`Tracing`) names the *subsystem*, not the *agent*. This establishes a naming convention for observability facades: `Tracing` for performance telemetry, with a future `Logging` class planned to absorb the logging configuration methods currently on `Beamtalk` (`logLevel:`, `enableDebug:`, `debugTargets`, etc.). The pair `Logging` / `Tracing` reads as two sibling observability subsystems, each owning its full surface. `Logger` remains the emit interface (`Logger info:`, `Logger error:`), consistent with ADR 0064's emit/config separation.
+
+This gives us optionality — the `Logging` migration is a separate future ADR, not a prerequisite for this work. But naming `Tracing` now signals the direction and avoids a rename later.
+
 ### Architecture: `telemetry` event bus + ETS storage handlers
 
 Use the Erlang [`telemetry`](https://github.com/beam-telemetry/telemetry) library as the event bus, with custom ETS-backed handlers for aggregation and trace capture. This is a **hybrid approach**: standard event emission, Beamtalk-specific storage and query.
 
 ```
-Beamtalk API (Tracer class — stdlib/src/Tracer.bt)
+Beamtalk API (Tracing class — stdlib/src/Tracing.bt)
     ↓ delegates to
-Erlang shim (beamtalk_tracer.erl — runtime)
+Erlang shim (beamtalk_tracing.erl — runtime)
     ↓ queries
 ETS storage (beamtalk_trace_store.erl — telemetry handler + gen_server)
     ↑ events emitted by
@@ -111,9 +127,11 @@ sync_send(ActorPid, Selector, Args) ->
 
 `telemetry:span/3` automatically emits `start`, `stop`, and `exception` events with timing. The `stop` event includes `duration` in native time units.
 
+**What the timing measures:** Send-wrapper instrumentation captures the **caller-perspective round-trip time** — the full duration from message send to reply received, including message queue wait and scheduling jitter. This is NOT actor method execution time. To distinguish queueing delay from execution time, use `Tracing healthFor:` which reports message queue depth. A high round-trip time with a deep queue indicates queueing; a high round-trip with an empty queue indicates slow method execution.
+
 **Lifecycle methods** (`isAlive`, `stop`, `pid`, `monitor`, `onExit:`, `demonitor`) are NOT instrumented — they are handled locally in the send wrappers without entering the gen_server message loop.
 
-**Codegen-level instrumentation** (wrapping `safe_dispatch` in generated code) is deferred as a future enhancement. Send-wrapper instrumentation captures the caller-perspective round-trip time, which is the actionable metric. Message queue depth from `actor_health` disambiguates queueing delay vs method execution time when needed.
+**Codegen-level instrumentation** (wrapping `safe_dispatch` in generated code) is deferred as a future enhancement. Send-wrapper instrumentation captures the caller-perspective round-trip time, which is the actionable metric for bottleneck detection. Codegen-level instrumentation would add precise method-body timing if needed later.
 
 ### Storage: Two ETS Tables
 
@@ -124,14 +142,15 @@ sync_send(ActorPid, Selector, Args) ->
 Captures individual dispatch events when tracing is enabled.
 
 ```erlang
-%% Key: erlang:monotonic_time(nanosecond) — unique, ordered
-%% Row: {Timestamp, Pid, Class, Selector, Mode, Duration_ns, Outcome, Metadata}
+%% Key: {erlang:monotonic_time(nanosecond), erlang:unique_integer([monotonic])}
+%%   — composite key ensures uniqueness across concurrent schedulers
+%% Row: {Key, Pid, Class, Selector, Mode, Duration_ns, Outcome, Metadata}
 %% Outcome: ok | error | timeout | cast
 %% Metadata: #{error => Term} for failures, #{} otherwise
 ```
 
-- Capped at 100,000 events (configurable via `Tracer maxEvents:`)
-- Ring buffer semantics: oldest events dropped on overflow
+- Capped at 100,000 events (configurable via `Tracing maxEvents:`)
+- Ring buffer semantics: on insert, if `ets:info(Tab, size) >= MaxEvents`, delete the oldest N entries (batch eviction of 10% to amortize cleanup cost) via `ets:select_delete` on the smallest keys
 - Only populated when tracing is enabled
 - Toggle via `persistent_term:put(beamtalk_tracing_enabled, true | false)` — ~5ns check
 
@@ -152,98 +171,95 @@ Running aggregates, updated on every dispatch regardless of tracing state.
 
 | Operation | Cost | When |
 |-----------|------|------|
-| Aggregate update (`ets:update_counter`) | ~100-200ns | Always |
+| `telemetry:span/3` dispatch + aggregate update | ~150-250ns | Always |
 | `persistent_term` check (trace enabled?) | ~5ns | Always |
-| Telemetry dispatch (no trace handler) | ~10-50ns | Always (near-zero with `persist/0`) |
-| Trace event insert (`ets:insert`) | ~300-500ns | Only when tracing enabled |
+| Trace event insert (`ets:insert` + eviction amortized) | ~300-500ns | Only when tracing enabled |
 | **Total per-call** | **~200ns (tracing off) / ~600ns (tracing on)** | |
 
-### Beamtalk API: `Tracer` Class
-
-A sealed, class-only facade following the System/Logger/Workspace pattern:
+### Beamtalk API: `Tracing` Class
 
 ```beamtalk
-sealed Object subclass: Tracer
+sealed Object subclass: Tracing
 
   // === Tracing lifecycle ===
 
   class sealed enable -> Nil
   // Start capturing trace events (aggregates are always on)
-  // Tracer enable
+  // Tracing enable
 
   class sealed disable -> Nil
   // Stop capturing trace events
-  // Tracer disable
+  // Tracing disable
 
   class sealed isEnabled -> Boolean
   // Check whether trace capture is active
-  // Tracer isEnabled   // => true
+  // Tracing isEnabled   // => true
 
   class sealed clear -> Nil
   // Clear all trace events and aggregate stats
-  // Tracer clear
+  // Tracing clear
 
   // === Trace event queries ===
 
   class sealed traces -> List
   // All captured trace events (up to buffer limit), newest first
-  // Tracer traces
+  // Tracing traces
 
   class sealed tracesFor: actor :: Object -> List
   // Trace events for a specific actor
-  // Tracer tracesFor: myCounter
+  // Tracing tracesFor: myCounter
 
   class sealed tracesFor: actor :: Object selector: sel :: Symbol -> List
   // Trace events for a specific actor + method
-  // Tracer tracesFor: myCounter selector: #increment
+  // Tracing tracesFor: myCounter selector: #increment
 
   // === Aggregate stats ===
 
   class sealed stats -> Dictionary
   // Per-actor, per-method aggregate stats (always available, even without tracing)
-  // Tracer stats
+  // Tracing stats
 
   class sealed statsFor: actor :: Object -> Dictionary
   // Aggregate stats for a specific actor
-  // Tracer statsFor: myCounter
+  // Tracing statsFor: myCounter
 
   // === Analysis (computed from aggregates) ===
 
   class sealed slowMethods: limit :: Integer -> List
-  // Top N methods by average latency
-  // Tracer slowMethods: 10
+  // Top N methods by average duration (descending)
+  // Tracing slowMethods: 10
 
   class sealed hotMethods: limit :: Integer -> List
-  // Top N methods by call count
-  // Tracer hotMethods: 10
+  // Top N methods by call count (descending)
+  // Tracing hotMethods: 10
 
   class sealed errorMethods: limit :: Integer -> List
-  // Top N methods by error + timeout rate
-  // Tracer errorMethods: 5
+  // Top N methods by error + timeout rate (descending)
+  // Tracing errorMethods: 5
 
   class sealed bottlenecks: limit :: Integer -> List
-  // Top N actors by message queue length (live snapshot)
-  // Tracer bottlenecks: 5
+  // Top N actors by message queue length — live snapshot via erlang:process_info/2
+  // Tracing bottlenecks: 5
 
   // === Live process health ===
 
   class sealed healthFor: actor :: Object -> Dictionary
   // Live process info: queue depth, memory, reductions, status, uptime
-  // Tracer healthFor: myCounter
+  // Tracing healthFor: myCounter
 
   class sealed systemHealth -> Dictionary
   // VM overview: scheduler count, memory breakdown, process count, run queue lengths
-  // Tracer systemHealth
+  // Tracing systemHealth
 
   // === Configuration ===
 
   class sealed maxEvents -> Integer
   // Current ring buffer capacity
-  // Tracer maxEvents   // => 100000
+  // Tracing maxEvents   // => 100000
 
   class sealed maxEvents: size :: Integer -> Nil
   // Set ring buffer capacity (clears existing events)
-  // Tracer maxEvents: 50000
+  // Tracing maxEvents: 50000
 ```
 
 ### REPL Session
@@ -252,85 +268,99 @@ sealed Object subclass: Tracer
 // Always-on aggregates — no setup needed
 c := Counter spawn.
 1 to: 100 do: [:i | c increment].
-Tracer stats
+Tracing stats
 // => {"<0.456.0>" => {"class" => "Counter", "methods" => {"increment" => {"calls" => 100, "ok" => 100, "errors" => 0, "avg_us" => 38, "min_us" => 12, "max_us" => 523}}}}
 
 // Enable trace capture for detailed events
-Tracer enable.
+Tracing enable.
 c increment.
 c increment.
 c increment.
-Tracer traces
+Tracing traces
 // => [{"timestamp_us" => 1234567890, "actor" => "<0.456.0>", "class" => "Counter", "selector" => "increment", "duration_us" => 42, "outcome" => "ok"}, ...]
 
 // Find bottlenecks
-Tracer slowMethods: 5
+Tracing slowMethods: 5
 // => [{"class" => "DatabasePool", "selector" => "query:", "avg_us" => 15023, "calls" => 47}, ...]
 
-Tracer bottlenecks: 3
+Tracing bottlenecks: 3
 // => [{"actor" => "<0.789.0>", "class" => "WorkQueue", "queue_depth" => 142, "memory_kb" => 256}, ...]
 
 // Live health check
-Tracer healthFor: c
+Tracing healthFor: c
 // => {"pid" => "<0.456.0>", "class" => "Counter", "status" => "waiting", "queue_depth" => 0, "memory_kb" => 4, "reductions" => 1523, "uptime_ms" => 45000}
 
 // Clean up
-Tracer disable.
-Tracer clear.
+Tracing disable.
+Tracing clear.
 ```
 
 ### Error Behavior
 
 ```beamtalk
 // Querying traces when not enabled — returns empty list (not an error)
-Tracer traces   // => []
+Tracing traces   // => []
 
 // Stats for unknown actor — returns empty dictionary
-Tracer statsFor: somethingInvalid   // => {}
+Tracing statsFor: somethingInvalid   // => {}
 
 // Health for dead actor
-Tracer healthFor: deadActor
+Tracing healthFor: deadActor
 // => {"pid" => "<0.456.0>", "class" => "Counter", "status" => "dead", "error" => "process not alive"}
 ```
 
 ### MCP Tools
 
-MCP tools wrap the `Tracer` Beamtalk API via thin REPL ops in `beamtalk_repl_ops_perf.erl`, following the established pattern:
+MCP tools wrap the `Tracing` Beamtalk API via thin REPL ops in `beamtalk_repl_ops_perf.erl`, following the established pattern:
 
 | MCP Tool | Beamtalk API | Description |
 |----------|-------------|-------------|
-| `enable-tracing` | `Tracer enable` | Start trace event capture |
-| `disable-tracing` | `Tracer disable` | Stop trace event capture |
-| `get-traces` | `Tracer traces` / `tracesFor:` | Get trace events as JSON |
-| `actor-stats` | `Tracer stats` / `statsFor:` | Aggregate stats per method |
-| `actor-health` | `Tracer healthFor:` | Live process info |
-| `bottlenecks` | `Tracer bottlenecks:` | Top N by queue depth |
-| `slow-methods` | `Tracer slowMethods:` | Top N by avg latency |
-| `error-methods` | `Tracer errorMethods:` | Top N by error rate |
-| `system-health` | `Tracer systemHealth` | VM overview |
-| `clear-traces` | `Tracer clear` | Clear all data |
+| `enable-tracing` | `Tracing enable` | Start trace event capture |
+| `disable-tracing` | `Tracing disable` | Stop trace event capture |
+| `get-traces` | `Tracing traces` / `tracesFor:` | Get trace events as JSON |
+| `actor-stats` | `Tracing stats` / `statsFor:` | Aggregate stats per method |
+| `actor-health` | `Tracing healthFor:` | Live process info |
+| `bottlenecks` | `Tracing bottlenecks:` | Top N by queue depth |
+| `slow-methods` | `Tracing slowMethods:` | Top N by avg latency |
+| `error-methods` | `Tracing errorMethods:` | Top N by error rate |
+| `system-health` | `Tracing systemHealth` | VM overview |
+| `clear-traces` | `Tracing clear` | Clear all data |
 
 The MCP tools add filtering parameters (e.g., `actor`, `selector`, `limit`) that map to the corresponding Beamtalk method variants.
 
 ### Agent Workflow
 
 ```
-1. agent calls enable-tracing        → Tracer enable
+1. agent calls enable-tracing        → Tracing enable
 2. agent calls test (existing tool)   → runs BUnit suite, actors spawn and die
-3. agent calls get-traces             → Tracer traces (structured JSON)
-4. agent calls actor-stats            → Tracer stats (aggregates survived actor death)
-5. agent calls slow-methods           → Tracer slowMethods: 10
-6. agent calls actor-health pid=X     → Tracer healthFor: (for live actors)
-7. agent calls disable-tracing        → Tracer disable
-8. agent calls clear-traces           → Tracer clear
+3. agent calls get-traces             → Tracing traces (structured JSON)
+4. agent calls actor-stats            → Tracing stats (aggregates survived actor death)
+5. agent calls slow-methods           → Tracing slowMethods: 10
+6. agent calls actor-health pid=X     → Tracing healthFor: (for live actors)
+7. agent calls disable-tracing        → Tracing disable
+8. agent calls clear-traces           → Tracing clear
 ```
 
 ### Cleanup and Lifecycle
 
-- **Trace events**: Bounded by ring buffer (100k default). Oldest dropped on overflow. Explicit `Tracer clear` resets.
-- **Aggregate stats**: Persist until `Tracer clear`. Size is proportional to unique `{Pid, Selector}` combinations, not call volume — bounded by the number of actors × methods seen.
+- **Trace events**: Bounded by ring buffer (100k default). Oldest dropped on overflow via batch eviction. Explicit `Tracing clear` resets.
+- **Aggregate stats**: Persist until `Tracing clear`. Size is proportional to unique `{Pid, Selector}` combinations, not call volume — bounded by the number of actors × methods seen.
 - **Actor death**: Stats and traces for dead actors are **retained** for post-mortem analysis. This is essential for the test workflow where actors spawn, run, and die before results are queried.
 - **`beamtalk_trace_store` gen_server**: Supervised under `beamtalk_runtime_sup`. Owns both ETS tables. Crash recovery: tables are lost (acceptable — tracing data is ephemeral by nature).
+
+### Future: Block-Scoped Profiling
+
+The Smalltalk `MessageTally spyOn: [block]` pattern is compelling for targeted profiling. A future enhancement could add:
+
+```beamtalk
+Tracing profile: [
+  c := Counter spawn.
+  1 to: 1000 do: [:i | c increment].
+]
+// => {"traces" => [...], "stats" => {...}, "duration_us" => 45230}
+```
+
+This would automatically enable tracing, execute the block, disable tracing, and return the captured results — eliminating the enable/disable lifecycle for the common case. The global mode (`Tracing enable`) remains necessary for the MCP agent workflow (enable → run tests in separate tool call → query results).
 
 ## Prior Art
 
@@ -342,17 +372,17 @@ Every OTP behaviour supports `sys:trace(Pid, true)` for per-process debug output
 ### Elixir — telemetry ecosystem
 Elixir's `telemetry` library is the de facto BEAM standard for instrumented observability. Libraries emit events via `telemetry:execute/3`; applications attach handlers. Phoenix LiveDashboard provides a web UI showing real-time metrics. GenServer itself does not auto-emit telemetry events — libraries add instrumentation explicitly.
 
-**What we adopt:** The `telemetry` library as our event bus, following the same event naming conventions (`[prefix, object, action, phase]`). **What we adapt:** Beamtalk instruments at the runtime level (all actor sends emit events automatically) rather than requiring library authors to add instrumentation manually. Our `Tracer` class provides the query API that the telemetry ecosystem leaves to third-party dashboards.
+**What we adopt:** The `telemetry` library as our event bus, following the same event naming conventions (`[prefix, object, action, phase]`). **What we adapt:** Beamtalk instruments at the runtime level (all actor sends emit events automatically) rather than requiring library authors to add instrumentation manually. Our `Tracing` class provides the query API that the telemetry ecosystem leaves to third-party dashboards.
 
 ### Akka — Cinnamon/Insights
 Akka Insights provides per-actor-class instrumentation via configuration (no code changes). Four key metrics: mailbox size, mailbox time (queue wait), processing time, and stash size. Configuration supports per-class, per-instance, and wildcard selection with threshold alerts.
 
-**What we adopt:** The four-metric model (our aggregates track call count, duration, errors, timeouts — analogous). Always-on aggregates with opt-in detailed tracing matches Akka's approach. **What we differ on:** Akka's instrumentation is configuration-driven and commercial. Ours is API-driven (`Tracer enable`) and built-in.
+**What we adopt:** The four-metric model (our aggregates track call count, duration, errors, timeouts — analogous). Always-on aggregates with opt-in detailed tracing matches Akka's approach. **What we differ on:** Akka's instrumentation is configuration-driven and commercial. Ours is API-driven (`Tracing enable`) and built-in.
 
 ### Pharo Smalltalk — MessageTally
-Pharo's `MessageTally spyOn: [block]` profiles a block expression, producing a hierarchical tree of methods with execution time percentages. Research by Bergel et al. showed that counting message sends (not sampling) produces perfectly stable profiles. Deeply integrated into the IDE — right-click to profile, visual hierarchy browser.
+Pharo's `MessageTally spyOn: [block]` profiles a block expression, producing a hierarchical tree of methods with execution time percentages. Research by Bergel et al. showed that counting message sends (not sampling) produces perfectly stable profiles. Deeply integrated into the IDE — right-click to profile, visual hierarchy browser. VisualWorks' `PerformanceProfiler` follows a similar pattern as a standalone class-side singleton.
 
-**What we learn:** The `profile: [block]` pattern is compelling for targeted profiling. Our current design focuses on continuous tracing rather than block-scoped profiling — a future `Tracer profile: [block]` method could layer on top of the event infrastructure. The message-counting insight validates our always-on aggregate counters.
+**What we adopt:** The standalone profiler class pattern — both Pharo (`MessageTally`) and VisualWorks (`PerformanceProfiler`) keep profiling as a dedicated tool, not methods on the `Smalltalk` global. This validates our `Tracing` class design. **What we defer:** The block-scoped `profile: [block]` invocation pattern is planned as a future enhancement (see Decision section). Our v1 uses global enable/disable because the MCP agent workflow requires tracing to span multiple tool calls.
 
 ### Pony — Flight Recorder
 Pony's runtime supports a **flight recorder** mode: a circular in-memory buffer that captures trace events continuously with low overhead and dumps to stderr on crash (SIGILL/SIGSEGV/SIGBUS). This provides post-mortem debugging data without the overhead of continuous export.
@@ -362,26 +392,27 @@ Pony's runtime supports a **flight recorder** mode: a circular in-memory buffer 
 ## User Impact
 
 ### Newcomer (from Python/JS/Ruby)
-- `Tracer stats` and `Tracer slowMethods: 5` are immediately discoverable and self-explanatory
+- `Tracing stats` and `Tracing slowMethods: 5` are immediately discoverable and self-explanatory
 - No setup required for aggregate stats — they just work
-- `Tracer enable` / `Tracer traces` is a simple workflow, no OTP concepts needed
+- `Tracing enable` / `Tracing traces` is a simple workflow, no OTP concepts needed
 - The REPL output format (dictionaries with string keys) is familiar from JSON
 
 ### Smalltalk Developer
-- `Tracer` as a sealed class-only facade follows the same pattern as `System` and `Logger` — consistent design vocabulary
-- `Tracer profile: [block]` (future) would mirror Pharo's `MessageTally spyOn:` — familiar territory
+- `Tracing` as a standalone class follows the Smalltalk tradition of separate profiler tools (`MessageTally`, `PerformanceProfiler`)
+- Future `Tracing profile: [block]` would mirror Pharo's `MessageTally spyOn:` — familiar territory
 - The class does not pollute `Object` or `Beamtalk` — clean separation of concerns
+- The `Tracing` / `Logging` naming convention (gerund-form subsystems) parallels how Smalltalk organizes system tools as separate classes
 
 ### Erlang/BEAM Developer
 - The `telemetry` event bus is the standard they expect — compatible with their existing tooling
 - `telemetry:attach/4` lets them add custom handlers (StatsD, Datadog) at the Erlang level
-- `Tracer healthFor:` wraps `erlang:process_info/2` — familiar data, Beamtalk syntax
+- `Tracing healthFor:` wraps `erlang:process_info/2` — familiar data, Beamtalk syntax
 - OpenTelemetry integration is available via the standard `opentelemetry_telemetry` bridge
 
 ### Production Operator
 - Always-on aggregates with ~200ns overhead are safe for production
 - Trace capture is opt-in — zero overhead when disabled
-- `Tracer systemHealth` provides the VM overview they need for capacity planning
+- `Tracing systemHealth` provides the VM overview they need for capacity planning
 - Structured output integrates with existing monitoring pipelines via custom telemetry handlers
 - Ring buffer prevents unbounded memory growth
 
@@ -391,7 +422,7 @@ Pony's runtime supports a **flight recorder** mode: a circular in-memory buffer 
 
 | Cohort | Best argument |
 |--------|---------------|
-| **Newcomer** | "Zero dependencies means nothing can break. `Tracer enable` just works — no library version to worry about." |
+| **Newcomer** | "Zero dependencies means nothing can break. `Tracing enable` just works — no library version to worry about." |
 | **Smalltalk purist** | "Self-contained is elegant. Beamtalk should own its full stack, not delegate core observability to an external library." |
 | **BEAM veteran** | "One fewer dependency to manage. ETS is the right tool for this — `telemetry` adds an indirection layer we don't need when we control both sides." |
 | **Operator** | "Fewer moving parts in production. I can inspect the ETS tables directly with `ets:tab2list/1` — no abstraction hiding the data." |
@@ -405,21 +436,30 @@ Pony's runtime supports a **flight recorder** mode: a circular in-memory buffer 
 | **BEAM veteran** | "If we're going to add observability, do it once with the standard. `telemetry` is BEAM-only — OpenTelemetry gives us cross-service distributed tracing from day one." |
 | **Operator** | "Every APM tool I use (Datadog, New Relic, Grafana Tempo) speaks OTLP. Native OpenTelemetry means zero custom integration work." |
 
-### Decided: `telemetry` + custom ETS handlers (hybrid)
+### Alternative C: Tracing methods on `Beamtalk` (ADR 0064 pattern)
 
 | Cohort | Best argument |
 |--------|---------------|
-| **Newcomer** | "The Beamtalk API is all I see — `Tracer enable`, `Tracer stats`. The telemetry library is invisible to me." |
-| **Smalltalk purist** | "The `Tracer` class is a clean facade. The implementation detail (telemetry) is hidden behind Beamtalk's message-passing API." |
+| **Newcomer** | "One place for system tools. I already know `Beamtalk logLevel:` and `Beamtalk enableDebug:` — `Beamtalk enableTracing` is the obvious next thing I'd try." |
+| **BEAM veteran** | "DDD consistency. ADR 0064 said runtime configuration goes on `Beamtalk`. Tracing enable/disable is runtime configuration. Splitting it to a new class contradicts the precedent." |
+| **Language designer** | "Fewer top-level names in the namespace. `Beamtalk` is already known; `Tracing` is a new name to discover. Discoverability is better when tools are co-located." |
+
+### Decided: `telemetry` + `Tracing` class (hybrid)
+
+| Cohort | Best argument |
+|--------|---------------|
+| **Newcomer** | "The Beamtalk API is all I see — `Tracing enable`, `Tracing stats`. The telemetry library is invisible to me." |
+| **Smalltalk purist** | "`MessageTally` is a standalone class in Pharo; `Tracing` is a standalone class here. This is the Smalltalk way — profiling tools are their own thing, not bolted onto the system dictionary." |
 | **BEAM veteran** | "`telemetry` events mean I can `telemetry:attach/4` my own handlers from the Erlang shell — export to Prometheus, StatsD, whatever. And `opentelemetry_telemetry` bridges to OTel when I need it." |
 | **Operator** | "Best of both worlds: local ETS queries for REPL debugging, composable handlers for production export, and an OTel upgrade path." |
-| **Language designer** | "Standard event emission with custom storage. We don't reinvent the bus, but we own the query semantics. And we can swap storage implementations without changing the Beamtalk API." |
+| **Language designer** | "The `Tracing` / `Logging` pair is a cleaner taxonomy than everything on `Beamtalk`. Each subsystem owns its full surface. This scales — a future `Metrics` class has an obvious home." |
 
 ### Tension Points
 
+- **ADR 0064 consistency:** BEAM veterans and newcomers have a genuine argument that `Tracing enable` should live on `Beamtalk` per the ADR 0064 DDD precedent. The counter-argument is scale: logging config is ~5 methods, tracing is ~15. At that size, a standalone class is the Smalltalk-native solution. The planned `Logging` migration will retroactively make both subsystems consistent.
 - **BEAM veterans** would prefer OpenTelemetry-native for distributed tracing. The bridge via `opentelemetry_telemetry` is a good compromise but adds one more package when they need it.
 - **Purists** would prefer zero dependencies. The argument is genuine — `telemetry` is tiny and stable, but it IS a dependency. The composability benefit (user-added handlers, OTel bridge) justifies the cost.
-- **All cohorts agree** on: always-on aggregates, opt-in detailed tracing, dedicated `Tracer` class (not on `Beamtalk`), structured output, ring-buffer bounded storage.
+- **All cohorts agree** on: always-on aggregates, opt-in detailed tracing, structured output, ring-buffer bounded storage.
 
 ## Alternatives Considered
 
@@ -436,12 +476,17 @@ Use `opentelemetry-erlang` as the primary instrumentation layer with spans, metr
 ### Alternative: sys module integration
 Use OTP's built-in `sys:trace/2` and `sys:statistics/2` for per-actor tracing.
 
-**Rejected because:** `sys:trace` produces unstructured text to stdout — not queryable, not aggregatable, not exposable via MCP. `sys:statistics` only tracks reductions, messages_in, messages_out — no per-method breakdown, no timing, no error classification. Would require significant wrapping to produce the structured output needed by the `Tracer` API and MCP tools.
+**Rejected because:** `sys:trace` produces unstructured text to stdout — not queryable, not aggregatable, not exposable via MCP. `sys:statistics` only tracks reductions, messages_in, messages_out — no per-method breakdown, no timing, no error classification. Would require significant wrapping to produce the structured output needed by the `Tracing` API and MCP tools.
 
 ### Alternative: Tracing in codegen (safe_dispatch)
 Instrument the generated `safe_dispatch` function in each actor's Core Erlang code, measuring method body execution time.
 
-**Rejected for now:** Adds codegen complexity and requires recompilation to enable/disable. Send-wrapper instrumentation captures the caller-perspective round-trip time (including message queue wait), which is the more actionable metric for bottleneck detection. Message queue depth from `Tracer healthFor:` disambiguates queueing vs execution time. Codegen-level instrumentation remains a future enhancement if method-body timing is needed.
+**Rejected for now:** Adds codegen complexity and requires recompilation to enable/disable. Send-wrapper instrumentation captures the caller-perspective round-trip time (including message queue wait), which is the more actionable metric for bottleneck detection. Message queue depth from `Tracing healthFor:` disambiguates queueing vs execution time. Codegen-level instrumentation remains a future enhancement if method-body timing is needed.
+
+### Alternative: Tracing control on `Beamtalk` (ADR 0064 DDD pattern)
+Place `enableTracing` / `disableTracing` / `tracingEnabled` on `Beamtalk`, with only query methods on a separate class.
+
+**Rejected because:** Adds 3 more methods to an already-large `BeamtalkInterface` (currently ~20 methods). More importantly, it splits the tracing API across two objects — users must know that control is on `Beamtalk` but queries are on `Tracing`. A standalone class with the full surface is simpler to discover and document. The ADR 0064 precedent was sound for logging config (~5 methods extending an existing introspection role), but tracing is a large enough domain (~15 methods) to justify its own namespace. The planned future `Logging` class will retroactively make both subsystems consistent as standalone facades.
 
 ## Consequences
 
@@ -452,18 +497,20 @@ Instrument the generated `safe_dispatch` function in each actor's Core Erlang co
 - Standard `telemetry` event bus enables user-extensible monitoring (StatsD, Datadog, OpenTelemetry bridge)
 - Ring buffer prevents unbounded memory growth
 - Post-mortem analysis works — data survives actor death
+- `Tracing` / `Logging` naming convention scales to future observability subsystems
 
 ### Negative
 - New dependency: `telemetry` library (mitigated: zero transitive deps, pure Erlang, ~500 LOC, de facto BEAM standard)
 - ~200ns overhead per actor message send (always-on aggregates) — negligible but non-zero
 - `beamtalk_trace_store` gen_server is a single point of contention for ETS writes under extreme load (mitigated: `ets:update_counter` is lock-free for concurrent writers on `set` tables)
 - Trace events reference PIDs which are opaque after actor death (mitigated: class name is captured at record time)
+- Standalone `Tracing` class is temporarily inconsistent with ADR 0064's pattern of logging config on `Beamtalk` (mitigated: planned `Logging` class migration will make both consistent)
 
 ### Neutral
 - Does not affect actors that don't send messages (value objects, pure computation)
 - Does not change any existing Beamtalk syntax or semantics
 - The `telemetry` dependency will likely already be present if users integrate with Elixir libraries
-- `Tracer` class follows the established sealed-facade pattern — no new language concepts
+- `Tracing` class follows the established sealed-facade pattern — no new language concepts
 
 ## Implementation
 
@@ -473,7 +520,7 @@ Instrument the generated `safe_dispatch` function in each actor's Core Erlang co
 1. Add `telemetry` dependency to `runtime/apps/beamtalk_runtime/rebar.config`
 2. Create `beamtalk_trace_store.erl` — gen_server owning ETS tables, telemetry handler callbacks, query API
 3. Add `beamtalk_trace_store` to `beamtalk_runtime_sup` supervision tree
-4. EUnit tests for trace store: insert, query, ring buffer overflow, aggregate counters, clear
+4. EUnit tests for trace store: insert, query, ring buffer overflow (batch eviction), aggregate counters, clear, composite key uniqueness
 
 ### Phase 2: Actor Instrumentation (S)
 **Affected components:** Runtime (`beamtalk_actor.erl`)
@@ -483,11 +530,11 @@ Instrument the generated `safe_dispatch` function in each actor's Core Erlang co
 3. EUnit tests: verify telemetry events are emitted, verify overhead is within budget
 
 ### Phase 3: Beamtalk API (M)
-**Affected components:** Stdlib (`Tracer.bt`), Runtime (`beamtalk_tracer.erl`)
+**Affected components:** Stdlib (`Tracing.bt`), Runtime (`beamtalk_tracing.erl`)
 
-1. Create `beamtalk_tracer.erl` — Erlang shim that the Tracer class delegates to
-2. Create `Tracer.bt` — sealed class-only facade
-3. BUnit tests for Tracer API: enable/disable, traces, stats, slowMethods, healthFor, systemHealth
+1. Create `beamtalk_tracing.erl` — Erlang shim that the Tracing class delegates to
+2. Create `Tracing.bt` — sealed class-only facade
+3. BUnit tests for Tracing API: enable/disable, traces, stats, slowMethods, healthFor, systemHealth
 
 ### Phase 4: MCP Tools (M)
 **Affected components:** Runtime (`beamtalk_repl_ops_perf.erl`), Rust MCP server (`server.rs`)
@@ -498,7 +545,7 @@ Instrument the generated `safe_dispatch` function in each actor's Core Erlang co
 4. Integration tests: MCP workflow (enable → eval → get-traces → stats)
 
 ### Phase 5: Documentation and Polish (S)
-1. Update `docs/beamtalk-language-features.md` with Tracer class documentation
+1. Update `docs/beamtalk-language-features.md` with Tracing class documentation
 2. Add examples to the example corpus for MCP search
 3. Update ADR 0064 to cross-reference this ADR
 
@@ -507,5 +554,5 @@ Instrument the generated `safe_dispatch` function in each actor's Core Erlang co
 - Related ADRs: ADR 0064 (Runtime Logging Control — complementary), ADR 0065 (OTP Primitives — Actor/Server hierarchy), ADR 0043 (Sync-by-Default Messaging)
 - Code: `beamtalk_actor.erl` (sync_send, async_send, cast_send), `server.rs` (MCP tool pattern)
 - External: [beam-telemetry/telemetry](https://github.com/beam-telemetry/telemetry), [opentelemetry_telemetry bridge](https://github.com/open-telemetry/opentelemetry-erlang-contrib)
-- Prior art: Erlang sys/recon, Elixir telemetry/LiveDashboard, Akka Insights, Pharo MessageTally, Pony flight recorder
+- Prior art: Erlang sys/recon, Elixir telemetry/LiveDashboard, Akka Insights, Pharo MessageTally/PerformanceProfiler, Pony flight recorder
 - Design document: `issue-adr-actor-observability.md` on branch `claude/erlang-genserver-tracing-DfzoF`
