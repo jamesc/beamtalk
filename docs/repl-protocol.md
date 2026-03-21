@@ -564,7 +564,7 @@ Returns the list of supported operations with their parameters, protocol version
     "describe": {"params": []},
     "health": {"params": []}
   },
-  "versions": {"protocol": "1.0", "beamtalk": "0.1.0"},
+  "versions": {"protocol": "1.0", "beamtalk": "0.2.0"},
   "status": ["done"]
 }
 ```
