@@ -353,36 +353,43 @@ Tracing healthFor: deadActor
 // => {"pid" => "<0.456.0>", "class" => "Counter", "status" => "dead", "error" => "process not alive"}
 ```
 
-### MCP Tools
+### MCP Tools: Lean Surface + `evaluate`
 
-MCP tools wrap the `Tracing` Beamtalk API via thin REPL ops in `beamtalk_repl_ops_perf.erl`, following the established pattern:
+The existing MCP `evaluate` tool can execute any Beamtalk expression, including `Tracing` methods. Rather than 10 dedicated MCP tools that are thin wrappers around `evaluate("Tracing ...")`, we start with a minimal dedicated tool surface and let agents discover the rest via `evaluate` + `Beamtalk help: Tracing`:
 
-| MCP Tool | Beamtalk API | Description |
-|----------|-------------|-------------|
-| `enable-tracing` | `Tracing enable` | Start trace event capture |
-| `disable-tracing` | `Tracing disable` | Stop trace event capture |
-| `get-traces` | `Tracing traces` / `tracesFor:` | Get trace events as JSON |
-| `actor-stats` | `Tracing stats` / `statsFor:` | Aggregate stats per method |
-| `actor-health` | `Tracing healthFor:` | Live process info |
-| `bottlenecks` | `Tracing bottlenecks:` | Top N by queue depth |
-| `slow-methods` | `Tracing slowMethods:` | Top N by avg latency |
-| `error-methods` | `Tracing errorMethods:` | Top N by error rate |
-| `system-health` | `Tracing systemHealth` | VM overview |
-| `clear-traces` | `Tracing clear` | Clear all data |
+**Dedicated MCP tools (v1):**
 
-The MCP tools add filtering parameters (e.g., `actor`, `selector`, `limit`) that map to the corresponding Beamtalk method variants.
+| MCP Tool | Beamtalk API | Why dedicated? |
+|----------|-------------|----------------|
+| `enable-tracing` | `Tracing enable` | Common workflow entry point, high discoverability value |
+| `get-traces` | `Tracing traces` / `tracesFor:` | Structured JSON output with filtering params (`actor`, `selector`, `limit`) |
+| `actor-stats` | `Tracing stats` / `statsFor:` | Structured JSON output, the main query after test runs |
+
+**Everything else via `evaluate`:**
+
+```
+evaluate("Tracing slowMethods: 10")
+evaluate("Tracing bottlenecks: 5")
+evaluate("Tracing healthFor: myCounter")
+evaluate("Tracing systemHealth")
+evaluate("Tracing disable")
+evaluate("Tracing clear")
+evaluate("Beamtalk help: Tracing")   // agent discovers available methods
+```
+
+This approach reduces implementation effort (3 tools vs 10), avoids API surface bloat in the MCP layer, and tests whether agents can discover the full `Tracing` API organically. If monitoring shows agents struggle to find specific methods, we can promote them to dedicated tools in a follow-up — additive, not a redesign.
 
 ### Agent Workflow
 
 ```
-1. agent calls enable-tracing        → Tracing enable
-2. agent calls test (existing tool)   → runs BUnit suite, actors spawn and die
-3. agent calls get-traces             → Tracing traces (structured JSON)
-4. agent calls actor-stats            → Tracing stats (aggregates survived actor death)
-5. agent calls slow-methods           → Tracing slowMethods: 10
-6. agent calls actor-health pid=X     → Tracing healthFor: (for live actors)
-7. agent calls disable-tracing        → Tracing disable
-8. agent calls clear-traces           → Tracing clear
+1. agent calls enable-tracing          → dedicated tool
+2. agent calls test (existing tool)    → runs BUnit suite, actors spawn and die
+3. agent calls get-traces              → dedicated tool (structured JSON)
+4. agent calls actor-stats             → dedicated tool (structured JSON)
+5. agent calls evaluate("Tracing slowMethods: 10")   → via evaluate
+6. agent calls evaluate("Tracing healthFor: ...")     → via evaluate
+7. agent calls evaluate("Tracing disable")            → via evaluate
+8. agent calls evaluate("Tracing clear")              → via evaluate
 ```
 
 ### Cleanup and Lifecycle
@@ -623,13 +630,14 @@ This spike should be a single branch with ~100 lines of test code. If the teleme
 2. Create `Tracing.bt` — sealed class-only facade
 3. BUnit tests for Tracing API: enable/disable, traces, stats, slowMethods, healthFor, systemHealth
 
-### Phase 4: MCP Tools (M)
+### Phase 4: MCP Tools (S)
 **Affected components:** Runtime (`beamtalk_repl_ops_perf.erl`), Rust MCP server (`server.rs`)
 
-1. Create `beamtalk_repl_ops_perf.erl` — REPL op handlers for tracing operations
+1. Create `beamtalk_repl_ops_perf.erl` — REPL op handlers for `enable-tracing`, `get-traces`, `actor-stats`
 2. Wire ops into `beamtalk_repl_server.erl`
-3. Add MCP tools to `server.rs` (10 tools, following existing pattern)
-4. Integration tests: MCP workflow (enable → eval → get-traces → stats)
+3. Add 3 MCP tools to `server.rs` (following existing pattern)
+4. Integration tests: MCP workflow (enable-tracing → test → get-traces → actor-stats)
+5. Monitor agent usage — promote additional methods to dedicated tools if discoverability is an issue
 
 ### Phase 5: Documentation and Polish (S)
 1. Update `docs/beamtalk-language-features.md` with Tracing class documentation
