@@ -539,7 +539,7 @@ The pattern of "telemetry handler → ETS store → query API" is standard on BE
 |--------|---------------|
 | **Newcomer** | "Zero dependencies means nothing can break. `Tracing enable` just works — no library version to worry about." |
 | **Smalltalk purist** | "ETS and `counters` are already part of OTP — the runtime we ship with. Adding `telemetry` means core observability depends on a third-party library's release cycle. OTP primitives won't break on a hex version bump." |
-| **BEAM veteran** | "One fewer dependency to manage. ETS is the right tool for this — `telemetry` adds an indirection layer we don't need when we control both sides." |
+| **BEAM veteran** | "You've already built the hard part — context propagation across gen_server boundaries. That's the real work. The `telemetry` event bus is just a dispatch layer I could replace with a direct function call. If a user wants OTel export, they can write a 20-line handler on your ETS tables. `telemetry` is a convenience, not a necessity." |
 | **Operator** | "Fewer moving parts in production. I can inspect the ETS tables directly with `ets:tab2list/1` — no abstraction hiding the data." |
 | **Language designer** | "The `persistent_term` toggle pattern is simpler and faster than telemetry's handler dispatch. We're optimizing for one specific use case, not building a general-purpose event bus." |
 
@@ -569,7 +569,7 @@ The pattern of "telemetry handler → ETS store → query API" is standard on BE
 |--------|---------------|
 | **Newcomer** | "The Beamtalk API is all I see — `Tracing enable`, `Tracing stats`. The telemetry library is invisible to me." |
 | **Smalltalk purist** | "`MessageTally` is a standalone class in Pharo; `Tracing` is a standalone class here. This is the Smalltalk way — profiling tools are their own thing, not bolted onto the system dictionary." |
-| **BEAM veteran** | "`telemetry` events mean I can `telemetry:attach/4` my own handlers from the Erlang shell — export to Prometheus, StatsD, whatever. And `opentelemetry_telemetry` bridges to OTel when I need it." |
+| **BEAM veteran** | "`telemetry` events mean I can `telemetry:attach/4` my own handlers from the Erlang shell — export to Prometheus, StatsD, whatever. Context propagation across actor boundaries means `opentelemetry_telemetry` gives me correlated distributed traces just by adding the dep. No other BEAM framework does this out of the box." |
 | **Operator** | "Best of both worlds: local ETS queries for REPL debugging, composable handlers for production export, and an OTel upgrade path." |
 | **Language designer** | "The `Tracing` / `Logging` pair is a cleaner taxonomy than everything on `Beamtalk`. Each subsystem owns its full surface. This scales — a future `Metrics` class has an obvious home." |
 
