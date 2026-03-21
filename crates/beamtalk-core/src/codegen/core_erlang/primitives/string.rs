@@ -181,7 +181,7 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
         "asInteger" => Some(Document::Str("call 'erlang':'binary_to_integer'(Self)")),
         "asFloat" => Some(Document::Str("call 'erlang':'binary_to_float'(Self)")),
         "asAtom" => Some(Document::Str(
-            "call 'erlang':'binary_to_existing_atom'(Self, 'utf8')",
+            "call 'erlang':'binary_to_atom'(Self, 'utf8')",
         )),
         "asList" => Some(Document::Str("call 'beamtalk_string':'as_list'(Self)")),
         "each:" => Some(docvec![
