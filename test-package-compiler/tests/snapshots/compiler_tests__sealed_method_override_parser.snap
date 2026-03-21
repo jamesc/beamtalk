@@ -269,6 +269,7 @@ Module {
         },
     ],
     method_definitions: [],
+    protocols: [],
     expressions: [],
     span: Span {
         start: 203,

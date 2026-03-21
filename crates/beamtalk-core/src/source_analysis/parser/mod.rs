@@ -54,7 +54,7 @@ use std::collections::HashSet;
 
 use crate::ast::{Comment, CommentAttachment, Expression, ExpressionStatement, Module};
 #[cfg(test)]
-use crate::ast::{CommentKind, Literal, MessageSelector};
+use crate::ast::{CommentKind, Literal};
 use crate::source_analysis::{Span, Token, TokenKind, Trivia, lex_with_eof};
 use ecow::EcoString;
 
@@ -892,6 +892,7 @@ impl Parser {
         let start = self.current_token().span();
         let mut classes = Vec::new();
         let mut method_definitions = Vec::new();
+        let mut protocols = Vec::new();
         let mut expressions = Vec::new();
 
         // Parse statements until EOF.
@@ -900,8 +901,13 @@ impl Parser {
         // collect their own comments inside parse_class_definition() /
         // parse_standalone_method_definition() via the same helper.
         while !self.is_at_end() {
+            // Check if this looks like a protocol definition
+            if self.is_at_protocol_definition() {
+                let protocol = self.parse_protocol_definition();
+                protocols.push(protocol);
+            }
             // Check if this looks like a class definition
-            if self.is_at_class_definition() {
+            else if self.is_at_class_definition() {
                 let class = self.parse_class_definition();
                 classes.push(class);
             } else if self.is_at_standalone_method_definition() {
@@ -958,12 +964,15 @@ impl Parser {
         //   collected; any remaining comments on the EOF token are trailing comments
         //   that appear after the last item in the file.
         let eof_comments = self.collect_comment_attachment().leading;
-        let (file_leading_comments, file_trailing_comments) =
-            if classes.is_empty() && method_definitions.is_empty() && expressions.is_empty() {
-                (eof_comments, Vec::new())
-            } else {
-                (Vec::new(), eof_comments)
-            };
+        let (file_leading_comments, file_trailing_comments) = if classes.is_empty()
+            && method_definitions.is_empty()
+            && protocols.is_empty()
+            && expressions.is_empty()
+        {
+            (eof_comments, Vec::new())
+        } else {
+            (Vec::new(), eof_comments)
+        };
 
         // Get end span
         let end = if self.current > 0 {
@@ -976,6 +985,7 @@ impl Parser {
         Module {
             classes,
             method_definitions,
+            protocols,
             expressions,
             span,
             file_leading_comments,
@@ -1012,6 +1022,17 @@ impl Parser {
 
         // Expect `subclass:` keyword
         matches!(self.peek_at(offset), Some(TokenKind::Keyword(k)) if k == "subclass:")
+    }
+
+    /// Checks if the current position looks like a protocol definition.
+    ///
+    /// Protocol definitions follow the pattern:
+    /// - `Protocol define: <Name>` optionally followed by `(T, E)` type params
+    ///
+    /// We look ahead for `Identifier("Protocol")` followed by `Keyword("define:")`.
+    pub(super) fn is_at_protocol_definition(&self) -> bool {
+        matches!(self.peek_at(0), Some(TokenKind::Identifier(name)) if name == "Protocol")
+            && matches!(self.peek_at(1), Some(TokenKind::Keyword(k)) if k == "define:")
     }
 
     /// Checks if the current position looks like a standalone method definition.

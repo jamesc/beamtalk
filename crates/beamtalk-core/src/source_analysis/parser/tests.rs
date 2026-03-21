@@ -3,7 +3,7 @@
 
 //! Tests for the Beamtalk recursive descent parser.
 use super::*;
-use crate::ast::{DeclaredKeyword, Identifier, TypeAnnotation};
+use crate::ast::{DeclaredKeyword, Identifier, MessageSelector, TypeAnnotation};
 use crate::source_analysis::Span;
 use crate::source_analysis::lex_with_eof;
 
@@ -5415,4 +5415,236 @@ fn parse_generic_union_with_generic_member() {
     } else {
         panic!("Expected Union type, got: {ty:?}");
     }
+}
+
+// ========================================================================
+// Protocol Definition Tests (ADR 0068, Phase 2a — BT-1578)
+// ========================================================================
+
+#[test]
+fn parse_protocol_printable() {
+    let module = parse_ok(
+        "Protocol define: Printable
+  /// Return a human-readable string representation.
+  asString -> String",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Printable");
+    assert!(proto.type_params.is_empty());
+    assert!(proto.extending.is_none());
+    assert_eq!(proto.method_signatures.len(), 1);
+
+    let sig = &proto.method_signatures[0];
+    assert_eq!(sig.selector.name(), "asString");
+    assert!(sig.parameters.is_empty());
+    let ret_ty = sig.return_type.as_ref().unwrap();
+    assert!(matches!(ret_ty, TypeAnnotation::Simple(id) if id.name == "String"));
+    assert!(sig.doc_comment.is_some());
+}
+
+#[test]
+fn parse_protocol_comparable() {
+    let module = parse_ok(
+        "Protocol define: Comparable
+  < other :: Self -> Boolean
+  > other :: Self -> Boolean
+  <= other :: Self -> Boolean
+  >= other :: Self -> Boolean",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Comparable");
+    assert_eq!(proto.method_signatures.len(), 4);
+
+    // Check first signature: `< other :: Self -> Boolean`
+    let sig = &proto.method_signatures[0];
+    assert!(matches!(&sig.selector, MessageSelector::Binary(op) if op == "<"));
+    assert_eq!(sig.parameters.len(), 1);
+    assert_eq!(sig.parameters[0].name.name, "other");
+    let param_ty = sig.parameters[0].type_annotation.as_ref().unwrap();
+    assert!(matches!(param_ty, TypeAnnotation::SelfType { .. }));
+    let ret_ty = sig.return_type.as_ref().unwrap();
+    assert!(matches!(ret_ty, TypeAnnotation::Simple(id) if id.name == "Boolean"));
+}
+
+#[test]
+fn parse_protocol_generic_collection() {
+    let module = parse_ok(
+        "Protocol define: Collection(E)
+  /// The number of elements in this collection.
+  size -> Integer
+  /// Iterate over each element.
+  do: block :: Block(E, Object)
+  /// Transform each element.
+  collect: block :: Block(E, Object) -> Self
+  /// Return elements matching the predicate.
+  select: block :: Block(E, Boolean) -> Self",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Collection");
+    assert_eq!(proto.type_params.len(), 1);
+    assert_eq!(proto.type_params[0].name, "E");
+    assert_eq!(proto.method_signatures.len(), 4);
+
+    // Check `size -> Integer`
+    let sig_size = &proto.method_signatures[0];
+    assert_eq!(sig_size.selector.name(), "size");
+    assert!(sig_size.parameters.is_empty());
+    assert!(matches!(
+        sig_size.return_type.as_ref().unwrap(),
+        TypeAnnotation::Simple(id) if id.name == "Integer"
+    ));
+
+    // Check `do: block :: Block(E, Object)`
+    let sig_do = &proto.method_signatures[1];
+    assert_eq!(sig_do.selector.name(), "do:");
+    assert_eq!(sig_do.parameters.len(), 1);
+    let param_ty = sig_do.parameters[0].type_annotation.as_ref().unwrap();
+    assert!(
+        matches!(param_ty, TypeAnnotation::Generic { base, parameters, .. }
+        if base.name == "Block" && parameters.len() == 2)
+    );
+    assert!(sig_do.return_type.is_none());
+
+    // Check `collect: block :: Block(E, Object) -> Self`
+    let sig_collect = &proto.method_signatures[2];
+    assert_eq!(sig_collect.selector.name(), "collect:");
+    let ret_ty = sig_collect.return_type.as_ref().unwrap();
+    assert!(matches!(ret_ty, TypeAnnotation::SelfType { .. }));
+}
+
+#[test]
+fn parse_protocol_extending() {
+    let module = parse_ok(
+        "Protocol define: Sortable
+  extending: Comparable
+  /// The key used for sort ordering.
+  sortKey -> Object",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Sortable");
+    assert!(proto.type_params.is_empty());
+    let extending = proto.extending.as_ref().unwrap();
+    assert_eq!(extending.name, "Comparable");
+    assert_eq!(proto.method_signatures.len(), 1);
+    assert_eq!(proto.method_signatures[0].selector.name(), "sortKey");
+}
+
+#[test]
+fn parse_protocol_no_methods() {
+    // A protocol with no method signatures (just the definition)
+    let module = parse_ok("Protocol define: Marker");
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Marker");
+    assert!(proto.method_signatures.is_empty());
+}
+
+#[test]
+fn parse_protocol_multiple_type_params() {
+    let module = parse_ok(
+        "Protocol define: Mapping(K, V)
+  at: key :: K -> V
+  put: key :: K value: val :: V",
+    );
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Mapping");
+    assert_eq!(proto.type_params.len(), 2);
+    assert_eq!(proto.type_params[0].name, "K");
+    assert_eq!(proto.type_params[1].name, "V");
+    assert_eq!(proto.method_signatures.len(), 2);
+
+    // Check `at: key :: K -> V`
+    let sig_at = &proto.method_signatures[0];
+    assert_eq!(sig_at.selector.name(), "at:");
+    assert_eq!(sig_at.parameters.len(), 1);
+    let ret_ty = sig_at.return_type.as_ref().unwrap();
+    assert!(matches!(ret_ty, TypeAnnotation::Simple(id) if id.name == "V"));
+
+    // Check `put: key :: K value: val :: V`
+    let sig_put = &proto.method_signatures[1];
+    assert_eq!(sig_put.selector.name(), "put:value:");
+    assert_eq!(sig_put.parameters.len(), 2);
+}
+
+#[test]
+fn parse_protocol_followed_by_class() {
+    // Protocol definition followed by a class definition
+    let module = parse_ok(
+        "Protocol define: Printable
+  asString -> String
+
+Object subclass: Foo
+  toString => \"hello\"",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    assert_eq!(module.protocols[0].name.name, "Printable");
+    assert_eq!(module.classes.len(), 1);
+    assert_eq!(module.classes[0].name.name, "Foo");
+}
+
+#[test]
+fn parse_multiple_protocols() {
+    let module = parse_ok(
+        "Protocol define: Printable
+  asString -> String
+
+Protocol define: Comparable
+  < other :: Self -> Boolean",
+    );
+    assert_eq!(module.protocols.len(), 2);
+    assert_eq!(module.protocols[0].name.name, "Printable");
+    assert_eq!(module.protocols[1].name.name, "Comparable");
+}
+
+#[test]
+fn parse_protocol_with_impl_body_error() {
+    // Protocol method signatures should NOT have `=>`
+    let diagnostics = parse_err(
+        "Protocol define: Bad
+  asString => \"hello\"",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d
+            .message
+            .contains("Protocol method signatures cannot have implementations")),
+        "Expected error about protocol implementations, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_protocol_unary_no_return_type() {
+    // Unary method without a return type
+    let module = parse_ok(
+        "Protocol define: Hashable
+  hash",
+    );
+    let proto = &module.protocols[0];
+    assert_eq!(proto.method_signatures.len(), 1);
+    assert_eq!(proto.method_signatures[0].selector.name(), "hash");
+    assert!(proto.method_signatures[0].return_type.is_none());
+}
+
+#[test]
+fn parse_protocol_identifier_in_expression_context() {
+    // `Protocol` used as a variable name should not trigger protocol parsing
+    let module = parse_ok("x := Protocol");
+    assert!(module.protocols.is_empty());
+    assert_eq!(module.expressions.len(), 1);
+}
+
+#[test]
+fn parse_protocol_class_definition_named_protocol() {
+    // A class named `Protocol` should parse as a class, not a protocol
+    // because the keyword after `Protocol` is `subclass:`, not `define:`
+    let module = parse_ok(
+        "Object subclass: Protocol
+  doSomething => nil",
+    );
+    assert!(module.protocols.is_empty());
+    assert_eq!(module.classes.len(), 1);
+    assert_eq!(module.classes[0].name.name, "Protocol");
 }

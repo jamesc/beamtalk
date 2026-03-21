@@ -6,6 +6,7 @@ AST:
 Module {
     classes: [],
     method_definitions: [],
+    protocols: [],
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {

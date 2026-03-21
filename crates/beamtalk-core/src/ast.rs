@@ -33,6 +33,7 @@
 //! let module = Module {
 //!     classes: Vec::new(),
 //!     method_definitions: Vec::new(),
+//!     protocols: Vec::new(),
 //!     expressions: vec![
 //!         ExpressionStatement::bare(Expression::Assignment {
 //!             target: Box::new(Expression::Identifier(Identifier {
@@ -96,6 +97,8 @@ pub struct Module {
     pub classes: Vec<ClassDefinition>,
     /// Standalone method definitions (Tonel-style `Class >> method => body`).
     pub method_definitions: Vec<StandaloneMethodDefinition>,
+    /// Protocol definitions (ADR 0068, Phase 2a).
+    pub protocols: Vec<ProtocolDefinition>,
     /// Top-level expressions (scripts, REPL input).
     pub expressions: Vec<ExpressionStatement>,
     /// Source location spanning the entire module.
@@ -117,6 +120,7 @@ impl Module {
         Self {
             classes: Vec::new(),
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions,
             span,
             file_leading_comments: Vec::new(),
@@ -130,6 +134,7 @@ impl Module {
         Self {
             classes,
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span,
             file_leading_comments: Vec::new(),
@@ -147,6 +152,7 @@ impl Module {
         Self {
             classes: Vec::new(),
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions,
             span,
             file_leading_comments,
@@ -463,6 +469,78 @@ pub struct StandaloneMethodDefinition {
     /// The method definition.
     pub method: MethodDefinition,
     /// Source location of the entire standalone method definition.
+    pub span: Span,
+}
+
+/// A protocol definition (ADR 0068, Phase 2a).
+///
+/// Protocols define named message sets. A class conforms to a protocol if it
+/// responds to all required messages — no explicit `implements:` declaration needed.
+///
+/// Example:
+/// ```text
+/// Protocol define: Printable
+///   /// Return a human-readable string representation.
+///   asString -> String
+///
+/// Protocol define: Collection(E)
+///   size -> Integer
+///   do: block :: Block(E, Object)
+///   collect: block :: Block(E, Object) -> Self
+///
+/// Protocol define: Sortable
+///   extending: Comparable
+///   sortKey -> Object
+/// ```
+///
+/// Protocol names are bare identifiers (uppercase, like class names). Protocols
+/// and classes share a single namespace — having both a class and a protocol
+/// with the same name is a compile error.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProtocolDefinition {
+    /// The protocol name (e.g., `Printable`, `Collection`).
+    pub name: Identifier,
+    /// Type parameters for generic protocols (e.g., `E` in `Collection(E)`).
+    ///
+    /// Empty for non-generic protocols.
+    pub type_params: Vec<Identifier>,
+    /// The protocol this one extends, if any.
+    ///
+    /// Example: `extending: Comparable` in `Sortable`.
+    pub extending: Option<Identifier>,
+    /// Required method signatures.
+    pub method_signatures: Vec<ProtocolMethodSignature>,
+    /// Non-doc comments (`//` and `/* */`) appearing before this protocol.
+    pub comments: CommentAttachment,
+    /// Doc comment attached to this protocol (`///` lines).
+    pub doc_comment: Option<String>,
+    /// Source location of the entire protocol definition.
+    pub span: Span,
+}
+
+/// A required method signature in a protocol definition (ADR 0068, Phase 2a).
+///
+/// Protocol method signatures are like method definitions but without a body
+/// (`=>` and implementation). They declare the shape a conforming class must have.
+///
+/// Examples:
+/// - Unary: `asString -> String`
+/// - Binary: `< other :: Self -> Boolean`
+/// - Keyword: `do: block :: Block(E, Object)`
+/// - With doc comment: `/// The number of elements.\n  size -> Integer`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProtocolMethodSignature {
+    /// The method selector (name).
+    pub selector: MessageSelector,
+    /// Method parameters with optional type annotations.
+    pub parameters: Vec<ParameterDefinition>,
+    /// Optional return type annotation.
+    pub return_type: Option<TypeAnnotation>,
+    /// Non-doc comments (`//` and `/* */`) appearing before this signature.
+    pub comments: CommentAttachment,
+    /// Doc comment attached to this signature (`///` lines).
+    pub doc_comment: Option<String>,
+    /// Source location.
     pub span: Span,
 }
 

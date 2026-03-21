@@ -1982,6 +1982,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("CondimentDecorator", "Beverage")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2059,6 +2060,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2081,6 +2083,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2104,6 +2107,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2133,6 +2137,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("MyInt", "Integer")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2153,6 +2158,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("MyString", "String")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2168,6 +2174,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("MyActor", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2187,6 +2194,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Character", "Integer")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2207,6 +2215,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Character", "Integer")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2227,6 +2236,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("MyCustomClass", "Integer")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2379,6 +2389,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2404,6 +2415,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2423,6 +2435,7 @@ mod tests {
         let module = Module {
             classes: vec![grandparent, parent, grandchild],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2446,6 +2459,7 @@ mod tests {
         let module = Module {
             classes: vec![child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2469,6 +2483,7 @@ mod tests {
         let module = Module {
             classes: vec![child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2492,6 +2507,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2631,6 +2647,7 @@ mod tests {
         let module = Module {
             classes: vec![base, derived],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2658,6 +2675,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Orphan", "NonExistent")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2726,6 +2744,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2788,6 +2807,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2847,6 +2867,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2867,6 +2888,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2890,6 +2912,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2916,6 +2939,7 @@ mod tests {
         let module = Module {
             classes: vec![child, parent],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2939,6 +2963,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3013,6 +3038,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3065,6 +3091,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3113,6 +3140,7 @@ mod tests {
         let module = Module {
             classes: vec![make_typed_state_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3132,6 +3160,7 @@ mod tests {
         let module = Module {
             classes: vec![make_typed_state_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3146,6 +3175,7 @@ mod tests {
         let module = Module {
             classes: vec![make_typed_state_class("Counter", "Actor")],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3190,6 +3220,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3251,6 +3282,7 @@ mod tests {
         let module = Module {
             classes: vec![parent, child],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3457,6 +3489,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3527,6 +3560,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3617,6 +3651,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3643,6 +3678,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("Counter", "Actor")],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3727,6 +3763,7 @@ mod tests {
         let module = Module {
             classes: vec![sealed_base, override_class],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4194,6 +4231,7 @@ mod tests {
                 make_user_class("MyValueChild", "MyValueBase"),
             ],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4230,6 +4268,7 @@ mod tests {
                 make_user_class("MyValueChild", "MyValueBase"),
             ],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4269,6 +4308,7 @@ mod tests {
                 make_user_class("MyTest", "TestCase"),
             ],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4293,6 +4333,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("WebApp", "Supervisor")],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4321,6 +4362,7 @@ mod tests {
         let module = Module {
             classes: vec![make_user_class("MyChild", "MyValueBase")],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -4407,6 +4449,7 @@ mod tests {
         let module = Module {
             classes: vec![child_class],
             method_definitions: vec![],
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],

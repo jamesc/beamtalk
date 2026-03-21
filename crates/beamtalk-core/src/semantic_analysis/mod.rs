@@ -1165,6 +1165,7 @@ mod tests {
         let module = Module {
             classes: vec![class_def],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             file_leading_comments: vec![],
             file_trailing_comments: Vec::new(),
@@ -1556,6 +1557,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1606,6 +1608,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -1904,6 +1907,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![bare(spawn_expr)],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2001,6 +2005,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2078,6 +2083,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2139,6 +2145,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2193,6 +2200,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2250,6 +2258,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2309,6 +2318,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2369,6 +2379,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2431,6 +2442,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2495,6 +2507,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2557,6 +2570,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2615,6 +2629,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2674,6 +2689,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2736,6 +2752,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2806,6 +2823,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2874,6 +2892,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2929,6 +2948,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -2992,6 +3012,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3045,6 +3066,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3124,6 +3146,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3220,6 +3243,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3293,6 +3317,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3364,6 +3389,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3543,6 +3569,7 @@ mod tests {
         let module = Module {
             classes: vec![shape],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span: test_span(),
             file_leading_comments: vec![],
@@ -3581,6 +3608,7 @@ mod tests {
         let module = Module {
             classes: vec![shape],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: vec![bare(interp)],
             span: test_span(),
             file_leading_comments: vec![],
@@ -3630,6 +3658,7 @@ mod tests {
         let module = Module {
             classes: vec![shape],
             method_definitions: vec![standalone],
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span: test_span(),
             file_leading_comments: vec![],
@@ -3708,6 +3737,7 @@ mod tests {
         let module = Module {
             classes: vec![counter],
             method_definitions: vec![standalone],
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span: test_span(),
             file_leading_comments: vec![],
