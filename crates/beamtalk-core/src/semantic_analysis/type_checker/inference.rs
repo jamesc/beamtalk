@@ -20,7 +20,7 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 
-use super::{InferredType, TypeChecker, TypeEnv, TypeProvenance};
+use super::{InferredType, TypeChecker, TypeEnv};
 
 /// Describes a control-flow narrowing detected from a type-test expression.
 ///
@@ -1099,21 +1099,16 @@ impl TypeChecker {
     /// to itself if it is non-nil.
     pub(super) fn non_nil_type(ty: &InferredType) -> InferredType {
         match ty {
-            InferredType::Union { members, .. } => {
-                let non_nil: Vec<InferredType> = members
+            InferredType::Union(members) => {
+                let non_nil: Vec<EcoString> = members
                     .iter()
-                    .filter(|m| {
-                        !matches!(m, InferredType::Known { class_name, .. } if class_name.as_str() == "UndefinedObject")
-                    })
+                    .filter(|m| m.as_str() != "UndefinedObject")
                     .cloned()
                     .collect();
                 match non_nil.len() {
                     0 => InferredType::Dynamic,
-                    1 => non_nil.into_iter().next().unwrap(),
-                    _ => InferredType::Union {
-                        members: non_nil,
-                        provenance: TypeProvenance::Inferred(Span::default()),
-                    },
+                    1 => InferredType::known(non_nil.into_iter().next().unwrap()),
+                    _ => InferredType::Union(non_nil),
                 }
             }
             // If the variable is not a union, narrowing away nil for a non-union

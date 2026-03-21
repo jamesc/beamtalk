@@ -5086,13 +5086,10 @@ Base subclass: Child
         // For now, union types in annotations aren't parsed to InferredType::Union
         // (they resolve to Dynamic), so this test validates the non_nil_type logic
         // directly.
-        let union = InferredType::Union {
-            members: vec![
-                InferredType::known("String"),
-                InferredType::known("UndefinedObject"),
-            ],
-            provenance: TypeProvenance::Inferred(span()),
-        };
+        let union = InferredType::Union(vec![
+            eco_string("String"),
+            eco_string("UndefinedObject"),
+        ]);
         let narrowed = TypeChecker::non_nil_type(&union);
         assert_eq!(
             narrowed,
@@ -5104,20 +5101,17 @@ Base subclass: Child
     #[test]
     fn test_narrowing_union_multi_member() {
         // String | Integer | UndefinedObject → String | Integer after non_nil
-        let union = InferredType::Union {
-            members: vec![
-                InferredType::known("String"),
-                InferredType::known("Integer"),
-                InferredType::known("UndefinedObject"),
-            ],
-            provenance: TypeProvenance::Inferred(span()),
-        };
+        let union = InferredType::Union(vec![
+            eco_string("String"),
+            eco_string("Integer"),
+            eco_string("UndefinedObject"),
+        ]);
         let narrowed = TypeChecker::non_nil_type(&union);
         match narrowed {
-            InferredType::Union { members, .. } => {
+            InferredType::Union(members) => {
                 assert_eq!(members.len(), 2);
-                assert!(members.contains(&InferredType::known("String")));
-                assert!(members.contains(&InferredType::known("Integer")));
+                assert!(members.contains(&eco_string("String")));
+                assert!(members.contains(&eco_string("Integer")));
             }
             _ => panic!("Expected Union type after narrowing, got: {narrowed:?}"),
         }
