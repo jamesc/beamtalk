@@ -4529,6 +4529,210 @@ Base subclass: Child
         );
     }
 
+    // ---- BT-1571: Constructor type inference tests ----
+
+    /// BT-1571: `GenResult ok: 42` infers T = Integer → GenResult(Integer, Dynamic).
+    #[test]
+    fn constructor_inference_ok_infers_t_from_integer() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+
+        // GenResult ok: 42
+        let result_ty = checker.infer_expr(
+            &msg_send(
+                class_ref("GenResult"),
+                MessageSelector::Keyword(vec![KeywordPart::new("ok:", span())]),
+                vec![int_lit(42)],
+            ),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        match &result_ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(
+                    class_name.as_str(),
+                    "GenResult",
+                    "Constructor should return GenResult"
+                );
+                assert_eq!(type_args.len(), 2, "Should have 2 type args (T, E)");
+                assert_eq!(
+                    type_args[0].as_known().map(EcoString::as_str),
+                    Some("Integer"),
+                    "T should be inferred as Integer from argument"
+                );
+                assert!(
+                    matches!(type_args[1], InferredType::Dynamic),
+                    "E should be Dynamic (not inferrable from ok:), got: {:?}",
+                    type_args[1]
+                );
+            }
+            other => panic!("Expected Known type with type_args, got: {other:?}"),
+        }
+    }
+
+    /// BT-1571: `GenResult error: #not_found` infers E = Symbol → GenResult(Dynamic, Symbol).
+    #[test]
+    fn constructor_inference_error_infers_e_from_symbol() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+
+        // GenResult error: #not_found
+        let result_ty = checker.infer_expr(
+            &msg_send(
+                class_ref("GenResult"),
+                MessageSelector::Keyword(vec![KeywordPart::new("error:", span())]),
+                vec![Expression::Literal(
+                    Literal::Symbol("not_found".into()),
+                    span(),
+                )],
+            ),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        match &result_ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "GenResult");
+                assert_eq!(type_args.len(), 2, "Should have 2 type args (T, E)");
+                assert!(
+                    matches!(type_args[0], InferredType::Dynamic),
+                    "T should be Dynamic (not inferrable from error:), got: {:?}",
+                    type_args[0]
+                );
+                assert_eq!(
+                    type_args[1].as_known().map(EcoString::as_str),
+                    Some("Symbol"),
+                    "E should be inferred as Symbol from argument"
+                );
+            }
+            other => panic!("Expected Known type with type_args, got: {other:?}"),
+        }
+    }
+
+    /// BT-1571: Constructor inference on non-generic class returns plain Known.
+    #[test]
+    fn constructor_inference_non_generic_class_no_type_args() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+
+        // Array new (non-generic in builtins — no type_params set)
+        let result_ty = checker.infer_expr(
+            &msg_send(
+                class_ref("Array"),
+                MessageSelector::Unary("new".into()),
+                vec![],
+            ),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        match &result_ty {
+            InferredType::Known { type_args, .. } => {
+                assert!(
+                    type_args.is_empty(),
+                    "Non-generic class should have no type args, got: {type_args:?}"
+                );
+            }
+            other => panic!("Expected Known type, got: {other:?}"),
+        }
+    }
+
+    /// BT-1571: Inferred type from constructor flows into subsequent instance sends.
+    /// `(GenResult ok: 42) unwrap` should return Integer via substitution.
+    #[test]
+    fn constructor_inference_flows_to_instance_sends() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+
+        // r := GenResult ok: 42
+        let assign_expr = Expression::Assignment {
+            target: Box::new(Expression::Identifier(ident("r"))),
+            value: Box::new(msg_send(
+                class_ref("GenResult"),
+                MessageSelector::Keyword(vec![KeywordPart::new("ok:", span())]),
+                vec![int_lit(42)],
+            )),
+            span: span(),
+        };
+        checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+
+        // r unwrap — should return Integer via T substitution
+        let unwrap_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            unwrap_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "unwrap on (GenResult ok: 42) should return Integer via constructor inference"
+        );
+    }
+
+    /// BT-1571: Constructor inference for error: flows into error accessor.
+    /// `(GenResult error: #not_found) error` should return Symbol.
+    #[test]
+    fn constructor_inference_error_flows_to_error_accessor() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+
+        // r := GenResult error: #not_found
+        let assign_expr = Expression::Assignment {
+            target: Box::new(Expression::Identifier(ident("r"))),
+            value: Box::new(msg_send(
+                class_ref("GenResult"),
+                MessageSelector::Keyword(vec![KeywordPart::new("error:", span())]),
+                vec![Expression::Literal(
+                    Literal::Symbol("not_found".into()),
+                    span(),
+                )],
+            )),
+            span: span(),
+        };
+        checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+
+        // r error — should return Symbol via E substitution
+        let error_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("error".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            error_ty.as_known().map(EcoString::as_str),
+            Some("Symbol"),
+            "error on (GenResult error: #not_found) should return Symbol via constructor inference"
+        );
+    }
+
     // ---- BT-1577: Generic inheritance tests ----
 
     /// Build `GenCollection(E)` with method `first` returning `E`, `size` returning `Integer`.

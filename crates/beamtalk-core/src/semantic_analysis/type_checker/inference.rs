@@ -429,6 +429,7 @@ impl TypeChecker {
                                 &selector_name,
                                 msg.span,
                                 hierarchy,
+                                &[], // cascade return type is receiver, not send result
                             );
                         }
                     } else if let InferredType::Known { ref class_name, .. } = receiver_ty {
@@ -439,6 +440,7 @@ impl TypeChecker {
                                     &selector_name,
                                     msg.span,
                                     hierarchy,
+                                    &[], // cascade return type is receiver, not send result
                                 );
                             }
                         } else {
@@ -629,7 +631,13 @@ impl TypeChecker {
                 hierarchy,
                 true,
             );
-            return self.check_class_side_send(class_name, &selector_name, span, hierarchy);
+            return self.check_class_side_send(
+                class_name,
+                &selector_name,
+                span,
+                hierarchy,
+                &arg_types,
+            );
         }
 
         // For instance-side sends on known types
@@ -650,7 +658,13 @@ impl TypeChecker {
                         hierarchy,
                         true,
                     );
-                    return self.check_class_side_send(class_name, &selector_name, span, hierarchy);
+                    return self.check_class_side_send(
+                        class_name,
+                        &selector_name,
+                        span,
+                        hierarchy,
+                        &arg_types,
+                    );
                 }
                 return InferredType::Dynamic;
             }
