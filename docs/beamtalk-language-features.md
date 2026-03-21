@@ -931,9 +931,15 @@ Protocol define: Collection(E)
 
   /// Return elements matching the predicate.
   select: block :: Block(E, Boolean) -> Self
+
+Protocol define: Serializable
+  /// Serialize this object to a string.
+  asString -> String
+  /// Reconstruct an instance from a string (class method).
+  class fromString: aString :: String -> Self
 ```
 
-Protocol bodies use **class-body style** — method signatures without `=>` implementations. Doc comments are supported on each required method.
+Protocol bodies use **class-body style** — method signatures without `=>` implementations. The `class` prefix marks class-method requirements, using the same syntax as class definitions. Doc comments are supported on each required method.
 
 ### Using Protocols as Types
 
