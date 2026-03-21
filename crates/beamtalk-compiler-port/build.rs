@@ -39,6 +39,11 @@ fn emit_beamtalk_version(workspace_root: &Path) {
     let base = fs::read_to_string(&version_file)
         .unwrap_or_else(|e| panic!("Failed to read {}: {e}", version_file.display()));
     let base = base.trim();
+    assert!(
+        !base.is_empty(),
+        "VERSION file is empty: {}",
+        version_file.display()
+    );
 
     let version = if git_on_tag() {
         base.to_string()
