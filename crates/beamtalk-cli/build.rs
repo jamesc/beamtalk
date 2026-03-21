@@ -72,6 +72,22 @@ fn emit_beamtalk_version(workspace_root: &Path) {
     let version_file = workspace_root.join("VERSION");
     println!("cargo:rerun-if-changed={}", version_file.display());
 
+    // Track git state so version is recomputed on new commits/tags.
+    // Uses `git rev-parse --git-dir` to work correctly in worktrees
+    // (where .git is a file, not a directory).
+    if let Some(git_dir) = git_dir() {
+        let git_dir = Path::new(&git_dir);
+        println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            git_dir.join("refs/heads").display()
+        );
+        println!(
+            "cargo:rerun-if-changed={}",
+            git_dir.join("refs/tags").display()
+        );
+    }
+
     let base = fs::read_to_string(&version_file)
         .unwrap_or_else(|e| panic!("Failed to read {}: {e}", version_file.display()));
     let base = base.trim();
@@ -94,6 +110,15 @@ fn git_on_tag() -> bool {
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+fn git_dir() -> Option<String> {
+    Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 
 fn git_short_sha() -> Option<String> {
