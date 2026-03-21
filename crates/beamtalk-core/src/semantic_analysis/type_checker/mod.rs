@@ -691,6 +691,7 @@ mod tests {
                 class_methods: vec![],
                 class_variables: vec![],
                 type_params: vec![],
+                superclass_type_args: vec![],
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 backing_module: None,
@@ -933,6 +934,7 @@ mod tests {
                 class_methods: vec![],
                 class_variables: vec![],
                 type_params: vec![],
+                superclass_type_args: vec![],
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 backing_module: None,
@@ -1078,6 +1080,7 @@ mod tests {
             class_methods,
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1259,6 +1262,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1296,6 +1300,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1342,6 +1347,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -1375,6 +1381,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2406,6 +2413,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3172,6 +3180,7 @@ Value subclass: Foo
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3794,6 +3803,7 @@ Base subclass: Child
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
         };
 
         // Use the full analysis pipeline (same as the build command)
@@ -4107,6 +4117,7 @@ Base subclass: Child
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -4272,6 +4283,7 @@ Base subclass: Child
             ],
             class_variables: vec![],
             type_params: vec![eco_string("T"), eco_string("E")],
+            superclass_type_args: vec![],
         };
 
         hierarchy.add_from_beam_meta(vec![result_info]);
@@ -4718,6 +4730,343 @@ Base subclass: Child
             error_ty.as_known().map(EcoString::as_str),
             Some("Symbol"),
             "error on (GenResult error: #not_found) should return Symbol via constructor inference"
+        );
+    }
+
+    // ---- BT-1577: Generic inheritance tests ----
+
+    /// Build `GenCollection(E)` with method `first` returning `E`, `size` returning `Integer`.
+    /// Build `GenArray(E)` extends `GenCollection(E)` with `superclass_type_args` mapping E to E.
+    fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo, SuperclassTypeArg};
+
+        let collection_info = ClassInfo {
+            name: eco_string("GenCollection"),
+            superclass: Some(eco_string("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![
+                MethodInfo {
+                    selector: eco_string("first"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenCollection"),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(eco_string("E")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("size"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenCollection"),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Integer")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("select:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenCollection"),
+                    is_sealed: false,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Self")),
+                    param_types: vec![Some(eco_string("Block(E, Boolean)"))],
+                    doc: None,
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![eco_string("E")],
+            superclass_type_args: vec![],
+        };
+
+        let array_info = ClassInfo {
+            name: eco_string("GenArray"),
+            superclass: Some(eco_string("GenCollection")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![MethodInfo {
+                selector: eco_string("append:"),
+                arity: 1,
+                kind: MethodKind::Primary,
+                defined_in: eco_string("GenArray"),
+                is_sealed: false,
+                spawns_block: false,
+                return_type: Some(eco_string("Self")),
+                param_types: vec![Some(eco_string("E"))],
+                doc: None,
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![eco_string("E")],
+            superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
+        };
+
+        hierarchy.add_from_beam_meta(vec![collection_info, array_info]);
+    }
+
+    /// BT-1577: Inherited method `first` on `GenArray(Integer)` returns `Integer`.
+    #[test]
+    fn generic_inheritance_inherited_method_returns_substituted_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_collection_hierarchy(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("GenArray"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("arr"), MessageSelector::Unary("first".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "first on GenArray(Integer) should return Integer via inheritance, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1577: Non-generic return type from inherited method is unaffected.
+    #[test]
+    fn generic_inheritance_non_generic_return_unchanged() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_collection_hierarchy(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("GenArray"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("arr"), MessageSelector::Unary("size".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "size on GenArray(Integer) should return Integer (non-generic), got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1577: Concrete superclass type arg — `IntArray` extends `GenCollection(Integer)`.
+    #[test]
+    fn generic_inheritance_concrete_superclass_type_arg() {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, SuperclassTypeArg};
+
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_collection_hierarchy(&mut hierarchy);
+
+        // IntArray has no type params, but maps Integer to GenCollection's E
+        let int_array_info = ClassInfo {
+            name: eco_string("IntArray"),
+            superclass: Some(eco_string("GenCollection")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![SuperclassTypeArg::Concrete {
+                type_name: eco_string("Integer"),
+            }],
+        };
+        hierarchy.add_from_beam_meta(vec![int_array_info]);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set("ia", InferredType::known("IntArray"));
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("ia"), MessageSelector::Unary("first".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "first on IntArray should return Integer via concrete superclass type arg, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1577: Self type on inherited method carries receiver's type args.
+    #[test]
+    fn generic_inheritance_self_type_carries_type_args() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_collection_hierarchy(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("GenArray"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        // select: returns Self — should be GenArray(Integer) not GenCollection(Integer)
+        let result_ty = checker.infer_expr(
+            &msg_send(
+                var("arr"),
+                MessageSelector::Keyword(vec![KeywordPart::new("select:", span())]),
+                vec![var("block")],
+            ),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        match &result_ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(
+                    class_name.as_str(),
+                    "GenArray",
+                    "Self should resolve to GenArray, got: {class_name}"
+                );
+                assert_eq!(type_args.len(), 1, "Should have 1 type arg");
+                assert_eq!(
+                    type_args[0].as_known().map(EcoString::as_str),
+                    Some("Integer"),
+                    "Type arg should be Integer"
+                );
+            }
+            _ => panic!("Expected Known type, got: {result_ty:?}"),
+        }
+    }
+
+    /// BT-1577: Multi-level inheritance composes substitution correctly.
+    /// `GenCollection(E) subclass: GenArray(E)`, `GenArray(E) subclass: SortedArray(E)`.
+    #[test]
+    fn generic_inheritance_multi_level_composition() {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, SuperclassTypeArg};
+
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_collection_hierarchy(&mut hierarchy);
+
+        // SortedArray(E) extends GenArray(E)
+        let sorted_info = ClassInfo {
+            name: eco_string("SortedArray"),
+            superclass: Some(eco_string("GenArray")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![eco_string("E")],
+            superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
+        };
+        hierarchy.add_from_beam_meta(vec![sorted_info]);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "sa",
+            InferredType::Known {
+                class_name: eco_string("SortedArray"),
+                type_args: vec![InferredType::known("String")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        // `first` is defined on GenCollection — 2 levels up
+        let result_ty = checker.infer_expr(
+            &msg_send(var("sa"), MessageSelector::Unary("first".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("String"),
+            "first on SortedArray(String) should compose through 2 levels to return String, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1577: Method defined on own class (not inherited) still uses direct substitution.
+    #[test]
+    fn generic_inheritance_own_method_uses_direct_substitution() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        // unwrap is defined on GenResult itself — should still work
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "unwrap on GenResult(Integer, IOError) should still return Integer, got: {result_ty:?}"
         );
     }
 }
