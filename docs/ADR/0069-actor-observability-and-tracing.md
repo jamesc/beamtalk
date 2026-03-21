@@ -11,7 +11,7 @@ Beamtalk actors (gen_server processes) have no built-in performance instrumentat
 
 The core workflow we need to enable:
 
-```
+```text
 enable tracing → run tests → get structured traces → find bottlenecks → debug
 ```
 
@@ -65,7 +65,7 @@ This gives us optionality — the `Logging` migration is a separate future ADR, 
 
 Use the Erlang [`telemetry`](https://github.com/beam-telemetry/telemetry) library as the event bus, with lock-free storage for aggregation and direct ETS writes for trace capture. The `beamtalk_trace_store` gen_server owns the tables and handles queries/lifecycle but is **not in the write path** — no serialization bottleneck on the hot path.
 
-```
+```text
 Beamtalk API (Tracing class — stdlib/src/Tracing.bt)
     ↓ delegates to
 Erlang shim (beamtalk_tracing.erl — runtime)
@@ -87,7 +87,7 @@ telemetry:execute/3 (standard BEAM event bus)
 telemetry_poller (periodic VM stats for systemHealth)
 ```
 
-**Design principle: no bottlenecks on the hot path.** Aggregate updates use the `counters` module (truly lock-free, ~50ns). Trace event inserts go directly to ETS from the calling process. The gen_server only handles control operations (enable/disable/clear) and periodic maintenance (ring buffer eviction). A crash of the gen_server loses accumulated data but does not affect actor dispatch.
+**Design principle: no bottlenecks on the hot path.** Aggregate updates use the `counters` module (truly lock-free, ~50ns). Trace event inserts go directly to ETS from the calling process. The gen_server only handles control operations (enable/disable/clear) and periodic maintenance (ring buffer eviction). With ETS `{heir, SupervisorPid, HeirData}` ownership transfer and counter refs in `persistent_term`, a gen_server crash does not lose accumulated data — only a full VM crash (SIGKILL, OOM) does. The gen_server is not in the write path, so its crash does not affect actor dispatch.
 
 **Why `telemetry` + `telemetry_poller`?**
 - `telemetry`: Single dependency, zero transitive deps, pure Erlang (~500 LOC). De facto BEAM ecosystem standard (Phoenix, Ecto, Broadway). Composable at the Erlang layer — system developers familiar with BEAM internals can attach custom handlers in Erlang (export to StatsD, Datadog, Prometheus) via `telemetry:attach/4` without modifying Beamtalk internals. This is an escape hatch for operations/infrastructure teams, not a general Beamtalk developer concern. Critically, adopting `telemetry` now means the OpenTelemetry upgrade is purely additive — users add the `opentelemetry_telemetry` bridge package to their project deps, and correlated distributed traces work immediately with no Beamtalk changes (see "Propagated Context Across Actor Boundaries").
@@ -367,7 +367,7 @@ The existing MCP `evaluate` tool can execute any Beamtalk expression, including 
 
 **Everything else via `evaluate`:**
 
-```
+```text
 evaluate("Tracing slowMethods: 10")
 evaluate("Tracing bottlenecks: 5")
 evaluate("Tracing healthFor: myCounter")
@@ -381,7 +381,7 @@ This approach reduces implementation effort (3 tools vs 10), avoids API surface 
 
 ### Agent Workflow
 
-```
+```text
 1. agent calls enable-tracing          → dedicated tool
 2. agent calls test (existing tool)    → runs BUnit suite, actors spawn and die
 3. agent calls get-traces              → dedicated tool (structured JSON)
@@ -709,4 +709,4 @@ This spike should be a single branch with ~100 lines of test code. If the teleme
 - Code: `beamtalk_actor.erl` (sync_send, async_send, cast_send), `server.rs` (MCP tool pattern)
 - External: [beam-telemetry/telemetry](https://github.com/beam-telemetry/telemetry), [beam-telemetry/telemetry_poller](https://github.com/beam-telemetry/telemetry_poller), [opentelemetry_telemetry bridge](https://github.com/open-telemetry/opentelemetry-erlang-contrib)
 - Prior art: Erlang sys/recon, Elixir telemetry/LiveDashboard, Akka Insights, Pharo MessageTally/PerformanceProfiler, Pony flight recorder, Mobius (Elixir in-memory store), peep (lock-free counters)
-- Design document: `issue-adr-actor-observability.md` on branch `claude/erlang-genserver-tracing-DfzoF`
+- Design document: Original design notes in BT-1429 and PR #1609
