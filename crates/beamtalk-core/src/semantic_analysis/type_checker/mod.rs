@@ -4116,6 +4116,7 @@ Base subclass: Child
         let module = Module {
             classes: vec![class],
             method_definitions: vec![],
+            protocols: vec![],
             expressions: vec![],
             span: span(),
             file_leading_comments: vec![],
