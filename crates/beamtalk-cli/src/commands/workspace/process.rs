@@ -73,13 +73,20 @@ const READINESS_READ_TIMEOUT_MS: u64 = 10_000;
 /// After Phase 1 (TCP) succeeds the cowboy WS handler may still be initialising
 /// — TCP accepts immediately once the listener socket is bound, but the WS
 /// upgrade can fail until cowboy's request-handling pipeline is fully up.
-/// CI observations (BT-1175, BT-1290) show cowboy can take > 18 s to register
-/// WS routes on heavily loaded runners (e.g. during concurrent startup tests).
-/// 300 retries with `READINESS_PROBE_DELAY_MS` (200 ms) spacing matches the
-/// Phase 1 TCP probe retry budget for symmetric startup tolerance. The actual
-/// wall-clock duration of Phase 2 is also bounded by the connect/read timeouts
-/// used by the WS client and can exceed this spacing-only estimate.
-const WS_HEALTH_RETRIES: usize = 300;
+/// CI observations (BT-1175, BT-1290, BT-1598) show cowboy can take > 18 s to
+/// register WS routes on heavily loaded runners (e.g. during concurrent startup
+/// tests). With exponential backoff (see `ws_health_delay_ms`), 60 retries
+/// cover ~70 s of sleep time plus per-attempt connect/auth overhead — ample
+/// for even the slowest CI runners.
+const WS_HEALTH_RETRIES: usize = 60;
+
+/// Maximum delay between Phase 2 WS health retries in milliseconds.
+///
+/// Exponential backoff starts at `READINESS_PROBE_DELAY_MS` (200 ms) and
+/// doubles every 10 attempts, capping at this value. This gives fast initial
+/// probes while avoiding busy-spinning on a WS handler that needs real time
+/// to initialise (BT-1598).
+const WS_HEALTH_MAX_DELAY_MS: u64 = 2000;
 
 /// Number of TCP readiness probe attempts between BEAM liveness checks.
 ///
@@ -373,12 +380,13 @@ pub fn start_detached_node(
 ///    on every probe attempt while the socket is not yet listening.
 ///
 /// 2. **WS health check** — once TCP accepts, perform the full auth handshake
-///    and send `{"op":"health"}`. Retried up to `WS_HEALTH_RETRIES` times for
-///    transient failures (brief cowboy restart, scheduler jitter).
+///    and send `{"op":"health"}`. Retried up to `WS_HEALTH_RETRIES` times with
+///    exponential backoff (200 ms → 2 s) for transient failures (brief cowboy
+///    restart, WS handler not yet registered, scheduler jitter).
 ///
 /// Phase 1 checks `is_process_alive` every `LIVENESS_CHECK_INTERVAL` attempts.
-/// Phase 2 checks after every attempt (every `READINESS_PROBE_DELAY_MS`) since
-/// each WS auth attempt can itself take up to `READINESS_READ_TIMEOUT_MS`.
+/// Phase 2 checks after every attempt; the delay between attempts grows via
+/// `ws_health_delay_ms` (exponential backoff, see BT-1598).
 ///
 /// `log_path` is `Some(path)` only when the startup log file was successfully
 /// opened; it is included in timeout error messages to guide diagnosis.
@@ -435,7 +443,10 @@ fn wait_for_tcp_ready(
     }
 
     // Phase 2: port is accepting — do the full WS auth + health check.
-    // Retried a few times for transient auth failures (cowboy brief restart, jitter).
+    // Retried with exponential backoff for transient auth failures (cowboy brief
+    // restart, WS handler not yet registered, scheduler jitter). BT-1598: fast
+    // initial probes catch quick readiness; slower later probes avoid
+    // busy-spinning while cowboy finishes route registration.
     let request = serde_json::json!({"op": "health"});
     for attempt in 0..WS_HEALTH_RETRIES {
         if let Ok(mut client) = ProtocolClient::connect(
@@ -456,7 +467,7 @@ fn wait_for_tcp_ready(
                  in progress on port {port}.{log_suffix}"
             ));
         }
-        std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
+        std::thread::sleep(Duration::from_millis(ws_health_delay_ms(attempt)));
     }
 
     Err(if is_process_alive(pid) {
@@ -471,6 +482,19 @@ fn wait_for_tcp_ready(
              Ensure Erlang/OTP is installed correctly.{log_suffix}"
         )
     })
+}
+
+/// Compute the delay for a Phase 2 WS health retry with exponential backoff.
+///
+/// Starts at `READINESS_PROBE_DELAY_MS` (200 ms) and doubles every 10
+/// attempts, capping at `WS_HEALTH_MAX_DELAY_MS` (2 s). This keeps initial
+/// probes fast while giving a genuinely slow cowboy startup enough breathing
+/// room between later attempts (BT-1598).
+fn ws_health_delay_ms(attempt: usize) -> u64 {
+    let shift = u32::try_from(attempt / 10).unwrap_or(u32::MAX);
+    let delay =
+        READINESS_PROBE_DELAY_MS.saturating_mul(1u64.checked_shl(shift).unwrap_or(u64::MAX));
+    delay.min(WS_HEALTH_MAX_DELAY_MS)
 }
 
 /// Build the Erlang `-eval` string for workspace node startup.
