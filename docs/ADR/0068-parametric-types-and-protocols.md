@@ -104,13 +104,12 @@ Type parameters are bare uppercase identifiers (by convention single letters: `T
 When using a generic class as a type annotation, concrete types replace the parameters:
 
 ```beamtalk
-// Annotating a variable
-result :: Result(String, IOError) := File read: "config.json"
-result unwrap    // Type checker knows: → String
-
 // Annotating a method parameter
 processResult: r :: Result(Integer, Error) -> Integer =>
   r unwrap + 1   // ✅ r unwrap is Integer, Integer has '+'
+
+// Annotating a method return type (propagates to all callers)
+readConfig -> Result(String, IOError) => File read: "config.json"
 
 // Annotating state
 Actor subclass: Cache(K, V)
@@ -122,7 +121,8 @@ Actor subclass: Cache(K, V)
 The type checker performs **positional substitution**: when it encounters `Result(String, IOError)`, it maps `T → String`, `E → IOError`, and substitutes through all method signatures of `Result`:
 
 ```beamtalk
-r :: Result(Integer, Error) := computeSomething
+// computeSomething declares -> Result(Integer, Error)
+r := computeSomething
 r unwrap          // Return type T → Integer ✅
 r map: [:v | v asString]   // Block param T → Integer, return Result(String, Error)
 r error           // Return type E → Error ✅
@@ -133,14 +133,14 @@ When the concrete type parameters are unknown — because the value comes from a
 ```beamtalk
 // someMethod's return type is just -> Result (no type params declared)
 r := someMethod
-r unwrap                   // → Dynamic (T is unknown — no annotation, no inference context)
+r unwrap                   // → Dynamic (T is unknown — no inference context)
 r unwrap + 1               // No warning — Dynamic bypasses checking
 // 💡 Hint: someMethod returns unparameterized Result — consider annotating
-//    its return type (-> Result(Integer, Error)) or this variable
-//    (r :: Result(Integer, Error)) to enable type checking
+//    its return type (-> Result(Integer, Error)) to enable type checking
 
-// Fix: annotate the variable to provide type context
-r :: Result(Integer, Error) := someMethod
+// Fix: annotate the method's return type (propagates to all callers)
+someMethod -> Result(Integer, Error) => ...
+r := someMethod
 r unwrap + 1               // ✅ Integer has '+'
 ```
 
@@ -351,7 +351,8 @@ These can be added incrementally — each new pattern is a new AST shape to reco
 - **Type parameter bounds/constraints** (`T :: Printable`): Deferred to Stage 2 (protocols). Type parameters are unbounded — any type is accepted.
 - **Higher-kinded types** (`F(_)`): Not planned. Beamtalk is not Haskell.
 - **Chain-backwards inference**: `r unwrap + 1` does NOT infer that `T = Integer` by reasoning backwards from `+`. Type params are inferred from constructor arguments and method arguments at call sites (forward/call-site inference), not from downstream usage of return values.
-- **Full bidirectional type checking**: No expected-type propagation from assignment targets into subexpressions. `x :: Array(String) := expr` does not push `Array(String)` into `expr` to constrain inference. This could be added later without breaking changes.
+- **Local variable type annotations** (`x :: Result(Integer, Error) := expr`): Deliberately not implemented. The ADR originally proposed this syntax as an escape hatch for when inference can't determine types. In practice, the right fix is to annotate the *method return type* at the source (`someMethod -> Result(Integer, Error) =>`), which propagates to all callers automatically. Variable annotations would add parser complexity for a case better solved at declaration sites. Can be revisited if a genuine need arises that can't be solved by method/parameter/state annotations.
+- **Full bidirectional type checking**: No expected-type propagation from assignment targets into subexpressions. This could be added later without breaking changes.
 
 ### Design Challenges
 
