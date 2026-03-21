@@ -73,19 +73,13 @@ fn emit_beamtalk_version(workspace_root: &Path) {
     println!("cargo:rerun-if-changed={}", version_file.display());
 
     // Track git state so version is recomputed on new commits/tags.
-    // Uses `git rev-parse --git-dir` to work correctly in worktrees
-    // (where .git is a file, not a directory).
-    if let Some(git_dir) = git_dir() {
-        let git_dir = Path::new(&git_dir);
-        println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
-        println!(
-            "cargo:rerun-if-changed={}",
-            git_dir.join("refs/heads").display()
-        );
-        println!(
-            "cargo:rerun-if-changed={}",
-            git_dir.join("refs/tags").display()
-        );
+    // Uses `git rev-parse --git-path` to resolve each path correctly in both
+    // regular repos and worktrees (where HEAD is worktree-private but refs
+    // and packed-refs live in the shared git-common-dir).
+    for p in ["HEAD", "refs/heads", "refs/tags", "packed-refs"] {
+        if let Some(path) = git_path(p) {
+            println!("cargo:rerun-if-changed={path}");
+        }
     }
 
     let base = fs::read_to_string(&version_file)
@@ -112,9 +106,9 @@ fn git_on_tag() -> bool {
         .is_ok_and(|s| s.success())
 }
 
-fn git_dir() -> Option<String> {
+fn git_path(path: &str) -> Option<String> {
     Command::new("git")
-        .args(["rev-parse", "--git-dir"])
+        .args(["rev-parse", "--git-path", path])
         .output()
         .ok()
         .filter(|o| o.status.success())
