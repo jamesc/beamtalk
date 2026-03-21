@@ -377,6 +377,12 @@ pub struct ClassDefinition {
     /// Empty for non-generic classes. Populated by the parser when parenthesized
     /// type parameters appear after the class name in the definition.
     pub type_params: Vec<Identifier>,
+    /// Type arguments applied to the superclass (e.g., `(E)` in `Collection(E) subclass: Array(E)`).
+    ///
+    /// Empty when the superclass is not parameterized. Each entry is a type annotation
+    /// that may reference this class's own type params (forwarded) or be a concrete type
+    /// (e.g., `Integer` in `Collection(Integer) subclass: IntArray`).
+    pub superclass_type_args: Vec<TypeAnnotation>,
     /// Source location of the entire class definition.
     pub span: Span,
 }
@@ -405,6 +411,7 @@ impl ClassDefinition {
             class_methods: Vec::new(),
             class_variables: Vec::new(),
             type_params: Vec::new(),
+            superclass_type_args: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -439,6 +446,7 @@ impl ClassDefinition {
             class_methods: Vec::new(),
             class_variables: Vec::new(),
             type_params: Vec::new(),
+            superclass_type_args: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,

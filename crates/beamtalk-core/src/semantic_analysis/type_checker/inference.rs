@@ -669,9 +669,6 @@ impl TypeChecker {
                 );
             }
 
-            // Build substitution map from receiver's type args (ADR 0068 Phase 1b)
-            let subst = Self::build_substitution_map(hierarchy, class_name, type_args);
-
             // Infer return type from method info
             if let Some(method) = hierarchy.find_method(class_name, &selector_name) {
                 if let Some(ref ret_ty) = method.return_type {
@@ -689,10 +686,23 @@ impl TypeChecker {
                         };
                     }
 
+                    // Build substitution map, composing through inheritance chain
+                    // if the method is inherited (ADR 0068 Phase 1b, BT-1577)
+                    let subst = Self::build_inherited_substitution_map(
+                        hierarchy,
+                        class_name,
+                        type_args,
+                        &method.defined_in,
+                    );
+
                     // Apply generic substitution if we have type args
                     if !subst.is_empty() {
                         let method_subst = Self::infer_method_local_params(
-                            &method, &arg_types, &subst, hierarchy, class_name,
+                            &method,
+                            &arg_types,
+                            &subst,
+                            hierarchy,
+                            &method.defined_in,
                         );
                         return Self::substitute_return_type(ret_ty, &subst, &method_subst);
                     }
@@ -862,6 +872,124 @@ impl TypeChecker {
             }
         }
         map
+    }
+
+    /// Build a substitution map that composes through the inheritance chain.
+    ///
+    /// When a method is inherited from a superclass, the type parameter names in
+    /// the method signature refer to the superclass's type params, not the receiver's.
+    /// This method walks from `receiver_class` up to `method_class`, composing
+    /// the `superclass_type_args` at each level to produce a substitution map
+    /// whose keys are the `method_class`'s type params.
+    ///
+    /// Example: `Collection(E) subclass: Array(E)` with receiver `Array(Integer)`:
+    /// - Array's `type_args`: `[Integer]` produces Array's subst: `{E → Integer}`
+    /// - Array's `superclass_type_args`: `[ParamRef(0)]` produces Collection's args: `[Integer]`
+    /// - Collection's subst: `{E → Integer}` (returned)
+    ///
+    /// Falls back to `build_substitution_map(receiver_class, type_args)` when
+    /// `method_class == receiver_class` (no inheritance to compose through).
+    ///
+    /// **References:** ADR 0068 Challenge 4 (BT-1577)
+    fn build_inherited_substitution_map(
+        hierarchy: &ClassHierarchy,
+        receiver_class: &str,
+        receiver_type_args: &[InferredType],
+        method_class: &str,
+    ) -> HashMap<EcoString, InferredType> {
+        use crate::semantic_analysis::class_hierarchy::SuperclassTypeArg;
+
+        // Fast path: method is defined on the receiver class itself
+        if receiver_class == method_class {
+            return Self::build_substitution_map(hierarchy, receiver_class, receiver_type_args);
+        }
+
+        // Check if there's anything to compose — either receiver has type args,
+        // or some class in the chain has concrete superclass_type_args.
+        if receiver_type_args.is_empty() {
+            // Even without receiver type args, a non-generic class may have
+            // concrete superclass_type_args (e.g., IntArray extends Collection(Integer)).
+            let has_concrete_super_args = hierarchy
+                .get_class(receiver_class)
+                .is_some_and(|info| !info.superclass_type_args.is_empty());
+            if !has_concrete_super_args {
+                return HashMap::new();
+            }
+        }
+
+        // Walk the inheritance chain from receiver to method_class,
+        // composing type args at each level.
+        let mut current_class = receiver_class.to_string();
+        let mut current_args = receiver_type_args.to_vec();
+        let mut visited = std::collections::HashSet::new();
+
+        while current_class != method_class {
+            if !visited.insert(current_class.clone()) {
+                break; // cycle guard
+            }
+
+            let Some(info) = hierarchy.get_class(&current_class) else {
+                break;
+            };
+
+            let Some(ref superclass) = info.superclass else {
+                break;
+            };
+
+            if info.superclass_type_args.is_empty() {
+                // No type arg mapping at this level.
+                // Try direct name-based matching as fallback for same-named params
+                // (e.g., when both child and parent use `E` but no explicit mapping).
+                let receiver_subst =
+                    Self::build_substitution_map(hierarchy, receiver_class, receiver_type_args);
+                if !receiver_subst.is_empty() {
+                    if let Some(method_info) = hierarchy.get_class(method_class) {
+                        let mut result = HashMap::new();
+                        for param in &method_info.type_params {
+                            if let Some(val) = receiver_subst.get(param) {
+                                result.insert(param.clone(), val.clone());
+                            }
+                        }
+                        if !result.is_empty() {
+                            return result;
+                        }
+                    }
+                }
+                // Continue walking up — a higher ancestor might have type args
+                current_class = superclass.to_string();
+                continue;
+            }
+
+            // Compose: resolve each superclass_type_arg using current_args
+            let current_subst =
+                Self::build_substitution_map(hierarchy, &current_class, &current_args);
+            let mut super_args = Vec::new();
+            for sta in &info.superclass_type_args {
+                match sta {
+                    SuperclassTypeArg::ParamRef { param_index } => {
+                        if let Some(arg) = current_args.get(*param_index) {
+                            super_args.push(arg.clone());
+                        } else {
+                            super_args.push(InferredType::Dynamic);
+                        }
+                    }
+                    SuperclassTypeArg::Concrete { type_name } => {
+                        let eco_name: EcoString = type_name.clone();
+                        if let Some(resolved) = current_subst.get(&eco_name) {
+                            super_args.push(resolved.clone());
+                        } else {
+                            super_args.push(InferredType::known(eco_name));
+                        }
+                    }
+                }
+            }
+
+            current_class = superclass.to_string();
+            current_args = super_args;
+        }
+
+        // Build the final substitution map for the method's defining class
+        Self::build_substitution_map(hierarchy, method_class, &current_args)
     }
 
     /// Substitute type parameters in a return type string using the substitution map.

@@ -71,6 +71,32 @@ impl MethodInfo {
     }
 }
 
+/// How a subclass maps one of its type parameters (or a concrete type) to a
+/// superclass type parameter position.
+///
+/// Used in `ClassInfo::superclass_type_args` to track the mapping established by
+/// `Collection(E) subclass: Array(E)` or `Collection(Integer) subclass: IntArray`.
+///
+/// **References:** ADR 0068 Challenge 4
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SuperclassTypeArg {
+    /// The subclass forwards one of its own type params to the superclass.
+    ///
+    /// Example: `Collection(E) subclass: Array(E)` — Array's `E` (at `param_index` 0)
+    /// maps to Collection's position 0.
+    ParamRef {
+        /// Index into this class's `type_params` vec.
+        param_index: usize,
+    },
+    /// A concrete (fixed) type is supplied to the superclass.
+    ///
+    /// Example: `Collection(Integer) subclass: IntArray` — `Integer` is fixed.
+    Concrete {
+        /// The concrete type name (e.g., "Integer").
+        type_name: EcoString,
+    },
+}
+
 /// Information about a class in the hierarchy.
 ///
 /// **DDD Context:** Semantic Analysis — Value Object
@@ -114,6 +140,15 @@ pub struct ClassInfo {
     ///
     /// Empty for non-generic classes.
     pub type_params: Vec<EcoString>,
+    /// How this class's type params (or concrete types) map to the superclass's type params.
+    ///
+    /// Empty when the superclass is not generic or no type args are applied.
+    ///
+    /// Example: `Collection(E) subclass: Array(E)` → `[ParamRef { param_index: 0 }]`
+    /// Example: `Collection(Integer) subclass: IntArray` → `[Concrete { type_name: "Integer" }]`
+    ///
+    /// **References:** ADR 0068 Challenge 4
+    pub superclass_type_args: Vec<SuperclassTypeArg>,
 }
 
 impl ClassInfo {
@@ -204,6 +239,22 @@ impl ClassInfo {
                 .map(|cv| cv.name.name.clone())
                 .collect(),
             type_params: class.type_params.iter().map(|tp| tp.name.clone()).collect(),
+            superclass_type_args: {
+                let own_params: Vec<EcoString> =
+                    class.type_params.iter().map(|tp| tp.name.clone()).collect();
+                class
+                    .superclass_type_args
+                    .iter()
+                    .map(|ta| {
+                        let name = ta.type_name();
+                        if let Some(idx) = own_params.iter().position(|p| p == &name) {
+                            SuperclassTypeArg::ParamRef { param_index: idx }
+                        } else {
+                            SuperclassTypeArg::Concrete { type_name: name }
+                        }
+                    })
+                    .collect()
+            },
         }
     }
 }
@@ -343,6 +394,7 @@ impl ClassHierarchy {
                         class_methods: Vec::new(),
                         class_variables: Vec::new(),
                         type_params: Vec::new(),
+                        superclass_type_args: Vec::new(),
                     },
                 );
             }
@@ -2048,6 +2100,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2337,6 +2390,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2373,6 +2427,7 @@ mod tests {
             }],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2553,6 +2608,7 @@ mod tests {
                 class_methods: vec![],
                 class_variables: vec![],
                 type_params: vec![],
+                superclass_type_args: vec![],
             },
         );
         h.classes.insert(
@@ -2571,6 +2627,7 @@ mod tests {
                 class_methods: vec![],
                 class_variables: vec![],
                 type_params: vec![],
+                superclass_type_args: vec![],
             },
         );
 
@@ -2610,6 +2667,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2638,6 +2696,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2735,6 +2794,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2798,6 +2858,7 @@ mod tests {
             ],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -2858,6 +2919,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3025,6 +3087,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
@@ -3078,6 +3141,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
@@ -3128,6 +3192,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3211,6 +3276,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3273,6 +3339,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3447,6 +3514,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3481,6 +3549,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3552,6 +3621,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3643,6 +3713,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3723,6 +3794,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3754,6 +3826,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -3825,6 +3898,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![info]);
         assert!(h.has_class("Counter"));
@@ -3862,6 +3936,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
         };
         h.classes.insert(EcoString::from("Counter"), ast_info);
 
@@ -3890,6 +3965,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![cache_info]);
 
@@ -3917,6 +3993,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![stub]);
         // Built-in should be unchanged
@@ -4474,6 +4551,7 @@ mod tests {
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
+            superclass_type_args: vec![],
         };
         h.add_from_beam_meta(vec![base_info]);
 

@@ -97,6 +97,9 @@ impl Parser {
             Some(superclass_id)
         };
 
+        // Parse optional superclass type arguments: `Collection(E) subclass: ...`
+        let superclass_type_args = self.parse_optional_superclass_type_args();
+
         // Expect `subclass:` keyword
         if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "subclass:") {
             self.error("Expected 'subclass:' keyword");
@@ -173,6 +176,7 @@ impl Parser {
         );
         class_def.is_typed = is_typed;
         class_def.type_params = type_params;
+        class_def.superclass_type_args = superclass_type_args;
         class_def.class_methods = class_methods;
         class_def.class_variables = class_variables;
         class_def.doc_comment = doc_comment;
@@ -203,6 +207,35 @@ impl Parser {
             self.error("Expected ')' after type parameters");
         }
         params
+    }
+
+    /// Parses optional superclass type arguments: `(E)`, `(Integer)`, `(K, V)`.
+    ///
+    /// Used for `Collection(E) subclass: Array(E)` — the `(E)` after `Collection`.
+    /// Returns an empty `Vec` if no `(` follows the superclass name.
+    ///
+    /// Unlike `parse_optional_type_params` which produces bare `Identifier`s,
+    /// this produces `TypeAnnotation`s since the arguments may be concrete types,
+    /// type param references, or even nested generics.
+    fn parse_optional_superclass_type_args(&mut self) -> Vec<TypeAnnotation> {
+        if !matches!(self.current_kind(), TokenKind::LeftParen) {
+            return Vec::new();
+        }
+        self.advance(); // consume `(`
+        let mut args = Vec::new();
+        if !matches!(self.current_kind(), TokenKind::RightParen) {
+            args.push(self.parse_type_annotation());
+            while is_comma(self.current_kind()) {
+                self.advance(); // consume `,`
+                args.push(self.parse_type_annotation());
+            }
+        }
+        if matches!(self.current_kind(), TokenKind::RightParen) {
+            self.advance(); // consume `)`
+        } else {
+            self.error("Expected ')' after superclass type arguments");
+        }
+        args
     }
 
     /// Helper to parse an identifier, reporting an error if not found.

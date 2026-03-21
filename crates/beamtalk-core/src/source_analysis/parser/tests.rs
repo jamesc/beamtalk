@@ -5648,3 +5648,73 @@ fn parse_protocol_class_definition_named_protocol() {
     assert_eq!(module.classes.len(), 1);
     assert_eq!(module.classes[0].name.name, "Protocol");
 }
+
+// ---- BT-1577: Superclass type argument parsing ----
+
+#[test]
+fn parse_superclass_type_args_single_param() {
+    // Collection(E) subclass: Array(E)
+    let module = parse_ok(
+        "Collection(E) subclass: Array(E)
+  append: item => nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "Array");
+    assert_eq!(class.superclass.as_ref().unwrap().name, "Collection");
+    assert_eq!(class.type_params.len(), 1);
+    assert_eq!(class.type_params[0].name, "E");
+    assert_eq!(class.superclass_type_args.len(), 1);
+    match &class.superclass_type_args[0] {
+        TypeAnnotation::Simple(id) => assert_eq!(id.name, "E"),
+        other => panic!("Expected Simple(E), got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_superclass_type_args_concrete_type() {
+    // Collection(Integer) subclass: IntArray
+    let module = parse_ok(
+        "Collection(Integer) subclass: IntArray
+  append: item => nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "IntArray");
+    assert!(class.type_params.is_empty());
+    assert_eq!(class.superclass_type_args.len(), 1);
+    match &class.superclass_type_args[0] {
+        TypeAnnotation::Simple(id) => assert_eq!(id.name, "Integer"),
+        other => panic!("Expected Simple(Integer), got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_superclass_type_args_two_params() {
+    // Mapping(K, V) subclass: SortedMap(K, V)
+    let module = parse_ok(
+        "Mapping(K, V) subclass: SortedMap(K, V)
+  size => 0",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.name.name, "SortedMap");
+    assert_eq!(class.type_params.len(), 2);
+    assert_eq!(class.superclass_type_args.len(), 2);
+    match &class.superclass_type_args[0] {
+        TypeAnnotation::Simple(id) => assert_eq!(id.name, "K"),
+        other => panic!("Expected Simple(K), got: {other:?}"),
+    }
+    match &class.superclass_type_args[1] {
+        TypeAnnotation::Simple(id) => assert_eq!(id.name, "V"),
+        other => panic!("Expected Simple(V), got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_superclass_no_type_args() {
+    // Actor subclass: Counter — no superclass type args
+    let module = parse_ok(
+        "Actor subclass: Counter
+  state: value = 0",
+    );
+    let class = &module.classes[0];
+    assert!(class.superclass_type_args.is_empty());
+}

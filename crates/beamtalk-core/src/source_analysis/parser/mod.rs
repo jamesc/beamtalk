@@ -1020,6 +1020,13 @@ impl Parser {
         }
         offset += 1;
 
+        // Skip optional superclass type arguments: `Collection(E)`, `Mapping(K, V)`
+        if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
+            if let Some(after) = self.skip_paren_type_params(offset) {
+                offset = after;
+            }
+        }
+
         // Expect `subclass:` keyword
         matches!(self.peek_at(offset), Some(TokenKind::Keyword(k)) if k == "subclass:")
     }

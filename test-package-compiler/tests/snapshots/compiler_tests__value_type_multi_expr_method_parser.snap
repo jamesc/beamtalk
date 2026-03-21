@@ -424,6 +424,7 @@ Module {
             doc_comment: None,
             backing_module: None,
             type_params: [],
+            superclass_type_args: [],
             span: Span {
                 start: 443,
                 end: 708,
