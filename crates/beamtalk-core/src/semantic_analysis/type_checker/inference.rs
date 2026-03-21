@@ -152,12 +152,12 @@ impl TypeChecker {
 
     /// Sets parameter types in the type environment from annotations.
     ///
-    /// All parameters are always registered. Typed (`Simple`) parameters are
-    /// registered as `Known`; untyped parameters are registered as `Dynamic`.
-    /// Generic annotations (e.g., `:: Result(Integer, Error)`) are resolved to
-    /// `Known` with `type_args`. Type parameters of enclosing generic classes
-    /// (e.g., `T` in `Result(T, E)`) resolve to `Dynamic` when no substitution
-    /// context is available.
+    /// All parameters are always registered. Typed parameters are resolved
+    /// via [`resolve_type_annotation`]; untyped parameters are registered as
+    /// `Dynamic`. Generic annotations (e.g., `:: Result(Integer, Error)`) are
+    /// resolved to `Known` with `type_args`. Type parameters of enclosing
+    /// generic classes (e.g., `T` in `Result(T, E)`) resolve to `Dynamic` when
+    /// no substitution context is available.
     /// Registering untyped params is necessary to prevent the bare-identifier
     /// state-field fallback in `infer_expr` from mis-inferring an untyped param
     /// as `self.<field>` when the parameter name shadows a state field name.
@@ -174,14 +174,21 @@ impl TypeChecker {
         }
     }
 
-    /// Resolve a `TypeAnnotation` AST node into an `InferredType`.
+    /// Resolves a [`TypeAnnotation`] to an [`InferredType`].
     ///
-    /// - `Simple(id)` → `Known { class_name: id, type_args: [] }`
-    /// - `Generic { base, parameters }` → `Known { class_name: base, type_args: [resolved...] }`
-    /// - Other variants (`SelfType`, unions, singletons) → `Dynamic`
-    fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
+    /// Handles all annotation variants:
+    /// - `Simple` → `Known { class_name, .. }` with keyword resolution (`nil` → `UndefinedObject`, etc.)
+    /// - `Generic` → `Known { class_name: base, type_args: [resolved...] }`
+    /// - `Union` → `Union(resolved_members)`
+    /// - `FalseOr` → `Union([inner, False])`
+    /// - `SelfType` → `Dynamic` (resolved at call site, not here)
+    /// - `Singleton` → `Dynamic` (not yet supported)
+    pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
         match ann {
-            TypeAnnotation::Simple(type_id) => InferredType::known(type_id.name.clone()),
+            TypeAnnotation::Simple(type_id) => {
+                let name = Self::resolve_type_keyword(&type_id.name);
+                InferredType::known(name)
+            }
             TypeAnnotation::Generic {
                 base, parameters, ..
             } => {
@@ -195,9 +202,54 @@ impl TypeChecker {
                     provenance: super::TypeProvenance::Declared(ann.span()),
                 }
             }
-            // SelfType in params is an error (caught by check_no_self_in_params).
-            // Union/singleton annotations are Phase 3.
-            _ => InferredType::Dynamic,
+            TypeAnnotation::Union { types, .. } => {
+                let members: Vec<InferredType> =
+                    types.iter().map(Self::resolve_type_annotation).collect();
+                InferredType::union_of(&members)
+            }
+            TypeAnnotation::FalseOr { inner, .. } => {
+                let inner_ty = Self::resolve_type_annotation(inner);
+                InferredType::union_of(&[inner_ty, InferredType::known("False")])
+            }
+            TypeAnnotation::SelfType { .. } | TypeAnnotation::Singleton { .. } => {
+                InferredType::Dynamic
+            }
+        }
+    }
+
+    /// Resolves type-position keywords to their class names.
+    ///
+    /// - `nil` → `UndefinedObject`
+    /// - `false` → `False`
+    /// - `true` → `True`
+    /// - Everything else passes through unchanged.
+    fn resolve_type_keyword(name: &EcoString) -> EcoString {
+        match name.as_str() {
+            "nil" => "UndefinedObject".into(),
+            "false" => "False".into(),
+            "true" => "True".into(),
+            _ => name.clone(),
+        }
+    }
+
+    /// Converts a type name string (from `ClassHierarchy::state_field_type`)
+    /// to a proper `InferredType`, splitting unions on `|`.
+    ///
+    /// Examples:
+    /// - `"Integer"` → `Known("Integer")`
+    /// - `"String | nil"` → `Union(["String", "UndefinedObject"])`
+    pub(super) fn resolve_type_name_string(type_name: &EcoString) -> InferredType {
+        if type_name.contains('|') {
+            let members: Vec<InferredType> = type_name
+                .split('|')
+                .map(|s| {
+                    let trimmed = s.trim();
+                    InferredType::known(Self::resolve_type_keyword(&EcoString::from(trimmed)))
+                })
+                .collect();
+            InferredType::union_of(&members)
+        } else {
+            InferredType::known(Self::resolve_type_keyword(type_name))
         }
     }
 
@@ -235,7 +287,7 @@ impl TypeChecker {
                                 if let Some(field_type) =
                                     hierarchy.state_field_type(&class_name, name)
                                 {
-                                    InferredType::known(field_type)
+                                    Self::resolve_type_name_string(&field_type)
                                 } else {
                                     InferredType::Dynamic
                                 }
@@ -261,7 +313,7 @@ impl TypeChecker {
                             if let Some(field_type) =
                                 hierarchy.state_field_type(&class_name, &field.name)
                             {
-                                result = InferredType::known(field_type);
+                                result = Self::resolve_type_name_string(&field_type);
                             }
                         }
                     }
@@ -397,6 +449,9 @@ impl TypeChecker {
                                 hierarchy,
                             );
                         }
+                    } else if let InferredType::Union(ref members) = receiver_ty {
+                        // Union cascades: validate selector on all members
+                        self.infer_union_message_send(members, &selector_name, msg.span, hierarchy);
                     }
                 }
                 receiver_ty
@@ -649,10 +704,16 @@ impl TypeChecker {
             // BT-1047: Fall back to return types inferred earlier in this same pass.
             // Method bodies are processed before top-level expressions, so inferred
             // return types are available for chain resolution without a second pass.
-            let key = (class_name.clone(), selector_name, false);
+            let key = (class_name.clone(), selector_name.clone(), false);
             if let Some(ret_ty) = self.method_return_types.get(&key) {
                 return InferredType::known(ret_ty.clone());
             }
+        }
+
+        // Union-typed receiver: check selector on ALL members, warn if any lacks it.
+        // Return type is the union of member return types.
+        if let InferredType::Union(ref members) = receiver_ty {
+            return self.infer_union_message_send(members, &selector_name, span, hierarchy);
         }
 
         InferredType::Dynamic
@@ -661,6 +722,86 @@ impl TypeChecker {
     /// Returns true if the expression is `self` (direct identifier reference).
     fn is_self_receiver(expr: &Expression) -> bool {
         matches!(expr, Expression::Identifier(ident) if ident.name == "self")
+    }
+
+    /// Infer the result type of a message send on a union-typed receiver.
+    ///
+    /// Checks the selector against ALL union members. If any member lacks the
+    /// selector, emits a warning with a nullable hint when `UndefinedObject` is
+    /// the missing member. The return type is the union of member return types
+    /// (simplified to a single type if all agree).
+    fn infer_union_message_send(
+        &mut self,
+        members: &[EcoString],
+        selector: &str,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+    ) -> InferredType {
+        let mut missing_members: Vec<&EcoString> = Vec::new();
+        let mut return_types: Vec<InferredType> = Vec::new();
+
+        for member in members {
+            if !hierarchy.has_class(member) {
+                // Unknown class in union — go Dynamic for this member
+                return_types.push(InferredType::Dynamic);
+                continue;
+            }
+            if hierarchy.has_instance_dnu_override(member) {
+                // DNU override accepts any message
+                return_types.push(InferredType::Dynamic);
+                continue;
+            }
+            if hierarchy.resolves_selector(member, selector) {
+                // Selector resolves — compute return type
+                if let Some(method) = hierarchy.find_method(member, selector) {
+                    if let Some(ref ret_ty) = method.return_type {
+                        let resolved = if ret_ty.as_str() == "Self" {
+                            member.clone()
+                        } else {
+                            ret_ty.clone()
+                        };
+                        return_types.push(InferredType::known(resolved));
+                    } else {
+                        return_types.push(InferredType::Dynamic);
+                    }
+                } else {
+                    return_types.push(InferredType::Dynamic);
+                }
+            } else {
+                missing_members.push(member);
+                // Still compute a Dynamic return for this member
+                return_types.push(InferredType::Dynamic);
+            }
+        }
+
+        if !missing_members.is_empty() {
+            let union_display = members.join(" | ");
+            let missing_display: Vec<&str> = missing_members.iter().map(|m| m.as_str()).collect();
+            let is_nullable = missing_members
+                .iter()
+                .any(|m| m.as_str() == "UndefinedObject");
+
+            let message = if missing_members.len() == 1 {
+                format!(
+                    "{} does not understand '{selector}' (in union {union_display})",
+                    missing_display[0]
+                )
+            } else {
+                format!(
+                    "{} do not understand '{selector}' (in union {union_display})",
+                    missing_display.join(", ")
+                )
+            };
+
+            let mut diag = Diagnostic::hint(message, span)
+                .with_category(crate::source_analysis::DiagnosticCategory::Dnu);
+            if is_nullable {
+                diag = diag.with_hint(format!("Check for nil before sending '{selector}'"));
+            }
+            self.diagnostics.push(diag);
+        }
+
+        InferredType::union_of(&return_types)
     }
 
     /// Infer types for a sequence of expression statements.

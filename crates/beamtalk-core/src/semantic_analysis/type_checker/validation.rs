@@ -206,7 +206,7 @@ impl TypeChecker {
                 ..
             } = arg_ty
             else {
-                continue; // Dynamic arguments never produce warnings
+                continue; // Dynamic or Union arguments — skip (conservative)
             };
             if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
                 let param_pos = i + 1;
@@ -249,30 +249,62 @@ impl TypeChecker {
             ..
         } = body_type
         else {
-            return; // Dynamic body — can't check
+            return; // Dynamic or Union body — can't reliably check
         };
 
         // For `-> Self`, the expected type is the class itself
         // For `-> Generic(...)`, extract the base type name for compatibility checking
-        let expected_ty: EcoString = match declared {
-            TypeAnnotation::Simple(type_id) => type_id.name.clone(),
-            TypeAnnotation::SelfType { .. } => class_name.clone(),
-            TypeAnnotation::Generic { base, .. } => base.name.clone(),
-            _ => return, // Phase 3 handles unions/singletons
+        // For `-> Union` / `-> FalseOr`, resolve via resolve_type_annotation
+        let expected = match declared {
+            TypeAnnotation::Simple(type_id) => InferredType::known(type_id.name.clone()),
+            TypeAnnotation::SelfType { .. } => InferredType::known(class_name.clone()),
+            TypeAnnotation::Generic { base, .. } => InferredType::known(base.name.clone()),
+            TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. } => {
+                Self::resolve_type_annotation(declared)
+            }
+            TypeAnnotation::Singleton { .. } => return, // Singleton — not yet supported
         };
 
-        if !Self::is_type_compatible(actual_ty, &expected_ty, hierarchy) {
-            let selector = method.selector.name();
-            self.diagnostics.push(
-                Diagnostic::warning(
-                    format!(
-                        "Method '{selector}' in {class_name} declares return type {expected_ty}, but body returns {actual_ty}"
-                    ),
-                    method.span,
-                )
-                .with_category(DiagnosticCategory::Type)
-                .with_hint(format!("Declared -> {expected_ty}, inferred body type is {actual_ty}")),
-            );
+        match &expected {
+            InferredType::Known {
+                class_name: expected_ty,
+                ..
+            } => {
+                if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
+                    let selector = method.selector.name();
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Method '{selector}' in {class_name} declares return type {expected_ty}, but body returns {actual_ty}"
+                            ),
+                            method.span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint(format!("Declared -> {expected_ty}, inferred body type is {actual_ty}")),
+                    );
+                }
+            }
+            InferredType::Union(members) => {
+                // Body type must be compatible with at least one union member
+                let compatible = members
+                    .iter()
+                    .any(|member| Self::is_type_compatible(actual_ty, member, hierarchy));
+                if !compatible {
+                    let selector = method.selector.name();
+                    let union_display = members.join(" | ");
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Method '{selector}' in {class_name} declares return type {union_display}, but body returns {actual_ty}"
+                            ),
+                            method.span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint(format!("Declared -> {union_display}, inferred body type is {actual_ty}")),
+                    );
+                }
+            }
+            InferredType::Dynamic => {} // Can't check
         }
     }
 
@@ -434,7 +466,7 @@ impl TypeChecker {
             ..
         } = value_ty
         else {
-            return; // Dynamic expressions never produce warnings
+            return; // Dynamic or Union values — skip (conservative)
         };
         let Some(InferredType::Known { class_name, .. }) = env.get("self") else {
             return;
@@ -507,9 +539,9 @@ impl TypeChecker {
     /// For example, Integer is assignable to Number because Integer's superclass
     /// chain includes Number.
     ///
-    /// For generic types (`Result(Integer, Error)`), compares the base type name.
-    /// For union types and singletons, returns true (permissive) — full union
-    /// checking is Phase 3.
+    /// For union declared types (containing `|`), the value is assignable if it's
+    /// compatible with any member. For generic types (`Result(Integer, Error)`),
+    /// compares the base type name. Singleton (`#`) types are still permissive.
     pub(super) fn is_assignable_to(
         value_type: &EcoString,
         declared_type: &EcoString,
@@ -518,9 +550,16 @@ impl TypeChecker {
         if value_type == declared_type {
             return true;
         }
-        // Skip checking for union and singleton types — Phase 3
-        if declared_type.contains('|') || declared_type.starts_with('#') {
+        // Singleton types — permissive until that phase lands
+        if declared_type.starts_with('#') {
             return true;
+        }
+        // Union declared types: value must be compatible with at least one member
+        if declared_type.contains('|') {
+            return declared_type.split('|').map(str::trim).any(|member| {
+                let member_eco: EcoString = Self::resolve_type_keyword_static(member);
+                Self::is_type_compatible(value_type, &member_eco, hierarchy)
+            });
         }
         // For generic declared types like "Result(Integer, Error)", extract
         // the base type name and compare structurally.
@@ -544,6 +583,18 @@ impl TypeChecker {
             .superclass_chain(&value_eco)
             .iter()
             .any(|ancestor| ancestor == &declared_eco)
+    }
+
+    /// Resolves type-position keywords to their class names (static version).
+    ///
+    /// Same as `resolve_type_keyword` but takes `&str` for use in validation contexts.
+    fn resolve_type_keyword_static(name: &str) -> EcoString {
+        match name {
+            "nil" => "UndefinedObject".into(),
+            "false" => "False".into(),
+            "true" => "True".into(),
+            _ => EcoString::from(name),
+        }
     }
 
     /// Emit a warning diagnostic for an unknown selector.
