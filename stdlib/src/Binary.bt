@@ -69,6 +69,21 @@ sealed typed Collection subclass: Binary
   class sealed fromBytes: bytes :: List -> Binary =>
     (Erlang beamtalk_binary) fromBytes: bytes
 
+  /// Deserialize a binary and return both the value and bytes consumed.
+  ///
+  /// Returns a tuple of (value, bytesConsumed). Useful for parsing
+  /// concatenated ETF values from a binary stream.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// bin := Binary serialize: 42
+  /// result := Binary deserializeWithUsed: bin
+  /// result first    // => 42
+  /// result second   // => bytes consumed
+  /// ```
+  class sealed deserializeWithUsed: binary :: Object -> Object =>
+    (Erlang beamtalk_binary) deserializeWithUsed: binary
+
   // ═══════════════════════════════════════════════════════════════════
   // Collection subclass-responsibility methods
   // ═══════════════════════════════════════════════════════════════════
