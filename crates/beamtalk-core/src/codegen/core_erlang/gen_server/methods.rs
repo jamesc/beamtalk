@@ -1650,7 +1650,7 @@ impl CoreErlangGenerator {
             let type_params: Vec<String> = protocol
                 .type_params
                 .iter()
-                .map(|tp| tp.name.to_string())
+                .map(|tp| tp.name.name.to_string())
                 .collect();
             let type_params_doc = Self::meta_atom_list(&type_params);
 

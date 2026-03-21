@@ -427,7 +427,7 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
             if i > 0 {
                 header.push(Document::Str(", "));
             }
-            header.push(Document::String(tp.name.to_string()));
+            header.push(Document::String(tp.name.name.to_string()));
         }
         header.push(Document::Str(")"));
     }
