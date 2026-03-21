@@ -566,7 +566,8 @@ mod tests {
     use crate::ast::{
         Block, CascadeMessage, ClassDefinition, ClassKind, CommentAttachment, Expression,
         ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition,
-        MethodKind, Module, ParameterDefinition, Pattern, StateDeclaration, TypeAnnotation,
+        MethodKind, Module, ParameterDefinition, Pattern, ProtocolDefinition,
+        ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
     };
     use crate::source_analysis::Span;
 
@@ -4980,6 +4981,20 @@ Base subclass: Child
         )
     }
 
+    /// Helper: build a symbol literal `#name`
+    fn sym_lit(name: &str) -> Expression {
+        Expression::Literal(Literal::Symbol(name.into()), span())
+    }
+
+    /// Helper: build `x respondsTo: #selector` keyword expression
+    fn responds_to(var_name: &str, selector_name: &str) -> Expression {
+        msg_send(
+            var(var_name),
+            MessageSelector::Keyword(vec![KeywordPart::new("respondsTo:", span())]),
+            vec![sym_lit(selector_name)],
+        )
+    }
+
     /// Helper: build a block expression `[body]`
     fn block_expr(body: Vec<Expression>) -> Expression {
         Expression::Block(Block::new(
@@ -5423,6 +5438,261 @@ Base subclass: Child
             1,
             "Expected 1 warning for unknownThing outside narrowed block, got {}",
             warnings.len(),
+        );
+    }
+
+    // ---- BT-1582: respondsTo: narrowing tests (ADR 0068 Phase 2e) ----
+
+    #[test]
+    fn test_detect_narrowing_responds_to_pattern() {
+        // `x respondsTo: #asString` → should detect narrowing for x
+        let expr = responds_to("x", "asString");
+        let info = TypeChecker::detect_narrowing(&expr);
+        assert!(info.is_some(), "Should detect respondsTo: narrowing");
+        let info = info.unwrap();
+        assert_eq!(info.variable.as_str(), "x");
+        assert_eq!(info.true_type, InferredType::Dynamic);
+        assert!(!info.is_nil_check);
+        assert_eq!(
+            info.responded_selector.as_deref(),
+            Some("asString"),
+            "Should record the tested selector"
+        );
+    }
+
+    #[test]
+    fn test_detect_narrowing_responds_to_non_symbol_arg() {
+        // `x respondsTo: someVar` — not a symbol literal → no narrowing
+        let expr = msg_send(
+            var("x"),
+            MessageSelector::Keyword(vec![KeywordPart::new("respondsTo:", span())]),
+            vec![var("someVar")],
+        );
+        assert!(
+            TypeChecker::detect_narrowing(&expr).is_none(),
+            "respondsTo: with non-symbol argument should not be detected as narrowing"
+        );
+    }
+
+    #[test]
+    fn test_narrowing_responds_to_in_true_block() {
+        // Build a class with a method:
+        //   process: x :: Object =>
+        //     (x respondsTo: #customMethod) ifTrue: [x customMethod]
+        //     x customMethod    // should warn — x is Object outside the block
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    // (x respondsTo: #customMethod) ifTrue: [x customMethod]
+                    if_true(
+                        responds_to("x", "customMethod"),
+                        block_expr(vec![msg_send(
+                            var("x"),
+                            MessageSelector::Unary("customMethod".into()),
+                            vec![],
+                        )]),
+                    ),
+                    // x customMethod — should warn (Object doesn't have customMethod)
+                    msg_send(
+                        var("x"),
+                        MessageSelector::Unary("customMethod".into()),
+                        vec![],
+                    ),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // Inside the block: `x customMethod` should NOT warn because x is Dynamic
+        // (respondsTo: narrowing sets the variable to Dynamic in the true block)
+        // Outside the block: `x customMethod` SHOULD warn because x is still Object
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning for customMethod outside the narrowed block, got {}:\n{:?}",
+            warnings.len(),
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_narrowing_responds_to_does_not_leak() {
+        // Verify narrowing from respondsTo: is scoped to block only:
+        //   process: x :: Object =>
+        //     (x respondsTo: #asString) ifTrue: [x asString]
+        //     x unknownSelector   // Object doesn't have this → warning
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![
+                    if_true(
+                        responds_to("x", "asString"),
+                        block_expr(vec![msg_send(
+                            var("x"),
+                            MessageSelector::Unary("asString".into()),
+                            vec![],
+                        )]),
+                    ),
+                    msg_send(
+                        var("x"),
+                        MessageSelector::Unary("unknownSelector".into()),
+                        vec![],
+                    ),
+                ],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        // 'unknownSelector' on Object should warn (narrowing doesn't leak)
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning for unknownSelector outside narrowed block, got {}",
+            warnings.len(),
+        );
+    }
+
+    #[test]
+    fn test_narrowing_responds_to_if_true_if_false() {
+        // Build: (x respondsTo: #customMethod) ifTrue: [x customMethod] ifFalse: [x customMethod]
+        // True block: no warning (narrowed to Dynamic)
+        // False block: should warn (x is still Object, no respondsTo: narrowing in false branch)
+        let hierarchy = ClassHierarchy::with_builtins();
+        let class = {
+            let process_method = make_keyword_method(
+                &["process:"],
+                vec![("x", Some("Object"))],
+                vec![if_true_if_false(
+                    responds_to("x", "customMethod"),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("customMethod".into()),
+                        vec![],
+                    )]),
+                    block_expr(vec![msg_send(
+                        var("x"),
+                        MessageSelector::Unary("customMethod".into()),
+                        vec![],
+                    )]),
+                )],
+            );
+            ClassDefinition::new(
+                ident("TestClass"),
+                ident("Object"),
+                vec![],
+                vec![process_method],
+                span(),
+            )
+        };
+        let module = make_module_with_classes(vec![], vec![class]);
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+
+        // True block: no warning (Dynamic narrowing)
+        // False block: should warn (Object doesn't have customMethod)
+        let warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected 1 warning in false block (no respondsTo: narrowing there), got {}:\n{:?}",
+            warnings.len(),
+            warnings.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_responds_to_protocol_inference() {
+        // When `x respondsTo: #asString` is detected, and a Printable protocol
+        // requiring asString exists, the responded_selector can be used to infer
+        // protocol conformance (ADR 0068 Phase 2e).
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Build a Printable protocol requiring asString
+        let printable_proto = ProtocolDefinition {
+            name: ident("Printable"),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![ProtocolMethodSignature {
+                selector: MessageSelector::Unary("asString".into()),
+                parameters: vec![],
+                return_type: Some(TypeAnnotation::Simple(ident("String"))),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        };
+        let module = Module {
+            protocols: vec![printable_proto],
+            ..Module::new(vec![], span())
+        };
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+        assert!(diags.is_empty());
+
+        // Detect narrowing from `x respondsTo: #asString`
+        let expr = responds_to("x", "asString");
+        let info = TypeChecker::detect_narrowing(&expr).unwrap();
+        assert_eq!(info.responded_selector.as_deref(), Some("asString"));
+
+        // The responded_selector matches the Printable protocol's required method.
+        // Integer conforms to Printable (has asString), String does too.
+        let result = registry.check_conformance("Integer", "Printable", &hierarchy);
+        assert!(
+            result.is_ok(),
+            "Integer responds to asString → conforms to Printable"
+        );
+
+        // A class without asString would not conform
+        // (This verifies the protocol registry is usable for narrowing inference)
+        let proto = registry.get("Printable").unwrap();
+        let required: Vec<&str> = proto
+            .all_required_selectors(&registry)
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        assert!(
+            required.contains(&"asString"),
+            "Printable protocol requires asString"
         );
     }
 
