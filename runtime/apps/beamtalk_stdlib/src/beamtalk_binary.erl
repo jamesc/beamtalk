@@ -39,8 +39,15 @@
 -module(beamtalk_binary).
 
 %% Class methods
--export(['serialize:'/1, 'deserialize:'/1, 'size:'/1, 'fromIolist:'/1, 'fromBytes:'/1]).
--export([serialize/1, deserialize/1, size/1, fromIolist/1]).
+-export([
+    'serialize:'/1,
+    'deserialize:'/1,
+    'size:'/1,
+    'fromIolist:'/1,
+    'fromBytes:'/1,
+    'deserializeWithUsed:'/1
+]).
+-export([serialize/1, deserialize/1, size/1, fromIolist/1, fromBytes/1, deserializeWithUsed/1]).
 
 %% Instance methods (ADR 0069 Phase 1)
 -export([do/2, at/2, byte_at/2, byte_size/1, part/3, concat/2]).
@@ -352,3 +359,15 @@ fromIolist(X) -> 'fromIolist:'(X).
 %% @doc Class method wrapper for from_bytes/1.
 -spec 'fromBytes:'([non_neg_integer()]) -> binary().
 'fromBytes:'(Bytes) -> from_bytes(Bytes).
+
+%% @doc FFI alias for fromBytes:/1.
+-spec fromBytes([non_neg_integer()]) -> binary().
+fromBytes(Bytes) -> from_bytes(Bytes).
+
+%% @doc Class method wrapper for deserialize_with_used/1.
+-spec 'deserializeWithUsed:'(binary()) -> {term(), non_neg_integer()}.
+'deserializeWithUsed:'(Bin) -> deserialize_with_used(Bin).
+
+%% @doc FFI alias for deserializeWithUsed:/1.
+-spec deserializeWithUsed(binary()) -> {term(), non_neg_integer()}.
+deserializeWithUsed(Bin) -> deserialize_with_used(Bin).
