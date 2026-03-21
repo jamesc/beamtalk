@@ -117,7 +117,7 @@ Instrument `sync_send/3`, `async_send/4`, and `cast_send/3` in `beamtalk_actor.e
 
 ```erlang
 sync_send(ActorPid, Selector, Args) ->
-    Class = get_class_for_pid(ActorPid),
+    Class = lookup_class(ActorPid),
     Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
     telemetry:span([beamtalk, actor, dispatch], Metadata, fun() ->
         Result = do_sync_send(ActorPid, Selector, Args),
@@ -127,7 +127,15 @@ sync_send(ActorPid, Selector, Args) ->
 
 `telemetry:span/3` automatically emits `start`, `stop`, and `exception` events with timing. The `stop` event includes `duration` in native time units.
 
-**What the timing measures:** Send-wrapper instrumentation captures the **caller-perspective round-trip time** — the full duration from message send to reply received, including message queue wait and scheduling jitter. This is NOT actor method execution time. To distinguish queueing delay from execution time, use `Tracing healthFor:` which reports message queue depth. A high round-trip time with a deep queue indicates queueing; a high round-trip with an empty queue indicates slow method execution.
+**Class name resolution:** The actor's class name is not accessible from the caller's process (it lives in the gen_server's state map). The `beamtalk_object_instances` ETS table already maintains a `{Class, Pid}` registry populated at actor spawn time — a reverse lookup (`ets:match` on the bag table by Pid) provides the class name. This is a single ETS read (~50-100ns), acceptable within the overhead budget. If the Pid is not found (e.g., Erlang process, not a Beamtalk actor), the class defaults to `unknown`.
+
+**What the timing measures:** Send-wrapper instrumentation captures different things depending on the send mode:
+- **`sync_send`** — **caller-perspective round-trip time**: the full duration from `gen_server:call` to reply, including message queue wait and scheduling jitter. This is NOT actor method execution time.
+- **`async_send` / `cast_send`** — **dispatch-to-mailbox time**: the duration from the caller's perspective to deliver the message to the actor's mailbox. For async sends, the actual method execution happens later (resolved via Future). For cast sends, there is no response.
+
+To distinguish queueing delay from execution time on sync calls, use `Tracing healthFor:` which reports message queue depth. A high round-trip time with a deep queue indicates queueing; a high round-trip with an empty queue indicates slow method execution.
+
+**`telemetry:span/3` and error handling:** The existing `sync_send/3` wraps `gen_server:call` in a `try/catch` that converts `exit:{timeout, _}` and `exit:{noproc, _}` to structured `#beamtalk_error{}` records. `telemetry:span/3` catches exceptions to emit the `exception` event and reraises via `erlang:raise/3`, preserving the original exception class and reason. Phase 0 (validation spike) will verify this composition works correctly before committing to the architecture.
 
 **Lifecycle methods** (`isAlive`, `stop`, `pid`, `monitor`, `onExit:`, `demonitor`) are NOT instrumented — they are handled locally in the send wrappers without entering the gen_server message loop.
 
@@ -150,7 +158,7 @@ Captures individual dispatch events when tracing is enabled.
 ```
 
 - Capped at 100,000 events (configurable via `Tracing maxEvents:`)
-- Ring buffer semantics: on insert, if `ets:info(Tab, size) >= MaxEvents`, delete the oldest N entries (batch eviction of 10% to amortize cleanup cost) via `ets:select_delete` on the smallest keys
+- Ring buffer semantics: trace event inserts go through the `beamtalk_trace_store` gen_server (serialized) to avoid TOCTOU races on eviction. On insert, if `ets:info(Tab, size) >= MaxEvents`, the gen_server evicts the oldest 10% via `ets:select_delete` on the smallest keys (batch eviction amortizes cleanup cost). The gen_server is only a bottleneck for trace events (opt-in), not for always-on aggregates which write directly to ETS
 - Only populated when tracing is enabled
 - Toggle via `persistent_term:put(beamtalk_tracing_enabled, true | false)` — ~5ns check
 
@@ -502,8 +510,9 @@ Place `enableTracing` / `disableTracing` / `tracingEnabled` on `Beamtalk`, with 
 ### Negative
 - New dependency: `telemetry` library (mitigated: zero transitive deps, pure Erlang, ~500 LOC, de facto BEAM standard)
 - ~200ns overhead per actor message send (always-on aggregates) — negligible but non-zero
-- `beamtalk_trace_store` gen_server is a single point of contention for ETS writes under extreme load (mitigated: `ets:update_counter` is lock-free for concurrent writers on `set` tables)
-- Trace events reference PIDs which are opaque after actor death (mitigated: class name is captured at record time)
+- `beamtalk_trace_store` gen_server serializes trace event inserts (mitigated: only active when tracing is enabled; always-on aggregate writes bypass the gen_server via direct `ets:update_counter` which uses per-bucket locking, not the gen_server)
+- Trace events reference PIDs which are opaque after actor death (mitigated: class name is captured at record time via `beamtalk_object_instances` lookup)
+- Aggregate `{Pid, Selector}` space grows without bound in long-running sessions with actor churn (PIDs are not reused within a BEAM session). Mitigated: `Tracing clear` resets; a future enhancement could auto-evict entries for dead PIDs on a periodic sweep
 - Standalone `Tracing` class is temporarily inconsistent with ADR 0064's pattern of logging config on `Beamtalk` (mitigated: planned `Logging` class migration will make both consistent)
 
 ### Neutral
@@ -514,13 +523,27 @@ Place `enableTracing` / `disableTracing` / `tracingEnabled` on `Beamtalk`, with 
 
 ## Implementation
 
-### Phase 1: Core Infrastructure (M)
+### Phase 0: Validation Spike (S)
 **Affected components:** Runtime (Erlang), rebar.config
 
-1. Add `telemetry` dependency to `runtime/apps/beamtalk_runtime/rebar.config`
-2. Create `beamtalk_trace_store.erl` — gen_server owning ETS tables, telemetry handler callbacks, query API
-3. Add `beamtalk_trace_store` to `beamtalk_runtime_sup` supervision tree
-4. EUnit tests for trace store: insert, query, ring buffer overflow (batch eviction), aggregate counters, clear, composite key uniqueness
+Prove the core assumptions before committing to the full architecture:
+
+1. Add `telemetry` dependency to `runtime/rebar.config` (root umbrella config)
+2. Write a minimal EUnit test that wraps a `gen_server:call` with `telemetry:span/3` and verifies:
+   - The `stop` event fires with correct duration
+   - The `exception` event fires on timeout and preserves the `exit:{timeout, _}` shape (critical: existing `sync_send/3` error handling depends on this)
+   - An attached handler can write to an ETS table from the calling process
+3. Verify `beamtalk_object_instances` reverse lookup (Pid → Class) works and measure overhead
+4. Microbenchmark: `telemetry:span/3` + `ets:update_counter/3` under the actual scheduler count — validate the ~200ns budget
+
+This spike should be a single branch with ~100 lines of test code. If the telemetry/try-catch composition breaks, fall back to direct ETS writes (the Custom ETS-Only alternative).
+
+### Phase 1: Core Infrastructure (M)
+**Affected components:** Runtime (Erlang)
+
+1. Create `beamtalk_trace_store.erl` — gen_server owning ETS tables, telemetry handler callbacks, query API
+2. Add `beamtalk_trace_store` to `beamtalk_runtime_sup` supervision tree
+3. EUnit tests for trace store: insert, query, ring buffer overflow (batch eviction), aggregate counters, clear, composite key uniqueness
 
 ### Phase 2: Actor Instrumentation (S)
 **Affected components:** Runtime (`beamtalk_actor.erl`)
