@@ -239,7 +239,22 @@ impl InferredType {
         }
         match flat.len() {
             0 => Self::Dynamic,
-            1 => flat.into_iter().next().unwrap(),
+            1 => match flat.into_iter().next().unwrap() {
+                Self::Known {
+                    class_name,
+                    type_args,
+                    provenance,
+                } if matches!(provenance, TypeProvenance::Inferred(_))
+                    && !matches!(best_provenance, TypeProvenance::Inferred(_)) =>
+                {
+                    Self::Known {
+                        class_name,
+                        type_args,
+                        provenance: best_provenance,
+                    }
+                }
+                only => only,
+            },
             _ => Self::Union {
                 members: flat,
                 provenance: best_provenance,
