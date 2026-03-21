@@ -325,7 +325,7 @@ pub fn run(
     // Node name: CLI --node > BEAMTALK_NODE_NAME > None
     let node_name = resolve_node_name(node_arg);
 
-    println!("Beamtalk v{}", env!("CARGO_PKG_VERSION"));
+    println!("Beamtalk v{}", env!("BEAMTALK_VERSION"));
     println!("Type :help for available commands, :exit to quit.");
     println!();
 

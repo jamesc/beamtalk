@@ -69,7 +69,7 @@ classes isEmpty
 
 // Beamtalk version returns a string
 version := Beamtalk version
-// => 0.1.0
+// => _
 
 // Validate version is a non-empty string
 version isEmpty
@@ -152,4 +152,4 @@ TranscriptStream current show: "hello from explicit form"
 
 // BeamtalkInterface current works as explicit form of Beamtalk
 BeamtalkInterface current version
-// => 0.1.0
+// => _
