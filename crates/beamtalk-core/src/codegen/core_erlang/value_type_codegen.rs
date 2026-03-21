@@ -2695,6 +2695,7 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
+            protocols: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
