@@ -496,7 +496,7 @@ The pattern of "telemetry handler → ETS store → query API" is standard on BE
 | Cohort | Best argument |
 |--------|---------------|
 | **Newcomer** | "Zero dependencies means nothing can break. `Tracing enable` just works — no library version to worry about." |
-| **Smalltalk purist** | "Self-contained is elegant. Beamtalk should own its full stack, not delegate core observability to an external library." |
+| **Smalltalk purist** | "ETS and `counters` are already part of OTP — the runtime we ship with. Adding `telemetry` means core observability depends on a third-party library's release cycle. OTP primitives won't break on a hex version bump." |
 | **BEAM veteran** | "One fewer dependency to manage. ETS is the right tool for this — `telemetry` adds an indirection layer we don't need when we control both sides." |
 | **Operator** | "Fewer moving parts in production. I can inspect the ETS tables directly with `ets:tab2list/1` — no abstraction hiding the data." |
 | **Language designer** | "The `persistent_term` toggle pattern is simpler and faster than telemetry's handler dispatch. We're optimizing for one specific use case, not building a general-purpose event bus." |
