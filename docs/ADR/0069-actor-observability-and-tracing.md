@@ -207,7 +207,7 @@ The gen_server is the owner and lifecycle manager, NOT the write path:
 | `enable` / `disable` / `clear` | No | Control operations, infrequent |
 | Periodic ring buffer eviction | No | Timer-based sweep, async |
 | Query: `traces`, `stats`, `slowMethods:` | No | Read-only, called from REPL/MCP |
-| Crash recovery | No | Tables/counters lost, recreated on restart |
+| Crash recovery | No | ETS tables survive via `heir` option (ownership transfers to supervisor); counters refs stored in `persistent_term` survive. Gen_server restart inherits existing data. |
 
 **Overhead budget:**
 
@@ -397,7 +397,7 @@ This approach reduces implementation effort (3 tools vs 10), avoids API surface 
 - **Trace events**: Bounded by ring buffer (100k default). Oldest dropped on overflow via batch eviction. Explicit `Tracing clear` resets.
 - **Aggregate stats**: Persist until `Tracing clear`. Size is proportional to unique `{Pid, Selector}` combinations, not call volume — bounded by the number of actors × methods seen.
 - **Actor death**: Stats and traces for dead actors are **retained** for post-mortem analysis. This is essential for the test workflow where actors spawn, run, and die before results are queried.
-- **`beamtalk_trace_store` gen_server**: Supervised under `beamtalk_runtime_sup`. Owns ETS tables and counter references. Crash recovery: data is lost but actor dispatch is unaffected (gen_server is not in the write path). Acceptable — tracing data is ephemeral by nature.
+- **`beamtalk_trace_store` gen_server**: Supervised under `beamtalk_runtime_sup`. Owns ETS tables (created with `{heir, SupervisorPid, HeirData}`) and counter references (stored in `persistent_term`). On gen_server crash: ETS ownership transfers to the supervisor via the `heir` mechanism, counters survive in `persistent_term`. The restarted gen_server inherits the existing tables — **no data loss on process crash**. Only a full VM crash (SIGKILL, OOM) loses data.
 
 ### Future: Block-Scoped Profiling
 
@@ -579,7 +579,7 @@ Place `enableTracing` / `disableTracing` / `tracingEnabled` on `Beamtalk`, with 
 ### Negative
 - New dependencies: `telemetry` + `telemetry_poller` (mitigated: zero transitive deps, pure Erlang, de facto BEAM standard)
 - ~150ns overhead per actor message send (always-on aggregates via `counters`) — negligible but non-zero
-- `beamtalk_trace_store` gen_server crash loses all accumulated data (mitigated: tracing data is ephemeral by nature; gen_server is NOT in the write path so its crash does not affect actor dispatch)
+- BEAM VM crash (SIGKILL, OOM) loses all in-memory tracing data (mitigated: tracing data is ephemeral by nature; a future enhancement could periodically checkpoint aggregates to the workspace log)
 - Trace events reference PIDs which are opaque after actor death (mitigated: class name is captured at record time via `beamtalk_object_instances` lookup)
 - Aggregate `{Pid, Selector}` space grows without bound in long-running sessions with actor churn (PIDs are not reused within a BEAM session). Mitigated: `Tracing clear` resets; a future enhancement could auto-evict entries for dead PIDs on a periodic sweep
 - Standalone `Tracing` class is temporarily inconsistent with ADR 0064's pattern of logging config on `Beamtalk` (mitigated: planned `Logging` class migration will make both consistent)
