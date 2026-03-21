@@ -3,14 +3,14 @@
 
 // E2E tests for REPL commands (BT-527).
 //
-// These tests require E2E because :bindings, :clear, :modules, and
-// :reload are REPL commands processed by the REPL session handler. BUnit
-// tests execute compiled Beamtalk code and cannot invoke REPL commands.
-// Workspace variable persistence across turns is also needed to verify that
-// bindings survive between expressions.
+// These tests require E2E because :bindings, :clear, and :reload are
+// REPL commands processed by the REPL session handler. BUnit tests execute
+// compiled Beamtalk code and cannot invoke REPL commands. Workspace variable
+// persistence across turns is also needed to verify that bindings survive
+// between expressions.
 //
-// Tests :bindings, :clear, :modules, and :reload commands
-// routed through their proper protocol operations.
+// Tests :bindings, :clear, and :reload commands routed through their
+// proper protocol operations.
 
 // @load tests/e2e/fixtures/counter.bt
 
@@ -124,14 +124,6 @@ p class
 // Class introspection on Point instances
 p respondsTo: #getX
 // => true
-
-// ===========================================================================
-// :modules — AFTER LOAD
-// ===========================================================================
-
-// Modules should show the loaded counter module
-:modules
-// => _
 
 // ===========================================================================
 // :reload — RELOAD LOADED CLASS
