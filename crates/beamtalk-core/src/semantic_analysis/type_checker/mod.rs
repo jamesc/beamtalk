@@ -229,6 +229,13 @@ impl InferredType {
                         best_provenance = *provenance;
                     }
                     for inner_m in inner {
+                        if let Self::Known { provenance: p, .. } = inner_m {
+                            if matches!(best_provenance, TypeProvenance::Inferred(_))
+                                && !matches!(p, TypeProvenance::Inferred(_))
+                            {
+                                best_provenance = *p;
+                            }
+                        }
                         if !flat.contains(inner_m) {
                             flat.push(inner_m.clone());
                         }
