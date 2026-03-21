@@ -5086,10 +5086,7 @@ Base subclass: Child
         // For now, union types in annotations aren't parsed to InferredType::Union
         // (they resolve to Dynamic), so this test validates the non_nil_type logic
         // directly.
-        let union = InferredType::Union(vec![
-            eco_string("String"),
-            eco_string("UndefinedObject"),
-        ]);
+        let union = InferredType::Union(vec![eco_string("String"), eco_string("UndefinedObject")]);
         let narrowed = TypeChecker::non_nil_type(&union);
         assert_eq!(
             narrowed,
