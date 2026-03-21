@@ -374,6 +374,15 @@ impl ProtocolRegistry {
             .cloned()
             .collect()
     }
+
+    /// Register a protocol directly for testing purposes (ADR 0068 Phase 2f).
+    ///
+    /// Bypasses the module registration path — useful for unit tests that need
+    /// a protocol without constructing a full `Module` AST.
+    #[cfg(test)]
+    pub fn register_test_protocol(&mut self, protocol: ProtocolInfo) {
+        self.protocols.insert(protocol.name.clone(), protocol);
+    }
 }
 
 #[cfg(test)]
