@@ -1,7 +1,7 @@
 # ADR 0069: Actor Observability and Tracing
 
 ## Status
-Proposed (2026-03-21)
+Accepted (2026-03-21)
 
 ## Context
 
