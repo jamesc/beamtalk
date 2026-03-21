@@ -480,7 +480,7 @@ impl TypeChecker {
                                 hierarchy,
                             );
                         }
-                    } else if let InferredType::Union(ref members) = receiver_ty {
+                    } else if let InferredType::Union { ref members, .. } = receiver_ty {
                         // Union cascades: validate selector on all members
                         self.infer_union_message_send(members, &selector_name, msg.span, hierarchy);
                     }
@@ -794,7 +794,7 @@ impl TypeChecker {
 
         // Union-typed receiver: check selector on ALL members, warn if any lacks it.
         // Return type is the union of member return types.
-        if let InferredType::Union(ref members) = receiver_ty {
+        if let InferredType::Union { ref members, .. } = receiver_ty {
             return self.infer_union_message_send(members, &selector_name, span, hierarchy);
         }
 
@@ -814,31 +814,32 @@ impl TypeChecker {
     /// (simplified to a single type if all agree).
     fn infer_union_message_send(
         &mut self,
-        members: &[EcoString],
+        members: &[InferredType],
         selector: &str,
         span: Span,
         hierarchy: &ClassHierarchy,
     ) -> InferredType {
-        let mut missing_members: Vec<&EcoString> = Vec::new();
+        let mut missing_names: Vec<EcoString> = Vec::new();
         let mut return_types: Vec<InferredType> = Vec::new();
 
         for member in members {
-            if !hierarchy.has_class(member) {
-                // Unknown class in union — go Dynamic for this member
+            let Some(member_name) = member.as_known() else {
+                return_types.push(InferredType::Dynamic);
+                continue;
+            };
+            if !hierarchy.has_class(member_name) {
                 return_types.push(InferredType::Dynamic);
                 continue;
             }
-            if hierarchy.has_instance_dnu_override(member) {
-                // DNU override accepts any message
+            if hierarchy.has_instance_dnu_override(member_name) {
                 return_types.push(InferredType::Dynamic);
                 continue;
             }
-            if hierarchy.resolves_selector(member, selector) {
-                // Selector resolves — compute return type
-                if let Some(method) = hierarchy.find_method(member, selector) {
+            if hierarchy.resolves_selector(member_name, selector) {
+                if let Some(method) = hierarchy.find_method(member_name, selector) {
                     if let Some(ref ret_ty) = method.return_type {
                         let resolved = if ret_ty.as_str() == "Self" {
-                            member.clone()
+                            member_name.clone()
                         } else {
                             ret_ty.clone()
                         };
@@ -850,20 +851,23 @@ impl TypeChecker {
                     return_types.push(InferredType::Dynamic);
                 }
             } else {
-                missing_members.push(member);
-                // Still compute a Dynamic return for this member
+                missing_names.push(member_name.clone());
                 return_types.push(InferredType::Dynamic);
             }
         }
 
-        if !missing_members.is_empty() {
-            let union_display = members.join(" | ");
-            let missing_display: Vec<&str> = missing_members.iter().map(|m| m.as_str()).collect();
-            let is_nullable = missing_members
+        if !missing_names.is_empty() {
+            let member_names: Vec<String> = members
+                .iter()
+                .filter_map(|m| m.display_name().map(|n| n.to_string()))
+                .collect();
+            let union_display = member_names.join(" | ");
+            let missing_display: Vec<&str> = missing_names.iter().map(EcoString::as_str).collect();
+            let is_nullable = missing_names
                 .iter()
                 .any(|m| m.as_str() == "UndefinedObject");
 
-            let message = if missing_members.len() == 1 {
+            let message = if missing_names.len() == 1 {
                 format!(
                     "{} does not understand '{selector}' (in union {union_display})",
                     missing_display[0]
@@ -1153,16 +1157,25 @@ impl TypeChecker {
     /// to itself if it is non-nil.
     pub(super) fn non_nil_type(ty: &InferredType) -> InferredType {
         match ty {
-            InferredType::Union(members) => {
-                let non_nil: Vec<EcoString> = members
+            InferredType::Union {
+                members,
+                provenance,
+            } => {
+                let non_nil: Vec<InferredType> = members
                     .iter()
-                    .filter(|m| m.as_str() != "UndefinedObject")
+                    .filter(|m| {
+                        m.as_known()
+                            .is_none_or(|name| name.as_str() != "UndefinedObject")
+                    })
                     .cloned()
                     .collect();
                 match non_nil.len() {
                     0 => InferredType::Dynamic,
-                    1 => InferredType::known(non_nil.into_iter().next().unwrap()),
-                    _ => InferredType::Union(non_nil),
+                    1 => non_nil.into_iter().next().unwrap(),
+                    _ => InferredType::Union {
+                        members: non_nil,
+                        provenance: *provenance,
+                    },
                 }
             }
             // If the variable is not a union, narrowing away nil for a non-union
