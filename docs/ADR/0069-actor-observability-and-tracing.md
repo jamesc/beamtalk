@@ -688,8 +688,23 @@ This spike should be a single branch with ~100 lines of test code. If the teleme
 2. Add examples to the example corpus for MCP search
 3. Update ADR 0064 to cross-reference this ADR
 
+## Implementation Tracking
+
+**Epic:** BT-1600
+**Issues:**
+- BT-1601: Telemetry validation spike (S) — Phase 0
+- BT-1602: Trace store gen_server with lock-free storage (M) — Phase 1, blocked by BT-1601
+- BT-1603: Instrument actor send wrappers with telemetry (M) — Phase 2a, blocked by BT-1602
+- BT-1604: Propagated context across actor boundaries (M) — Phase 2b, blocked by BT-1603
+- BT-1605: Tracing.bt stdlib class and Erlang shim (M) — Phase 3, blocked by BT-1602, BT-1603
+- BT-1606: MCP tracing tools — lean surface (S) — Phase 4, blocked by BT-1605
+- BT-1607: Tracing documentation and examples (S) — Phase 5, blocked by BT-1605
+
+**Status:** Planned
+**Recommended start:** BT-1601 (validation spike, no dependencies)
+
 ## References
-- Related issues: BT-1429 (deferred from ADR 0064)
+- Related issues: BT-1429 (deferred from ADR 0064), BT-1600 (implementation epic)
 - Related ADRs: ADR 0064 (Runtime Logging Control — complementary), ADR 0065 (OTP Primitives — Actor/Server hierarchy), ADR 0043 (Sync-by-Default Messaging)
 - Code: `beamtalk_actor.erl` (sync_send, async_send, cast_send), `server.rs` (MCP tool pattern)
 - External: [beam-telemetry/telemetry](https://github.com/beam-telemetry/telemetry), [beam-telemetry/telemetry_poller](https://github.com/beam-telemetry/telemetry_poller), [opentelemetry_telemetry bridge](https://github.com/open-telemetry/opentelemetry-erlang-contrib)
