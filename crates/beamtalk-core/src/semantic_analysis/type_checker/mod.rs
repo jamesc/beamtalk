@@ -3759,4 +3759,345 @@ Base subclass: Child
     fn eco_string(s: &str) -> ecow::EcoString {
         ecow::EcoString::from(s)
     }
+
+    // ---- BT-1570: Generic substitution tests ----
+
+    /// Build a `GenResult(T, E)` class in the hierarchy for generic tests.
+    ///
+    /// Uses `GenResult` instead of `Result` to avoid collision with the
+    /// builtin `Result` class (which has no `type_params`).
+    fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+
+        let result_info = ClassInfo {
+            name: eco_string("GenResult"),
+            superclass: Some(eco_string("Value")),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            is_native: false,
+            state: vec![eco_string("okValue"), eco_string("errReason")],
+            state_types: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(eco_string("okValue"), eco_string("T"));
+                m.insert(eco_string("errReason"), eco_string("E"));
+                m
+            },
+            methods: vec![
+                MethodInfo {
+                    selector: eco_string("unwrap"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("T")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("error"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("E")),
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("map:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("GenResult(R, E)")),
+                    param_types: vec![Some(eco_string("Block(T, R)"))],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("isOk"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Boolean")),
+                    param_types: vec![],
+                    doc: None,
+                },
+            ],
+            class_methods: vec![
+                MethodInfo {
+                    selector: eco_string("ok:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Self")),
+                    param_types: vec![Some(eco_string("T"))],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: eco_string("error:"),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: eco_string("GenResult"),
+                    is_sealed: true,
+                    spawns_block: false,
+                    return_type: Some(eco_string("Self")),
+                    param_types: vec![Some(eco_string("E"))],
+                    doc: None,
+                },
+            ],
+            class_variables: vec![],
+            type_params: vec![eco_string("T"), eco_string("E")],
+        };
+
+        hierarchy.add_from_beam_meta(vec![result_info]);
+    }
+
+    /// BT-1570: Substitution map built from `GenResult(Integer, IOError)`.
+    /// `unwrap` returns `T` → `Integer`.
+    #[test]
+    fn generic_substitution_unwrap_returns_concrete_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Integer"),
+            "unwrap on GenResult(Integer, IOError) should return Integer, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1570: `error` returns `E` → `IOError`.
+    #[test]
+    fn generic_substitution_error_returns_concrete_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("error".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("IOError"),
+            "error on GenResult(Integer, IOError) should return IOError, got: {result_ty:?}"
+        );
+    }
+
+    /// BT-1570: Non-generic return type (`isOk` -> `Boolean`) is unaffected.
+    #[test]
+    fn generic_substitution_non_generic_return_unchanged() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        );
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("isOk".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        assert_eq!(
+            result_ty.as_known().map(EcoString::as_str),
+            Some("Boolean"),
+            "isOk on GenResult should return Boolean regardless of type args"
+        );
+    }
+
+    /// BT-1570: No `type_args` on receiver falls back to unsubstituted return.
+    #[test]
+    fn generic_no_type_args_returns_unsubstituted() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        // Set r to bare GenResult (no type_args) — unparameterized
+        env.set("r", InferredType::known("GenResult"));
+
+        let result_ty = checker.infer_expr(
+            &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
+            &hierarchy,
+            &mut env,
+            false,
+        );
+
+        // Without type_args, the return type "T" is returned as-is (known("T")).
+        // It won't produce false-positive warnings because "T" is unknown to
+        // the hierarchy, so all type compatibility checks return true.
+        assert!(
+            result_ty.as_known().map(EcoString::as_str) != Some("Integer"),
+            "unwrap on bare GenResult (no type_args) should NOT return Integer"
+        );
+    }
+
+    /// BT-1570: `set_param_types` handles generic annotations.
+    #[test]
+    fn set_param_types_resolves_generic_annotation() {
+        // Parameter annotated as :: Result(Integer, Error) should be Known("Result")
+        // with type_args
+        let params = vec![ParameterDefinition {
+            name: ident("r"),
+            type_annotation: Some(TypeAnnotation::Generic {
+                base: ident("Result"),
+                parameters: vec![
+                    TypeAnnotation::Simple(ident("Integer")),
+                    TypeAnnotation::Simple(ident("Error")),
+                ],
+                span: span(),
+            }),
+        }];
+
+        let mut env = TypeEnv::new();
+        TypeChecker::set_param_types(&mut env, &params);
+
+        let r_type = env.get("r").expect("r should be in env");
+        match r_type {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                assert_eq!(class_name.as_str(), "Result");
+                assert_eq!(type_args.len(), 2);
+                assert_eq!(
+                    type_args[0].as_known().map(EcoString::as_str),
+                    Some("Integer")
+                );
+                assert_eq!(
+                    type_args[1].as_known().map(EcoString::as_str),
+                    Some("Error")
+                );
+            }
+            other => panic!("Expected Known type with type_args, got: {other:?}"),
+        }
+    }
+
+    /// BT-1570: Generic return type check extracts base type for compatibility.
+    #[test]
+    fn check_return_type_handles_generic_declared_type() {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        add_generic_result_class(&mut hierarchy);
+
+        // Method declares -> GenResult(Integer, Error), body returns GenResult
+        let method = MethodDefinition {
+            selector: MessageSelector::Unary("compute".into()),
+            parameters: vec![],
+            body: vec![bare(int_lit(42))], // placeholder body
+            return_type: Some(TypeAnnotation::Generic {
+                base: ident("GenResult"),
+                parameters: vec![
+                    TypeAnnotation::Simple(ident("Integer")),
+                    TypeAnnotation::Simple(ident("Error")),
+                ],
+                span: span(),
+            }),
+            kind: MethodKind::Primary,
+            is_sealed: false,
+            span: span(),
+            doc_comment: None,
+            comments: CommentAttachment::default(),
+        };
+
+        let body_type = InferredType::known("GenResult");
+        let mut checker = TypeChecker::new();
+        checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+
+        // Should NOT warn: GenResult is compatible with declared GenResult(Integer, Error)
+        let type_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("return type"))
+            .collect();
+        assert!(
+            type_warnings.is_empty(),
+            "GenResult body should be compatible with GenResult(Integer, Error) return type, got: {type_warnings:?}"
+        );
+    }
+
+    /// BT-1570: `is_assignable_to` handles generic declared types structurally.
+    #[test]
+    fn is_assignable_to_generic_declared_type() {
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Result is assignable to Result(Integer, Error) — base type matches
+        assert!(
+            TypeChecker::is_assignable_to(
+                &eco_string("Result"),
+                &eco_string("Result(Integer, Error)"),
+                &hierarchy,
+            ),
+            "Result should be assignable to Result(Integer, Error)"
+        );
+
+        // Integer is NOT assignable to Result(Integer, Error) — base types differ
+        assert!(
+            !TypeChecker::is_assignable_to(
+                &eco_string("Integer"),
+                &eco_string("Result(Integer, Error)"),
+                &hierarchy,
+            ),
+            "Integer should NOT be assignable to Result(Integer, Error)"
+        );
+    }
 }
