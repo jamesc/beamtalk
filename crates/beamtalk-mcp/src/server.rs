@@ -828,6 +828,7 @@ impl BeamtalkMcp {
         Parameters(params): Parameters<UnloadParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("unload");
+        validate_class_name(&params.class)?;
         tracing::debug!(tool = "unload", class = %params.class, "tool invoked");
         let response = self
             .client
