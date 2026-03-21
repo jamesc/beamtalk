@@ -374,23 +374,27 @@ topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->
 %% Per-file errors are returned as structured maps with path, kind, and message
 %% so callers can handle partial failures programmatically.
 %%
-%% BT-1543: Class indexes are built once before the batch and threaded through
-%% to each compilation, avoiding N redundant scans of the class registry.
+%% BT-1608: Class indexes are rebuilt after each successful file load so that
+%% later files in the batch can reference classes loaded earlier (e.g. test
+%% files referencing fixture classes). The original BT-1543 optimisation of
+%% building indexes once caused "Undefined function" errors when test files
+%% were compiled before their fixture dependencies were visible in the index.
 -spec load_files_sequential([string()], pid()) -> {[map()], [map()]}.
 load_files_sequential(Files, SessionPid) ->
-    PrebuiltIndexes = beamtalk_repl_compiler:build_class_indexes(),
-    {RevClasses, RevErrors} =
+    Indexes0 = beamtalk_repl_compiler:build_class_indexes(),
+    {RevClasses, RevErrors, _} =
         lists:foldl(
-            fun(Path, {ClassesAcc, ErrorsAcc}) ->
-                case beamtalk_repl_shell:load_file(SessionPid, Path, PrebuiltIndexes) of
+            fun(Path, {ClassesAcc, ErrorsAcc, Indexes}) ->
+                case beamtalk_repl_shell:load_file(SessionPid, Path, Indexes) of
                     {ok, Classes} ->
-                        {lists:reverse(Classes, ClassesAcc), ErrorsAcc};
+                        NewIndexes = beamtalk_repl_compiler:build_class_indexes(),
+                        {lists:reverse(Classes, ClassesAcc), ErrorsAcc, NewIndexes};
                     {error, Reason} ->
                         ErrMaps = structured_file_errors(Path, Reason),
-                        {ClassesAcc, lists:reverse(ErrMaps, ErrorsAcc)}
+                        {ClassesAcc, lists:reverse(ErrMaps, ErrorsAcc), Indexes}
                 end
             end,
-            {[], []},
+            {[], [], Indexes0},
             Files
         ),
     {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
