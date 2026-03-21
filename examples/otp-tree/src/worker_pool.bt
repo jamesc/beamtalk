@@ -6,7 +6,7 @@
 // Each worker is supervised independently: a crash in one worker does not
 // affect the others or the rest of the tree.
 
-DynamicSupervisor subclass: WorkerPool
+DynamicSupervisor(TaskWorker) subclass: WorkerPool
 
   class supervisionPolicy -> Symbol => #permanent
 

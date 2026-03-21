@@ -3,7 +3,7 @@
 
 // BT-1222: Concrete DynamicSupervisor subclass with overridden config — fixture for dynamic_supervisor_defaults_test.bt
 
-DynamicSupervisor subclass: TestDynamicSupervisorCustom
+DynamicSupervisor(Counter) subclass: TestDynamicSupervisorCustom
 
   class childClass => Counter
 
