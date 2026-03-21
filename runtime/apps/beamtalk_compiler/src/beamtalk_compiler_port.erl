@@ -60,6 +60,7 @@ open(BinaryPath) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
+    | {ok, protocol_definition, map()}
     | {error, [map()]}.
 compile_expression(Port, Source, ModuleName, KnownVars) ->
     compile_expression(Port, Source, ModuleName, KnownVars, #{}).
@@ -77,6 +78,7 @@ compile_expression(Port, Source, ModuleName, KnownVars) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
+    | {ok, protocol_definition, map()}
     | {error, [map()]}.
 compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
     SuperclassIndex = maps:get(class_superclass_index, Options, #{}),
@@ -284,6 +286,7 @@ close(Port) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
+    | {ok, protocol_definition, map()}
     | {error, [map()]}.
 handle_response(
     #{
@@ -325,6 +328,17 @@ handle_response(#{
         selector => Selector,
         is_class_method => IsClassMethod,
         method_source => MethodSource,
+        warnings => Warnings
+    }};
+%% BT-1612: Protocol definition response — pass protocol metadata through.
+handle_response(#{
+    status := ok,
+    kind := protocol_definition,
+    protocols := Protocols,
+    warnings := Warnings
+}) ->
+    {ok, protocol_definition, #{
+        protocols => Protocols,
         warnings => Warnings
     }};
 handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings}) ->

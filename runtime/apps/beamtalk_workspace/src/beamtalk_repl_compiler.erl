@@ -51,6 +51,7 @@
     {ok, binary(), term(), [binary()]}
     | {ok, class_definition, map(), [binary()]}
     | {ok, method_definition, map(), [binary()]}
+    | {ok, protocol_definition, map(), [binary()]}
     | {error, term()}.
 compile_expression(Expression, ModuleName, Bindings) ->
     compile_expression_via_port(Expression, ModuleName, Bindings).
@@ -117,6 +118,10 @@ compile_for_codegen(SourceBin, ModNameBin, KnownVars) ->
                     {error,
                         {compile_error,
                             <<"show-codegen does not support standalone method definitions">>}};
+                %% BT-1612: Protocol definitions have no Core Erlang to show.
+                {ok, protocol_definition, _ProtocolInfo} ->
+                    {error,
+                        {compile_error, <<"show-codegen does not support protocol definitions">>}};
                 {ok, CoreErlang, Warnings} ->
                     {ok, CoreErlang, Warnings};
                 {error, Diagnostics} ->
@@ -301,6 +306,10 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
                             [class_name, selector, is_class_method, method_source], MethodInfo
                         ),
                         Warnings};
+                %% BT-1612: Protocol definition — pass through for direct registration.
+                {ok, protocol_definition, ProtocolInfo} ->
+                    Warnings = maps:get(warnings, ProtocolInfo, []),
+                    {ok, protocol_definition, maps:with([protocols], ProtocolInfo), Warnings};
                 {ok, CoreErlang, Warnings} ->
                     compile_standard_expression(CoreErlang, Warnings);
                 {error, Diagnostics} ->

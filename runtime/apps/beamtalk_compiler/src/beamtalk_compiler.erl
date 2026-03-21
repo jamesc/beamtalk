@@ -44,6 +44,7 @@
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
+    | {ok, protocol_definition, map()}
     | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars).
@@ -56,6 +57,7 @@ compile_expression(Source, ModuleName, KnownVars) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
+    | {ok, protocol_definition, map()}
     | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars, Options).

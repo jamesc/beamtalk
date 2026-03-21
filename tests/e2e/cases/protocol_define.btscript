@@ -1,0 +1,67 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Protocol define: declarations in the REPL (BT-1612)
+//
+// Verifies that protocol definitions can be entered interactively and
+// that the protocol registry is updated immediately.
+
+// ===========================================================================
+// BASIC PROTOCOL DEFINITION
+// ===========================================================================
+
+// Define a simple protocol with one required method
+Protocol define: Greetable
+  greet -> String
+// => Protocol Greetable defined
+
+// Verify the protocol was registered
+Protocol isProtocol: #Greetable
+// => true
+
+// Verify required methods
+Protocol requiredMethods: #Greetable
+// => [#greet]
+
+// ===========================================================================
+// PROTOCOL WITH MULTIPLE METHODS
+// ===========================================================================
+
+Protocol define: Serializable
+  serialize -> String
+  deserialize: data :: String -> Self
+// => Protocol Serializable defined
+
+Protocol isProtocol: #Serializable
+// => true
+
+// ===========================================================================
+// PROTOCOL WITH TYPE PARAMETERS
+// ===========================================================================
+
+Protocol define: Container(E)
+  contents -> E
+  put: item :: E
+// => Protocol Container defined
+
+Protocol isProtocol: #Container
+// => true
+
+// ===========================================================================
+// PROTOCOL WITH EXTENDING
+// ===========================================================================
+
+Protocol define: PrettyPrintable
+  extending: Greetable
+  prettyPrint -> String
+// => Protocol PrettyPrintable defined
+
+Protocol isProtocol: #PrettyPrintable
+// => true
+
+// ===========================================================================
+// UNKNOWN PROTOCOL RETURNS FALSE
+// ===========================================================================
+
+Protocol isProtocol: #NotAProtocol
+// => false
