@@ -31,11 +31,12 @@ TestCase subclass: BinaryTest
 
   testSerializeProducesBinary =>
     bin := Binary serialize: 42
-    self assert: (Binary size: bin) > 0
+    sz := bin byteSize
+    self assert: sz > 0
 
-  testSizeOfString => self assert: (Binary size: "hello") equals: 5
+  testByteSizeOfString => self assert: "hello" byteSize equals: 5
 
-  testSizeOfEmptyString => self assert: (Binary size: "") equals: 0
+  testByteSizeOfEmptyString => self assert: "" byteSize equals: 0
 
   testFromIolist =>
     result := Binary fromIolist: #("hello", " ", "world")
@@ -47,8 +48,6 @@ TestCase subclass: BinaryTest
 
   testDeserializeTypeError =>
     self should: [Binary deserialize: 42] raise: #type_error
-
-  testSizeTypeError => self should: [Binary size: 42] raise: #type_error
 
   testClassIdentity =>
     // BT-802 (ADR 0036): class on class returns a real metaclass object
