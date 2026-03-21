@@ -1104,6 +1104,10 @@ mod tests {
         }
     }
 
+    /// Maximum number of REPL startup attempts before giving up.
+    /// Retries handle transient failures like resource exhaustion in CI.
+    const MAX_REPL_STARTUP_ATTEMPTS: usize = 3;
+
     /// Auto-started REPL workspace for integration tests.
     ///
     /// Uses the same startup path as `beamtalk-mcp --start`: runs
@@ -1112,10 +1116,39 @@ mod tests {
     /// `workspace::parse_workspace_id`), then reads the cookie from workspace
     /// storage. The workspace is stopped on `Drop`.
     ///
+    /// Retries up to `MAX_REPL_STARTUP_ATTEMPTS` times to handle transient
+    /// failures (e.g. resource exhaustion in CI causing the REPL to crash on
+    /// startup — see BT-1599).
+    ///
     /// These tests are `#[ignore]` so they only run via `just test-mcp`
     /// (single-threaded with `--test-threads=1`), not in the regular parallel
     /// `just test` pass.
     static REPL: LazyLock<Result<ReplWorkspace, String>> = LazyLock::new(|| {
+        let mut last_err = String::new();
+        for attempt in 1..=MAX_REPL_STARTUP_ATTEMPTS {
+            match try_start_repl(attempt) {
+                Ok(ws) => return Ok(ws),
+                Err(e) => {
+                    eprintln!(
+                        "MCP tests: REPL startup attempt {attempt}/{MAX_REPL_STARTUP_ATTEMPTS} \
+                         failed: {e}"
+                    );
+                    last_err = e;
+                    if attempt < MAX_REPL_STARTUP_ATTEMPTS {
+                        // Brief pause before retry to let resources settle
+                        std::thread::sleep(Duration::from_secs(2));
+                    }
+                }
+            }
+        }
+        Err(format!(
+            "REPL failed to start after {MAX_REPL_STARTUP_ATTEMPTS} attempts. Last error: {last_err}"
+        ))
+    });
+
+    /// Single attempt to start the REPL workspace. Extracted from the
+    /// `LazyLock` initializer so retry logic can call it in a loop.
+    fn try_start_repl(attempt: usize) -> Result<ReplWorkspace, String> {
         let bin_name = format!("beamtalk{}", std::env::consts::EXE_SUFFIX);
         let bin = find_binary(&bin_name).ok_or_else(|| {
             format!("Could not find target/debug/{bin_name} — run `cargo build` first")
@@ -1126,22 +1159,27 @@ mod tests {
         // --timeout 300: short idle timeout (5 min) so the workspace dies quickly
         // after the test binary exits, rather than lingering for the default 4h.
         //
-        // Stdout is redirected to a temp file instead of piped. On Windows,
-        // piping creates a handle that the BEAM node inherits; a background
-        // reader thread then blocks forever on the pipe (the BEAM never closes
-        // its copy), preventing the test binary from exiting. A temp file
-        // avoids this: the CLI writes to the file, we poll-read it, and
-        // there's no long-lived thread.
+        // Stdout and stderr are redirected to temp files instead of piped. On
+        // Windows, piping creates a handle that the BEAM node inherits; a
+        // background reader thread then blocks forever on the pipe (the BEAM
+        // never closes its copy), preventing the test binary from exiting.
+        // A temp file avoids this: the CLI writes to the file, we poll-read
+        // it, and there's no long-lived thread.
+        let pid = std::process::id();
         let stdout_file =
-            std::env::temp_dir().join(format!("beamtalk-mcp-test-{}.stdout", std::process::id()));
+            std::env::temp_dir().join(format!("beamtalk-mcp-test-{pid}-{attempt}.stdout"));
+        let stderr_file =
+            std::env::temp_dir().join(format!("beamtalk-mcp-test-{pid}-{attempt}.stderr"));
         let stdout_writer = std::fs::File::create(&stdout_file)
             .map_err(|e| format!("Failed to create stdout temp file: {e}"))?;
+        let stderr_writer = std::fs::File::create(&stderr_file)
+            .map_err(|e| format!("Failed to create stderr temp file: {e}"))?;
 
-        let child = Command::new(&bin)
+        let mut child = Command::new(&bin)
             .args(["repl", "--port", "0", "--timeout", "300"])
             .stdin(Stdio::null())
             .stdout(stdout_writer)
-            .stderr(Stdio::null())
+            .stderr(stderr_writer)
             .spawn()
             .map_err(|e| format!("Failed to start REPL at {}: {e}", bin.display()))?;
 
@@ -1153,6 +1191,26 @@ mod tests {
         let mut last_line_count = 0;
 
         while std::time::Instant::now() < deadline {
+            // Check if the child process exited early (crash / resource error)
+            if let Ok(Some(status)) = child.try_wait() {
+                // Process already exited — collect remaining output and fail
+                if let Ok(content) = std::fs::read_to_string(&stdout_file) {
+                    for line in content.lines().skip(last_line_count) {
+                        stdout_lines.push(line.to_string());
+                    }
+                }
+                let stdout = stdout_lines.join("\n");
+                let stderr = std::fs::read_to_string(&stderr_file).unwrap_or_default();
+                let _ = std::fs::remove_file(&stdout_file);
+                let _ = std::fs::remove_file(&stderr_file);
+                return Err(format!(
+                    "REPL process exited before reporting port.\n\
+                     exit status: {status}\n\
+                     stdout: {stdout}\n\
+                     stderr: {stderr}"
+                ));
+            }
+
             // Re-read the file to get new lines
             if let Ok(content) = std::fs::read_to_string(&stdout_file) {
                 let lines: Vec<&str> = content.lines().collect();
@@ -1173,8 +1231,12 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
         }
 
-        // Clean up temp file (best-effort)
+        // Read stderr for diagnostics (best-effort)
+        let stderr = std::fs::read_to_string(&stderr_file).unwrap_or_default();
+
+        // Clean up temp files (best-effort)
         let _ = std::fs::remove_file(&stdout_file);
+        let _ = std::fs::remove_file(&stderr_file);
 
         // Don't wait for the CLI process — the workspace BEAM node is
         // independent. On Windows, dropping without wait() is fine.
@@ -1182,7 +1244,11 @@ mod tests {
 
         let stdout = stdout_lines.join("\n");
         let port = workspace::parse_repl_port(&stdout).ok_or_else(|| {
-            format!("REPL did not report port.\nstdout: {stdout}\nexit: unknown (detached)")
+            format!(
+                "REPL did not report port.\n\
+                 stdout: {stdout}\n\
+                 stderr: {stderr}"
+            )
         })?;
 
         let workspace_id = workspace::parse_workspace_id(&stdout);
@@ -1218,7 +1284,7 @@ mod tests {
         Err(format!(
             "REPL reported port {port} but TCP connect failed after {timeout_ms}ms"
         ))
-    });
+    }
 
     /// Get the port and cookie of the shared REPL, starting it if needed.
     fn test_port_and_cookie() -> Result<(u16, String), String> {
