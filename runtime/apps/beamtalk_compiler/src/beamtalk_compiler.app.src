@@ -1,6 +1,6 @@
 {application, beamtalk_compiler, [
     {description, "Beamtalk Compiler - Anti-Corruption Layer to Rust compiler (ADR 0022)"},
-    {vsn, "0.1.0"},
+    {vsn, {cmd, "escript ../../../scripts/version.escript"}},
     {mod, {beamtalk_compiler_app, []}},
     {modules, []},
     {registered, [beamtalk_compiler_sup, beamtalk_compiler_server]},

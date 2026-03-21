@@ -1,6 +1,6 @@
 {application, beamtalk_workspace, [
     {description, "Beamtalk workspace and interactive development environment"},
-    {vsn, "0.1.0"},
+    {vsn, {cmd, "escript ../../../scripts/version.escript"}},
     {modules, []},
     {registered, []},
     {applications, [kernel, stdlib, crypto, cowboy, beamtalk_runtime, sasl, beamtalk_stdlib]},

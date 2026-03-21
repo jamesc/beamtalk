@@ -1165,7 +1165,7 @@ fn handle_diagnostics(request: &Map) -> Term {
 
 /// Handle a `version` request.
 fn handle_version() -> Term {
-    let version = env!("CARGO_PKG_VERSION");
+    let version = env!("BEAMTALK_VERSION");
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("version"), binary(version)),
