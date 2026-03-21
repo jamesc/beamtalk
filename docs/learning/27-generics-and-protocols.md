@@ -5,11 +5,8 @@ Beamtalk's type system goes beyond simple annotations with two powerful features
 **structural protocols** for formalizing duck-typing contracts. Both are
 compile-time only — zero runtime cost.
 
-> **Status:** This chapter documents the design from
-> [ADR 0068](../ADR/0068-parametric-types-and-protocols.md). These features are
-> being implemented incrementally. Code examples show the target syntax and
-> semantics. See the [implementation tracking](../ADR/0068-parametric-types-and-protocols.md#implementation)
-> section for current progress.
+> **Status:** v0.3.0 — fully implemented. See
+> [ADR 0068](../ADR/0068-parametric-types-and-protocols.md) for design rationale.
 
 ## Why generics?
 

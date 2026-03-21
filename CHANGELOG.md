@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.3.0 — 2026-03-21
+
+### Language
+
+- **Parametric types (generics)** — classes can declare type parameters (`Value subclass: Stack(T)`), with full type checker substitution, constructor inference, and generic inheritance via superclass type application ([ADR 0068](docs/ADR/0068-parametric-types-and-protocols.md))
+- **Protocols** — `Protocol` declarations with class-body syntax, protocol registry with conformance checking, runtime queries (`conformsTo:`, `protocols`), variance for protocol-typed parameters, and type parameter bounds (`T :: Printable`) ([ADR 0068](docs/ADR/0068-parametric-types-and-protocols.md))
+- **Union types** — `T | U` syntax with exhaustive type checking and provenance tracking
+- **Control flow narrowing** — `class =`, `isKindOf:`, `isNil`, and `respondsTo:` narrow types in `ifTrue:`/`ifFalse:` branches
+- **String is now a subclass of Binary** — String inherits Binary's byte-level methods; Binary moved under Collection hierarchy ([ADR 0069](docs/ADR/0069-string-subclass-of-binary.md))
+- **DynamicSupervisor type parameter** — `startChild` return type narrows based on the supervisor's declared child type
+
+### Standard Library
+
+- **Protocol** — new stdlib class wrapping the runtime protocol registry
+- **Binary** — expanded with instance methods: `size`, `serialize:`, `deserialize:`, `fromIolist:`, `at:`, `slice:length:`, `toList`, and more
+- Stdlib generic annotations added to `Result`, `Array`, `Dictionary`, and `Set`
+
+### Compiler
+
+- **Generic type substitution** — type checker resolves type arguments through method calls, field access, and constructor patterns
+- **Dialyzer spec generation** — generic types emit proper `-spec` attributes; CI validates generated specs
+- **Codegen runtime metadata** — generic type information preserved at runtime for reflection
+- **Union type provenance** — `InferredType::Union` unified to `Vec<InferredType>` members with source tracking
+- **Fix false type warnings** for generic field defaults
+
+### Tooling
+
+- **MCP** — removed `:modules` command; purged "module" terminology in favour of "class" throughout
+- **Single-source versioning** — `VERSION` file at repo root with automatic dev suffix from git state
+- **Nightly builds** — distribution builds and `install.sh --nightly` support
+- **MCP load_project** — rebuild class indexes after each file load, fixing test fixture resolution (BT-1608)
+
+### Documentation
+
+- ADR 0068: Parametric Types and Protocols (updated)
+- ADR 0069: Actor Observability and Tracing (BT-1429)
+- ADR 0069: Make String a subclass of Binary
+- Learning guide 27: Generics and Protocols
+
+### Internal
+
+- Fix flaky CI: WebSocket health check with exponential backoff (BT-1598)
+- Fix broken streamlinear-cli installation in cloud and devcontainer
+- Binary instance method tests and `Binary size:` migration (BT-1594)
+- String method audit verifying Binary inheritance (BT-1595)
+
 ## 0.2.0 — 2026-03-20
 
 ### Language

@@ -1400,7 +1400,7 @@
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "Beamtalk version\n// => \"0.2.0\"\n\nBeamtalk allClasses includes: #Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\n(Beamtalk globals) at: #Integer\n// => Integer\n\n(Beamtalk help: Integer)\n// => \"== Integer < Number ==\\n...\"\n\n(Beamtalk help: Integer selector: #+)\n// => \"Integer >> +\\n...\"",
+      "source": "Beamtalk version\n// => \"0.3.0\"\n\nBeamtalk allClasses includes: #Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\n(Beamtalk globals) at: #Integer\n// => Integer\n\n(Beamtalk help: Integer)\n// => \"== Integer < Number ==\\n...\"\n\n(Beamtalk help: Integer selector: #+)\n// => \"Integer >> +\\n...\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {

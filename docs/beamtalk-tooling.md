@@ -56,7 +56,7 @@ Two global objects provide introspection and project operations:
 
 **`Beamtalk`** — system reflection:
 ```beamtalk
-Beamtalk version             // => "0.2.0"
+Beamtalk version             // => "0.3.0"
 Beamtalk allClasses          // All registered class names
 Beamtalk classNamed: #Counter // Look up a class by name
 Beamtalk globals             // Snapshot of system namespace

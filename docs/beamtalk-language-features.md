@@ -2,7 +2,7 @@
 
 Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy and [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) for syntax design decisions.
 
-**Status:** v0.2.0 — implemented features are stable; planned sections (generics, protocols, unions, narrowing) are marked inline. See [ADR 0068](ADR/0068-parametric-types-and-protocols.md) for the full design.
+**Status:** v0.3.0 — implemented features are stable, including generics, protocols, union types, and control flow narrowing. See [ADR 0068](ADR/0068-parametric-types-and-protocols.md) for the type system design.
 
 **Syntax note:** Beamtalk uses a modernised Smalltalk syntax: `//` comments (not `"..."`), standard math precedence (not left-to-right), and optional statement terminators (newlines work).
 
@@ -1826,7 +1826,7 @@ Analogous to Pharo's `Smalltalk` image facade.
 
 ```beamtalk
 Beamtalk version
-// => "0.2.0"
+// => "0.3.0"
 
 Beamtalk allClasses includes: #Integer
 // => true
@@ -2029,10 +2029,9 @@ Integer subclass: SafeInteger
 ```
 
 
-### v0.2 plan
+### Namespace
 
-A `import`/module system is planned for v0.2. Until then, class names must be
-globally unique. See [known-limitations.md](known-limitations.md) and
+Class names must be globally unique. A module/import system is planned for a future release. See [known-limitations.md](known-limitations.md) and
 [ADR 0031](ADR/0031-flat-namespace-for-v01.md) for details.
 
 ---
