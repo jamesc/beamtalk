@@ -453,14 +453,14 @@ Pony's runtime supports a **flight recorder** mode: a circular in-memory buffer 
 **What we learn:** Our ring buffer design is essentially a flight recorder. The Pony model of "always capturing, only materializing on demand" aligns with our approach of always-on aggregates + opt-in trace capture.
 
 ### BEAM Telemetry Ecosystem — In-Memory Storage
-No general-purpose "queryable in-memory telemetry store" exists for BEAM in pure Erlang. The ecosystem is optimized for emission and export, not local querying. Relevant prior art:
+The pattern of "telemetry handler → ETS store → query API" is standard on BEAM — every application that needs local metrics does it, typically in ~20-30 lines. No one packages it as a general-purpose library because the query API is always application-specific. Several projects demonstrate the pattern:
 
-- **`Mobius`** (Elixir, [github.com/mattludwigs/mobius](https://github.com/mattludwigs/mobius)) — The closest to what we're building. ETS circular buffer with `Mobius.query/1` for historical metric retrieval. Designed for Nerves (resource-constrained devices). Elixir-only.
-- **`peep`** (Elixir, [github.com/rkallos/peep](https://github.com/rkallos/peep)) — High-performance `telemetry_metrics` reporter using `atomics`/`persistent_term`. Validates our `counters`-based approach for lock-free aggregation. Elixir-only.
-- **`telemetry_metrics_prometheus_core`** (Erlang) — Stores aggregated metrics in ETS for Prometheus scraping. Pure Erlang but only queryable via Prometheus text format, not ad-hoc queries.
-- **Phoenix LiveDashboard** — Stores recent data points in a GenServer's process state (small circular buffer) for real-time charting. Not designed for historical queries.
+- **`Mobius`** (Elixir, [github.com/mattludwigs/mobius](https://github.com/mattludwigs/mobius)) — ETS circular buffer with `Mobius.query/1` for historical metric retrieval. Designed for Nerves (resource-constrained devices). The closest analogue to our design — same pattern, different data model.
+- **`peep`** (Elixir, [github.com/rkallos/peep](https://github.com/rkallos/peep)) — High-performance `telemetry_metrics` reporter using `atomics`/`persistent_term`. Validates our `counters`-based approach for lock-free aggregation.
+- **`telemetry_metrics_prometheus_core`** (Erlang) — Stores aggregated metrics in ETS for Prometheus scraping. Pure Erlang, same handler-to-ETS pattern.
+- **Phoenix LiveDashboard** — Stores recent data points in a GenServer's process state (small circular buffer) for real-time charting.
 
-**What we learn:** Our requirement for a queryable in-memory store (for REPL + MCP) is unique in the BEAM ecosystem — it's the gap between "emit events" (telemetry) and "export to dashboard" (LiveDashboard, Prometheus). We must build the store; the question was only which plumbing sits between event and store. `peep`'s success with `atomics`/`counters` validates our lock-free aggregate design.
+**What we learn:** The storage pattern is well-established on BEAM. What's specific to Beamtalk is the data model (actor-scoped traces + per-method aggregates), the query API (`slowMethods:`, `bottlenecks:`), and the Beamtalk class wrapping it for REPL + MCP consumption. `peep`'s success with `atomics`/`counters` validates our lock-free aggregate design.
 
 ## User Impact
 
