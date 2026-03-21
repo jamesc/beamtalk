@@ -153,7 +153,7 @@ String overrides `at:` and `size` with grapheme semantics. All other Binary meth
 
 // Collection protocol — String iterates graphemes, Binary iterates bytes
 "hello" do: [:g | g]         // g is "h", "e", "l", "l", "o" (grapheme strings)
-"hello" collect: [:g | g]    // => #("h", "e", "l", "l", "o")
+"hello" collect: [:g | g]    // => ("h", "e", "l", "l", "o") — a List of grapheme strings
 
 // Slicing — Binary's part:size: works on bytes
 "hello" part: 0 size: 3  // => Binary (raw bytes, not String)
@@ -189,7 +189,7 @@ When String inherits Binary methods, return types need attention:
 
 - **`concat:`** on Binary returns `Binary`. String inherits this unchanged. For string concatenation, users should continue using `++` (which returns String). `"hello" concat: "world"` returns a Binary — this is the byte-level operation. `"hello" ++ "world"` returns a String — this is the text-level operation.
 
-- **`collect:`** (from Collection) returns a `List` of byte integers when called on Binary, and a `List` of single-grapheme Strings when called on String. (String overrides `collect:` to return a `String` — Binary could do the same for byte-preserving transforms, but the default List behavior is acceptable for v1.)
+- **`collect:`** (from Collection) returns a `List` of byte integers when called on Binary, and a `List` of single-grapheme Strings when called on String. Both use the default Collection implementation that returns a List. (A future enhancement could override `collect:` on String to return a String and on Binary to return a Binary — matching how List, Array, and Set override `collect:` to return their own type — but the default List behavior is acceptable for v1.)
 
 ### File I/O — no conversion needed
 
@@ -327,6 +327,7 @@ Rejected because String is already a Collection — if Binary is between Collect
 - Add class methods: `fromBytes:`
 - Implement Erlang runtime functions in `beamtalk_binary.erl`
 - Migrate `Binary size:` class method → `size` instance method (with deprecation on old class method)
+- **Collection method return types:** For v1, `select:`, `collect:`, and `reject:` on Binary and String use the default Collection implementations (returning List). Overriding these to return their own type (matching List/Array/Set) is deferred to a future enhancement — document this as a known deviation in `:help Binary`
 
 ### Phase 2: Serialization methods
 - Add `deserializeWithUsed:` class method
