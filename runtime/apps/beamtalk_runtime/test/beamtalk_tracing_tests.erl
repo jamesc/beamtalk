@@ -135,7 +135,7 @@ health_test_() ->
                     ?assert(maps:is_key(<<"status">>, Result)),
                     ?assert(maps:is_key(<<"queue_depth">>, Result)),
                     ?assert(maps:is_key(<<"memory_kb">>, Result)),
-                    ?assertNotEqual(<<"dead">>, maps:get(<<"status">>, Result))
+                    ?assertNotEqual(dead, maps:get(<<"status">>, Result))
                 end)},
             {"healthFor dead process returns dead status",
                 ?_test(begin
