@@ -1421,8 +1421,9 @@ handle_protocol_definition_success_test() ->
         {attribute, 2, export, [{register_class, 0}]},
         {function, 3, register_class, 0, [
             {clause, 3, [], [], [
-                {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, put}},
-                    [{atom, 3, '__bt_test_register_called'}, {atom, 3, true}]}
+                {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, put}}, [
+                    {atom, 3, '__bt_test_register_called'}, {atom, 3, true}
+                ]}
             ]}
         ]}
     ],
