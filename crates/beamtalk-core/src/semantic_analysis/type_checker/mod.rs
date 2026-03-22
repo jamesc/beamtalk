@@ -6138,6 +6138,7 @@ Base subclass: Child
                 doc_comment: None,
                 span: span(),
             }],
+            class_method_signatures: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -6558,6 +6559,7 @@ Base subclass: Child
                     doc_comment: None,
                     span: span(),
                 }],
+                class_method_signatures: vec![],
                 comments: crate::ast::CommentAttachment::default(),
                 doc_comment: None,
                 span: span(),
@@ -6620,6 +6622,7 @@ Base subclass: Child
                     doc_comment: None,
                     span: span(),
                 }],
+                class_method_signatures: vec![],
                 comments: crate::ast::CommentAttachment::default(),
                 doc_comment: None,
                 span: span(),
@@ -6895,6 +6898,7 @@ Base subclass: Child
                 return_type: Some(eco_string("String")),
                 param_types: vec![],
             }],
+            class_methods: vec![],
             span: span(),
         };
         registry.register_test_protocol(printable);

@@ -64,3 +64,14 @@ TestCase subclass: ProtocolQueriesTest
     // Unknown protocol returns empty list
     classes := Protocol conformingClasses: #NonExistentProtocol
     self assert: classes size equals: 0
+
+  // --- BT-1611: Class method protocol tests ---
+  testCreatableIsProtocol =>
+    self assert: (Protocol isProtocol: #Creatable) equals: true
+
+  testRequiredMethodsCreatable =>
+    // Creatable has one class method requirement: `class create`
+    // Required methods returns class methods with "class " prefix
+    methods := Protocol requiredMethods: #Creatable
+    self assert: methods size equals: 1
+    self assert: (methods includes: #'class create') equals: true

@@ -518,8 +518,13 @@ pub struct ProtocolDefinition {
     ///
     /// Example: `extending: Comparable` in `Sortable`.
     pub extending: Option<Identifier>,
-    /// Required method signatures.
+    /// Required instance method signatures.
     pub method_signatures: Vec<ProtocolMethodSignature>,
+    /// Required class method signatures (BT-1611).
+    ///
+    /// Defined with the `class` prefix, e.g., `class fromString: aString :: String -> Self`.
+    /// Conforming classes must respond to these selectors on the class side.
+    pub class_method_signatures: Vec<ProtocolMethodSignature>,
     /// Non-doc comments (`//` and `/* */`) appearing before this protocol.
     pub comments: CommentAttachment,
     /// Doc comment attached to this protocol (`///` lines).

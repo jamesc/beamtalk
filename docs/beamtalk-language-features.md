@@ -976,6 +976,18 @@ Protocol define: Sortable
   sortKey -> Object
 ```
 
+### Class Method Requirements (BT-1611)
+
+Protocols can require class-side methods using the `class` prefix, the same syntax as class definitions:
+
+```beamtalk
+Protocol define: Serializable
+  asString -> String
+  class fromString: aString :: String -> Self
+```
+
+A class conforms to `Serializable` only if it has both the instance method `asString` and the class method `fromString:`. This is useful for factory methods, singleton patterns, and other class-level contracts.
+
 ### Type Parameter Bounds
 
 Type parameters can be bounded by protocols:

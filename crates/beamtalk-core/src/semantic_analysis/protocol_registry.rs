@@ -58,8 +58,10 @@ pub struct ProtocolInfo {
     pub type_param_bounds: Vec<Option<EcoString>>,
     /// Protocol this one extends, if any (e.g., `Comparable` for `Sortable`).
     pub extending: Option<EcoString>,
-    /// Required method signatures.
+    /// Required instance method signatures.
     pub methods: Vec<ProtocolMethodRequirement>,
+    /// Required class method signatures (BT-1611).
+    pub class_methods: Vec<ProtocolMethodRequirement>,
     /// Source span of the protocol definition (for diagnostics).
     pub span: Span,
 }
@@ -67,20 +69,19 @@ pub struct ProtocolInfo {
 impl ProtocolInfo {
     /// Build a `ProtocolInfo` from a parsed `ProtocolDefinition` AST node.
     fn from_definition(def: &ProtocolDefinition) -> Self {
-        let methods = def
-            .method_signatures
-            .iter()
-            .map(|sig| ProtocolMethodRequirement {
-                selector: sig.selector.name(),
-                arity: sig.selector.arity(),
-                return_type: sig.return_type.as_ref().map(TypeAnnotation::type_name),
-                param_types: sig
-                    .parameters
-                    .iter()
-                    .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
-                    .collect(),
-            })
-            .collect();
+        let make_req = |sig: &crate::ast::ProtocolMethodSignature| ProtocolMethodRequirement {
+            selector: sig.selector.name(),
+            arity: sig.selector.arity(),
+            return_type: sig.return_type.as_ref().map(TypeAnnotation::type_name),
+            param_types: sig
+                .parameters
+                .iter()
+                .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                .collect(),
+        };
+
+        let methods = def.method_signatures.iter().map(make_req).collect();
+        let class_methods = def.class_method_signatures.iter().map(make_req).collect();
 
         Self {
             name: def.name.name.clone(),
@@ -96,6 +97,7 @@ impl ProtocolInfo {
                 .collect(),
             extending: def.extending.as_ref().map(|id| id.name.clone()),
             methods,
+            class_methods,
             span: def.span,
         }
     }
@@ -133,6 +135,47 @@ impl ProtocolInfo {
         if let Some(ref parent_name) = self.extending {
             if let Some(parent) = registry.get(parent_name) {
                 for req in parent.all_requirements(registry) {
+                    if !reqs.iter().any(|r| r.selector == req.selector) {
+                        reqs.push(req);
+                    }
+                }
+            }
+        }
+
+        reqs
+    }
+
+    /// Returns all required class method selectors, including from extended protocols (BT-1611).
+    pub fn all_required_class_selectors<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+    ) -> Vec<&'a EcoString> {
+        let mut selectors: Vec<&EcoString> =
+            self.class_methods.iter().map(|m| &m.selector).collect();
+
+        if let Some(ref parent_name) = self.extending {
+            if let Some(parent) = registry.get(parent_name) {
+                for sel in parent.all_required_class_selectors(registry) {
+                    if !selectors.contains(&sel) {
+                        selectors.push(sel);
+                    }
+                }
+            }
+        }
+
+        selectors
+    }
+
+    /// Returns all class method requirements, including from extended protocols (BT-1611).
+    pub fn all_class_requirements<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+    ) -> Vec<&'a ProtocolMethodRequirement> {
+        let mut reqs: Vec<&ProtocolMethodRequirement> = self.class_methods.iter().collect();
+
+        if let Some(ref parent_name) = self.extending {
+            if let Some(parent) = registry.get(parent_name) {
+                for req in parent.all_class_requirements(registry) {
                     if !reqs.iter().any(|r| r.selector == req.selector) {
                         reqs.push(req);
                     }
@@ -311,6 +354,15 @@ impl ProtocolRegistry {
             }
         }
 
+        // BT-1611: Check class method requirements against the metaclass
+        let required_class = protocol.all_required_class_selectors(self);
+        for selector in required_class {
+            if !hierarchy.resolves_class_selector(class_name, selector) {
+                // Prefix with "class " to distinguish in error messages
+                missing.push(EcoString::from(format!("class {selector}")));
+            }
+        }
+
         if missing.is_empty() {
             Ok(())
         } else {
@@ -440,6 +492,7 @@ mod tests {
                     }
                 })
                 .collect(),
+            class_method_signatures: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -850,5 +903,117 @@ mod tests {
         // Unknown class — should not error (conservative)
         let result = registry.check_conformance("NotAClass", "Printable", &hierarchy);
         assert!(result.is_ok());
+    }
+
+    // ---- BT-1611: Class Method Protocol Tests ----
+
+    #[test]
+    fn register_protocol_with_class_methods() {
+        let mut proto = make_protocol("Serializable", vec![("asString", 0, Some("String"))]);
+        proto.class_method_signatures = vec![ProtocolMethodSignature {
+            selector: MessageSelector::Keyword(vec![KeywordPart::new(
+                "fromString:".to_string(),
+                span(),
+            )]),
+            parameters: vec![ParameterDefinition::new(ident("aString"))],
+            return_type: None,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }];
+
+        let module = Module {
+            protocols: vec![proto],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+
+        assert!(diags.is_empty());
+        let info = registry.get("Serializable").unwrap();
+        assert_eq!(info.methods.len(), 1);
+        assert_eq!(info.class_methods.len(), 1);
+        assert_eq!(info.class_methods[0].selector.as_str(), "fromString:");
+    }
+
+    #[test]
+    fn class_method_conformance_missing() {
+        // Protocol requires class method `fromString:` — no class has it by default
+        let mut proto = make_protocol("Serializable", vec![("asString", 0, Some("String"))]);
+        proto.class_method_signatures = vec![ProtocolMethodSignature {
+            selector: MessageSelector::Keyword(vec![KeywordPart::new(
+                "fromString:".to_string(),
+                span(),
+            )]),
+            parameters: vec![ParameterDefinition::new(ident("aString"))],
+            return_type: None,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }];
+
+        let module = Module {
+            classes: vec![make_class("MyClass", "Object", vec!["asString"])],
+            protocols: vec![proto],
+            ..empty_module()
+        };
+
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        // MyClass has asString but not class fromString: — should fail
+        let result = registry.check_conformance("MyClass", "Serializable", &hierarchy);
+        assert!(result.is_err());
+        let missing = result.unwrap_err();
+        assert!(missing.iter().any(|s| s.as_str() == "class fromString:"));
+    }
+
+    #[test]
+    fn all_required_class_selectors_includes_parent() {
+        let mut registry = ProtocolRegistry::new();
+
+        // Parent protocol with class method
+        let parent_info = ProtocolInfo {
+            name: "Base".into(),
+            type_params: vec![],
+            type_param_bounds: vec![],
+            extending: None,
+            methods: vec![],
+            class_methods: vec![ProtocolMethodRequirement {
+                selector: "create".into(),
+                arity: 0,
+                return_type: None,
+                param_types: vec![],
+            }],
+            span: span(),
+        };
+        registry.register_test_protocol(parent_info);
+
+        // Child protocol extending Base with its own class method
+        let child_info = ProtocolInfo {
+            name: "Extended".into(),
+            type_params: vec![],
+            type_param_bounds: vec![],
+            extending: Some("Base".into()),
+            methods: vec![],
+            class_methods: vec![ProtocolMethodRequirement {
+                selector: "createWith:".into(),
+                arity: 1,
+                return_type: None,
+                param_types: vec![None],
+            }],
+            span: span(),
+        };
+        registry.register_test_protocol(child_info);
+
+        let extended = registry.get("Extended").unwrap();
+        let class_sels = extended.all_required_class_selectors(&registry);
+        assert_eq!(class_sels.len(), 2);
+        assert!(class_sels.iter().any(|s| s.as_str() == "create"));
+        assert!(class_sels.iter().any(|s| s.as_str() == "createWith:"));
     }
 }

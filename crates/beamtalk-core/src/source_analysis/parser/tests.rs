@@ -5712,6 +5712,64 @@ fn parse_protocol_identifier_in_expression_context() {
 }
 
 #[test]
+fn parse_protocol_class_method_unary() {
+    // BT-1611: Protocol with a class method requirement
+    let module = parse_ok(
+        "Protocol define: Serializable
+  asString -> String
+  class fromString: aString :: String -> Self",
+    );
+    assert_eq!(module.protocols.len(), 1);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.name.name, "Serializable");
+
+    // Instance methods
+    assert_eq!(proto.method_signatures.len(), 1);
+    assert_eq!(proto.method_signatures[0].selector.name(), "asString");
+
+    // Class methods
+    assert_eq!(proto.class_method_signatures.len(), 1);
+    let class_sig = &proto.class_method_signatures[0];
+    assert_eq!(class_sig.selector.name(), "fromString:");
+    assert_eq!(class_sig.parameters.len(), 1);
+    assert_eq!(class_sig.parameters[0].name.name, "aString");
+    let param_ty = class_sig.parameters[0].type_annotation.as_ref().unwrap();
+    assert!(matches!(param_ty, TypeAnnotation::Simple(id) if id.name == "String"));
+    let ret_ty = class_sig.return_type.as_ref().unwrap();
+    assert!(matches!(ret_ty, TypeAnnotation::SelfType { .. }));
+}
+
+#[test]
+fn parse_protocol_class_method_only() {
+    // BT-1611: Protocol with only class methods
+    let module = parse_ok(
+        "Protocol define: Factory
+  class create -> Self",
+    );
+    let proto = &module.protocols[0];
+    assert!(proto.method_signatures.is_empty());
+    assert_eq!(proto.class_method_signatures.len(), 1);
+    assert_eq!(proto.class_method_signatures[0].selector.name(), "create");
+}
+
+#[test]
+fn parse_protocol_mixed_instance_and_class_methods() {
+    // BT-1611: Protocol with interleaved instance and class method signatures
+    let module = parse_ok(
+        "Protocol define: Configurable
+  config -> Map
+  class default -> Self
+  reset -> Object",
+    );
+    let proto = &module.protocols[0];
+    assert_eq!(proto.method_signatures.len(), 2); // config and reset
+    assert_eq!(proto.method_signatures[0].selector.name(), "config");
+    assert_eq!(proto.method_signatures[1].selector.name(), "reset");
+    assert_eq!(proto.class_method_signatures.len(), 1);
+    assert_eq!(proto.class_method_signatures[0].selector.name(), "default");
+}
+
+#[test]
 fn parse_protocol_class_definition_named_protocol() {
     // A class named `Protocol` should parse as a class, not a protocol
     // because the keyword after `Protocol` is `subclass:`, not `define:`
