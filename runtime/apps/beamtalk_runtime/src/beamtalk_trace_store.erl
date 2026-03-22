@@ -539,25 +539,35 @@ allocate_counter_slot(Key) ->
     #{size := AtomicsSize} = atomics:info(AtomicsRef),
     %% Grow atomics if needed — serialized through the gen_server (BT-1621)
     %% to prevent concurrent grows from overwriting each other's persistent_term.
-    NewAtomicsRef =
-        case SlotBase + ?SLOTS_PER_KEY > AtomicsSize of
-            true ->
-                %% Grow serialized through gen_server (BT-1621). Gracefully degrade
-                %% if the trace store is down or slow — observability should never
-                %% crash the actor being observed.
-                try
-                    gen_server:call(?MODULE, {grow_counters, AtomicsRef, AtomicsSize}, 10000)
-                catch
-                    exit:{noproc, _} -> AtomicsRef;
-                    exit:{timeout, _} -> AtomicsRef
-                end;
-            false ->
-                AtomicsRef
-        end,
-    %% Initialise min duration to sentinel so first real call sets it correctly
-    atomics:put(NewAtomicsRef, SlotBase + ?SLOT_MIN_DURATION, ?MIN_SENTINEL),
-    ets:insert(?AGG_INDEX, {Key, NewAtomicsRef, SlotBase}),
-    {NewAtomicsRef, SlotBase}.
+    case SlotBase + ?SLOTS_PER_KEY > AtomicsSize of
+        true ->
+            %% Grow serialized through gen_server (BT-1621). Gracefully degrade
+            %% if the trace store is down or slow — observability should never
+            %% crash the actor being observed.
+            try
+                NewAtomicsRef = gen_server:call(
+                    ?MODULE, {grow_counters, AtomicsRef, AtomicsSize}, 10000
+                ),
+                %% Initialise min duration to sentinel so first call sets it
+                atomics:put(NewAtomicsRef, SlotBase + ?SLOT_MIN_DURATION, ?MIN_SENTINEL),
+                ets:insert(?AGG_INDEX, {Key, NewAtomicsRef, SlotBase}),
+                {NewAtomicsRef, SlotBase}
+            catch
+                exit:{noproc, _} ->
+                    %% Trace store down — slot was allocated but can't grow.
+                    %% Return a dummy ref that safely absorbs writes.
+                    DummyRef = atomics:new(?SLOTS_PER_KEY, [{signed, true}]),
+                    {DummyRef, 0};
+                exit:{timeout, _} ->
+                    DummyRef = atomics:new(?SLOTS_PER_KEY, [{signed, true}]),
+                    {DummyRef, 0}
+            end;
+        false ->
+            %% Initialise min duration to sentinel so first call sets it
+            atomics:put(AtomicsRef, SlotBase + ?SLOT_MIN_DURATION, ?MIN_SENTINEL),
+            ets:insert(?AGG_INDEX, {Key, AtomicsRef, SlotBase}),
+            {AtomicsRef, SlotBase}
+    end.
 
 %% @private Atomically allocate the next slot base.
 %% Uses atomics:add_get/3 for true lock-free atomic allocation — no race condition
