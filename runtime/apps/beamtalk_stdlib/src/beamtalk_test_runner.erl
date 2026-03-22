@@ -610,7 +610,11 @@ run_concurrent_loop(Remaining, Ref, Self, Expected, Acc, PidMap) ->
                 io_lib:format("Test worker crashed: ~p", [Reason])
             ),
             Result = make_test_result(
-                1, 0, 1, 0, 0.0,
+                1,
+                0,
+                1,
+                0,
+                0.0,
                 [#{name => ClassName, status => fail, error => ErrMsg}]
             ),
             case Remaining of
