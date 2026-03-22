@@ -734,7 +734,7 @@ export_traces_default_path_test_() ->
 %% @private Generate a unique temporary export path.
 tmp_export_path(Tag) ->
     iolist_to_binary([
-        "/tmp/beamtalk_test_export_",
+        "beamtalk_test_export_",
         Tag,
         "_",
         integer_to_list(erlang:unique_integer([positive])),

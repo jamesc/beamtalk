@@ -757,7 +757,7 @@ do_export_traces(Opts) ->
 
 %% @private Generate a default export path with timestamp.
 default_export_path() ->
-    {{Year, Month, Day}, {Hour, Min, Sec}} = calendar:local_time(),
+    {{Year, Month, Day}, {Hour, Min, Sec}} = calendar:universal_time(),
     Filename = io_lib:format(
         "traces-~4..0B-~2..0B-~2..0BT~2..0B-~2..0B-~2..0B.json",
         [Year, Month, Day, Hour, Min, Sec]
