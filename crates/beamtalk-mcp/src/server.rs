@@ -356,6 +356,31 @@ pub struct ActorStatsParams {
     pub actor: Option<String>,
 }
 
+/// Parameters for the `export_traces` MCP tool (ADR 0069).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ExportTracesParams {
+    /// Optional file path for the export. Defaults to a timestamped file in the
+    /// workspace (e.g. "traces-2026-03-22T14-30-00.json").
+    #[schemars(
+        description = "Optional file path for the JSON export. Defaults to a timestamped file in the current directory."
+    )]
+    pub path: Option<String>,
+    /// Optional actor PID to filter traces (e.g. "<0.123.0>").
+    #[schemars(
+        description = "Optional actor PID to filter exported traces, e.g. \"<0.123.0>\". Omit to export all traces."
+    )]
+    pub actor: Option<String>,
+    /// Optional method selector to further filter traces (e.g. "increment").
+    /// Requires `actor` to also be specified.
+    #[schemars(
+        description = "Optional method selector to filter exported traces (e.g. \"increment\"). Requires 'actor' to be specified."
+    )]
+    pub selector: Option<String>,
+    /// Maximum number of trace events to export. Traces are newest-first.
+    #[schemars(description = "Maximum number of trace events to export. Traces are newest-first.")]
+    pub limit: Option<u32>,
+}
+
 // --- MCP Tool implementations ---
 
 #[tool_router]
@@ -1263,6 +1288,53 @@ impl BeamtalkMcp {
                 "No traces captured. Enable tracing first with enable-tracing, then run actor code."
                     .to_string()
             }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Export trace events to a JSON file with optional filtering (ADR 0069).
+    #[tool(
+        description = "Export captured trace events to a JSON file. Optionally filter by actor PID, method selector, or limit the number of events. Returns the file path and event count. The output file contains a metadata header with export timestamp, filters used, and total event count, followed by the trace events array."
+    )]
+    async fn export_traces(
+        &self,
+        Parameters(params): Parameters<ExportTracesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("export_traces");
+        tracing::debug!(
+            tool = "export_traces",
+            path = ?params.path,
+            actor = ?params.actor,
+            selector = ?params.selector,
+            limit = ?params.limit,
+            "tool invoked"
+        );
+
+        // Reject selector without actor
+        if params.selector.is_some() && params.actor.is_none() {
+            return Ok(error_result(
+                "ERROR: 'selector' requires 'actor' to be specified.",
+            ));
+        }
+
+        let response = self
+            .client
+            .export_traces(
+                params.path.as_deref(),
+                params.actor.as_deref(),
+                params.selector.as_deref(),
+                params.limit,
+            )
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to export traces");
+
+        let text = match response.value {
+            Some(ref v) => pretty_json(v),
+            None => "No traces to export. Enable tracing first with enable-tracing, then run actor code.".to_string(),
         };
 
         timer.mark_ok();
