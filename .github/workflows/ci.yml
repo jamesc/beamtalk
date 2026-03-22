@@ -103,9 +103,99 @@ jobs:
         run: just build clippy fmt-check test-rust
 
   # ─── Full test suite on Linux only (requires Erlang/OTP) ──────────────
-  test:
+  # Split into parallel jobs for faster CI (~5 min wall-clock vs ~16 min sequential).
+  # Each job restores Rust + Erlang caches and does a fast incremental build (~40s).
+  # Rust unit tests already run in the cross-platform 'check' job above.
+
+  test-beam:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
+            ${{ runner.os }}-erlang-otp-27.0-
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: just build
+
+      - name: Test stdlib (compiled language features)
+        run: just test-stdlib
+
+      - name: Test BUnit (TestCase tests)
+        run: just test-bunit
+
+      - name: Test examples
+        run: just test-examples
+
+  test-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
+            ${{ runner.os }}-erlang-otp-27.0-
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: just build
+
+      - name: Test Erlang runtime (unit tests)
+        run: just test-runtime
+
+  test-dialyzer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -148,14 +238,8 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Build Rust
-        run: just build-rust
-
-      - name: Build Erlang runtime
-        run: just build-erlang
-
-      - name: Build standard library
-        run: just build-stdlib
+      - name: Build
+        run: just build
 
       - name: Check for Erlang changes
         id: erlang-changes
@@ -173,27 +257,49 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Test Rust (unit + integration)
-        run: just test-rust
-
-      - name: Test stdlib (compiled language features)
-        run: just test-stdlib
-
-      - name: Test BUnit (TestCase tests)
-        run: just test-bunit
-
-      - name: Test examples
-        run: just test-examples
-
-      - name: Test Erlang runtime (unit tests)
-        run: just test-runtime
-
       - name: Dialyzer type checking (Erlang runtime)
         if: steps.erlang-changes.outputs.changed == 'true'
         run: just dialyzer
 
       - name: Dialyzer spec validation (generated -spec attributes)
         run: just dialyzer-specs
+
+  test-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@v3
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
+            ${{ runner.os }}-erlang-otp-27.0-
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: just build
 
       - name: Test workspace integration
         run: just test-integration
