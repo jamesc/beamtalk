@@ -32,6 +32,13 @@ if [[ ! -f "${MARKER}" ]]; then
     trap - EXIT
     touch "${MARKER}"
   fi
+
+  # After first-time setup, run `just build` so rebar3 plugins (erlfmt) are
+  # compiled and BEAM artifacts exist before any lint or test runs.
+  if command -v just &>/dev/null; then
+    echo "Running initial build after cloud setup..."
+    just build 2>&1 || echo "Warning: initial build failed — some tools may not work until build succeeds."
+  fi
 fi
 
 # Ensure the pre-push lint hook is active (local config, needs setting per-clone/worktree)
@@ -64,4 +71,16 @@ if git ls-remote --heads origin "${BRANCH}" 2>/dev/null | grep -qF "refs/heads/$
   fi
 else
   echo "Worktree branch '${BRANCH}' has no remote counterpart on origin — nothing to pull."
+fi
+
+# --- Build in worktree to avoid stale BEAM artifacts ---
+# CLAUDE.md: "After entering or creating a worktree, run `just build` before
+# running tests. Stale BEAM artifacts from another build cause false failures."
+if command -v just &>/dev/null; then
+  echo "Building in worktree to avoid stale artifacts..."
+  if just build 2>&1; then
+    echo "Worktree build complete."
+  else
+    echo "Warning: worktree build failed — tests may see stale artifacts."
+  fi
 fi

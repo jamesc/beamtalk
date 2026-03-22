@@ -280,6 +280,21 @@ else
   ok "rebar3 v${REBAR3_VERSION} installed"
 fi
 
+# --- Pre-compile rebar3 plugins (erlfmt) ---
+# The pre-push hook runs `rebar3 fmt --check` which needs erlfmt compiled.
+# Without this, the first push attempt downloads/compiles erlfmt on the fly
+# which can timeout or fail in constrained environments.
+
+RUNTIME_DIR="${CLAUDE_PROJECT_DIR:-${PWD}}/runtime"
+if [ -d "$RUNTIME_DIR" ] && have rebar3; then
+  info "Pre-compiling rebar3 plugins (erlfmt)..."
+  if (cd "$RUNTIME_DIR" && rebar3 plugins list >/dev/null 2>&1); then
+    ok "rebar3 plugins ready"
+  else
+    warn "rebar3 plugin pre-compilation failed — erlfmt may compile on first use"
+  fi
+fi
+
 # --- Skills repo (Claude Code skills & agents) ---
 
 if [ "${SKIP_SKILLS:-}" = "1" ]; then
