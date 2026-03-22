@@ -305,12 +305,28 @@ all_required_class_methods(Info) ->
     ],
     ClassMethods ++ FilteredParent.
 
-%% @private Check if a class has a class-side method (walks hierarchy) (BT-1611).
+%% @private Check if a class has a class-side method (walks hierarchy + extensions) (BT-1611/BT-1617).
 %%
 %% Walks the superclass chain checking each class's local class methods map.
-%% This mirrors the compile-time `resolves_class_selector` check.
+%% Falls back to the extensions ETS table for class-side extensions registered
+%% via `Class class >> selector` (keyed as `{'ClassName class', Selector}`).
+%% This mirrors the actual class-side dispatch path.
 -spec class_has_class_method(atom(), atom()) -> boolean().
 class_has_class_method(ClassName, Selector) ->
+    case class_has_class_method_in_chain(ClassName, Selector) of
+        true ->
+            true;
+        false ->
+            %% BT-1617: Check extensions ETS table for class-side extensions.
+            %% Class-side extensions use the metaclass tag atom (e.g. 'Integer class')
+            %% as the class key in the extensions registry.
+            MetaclassTag = beamtalk_class_registry:class_object_tag(ClassName),
+            check_class_extension(MetaclassTag, Selector)
+    end.
+
+%% @private Walk the superclass chain checking local class methods maps.
+-spec class_has_class_method_in_chain(atom(), atom()) -> boolean().
+class_has_class_method_in_chain(ClassName, Selector) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             false;
@@ -324,10 +340,23 @@ class_has_class_method(ClassName, Selector) ->
                         %% Walk superclass chain
                         case beamtalk_object_class:superclass(ClassPid) of
                             none -> false;
-                            SuperName -> class_has_class_method(SuperName, Selector)
+                            SuperName -> class_has_class_method_in_chain(SuperName, Selector)
                         end
                 end
             catch
                 _:_ -> false
             end
+    end.
+
+%% @private Safe extension registry lookup for class-side methods (BT-1617).
+%%
+%% Guards against the ETS table not existing (e.g., during early bootstrap).
+-spec check_class_extension(atom(), atom()) -> boolean().
+check_class_extension(MetaclassTag, Selector) ->
+    try
+        beamtalk_extensions:has(MetaclassTag, Selector)
+    catch
+        error:badarg ->
+            %% ETS table doesn't exist yet (early bootstrap)
+            false
     end.

@@ -208,3 +208,47 @@ protocols_for_class_empty_registry_test() ->
 conforming_classes_unknown_protocol_test() ->
     setup(),
     ?assertEqual([], beamtalk_protocol_registry:conforming_classes('Unknown')).
+
+%%% ============================================================================
+%%% Class Method Extension Conformance Tests (BT-1617)
+%%% ============================================================================
+
+%% @doc Protocol with class method requirement satisfied via class-side extension
+%% should report conformance.
+class_method_extension_conforms_test() ->
+    setup(),
+    %% Ensure extensions ETS table exists
+    beamtalk_extensions:init(),
+    %% Register a protocol requiring only a class method
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'Parseable',
+        required_methods => [],
+        required_class_methods => [#{selector => 'fromString:', arity => 1}],
+        type_params => [],
+        extending => undefined
+    }),
+    %% Register a class-side extension: 'TestExtClass class' >> fromString:
+    %% The metaclass tag for TestExtClass is 'TestExtClass class'.
+    ExtFun = fun(_Args, _Self) -> ok end,
+    beamtalk_extensions:register('TestExtClass class', 'fromString:', ExtFun, test),
+    %% Verify conformance — class has no process but extension satisfies class method
+    ?assert(beamtalk_protocol_registry:conforms_to('TestExtClass', 'Parseable')),
+    %% Cleanup
+    ets:delete(beamtalk_extensions, {'TestExtClass class', 'fromString:'}).
+
+%% @doc Protocol with class method requirement NOT satisfied (no extension, no process)
+%% should report non-conformance.
+class_method_no_extension_does_not_conform_test() ->
+    setup(),
+    %% Ensure extensions ETS table exists
+    beamtalk_extensions:init(),
+    %% Register a protocol requiring only a class method
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'Parseable2',
+        required_methods => [],
+        required_class_methods => [#{selector => 'fromString:', arity => 1}],
+        type_params => [],
+        extending => undefined
+    }),
+    %% No extension registered, no class process — should not conform
+    ?assertNot(beamtalk_protocol_registry:conforms_to('NoExtClass', 'Parseable2')).
