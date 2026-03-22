@@ -506,7 +506,15 @@ allocate_counter_slot(Key) ->
     NewCounterRef =
         case SlotBase + ?SLOTS_PER_KEY > CounterSize of
             true ->
-                gen_server:call(?MODULE, {grow_counters, CounterRef, CounterSize});
+                %% Grow serialized through gen_server (BT-1621). Gracefully degrade
+                %% if the trace store is down or slow — observability should never
+                %% crash the actor being observed.
+                try
+                    gen_server:call(?MODULE, {grow_counters, CounterRef, CounterSize}, 10000)
+                catch
+                    exit:{noproc, _} -> CounterRef;
+                    exit:{timeout, _} -> CounterRef
+                end;
             false ->
                 CounterRef
         end,
