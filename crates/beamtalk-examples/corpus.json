@@ -19834,6 +19834,36 @@
       "explanation": "Advanced string operations tests - migrated from bootstrap/string_methods.bt (BT-827)"
     },
     {
+      "id": "stdlib-test-string-as-atom-test",
+      "title": "StringAsAtomTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "StringAsAtomTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "string_as_atom_test",
+        "subclassing",
+        "testAsAtomClassIsSymbol",
+        "testInterpolatedString",
+        "testShortString",
+        "testSimpleString",
+        "testStringWithDigits",
+        "testStringWithMultipleUnderscores",
+        "testStringWithTrailingDigits",
+        "testStringWithUnderscore"
+      ],
+      "source": "// String#asAtom tests (BT-1585)\n// Verifies that asAtom reliably converts strings to atoms,\n// including strings with underscores, digits, and interpolation.\n\nTestCase subclass: StringAsAtomTest\n\n  testSimpleString => self assert: \"hello\" asAtom equals: #hello\n\n  testShortString => self assert: \"abc\" asAtom equals: #abc\n\n  testStringWithUnderscore =>\n    self assert: \"hello_world\" asAtom equals: #hello_world\n\n  testStringWithDigits => self assert: \"foo_42\" asAtom equals: #foo_42\n\n  testStringWithTrailingDigits => self assert: \"item99\" asAtom equals: #item99\n\n  testStringWithMultipleUnderscores =>\n    self assert: \"a_b_c\" asAtom equals: #a_b_c\n\n  testInterpolatedString =>\n    id := 42\n    name := \"tq_{id}\" asAtom\n    self assert: name equals: #tq_42\n\n  testAsAtomClassIsSymbol => self assert: \"test\" asAtom class equals: Symbol",
+      "explanation": "String#asAtom tests (BT-1585) Verifies that asAtom reliably converts strings to atoms, including strings with underscores, digits, and interpolation."
+    },
+    {
       "id": "stdlib-test-string-binary-inheritance-test",
       "title": "StringBinaryInheritanceTest",
       "category": "stdlib-tests",
