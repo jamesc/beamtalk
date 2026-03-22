@@ -193,8 +193,10 @@ get_traces(Pid, Selector) ->
 %%   limit    - integer() max events to export
 %% Returns {ok, #{path => Path, count => Count}} on success.
 -spec export_traces(map()) -> {ok, map()} | {error, term()}.
-export_traces(Opts) ->
-    gen_server:call(?MODULE, {export_traces, Opts}).
+export_traces(Opts) when is_map(Opts) ->
+    gen_server:call(?MODULE, {export_traces, Opts});
+export_traces(_) ->
+    {error, badarg}.
 
 %% @doc Get aggregate stats for all actors.
 -spec get_stats() -> map().
@@ -758,9 +760,10 @@ do_export_traces(Opts) ->
 %% @private Generate a default export path with timestamp.
 default_export_path() ->
     {{Year, Month, Day}, {Hour, Min, Sec}} = calendar:universal_time(),
+    Unique = erlang:unique_integer([positive, monotonic]),
     Filename = io_lib:format(
-        "traces-~4..0B-~2..0B-~2..0BT~2..0B-~2..0B-~2..0B.json",
-        [Year, Month, Day, Hour, Min, Sec]
+        "traces-~4..0B-~2..0B-~2..0BT~2..0B-~2..0B-~2..0B-~B.json",
+        [Year, Month, Day, Hour, Min, Sec, Unique]
     ),
     iolist_to_binary(Filename).
 
