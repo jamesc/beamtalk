@@ -296,7 +296,15 @@ handle_dispatch_stop(_EventName, #{duration := Duration}, Metadata, _Config) ->
     Class = maps:get(class, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
     record_dispatch(Pid, Selector, DurationNs, Outcome, Mode),
-    record_trace_event(Pid, Class, Selector, Mode, DurationNs, Outcome, #{}, stop),
+    %% BT-1625: Only fetch trace context when tracing is enabled to avoid
+    %% per-dispatch overhead when trace capture is disabled.
+    case is_enabled() of
+        true ->
+            TraceCtx = beamtalk_actor:get_trace_context(),
+            record_trace_event(Pid, Class, Selector, Mode, DurationNs, Outcome, TraceCtx, stop);
+        false ->
+            ok
+    end,
     ok;
 handle_dispatch_stop(_EventName, _Measurements, _Metadata, _Config) ->
     ok.
@@ -310,8 +318,21 @@ handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config
     Reason = maps:get(reason, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
     record_dispatch(Pid, Selector, DurationNs, error, Mode),
-    EventMeta = #{error => Reason, kind => Kind},
-    record_trace_event(Pid, Class, Selector, Mode, DurationNs, error, EventMeta, exception),
+    %% BT-1625: Only fetch trace context and build enriched metadata when
+    %% tracing is enabled to avoid per-dispatch overhead.
+    case is_enabled() of
+        true ->
+            TraceCtx = beamtalk_actor:get_trace_context(),
+            BaseMeta = #{error => Reason, kind => Kind},
+            EventMeta =
+                case map_size(TraceCtx) of
+                    0 -> BaseMeta;
+                    _ -> maps:merge(TraceCtx, BaseMeta)
+                end,
+            record_trace_event(Pid, Class, Selector, Mode, DurationNs, error, EventMeta, exception);
+        false ->
+            ok
+    end,
     ok;
 handle_dispatch_exception(_EventName, _Measurements, _Metadata, _Config) ->
     ok.
