@@ -96,26 +96,6 @@
 %%% The `register_spawned/4` function handles REPL actor registry
 %%% integration as a separate concern after spawn completes.
 %%%
-%%% ## Actor Migration (BT-106)
-%%%
-%%% The `migrate:` and `migrate:with:` protocol allows an actor to spawn a
-%%% replacement process of a different class, transfer its user state, and
-%%% terminate. This is the BEAM-compatible alternative to Smalltalk's `become:`
-%%% (identity swap), which is impossible with immutable process identifiers.
-%%%
-%%% ```
-%%% %% Beamtalk usage:
-%%% counterV2 := counter migrate: CounterV2
-%%% counterV2 := counter migrate: CounterV2 with: [:state | state at: #newField put: "x"]
-%%% ```
-%%%
-%%% Implementation: handled in dispatch/4 as a built-in actor selector. Returns
-%%% `{stop_migrate, NewObjectRef, OldState}` which handle_call/handle_cast
-%%% translate into a gen_server stop with the new reference as the reply.
-%%%
-%%% WARNING: Existing references to the old actor become invalid after migration.
-%%% All callers must update their reference to the returned new object.
-%%%
 %%% ## Code Hot Reload
 %%%
 %%% The code_change/3 callback supports state migration during hot reload.
@@ -198,9 +178,6 @@
 
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
-
-%% Migration helpers
--export([migrate_actor/2, migrate_actor/3]).
 
 %%% Public API
 
@@ -910,10 +887,6 @@ handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args)
         {noreply, NewState} ->
             log_dispatch_complete(State, NewState, Selector, cast, T0),
             {noreply, NewState};
-        {stop_migrate, _NewObjectRef, NewState} ->
-            %% BT-106: Migration via fire-and-forget — stop after migration
-            log_dispatch_complete(State, NewState, Selector, cast, T0),
-            {stop, normal, NewState};
         {error, Reason, NewState} ->
             %% Log error but don't crash — caller expects no reply
             T1 = erlang:monotonic_time(microsecond),
@@ -950,11 +923,6 @@ handle_cast({Selector, Args, FuturePid}, State) ->
             log_dispatch_complete(State, NewState, Selector, async, T0),
             beamtalk_future:resolve(FuturePid, nil),
             {noreply, NewState};
-        {stop_migrate, NewObjectRef, NewState} ->
-            %% BT-106: Migration — resolve future with new ref, then stop
-            log_dispatch_complete(State, NewState, Selector, async, T0),
-            beamtalk_future:resolve(FuturePid, NewObjectRef),
-            {stop, normal, NewState};
         {error, Reason, NewState} ->
             %% Method failed, reject the future
             log_dispatch_complete(State, NewState, Selector, async, T0),
@@ -992,10 +960,6 @@ handle_call({Selector, Args}, From, State) ->
             %% Method didn't return a value, return nil
             log_dispatch_complete(State, NewState, Selector, sync, T0),
             {reply, nil, NewState};
-        {stop_migrate, NewObjectRef, NewState} ->
-            %% BT-106: Migration — reply with new object ref, then stop
-            log_dispatch_complete(State, NewState, Selector, sync, T0),
-            {stop, normal, {ok, NewObjectRef}, NewState};
         {error, Reason, NewState} ->
             %% Method failed, return error tuple
             log_dispatch_complete(State, NewState, Selector, sync, T0),
@@ -1037,175 +1001,6 @@ terminate(Reason, State) ->
         domain => [beamtalk, runtime]
     }),
     ok.
-
-%%% Migration Functions
-
-%% @doc BT-106: Migrate an actor to a new class, preserving user state.
-%%
-%% Extracts user-visible state fields from the current actor, spawns a new
-%% actor of the target class using `safe_spawn/2`, and returns a stop_migrate
-%% tuple that instructs the gen_server to shut down after replying with the
-%% new object reference.
-%%
-%% The new actor receives the old actor's user state merged into its default
-%% init state. Internal keys (__methods__, $beamtalk_class, __class_mod__)
-%% come from the new class; user fields are preserved from the old state.
-%%
-%% @param NewClassMod The Erlang module atom for the target class
-%% @param State The current actor's state map
--spec migrate_actor(atom(), map()) ->
-    {stop_migrate, #beamtalk_object{}, map()} | {error, term(), map()}.
-migrate_actor(NewClassMod, State) ->
-    case is_atom(NewClassMod) of
-        false ->
-            ClassName = beamtalk_tagged_map:class_of(State, unknown),
-            Error = beamtalk_error:new(
-                type_error,
-                ClassName,
-                'migrate:',
-                <<"migrate: argument must be a class (atom)">>
-            ),
-            {error, Error, State};
-        true ->
-            UserState = extract_user_state(State),
-            do_migrate(NewClassMod, UserState, State)
-    end.
-
-%% @doc BT-106: Migrate an actor to a new class with state transformation.
-%%
-%% Like migrate_actor/2, but applies a transformer function to the user state
-%% before spawning the new actor. The transformer receives the user state map
-%% (without internal keys) and must return a new map.
-%%
-%% @param NewClassMod The Erlang module atom for the target class
-%% @param TransformerBlock A fun/1 that transforms the user state map
-%% @param State The current actor's state map
--spec migrate_actor(atom(), function(), map()) ->
-    {stop_migrate, #beamtalk_object{}, map()} | {error, term(), map()}.
-migrate_actor(NewClassMod, TransformerBlock, State) ->
-    case is_atom(NewClassMod) of
-        false ->
-            ClassName = beamtalk_tagged_map:class_of(State, unknown),
-            Error = beamtalk_error:new(
-                type_error,
-                ClassName,
-                'migrate:with:',
-                <<"migrate:with: first argument must be a class (atom)">>
-            ),
-            {error, Error, State};
-        true ->
-            case is_function(TransformerBlock, 1) of
-                false ->
-                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error = beamtalk_error:new(
-                        type_error,
-                        ClassName,
-                        'migrate:with:',
-                        <<"migrate:with: second argument must be a block taking one argument">>
-                    ),
-                    {error, Error, State};
-                true ->
-                    UserState = extract_user_state(State),
-                    try TransformerBlock(UserState) of
-                        TransformedState when is_map(TransformedState) ->
-                            do_migrate(NewClassMod, TransformedState, State);
-                        _NonMap ->
-                            ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                            Error = beamtalk_error:new(
-                                type_error,
-                                ClassName,
-                                'migrate:with:',
-                                <<"State transformer must return a Map">>
-                            ),
-                            {error, Error, State}
-                    catch
-                        error:#beamtalk_error{} = BtError:_ ->
-                            {error, BtError, State};
-                        Class:Reason:Stacktrace ->
-                            wrap_method_error('migrate:with:', State, Class, Reason, Stacktrace)
-                    end
-            end
-    end.
-
-%% @private
-%% @doc Extract user-visible state fields, excluding internal keys.
--spec extract_user_state(map()) -> map().
-extract_user_state(State) ->
-    InternalKeys = ['__methods__', beamtalk_tagged_map:class_key(), '__class_mod__'],
-    maps:without(InternalKeys, State).
-
-%% @private
-%% @doc Spawn a new actor of the target class with the migrated user state.
-%%
-%% Passes the user state map to the target module's init/1 callback. The target
-%% module is responsible for constructing its internal state (adding __methods__,
-%% $beamtalk_class, etc.) and picking up any relevant fields from the passed map.
-%%
-%% Uses safe_spawn/2 which handles trap_exit and initialize synchronization.
-%%
-%% @param NewClassMod The Erlang module atom for the target class
-%% @param UserState The user-visible state fields to transfer
-%% @param OldState The current (migrating) actor's full state
--spec do_migrate(atom(), map(), map()) ->
-    {stop_migrate, #beamtalk_object{}, map()} | {error, term(), map()}.
-do_migrate(NewClassMod, UserState, OldState) ->
-    OldClassName = beamtalk_tagged_map:class_of(OldState, unknown),
-    case safe_spawn(NewClassMod, UserState) of
-        {ok, NewPid} ->
-            %% Unlink the new actor from the old actor. safe_spawn uses
-            %% start_link which creates a link; if we kept it, the old
-            %% actor's normal termination would propagate to the new one
-            %% (harmless for normal exits, but messy for supervision).
-            erlang:unlink(NewPid),
-            %% Retrieve class metadata from the new actor's state
-            try sys:get_state(NewPid, 5000) of
-                NewState when is_map(NewState) ->
-                    NewClassName = beamtalk_tagged_map:class_of(NewState, unknown),
-                    NewClassModName = maps:get('__class_mod__', NewState, undefined),
-                    NewObjectRef = #beamtalk_object{
-                        class = NewClassName,
-                        class_mod = NewClassModName,
-                        pid = NewPid
-                    },
-                    ?LOG_INFO("Actor migrated", #{
-                        old_class => OldClassName,
-                        new_class => NewClassName,
-                        old_pid => self(),
-                        new_pid => NewPid,
-                        domain => [beamtalk, runtime]
-                    }),
-                    {stop_migrate, NewObjectRef, OldState};
-                _NonMap ->
-                    %% Unexpected state format — still return the ref
-                    NewObjectRef = #beamtalk_object{
-                        class = unknown,
-                        class_mod = NewClassMod,
-                        pid = NewPid
-                    },
-                    {stop_migrate, NewObjectRef, OldState}
-            catch
-                _:_ ->
-                    %% Can't read state — still return the ref with best-effort metadata
-                    NewObjectRef = #beamtalk_object{
-                        class = unknown,
-                        class_mod = NewClassMod,
-                        pid = NewPid
-                    },
-                    {stop_migrate, NewObjectRef, OldState}
-            end;
-        {error, Reason} ->
-            Error = beamtalk_error:new(
-                runtime_error,
-                OldClassName,
-                'migrate:',
-                iolist_to_binary(
-                    io_lib:format(
-                        "Failed to spawn new actor during migration: ~p", [Reason]
-                    )
-                )
-            ),
-            {error, Error, OldState}
-    end.
 
 %%% Helper Functions
 
@@ -1270,10 +1065,7 @@ make_self(State) ->
 %%   {noreply, NewState} - Method didn't return a value
 %%   {error, Reason, State} - Method or dispatch failed
 -spec dispatch(atom(), list(), #beamtalk_object{}, map()) ->
-    {reply, term(), map()}
-    | {noreply, map()}
-    | {error, term(), map()}
-    | {stop_migrate, #beamtalk_object{}, map()}.
+    {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
 dispatch(Selector, Args, Self, State) ->
     %% BT-427: Actor-specific methods that can't be in Object:
     %% - isAlive: checks process liveness
@@ -1320,12 +1112,6 @@ dispatch(Selector, Args, Self, State) ->
                 false when CheckSelector =:= delegate ->
                     %% delegate is handled by actor dispatch, not in __methods__
                     {reply, true, State};
-                false when CheckSelector =:= 'migrate:' ->
-                    %% BT-106: migrate: is handled by actor dispatch
-                    {reply, true, State};
-                false when CheckSelector =:= 'migrate:with:' ->
-                    %% BT-106: migrate:with: is handled by actor dispatch
-                    {reply, true, State};
                 false ->
                     %% Check inherited methods via hierarchy walk
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
@@ -1341,19 +1127,6 @@ dispatch(Selector, Args, Self, State) ->
                         end,
                     {reply, Result, State}
             end;
-        'migrate:' when length(Args) =:= 1 ->
-            %% BT-106: Migrate actor to a new class.
-            %% Spawns a new actor of the target class with the current state,
-            %% then stops this actor. Returns {stop_migrate, NewObjectRef} so
-            %% that handle_call/handle_cast can return a gen_server stop tuple.
-            [NewClassMod] = Args,
-            migrate_actor(NewClassMod, State);
-        'migrate:with:' when length(Args) =:= 2 ->
-            %% BT-106: Migrate actor to a new class with state transformation.
-            %% The transformer block receives the user state map and returns
-            %% a new state map for the target class.
-            [NewClassMod, TransformerBlock] = Args,
-            migrate_actor(NewClassMod, TransformerBlock, State);
         'perform:' when length(Args) =:= 1 ->
             %% Dynamic message send: obj perform: #increment => obj increment
             [TargetSelector] = Args,

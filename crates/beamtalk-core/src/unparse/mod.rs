@@ -445,16 +445,21 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
 
     // Instance method signatures (indented by 2 spaces)
     for sig in &protocol.method_signatures {
-        docs.push(line());
-        docs.push(Document::Str("  "));
-        docs.push(unparse_protocol_method_signature(sig));
+        docs.push(nest(
+            2,
+            docvec![line(), unparse_protocol_method_signature(sig, None)],
+        ));
     }
 
     // Class method signatures (BT-1611, indented by 2 spaces, prefixed with `class`)
     for sig in &protocol.class_method_signatures {
-        docs.push(line());
-        docs.push(Document::Str("  class "));
-        docs.push(unparse_protocol_method_signature(sig));
+        docs.push(nest(
+            2,
+            docvec![
+                line(),
+                unparse_protocol_method_signature(sig, Some("class "))
+            ],
+        ));
     }
 
     concat(docs)
@@ -464,7 +469,13 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
 ///
 /// Protocol method signatures look like method definitions without `=>` and body:
 /// `asString -> String`, `do: block :: Block(E, Object)`
-fn unparse_protocol_method_signature(sig: &ProtocolMethodSignature) -> Document<'static> {
+///
+/// An optional `prefix` (e.g. `"class "`) is inserted after any doc comment lines
+/// but before the selector, so doc comments appear above the signature line.
+fn unparse_protocol_method_signature(
+    sig: &ProtocolMethodSignature,
+    prefix: Option<&'static str>,
+) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // Doc comment
@@ -477,6 +488,11 @@ fn unparse_protocol_method_signature(sig: &ProtocolMethodSignature) -> Document<
             }
             docs.push(line());
         }
+    }
+
+    // Optional prefix (e.g. `class `) appears on the signature line, after doc comments
+    if let Some(p) = prefix {
+        docs.push(Document::Str(p));
     }
 
     // Selector and parameters
@@ -2863,6 +2879,35 @@ mod tests {
             "\n",
             "  writeLine: data -> Nil =>\n",
             "    (Erlang beamtalk_subprocess) writeLine: self data: data\n",
+        );
+        assert_identity(source);
+    }
+
+    // --- Protocol round-trip (BT-1618) ---
+
+    #[test]
+    fn protocol_class_method_doc_comment_round_trip() {
+        // BT-1618: `class` prefix must appear on the signature line, after doc comments.
+        let source = concat!(
+            "Protocol define: Parseable\n",
+            "  /// Reconstruct from string.\n",
+            "  class fromString: aString :: String -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_class_method_no_doc_comment_round_trip() {
+        let source = concat!("Protocol define: Creatable\n", "  class create -> Self\n",);
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_instance_method_doc_comment_round_trip() {
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  /// Convert to display string.\n",
+            "  asString -> String\n",
         );
         assert_identity(source);
     }

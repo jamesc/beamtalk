@@ -556,3 +556,60 @@ vm_measurements_handler_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% Test: Wall-clock timestamp in trace events (BT-1620)
+%%====================================================================
+
+wall_clock_timestamp_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                TestPid = self(),
+                beamtalk_trace_store:enable(),
+
+                Before = erlang:system_time(microsecond),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                ),
+                After = erlang:system_time(microsecond),
+
+                [Trace] = beamtalk_trace_store:get_traces(),
+                Ts = maps:get(timestamp_us, Trace),
+                %% Wall-clock timestamp should be between Before and After
+                ?assert(Ts >= Before),
+                ?assert(Ts =< After),
+                %% Should be a reasonable epoch timestamp (after 2025-01-01)
+                ?assert(Ts > 1735689600000000)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Serialized counter grow (BT-1621)
+%%====================================================================
+
+serialized_counter_grow_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                %% Fill up counter slots to trigger a grow.
+                %% Initial size is 6000 slots, 6 per key = 1000 keys before grow.
+                %% Record enough unique {Pid, Selector} keys to force a grow.
+                TestPid = self(),
+                lists:foreach(
+                    fun(I) ->
+                        Sel = list_to_atom("method_" ++ integer_to_list(I)),
+                        beamtalk_trace_store:record_dispatch(TestPid, Sel, 100, ok, sync)
+                    end,
+                    lists:seq(1, 1010)
+                ),
+                %% Verify the counters grew — stats should have all 1010 methods
+                Stats = beamtalk_trace_store:get_stats(),
+                PidKey = pid_to_list(TestPid),
+                PidStats = maps:get(PidKey, Stats),
+                Methods = maps:get(methods, PidStats),
+                ?assert(maps:size(Methods) >= 1010)
+            end)
+        ]
+    end}.
