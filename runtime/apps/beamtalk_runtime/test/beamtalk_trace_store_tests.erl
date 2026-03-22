@@ -800,3 +800,129 @@ slow_methods_sort_by_max_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% Test: export_traces
+%%====================================================================
+
+export_traces_no_filters_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {"export with no traces produces empty file",
+                ?_test(begin
+                    TmpFile = tmp_export_path("no_traces"),
+                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                    ?assertMatch({ok, #{path := TmpFile, count := 0}}, Result),
+                    %% Verify file exists and contains valid JSON
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    ?assertEqual(
+                        0, maps:get(<<"total_events">>, maps:get(<<"metadata">>, Decoded))
+                    ),
+                    ?assertEqual([], maps:get(<<"traces">>, Decoded)),
+                    file:delete(TmpFile)
+                end)},
+            {"export captures recorded trace events",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
+                    ),
+                    TmpFile = tmp_export_path("with_traces"),
+                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                    ?assertMatch({ok, #{count := 2}}, Result),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Meta = maps:get(<<"metadata">>, Decoded),
+                    ?assertEqual(2, maps:get(<<"total_events">>, Meta)),
+                    Traces = maps:get(<<"traces">>, Decoded),
+                    ?assertEqual(2, length(Traces)),
+                    file:delete(TmpFile)
+                end)}
+        ]
+    end}.
+
+export_traces_with_filters_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {"export with selector filter",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
+                    ),
+                    TmpFile = tmp_export_path("filtered"),
+                    Result = beamtalk_trace_store:export_traces(#{
+                        path => TmpFile,
+                        actor => TestPid,
+                        selector => increment
+                    }),
+                    ?assertMatch({ok, #{count := 1}}, Result),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Traces = maps:get(<<"traces">>, Decoded),
+                    ?assertEqual(1, length(Traces)),
+                    [Trace] = Traces,
+                    ?assertEqual(<<"increment">>, maps:get(<<"selector">>, Trace)),
+                    file:delete(TmpFile)
+                end)},
+            {"export with limit",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    lists:foreach(
+                        fun(I) ->
+                            Sel = list_to_atom("m_" ++ integer_to_list(I)),
+                            beamtalk_trace_store:record_trace_event(
+                                TestPid, 'Counter', Sel, sync, 1000, ok, #{}, stop
+                            )
+                        end,
+                        lists:seq(1, 10)
+                    ),
+                    TmpFile = tmp_export_path("limited"),
+                    Result = beamtalk_trace_store:export_traces(#{
+                        path => TmpFile,
+                        limit => 3
+                    }),
+                    ?assertMatch({ok, #{count := 3}}, Result),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    ?assertEqual(3, length(maps:get(<<"traces">>, Decoded))),
+                    file:delete(TmpFile)
+                end)}
+        ]
+    end}.
+
+export_traces_default_path_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {"export with default path generates timestamped file",
+                ?_test(begin
+                    Result = beamtalk_trace_store:export_traces(#{}),
+                    ?assertMatch({ok, #{path := _, count := 0}}, Result),
+                    {ok, #{path := Path}} = Result,
+                    %% Verify the default path matches the expected pattern
+                    ?assertMatch(<<"traces-", _/binary>>, Path),
+                    ?assert(binary:match(Path, <<".json">>) =/= nomatch),
+                    file:delete(Path)
+                end)}
+        ]
+    end}.
+
+%% @private Generate a unique temporary export path.
+tmp_export_path(Tag) ->
+    iolist_to_binary([
+        "beamtalk_test_export_",
+        Tag,
+        "_",
+        integer_to_list(erlang:unique_integer([positive])),
+        ".json"
+    ]).

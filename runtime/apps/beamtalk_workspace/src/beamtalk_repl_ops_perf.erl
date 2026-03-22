@@ -10,6 +10,7 @@
 %%% - disable-tracing: stop trace event capture
 %%% - get-traces: query trace events with filtering
 %%% - actor-stats: query aggregate actor statistics
+%%% - export-traces: export trace events to a JSON file
 %%%
 %%% Delegates to beamtalk_tracing which wraps beamtalk_trace_store.
 %%% @see beamtalk_tracing
@@ -22,7 +23,7 @@
 
 -export([handle/4, describe_ops/0]).
 
-%% @doc Handle enable-tracing, get-traces, and actor-stats ops.
+%% @doc Handle enable-tracing, get-traces, actor-stats, and export-traces ops.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"enable-tracing">>, _Params, Msg, _SessionPid) ->
     beamtalk_tracing:enable(),
@@ -48,9 +49,59 @@ handle(<<"actor-stats">>, Params, Msg, _SessionPid) ->
     Stats = get_stats(Actor),
     beamtalk_repl_protocol:encode_result(
         Stats, Msg, fun beamtalk_repl_json:term_to_json/1
-    ).
+    );
+handle(<<"export-traces">>, Params, Msg, _SessionPid) ->
+    Opts = build_export_opts(Params),
+    case beamtalk_tracing:exportTraces(Opts) of
+        {ok, #{path := Path, count := Count}} ->
+            Result = #{
+                <<"path">> => iolist_to_binary(Path),
+                <<"count">> => Count
+            },
+            %% Result is already a JSX-compatible map with binary keys;
+            %% use identity to avoid term_to_json stringifying the map.
+            beamtalk_repl_protocol:encode_result(
+                Result, Msg, fun(X) -> X end
+            );
+        {error, Reason} ->
+            ErrMsg = iolist_to_binary(
+                io_lib:format("Failed to export traces: ~p", [Reason])
+            ),
+            error(#beamtalk_error{
+                kind = io_error,
+                class = 'Tracing',
+                message = ErrMsg,
+                hint = <<"Check file path and permissions.">>,
+                details = #{}
+            })
+    end.
 
 %%% Internal helpers
+
+%% @private Build export options map from REPL params.
+-spec build_export_opts(map()) -> map().
+build_export_opts(Params) ->
+    Opts0 = #{},
+    Opts1 =
+        case maps:get(<<"path">>, Params, undefined) of
+            undefined -> Opts0;
+            PathBin -> Opts0#{path => PathBin}
+        end,
+    Opts2 =
+        case maps:get(<<"actor">>, Params, undefined) of
+            undefined -> Opts1;
+            ActorBin -> Opts1#{actor => parse_pid(ActorBin)}
+        end,
+    Opts3 =
+        case maps:get(<<"selector">>, Params, undefined) of
+            undefined -> Opts2;
+            SelectorBin -> Opts2#{selector => parse_selector(SelectorBin)}
+        end,
+    case maps:get(<<"limit">>, Params, undefined) of
+        undefined -> Opts3;
+        Limit when is_integer(Limit) -> Opts3#{limit => Limit};
+        _ -> Opts3
+    end.
 
 %% @private Get traces with optional actor and selector filters.
 -spec get_traces(binary() | undefined, binary() | undefined) -> [map()].
@@ -138,5 +189,10 @@ describe_ops() ->
         <<"actor-stats">> => #{
             <<"params">> => [],
             <<"optional">> => [<<"actor">>]
+        },
+        <<"export-traces">> => #{
+            <<"params">> => [],
+            <<"optional">> => [<<"path">>, <<"actor">>, <<"selector">>, <<"limit">>],
+            <<"notes">> => <<"Exports trace events to a JSON file. selector requires actor.">>
         }
     }.

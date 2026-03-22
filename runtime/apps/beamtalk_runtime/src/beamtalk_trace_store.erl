@@ -40,6 +40,8 @@
     get_traces/0,
     get_traces/1,
     get_traces/2,
+    %% Export
+    export_traces/1,
     get_stats/0,
     get_stats/1,
     slow_methods/1,
@@ -57,6 +59,7 @@
     %% Telemetry handler callbacks
     handle_dispatch_stop/4,
     handle_dispatch_exception/4,
+    handle_lifecycle_event/4,
     handle_vm_measurements/4
 ]).
 
@@ -193,6 +196,19 @@ get_traces(Pid) ->
 get_traces(Pid, Selector) ->
     gen_server:call(?MODULE, {get_traces, Pid, Selector}).
 
+%% @doc Export trace events to a JSON file.
+%% Opts is a map with optional keys:
+%%   path     - binary file path (default: timestamped file in cwd)
+%%   actor    - pid() to filter by actor
+%%   selector - atom() to filter by selector
+%%   limit    - integer() max events to export
+%% Returns {ok, #{path => Path, count => Count}} on success.
+-spec export_traces(map()) -> {ok, map()} | {error, term()}.
+export_traces(Opts) when is_map(Opts) ->
+    gen_server:call(?MODULE, {export_traces, Opts});
+export_traces(_) ->
+    {error, badarg}.
+
 %% @doc Get aggregate stats for all actors.
 -spec get_stats() -> map().
 get_stats() ->
@@ -300,6 +316,32 @@ handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config
 handle_dispatch_exception(_EventName, _Measurements, _Metadata, _Config) ->
     ok.
 
+%% @doc Handler for [beamtalk, actor, lifecycle, *] events (BT-1629).
+%% Lifecycle events (start, stop, kill) are instantaneous — no duration.
+%% Recorded in the shared trace ring buffer with mode => lifecycle.
+-spec handle_lifecycle_event([atom()], map(), map(), map()) -> ok.
+handle_lifecycle_event(EventName, _Measurements, Metadata, _Config) ->
+    #{pid := Pid, class := Class} = Metadata,
+    %% Extract lifecycle action from event name: [beamtalk, actor, lifecycle, Action]
+    Action = lists:last(EventName),
+    %% Derive outcome from reason for stop events: normal/shutdown = ok, crash = error
+    Outcome = lifecycle_outcome(Action, Metadata),
+    %% Record aggregate stats with selector = lifecycle action (e.g., start, stop, kill)
+    record_dispatch(Pid, Action, 0, Outcome, lifecycle),
+    %% Record trace event with mode => lifecycle, duration 0 (instantaneous)
+    EventMeta = maps:without([pid, class], Metadata),
+    record_trace_event(Pid, Class, Action, lifecycle, 0, Outcome, EventMeta, stop),
+    ok.
+
+%% @private Derive outcome from lifecycle event action and metadata.
+%% For stop events, normal/shutdown exits are ok; anything else is an error.
+%% Start and kill events are always ok.
+lifecycle_outcome(stop, #{reason := normal}) -> ok;
+lifecycle_outcome(stop, #{reason := shutdown}) -> ok;
+lifecycle_outcome(stop, #{reason := {shutdown, _}}) -> ok;
+lifecycle_outcome(stop, #{reason := _}) -> error;
+lifecycle_outcome(_, _) -> ok.
+
 %% @doc Handler for telemetry_poller VM measurement events.
 -spec handle_vm_measurements([atom()], map(), map(), map()) -> ok.
 handle_vm_measurements(_EventName, Measurements, _Metadata, _Config) ->
@@ -374,6 +416,9 @@ handle_call({grow_counters, CallerRef, CallerSize}, _From, State) ->
     {reply, Result, State};
 handle_call({get_traces, Pid, Selector}, _From, State) ->
     Result = do_get_traces(Pid, Selector),
+    {reply, Result, State};
+handle_call({export_traces, Opts}, _From, State) ->
+    Result = do_export_traces(Opts),
     {reply, Result, State};
 handle_call(get_stats, _From, State) ->
     Result = to_binary_keys(do_get_stats(undefined)),
@@ -631,6 +676,25 @@ attach_telemetry_handlers() ->
         fun ?MODULE:handle_dispatch_exception/4,
         #{}
     ),
+    %% BT-1629: Lifecycle event handlers (start, stop, kill)
+    ok = telemetry:attach(
+        beamtalk_trace_store_lifecycle_start,
+        [beamtalk, actor, lifecycle, start],
+        fun ?MODULE:handle_lifecycle_event/4,
+        #{}
+    ),
+    ok = telemetry:attach(
+        beamtalk_trace_store_lifecycle_stop,
+        [beamtalk, actor, lifecycle, stop],
+        fun ?MODULE:handle_lifecycle_event/4,
+        #{}
+    ),
+    ok = telemetry:attach(
+        beamtalk_trace_store_lifecycle_kill,
+        [beamtalk, actor, lifecycle, kill],
+        fun ?MODULE:handle_lifecycle_event/4,
+        #{}
+    ),
     ok = telemetry:attach(
         beamtalk_trace_store_vm_measurements,
         [vm, memory],
@@ -644,6 +708,10 @@ detach_telemetry_handlers() ->
     try
         telemetry:detach(beamtalk_trace_store_dispatch_stop),
         telemetry:detach(beamtalk_trace_store_dispatch_exception),
+        %% BT-1629: Lifecycle event handlers
+        telemetry:detach(beamtalk_trace_store_lifecycle_start),
+        telemetry:detach(beamtalk_trace_store_lifecycle_stop),
+        telemetry:detach(beamtalk_trace_store_lifecycle_kill),
         telemetry:detach(beamtalk_trace_store_vm_measurements)
     catch
         error:undef -> ok
@@ -710,6 +778,75 @@ do_get_traces(Pid, Selector) ->
     %% Sort newest first (reverse of ordered_set natural order)
     Sorted = lists:reverse(Filtered),
     [trace_event_to_map(Ev) || Ev <- Sorted].
+
+%% @private Export traces to a JSON file with optional filters.
+do_export_traces(Opts) ->
+    Pid = maps:get(actor, Opts, undefined),
+    Selector = maps:get(selector, Opts, undefined),
+    Limit = maps:get(limit, Opts, undefined),
+    Traces = do_get_traces(Pid, Selector),
+    Limited =
+        case Limit of
+            undefined -> Traces;
+            L when is_integer(L), L > 0 -> lists:sublist(Traces, L);
+            _ -> Traces
+        end,
+    Count = length(Limited),
+    Path =
+        case maps:get(path, Opts, undefined) of
+            undefined -> default_export_path();
+            P -> P
+        end,
+    %% Build metadata header
+    FilterParams = maps:without([path], Opts),
+    FilterMap = maps:fold(
+        fun(K, V, Acc) ->
+            BinKey = atom_to_binary(K, utf8),
+            BinVal =
+                case V of
+                    _ when is_pid(V) -> list_to_binary(pid_to_list(V));
+                    _ when is_atom(V) -> atom_to_binary(V, utf8);
+                    _ when is_integer(V) -> V;
+                    _ when is_binary(V) -> V;
+                    _ -> iolist_to_binary(io_lib:format("~p", [V]))
+                end,
+            Acc#{BinKey => BinVal}
+        end,
+        #{},
+        FilterParams
+    ),
+    {{Year, Month, Day}, {Hour, Min, Sec}} = calendar:universal_time(),
+    TimestampBin = iolist_to_binary(
+        io_lib:format(
+            "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0BZ",
+            [Year, Month, Day, Hour, Min, Sec]
+        )
+    ),
+    Export = #{
+        <<"metadata">> => #{
+            <<"export_timestamp">> => TimestampBin,
+            <<"filters">> => FilterMap,
+            <<"total_events">> => Count
+        },
+        <<"traces">> => Limited
+    },
+    JsonBin = jsx:encode(Export, [{space, 2}, {indent, 2}]),
+    case file:write_file(Path, JsonBin) of
+        ok ->
+            {ok, #{path => Path, count => Count}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% @private Generate a default export path with timestamp.
+default_export_path() ->
+    {{Year, Month, Day}, {Hour, Min, Sec}} = calendar:universal_time(),
+    Unique = erlang:unique_integer([positive, monotonic]),
+    Filename = io_lib:format(
+        "traces-~4..0B-~2..0B-~2..0BT~2..0B-~2..0B-~2..0B-~B.json",
+        [Year, Month, Day, Hour, Min, Sec, Unique]
+    ),
+    iolist_to_binary(Filename).
 
 %% @private Convert a trace event tuple to a map.
 %% Supports both 9-tuple (with wall-clock) and legacy 8-tuple (without) formats.

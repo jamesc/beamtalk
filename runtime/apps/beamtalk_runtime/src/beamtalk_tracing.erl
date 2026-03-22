@@ -38,6 +38,8 @@
     traces/0,
     tracesFor/1,
     tracesFor/2,
+    %% Export
+    exportTraces/1,
     %% Aggregate stats
     stats/0,
     statsFor/1,
@@ -121,6 +123,15 @@ tracesFor(Actor) ->
 tracesFor(Actor, Selector) ->
     Pid = extract_pid(Actor),
     call_trace_store_default(fun() -> beamtalk_trace_store:get_traces(Pid, Selector) end, []).
+
+%% @doc Export trace events to a JSON file with optional filters.
+%% Opts is a map with optional keys: path, actor (pid), selector (atom), limit (integer).
+-spec exportTraces(map()) -> {ok, map()} | {error, term()}.
+exportTraces(Opts) ->
+    call_trace_store_default(
+        fun() -> beamtalk_trace_store:export_traces(Opts) end,
+        {error, trace_store_not_running}
+    ).
 
 %%====================================================================
 %% Aggregate stats
