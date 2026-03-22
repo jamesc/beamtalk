@@ -16,6 +16,7 @@
 %%% - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
 %%% - beamtalk_repl_ops_session: sessions, clone, close, health, shutdown
 %%% - beamtalk_repl_ops_dev: complete, docs (deprecated), describe, show-codegen
+%%% - beamtalk_repl_ops_perf: enable-tracing, get-traces, actor-stats (ADR 0069)
 %%%
 %%% Deprecated ops (BT-849 / ADR 0040 Phase 6) are superseded by Beamtalk-native
 %%% message sends but remain functional for WebSocket client backward compatibility.
@@ -452,6 +453,12 @@ handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"unload">> ->
     %% BEAM module, workspace_meta, session tracker). Previously returned a deprecation
     %% error (BT-785) but that left orphaned bt@* BEAM modules.
     beamtalk_repl_ops_load:handle(<<"unload">>, Params, Msg, SessionPid);
+handle_op(Op, Params, Msg, SessionPid) when
+    Op =:= <<"enable-tracing">>;
+    Op =:= <<"get-traces">>;
+    Op =:= <<"actor-stats">>
+->
+    beamtalk_repl_ops_perf:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, _Params, Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
     Err1 = beamtalk_error:with_message(

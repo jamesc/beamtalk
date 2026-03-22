@@ -326,6 +326,36 @@ pub struct ListClassesParams {
     pub filter: Option<String>,
 }
 
+/// Parameters for the `get_traces` MCP tool (ADR 0069).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GetTracesParams {
+    /// Optional actor PID to filter traces (e.g. "<0.123.0>").
+    #[schemars(
+        description = "Optional actor PID to filter traces, e.g. \"<0.123.0>\". Omit to get all traces."
+    )]
+    pub actor: Option<String>,
+    /// Optional method selector to further filter traces (e.g. "increment").
+    /// Requires `actor` to also be specified.
+    #[schemars(
+        description = "Optional method selector to filter traces (e.g. \"increment\"). Requires 'actor' to be specified."
+    )]
+    pub selector: Option<String>,
+    /// Maximum number of trace events to return. Traces are newest-first.
+    #[schemars(description = "Maximum number of trace events to return. Traces are newest-first.")]
+    pub limit: Option<u32>,
+}
+
+/// Parameters for the `actor_stats` MCP tool (ADR 0069).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ActorStatsParams {
+    /// Optional actor PID to get stats for (e.g. "<0.123.0>").
+    /// Omit to get stats for all actors.
+    #[schemars(
+        description = "Optional actor PID to get stats for, e.g. \"<0.123.0>\". Omit to get aggregate stats for all actors."
+    )]
+    pub actor: Option<String>,
+}
+
 // --- MCP Tool implementations ---
 
 #[tool_router]
@@ -1144,6 +1174,103 @@ impl BeamtalkMcp {
             })
             .collect::<Vec<_>>()
             .join("\n---\n\n");
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Enable actor trace event capture (ADR 0069).
+    #[tool(
+        description = "Enable actor trace event capture. Aggregate stats (call counts, durations) are always on; this enables detailed per-event traces. Call get-traces and actor-stats after running actor code to inspect results. Disable with evaluate(\"Tracing disable\")."
+    )]
+    async fn enable_tracing(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("enable_tracing");
+        tracing::debug!(tool = "enable_tracing", "tool invoked");
+        let response = self
+            .client
+            .enable_tracing()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to enable tracing");
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(
+            "Tracing enabled. Run actor code, then use get-traces or actor-stats to inspect results.",
+        )]))
+    }
+
+    /// Get captured trace events with optional filtering (ADR 0069).
+    #[tool(
+        description = "Get captured trace events, newest first. Optionally filter by actor PID, method selector, or limit the number of results. Returns structured JSON with actor, selector, duration, result, and timestamp for each event."
+    )]
+    async fn get_traces(
+        &self,
+        Parameters(params): Parameters<GetTracesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("get_traces");
+        tracing::debug!(
+            tool = "get_traces",
+            actor = ?params.actor,
+            selector = ?params.selector,
+            limit = ?params.limit,
+            "tool invoked"
+        );
+
+        // Reject selector without actor
+        if params.selector.is_some() && params.actor.is_none() {
+            return Ok(error_result(
+                "ERROR: 'selector' requires 'actor' to be specified.",
+            ));
+        }
+
+        let response = self
+            .client
+            .get_traces(
+                params.actor.as_deref(),
+                params.selector.as_deref(),
+                params.limit,
+            )
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to get traces");
+
+        let text = match response.value {
+            Some(ref v) => pretty_json(v),
+            None => {
+                "No traces captured. Enable tracing first with enable-tracing, then run actor code."
+                    .to_string()
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Get aggregate actor statistics (ADR 0069).
+    #[tool(
+        description = "Get aggregate per-actor, per-method statistics: call count, total/average/min/max duration, error and timeout counts. Stats are always available even without tracing enabled. Optionally filter by actor PID."
+    )]
+    async fn actor_stats(
+        &self,
+        Parameters(params): Parameters<ActorStatsParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("actor_stats");
+        tracing::debug!(tool = "actor_stats", actor = ?params.actor, "tool invoked");
+
+        let response = self
+            .client
+            .actor_stats(params.actor.as_deref())
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to get actor stats");
+
+        let text = match response.value {
+            Some(ref v) => pretty_json(v),
+            None => "No stats available.".to_string(),
+        };
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
