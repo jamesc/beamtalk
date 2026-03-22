@@ -306,10 +306,9 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
                             [class_name, selector, is_class_method, method_source], MethodInfo
                         ),
                         Warnings};
-                %% BT-1612: Protocol definition — pass through for direct registration.
+                %% BT-1612: Protocol definition — compile Core Erlang to BEAM
                 {ok, protocol_definition, ProtocolInfo} ->
-                    Warnings = maps:get(warnings, ProtocolInfo, []),
-                    {ok, protocol_definition, maps:with([protocols], ProtocolInfo), Warnings};
+                    compile_protocol_definition_result(ProtocolInfo);
                 {ok, CoreErlang, Warnings} ->
                     compile_standard_expression(CoreErlang, Warnings);
                 {error, Diagnostics} ->
@@ -320,6 +319,33 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
         end,
         direct
     ).
+
+%% BT-1612: Compile a protocol definition result to BEAM bytecode.
+-spec compile_protocol_definition_result(map()) ->
+    {ok, protocol_definition, map(), [binary()]} | {error, binary()}.
+compile_protocol_definition_result(ProtocolInfo) ->
+    #{
+        core_erlang := CoreErlang,
+        module_name := ModuleNameBin,
+        protocols := Protocols,
+        warnings := Warnings
+    } = ProtocolInfo,
+    ModuleName = binary_to_atom(ModuleNameBin, utf8),
+    case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+        {ok, _CompiledMod, Binary} ->
+            {ok, protocol_definition,
+                #{
+                    binary => Binary,
+                    module_name => ModuleName,
+                    protocols => Protocols
+                },
+                Warnings};
+        {error, Reason} ->
+            ErrMsg = iolist_to_binary(
+                io_lib:format("Failed to compile protocol module ~s: ~p", [ModuleNameBin, Reason])
+            ),
+            {error, ErrMsg}
+    end.
 
 %% Compile a class definition result including optional trailing expressions.
 -spec compile_class_definition_result(map(), atom()) ->

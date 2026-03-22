@@ -497,63 +497,19 @@ fn method_definition_ok_response(
     ]))
 }
 
-/// Build a response map for a successful protocol definition in REPL.
-///
-/// Returns protocol metadata so the Erlang side can register each protocol
-/// directly via `beamtalk_protocol_registry:register_protocol/1` without
-/// needing a compiled BEAM module (BT-1612).
+/// Build a response map for a successful protocol definition in REPL (BT-1612).
 fn protocol_definition_ok_response(
-    protocols: &[beamtalk_core::ast::ProtocolDefinition],
+    core_erlang: &str,
+    module_name: &str,
+    protocol_names: &[String],
     warnings: &[String],
 ) -> Term {
-    let protocol_terms: Vec<Term> = protocols
-        .iter()
-        .map(|p| {
-            let name = binary(&p.name.name);
-
-            // Build required_methods list
-            let methods: Vec<Term> = p
-                .method_signatures
-                .iter()
-                .map(|sig| {
-                    Term::from(Map::from([
-                        (atom("selector"), binary(&sig.selector.name())),
-                        (
-                            atom("arity"),
-                            Term::from(eetf::FixInteger::from(
-                                i32::try_from(sig.selector.arity()).unwrap_or(0),
-                            )),
-                        ),
-                    ]))
-                })
-                .collect();
-
-            // Build type_params list
-            let type_params: Vec<Term> = p
-                .type_params
-                .iter()
-                .map(|tp| binary(&tp.name.name))
-                .collect();
-
-            // Build extending value
-            let extending = if let Some(ref ext) = p.extending {
-                binary(&ext.name)
-            } else {
-                atom("undefined")
-            };
-
-            Term::from(Map::from([
-                (atom("name"), name),
-                (atom("required_methods"), Term::from(List::from(methods))),
-                (atom("type_params"), Term::from(List::from(type_params))),
-                (atom("extending"), extending),
-            ]))
-        })
-        .collect();
-
+    let protocol_terms: Vec<Term> = protocol_names.iter().map(|n| binary(n)).collect();
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("kind"), atom("protocol_definition")),
+        (atom("core_erlang"), binary(core_erlang)),
+        (atom("module_name"), binary(module_name)),
         (atom("protocols"), Term::from(List::from(protocol_terms))),
         (
             atom("warnings"),
@@ -849,10 +805,16 @@ fn handle_compile_expression(request: &Map) -> Term {
         );
     }
 
-    // BT-1612: If the parsed module contains protocol definitions, return protocol info
-    // so the Erlang side can register them directly with the protocol registry.
+    // BT-1612: If the parsed module contains protocol definitions, compile and return them
     if !module.protocols.is_empty() {
-        return protocol_definition_ok_response(&module.protocols, &warnings);
+        return handle_inline_protocol_definition(
+            &module,
+            &source,
+            &warnings,
+            &class_superclass_index,
+            class_module_index,
+            pre_class_hierarchy,
+        );
     }
 
     if module.expressions.is_empty() {
@@ -926,12 +888,15 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
         return diagnostic_error_response(&error_diags, &source);
     }
 
-    if !module.classes.is_empty() || !module.method_definitions.is_empty() {
-        return error_response(
-            &["trace mode does not support class or method definitions; \
-             use eval without trace to define classes"
-                .to_string()],
-        );
+    if !module.classes.is_empty()
+        || !module.method_definitions.is_empty()
+        || !module.protocols.is_empty()
+    {
+        return error_response(&[
+            "trace mode does not support class, method, or protocol definitions; \
+             use eval without trace to define them"
+                .to_string(),
+        ]);
     }
 
     // BT-1612: Protocol definitions are not supported in trace mode.
@@ -1049,6 +1014,45 @@ fn handle_inline_class_definition(
             trailing_core_erlang.as_deref(),
             &warnings,
         ),
+        Err(e) => error_response(&[format_codegen_error(&e, source)]),
+    }
+}
+
+/// Handle protocol definitions in the REPL (BT-1612).
+///
+/// Compiles protocol-only modules to Core Erlang (which generates `register_class/0`
+/// with protocol registration via BT-1610), then returns a `protocol_definition`
+/// response so the Erlang side can load and execute the module.
+fn handle_inline_protocol_definition(
+    module: &beamtalk_core::ast::Module,
+    source: &str,
+    warnings: &[String],
+    class_superclass_index: &std::collections::HashMap<String, String>,
+    class_module_index: std::collections::HashMap<String, String>,
+    pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+) -> Term {
+    let first_protocol_name = &module.protocols[0].name.name;
+    let base_name = beamtalk_core::erlang::to_module_name(first_protocol_name);
+    let protocol_module_name = format!("bt@{base_name}");
+
+    let protocol_names: Vec<String> = module
+        .protocols
+        .iter()
+        .map(|p| p.name.name.to_string())
+        .collect();
+
+    match beamtalk_core::erlang::generate_module(
+        module,
+        beamtalk_core::erlang::CodegenOptions::new(&protocol_module_name)
+            .with_workspace_mode(true)
+            .with_source(source)
+            .with_class_superclass_index(class_superclass_index.clone())
+            .with_class_module_index(class_module_index)
+            .with_class_hierarchy(pre_class_hierarchy),
+    ) {
+        Ok(code) => {
+            protocol_definition_ok_response(&code, &protocol_module_name, &protocol_names, warnings)
+        }
         Err(e) => error_response(&[format_codegen_error(&e, source)]),
     }
 }
