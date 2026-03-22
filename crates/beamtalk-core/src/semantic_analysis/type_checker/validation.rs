@@ -241,6 +241,7 @@ impl TypeChecker {
     }
 
     /// Check argument types against declared parameter types for a message send.
+    #[allow(clippy::too_many_arguments)] // BT-1588: arg_exprs + env needed for origin tracing
     pub(super) fn check_argument_types(
         &mut self,
         class_name: &EcoString,
@@ -249,6 +250,8 @@ impl TypeChecker {
         span: Span,
         hierarchy: &ClassHierarchy,
         is_class_side: bool,
+        arg_exprs: Option<&[Expression]>,
+        env: Option<&super::TypeEnv>,
     ) {
         let method = if is_class_side {
             hierarchy.find_class_method(class_name, selector)
@@ -273,16 +276,38 @@ impl TypeChecker {
             };
             if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
                 let param_pos = i + 1;
-                self.diagnostics.push(
+                // BT-1588: Use hint severity for generic type params (likely false positive)
+                let is_generic = super::is_generic_type_param(actual_ty);
+                let mut diag = if is_generic {
+                    Diagnostic::hint(
+                        format!(
+                            "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
+                        ),
+                        span,
+                    )
+                    .with_hint(format!(
+                        "This is likely a false positive — `{actual_ty}` is a generic type parameter that may be {expected_ty} at runtime. \
+                         Use `@expect type` to suppress"
+                    ))
+                } else {
                     Diagnostic::warning(
                         format!(
                             "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
                         ),
                         span,
                     )
-                    .with_category(DiagnosticCategory::Type)
-                    .with_hint(format!("Expected {expected_ty} (or a subclass), got {actual_ty}")),
-                );
+                    .with_hint(format!("Expected {expected_ty} (or a subclass), got {actual_ty}"))
+                };
+                // BT-1588: Attach origin note if available
+                if let (Some(exprs), Some(e)) = (arg_exprs, env) {
+                    if let Some(Expression::Identifier(ident)) = exprs.get(i) {
+                        if let Some(origin) = e.get_origin(&ident.name) {
+                            diag = diag.with_note(origin.description.clone(), Some(origin.span));
+                        }
+                    }
+                }
+                self.diagnostics
+                    .push(diag.with_category(DiagnosticCategory::Type));
             }
         }
     }
@@ -464,23 +489,38 @@ impl TypeChecker {
         arg_ty: &EcoString,
         span: Span,
         hierarchy: &ClassHierarchy,
+        arg_origin: Option<&(EcoString, Option<Span>)>,
     ) {
         let is_numeric = |ty: &str| hierarchy.is_numeric_type(ty);
         let is_arithmetic = matches!(operator, "+" | "-" | "*" | "/");
         let is_comparison = matches!(operator, "<" | ">" | "<=" | ">=");
+        let is_generic = super::is_generic_type_param(arg_ty);
 
         // Arithmetic operators on numeric types require numeric arguments
         if is_arithmetic && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
-            self.diagnostics.push(
+            // BT-1588: Use hint severity for generic type params (likely false positive)
+            let mut diag = if is_generic {
+                Diagnostic::hint(
+                    format!(
+                        "`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"
+                    ),
+                    span,
+                )
+            } else {
                 Diagnostic::warning(
                     format!(
                         "`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"
                     ),
                     span,
                 )
+            };
+            diag = diag
                 .with_category(DiagnosticCategory::Type)
-                .with_hint("Arithmetic operators require Integer or Float operands"),
-            );
+                .with_hint("Arithmetic operators require Integer or Float operands");
+            if let Some((desc, origin_span)) = arg_origin {
+                diag = diag.with_note(desc.clone(), *origin_span);
+            }
+            self.diagnostics.push(diag);
             return;
         }
 
@@ -490,29 +530,55 @@ impl TypeChecker {
             && arg_ty.as_str() != "String"
             && arg_ty.as_str() != "Symbol"
         {
-            self.diagnostics.push(
+            // BT-1588: Use hint severity for generic type params (likely false positive)
+            let mut diag = if is_generic {
+                Diagnostic::hint(
+                    format!("`++` on String expects a String argument, got {arg_ty}"),
+                    span,
+                )
+                .with_hint(
+                    "This is likely a false positive — the generic type may be String at runtime. \
+                     Use `displayString` or `@expect type` to suppress",
+                )
+            } else {
                 Diagnostic::warning(
                     format!("`++` on String expects a String argument, got {arg_ty}"),
                     span,
                 )
-                .with_category(DiagnosticCategory::Type)
-                .with_hint("Convert the argument to String first"),
-            );
+                .with_hint("Convert the argument to String first")
+            };
+            diag = diag.with_category(DiagnosticCategory::Type);
+            if let Some((desc, origin_span)) = arg_origin {
+                diag = diag.with_note(desc.clone(), *origin_span);
+            }
+            self.diagnostics.push(diag);
             return;
         }
 
         // Comparison operators on numeric types require numeric arguments
         if is_comparison && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
-            self.diagnostics.push(
+            let mut diag = if is_generic {
+                Diagnostic::hint(
+                    format!(
+                        "`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"
+                    ),
+                    span,
+                )
+            } else {
                 Diagnostic::warning(
                     format!(
                         "`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"
                     ),
                     span,
                 )
+            };
+            diag = diag
                 .with_category(DiagnosticCategory::Type)
-                .with_hint("Comparison operators require compatible types"),
-            );
+                .with_hint("Comparison operators require compatible types");
+            if let Some((desc, origin_span)) = arg_origin {
+                diag = diag.with_note(desc.clone(), *origin_span);
+            }
+            self.diagnostics.push(diag);
         }
     }
 

@@ -39,6 +39,9 @@ pub struct CompileDiagnostic {
 
 impl CompileDiagnostic {
     /// Create a new diagnostic from a beamtalk-core diagnostic.
+    ///
+    /// When the core diagnostic has notes (BT-1588), they are appended to the
+    /// message with line references for origin tracing.
     pub fn from_core_diagnostic(
         diagnostic: &CoreDiagnostic,
         source_path: &str,
@@ -51,9 +54,29 @@ impl CompileDiagnostic {
             Severity::Hint => "hint here",
         };
 
+        // BT-1588: Append notes to the message for origin tracing.
+        // Notes include context like "variable has type V because it came from
+        // `Dictionary at:ifAbsent:` at line 42".
+        let message = if diagnostic.notes.is_empty() {
+            diagnostic.message.to_string()
+        } else {
+            use std::fmt::Write;
+            let mut msg = diagnostic.message.to_string();
+            for note in &diagnostic.notes {
+                if let Some(note_span) = note.span {
+                    let offset = (note_span.start() as usize).min(source.len());
+                    let line = source[..offset].chars().filter(|c| *c == '\n').count() + 1;
+                    let _ = write!(msg, "\n  = {} (line {})", note.message, line);
+                } else {
+                    let _ = write!(msg, "\n  = {}", note.message);
+                }
+            }
+            msg
+        };
+
         Self {
             severity: diagnostic.severity,
-            message: diagnostic.message.to_string(),
+            message,
             src: miette::NamedSource::new(source_path, source.to_string()),
             span: (
                 diagnostic.span.start() as usize,
@@ -125,5 +148,40 @@ mod tests {
         let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
 
         assert_eq!(diag.message, message);
+    }
+
+    #[test]
+    fn test_from_core_diagnostic_with_notes() {
+        // BT-1588: Notes should be appended to the message with line references
+        let source =
+            "line1\nline2\nval := dict at: key ifAbsent: [\"default\"]\nval ++ \" suffix\"";
+        let core_diag = CoreDiagnostic::warning(
+            "`++` on String expects a String argument, got V",
+            Span::new(50, 65),
+        )
+        .with_note(
+            "note: `Dictionary at:ifAbsent:` returns generic type `V`",
+            Some(Span::new(12, 48)),
+        );
+
+        let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
+        assert!(
+            diag.message.contains("Dictionary at:ifAbsent:"),
+            "Message should include the origin note"
+        );
+        assert!(
+            diag.message.contains("line 3"),
+            "Message should include line number of origin, got: {}",
+            diag.message
+        );
+    }
+
+    #[test]
+    fn test_from_core_diagnostic_no_notes() {
+        // Diagnostics without notes should not have extra text
+        let core_diag = CoreDiagnostic::warning("simple warning", Span::new(0, 5));
+        let source = "test := 42";
+        let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
+        assert_eq!(diag.message, "simple warning");
     }
 }

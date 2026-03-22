@@ -1351,10 +1351,21 @@ fn run_lint_structured(path: &str) -> LintResult {
                 Severity::Error => "error",
                 Severity::Warning | Severity::Lint | Severity::Hint => "warning",
             };
+            // BT-1588: Include notes in the message for origin tracing
+            let message = if diag.notes.is_empty() {
+                diag.message.to_string()
+            } else {
+                use std::fmt::Write;
+                let mut msg = diag.message.to_string();
+                for note in &diag.notes {
+                    let _ = write!(msg, " ({})", note.message);
+                }
+                msg
+            };
             let entry = LintDiagnostic {
                 file: file_name.clone(),
                 line: Some(line),
-                message: diag.message.to_string(),
+                message,
                 severity,
             };
             if diag.severity == Severity::Error {

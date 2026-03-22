@@ -395,6 +395,19 @@ pub enum DiagnosticCategory {
     ActorNew,
 }
 
+/// A secondary note attached to a diagnostic (BT-1588).
+///
+/// Notes provide additional context like "variable has type V because it came
+/// from `Dictionary at:ifAbsent:` at line 42". The optional span points to the
+/// origin location in source code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticNote {
+    /// The note message.
+    pub message: EcoString,
+    /// Optional source location the note refers to.
+    pub span: Option<Span>,
+}
+
 /// A diagnostic message (error, warning, or hint).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
@@ -408,6 +421,12 @@ pub struct Diagnostic {
     pub hint: Option<EcoString>,
     /// Optional semantic category for `@expect` suppression.
     pub category: Option<DiagnosticCategory>,
+    /// Additional notes explaining the diagnostic (e.g., type origin tracing).
+    ///
+    /// Each note is a message with an optional source span pointing to the
+    /// origin of the relevant type or value. Inspired by Rust's "type
+    /// originated here" secondary labels (BT-1588).
+    pub notes: Vec<DiagnosticNote>,
 }
 
 impl Diagnostic {
@@ -420,6 +439,7 @@ impl Diagnostic {
             span,
             hint: None,
             category: None,
+            notes: Vec::new(),
         }
     }
 
@@ -432,6 +452,7 @@ impl Diagnostic {
             span,
             hint: None,
             category: None,
+            notes: Vec::new(),
         }
     }
 
@@ -444,6 +465,7 @@ impl Diagnostic {
             span,
             hint: None,
             category: None,
+            notes: Vec::new(),
         }
     }
 
@@ -456,6 +478,7 @@ impl Diagnostic {
             span,
             hint: None,
             category: Some(DiagnosticCategory::Lint),
+            notes: Vec::new(),
         }
     }
 
@@ -470,6 +493,18 @@ impl Diagnostic {
     #[must_use]
     pub fn with_category(mut self, category: DiagnosticCategory) -> Self {
         self.category = Some(category);
+        self
+    }
+
+    /// Attaches a note explaining the diagnostic context (BT-1588).
+    ///
+    /// Notes provide secondary information like type origin tracing.
+    #[must_use]
+    pub fn with_note(mut self, message: impl Into<EcoString>, span: Option<Span>) -> Self {
+        self.notes.push(DiagnosticNote {
+            message: message.into(),
+            span,
+        });
         self
     }
 }

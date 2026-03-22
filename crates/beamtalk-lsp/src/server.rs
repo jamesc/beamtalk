@@ -1351,10 +1351,17 @@ fn to_lsp_diagnostic(
             Severity::Lint | Severity::Hint => DiagnosticSeverity::HINT,
         }),
         source: Some("beamtalk".into()),
-        message: if let Some(ref hint) = diag.hint {
-            format!("{}\nHint: {hint}", diag.message)
-        } else {
-            diag.message.to_string()
+        message: {
+            use std::fmt::Write;
+            let mut msg = diag.message.to_string();
+            // BT-1588: Append notes for origin tracing
+            for note in &diag.notes {
+                let _ = write!(msg, "\n  = {}", note.message);
+            }
+            if let Some(ref hint) = diag.hint {
+                let _ = write!(msg, "\nHint: {hint}");
+            }
+            msg
         },
         ..Default::default()
     }

@@ -270,6 +270,19 @@ impl InferredType {
     }
 }
 
+/// Returns `true` if the type name looks like an unresolved generic type parameter
+/// (e.g., `V`, `K`, `T`, `R`, `E`).
+///
+/// Generic type parameters are single uppercase letters that come from class
+/// type parameter lists. When a generic method like `Dictionary at:ifAbsent:`
+/// returns `V`, the type checker reports `V` as the variable's type. This
+/// helper identifies such types so diagnostics can provide better context
+/// (BT-1588).
+fn is_generic_type_param(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() == 1 && bytes[0].is_ascii_uppercase()
+}
+
 /// Map of expression spans to their inferred types.
 ///
 /// Used by LSP providers (hover, completions) to query types at cursor positions.
@@ -960,12 +973,26 @@ impl Default for TypeChecker {
     }
 }
 
+/// Describes where a variable got its type (BT-1588).
+///
+/// Used to generate "variable has type X because ..." notes in diagnostics.
+#[derive(Debug, Clone)]
+struct TypeOrigin {
+    /// Human-readable description of why the variable has this type.
+    /// e.g., "returned from `Dictionary at:ifAbsent:` at this location"
+    description: EcoString,
+    /// The source span where the type was assigned.
+    span: Span,
+}
+
 /// Type environment for tracking variable → type mappings.
 ///
 /// Supports nested scopes via `child()` which clones the parent env.
 #[derive(Debug, Clone)]
 struct TypeEnv {
     bindings: HashMap<EcoString, InferredType>,
+    /// Where each variable got its type (BT-1588).
+    origins: HashMap<EcoString, TypeOrigin>,
     /// Whether we're inside a class method body (self refers to class-side).
     in_class_method: bool,
 }
@@ -974,6 +1001,7 @@ impl TypeEnv {
     fn new() -> Self {
         Self {
             bindings: HashMap::new(),
+            origins: HashMap::new(),
             in_class_method: false,
         }
     }
@@ -982,8 +1010,31 @@ impl TypeEnv {
         self.bindings.get(name).cloned()
     }
 
+    /// Get the origin description for a variable's type, if tracked.
+    fn get_origin(&self, name: &str) -> Option<&TypeOrigin> {
+        self.origins.get(name)
+    }
+
     fn set(&mut self, name: &str, ty: InferredType) {
         self.bindings.insert(name.into(), ty);
+    }
+
+    /// Set a variable's type with origin tracking (BT-1588).
+    fn set_with_origin(
+        &mut self,
+        name: &str,
+        ty: InferredType,
+        description: impl Into<EcoString>,
+        span: Span,
+    ) {
+        self.bindings.insert(name.into(), ty);
+        self.origins.insert(
+            name.into(),
+            TypeOrigin {
+                description: description.into(),
+                span,
+            },
+        );
     }
 
     /// Create a child scope that inherits parent bindings.
@@ -7095,5 +7146,158 @@ Base subclass: Child
         let (base, args) = TypeChecker::parse_generic_type_string("String");
         assert_eq!(base, "String");
         assert!(args.is_empty());
+    }
+
+    // ---- BT-1588: Generic type param detection ----
+
+    #[test]
+    fn test_is_generic_type_param() {
+        // Single uppercase letters are generic type params
+        assert!(is_generic_type_param("V"));
+        assert!(is_generic_type_param("K"));
+        assert!(is_generic_type_param("T"));
+        assert!(is_generic_type_param("R"));
+        assert!(is_generic_type_param("E"));
+
+        // Multi-character names are NOT generic type params
+        assert!(!is_generic_type_param("String"));
+        assert!(!is_generic_type_param("Integer"));
+        assert!(!is_generic_type_param("Dictionary"));
+
+        // Lowercase is NOT a generic type param
+        assert!(!is_generic_type_param("v"));
+        assert!(!is_generic_type_param("t"));
+
+        // Empty string is NOT
+        assert!(!is_generic_type_param(""));
+    }
+
+    #[test]
+    fn test_generic_type_param_binary_operand_hint_severity() {
+        // Directly test check_binary_operand_types with a generic type param
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+
+        // "hello" ++ V — V is generic, should produce Hint not Warning
+        checker.check_binary_operand_types(
+            &"String".into(),
+            "++",
+            &"V".into(),
+            span(),
+            &hierarchy,
+            None,
+        );
+
+        let diags: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a String argument"))
+            .collect();
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].severity,
+            crate::source_analysis::Severity::Hint,
+            "Generic type param V should produce Hint, not Warning"
+        );
+
+        // "hello" ++ Integer — concrete type, should produce Warning
+        let mut checker2 = TypeChecker::new();
+        checker2.check_binary_operand_types(
+            &"String".into(),
+            "++",
+            &"Integer".into(),
+            span(),
+            &hierarchy,
+            None,
+        );
+        let diags2: Vec<_> = checker2
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a String argument"))
+            .collect();
+        assert_eq!(diags2.len(), 1);
+        assert_eq!(
+            diags2[0].severity,
+            crate::source_analysis::Severity::Warning,
+            "Concrete type Integer should produce Warning"
+        );
+    }
+
+    #[test]
+    fn test_type_env_origin_tracking() {
+        let mut env = TypeEnv::new();
+
+        // Set without origin
+        env.set("x", InferredType::known("Integer"));
+        assert!(env.get_origin("x").is_none());
+
+        // Set with origin
+        env.set_with_origin(
+            "val",
+            InferredType::known("V"),
+            "`Dictionary at:ifAbsent:` returns generic type `V`",
+            Span::new(100, 120),
+        );
+        let origin = env.get_origin("val").unwrap();
+        assert!(origin.description.contains("Dictionary"));
+        assert_eq!(origin.span, Span::new(100, 120));
+
+        // Child inherits origins
+        let child = env.child();
+        assert!(child.get_origin("val").is_some());
+    }
+
+    #[test]
+    fn test_diagnostic_notes_field() {
+        use crate::source_analysis::Diagnostic;
+
+        // Diagnostic without notes
+        let diag = Diagnostic::warning("test warning", span());
+        assert!(diag.notes.is_empty());
+
+        // Diagnostic with a note
+        let diag = Diagnostic::warning("type mismatch", span()).with_note(
+            "variable has type V from Dictionary at:ifAbsent:",
+            Some(Span::new(10, 20)),
+        );
+        assert_eq!(diag.notes.len(), 1);
+        assert!(diag.notes[0].message.contains("Dictionary"));
+        assert_eq!(diag.notes[0].span, Some(Span::new(10, 20)));
+
+        // Hint severity for generic types
+        let diag = Diagnostic::hint("likely false positive", span());
+        assert_eq!(diag.severity, crate::source_analysis::Severity::Hint);
+    }
+
+    #[test]
+    fn test_binary_operand_with_origin_note() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+
+        // "hello" ++ V with origin info
+        let origin = (
+            EcoString::from("`Dictionary at:ifAbsent:` returns generic type `V`"),
+            Some(Span::new(50, 80)),
+        );
+        checker.check_binary_operand_types(
+            &"String".into(),
+            "++",
+            &"V".into(),
+            span(),
+            &hierarchy,
+            Some(&origin),
+        );
+
+        let diags: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("expects a String argument"))
+            .collect();
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].notes.len(), 1, "Should have origin note attached");
+        assert!(
+            diags[0].notes[0].message.contains("Dictionary"),
+            "Note should reference Dictionary origin"
+        );
     }
 }

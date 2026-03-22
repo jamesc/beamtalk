@@ -14,7 +14,7 @@
 
 use crate::commands::build::collect_source_files_from_dir;
 use crate::diagnostic::CompileDiagnostic;
-use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use miette::{IntoDiagnostic, Result};
 
@@ -99,6 +99,17 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
                     eprintln!("{:?}", miette::Report::new(compile_diag));
                 }
                 OutputFormat::Json => {
+                    let notes: Vec<serde_json::Value> = diag
+                        .notes
+                        .iter()
+                        .map(|n| {
+                            serde_json::json!({
+                                "message": n.message.as_str(),
+                                "span_start": n.span.map(Span::start),
+                                "span_end": n.span.map(Span::end),
+                            })
+                        })
+                        .collect();
                     let json = serde_json::json!({
                         "file": file.as_str(),
                         "severity": format!("{:?}", diag.severity).to_lowercase(),
@@ -106,6 +117,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
                         "span_start": diag.span.start(),
                         "span_end": diag.span.end(),
                         "hint": diag.hint.as_deref(),
+                        "notes": notes,
                     });
                     println!("{json}");
                 }
