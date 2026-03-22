@@ -156,6 +156,26 @@ dispatch('perform:withArguments:', [_TargetSelector, _ArgList], Self, State) ->
     Error1 = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected atom selector and list of arguments">>),
     {error, Error2, State};
+%% BT-1190: Dynamic message send with explicit timeout.
+%% For value types, timeout is irrelevant — dispatch locally like perform:withArguments:.
+%% Cross-actor sends are intercepted in beamtalk_message_dispatch:send/3.
+dispatch('perform:withArguments:timeout:', [TargetSelector, ArgList, Timeout], Self, State) when
+    is_atom(TargetSelector),
+    is_list(ArgList),
+    (is_integer(Timeout) andalso Timeout >= 0 orelse Timeout =:= infinity)
+->
+    ClassName = class_name(Self, State),
+    Result = beamtalk_dispatch:lookup(TargetSelector, ArgList, Self, State, ClassName),
+    normalize_dispatch_result(Result, State);
+dispatch('perform:withArguments:timeout:', [_TargetSelector, _ArgList, _Timeout], Self, State) ->
+    ClassName = class_name(Self, State, 'Object'),
+    Error0 = beamtalk_error:new(type_error, ClassName),
+    Error1 = beamtalk_error:with_selector(Error0, 'perform:withArguments:timeout:'),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        <<"Expected atom selector, list of arguments, and non-negative integer or #infinity timeout">>
+    ),
+    {error, Error2, State};
 %% BT-405: Abstract method contract — mirrors Object.bt pure method body
 %% Runtime clause needed until compiled stdlib dispatch is wired up
 dispatch(subclassResponsibility, [], Self, State) ->
@@ -183,6 +203,7 @@ has_method('fieldAt:') -> true;
 has_method('fieldAt:put:') -> true;
 has_method('perform:') -> true;
 has_method('perform:withArguments:') -> true;
+has_method('perform:withArguments:timeout:') -> true;
 has_method('printString') -> true;
 has_method('displayString') -> true;
 has_method(inspect) -> true;

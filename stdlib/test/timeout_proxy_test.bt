@@ -1,0 +1,60 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for TimeoutProxy (BT-1190)
+
+TestCase subclass: TimeoutProxyTest
+  field: actor = nil
+
+  setUp => self.actor := SlowActor spawn
+
+  tearDown => self.actor isAlive ifTrue: [self.actor stop]
+
+  testWithTimeoutReturnsProxy =>
+    // withTimeout: returns a TimeoutProxy, not the original actor
+    proxy := self.actor withTimeout: 30000
+    self assert: proxy class equals: TimeoutProxy
+    proxy stop
+
+  testProxyForwardsMessages =>
+    // Proxy forwards messages to the target actor
+    proxy := self.actor withTimeout: 30000
+    result := proxy getValue
+    self assert: result equals: 42
+    proxy stop
+
+  testProxyForwardsWithSufficientTimeout =>
+    // slowGet: sleeps 50ms; 2000ms timeout is plenty
+    proxy := self.actor withTimeout: 2000
+    result := proxy slowGet: 50
+    self assert: result equals: 42
+    proxy stop
+
+  testProxyTimesOutWithShortTimeout =>
+    // slowGet: sleeps 500ms; 100ms timeout should trigger timeout error
+    proxy := self.actor withTimeout: 100
+    self should: [proxy slowGet: 500] raise: #timeout
+    proxy stop
+
+  testInfinityTimeoutNeverTimesOut =>
+    // #infinity timeout should never time out
+    proxy := self.actor withTimeout: #infinity
+    result := proxy slowGet: 50
+    self assert: result equals: 42
+    proxy stop
+
+  testOneShotUsage =>
+    // Capture proxy to stop it after use
+    proxy := self.actor withTimeout: 2000
+    result := proxy getValue
+    self assert: result equals: 42
+    proxy stop
+
+  testProxyTimeoutExceedsDefaultFiveSeconds =>
+    // Regression: caller→proxy hop must not use the default 5000ms timeout.
+    // Without the fix, a 5200ms delay would timeout at the outer hop even
+    // though the proxy is configured with a 10000ms timeout.
+    proxy := self.actor withTimeout: 10000
+    result := proxy slowGet: 5200
+    self assert: result equals: 42
+    proxy stop

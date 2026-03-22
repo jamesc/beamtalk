@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// SlowE2EActor — E2E fixture that sleeps before responding.
+// Used by actor_timeout.btscript to verify timeout behavior.
+
+Actor subclass: SlowE2EActor
+  state: value = 42
+
+  slowGet: ms =>
+    Timer sleep: ms
+    self.value
+
+  getValue => self.value

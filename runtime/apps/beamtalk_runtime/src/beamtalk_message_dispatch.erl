@@ -20,6 +20,12 @@
 %%% | Class object     | `beamtalk_object_class:class_send/3` | Value |
 %%% | Primitive        | `beamtalk_primitive:send/3` | Value |
 %%%
+%%% ### send/4 (sync with explicit timeout — returns value) (BT-1190)
+%%%
+%%% Same as send/3 but passes Timeout to `beamtalk_actor:sync_send/4`.
+%%% For non-actor receivers, timeout is ignored and dispatch falls through
+%%% to the normal synchronous path.
+%%%
 %%% ### cast/3 (fire-and-forget — returns ok) (BT-920)
 %%%
 %%% | Receiver Type    | Dispatch Path | Returns |
@@ -39,13 +45,13 @@
 %%% See: ADR 0006 (Unified Method Dispatch), BT-430, ADR 0043 (BT-918)
 
 -module(beamtalk_message_dispatch).
--export([send/3, cast/3]).
+-export([send/3, send/4, cast/3]).
 
 -include("beamtalk.hrl").
 
 %% Compiled stdlib modules are generated from Core Erlang.
 %% Dialyzer can't resolve them if stdlib hasn't been built yet.
--dialyzer({nowarn_function, [send/3, cast/3]}).
+-dialyzer({nowarn_function, [send/3, send/4, cast/3]}).
 
 %% @doc Send a message to any receiver (actor, class object, primitive, or future).
 %%
@@ -55,6 +61,16 @@
 %% For class objects, dispatches synchronously via class_send.
 %% For primitives, dispatches synchronously via beamtalk_primitive:send/3.
 -spec send(term(), atom(), list()) -> term().
+send(Receiver, 'perform:withArguments:timeout:', [TargetSelector, ArgList, Timeout]) when
+    is_atom(TargetSelector),
+    is_list(ArgList),
+    (is_integer(Timeout) andalso Timeout >= 0 orelse Timeout =:= infinity)
+->
+    %% BT-1190: Intercept perform:withArguments:timeout: at the dispatch level.
+    %% Rewrites to send/4 so that the gen_server:call to the target uses the
+    %% custom timeout, rather than sending perform:withArguments:timeout: as a
+    %% regular message (which would use the default 5s timeout).
+    send(Receiver, TargetSelector, ArgList, Timeout);
 send({beamtalk_future, _} = Future, Selector, Args) ->
     %% BT-840: Auto-await futures in chained message sends.
     %% This enables backward compat during migration — any residual futures
@@ -139,6 +155,54 @@ send(Receiver, Selector, Args) ->
                     end
             end;
         false ->
+            beamtalk_primitive:send(Receiver, Selector, Args)
+    end.
+
+%% @doc Send a message with explicit timeout (BT-1190).
+%%
+%% Same as send/3 but passes Timeout to beamtalk_actor:sync_send/4.
+%% For actor receivers, the timeout applies to gen_server:call. For value
+%% types, metaclasses, and class objects, timeout is ignored and dispatch
+%% falls through to the normal synchronous path.
+-spec send(term(), atom(), list(), timeout()) -> term().
+send({beamtalk_future, _} = Future, Selector, Args, Timeout) ->
+    %% BT-840 parity: auto-await futures before re-dispatching with timeout.
+    Value = beamtalk_future:await(Future),
+    send(Value, Selector, Args, Timeout);
+send({beamtalk_supervisor, _, _, _} = Sup, Selector, Args, _Timeout) ->
+    %% Supervisors dispatch via hierarchy walk (in-process, not gen_server:call),
+    %% so timeout is irrelevant. Delegate to send/3.
+    send(Sup, Selector, Args);
+send(Receiver, Selector, Args, Timeout) ->
+    case is_actor(Receiver) of
+        true ->
+            case element(2, Receiver) of
+                'Metaclass' ->
+                    beamtalk_primitive:send(Receiver, Selector, Args);
+                _ ->
+                    case beamtalk_class_registry:is_class_object(Receiver) of
+                        true ->
+                            ClassPid = element(4, Receiver),
+                            beamtalk_object_class:class_send(ClassPid, Selector, Args);
+                        false ->
+                            Pid = element(4, Receiver),
+                            case is_pid(Pid) of
+                                true ->
+                                    beamtalk_actor:sync_send(Pid, Selector, Args, Timeout);
+                                false ->
+                                    ClassName = element(2, Receiver),
+                                    Error = beamtalk_error:new(
+                                        actor_dead,
+                                        ClassName,
+                                        Selector,
+                                        <<"Actor process is not available — class may not be fully registered">>
+                                    ),
+                                    error(beamtalk_exception_handler:ensure_wrapped(Error))
+                            end
+                    end
+            end;
+        false ->
+            %% Value types have no timeout semantics — dispatch is synchronous in-process.
             beamtalk_primitive:send(Receiver, Selector, Args)
     end.
 
