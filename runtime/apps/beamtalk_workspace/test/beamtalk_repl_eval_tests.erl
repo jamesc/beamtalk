@@ -1414,8 +1414,7 @@ handle_protocol_definition_success_test() ->
     %% Dynamically compile a module whose register_class/0 sets a process flag
     %% to prove it was actually called (not just skipped).
     ModuleName = '__bt_test_good_protocol',
-    Self = self(),
-    %% register_class/0 sends a message to the test process to prove it ran
+    %% register_class/0 sets a process dict flag to prove it ran
     Forms = [
         {attribute, 1, module, ModuleName},
         {attribute, 2, export, [{register_class, 0}]},
