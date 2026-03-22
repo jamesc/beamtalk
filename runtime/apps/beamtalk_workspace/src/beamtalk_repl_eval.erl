@@ -346,9 +346,19 @@ handle_protocol_definition(ProtocolInfo, Warnings, State) ->
 maybe_register_protocol_class(ModuleName) ->
     case erlang:function_exported(ModuleName, register_class, 0) of
         true ->
-            try
-                ModuleName:register_class(),
-                ok
+            try ModuleName:register_class() of
+                ok ->
+                    ok;
+                {error, RegReason} ->
+                    ?LOG_ERROR(
+                        "Protocol register_class/0 returned error for ~p: ~p",
+                        [ModuleName, RegReason],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    Err = beamtalk_repl_errors:ensure_structured_error(
+                        {registration_error, {ModuleName, RegReason}}
+                    ),
+                    {error, Err}
             catch
                 Class:Reason:Stacktrace ->
                     ?LOG_ERROR(
