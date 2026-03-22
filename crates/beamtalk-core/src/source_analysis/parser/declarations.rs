@@ -1356,6 +1356,11 @@ impl Parser {
             && !self.is_at_class_definition()
             && !self.is_at_standalone_method_definition()
         {
+            // BT-1618: Collect doc comment *before* checking for `class` prefix,
+            // because the doc comment is leading trivia on the `class` token and
+            // would be lost when we advance past it.
+            let doc_comment = self.collect_doc_comment();
+
             // BT-1611: Detect `class` prefix for class method signatures.
             // Use the same lookahead as class definition parsing: `class` followed
             // by something other than `=>` or `-> Type =>` means it's a modifier.
@@ -1368,7 +1373,7 @@ impl Parser {
                 self.advance(); // consume `class`
             }
 
-            if let Some(sig) = self.parse_protocol_method_signature() {
+            if let Some(sig) = self.parse_protocol_method_signature_with_doc(doc_comment) {
                 if is_class_method {
                     class_signatures.push(sig);
                 } else {
@@ -1390,13 +1395,20 @@ impl Parser {
     ///
     /// Returns `None` if the current position doesn't look like a method signature.
     ///
+    /// If `pre_doc` is `Some`, it is used as the doc comment (already collected
+    /// by the caller before consuming a `class` prefix). Otherwise, collects
+    /// the doc comment from the current token's leading trivia.
+    ///
     /// Syntax:
     /// - Unary: `asString -> String`
     /// - Binary: `< other :: Self -> Boolean`
     /// - Keyword: `do: block :: Block(E, Object)`
-    fn parse_protocol_method_signature(&mut self) -> Option<ProtocolMethodSignature> {
+    fn parse_protocol_method_signature_with_doc(
+        &mut self,
+        pre_doc: Option<String>,
+    ) -> Option<ProtocolMethodSignature> {
         let start = self.current_token().span();
-        let doc_comment = self.collect_doc_comment();
+        let doc_comment = pre_doc.or_else(|| self.collect_doc_comment());
         let comments = self.collect_comment_attachment();
 
         // Determine what kind of signature this is

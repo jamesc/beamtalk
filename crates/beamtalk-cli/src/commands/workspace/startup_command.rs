@@ -226,6 +226,8 @@ mod tests {
             cowlib_ebin: beam_dir.clone(),
             ranch_ebin: beam_dir.clone(),
             gun_ebin: beam_dir.clone(),
+            telemetry_ebin: beam_dir.clone(),
+            telemetry_poller_ebin: beam_dir.clone(),
             stdlib_ebin: beam_dir.clone(),
             stdlib_erlang_ebin: beam_dir.clone(),
         };

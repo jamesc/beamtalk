@@ -46,14 +46,7 @@
     update_class/2,
     local_class_methods/1,
     local_class_methods_map/1,
-    local_instance_methods/1,
-    %% BT-102: Method combinations (before/after daemons)
-    add_before/3,
-    add_after/3,
-    remove_before/2,
-    remove_after/2,
-    get_before_methods/2,
-    get_after_methods/2
+    local_instance_methods/1
 ]).
 
 %% gen_server callbacks
@@ -104,13 +97,7 @@
     class_method_return_types = #{} :: #{selector() => meta_type_repr()},
     %% ADR 0033: Runtime-embedded documentation
     doc = none :: binary() | none,
-    method_docs = #{} :: #{selector() => binary()},
-    %% BT-102: Method combinations (before/after daemons, inspired by LFE Flavors).
-    %% Maps from selector to a list of {Id, Fun} tuples.
-    %% Before funs: fun(Self, State) -> {ok, State} | {short_circuit, Result, State}
-    %% After funs: fun(Self, Result, State) -> {ok, NewResult, State}
-    before_methods = #{} :: #{selector() => [{term(), function()}]},
-    after_methods = #{} :: #{selector() => [{term(), function()}]}
+    method_docs = #{} :: #{selector() => binary()}
 }).
 
 %%====================================================================
@@ -283,67 +270,6 @@ is_abstract(ClassPid) ->
 -spec is_constructible(pid()) -> boolean().
 is_constructible(ClassPid) ->
     gen_server:call(ClassPid, is_constructible).
-
-%%====================================================================
-%% BT-102: Method Combinations (Before/After Daemons)
-%%====================================================================
-
-%% @doc Register a before-method daemon for a selector on this class.
-%%
-%% Before methods run before the primary method during dispatch.
-%% The Fun receives (Self, State) and must return:
-%%   {ok, State}              — continue to primary method with (possibly updated) state
-%%   {short_circuit, Result, State} — skip the primary method and return Result
-%%
-%% Returns the daemon ID (a unique reference) for later removal.
-%% ADR 0006: Before methods run superclass -> subclass order.
--spec add_before(pid(), selector(), function()) -> {ok, reference()}.
-add_before(ClassPid, Selector, Fun) when is_function(Fun, 2) ->
-    gen_server:call(ClassPid, {add_before, Selector, Fun}).
-
-%% @doc Register an after-method daemon for a selector on this class.
-%%
-%% After methods run after the primary method during dispatch.
-%% The Fun receives (Self, Result, State) and must return:
-%%   {ok, NewResult, State}   — possibly transform the result
-%%
-%% Returns the daemon ID (a unique reference) for later removal.
-%% ADR 0006: After methods run subclass -> superclass order.
--spec add_after(pid(), selector(), function()) -> {ok, reference()}.
-add_after(ClassPid, Selector, Fun) when is_function(Fun, 3) ->
-    gen_server:call(ClassPid, {add_after, Selector, Fun}).
-
-%% @doc Remove a before-method daemon by selector from this class.
-%%
-%% Removes all before-method daemons for the given selector.
-%% Returns ok regardless of whether any daemons existed.
--spec remove_before(pid(), selector()) -> ok.
-remove_before(ClassPid, Selector) ->
-    gen_server:call(ClassPid, {remove_before, Selector}).
-
-%% @doc Remove an after-method daemon by selector from this class.
-%%
-%% Removes all after-method daemons for the given selector.
-%% Returns ok regardless of whether any daemons existed.
--spec remove_after(pid(), selector()) -> ok.
-remove_after(ClassPid, Selector) ->
-    gen_server:call(ClassPid, {remove_after, Selector}).
-
-%% @doc Get before-method daemons for a selector on this class.
-%%
-%% Returns a list of {Id, Fun} tuples registered for the given selector.
-%% Returns [] if no before-methods are registered.
--spec get_before_methods(pid(), selector()) -> [{reference(), function()}].
-get_before_methods(ClassPid, Selector) ->
-    gen_server:call(ClassPid, {get_before_methods, Selector}).
-
-%% @doc Get after-method daemons for a selector on this class.
-%%
-%% Returns a list of {Id, Fun} tuples registered for the given selector.
-%% Returns [] if no after-methods are registered.
--spec get_after_methods(pid(), selector()) -> [{reference(), function()}].
-get_after_methods(ClassPid, Selector) ->
-    gen_server:call(ClassPid, {get_after_methods, Selector}).
 
 %%====================================================================
 %% gen_server callbacks
@@ -689,28 +615,7 @@ handle_call(get_module, _From, #class_state{module = Module} = State) ->
 handle_call({get_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
     {reply, maps:get(Name, ClassVars, nil), State};
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
-    {reply, Value, State#class_state{class_state = maps:put(Name, Value, ClassVars)}};
-%% BT-102: Method combinations — register/remove before/after daemons.
-handle_call({add_before, Selector, Fun}, _From, #class_state{before_methods = BM} = State) ->
-    Id = make_ref(),
-    Existing = maps:get(Selector, BM, []),
-    NewBM = maps:put(Selector, Existing ++ [{Id, Fun}], BM),
-    {reply, {ok, Id}, State#class_state{before_methods = NewBM}};
-handle_call({add_after, Selector, Fun}, _From, #class_state{after_methods = AM} = State) ->
-    Id = make_ref(),
-    Existing = maps:get(Selector, AM, []),
-    NewAM = maps:put(Selector, Existing ++ [{Id, Fun}], AM),
-    {reply, {ok, Id}, State#class_state{after_methods = NewAM}};
-handle_call({remove_before, Selector}, _From, #class_state{before_methods = BM} = State) ->
-    NewBM = maps:remove(Selector, BM),
-    {reply, ok, State#class_state{before_methods = NewBM}};
-handle_call({remove_after, Selector}, _From, #class_state{after_methods = AM} = State) ->
-    NewAM = maps:remove(Selector, AM),
-    {reply, ok, State#class_state{after_methods = NewAM}};
-handle_call({get_before_methods, Selector}, _From, #class_state{before_methods = BM} = State) ->
-    {reply, maps:get(Selector, BM, []), State};
-handle_call({get_after_methods, Selector}, _From, #class_state{after_methods = AM} = State) ->
-    {reply, maps:get(Selector, AM, []), State}.
+    {reply, Value, State#class_state{class_state = maps:put(Name, Value, ClassVars)}}.
 
 %% ADR 0032 Phase 1: Passes instance_methods (local only) instead of flattened table.
 handle_cast(
