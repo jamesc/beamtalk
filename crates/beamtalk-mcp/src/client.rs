@@ -619,6 +619,11 @@ impl ReplClient {
         self.send(&Self::request("enable-tracing")).await
     }
 
+    /// Send a disable-tracing operation (ADR 0069).
+    pub async fn disable_tracing(&self) -> Result<ReplResponse, String> {
+        self.send(&Self::request("disable-tracing")).await
+    }
+
     /// Send a get-traces operation with optional filtering (ADR 0069).
     pub async fn get_traces(
         &self,

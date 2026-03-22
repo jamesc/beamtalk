@@ -51,6 +51,8 @@
     %% Configuration
     max_events/0,
     max_events/1,
+    %% Health check
+    telemetry_attached/0,
     %% Telemetry handler callbacks
     handle_dispatch_stop/4,
     handle_dispatch_exception/4,
@@ -234,6 +236,21 @@ max_events() ->
 -spec max_events(pos_integer()) -> ok.
 max_events(Size) when is_integer(Size), Size > 0 ->
     gen_server:call(?MODULE, {max_events, Size}).
+
+%% @doc Check whether telemetry handlers are attached to actor dispatch events.
+%% Returns true if the trace store's telemetry handlers are active, false if
+%% telemetry is unavailable or handlers failed to attach.
+-spec telemetry_attached() -> boolean().
+telemetry_attached() ->
+    try
+        Handlers = telemetry:list_handlers([beamtalk, actor, dispatch, stop]),
+        lists:any(
+            fun(#{id := Id}) -> Id =:= beamtalk_trace_store_dispatch_stop end,
+            Handlers
+        )
+    catch
+        error:undef -> false
+    end.
 
 %%====================================================================
 %% Telemetry handler callbacks
@@ -714,10 +731,11 @@ do_get_stats(FilterPid) ->
             case FilterPid =:= undefined orelse Pid =:= FilterPid of
                 true ->
                     Stats = read_counter_stats(CounterRef, SlotBase),
-                    PidKey = pid_to_list(Pid),
-                    PidStats = maps:get(PidKey, Acc, #{methods => #{}}),
+                    PidKey = list_to_binary(pid_to_list(Pid)),
+                    ClassName = lookup_class_for_pid(Pid),
+                    PidStats = maps:get(PidKey, Acc, #{class => ClassName, methods => #{}}),
                     Methods = maps:get(methods, PidStats),
-                    SelKey = atom_to_list(Selector),
+                    SelKey = atom_to_binary(Selector, utf8),
                     NewMethods = maps:put(SelKey, Stats, Methods),
                     maps:put(PidKey, PidStats#{methods => NewMethods}, Acc);
                 false ->
@@ -754,7 +772,14 @@ collect_method_stats() ->
     ets:foldl(
         fun({{Pid, Selector}, CounterRef, SlotBase}, Acc) ->
             Stats = read_counter_stats(CounterRef, SlotBase),
-            [Stats#{pid => Pid, selector => Selector} | Acc]
+            [
+                Stats#{
+                    pid => list_to_binary(pid_to_list(Pid)),
+                    class => lookup_class_for_pid(Pid),
+                    selector => Selector
+                }
+                | Acc
+            ]
         end,
         [],
         ?AGG_INDEX
@@ -822,7 +847,8 @@ do_bottlenecks(Limit) ->
                             QLen = proplists:get_value(message_queue_len, Info, 0),
                             Mem = proplists:get_value(memory, Info, 0),
                             {true, #{
-                                actor => Pid,
+                                actor => list_to_binary(pid_to_list(Pid)),
+                                class => lookup_class_for_pid(Pid),
                                 queue_depth => QLen,
                                 memory_kb => Mem div 1024
                             }}
@@ -849,10 +875,15 @@ do_actor_health(Pid) ->
                 ])
             of
                 undefined ->
-                    #{pid => Pid, status => dead, error => <<"process not alive">>};
+                    #{
+                        pid => list_to_binary(pid_to_list(Pid)),
+                        status => dead,
+                        error => <<"process not alive">>
+                    };
                 Info ->
                     #{
-                        pid => Pid,
+                        pid => list_to_binary(pid_to_list(Pid)),
+                        class => lookup_class_for_pid(Pid),
                         status => proplists:get_value(status, Info),
                         queue_depth => proplists:get_value(message_queue_len, Info, 0),
                         memory_kb => proplists:get_value(memory, Info, 0) div 1024,
@@ -860,7 +891,11 @@ do_actor_health(Pid) ->
                     }
             end;
         false ->
-            #{pid => Pid, status => dead, error => <<"process not alive">>}
+            #{
+                pid => list_to_binary(pid_to_list(Pid)),
+                status => dead,
+                error => <<"process not alive">>
+            }
     end.
 
 %% @private VM overview.
@@ -879,6 +914,17 @@ do_system_health(State) ->
         run_queue => erlang:statistics(run_queue),
         vm_stats => State#state.vm_stats
     }.
+
+%% @private Resolve actor class name from pid via beamtalk_object_instances.
+%% Returns binary class name or <<"unknown">>.
+-spec lookup_class_for_pid(pid()) -> binary().
+lookup_class_for_pid(Pid) ->
+    try ets:match(beamtalk_instance_registry, {'$1', Pid}) of
+        [[Class] | _] -> atom_to_binary(Class, utf8);
+        [] -> <<"unknown">>
+    catch
+        error:badarg -> <<"unknown">>
+    end.
 
 %%====================================================================
 %% Internal: Clear

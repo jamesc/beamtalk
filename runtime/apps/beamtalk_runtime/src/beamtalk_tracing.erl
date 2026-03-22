@@ -59,10 +59,38 @@
 %%====================================================================
 
 %% @doc Enable trace event capture.
+%% Raises a warning error if telemetry handlers are not attached (e.g. telemetry
+%% not on the code path), since tracing will be enabled but non-functional.
 -spec enable() -> nil.
 enable() ->
     call_trace_store(fun beamtalk_trace_store:enable/0),
-    nil.
+    case beamtalk_trace_store:telemetry_attached() of
+        true ->
+            nil;
+        false ->
+            ?LOG_WARNING(
+                "Tracing enabled but telemetry handlers are not attached. "
+                "Traces and stats will be empty. Check that the telemetry "
+                "dependency is on the BEAM code path.",
+                [],
+                #{domain => [beamtalk, runtime]}
+            ),
+            error(#beamtalk_error{
+                kind = configuration_error,
+                class = 'Tracing',
+                message =
+                    <<
+                        "Tracing is not available in this environment. "
+                        "The tracing infrastructure failed to initialize at startup."
+                    >>,
+                hint =
+                    <<
+                        "This usually means the Beamtalk installation is incomplete or "
+                        "corrupted. Try reinstalling or updating Beamtalk."
+                    >>,
+                details = #{}
+            })
+    end.
 
 %% @doc Disable trace event capture.
 -spec disable() -> nil.

@@ -52,11 +52,11 @@ direct_insert_and_query_test_() ->
 
                 %% Check stats
                 Stats = beamtalk_trace_store:get_stats(),
-                PidKey = pid_to_list(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
                 ?assertMatch(#{PidKey := _}, Stats),
                 PidStats = maps:get(PidKey, Stats),
                 Methods = maps:get(methods, PidStats),
-                IncStats = maps:get("increment", Methods),
+                IncStats = maps:get(<<"increment">>, Methods),
                 ?assertEqual(1, maps:get(calls, IncStats)),
                 ?assertEqual(1, maps:get(ok, IncStats)),
                 ?assertEqual(0, maps:get(errors, IncStats)),
@@ -169,9 +169,9 @@ counters_aggregates_test_() ->
 
                 %% Check aggregated stats
                 Stats = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = pid_to_list(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats = maps:get(PidKey, Stats),
-                IncStats = maps:get("increment", maps:get(methods, PidStats)),
+                IncStats = maps:get(<<"increment">>, maps:get(methods, PidStats)),
 
                 ?assertEqual(3, maps:get(calls, IncStats)),
                 ?assertEqual(2, maps:get(ok, IncStats)),
@@ -323,7 +323,7 @@ actor_health_test_() ->
                 %% Health of a live process
                 TestPid = self(),
                 Health = beamtalk_trace_store:actor_health(TestPid),
-                ?assertEqual(TestPid, maps:get(pid, Health)),
+                ?assertEqual(list_to_binary(pid_to_list(TestPid)), maps:get(pid, Health)),
                 ?assertNotEqual(dead, maps:get(status, Health)),
                 ?assert(is_integer(maps:get(queue_depth, Health))),
                 ?assert(is_integer(maps:get(memory_kb, Health))),
@@ -385,8 +385,9 @@ bottlenecks_test_() ->
                 Result = beamtalk_trace_store:bottlenecks(10),
                 ?assert(is_list(Result)),
                 %% Our spawned process should be in the list
+                PidBin = list_to_binary(pid_to_list(Pid)),
                 Pids = [maps:get(actor, R) || R <- Result],
-                ?assert(lists:member(Pid, Pids)),
+                ?assert(lists:member(PidBin, Pids)),
 
                 Pid ! stop
             end)
@@ -421,7 +422,7 @@ telemetry_dispatch_stop_handler_test_() ->
 
                 %% Verify aggregate was recorded
                 Stats = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = pid_to_list(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
                 ?assertMatch(#{PidKey := _}, Stats)
             end)
         ]
@@ -456,9 +457,9 @@ telemetry_dispatch_exception_handler_test_() ->
 
                 %% Verify error was recorded
                 Stats = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = pid_to_list(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats = maps:get(PidKey, Stats),
-                MethodStats = maps:get("badmethod", maps:get(methods, PidStats)),
+                MethodStats = maps:get(<<"badmethod">>, maps:get(methods, PidStats)),
                 ?assertEqual(1, maps:get(errors, MethodStats))
             end)
         ]
@@ -606,7 +607,7 @@ serialized_counter_grow_test_() ->
                 ),
                 %% Verify the counters grew — stats should have all 1010 methods
                 Stats = beamtalk_trace_store:get_stats(),
-                PidKey = pid_to_list(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats = maps:get(PidKey, Stats),
                 Methods = maps:get(methods, PidStats),
                 ?assert(maps:size(Methods) >= 1010)

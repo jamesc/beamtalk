@@ -1,0 +1,177 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for actor tracing (ADR 0069, BT-1622).
+//
+// These tests require E2E because:
+// - Tracing depends on the telemetry dependency being on the BEAM code path,
+//   which only happens when running via the Beamtalk CLI (not rebar3 eunit).
+// - Verifies the full pipeline: telemetry handlers → trace store → Tracing API.
+// - Catches integration issues like missing -pa paths (the bug that shipped
+//   with the original tracing epic BT-1600).
+
+// ===========================================================================
+// SETUP: Load a simple actor for tracing
+// ===========================================================================
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// AGGREGATE STATS (always on, no enable needed)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Stats are populated after actor calls without explicit enable
+// ---------------------------------------------------------------------------
+
+c := Counter spawn
+// => #Actor<Counter,_>
+
+c increment
+// => _
+
+c increment
+// => _
+
+c increment
+// => _
+
+stats := Tracing stats
+// => _
+
+// Stats should be non-empty (at least one actor with methods)
+stats isEmpty
+// => false
+
+// ===========================================================================
+// TRACE EVENT CAPTURE (requires enable)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Enable tracing, make calls, verify traces are captured
+// ---------------------------------------------------------------------------
+
+Tracing enable
+// => _
+
+c increment
+// => _
+
+c getValue
+// => 4
+
+traces := Tracing traces
+// => _
+
+// Should have at least 2 traces (increment + getValue)
+traces size >= 2
+// => true
+
+// ---------------------------------------------------------------------------
+// Trace events have expected structure
+// ---------------------------------------------------------------------------
+
+first := traces first
+// => _
+
+first at: "class"
+// => "Counter"
+
+first at: "outcome"
+// => "ok"
+
+// ---------------------------------------------------------------------------
+// Filter traces by actor
+// ---------------------------------------------------------------------------
+
+actorTraces := Tracing tracesFor: c
+// => _
+
+actorTraces size >= 2
+// => true
+
+// ---------------------------------------------------------------------------
+// Disable and verify no new traces captured
+// ---------------------------------------------------------------------------
+
+Tracing disable
+// => _
+
+Tracing isEnabled
+// => false
+
+prevSize := (Tracing traces) size
+// => _
+
+c increment
+// => _
+
+(Tracing traces) size == prevSize
+// => true
+
+// ===========================================================================
+// ANALYSIS METHODS
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// slowMethods returns results
+// ---------------------------------------------------------------------------
+
+slow := Tracing slowMethods: 5
+// => _
+
+slow isEmpty
+// => false
+
+// ---------------------------------------------------------------------------
+// hotMethods returns results
+// ---------------------------------------------------------------------------
+
+hot := Tracing hotMethods: 5
+// => _
+
+hot isEmpty
+// => false
+
+// ===========================================================================
+// LIVE HEALTH
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// healthFor returns process info for a live actor
+// ---------------------------------------------------------------------------
+
+health := Tracing healthFor: c
+// => _
+
+health at: "class"
+// => "Counter"
+
+health at: "status"
+// => "waiting"
+
+// ---------------------------------------------------------------------------
+// systemHealth returns VM info
+// ---------------------------------------------------------------------------
+
+sysHealth := Tracing systemHealth
+// => _
+
+sysHealth isEmpty
+// => false
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+Tracing clear
+// => _
+
+(Tracing traces) size
+// => 0
+
+(Tracing stats) isEmpty
+// => true
+
+c stop
+// => _
