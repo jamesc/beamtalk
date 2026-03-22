@@ -166,6 +166,9 @@
 %% Propagated context (ADR 0069 Phase 2b)
 -export([get_propagated_ctx/0, restore_propagated_ctx/1]).
 
+%% Application-level trace context (BT-1625)
+-export([set_trace_context/1, get_trace_context/0]).
+
 %% gen_server callbacks (for generated actors to delegate to)
 -export([
     init/1,
@@ -782,17 +785,47 @@ lookup_class(Pid) ->
         error:badarg -> unknown
     end.
 
+%% @doc Set application-level trace context key-value pairs (BT-1625).
+%%
+%% Stores the provided map in the process dictionary under '$beamtalk_trace_ctx'.
+%% Also merges the keys into OTP logger process metadata so that ?LOG_ERROR,
+%% ?LOG_INFO etc. automatically include fields like workflowId without extra work.
+%%
+%% Example: set_trace_context(#{workflowId => <<"wf-123">>, activityId => <<"a-1">>})
+%%
+%% Cost: ~20-30ns (one put/2 + one logger:update_process_metadata/1).
+-spec set_trace_context(map()) -> ok.
+set_trace_context(Ctx) when is_map(Ctx) ->
+    OldCtx = get_trace_context(),
+    Merged = maps:merge(OldCtx, Ctx),
+    put('$beamtalk_trace_ctx', Merged),
+    logger:update_process_metadata(Ctx),
+    ok.
+
+%% @doc Get the current application-level trace context (BT-1625).
+%%
+%% Returns the map stored by set_trace_context/1, or #{} if none set.
+%% Cost: ~10ns (one get/1).
+-spec get_trace_context() -> map().
+get_trace_context() ->
+    case get('$beamtalk_trace_ctx') of
+        undefined -> #{};
+        Ctx when is_map(Ctx) -> Ctx
+    end.
+
 %% @doc Build a propagated context map for cross-actor message sends (ADR 0069 Phase 2b).
 %%
 %% Returns an extensible map containing context that should flow across actor
-%% boundaries. Currently captures OTel trace context when the otel_ctx module
-%% is loaded. Future keys (request_id, deadline, causality) will be added here.
+%% boundaries. Currently captures:
+%% - OTel trace context (when otel_ctx module is loaded)
+%% - Application-level trace context (BT-1625, set via set_trace_context/1)
+%% Future keys (request_id, deadline, causality) will be added here.
 %%
-%% Cost: ~10ns when OTel not loaded (erlang:function_exported check + map construction),
-%% ~40ns when OTel loaded (+ otel_ctx:get_current/0 call).
+%% Cost: ~20ns when OTel not loaded (function_exported check + get/1 + map construction),
+%% ~50ns when OTel loaded (+ otel_ctx:get_current/0 call).
 -spec get_propagated_ctx() -> map().
 get_propagated_ctx() ->
-    #{otel => get_otel_ctx()}.
+    #{otel => get_otel_ctx(), trace_ctx => get_trace_context()}.
 
 %% @private
 %% @doc Get current OTel trace context if otel_ctx module is available.
@@ -807,18 +840,36 @@ get_otel_ctx() ->
 %% @doc Restore propagated context on the receiving actor side (ADR 0069 Phase 2b).
 %%
 %% Called by generated handle_call/handle_cast to restore context from the
-%% propagated context map. When OTel context is present and otel_ctx is loaded,
-%% attaches the trace context so spans created in this actor are linked to the
-%% caller's trace. No-op when OTel is not loaded or context is undefined.
+%% propagated context map. Restores two kinds of context:
+%% - OTel trace context: attaches to otel_ctx so spans are linked to caller's trace
+%% - Application-level trace context (BT-1625): restores key-value pairs set via
+%%   set_trace_context/1 and updates OTP logger process metadata
+%% No-op when context is not present or dependencies are not loaded.
 -spec restore_propagated_ctx(map()) -> ok.
-restore_propagated_ctx(#{otel := Ctx}) when Ctx =/= undefined ->
-    case erlang:function_exported(otel_ctx, attach, 1) of
-        true ->
-            erlang:apply(otel_ctx, attach, [Ctx]),
+restore_propagated_ctx(PropCtx) when is_map(PropCtx) ->
+    %% Restore OTel context if present
+    case maps:get(otel, PropCtx, undefined) of
+        undefined ->
             ok;
-        false ->
+        OtelCtx ->
+            case erlang:function_exported(otel_ctx, attach, 1) of
+                true ->
+                    erlang:apply(otel_ctx, attach, [OtelCtx]),
+                    ok;
+                false ->
+                    ok
+            end
+    end,
+    %% Restore application-level trace context if present (BT-1625)
+    case maps:get(trace_ctx, PropCtx, undefined) of
+        undefined ->
+            ok;
+        TraceCtx when is_map(TraceCtx), map_size(TraceCtx) > 0 ->
+            set_trace_context(TraceCtx);
+        _ ->
             ok
-    end;
+    end,
+    ok;
 restore_propagated_ctx(_) ->
     ok.
 

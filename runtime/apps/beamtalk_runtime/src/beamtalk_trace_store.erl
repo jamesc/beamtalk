@@ -280,7 +280,9 @@ handle_dispatch_stop(_EventName, #{duration := Duration}, Metadata, _Config) ->
     Class = maps:get(class, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
     record_dispatch(Pid, Selector, DurationNs, Outcome, Mode),
-    record_trace_event(Pid, Class, Selector, Mode, DurationNs, Outcome, #{}, stop),
+    %% BT-1625: Merge application-level trace context into event metadata
+    TraceCtx = beamtalk_actor:get_trace_context(),
+    record_trace_event(Pid, Class, Selector, Mode, DurationNs, Outcome, TraceCtx, stop),
     ok;
 handle_dispatch_stop(_EventName, _Measurements, _Metadata, _Config) ->
     ok.
@@ -294,7 +296,9 @@ handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config
     Reason = maps:get(reason, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
     record_dispatch(Pid, Selector, DurationNs, error, Mode),
-    EventMeta = #{error => Reason, kind => Kind},
+    %% BT-1625: Merge application-level trace context into event metadata
+    TraceCtx = beamtalk_actor:get_trace_context(),
+    EventMeta = maps:merge(TraceCtx, #{error => Reason, kind => Kind}),
     record_trace_event(Pid, Class, Selector, Mode, DurationNs, error, EventMeta, exception),
     ok;
 handle_dispatch_exception(_EventName, _Measurements, _Metadata, _Config) ->
