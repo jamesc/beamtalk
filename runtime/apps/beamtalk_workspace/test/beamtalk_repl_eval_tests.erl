@@ -1357,3 +1357,98 @@ do_eval_trace_preserves_existing_bindings_on_error_test() ->
     ?assertEqual(10, maps:get(x, FinalBindings)),
     ?assertEqual(20, maps:get(y, FinalBindings)),
     ?assertEqual(false, maps:is_key(z, FinalBindings)).
+
+%%====================================================================
+%% Protocol definition error handling tests (BT-1616)
+%%====================================================================
+
+%% @doc Test that code:load_binary failure returns a structured #beamtalk_error{}.
+handle_protocol_definition_load_failure_returns_structured_error_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    ProtocolInfo = #{
+        binary => <<"not valid beam binary">>,
+        module_name => '__bt_test_bad_protocol',
+        protocols => [<<"BadProto">>]
+    },
+    Result = beamtalk_repl_eval:handle_protocol_definition(ProtocolInfo, [], State),
+    ?assertMatch({error, #beamtalk_error{}, <<>>, [], _}, Result),
+    {error, Err, _, _, _} = Result,
+    ?assertEqual(io_error, Err#beamtalk_error.kind).
+
+%% @doc Test that register_class/0 failure surfaces as a structured #beamtalk_error{}.
+handle_protocol_definition_register_class_failure_returns_structured_error_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    %% Dynamically compile a module whose register_class/0 throws an error
+    ModuleName = '__bt_test_failing_register_protocol',
+    Forms = [
+        {attribute, 1, module, ModuleName},
+        {attribute, 2, export, [{register_class, 0}]},
+        {function, 3, register_class, 0, [
+            {clause, 3, [], [], [
+                {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, error}}, [
+                    {atom, 3, registration_boom}
+                ]}
+            ]}
+        ]}
+    ],
+    {ok, ModuleName, Binary} = compile:forms(Forms),
+    ProtocolInfo = #{
+        binary => Binary,
+        module_name => ModuleName,
+        protocols => [<<"FailProto">>]
+    },
+    Result = beamtalk_repl_eval:handle_protocol_definition(ProtocolInfo, [], State),
+    ?assertMatch({error, #beamtalk_error{}, <<>>, [], _}, Result),
+    {error, Err, _, _, _} = Result,
+    ?assertEqual(registration_error, Err#beamtalk_error.kind),
+    %% Verify the error message mentions the module and reason
+    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"registration failed">>)),
+    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"registration_boom">>)),
+    %% Cleanup
+    code:purge(ModuleName),
+    code:delete(ModuleName).
+
+%% @doc Test that successful protocol definition still works correctly.
+handle_protocol_definition_success_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    %% Dynamically compile a module whose register_class/0 succeeds
+    ModuleName = '__bt_test_good_protocol',
+    Forms = [
+        {attribute, 1, module, ModuleName},
+        {attribute, 2, export, [{register_class, 0}]},
+        {function, 3, register_class, 0, [
+            {clause, 3, [], [], [{atom, 3, ok}]}
+        ]}
+    ],
+    {ok, ModuleName, Binary} = compile:forms(Forms),
+    ProtocolInfo = #{
+        binary => Binary,
+        module_name => ModuleName,
+        protocols => [<<"GoodProto">>]
+    },
+    Result = beamtalk_repl_eval:handle_protocol_definition(ProtocolInfo, [], State),
+    ?assertMatch({ok, <<"Protocol GoodProto defined">>, <<>>, [], _}, Result),
+    %% Cleanup
+    code:purge(ModuleName),
+    code:delete(ModuleName).
+
+%% @doc Test protocol definition success when register_class/0 is not exported.
+handle_protocol_definition_no_register_class_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    %% Dynamically compile a module without register_class/0
+    ModuleName = '__bt_test_no_register_protocol',
+    Forms = [
+        {attribute, 1, module, ModuleName},
+        {attribute, 2, export, []}
+    ],
+    {ok, ModuleName, Binary} = compile:forms(Forms),
+    ProtocolInfo = #{
+        binary => Binary,
+        module_name => ModuleName,
+        protocols => [<<"NoRegProto">>]
+    },
+    Result = beamtalk_repl_eval:handle_protocol_definition(ProtocolInfo, [], State),
+    ?assertMatch({ok, <<"Protocol NoRegProto defined">>, <<>>, [], _}, Result),
+    %% Cleanup
+    code:purge(ModuleName),
+    code:delete(ModuleName).
