@@ -243,6 +243,7 @@ pub fn is_input_complete(source: &str) -> bool {
     let mut binary_depth: i32 = 0; // << >>
     let mut last_meaningful_kind: Option<&TokenKind> = None;
     let mut has_subclass_keyword = false;
+    let mut has_protocol_define = false;
     let mut has_method_arrow = false;
 
     for token in &tokens {
@@ -284,12 +285,18 @@ pub fn is_input_complete(source: &str) -> bool {
 
             // Track class definition pattern
             TokenKind::Keyword(k) if k == "subclass:" => has_subclass_keyword = true,
+            // Track protocol definition pattern (Protocol define: Name ...)
+            TokenKind::Keyword(k) if k == "define:" => {
+                if matches!(last_meaningful_kind, Some(TokenKind::Identifier(name)) if name == "Protocol")
+                {
+                    has_protocol_define = true;
+                }
+            }
             // Only count `=>` as a method arrow when not nested inside delimiters
             // (e.g., `#{key => value}` in state initializers should not count)
             TokenKind::FatArrow if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 => {
                 has_method_arrow = true;
             }
-
             TokenKind::Eof => break,
             _ => {}
         }
@@ -338,6 +345,14 @@ pub fn is_input_complete(source: &str) -> bool {
     // In the REPL, user presses Enter on a blank line to submit; in E2E tests,
     // the assertion line `// =>` follows immediately after the last method.
     if has_subclass_keyword && !has_method_arrow {
+        return false;
+    }
+
+    // Protocol definition: always incomplete — protocols can have multiple method
+    // signatures, so we can't know when the definition ends from tokens alone.
+    // In the REPL, the user submits with a blank line. In E2E tests, the
+    // `// =>` assertion or blank line terminates the continuation collection.
+    if has_protocol_define {
         return false;
     }
 

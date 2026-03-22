@@ -72,6 +72,7 @@ start_link(Args) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
+    | {ok, protocol_definition, map()}
     | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     compile_expression(Source, ModuleName, KnownVars, #{}).
@@ -84,6 +85,7 @@ compile_expression(Source, ModuleName, KnownVars) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
+    | {ok, protocol_definition, map()}
     | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     gen_server:call(

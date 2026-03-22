@@ -35,6 +35,7 @@
     inject_output/3,
     handle_class_definition/7,
     handle_method_definition/4,
+    handle_protocol_definition/3,
     wrap_load_err/3
 ]).
 -endif.
@@ -78,6 +79,9 @@ do_eval(Expression, State, Subscriber) ->
         %% BT-571: Standalone method definition
         {ok, method_definition, MethodInfo, Warnings} ->
             handle_method_definition(MethodInfo, Warnings, Expression, NewState);
+        %% BT-1612: Protocol definition — register directly with protocol registry
+        {ok, protocol_definition, ProtocolInfo, Warnings} ->
+            handle_protocol_definition(ProtocolInfo, Warnings, NewState);
         {ok, Binary, _ResultExpr, Warnings} ->
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
@@ -300,6 +304,58 @@ handle_class_definition(
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 handle_method_definition(MethodInfo, Warnings, Expression, State) ->
     beamtalk_repl_loader:reload_method_definition(MethodInfo, Warnings, Expression, State).
+
+%% @doc Handle protocol definition: register each protocol with the runtime registry.
+%%
+%% Calls `beamtalk_protocol_registry:register_protocol/1` directly for each
+%% protocol in the definition, without compiling a BEAM module (BT-1612).
+-spec handle_protocol_definition(map(), [binary()], beamtalk_repl_state:state()) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+handle_protocol_definition(#{protocols := Protocols}, Warnings, State) ->
+    Names = lists:map(
+        fun(#{name := NameBin} = Proto) ->
+            %% Convert binary keys to atoms for register_protocol/1
+            Name = binary_to_atom(NameBin, utf8),
+            RequiredMethods = lists:map(
+                fun(#{selector := Sel, arity := Ar}) ->
+                    #{selector => binary_to_atom(Sel, utf8), arity => Ar}
+                end,
+                maps:get(required_methods, Proto, [])
+            ),
+            TypeParams = lists:map(
+                fun(TP) -> binary_to_atom(TP, utf8) end,
+                maps:get(type_params, Proto, [])
+            ),
+            Extending =
+                case maps:get(extending, Proto, undefined) of
+                    undefined -> undefined;
+                    ExtBin when is_binary(ExtBin) -> binary_to_atom(ExtBin, utf8);
+                    ExtAtom when is_atom(ExtAtom) -> ExtAtom
+                end,
+            beamtalk_protocol_registry:register_protocol(#{
+                name => Name,
+                required_methods => RequiredMethods,
+                type_params => TypeParams,
+                extending => Extending
+            }),
+            Name
+        end,
+        Protocols
+    ),
+    %% Return a human-readable result: "Protocol X defined" or "Protocols X, Y defined"
+    Result =
+        case Names of
+            [SingleName] ->
+                list_to_binary(
+                    "Protocol " ++ atom_to_list(SingleName) ++ " defined"
+                );
+            MultiNames ->
+                NameStrs = [atom_to_list(N) || N <- MultiNames],
+                list_to_binary(
+                    "Protocols " ++ lists:flatten(lists:join(", ", NameStrs)) ++ " defined"
+                )
+        end,
+    {ok, Result, <<>>, Warnings, State}.
 
 %% @doc Evaluate a loaded module: capture IO, execute, process result, cleanup.
 -spec eval_loaded_module(

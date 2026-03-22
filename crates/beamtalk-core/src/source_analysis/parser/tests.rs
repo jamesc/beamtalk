@@ -5793,3 +5793,48 @@ fn parse_superclass_no_type_args() {
     let class = &module.classes[0];
     assert!(class.superclass_type_args.is_empty());
 }
+
+// === Protocol define: is_input_complete tests ===
+
+#[test]
+fn incomplete_protocol_define_no_methods() {
+    // "Protocol define: Greetable" alone is incomplete — waiting for method sigs
+    assert!(!is_input_complete("Protocol define: Greetable"));
+}
+
+#[test]
+fn incomplete_protocol_define_with_method() {
+    // Protocol definitions are always incomplete — the REPL needs a blank line
+    // to know the definition is finished (protocols can have multiple methods).
+    assert!(!is_input_complete(
+        "Protocol define: Greetable\n  greet -> String"
+    ));
+}
+
+#[test]
+fn incomplete_protocol_define_with_multiple_methods() {
+    // Still incomplete even with multiple methods — needs blank line to submit
+    assert!(!is_input_complete(
+        "Protocol define: Serializable\n  serialize -> String\n  deserialize: data :: String -> Self"
+    ));
+}
+
+#[test]
+fn incomplete_protocol_define_extending_only() {
+    assert!(!is_input_complete(
+        "Protocol define: PrettyPrintable\n  extending: Greetable"
+    ));
+}
+
+#[test]
+fn incomplete_protocol_define_extending_with_method() {
+    assert!(!is_input_complete(
+        "Protocol define: PrettyPrintable\n  extending: Greetable\n  prettyPrint -> String"
+    ));
+}
+
+#[test]
+fn non_protocol_define_is_complete() {
+    // "define:" on a non-Protocol receiver should not trigger the protocol check
+    assert!(is_input_complete("myObj define: something"));
+}
