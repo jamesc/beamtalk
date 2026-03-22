@@ -1129,9 +1129,9 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 131, end: 139 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 147, end: 160 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 170, end: 172 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 670, end: 676 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ++", span: Span { start: 677, end: 679 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 685, end: 686 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 131, end: 139 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 147, end: 160 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 170, end: 172 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 670, end: 676 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ++", span: Span { start: 677, end: 679 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 685, end: 686 }, hint: None, category: None, notes: [] }

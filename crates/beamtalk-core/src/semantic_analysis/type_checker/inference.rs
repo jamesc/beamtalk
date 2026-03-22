@@ -384,7 +384,18 @@ impl TypeChecker {
                 let ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
                 match target.as_ref() {
                     Expression::Identifier(ident) => {
-                        env.set(ident.name.as_str(), ty.clone());
+                        // BT-1588: Track type origin for generic type params
+                        if let Some(origin) = Self::describe_type_origin(value, &ty, hierarchy, env)
+                        {
+                            env.set_with_origin(
+                                ident.name.as_str(),
+                                ty.clone(),
+                                origin.0,
+                                origin.1,
+                            );
+                        } else {
+                            env.set(ident.name.as_str(), ty.clone());
+                        }
                     }
                     Expression::FieldAccess {
                         receiver, field, ..
@@ -668,7 +679,23 @@ impl TypeChecker {
             ) = (&receiver_ty, arg_types.first())
             {
                 if hierarchy.resolves_selector(recv_ty, &selector_name) {
-                    self.check_binary_operand_types(recv_ty, op, arg_ty, span, hierarchy);
+                    // BT-1588: Collect origin info for the argument expression
+                    let arg_origin = arguments.first().and_then(|arg_expr| {
+                        if let Expression::Identifier(ident) = arg_expr {
+                            env.get_origin(&ident.name)
+                                .map(|o| (o.description.clone(), Some(o.span)))
+                        } else {
+                            None
+                        }
+                    });
+                    self.check_binary_operand_types(
+                        recv_ty,
+                        op,
+                        arg_ty,
+                        span,
+                        hierarchy,
+                        arg_origin.as_ref(),
+                    );
                 }
             }
         }
@@ -683,6 +710,8 @@ impl TypeChecker {
                 span,
                 hierarchy,
                 true,
+                Some(arguments),
+                Some(env),
             );
             return self.check_class_side_send(
                 class_name,
@@ -710,6 +739,8 @@ impl TypeChecker {
                         span,
                         hierarchy,
                         true,
+                        Some(arguments),
+                        Some(env),
                     );
                     return self.check_class_side_send(
                         class_name,
@@ -733,6 +764,8 @@ impl TypeChecker {
                     span,
                     hierarchy,
                     false,
+                    Some(arguments),
+                    Some(env),
                 );
             }
 
@@ -804,6 +837,62 @@ impl TypeChecker {
     /// Returns true if the expression is `self` (direct identifier reference).
     fn is_self_receiver(expr: &Expression) -> bool {
         matches!(expr, Expression::Identifier(ident) if ident.name == "self")
+    }
+
+    /// Describes where an expression's type originated (BT-1588).
+    ///
+    /// Returns `Some((description, span))` when the value expression is a
+    /// message send that returns a generic type parameter (e.g., `V` from
+    /// `Dictionary at:ifAbsent:`). Returns `None` when origin tracking
+    /// isn't useful (concrete types, Dynamic, etc.).
+    fn describe_type_origin(
+        value: &Expression,
+        ty: &super::InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &super::TypeEnv,
+    ) -> Option<(EcoString, crate::source_analysis::Span)> {
+        // Only track origin for generic type params (single uppercase letter)
+        let type_name = ty.as_known()?;
+        if !super::is_generic_type_param(type_name) {
+            return None;
+        }
+
+        // Extract the message send details
+        if let Expression::MessageSend {
+            receiver,
+            selector,
+            span,
+            ..
+        } = value
+        {
+            let selector_name = selector.name();
+            // Try to get the receiver's type name for context
+            let receiver_type = match receiver.as_ref() {
+                Expression::Identifier(ident) => env
+                    .get(&ident.name)
+                    .and_then(|t| t.as_known().cloned())
+                    .unwrap_or_else(|| ident.name.clone()),
+                Expression::ClassReference { name, .. } => name.name.clone(),
+                _ => {
+                    // For other expressions, try to find a class name from hierarchy
+                    EcoString::from("receiver")
+                }
+            };
+
+            let desc = if hierarchy.has_class(&receiver_type) {
+                EcoString::from(format!(
+                    "`{receiver_type} {selector_name}` returns generic type `{type_name}`"
+                ))
+            } else {
+                EcoString::from(format!(
+                    "`{selector_name}` returns generic type `{type_name}`"
+                ))
+            };
+
+            return Some((desc, *span));
+        }
+
+        None
     }
 
     /// Infer the result type of a message send on a union-typed receiver.
