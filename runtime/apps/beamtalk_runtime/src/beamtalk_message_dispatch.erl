@@ -11,7 +11,7 @@
 %%%
 %%% ## Dispatch Strategy
 %%%
-%%% ### send/3 (sync — returns value)
+%%% ### send/3 (sync -- returns value)
 %%%
 %%% | Receiver Type    | Dispatch Path | Returns |
 %%% |------------------|---------------|---------|
@@ -20,17 +20,17 @@
 %%% | Class object     | `beamtalk_object_class:class_send/3` | Value |
 %%% | Primitive        | `beamtalk_primitive:send/3` | Value |
 %%%
-%%% ### send/4 (sync with explicit timeout — returns value) (BT-1190)
+%%% ### send/4 (sync with explicit timeout -- returns value) (BT-1190)
 %%%
 %%% Same as send/3 but passes Timeout to `beamtalk_actor:sync_send/4`.
 %%% For non-actor receivers, timeout is ignored and dispatch falls through
 %%% to the normal synchronous path.
 %%%
-%%% ### cast/3 (fire-and-forget — returns ok) (BT-920)
+%%% ### cast/3 (fire-and-forget -- returns ok) (BT-920)
 %%%
 %%% | Receiver Type    | Dispatch Path | Returns |
 %%% |------------------|---------------|---------|
-%%% | Supervisor tuple | (silently ignored — cast has no supervisor semantics) | ok |
+%%% | Supervisor tuple | (silently ignored -- cast has no supervisor semantics) | ok |
 %%% | Actor record     | `beamtalk_actor:cast_send/3` | ok |
 %%% | Class object     | (silently ignored) | ok |
 %%% | Primitive        | (silently ignored) | ok |
@@ -56,7 +56,7 @@
 %% @doc Send a message to any receiver (actor, class object, primitive, or future).
 %%
 %% For futures, auto-awaits the value and re-dispatches (BT-840).
-%% For supervisors, dispatches via hierarchy walk (ADR 0059 — not gen_server).
+%% For supervisors, dispatches via hierarchy walk (ADR 0059 -- not gen_server).
 %% For actors, sends synchronously via gen_server:call (BT-918 / ADR 0043).
 %% For class objects, dispatches synchronously via class_send.
 %% For primitives, dispatches synchronously via beamtalk_primitive:send/3.
@@ -73,15 +73,15 @@ send(Receiver, 'perform:withArguments:timeout:', [TargetSelector, ArgList, Timeo
     send(Receiver, TargetSelector, ArgList, Timeout);
 send({beamtalk_future, _} = Future, Selector, Args) ->
     %% BT-840: Auto-await futures in chained message sends.
-    %% This enables backward compat during migration — any residual futures
+    %% This enables backward compat during migration -- any residual futures
     %% returned by old code paths are awaited before re-dispatching.
     Value = beamtalk_future:await(Future),
     send(Value, Selector, Args);
 send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, isAlive, []) ->
-    %% ADR 0059: Supervisor lifecycle — check process liveness without gen_server.
+    %% ADR 0059: Supervisor lifecycle -- check process liveness without gen_server.
     is_process_alive(Pid) andalso ClassName =/= undefined;
 send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, stop, []) ->
-    %% ADR 0059: Supervisor stop — OTP supervisors are gen_servers; use gen_server:stop/1.
+    %% ADR 0059: Supervisor stop -- OTP supervisors are gen_servers; use gen_server:stop/1.
     %% Catch noproc so a stale handle raises a structured error rather than a raw OTP exit.
     try
         gen_server:stop(Pid),
@@ -93,7 +93,7 @@ send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, stop, []) ->
                 runtime_error,
                 ClassName,
                 stop,
-                <<"supervisor is not running — the handle is stale">>
+                <<"supervisor is not running -- the handle is stale">>
             ),
             error(beamtalk_exception_handler:ensure_wrapped(Error));
         exit:noproc ->
@@ -102,13 +102,13 @@ send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, stop, []) ->
                 runtime_error,
                 ClassName,
                 stop,
-                <<"supervisor is not running — the handle is stale">>
+                <<"supervisor is not running -- the handle is stale">>
             ),
             error(beamtalk_exception_handler:ensure_wrapped(Error))
     end;
 send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
     %% ADR 0059: Route supervisor method calls via class hierarchy walk.
-    %% Supervisor instances do not run in a gen_server — methods execute
+    %% Supervisor instances do not run in a gen_server -- methods execute
     %% in the caller's process context (OTP supervisor handle_call is reserved).
     %% Phase 2: walks hierarchy to stdlib Supervisor/DynamicSupervisor methods.
     %% Phase 3: generated Module:'method'(Self) will be found first.
@@ -124,7 +124,7 @@ send(Receiver, Selector, Args) ->
             case element(2, Receiver) of
                 'Metaclass' ->
                     %% ADR 0036 (BT-802): Metaclass objects dispatch synchronously via
-                    %% the Metaclass → Class → Behaviour chain. They must NOT be treated
+                    %% the Metaclass -> Class -> Behaviour chain. They must NOT be treated
                     %% as regular actor instances.
                     beamtalk_primitive:send(Receiver, Selector, Args);
                 _ ->
@@ -139,7 +139,7 @@ send(Receiver, Selector, Args) ->
                             %% record may contain an invalid PID (e.g., undefined).
                             case is_pid(Pid) of
                                 true ->
-                                    %% BT-918 / ADR 0043: sync-by-default — use gen_server:call
+                                    %% BT-918 / ADR 0043: sync-by-default -- use gen_server:call
                                     %% so the send returns the value directly, not a Future.
                                     beamtalk_actor:sync_send(Pid, Selector, Args);
                                 false ->
@@ -148,7 +148,7 @@ send(Receiver, Selector, Args) ->
                                         actor_dead,
                                         ClassName,
                                         Selector,
-                                        <<"Actor process is not available — class may not be fully registered">>
+                                        <<"Actor process is not available -- class may not be fully registered">>
                                     ),
                                     error(beamtalk_exception_handler:ensure_wrapped(Error))
                             end
@@ -195,21 +195,21 @@ send(Receiver, Selector, Args, Timeout) ->
                                         actor_dead,
                                         ClassName,
                                         Selector,
-                                        <<"Actor process is not available — class may not be fully registered">>
+                                        <<"Actor process is not available -- class may not be fully registered">>
                                     ),
                                     error(beamtalk_exception_handler:ensure_wrapped(Error))
                             end
                     end
             end;
         false ->
-            %% Value types have no timeout semantics — dispatch is synchronous in-process.
+            %% Value types have no timeout semantics -- dispatch is synchronous in-process.
             beamtalk_primitive:send(Receiver, Selector, Args)
     end.
 
 %% @doc Fire-and-forget cast to an actor receiver (BT-920).
 %%
 %% For actors, extracts the PID and calls beamtalk_actor:cast_send/3.
-%% Returns ok regardless of receiver type — non-actors are silently ignored
+%% Returns ok regardless of receiver type -- non-actors are silently ignored
 %% since cast has no meaningful semantics for primitives.
 %% Auto-awaits futures before dispatching (BT-840 parity with send/3).
 -spec cast(term(), atom(), list()) -> ok.

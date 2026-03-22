@@ -81,14 +81,14 @@
 %%%
 %%% There are multiple paths that create actor processes. The `initialize`
 %%% hook (if defined) is called inside the generated `init/1` callback,
-%%% so it runs for ALL spawn paths — direct, supervised, and named.
+%%% so it runs for ALL spawn paths -- direct, supervised, and named.
 %%%
 %%% | Path | Entry | Context | Initialize? |
 %%% |------|-------|---------|-------------|
-%%% | Module:spawn/0,1 | gen_server:start_link → init/1 | Batch/tests | Yes |
+%%% | Module:spawn/0,1 | gen_server:start_link -> init/1 | Batch/tests | Yes |
 %%% | REPL spawn | Module:spawn/0,1 + register_spawned/4 | REPL | Yes |
-%%% | class_send → spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
-%%% | Supervisor child | start_link/1 → gen_server:start_link → init/1 | Supervised | Yes |
+%%% | class_send -> spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
+%%% | Supervisor child | start_link/1 -> gen_server:start_link -> init/1 | Supervised | Yes |
 %%% | dynamic_object | gen_server:start_link(?MODULE, ...) | Internal | No (by design) |
 %%%
 %%% Key invariant: `initialize` dispatch lives in generated `init/1`, not
@@ -274,7 +274,7 @@ await_initialize(Pid) ->
             ok
     catch
         exit:{noproc, _} ->
-            %% Process already dead — wait for the DOWN message unconditionally.
+            %% Process already dead -- wait for the DOWN message unconditionally.
             %% The monitor was set before sys:get_state, so DOWN is guaranteed.
             receive
                 {'DOWN', MonRef, process, Pid, Reason} -> {error, Reason}
@@ -313,7 +313,7 @@ safe_spawn(Module, InitArgs) ->
                     %% still running but we gave up waiting). Then flush EXIT
                     %% BEFORE restoring trap_exit to avoid a fatal signal.
                     exit(Pid, kill),
-                    %% Wait unconditionally — EXIT is guaranteed after kill
+                    %% Wait unconditionally -- EXIT is guaranteed after kill
                     receive
                         {'EXIT', Pid, _} -> ok
                     end,
@@ -503,7 +503,7 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
 %% @doc Send a fire-and-forget message to an actor (no future, no return value).
 %%
 %% Checks if the actor is alive before sending. If dead, silently returns ok
-%% (fire-and-forget semantics — the caller does not expect a reply).
+%% (fire-and-forget semantics -- the caller does not expect a reply).
 %%
 %% WARNING: Race condition! is_process_alive/1 is a snapshot check.
 %% The actor could die between the alive check and the gen_server:cast.
@@ -632,7 +632,7 @@ sync_send(ActorPid, Selector, Args) ->
     %% Measures caller-perspective round-trip time for sync sends.
     %% telemetry:span/3 emits start/stop/exception events automatically.
     %% On exception, span catches it, emits the exception event, and re-raises
-    %% via erlang:raise/3 — preserving the original exit class and reason for
+    %% via erlang:raise/3 -- preserving the original exit class and reason for
     %% the outer try/catch to convert to structured beamtalk_error records.
     Class = lookup_class(ActorPid),
     Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
@@ -644,12 +644,12 @@ sync_send(ActorPid, Selector, Args) ->
                     %% Unwrap here so callers receive the value directly.
                     %%
                     %% The {error, Error} case has two sub-forms due to the safe_dispatch layer:
-                    %%   1. Error = #beamtalk_error{} — returned by dispatch_user_method try/catch
-                    %%   2. Error = {ErlType, Value} — raw Erlang exception caught by safe_dispatch
+                    %%   1. Error = #beamtalk_error{} -- returned by dispatch_user_method try/catch
+                    %%   2. Error = {ErlType, Value} -- raw Erlang exception caught by safe_dispatch
                     %% We re-raise both forms as Erlang exceptions so the caller sees them correctly.
                     PropCtx = get_propagated_ctx(),
                     %% BT-1190: TimeoutProxy manages its own timeout on the inner
-                    %% (proxy→target) hop. The outer (caller→proxy) hop must use
+                    %% (proxy->target) hop. The outer (caller->proxy) hop must use
                     %% infinity so it doesn't time out before the proxy's configured
                     %% timeout expires. For all other actors, use gen_server:call/2
                     %% which defaults to 5000ms.
@@ -762,7 +762,7 @@ raise_actor_dead(Selector) ->
 %% @doc Raise a structured timeout error as an Erlang exception.
 %%
 %% Used by sync_send/3 when gen_server:call exceeds the timeout (default 5000ms).
-%% A timeout means the actor didn't respond in time, NOT that it's dead —
+%% A timeout means the actor didn't respond in time, NOT that it's dead --
 %% it may be slow, overloaded, or deadlocked.
 -spec raise_timeout(atom()) -> no_return().
 raise_timeout(Selector) ->
@@ -805,7 +805,7 @@ maybe_span(EventPrefix, Metadata, Fun) ->
 %% @private
 %% @doc Resolve actor class name via beamtalk_object_instances reverse lookup.
 %% Returns the class atom if found, or 'unknown' for non-Beamtalk PIDs.
-%% Uses ets:match on the bag table — single ETS read (~50-100ns).
+%% Uses ets:match on the bag table -- single ETS read (~50-100ns).
 -spec lookup_class(pid()) -> atom().
 lookup_class(Pid) ->
     try ets:match(beamtalk_instance_registry, {'$1', Pid}) of
@@ -829,7 +829,7 @@ get_propagated_ctx() ->
 
 %% @private
 %% @doc Get current OTel trace context if otel_ctx module is available.
-%% Returns 'undefined' when OpenTelemetry is not loaded — no compile-time dependency.
+%% Returns 'undefined' when OpenTelemetry is not loaded -- no compile-time dependency.
 -spec get_otel_ctx() -> term().
 get_otel_ctx() ->
     case erlang:function_exported(otel_ctx, get_current, 0) of
@@ -856,7 +856,7 @@ restore_propagated_ctx(_) ->
     ok.
 
 %% @doc Spawn a lightweight watcher that monitors both the actor and future.
-%% BT-886: Closes the TOCTOU race in async_send — if the actor dies during
+%% BT-886: Closes the TOCTOU race in async_send -- if the actor dies during
 %% message processing (after the cast but before the future is resolved),
 %% the watcher rejects the future with a structured actor_dead error.
 %% The watcher also monitors the future process so it can clean up promptly
@@ -868,12 +868,12 @@ spawn_future_watcher(ActorPid, FuturePid, Selector) ->
         FutureRef = erlang:monitor(process, FuturePid),
         receive
             {'DOWN', ActorRef, process, ActorPid, _Reason} ->
-                %% Actor died — reject future (no-op if already resolved)
+                %% Actor died -- reject future (no-op if already resolved)
                 {error, Error} = actor_dead_error(Selector),
                 beamtalk_future:reject(FuturePid, Error),
                 erlang:demonitor(FutureRef, [flush]);
             {'DOWN', FutureRef, process, FuturePid, _Reason} ->
-                %% Future completed and its process ended — clean up
+                %% Future completed and its process ended -- clean up
                 erlang:demonitor(ActorRef, [flush])
         after 30000 ->
             %% Safety cleanup: stop watching after 30s
@@ -951,7 +951,7 @@ handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args)
             log_dispatch_complete(State, NewState, Selector, cast, T0),
             {noreply, NewState};
         {error, Reason, NewState} ->
-            %% Log error but don't crash — caller expects no reply
+            %% Log error but don't crash -- caller expects no reply
             T1 = erlang:monotonic_time(microsecond),
             ?LOG_WARNING("Fire-and-forget dispatch error", #{
                 selector => Selector,
@@ -1183,7 +1183,7 @@ dispatch(Selector, Args, Self, State) ->
                             true ->
                                 true;
                             false ->
-                                %% Class may not be registered — check Object directly
+                                %% Class may not be registered -- check Object directly
                                 beamtalk_object_ops:has_method(CheckSelector)
                         catch
                             _:_ -> beamtalk_object_ops:has_method(CheckSelector)
@@ -1215,7 +1215,7 @@ dispatch(Selector, Args, Self, State) ->
         'perform:withArguments:timeout:' when length(Args) =:= 3 ->
             %% BT-1190: Dynamic message send with explicit timeout.
             %% For self-sends (inside an actor's handle_call), the timeout is
-            %% irrelevant — just dispatch locally like perform:withArguments:.
+            %% irrelevant -- just dispatch locally like perform:withArguments:.
             %% Cross-actor sends are intercepted in beamtalk_message_dispatch:send/3
             %% which rewrites to send/4 with the custom timeout.
             [TargetSelector, ArgList, Timeout] = Args,

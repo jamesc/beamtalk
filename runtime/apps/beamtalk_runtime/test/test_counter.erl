@@ -32,7 +32,7 @@
 start_link(InitialValue) ->
     beamtalk_actor:start_link(?MODULE, InitialValue).
 
-%% @doc Start without a link (for kill tests — avoids propagating exit signals to the test process).
+%% @doc Start without a link (for kill tests -- avoids propagating exit signals to the test process).
 start(InitialValue) ->
     gen_server:start(?MODULE, InitialValue, []).
 

@@ -31,7 +31,7 @@ actor_teardown(_) ->
 
 actor_test_() ->
     {setup, fun actor_setup/0, fun actor_teardown/1, [
-        %% BT-918 / ADR 0043: sync-by-default — actor dispatch returns value directly, not future
+        %% BT-918 / ADR 0043: sync-by-default -- actor dispatch returns value directly, not future
         {"actor dispatch returns value directly (sync)", fun actor_returns_value_directly/0},
         {"actor dispatch dead actor raises error", fun actor_dead_raises_error/0},
         {"class object dispatch returns value", fun class_object_returns_value/0}
@@ -90,7 +90,7 @@ send4_actor_timeout_raises_error() ->
     gen_server:stop(Counter).
 
 send4_value_type_ignores_timeout() ->
-    %% Value types have no timeout semantics — just dispatches normally
+    %% Value types have no timeout semantics -- just dispatches normally
     Result = beamtalk_message_dispatch:send(2, '+', [3], 30000),
     ?assertEqual(5, Result).
 

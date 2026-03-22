@@ -94,7 +94,7 @@ dispatch('printString', [], Self, State) ->
     Str = iolist_to_binary([<<"a ">>, DisplayName]),
     {reply, Str, State};
 dispatch('displayString', [], Self, State) ->
-    %% displayString for actors delegates to printString — same result.
+    %% displayString for actors delegates to printString -- same result.
     DisplayName = class_display_name(Self, State),
     Str = iolist_to_binary([<<"a ">>, DisplayName]),
     {reply, Str, State};
@@ -103,7 +103,7 @@ dispatch(inspect, [], Self, State) ->
     %% BT-1167: For actor instances, produce ClassName(field: inspect(value), ...) format.
     case map_size(State) =:= 0 of
         true ->
-            %% Class objects — keep legacy "a ClassName" format.
+            %% Class objects -- keep legacy "a ClassName" format.
             DisplayName = class_display_name(Self, State),
             Str = iolist_to_binary([<<"a ">>, DisplayName]),
             {reply, Str, State};
@@ -157,7 +157,7 @@ dispatch('perform:withArguments:', [_TargetSelector, _ArgList], Self, State) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected atom selector and list of arguments">>),
     {error, Error2, State};
 %% BT-1190: Dynamic message send with explicit timeout.
-%% For value types, timeout is irrelevant — dispatch locally like perform:withArguments:.
+%% For value types, timeout is irrelevant -- dispatch locally like perform:withArguments:.
 %% Cross-actor sends are intercepted in beamtalk_message_dispatch:send/3.
 dispatch('perform:withArguments:timeout:', [TargetSelector, ArgList, Timeout], Self, State) when
     is_atom(TargetSelector),
@@ -176,7 +176,7 @@ dispatch('perform:withArguments:timeout:', [_TargetSelector, _ArgList, _Timeout]
         <<"Expected atom selector, list of arguments, and non-negative integer or #infinity timeout">>
     ),
     {error, Error2, State};
-%% BT-405: Abstract method contract — mirrors Object.bt pure method body
+%% BT-405: Abstract method contract -- mirrors Object.bt pure method body
 %% Runtime clause needed until compiled stdlib dispatch is wired up
 dispatch(subclassResponsibility, [], Self, State) ->
     ClassName = class_name(Self, State, 'Object'),

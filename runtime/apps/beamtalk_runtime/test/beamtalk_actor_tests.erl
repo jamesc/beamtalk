@@ -1647,7 +1647,7 @@ handle_cast_fire_and_forget_dispatches_test() ->
     gen_server:stop(Counter).
 
 handle_cast_fire_and_forget_result_discarded_test() ->
-    %% {cast, Selector, Args} with a method that returns a value — result is discarded
+    %% {cast, Selector, Args} with a method that returns a value -- result is discarded
     {ok, Counter} = test_counter:start_link(42),
     gen_server:cast(Counter, {cast, getValue, []}),
     timer:sleep(20),
@@ -1719,7 +1719,7 @@ async_send_kill_isAlive_false_immediately_after_test() ->
     KillFuture = beamtalk_future:new(),
     beamtalk_actor:async_send(Counter, kill, [], KillFuture),
     ok = beamtalk_future:await(KillFuture),
-    %% No sleep — process must be dead synchronously after kill resolves
+    %% No sleep -- process must be dead synchronously after kill resolves
     AliveFuture = beamtalk_future:new(),
     beamtalk_actor:async_send(Counter, isAlive, [], AliveFuture),
     ?assertEqual(false, beamtalk_future:await(AliveFuture)).
