@@ -1408,19 +1408,27 @@ handle_protocol_definition_register_class_failure_returns_structured_error_test(
     code:purge(ModuleName),
     code:delete(ModuleName).
 
-%% @doc Test that successful protocol definition still works correctly.
+%% @doc Test that successful protocol definition calls register_class/0.
 handle_protocol_definition_success_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
-    %% Dynamically compile a module whose register_class/0 succeeds
+    %% Dynamically compile a module whose register_class/0 sets a process flag
+    %% to prove it was actually called (not just skipped).
     ModuleName = '__bt_test_good_protocol',
+    Self = self(),
+    %% register_class/0 sends a message to the test process to prove it ran
     Forms = [
         {attribute, 1, module, ModuleName},
         {attribute, 2, export, [{register_class, 0}]},
         {function, 3, register_class, 0, [
-            {clause, 3, [], [], [{atom, 3, ok}]}
+            {clause, 3, [], [], [
+                {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, put}},
+                    [{atom, 3, '__bt_test_register_called'}, {atom, 3, true}]}
+            ]}
         ]}
     ],
     {ok, ModuleName, Binary} = compile:forms(Forms),
+    %% Clear the flag before the test
+    erlang:erase('__bt_test_register_called'),
     ProtocolInfo = #{
         binary => Binary,
         module_name => ModuleName,
@@ -1428,7 +1436,10 @@ handle_protocol_definition_success_test() ->
     },
     Result = beamtalk_repl_eval:handle_protocol_definition(ProtocolInfo, [], State),
     ?assertMatch({ok, <<"Protocol GoodProto defined">>, <<>>, [], _}, Result),
+    %% Verify register_class/0 was actually called
+    ?assertEqual(true, erlang:get('__bt_test_register_called')),
     %% Cleanup
+    erlang:erase('__bt_test_register_called'),
     code:purge(ModuleName),
     code:delete(ModuleName).
 

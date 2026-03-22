@@ -330,6 +330,10 @@ handle_protocol_definition(ProtocolInfo, Warnings, State) ->
                         end,
                     {ok, DisplayStr, <<>>, Warnings, NewState};
                 {error, RegError} ->
+                    %% Registration failed — clean up the loaded module to avoid
+                    %% leaving it resident but untracked in State.
+                    RegistryPid = beamtalk_repl_state:get_actor_registry(State),
+                    cleanup_module(ModuleName, RegistryPid),
                     {error, RegError, <<>>, Warnings, State}
             end;
         {error, Reason} ->
