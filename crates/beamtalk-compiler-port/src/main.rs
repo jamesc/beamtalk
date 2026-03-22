@@ -892,11 +892,11 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
         || !module.method_definitions.is_empty()
         || !module.protocols.is_empty()
     {
-        return error_response(
-            &["trace mode does not support class, method, or protocol definitions; \
+        return error_response(&[
+            "trace mode does not support class, method, or protocol definitions; \
              use eval without trace to define them"
-                .to_string()],
-        );
+                .to_string(),
+        ]);
     }
 
     // BT-1612: Protocol definitions are not supported in trace mode.
