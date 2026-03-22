@@ -75,10 +75,10 @@ first := traces first
 // => _
 
 first at: "class"
-// => "Counter"
+// => Counter
 
 first at: "outcome"
-// => "ok"
+// => ok
 
 // ---------------------------------------------------------------------------
 // Filter traces by actor
@@ -145,10 +145,10 @@ health := Tracing healthFor: c
 // => _
 
 health at: "class"
-// => "Counter"
+// => Counter
 
 health at: "status"
-// => "waiting"
+// => waiting
 
 // ---------------------------------------------------------------------------
 // systemHealth returns VM info

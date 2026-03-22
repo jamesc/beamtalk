@@ -360,28 +360,28 @@ handle_call({get_traces, Pid, Selector}, _From, State) ->
     Result = do_get_traces(Pid, Selector),
     {reply, Result, State};
 handle_call(get_stats, _From, State) ->
-    Result = do_get_stats(undefined),
+    Result = to_binary_keys(do_get_stats(undefined)),
     {reply, Result, State};
 handle_call({get_stats, Pid}, _From, State) ->
-    Result = do_get_stats(Pid),
+    Result = to_binary_keys(do_get_stats(Pid)),
     {reply, Result, State};
 handle_call({slow_methods, Limit}, _From, State) ->
-    Result = do_slow_methods(Limit),
+    Result = [to_binary_keys(M) || M <- do_slow_methods(Limit)],
     {reply, Result, State};
 handle_call({hot_methods, Limit}, _From, State) ->
-    Result = do_hot_methods(Limit),
+    Result = [to_binary_keys(M) || M <- do_hot_methods(Limit)],
     {reply, Result, State};
 handle_call({error_methods, Limit}, _From, State) ->
-    Result = do_error_methods(Limit),
+    Result = [to_binary_keys(M) || M <- do_error_methods(Limit)],
     {reply, Result, State};
 handle_call({bottlenecks, Limit}, _From, State) ->
-    Result = do_bottlenecks(Limit),
+    Result = [to_binary_keys(M) || M <- do_bottlenecks(Limit)],
     {reply, Result, State};
 handle_call({actor_health, Pid}, _From, State) ->
-    Result = do_actor_health(Pid),
+    Result = to_binary_keys(do_actor_health(Pid)),
     {reply, Result, State};
 handle_call(system_health, _From, State) ->
-    Result = do_system_health(State),
+    Result = to_binary_keys(do_system_health(State)),
     {reply, Result, State};
 handle_call({max_events, Size}, _From, State) ->
     persistent_term:put(?PT_MAX_EVENTS, Size),
@@ -694,13 +694,13 @@ trace_event_to_map({
     WallClockUs
 }) ->
     Base = #{
-        timestamp_us => WallClockUs,
-        actor => Pid,
-        class => Class,
-        selector => Selector,
-        mode => Mode,
-        duration_us => DurationNs div 1000,
-        outcome => Outcome
+        <<"timestamp_us">> => WallClockUs,
+        <<"actor">> => list_to_binary(pid_to_list(Pid)),
+        <<"class">> => atom_to_binary(Class, utf8),
+        <<"selector">> => atom_to_binary(Selector, utf8),
+        <<"mode">> => atom_to_binary(Mode, utf8),
+        <<"duration_us">> => DurationNs div 1000,
+        <<"outcome">> => atom_to_binary(Outcome, utf8)
     },
     case maps:size(Metadata) of
         0 -> Base;
@@ -711,13 +711,13 @@ trace_event_to_map({
 }) ->
     %% Legacy format (pre-BT-1620): fall back to monotonic-derived timestamp
     Base = #{
-        timestamp_us => MonotonicNs div 1000,
-        actor => Pid,
-        class => Class,
-        selector => Selector,
-        mode => Mode,
-        duration_us => DurationNs div 1000,
-        outcome => Outcome
+        <<"timestamp_us">> => MonotonicNs div 1000,
+        <<"actor">> => list_to_binary(pid_to_list(Pid)),
+        <<"class">> => atom_to_binary(Class, utf8),
+        <<"selector">> => atom_to_binary(Selector, utf8),
+        <<"mode">> => atom_to_binary(Mode, utf8),
+        <<"duration_us">> => DurationNs div 1000,
+        <<"outcome">> => atom_to_binary(Outcome, utf8)
     },
     case maps:size(Metadata) of
         0 -> Base;
@@ -914,6 +914,29 @@ do_system_health(State) ->
         run_queue => erlang:statistics(run_queue),
         vm_stats => State#state.vm_stats
     }.
+
+%% @private Convert atom map keys to binary for user-facing output.
+%% Nested maps are converted recursively.
+-spec to_binary_keys(map()) -> map().
+to_binary_keys(Map) when is_map(Map) ->
+    maps:fold(
+        fun(K, V, Acc) ->
+            BinKey =
+                case K of
+                    _ when is_atom(K) -> atom_to_binary(K, utf8);
+                    _ when is_binary(K) -> K;
+                    _ -> iolist_to_binary(io_lib:format("~p", [K]))
+                end,
+            BinVal =
+                case V of
+                    _ when is_map(V) -> to_binary_keys(V);
+                    _ -> V
+                end,
+            maps:put(BinKey, BinVal, Acc)
+        end,
+        #{},
+        Map
+    ).
 
 %% @private Resolve actor class name from pid via beamtalk_object_instances.
 %% Returns binary class name or <<"unknown">>.
