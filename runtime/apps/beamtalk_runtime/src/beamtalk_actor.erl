@@ -686,7 +686,10 @@ sync_send(ActorPid, Selector, Args) ->
 %% Timeout is a non-negative integer (milliseconds) or the atom `infinity`.
 %% Used by TimeoutProxy to forward messages with a custom timeout.
 -spec sync_send(pid(), atom(), list(), timeout()) -> term().
-sync_send(ActorPid, Selector, Args, Timeout) ->
+sync_send(ActorPid, Selector, Args, Timeout) when
+    is_integer(Timeout), Timeout >= 0;
+    Timeout =:= infinity
+->
     Class = lookup_class(ActorPid),
     Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
     try
@@ -719,7 +722,15 @@ sync_send(ActorPid, Selector, Args, Timeout) ->
             raise_timeout(Selector);
         exit:{_Reason, _} ->
             raise_actor_dead(Selector)
-    end.
+    end;
+sync_send(_ActorPid, Selector, _Args, _InvalidTimeout) ->
+    Error = beamtalk_error:new(
+        type_error,
+        unknown,
+        Selector,
+        <<"Timeout must be a non-negative integer (milliseconds) or #infinity">>
+    ),
+    error(beamtalk_exception_handler:ensure_wrapped(Error)).
 
 %% @private
 %% @doc Raise a structured actor_dead error as an Erlang exception.

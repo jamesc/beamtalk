@@ -1331,17 +1331,19 @@ The default `.` send timeout is 5000ms. For actors that may take longer (databas
 
 ```beamtalk
 // Wrap an actor with a custom timeout (milliseconds)
-slowDb := db withTimeout: 30000.
-slowDb query: sql.              // forwarded with 30s timeout
-
-// One-shot usage
-(db withTimeout: 30000) query: sql.
+slowDb := db withTimeout: 30000
+slowDb query: sql              // forwarded with 30s timeout
+slowDb stop                    // stop the proxy when done
 
 // Infinite timeout (use with care — blocks indefinitely)
-(db withTimeout: #infinity) query: sql.
+infDb := db withTimeout: #infinity
+infDb query: sql
+infDb stop
 ```
 
 `withTimeout:` returns a `TimeoutProxy` — a lightweight actor that intercepts all messages via `doesNotUnderstand:args:` and forwards them to the target with the specified timeout. This is pure message passing with no special syntax or reserved keywords.
+
+**Lifecycle:** The proxy is a separate actor process. Capture the reference and call `stop` when finished to avoid leaking processes.
 
 ### BEAM Mapping
 

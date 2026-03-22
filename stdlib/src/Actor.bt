@@ -93,12 +93,13 @@ Object subclass: Actor
   /// the given timeout (in milliseconds, or `#infinity`) for `gen_server:call`.
   /// The default OTP timeout is 5000ms.
   ///
+  /// The proxy is a separate actor process — call `stop` on it when done.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// slowDb := db withTimeout: 30000
   /// slowDb query: sql              // forwarded with 30s timeout
-  ///
-  /// (db withTimeout: #infinity) query: sql   // infinite timeout
+  /// slowDb stop                    // stop the proxy when done
   /// ```
   withTimeout: ms =>
     proxy := TimeoutProxy spawn

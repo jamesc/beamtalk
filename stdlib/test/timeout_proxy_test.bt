@@ -44,6 +44,8 @@ TestCase subclass: TimeoutProxyTest
     proxy stop
 
   testOneShotUsage =>
-    // One-shot usage: (actor withTimeout: ms) message
-    result := (self.actor withTimeout: 2000) getValue
+    // Capture proxy to stop it after use
+    proxy := self.actor withTimeout: 2000
+    result := proxy getValue
     self assert: result equals: 42
+    proxy stop
