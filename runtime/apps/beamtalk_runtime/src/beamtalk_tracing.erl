@@ -70,26 +70,12 @@ enable() ->
         false ->
             ?LOG_WARNING(
                 "Tracing enabled but telemetry handlers are not attached. "
-                "Traces and stats will be empty. Check that the telemetry "
-                "dependency is on the BEAM code path.",
+                "Traces and stats will be empty. This usually means the Beamtalk "
+                "installation is incomplete — try reinstalling or updating.",
                 [],
                 #{domain => [beamtalk, runtime]}
             ),
-            error(#beamtalk_error{
-                kind = configuration_error,
-                class = 'Tracing',
-                message =
-                    <<
-                        "Tracing is not available in this environment. "
-                        "The tracing infrastructure failed to initialize at startup."
-                    >>,
-                hint =
-                    <<
-                        "This usually means the Beamtalk installation is incomplete or "
-                        "corrupted. Try reinstalling or updating Beamtalk."
-                    >>,
-                details = #{}
-            })
+            nil
     end.
 
 %% @doc Disable trace event capture.
