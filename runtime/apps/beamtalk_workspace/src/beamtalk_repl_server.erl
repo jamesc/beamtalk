@@ -455,6 +455,7 @@ handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"unload">> ->
     beamtalk_repl_ops_load:handle(<<"unload">>, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"enable-tracing">>;
+    Op =:= <<"disable-tracing">>;
     Op =:= <<"get-traces">>;
     Op =:= <<"actor-stats">>
 ->

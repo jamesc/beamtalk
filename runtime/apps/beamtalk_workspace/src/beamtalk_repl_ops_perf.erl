@@ -7,6 +7,7 @@
 %%%
 %%% Provides REPL protocol ops for the MCP tracing workflow:
 %%% - enable-tracing: start trace event capture
+%%% - disable-tracing: stop trace event capture
 %%% - get-traces: query trace events with filtering
 %%% - actor-stats: query aggregate actor statistics
 %%%
@@ -19,7 +20,7 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([handle/4]).
+-export([handle/4, describe_ops/0]).
 
 %% @doc Handle enable-tracing, get-traces, and actor-stats ops.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
@@ -27,6 +28,11 @@ handle(<<"enable-tracing">>, _Params, Msg, _SessionPid) ->
     beamtalk_tracing:enable(),
     beamtalk_repl_protocol:encode_result(
         <<"Tracing enabled">>, Msg, fun beamtalk_repl_json:term_to_json/1
+    );
+handle(<<"disable-tracing">>, _Params, Msg, _SessionPid) ->
+    beamtalk_tracing:disable(),
+    beamtalk_repl_protocol:encode_result(
+        <<"Tracing disabled">>, Msg, fun beamtalk_repl_json:term_to_json/1
     );
 handle(<<"get-traces">>, Params, Msg, _SessionPid) ->
     Actor = maps:get(<<"actor">>, Params, undefined),
@@ -113,3 +119,24 @@ parse_selector(SelectorBin) ->
                 details = #{}
             })
     end.
+
+%%====================================================================
+%% Op descriptors for dynamic describe
+%%====================================================================
+
+%% @doc Return op descriptors for the tracing/performance operations.
+-spec describe_ops() -> map().
+describe_ops() ->
+    #{
+        <<"enable-tracing">> => #{<<"params">> => []},
+        <<"disable-tracing">> => #{<<"params">> => []},
+        <<"get-traces">> => #{
+            <<"params">> => [],
+            <<"optional">> => [<<"actor">>, <<"limit">>],
+            <<"notes">> => <<"selector requires actor to be set">>
+        },
+        <<"actor-stats">> => #{
+            <<"params">> => [],
+            <<"optional">> => [<<"actor">>]
+        }
+    }.

@@ -59,10 +59,25 @@
 %%====================================================================
 
 %% @doc Enable trace event capture.
+%% Logs a warning if telemetry handlers are not attached (e.g. telemetry
+%% not on the code path), since tracing will be enabled but non-functional.
+%% Always returns nil — the warning is advisory, not fatal.
 -spec enable() -> nil.
 enable() ->
     call_trace_store(fun beamtalk_trace_store:enable/0),
-    nil.
+    case beamtalk_trace_store:telemetry_attached() of
+        true ->
+            nil;
+        false ->
+            ?LOG_WARNING(
+                "Tracing enabled but telemetry handlers are not attached. "
+                "Traces and stats will be empty. This usually means the Beamtalk "
+                "installation is incomplete — try reinstalling or updating.",
+                [],
+                #{domain => [beamtalk, runtime]}
+            ),
+            nil
+    end.
 
 %% @doc Disable trace event capture.
 -spec disable() -> nil.

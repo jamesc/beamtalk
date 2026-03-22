@@ -93,13 +93,13 @@ TestCase subclass: TracingTest
     c := Counter spawn
     health := Tracing healthFor: c
     // Should have status key (waiting or running, not dead)
-    self deny: ((health at: #status) =:= #dead)
+    self deny: ((health at: "status") == #dead)
     // Should have queue_depth key
-    self assert: ((health at: #queue_depth) >= 0)
+    self assert: ((health at: "queue_depth") >= 0)
     // Should have memory_kb key
-    self assert: ((health at: #memory_kb) >= 0)
+    self assert: ((health at: "memory_kb") >= 0)
     // Should have reductions key
-    self assert: ((health at: #reductions) >= 0)
+    self assert: ((health at: "reductions") >= 0)
     c stop
 
   testHealthForDeadActor =>
@@ -109,23 +109,23 @@ TestCase subclass: TracingTest
     Timer sleep: 50
     health := Tracing healthFor: c
     // Dead actor should have status=dead
-    self assert: (health at: #status) equals: #dead
+    self assert: (health at: "status") equals: #dead
     // Dead actor should have error message
-    self assert: (health at: #error) equals: "process not alive"
+    self assert: (health at: "error") equals: "process not alive"
 
   testSystemHealth =>
     health := Tracing systemHealth
     // Should have scheduler_count (positive integer)
-    self assert: ((health at: #scheduler_count) > 0)
+    self assert: ((health at: "scheduler_count") > 0)
     // Should have process_count
-    self assert: ((health at: #process_count) > 0)
+    self assert: ((health at: "process_count") > 0)
     // Should have process_limit
-    self assert: ((health at: #process_limit) > 0)
+    self assert: ((health at: "process_limit") > 0)
     // Should have memory map
-    mem := health at: #memory
-    self assert: ((mem at: #total_mb) >= 0)
+    mem := health at: "memory"
+    self assert: ((mem at: "total_mb") >= 0)
     // Should have run_queue
-    self assert: ((health at: #run_queue) >= 0)
+    self assert: ((health at: "run_queue") >= 0)
 
   // === Type error validation ===
   testSlowMethodsRequiresPositiveInteger =>

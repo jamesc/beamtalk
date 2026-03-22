@@ -116,7 +116,7 @@ pid_extraction_test_() ->
                 ?_test(begin
                     Obj = #beamtalk_object{class = 'Counter', class_mod = counter, pid = self()},
                     Result = beamtalk_tracing:healthFor(Obj),
-                    ?assertMatch(#{status := _}, Result)
+                    ?assert(maps:is_key(<<"status">>, Result))
                 end)}
         ]
     end}.
@@ -131,24 +131,27 @@ health_test_() ->
             {"healthFor live process returns status",
                 ?_test(begin
                     Result = beamtalk_tracing:healthFor(self()),
-                    ?assertMatch(
-                        #{pid := _, status := _, queue_depth := _, memory_kb := _}, Result
-                    ),
-                    ?assertNotEqual(dead, maps:get(status, Result))
+                    ?assert(maps:is_key(<<"pid">>, Result)),
+                    ?assert(maps:is_key(<<"status">>, Result)),
+                    ?assert(maps:is_key(<<"queue_depth">>, Result)),
+                    ?assert(maps:is_key(<<"memory_kb">>, Result)),
+                    ?assertNotEqual(dead, maps:get(<<"status">>, Result))
                 end)},
             {"healthFor dead process returns dead status",
                 ?_test(begin
                     Pid = spawn(fun() -> ok end),
                     timer:sleep(50),
                     Result = beamtalk_tracing:healthFor(Pid),
-                    ?assertEqual(dead, maps:get(status, Result)),
-                    ?assertEqual(<<"process not alive">>, maps:get(error, Result))
+                    ?assertEqual(dead, maps:get(<<"status">>, Result)),
+                    ?assertEqual(<<"process not alive">>, maps:get(<<"error">>, Result))
                 end)},
             {"systemHealth returns VM info",
                 ?_test(begin
                     Result = beamtalk_tracing:systemHealth(),
-                    ?assertMatch(#{scheduler_count := _, process_count := _, memory := _}, Result),
-                    ?assert(maps:get(scheduler_count, Result) > 0)
+                    ?assert(maps:is_key(<<"scheduler_count">>, Result)),
+                    ?assert(maps:is_key(<<"process_count">>, Result)),
+                    ?assert(maps:is_key(<<"memory">>, Result)),
+                    ?assert(maps:get(<<"scheduler_count">>, Result) > 0)
                 end)}
         ]
     end}.
@@ -208,11 +211,11 @@ query_with_data_test_() ->
                     TestPid = self(),
                     beamtalk_trace_store:record_dispatch(TestPid, increment, 5000, ok, sync),
                     Stats = beamtalk_tracing:stats(),
-                    PidKey = pid_to_list(TestPid),
+                    PidKey = list_to_binary(pid_to_list(TestPid)),
                     ?assert(maps:is_key(PidKey, Stats)),
                     PidStats = maps:get(PidKey, Stats),
-                    Methods = maps:get(methods, PidStats),
-                    ?assert(maps:is_key("increment", Methods))
+                    Methods = maps:get(<<"methods">>, PidStats),
+                    ?assert(maps:is_key(<<"increment">>, Methods))
                 end)},
             {"tracesFor returns events after record_trace_event",
                 ?_test(begin
@@ -224,7 +227,7 @@ query_with_data_test_() ->
                     Traces = beamtalk_tracing:tracesFor(TestPid),
                     ?assert(length(Traces) >= 1),
                     [First | _] = Traces,
-                    ?assertEqual(increment, maps:get(selector, First)),
+                    ?assertEqual(<<"increment">>, maps:get(<<"selector">>, First)),
                     beamtalk_tracing:disable()
                 end)},
             {"tracesFor/2 filters by selector",
@@ -241,7 +244,7 @@ query_with_data_test_() ->
                     ?assert(length(Traces) >= 1),
                     lists:foreach(
                         fun(T) ->
-                            ?assertEqual(increment, maps:get(selector, T))
+                            ?assertEqual(<<"increment">>, maps:get(<<"selector">>, T))
                         end,
                         Traces
                     ),

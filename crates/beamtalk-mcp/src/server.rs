@@ -1200,6 +1200,27 @@ impl BeamtalkMcp {
         )]))
     }
 
+    /// Disable actor trace event capture (ADR 0069).
+    #[tool(
+        description = "Disable actor trace event capture. Aggregate stats remain available. Use enable-tracing to resume capture."
+    )]
+    async fn disable_tracing(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("disable_tracing");
+        tracing::debug!(tool = "disable_tracing", "tool invoked");
+        let response = self
+            .client
+            .disable_tracing()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to disable tracing");
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(
+            "Tracing disabled. Aggregate stats remain available via actor-stats.",
+        )]))
+    }
+
     /// Get captured trace events with optional filtering (ADR 0069).
     #[tool(
         description = "Get captured trace events, newest first. Optionally filter by actor PID, method selector, or limit the number of results. Returns structured JSON with actor, selector, duration, result, and timestamp for each event."
