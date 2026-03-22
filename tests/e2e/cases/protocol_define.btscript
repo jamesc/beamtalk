@@ -21,7 +21,7 @@ Protocol isProtocol: #Greetable
 
 // Verify required methods
 Protocol requiredMethods: #Greetable
-// => [#greet]
+// => ["greet"]
 
 // ===========================================================================
 // PROTOCOL WITH MULTIPLE METHODS
