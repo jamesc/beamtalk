@@ -411,6 +411,9 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-1604 (ADR 0069 Phase 2b): Matches 4-tuple messages with `PropCtx`
+    /// for both fire-and-forget casts and async sends. Falls back to 3-tuple
+    /// for backward compatibility.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_handle_cast(
         &mut self,
@@ -426,7 +429,18 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
-                            // BT-920: Fire-and-forget cast {cast, Selector, Args}
+                            // BT-1604: Fire-and-forget cast with propagated context
+                            line(),
+                            "<{'cast', CastSelector, CastArgs, CastPropCtx}> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in",
+                                    Self::cast_dispatch_case(&module_name),
+                                ]
+                            ),
+                            // BT-920: Fire-and-forget cast without context (backward compat)
                             line(),
                             "<{'cast', CastSelector, CastArgs}> when 'true' ->",
                             nest(INDENT, Self::cast_dispatch_case(&module_name)),
@@ -448,11 +462,16 @@ impl CoreErlangGenerator {
     ///
     /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
     /// returns `{ok, Result}` or `{error, Error}` tuples.
+    ///
+    /// BT-1604 (ADR 0069 Phase 2b): Matches 3-tuple `{Selector, Args, PropCtx}`
+    /// to restore propagated context (`OTel` trace context) before dispatch.
+    /// Falls back to 2-tuple `{Selector, Args}` for backward compatibility.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_handle_call(
         &mut self,
     ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
+        let dispatch_case = Self::handle_call_dispatch_case(&module_name);
         let doc = docvec![
             "'handle_call'/3 = fun (Msg, _From, State) ->",
             nest(
@@ -463,47 +482,21 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
+                            // BT-1604: 3-tuple with propagated context — restore before dispatch
                             line(),
-                            "<{Selector, Args}> when 'true' ->",
+                            "<{Selector, Args, PropCtx}> when 'true' ->",
                             nest(
                                 INDENT,
                                 docvec![
                                     line(),
-                                    // Use safe_dispatch for error isolation per BT-29
-                                    docvec![
-                                        "case call '",
-                                        Document::String(module_name.clone()),
-                                        "':'safe_dispatch'(Selector, Args, State) of"
-                                    ],
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            // Success case: return {ok, Result}
-                                            line(),
-                                            "<{'reply', Result, NewState}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    "{'reply', {'ok', Result}, NewState}",
-                                                ]
-                                            ),
-                                            // Error case: return {error, Error}
-                                            line(),
-                                            "<{'error', Error, NewState}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    "{'reply', {'error', Error}, NewState}",
-                                                ]
-                                            ),
-                                        ]
-                                    ),
-                                    line(),
-                                    "end",
+                                    "let _CtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(PropCtx) in",
+                                    dispatch_case.clone(),
                                 ]
                             ),
+                            // Backward compat: 2-tuple without context
+                            line(),
+                            "<{Selector, Args}> when 'true' ->",
+                            nest(INDENT, dispatch_case),
                         ]
                     ),
                     line(),
@@ -514,6 +507,41 @@ impl CoreErlangGenerator {
             "\n",
         ];
         Ok(doc)
+    }
+
+    /// BT-1604: Generates the inner `case safe_dispatch ... end` block for `handle_call`.
+    /// Shared between 3-tuple (with `PropCtx`) and 2-tuple (backward compat) patterns.
+    fn handle_call_dispatch_case(module_name: &str) -> Document<'static> {
+        docvec![
+            line(),
+            // Use safe_dispatch for error isolation per BT-29
+            docvec![
+                "case call '",
+                Document::String(module_name.to_owned()),
+                "':'safe_dispatch'(Selector, Args, State) of"
+            ],
+            nest(
+                INDENT,
+                docvec![
+                    // Success case: return {ok, Result}
+                    line(),
+                    "<{'reply', Result, NewState}> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![line(), "{'reply', {'ok', Result}, NewState}",]
+                    ),
+                    // Error case: return {error, Error}
+                    line(),
+                    "<{'error', Error, NewState}> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![line(), "{'reply', {'error', Error}, NewState}",]
+                    ),
+                ]
+            ),
+            line(),
+            "end",
+        ]
     }
 
     /// Generates the `handle_info/2` callback (BT-936, ADR 0065 / BT-1457).

@@ -110,6 +110,9 @@ make_collector() ->
 collector_loop(Owner, Acc) ->
     receive
         %% gen_server:cast/2 sends {'$gen_cast', Msg} to the target process
+        %% BT-1604: cast_send now sends {cast, Selector, Args, PropCtx} with propagated context
+        {'$gen_cast', {cast, Selector, Args, _PropCtx}} ->
+            collector_loop(Owner, [{Selector, Args} | Acc]);
         {'$gen_cast', {cast, Selector, Args}} ->
             collector_loop(Owner, [{Selector, Args} | Acc]);
         {get_events, Ref} ->

@@ -183,6 +183,9 @@
 %% Message send helpers (lifecycle-aware wrappers)
 -export([async_send/4, sync_send/3, cast_send/3]).
 
+%% Propagated context (ADR 0069 Phase 2b)
+-export([get_propagated_ctx/0, restore_propagated_ctx/1]).
+
 %% gen_server callbacks (for generated actors to delegate to)
 -export([
     init/1,
@@ -508,7 +511,8 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
     maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
         case is_process_alive(ActorPid) of
             true ->
-                gen_server:cast(ActorPid, {Selector, Args, FuturePid}),
+                PropCtx = get_propagated_ctx(),
+                gen_server:cast(ActorPid, {Selector, Args, FuturePid, PropCtx}),
                 spawn_future_watcher(ActorPid, FuturePid, Selector),
                 {ok, Metadata#{outcome => ok}};
             false ->
@@ -535,7 +539,8 @@ cast_send(ActorPid, Selector, Args) ->
     maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
         case is_process_alive(ActorPid) of
             true ->
-                gen_server:cast(ActorPid, {cast, Selector, Args}),
+                PropCtx = get_propagated_ctx(),
+                gen_server:cast(ActorPid, {cast, Selector, Args, PropCtx}),
                 {ok, Metadata#{outcome => cast}};
             false ->
                 {ok, Metadata#{outcome => cast}}
@@ -665,7 +670,8 @@ sync_send(ActorPid, Selector, Args) ->
                     %%   1. Error = #beamtalk_error{} — returned by dispatch_user_method try/catch
                     %%   2. Error = {ErlType, Value} — raw Erlang exception caught by safe_dispatch
                     %% We re-raise both forms as Erlang exceptions so the caller sees them correctly.
-                    case gen_server:call(ActorPid, {Selector, Args}) of
+                    PropCtx = get_propagated_ctx(),
+                    case gen_server:call(ActorPid, {Selector, Args, PropCtx}) of
                         {ok, Result} ->
                             {Result, Metadata#{outcome => ok}};
                         {error, {_ErlType, ErrorValue}} ->
@@ -769,6 +775,46 @@ lookup_class(Pid) ->
         error:badarg -> unknown
     end.
 
+%% @doc Build a propagated context map for cross-actor message sends (ADR 0069 Phase 2b).
+%%
+%% Returns an extensible map containing context that should flow across actor
+%% boundaries. Currently captures OTel trace context when the otel_ctx module
+%% is loaded. Future keys (request_id, deadline, causality) will be added here.
+%%
+%% Cost: ~10ns when OTel not loaded (erlang:function_exported check + map construction),
+%% ~40ns when OTel loaded (+ otel_ctx:get_current/0 call).
+-spec get_propagated_ctx() -> map().
+get_propagated_ctx() ->
+    #{otel => get_otel_ctx()}.
+
+%% @private
+%% @doc Get current OTel trace context if otel_ctx module is available.
+%% Returns 'undefined' when OpenTelemetry is not loaded — no compile-time dependency.
+-spec get_otel_ctx() -> term().
+get_otel_ctx() ->
+    case erlang:function_exported(otel_ctx, get_current, 0) of
+        true -> erlang:apply(otel_ctx, get_current, []);
+        false -> undefined
+    end.
+
+%% @doc Restore propagated context on the receiving actor side (ADR 0069 Phase 2b).
+%%
+%% Called by generated handle_call/handle_cast to restore context from the
+%% propagated context map. When OTel context is present and otel_ctx is loaded,
+%% attaches the trace context so spans created in this actor are linked to the
+%% caller's trace. No-op when OTel is not loaded or context is undefined.
+-spec restore_propagated_ctx(map()) -> ok.
+restore_propagated_ctx(#{otel := Ctx}) when Ctx =/= undefined ->
+    case erlang:function_exported(otel_ctx, attach, 1) of
+        true ->
+            erlang:apply(otel_ctx, attach, [Ctx]),
+            ok;
+        false ->
+            ok
+    end;
+restore_propagated_ctx(_) ->
+    ok.
+
 %% @doc Spawn a lightweight watcher that monitors both the actor and future.
 %% BT-886: Closes the TOCTOU race in async_send — if the actor dies during
 %% message processing (after the cast but before the future is resolved),
@@ -841,6 +887,12 @@ init(_NonMapState) ->
 %% Errors in fire-and-forget are logged but do not crash the actor.
 %% Errors in async-with-future are communicated via future rejection.
 -spec handle_cast(term(), map()) -> {noreply, map()}.
+%% BT-1604: Fire-and-forget cast with propagated context (ADR 0069 Phase 2b)
+handle_cast({cast, Selector, Args, PropCtx}, State) when
+    is_atom(Selector), is_list(Args), is_map(PropCtx)
+->
+    restore_propagated_ctx(PropCtx),
+    handle_cast({cast, Selector, Args}, State);
 handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args) ->
     Self = make_self(State),
     ?LOG_DEBUG("Actor dispatch (cast fire-and-forget)", #{
@@ -873,6 +925,10 @@ handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args)
             }),
             {noreply, NewState}
     end;
+%% BT-1604: Async send with propagated context (ADR 0069 Phase 2b)
+handle_cast({Selector, Args, FuturePid, PropCtx}, State) when is_map(PropCtx) ->
+    restore_propagated_ctx(PropCtx),
+    handle_cast({Selector, Args, FuturePid}, State);
 handle_cast({Selector, Args, FuturePid}, State) ->
     Self = make_self(State),
     ?LOG_DEBUG("Actor dispatch (async)", #{
@@ -911,9 +967,13 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 %% @doc Handle synchronous messages (call).
-%% Message format: {Selector, Args}
+%% Message format: {Selector, Args} or {Selector, Args, PropCtx} (ADR 0069 Phase 2b)
 %% Dispatches to method and returns result immediately.
 -spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
+%% BT-1604: Sync call with propagated context (ADR 0069 Phase 2b)
+handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
+    restore_propagated_ctx(PropCtx),
+    handle_call({Selector, Args}, From, State);
 handle_call({Selector, Args}, From, State) ->
     Self = make_self(State),
     ?LOG_DEBUG("Actor dispatch (sync)", #{

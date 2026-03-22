@@ -210,6 +210,10 @@ init(Config) ->
 
 %% @doc Dispatch sync calls.
 -spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
+%% BT-1604: Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
+handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    handle_call({Selector, Args}, From, State);
 handle_call({'writeLine:', [Data]}, _From, State) ->
     handle_writeLine(Data, State);
 handle_call({exitCode, []}, _From, State) ->
