@@ -18,6 +18,7 @@ Object subclass: TestRunner
 
   /// Run all test methods across all discovered TestCase subclasses.
   /// Returns a TestResult aggregating the combined results.
+  /// Runs all classes sequentially (equivalent to `runAll: 1`).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -25,6 +26,19 @@ Object subclass: TestRunner
   /// result hasPassed       // => true
   /// ```
   class runAll -> TestResult => (Erlang beamtalk_test_runner) runAll
+
+  /// Run all tests with up to `maxJobs` classes running concurrently.
+  ///
+  /// Classes declaring `serial => true` run sequentially after
+  /// all concurrent classes complete. Use `1` for sequential behavior.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result := TestRunner runAll: 4    // run up to 4 classes concurrently
+  /// result hasPassed                  // => true
+  /// ```
+  class runAll: maxJobs :: Integer -> TestResult =>
+    (Erlang beamtalk_test_runner) runAll: maxJobs
 
   /// Run all test methods in the given TestCase subclass `testClass`.
   /// Returns a TestResult for that class.

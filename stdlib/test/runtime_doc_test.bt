@@ -5,6 +5,14 @@
 
 TestCase subclass: RuntimeDocTest
 
+  // Reset global doc state before each test to avoid ordering dependencies.
+  // Class-level and method-level docs are global mutations on the class object,
+  // so earlier tests (e.g. testSetMethodDoc) would pollute later tests.
+  setUp =>
+    DocTestHelper doc: nil
+    DocTestHelper setDocForMethod: #greet to: nil
+    DocTestHelper setDocForMethod: #answer to: nil
+
   // --- Class doc ---
   testClassDocDefaultsToNil => self assert: DocTestHelper doc equals: nil
 
