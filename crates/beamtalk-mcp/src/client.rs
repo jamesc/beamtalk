@@ -614,6 +614,46 @@ impl ReplClient {
         self.send(&Self::request("describe")).await
     }
 
+    /// Send an enable-tracing operation (ADR 0069).
+    pub async fn enable_tracing(&self) -> Result<ReplResponse, String> {
+        self.send(&Self::request("enable-tracing")).await
+    }
+
+    /// Send a get-traces operation with optional filtering (ADR 0069).
+    pub async fn get_traces(
+        &self,
+        actor: Option<&str>,
+        selector: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<ReplResponse, String> {
+        let mut request = serde_json::json!({
+            "op": "get-traces",
+            "id": next_msg_id()
+        });
+        if let Some(a) = actor {
+            request["actor"] = serde_json::Value::String(a.to_owned());
+        }
+        if let Some(s) = selector {
+            request["selector"] = serde_json::Value::String(s.to_owned());
+        }
+        if let Some(l) = limit {
+            request["limit"] = serde_json::json!(l);
+        }
+        self.send(&request).await
+    }
+
+    /// Send an actor-stats operation with optional actor filter (ADR 0069).
+    pub async fn actor_stats(&self, actor: Option<&str>) -> Result<ReplResponse, String> {
+        let mut request = serde_json::json!({
+            "op": "actor-stats",
+            "id": next_msg_id()
+        });
+        if let Some(a) = actor {
+            request["actor"] = serde_json::Value::String(a.to_owned());
+        }
+        self.send(&request).await
+    }
+
     /// Send a load-project operation.
     ///
     /// Uses [`send_once`] (no retry) because `load-project` loads multiple files
