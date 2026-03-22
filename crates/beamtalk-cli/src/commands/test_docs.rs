@@ -340,8 +340,8 @@ fn extract_to_btscript_files(
 /// corresponding `.erl` wrappers, and registers them for compilation and execution.
 fn generate_bunit_wrappers(
     bunit_fixtures: &[BunitFixture],
-    build_dir: &Utf8Path,
-    all_erl_files: &mut Vec<Utf8PathBuf>,
+    _build_dir: &Utf8Path,
+    _all_erl_files: &mut [Utf8PathBuf],
     compiled_files: &mut Vec<CompiledTestFile>,
 ) -> Result<()> {
     for fixture in bunit_fixtures {

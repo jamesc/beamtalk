@@ -34,7 +34,6 @@ type PkgClassIndexes = HashMap<Utf8PathBuf, (HashMap<String, String>, HashMap<St
 
 /// Metadata about a `TestCase` subclass discovered in a `.bt` file.
 #[derive(Debug)]
-#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct TestCaseClass {
     /// Class name (e.g., `CounterTest`).
     pub(crate) class_name: String,
@@ -45,16 +44,9 @@ pub(crate) struct TestCaseClass {
     pub(crate) module_name: String,
     /// Methods whose names start with `test`.
     pub(crate) test_methods: Vec<String>,
-    /// Whether a `setUp` method is defined.
-    pub(crate) has_setup: bool,
-    /// Whether a `tearDown` method is defined.
-    pub(crate) has_teardown: bool,
-    /// Whether a `setUpOnce` method is defined (BT-1549).
-    pub(crate) has_setup_once: bool,
-    /// Whether a `tearDownOnce` method is defined (BT-1549).
-    pub(crate) has_teardown_once: bool,
-    /// Whether `serial => true` is declared (BT-1624).
-    pub(crate) is_serial: bool,
+    // BT-1631: Removed has_setup, has_teardown, has_setup_once, has_teardown_once, is_serial
+    // fields — test lifecycle and serial detection are now handled entirely by
+    // beamtalk_test_runner in the Erlang runtime.
 }
 
 /// Discover `TestCase` subclasses in a `.bt` file by parsing the AST.
@@ -107,34 +99,16 @@ pub(crate) fn discover_test_classes(
         let module_name = format!("bt@{stem}");
 
         let mut test_methods = Vec::new();
-        let mut has_setup = false;
-        let mut has_teardown = false;
-        let mut has_setup_once = false;
-        let mut has_teardown_once = false;
 
         for method in &class.methods {
             let selector_name = method.selector.name();
             if selector_name.starts_with("test") {
                 test_methods.push(selector_name.to_string());
-            } else if selector_name == "setUp" {
-                has_setup = true;
-            } else if selector_name == "tearDown" {
-                has_teardown = true;
-            } else if selector_name == "setUpOnce" {
-                has_setup_once = true;
-            } else if selector_name == "tearDownOnce" {
-                has_teardown_once = true;
             }
         }
 
-        // Check for `class serial` in class methods (BT-1624).
-        // Presence of the override is sufficient — the base TestCase.serial
-        // returns false and isn't in class_methods (which is per-class, not
-        // inherited). A subclass only overrides serial to return true.
-        let is_serial = class
-            .class_methods
-            .iter()
-            .any(|m| m.selector.name() == "serial");
+        // BT-1631: Removed setUp/tearDown/serial detection — the BUnit runner
+        // (beamtalk_test_runner) handles all lifecycle and serialization in Erlang.
 
         if !test_methods.is_empty() {
             test_classes.push(TestCaseClass {
@@ -142,11 +116,6 @@ pub(crate) fn discover_test_classes(
                 superclass_name: class.superclass_name().to_string(),
                 module_name,
                 test_methods,
-                has_setup,
-                has_teardown,
-                has_setup_once,
-                has_teardown_once,
-                is_serial,
             });
         }
     }
@@ -352,12 +321,11 @@ fn generate_core_file(
     Ok(core_file)
 }
 
-/// Compile `EUnit` wrapper `.erl` files with erlc.
 // ──────────────────────────────────────────────────────────────────────────
 // BUnit runner (BT-1631)
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Result from running BUnit tests via beamtalk_test_runner:run_all/1.
+/// Result from running `BUnit` tests via `beamtalk_test_runner:run_all/1`.
 ///
 /// Holds the parsed JSON result containing aggregated test metrics and per-test details.
 #[derive(Debug)]
@@ -369,8 +337,10 @@ struct BunitResult {
     /// Number of failing tests.
     failed: usize,
     /// Number of skipped tests.
+    #[allow(dead_code)] // populated for future skip-reason display
     skipped: usize,
     /// Total duration in seconds.
+    #[allow(dead_code)] // populated for future per-class duration display
     duration: f64,
     /// Per-test result details (name, status, optional error).
     tests: Vec<TestResultDetail>,
@@ -512,10 +482,6 @@ fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
         current = current.parent()?.to_owned();
     }
 }
-
-/// Return the effective class module index for a test file.
-///
-/// Uses the per-package index for the file's owning package (if found), so test
 
 /// Recursively collect `.bt` files from `dir` into `files`.
 fn find_test_files_recursive(dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
@@ -670,6 +636,7 @@ struct CompiledDocTestResult {
     /// `EUnit` wrapper module name for this class's doc tests.
     eunit_module: String,
     /// Path to the generated `.erl` wrapper file.
+    #[allow(dead_code)] // TODO: used when doc tests are migrated to BUnit runner
     erl_file: Utf8PathBuf,
     /// Number of `// =>` assertions compiled into tests.
     assertion_count: usize,
@@ -760,6 +727,7 @@ fn generate_doc_test_eunit_wrapper(
 // ──────────────────────────────────────────────────────────────────────────
 
 /// Compiled test file metadata, ready for execution.
+#[allow(dead_code)] // fields populated during discovery for future per-file reporting
 struct CompiledTest {
     /// Source file path.
     source_file: Utf8PathBuf,
@@ -768,6 +736,7 @@ struct CompiledTest {
 }
 
 /// Compiled doc test metadata, ready for execution.
+#[allow(dead_code)] // fields populated during discovery; doc tests TODO for BUnit migration
 struct CompiledDocTest {
     /// Source file path.
     source_file: Utf8PathBuf,
@@ -810,8 +779,6 @@ struct TestPipeline {
     precompiled_modules: HashSet<String>,
     /// All fixture module names (pre-compiled + `@load`-compiled).
     all_fixture_modules: Vec<String>,
-    /// All generated `.erl` `EUnit` wrapper files to compile.
-    all_erl_files: Vec<Utf8PathBuf>,
     /// Compiled `BUnit` test metadata.
     compiled_tests: Vec<CompiledTest>,
     /// Compiled doc test metadata.
@@ -976,7 +943,6 @@ fn initialize_pipeline(
         fixture_class_index: HashMap::new(),
         precompiled_modules: HashSet::new(),
         all_fixture_modules: Vec::new(),
-        all_erl_files: Vec::new(),
         compiled_tests: Vec::new(),
         compiled_doc_tests: Vec::new(),
         package_modules: Vec::new(),
@@ -1172,7 +1138,8 @@ fn compile_single_test_file(
         &pipeline.all_class_infos,
     )?;
     for dr in doc_results {
-        pipeline.all_erl_files.push(dr.erl_file);
+        // BT-1631: Doc test EUnit wrappers are still generated but not compiled here.
+        // TODO: Migrate doc tests to use BUnit runner directly.
         pipeline.compiled_doc_tests.push(CompiledDocTest {
             source_file: test_file.to_path_buf(),
             display_name: dr.display_name,
@@ -1292,20 +1259,18 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
 
 /// Phase 3: Run all tests via `beamtalk_test_runner:run_all(Jobs)`.
 ///
-/// BT-1631: Replaces EUnit wrapper compilation and execution with direct
-/// calls to the BUnit runner, which handles test discovery and execution
+/// Replaces `EUnit` wrapper compilation and execution with direct
+/// calls to the `BUnit` runner, which handles test discovery and execution
 /// in the Erlang runtime and returns structured JSON results.
 fn execute_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     println!("Running tests...\n");
 
-    run_bunit_tests(
-        pipeline,
-    )
+    run_bunit_tests(pipeline)
 }
 
 /// Run tests via `beamtalk_test_runner:run_all(Jobs)` in a single BEAM process.
 ///
-/// Calls the BUnit runner directly, bypassing EUnit wrappers. The runner
+/// Calls the `BUnit` runner directly, bypassing `EUnit` wrappers. The runner
 /// discovers test classes, executes them with the specified concurrency level,
 /// and returns aggregated results as JSON.
 #[allow(clippy::too_many_lines)]
@@ -1343,11 +1308,25 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
             + ", "
     };
 
+    // Build test module loading commands (triggers on_load → class registration)
+    let test_load_cmd = if pipeline.compiled_tests.is_empty() {
+        String::new()
+    } else {
+        pipeline
+            .compiled_tests
+            .iter()
+            .map(|t| format!("code:ensure_loaded('{}')", t.test_class.module_name))
+            .collect::<Vec<_>>()
+            .join(", ")
+            + ", "
+    };
+
     // Call beamtalk_test_runner:run_all(Jobs) and serialize result to JSON
     let eval_cmd = format!(
         "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
          {package_load_cmd}\
          {fixture_load_cmd}\
+         {test_load_cmd}\
          Result = beamtalk_test_runner:run_all({jobs}), \
          JSON = beamtalk_test_runner:result_to_json(Result), \
          io:format(\"~s~n\", [JSON]), \
@@ -1363,7 +1342,9 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     }
     #[cfg(not(windows))]
     {
-        cmd.arg("-noshell").arg("-pa").arg(pipeline.build_dir.as_str());
+        cmd.arg("-noshell")
+            .arg("-pa")
+            .arg(pipeline.build_dir.as_str());
     }
 
     // Add all package ebin directories to code path
@@ -1396,11 +1377,15 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     debug!("BUnit stdout: {}", stdout);
     debug!("BUnit stderr: {}", stderr);
 
-    // Extract JSON from stdout (first line before init:stop output)
+    // Extract JSON from stdout — skip any Erlang error/info reports that may precede it.
+    // The JSON line starts with `{` and contains our result keys.
     let json_line = stdout
         .lines()
-        .next()
-        .ok_or_else(|| miette::miette!("No output from BUnit runner"))?;
+        .find(|line| line.starts_with('{'))
+        .ok_or_else(|| {
+            let combined = format!("{stdout}\n{stderr}");
+            miette::miette!("No JSON output from BUnit runner:\n{combined}")
+        })?;
 
     // Parse JSON result
     let result_json: serde_json::Value = serde_json::from_str(json_line)
@@ -1408,18 +1393,16 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
         .wrap_err_with(|| format!("Failed to parse BUnit JSON result: {json_line}"))?;
 
     // Deserialize into BunitResult
-    let total = result_json["total"]
-        .as_u64()
-        .ok_or_else(|| miette::miette!("Missing 'total' in BUnit result"))? as usize;
-    let passed = result_json["passed"]
-        .as_u64()
-        .ok_or_else(|| miette::miette!("Missing 'passed' in BUnit result"))? as usize;
-    let failed = result_json["failed"]
-        .as_u64()
-        .ok_or_else(|| miette::miette!("Missing 'failed' in BUnit result"))? as usize;
-    let skipped = result_json["skipped"]
-        .as_u64()
-        .ok_or_else(|| miette::miette!("Missing 'skipped' in BUnit result"))? as usize;
+    let parse_usize = |key: &str| -> Result<usize> {
+        result_json[key]
+            .as_u64()
+            .map(|v| usize::try_from(v).unwrap_or(usize::MAX))
+            .ok_or_else(|| miette::miette!("Missing '{key}' in BUnit result"))
+    };
+    let total = parse_usize("total")?;
+    let passed = parse_usize("passed")?;
+    let failed = parse_usize("failed")?;
+    let skipped = parse_usize("skipped")?;
     let duration = result_json["duration"]
         .as_f64()
         .ok_or_else(|| miette::miette!("Missing 'duration' in BUnit result"))?;
@@ -1431,16 +1414,14 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let tests = tests_array
         .iter()
         .map(|t| {
-            let name = t["name"]
-                .as_str()
-                .unwrap_or("unknown")
-                .to_string();
-            let status = t["status"]
-                .as_str()
-                .unwrap_or("unknown")
-                .to_string();
-            let error = t["error"].as_str().map(|s| s.to_string());
-            TestResultDetail { name, status, error }
+            let name = t["name"].as_str().unwrap_or("unknown").to_string();
+            let status = t["status"].as_str().unwrap_or("unknown").to_string();
+            let error = t["error"].as_str().map(String::from);
+            TestResultDetail {
+                name,
+                status,
+                error,
+            }
         })
         .collect();
 
@@ -1477,14 +1458,15 @@ fn report_results(
             test_name.clone()
         };
 
-        let (passed, failed, skipped) = class_results.entry(class_name.clone()).or_insert((0, 0, 0));
+        let (passed, failed, skipped) =
+            class_results.entry(class_name.clone()).or_insert((0, 0, 0));
 
         match test.status.as_str() {
             "pass" => *passed += 1,
             "fail" => {
                 *failed += 1;
                 if let Some(error) = &test.error {
-                    failed_details.push(format!("FAIL {}: {}", test_name, error));
+                    failed_details.push(format!("FAIL {test_name}: {error}"));
                 }
             }
             "skip" => *skipped += 1,
@@ -1498,7 +1480,9 @@ fn report_results(
         if let Some((passed, failed, skipped)) = class_results.get(class_name) {
             let total = passed + failed + skipped;
             if *failed > 0 {
-                println!("  {class_name}: {total} tests, {passed} passed, {failed} failed \u{2717}");
+                println!(
+                    "  {class_name}: {total} tests, {passed} passed, {failed} failed \u{2717}"
+                );
             } else {
                 println!("  {class_name}: {total} tests, {total} passed \u{2713}");
             }
@@ -1565,8 +1549,6 @@ mod tests {
         assert_eq!(classes.len(), 1);
         assert_eq!(classes[0].class_name, "MyTest");
         assert_eq!(classes[0].test_methods, vec!["testAdd"]);
-        assert!(!classes[0].has_setup);
-        assert!(!classes[0].has_teardown);
     }
 
     #[test]
@@ -1581,8 +1563,8 @@ mod tests {
 
         let (classes, _) = discover_test_classes(&file).unwrap();
         assert_eq!(classes.len(), 1);
-        assert!(classes[0].has_setup);
-        assert!(classes[0].has_teardown);
+        // BT-1631: setUp/tearDown detection removed — handled by the BUnit runtime.
+        // Only test method discovery matters for the CLI now.
         assert_eq!(classes[0].test_methods, vec!["testIt"]);
     }
 
