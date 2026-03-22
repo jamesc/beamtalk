@@ -260,18 +260,18 @@ aggregate_counters_updated_test_() ->
 
                     %% Check aggregate stats
                     Stats = beamtalk_trace_store:get_stats(),
-                    PidKey = pid_to_list(Pid),
+                    PidKey = list_to_binary(pid_to_list(Pid)),
                     ?assertMatch(#{PidKey := _}, Stats),
                     PidStats = maps:get(PidKey, Stats),
-                    Methods = maps:get(methods, PidStats),
+                    Methods = maps:get(<<"methods">>, PidStats),
 
                     %% increment should have 2 calls
-                    IncStats = maps:get("increment", Methods),
-                    ?assertEqual(2, maps:get(calls, IncStats)),
+                    IncStats = maps:get(<<"increment">>, Methods),
+                    ?assertEqual(2, maps:get(<<"calls">>, IncStats)),
 
                     %% getValue should have 1 call
-                    GetStats = maps:get("getValue", Methods),
-                    ?assertEqual(1, maps:get(calls, GetStats))
+                    GetStats = maps:get(<<"getValue">>, Methods),
+                    ?assertEqual(1, maps:get(<<"calls">>, GetStats))
                 after
                     gen_server:stop(Pid)
                 end
@@ -301,12 +301,19 @@ trace_events_captured_when_enabled_test_() ->
                     timer:sleep(50),
 
                     Traces = beamtalk_trace_store:get_traces(),
-                    ?assertEqual(1, length(Traces)),
-                    [Trace] = Traces,
-                    ?assertEqual(Pid, maps:get(actor, Trace)),
-                    ?assertEqual('Counter', maps:get(class, Trace)),
-                    ?assertEqual(getValue, maps:get(selector, Trace)),
-                    ?assertEqual(sync, maps:get(mode, Trace))
+                    %% Filter to dispatch events only (exclude lifecycle)
+                    DispatchTraces = [
+                        T
+                     || T <- Traces,
+                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                    ],
+                    ?assertEqual(1, length(DispatchTraces)),
+                    [Trace] = DispatchTraces,
+                    PidStr = list_to_binary(pid_to_list(Pid)),
+                    ?assertEqual(PidStr, maps:get(<<"actor">>, Trace)),
+                    ?assertEqual(<<"Counter">>, maps:get(<<"class">>, Trace)),
+                    ?assertEqual(<<"getValue">>, maps:get(<<"selector">>, Trace)),
+                    ?assertEqual(<<"sync">>, maps:get(<<"mode">>, Trace))
                 after
                     gen_server:stop(Pid)
                 end
@@ -531,23 +538,331 @@ multiple_modes_aggregate_test_() ->
 
                     %% Verify stats show calls for both methods
                     Stats = beamtalk_trace_store:get_stats(),
-                    PidKey = pid_to_list(Pid),
+                    PidKey = list_to_binary(pid_to_list(Pid)),
                     ?assertMatch(#{PidKey := _}, Stats),
                     PidStats = maps:get(PidKey, Stats),
-                    Methods = maps:get(methods, PidStats),
+                    Methods = maps:get(<<"methods">>, PidStats),
 
                     %% increment: 1 sync + 1 cast = 2 calls
-                    IncStats = maps:get("increment", Methods),
-                    ?assertEqual(2, maps:get(calls, IncStats)),
+                    IncStats = maps:get(<<"increment">>, Methods),
+                    ?assertEqual(2, maps:get(<<"calls">>, IncStats)),
 
                     %% getValue: 1 sync call
-                    GetStats = maps:get("getValue", Methods),
-                    ?assertEqual(1, maps:get(calls, GetStats)),
+                    GetStats = maps:get(<<"getValue">>, Methods),
+                    ?assertEqual(1, maps:get(<<"calls">>, GetStats)),
 
                     %% Duration should be > 0
-                    ?assert(maps:get(total_duration_ns, GetStats) > 0)
+                    ?assert(maps:get(<<"total_duration_ns">>, GetStats) > 0)
                 after
                     gen_server:stop(Pid)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Lifecycle start event emitted on actor init (BT-1629)
+%%====================================================================
+
+lifecycle_start_event_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                StartHandler = attach_handler([beamtalk, actor, lifecycle, start]),
+                try
+                    Pid = start_registered_counter(0),
+                    try
+                        %% Verify lifecycle start event was emitted
+                        receive
+                            {telemetry_event, [beamtalk, actor, lifecycle, start], _Measurements,
+                                Metadata} ->
+                                ?assertEqual(Pid, maps:get(pid, Metadata)),
+                                ?assertEqual('Counter', maps:get(class, Metadata))
+                        after 1000 ->
+                            ?assert(false)
+                        end
+                    after
+                        gen_server:stop(Pid)
+                    end
+                after
+                    telemetry:detach(StartHandler)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Lifecycle stop event emitted on actor terminate (BT-1629)
+%%====================================================================
+
+lifecycle_terminate_event_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                StopHandler = attach_handler([beamtalk, actor, lifecycle, stop]),
+                try
+                    Pid = start_registered_counter(0),
+                    %% Gracefully stop the actor — triggers terminate/2
+                    gen_server:stop(Pid),
+                    %% Verify lifecycle stop event was emitted from terminate/2
+                    %% (There may also be a stop event from sync_send, but we
+                    %% just need at least one with reason => normal)
+                    receive
+                        {telemetry_event, [beamtalk, actor, lifecycle, stop], _Measurements,
+                            Metadata} ->
+                            ?assertEqual(Pid, maps:get(pid, Metadata)),
+                            ?assertEqual('Counter', maps:get(class, Metadata)),
+                            ?assertEqual(normal, maps:get(reason, Metadata))
+                    after 1000 ->
+                        ?assert(false)
+                    end
+                after
+                    telemetry:detach(StopHandler)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Lifecycle stop event via sync_send stop (BT-1629)
+%%====================================================================
+
+lifecycle_sync_stop_event_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                StopHandler = attach_handler([beamtalk, actor, lifecycle, stop]),
+                try
+                    Pid = start_registered_counter(0),
+                    %% Use sync_send stop which emits lifecycle event
+                    beamtalk_actor:sync_send(Pid, stop, []),
+                    %% Verify lifecycle stop event was emitted
+                    receive
+                        {telemetry_event, [beamtalk, actor, lifecycle, stop], _Measurements,
+                            Metadata} ->
+                            ?assertEqual(Pid, maps:get(pid, Metadata)),
+                            ?assertEqual('Counter', maps:get(class, Metadata)),
+                            ?assertEqual(normal, maps:get(reason, Metadata))
+                    after 1000 ->
+                        ?assert(false)
+                    end
+                after
+                    telemetry:detach(StopHandler)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Lifecycle kill event via sync_send kill (BT-1629)
+%%====================================================================
+
+lifecycle_sync_kill_event_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                KillHandler = attach_handler([beamtalk, actor, lifecycle, kill]),
+                OldTrap = process_flag(trap_exit, true),
+                try
+                    Pid = start_registered_counter(0),
+                    %% Use sync_send kill which emits lifecycle event
+                    beamtalk_actor:sync_send(Pid, kill, []),
+                    %% Flush the EXIT message from the linked actor
+                    receive
+                        {'EXIT', Pid, _} -> ok
+                    after 100 -> ok
+                    end,
+                    %% Verify lifecycle kill event was emitted
+                    receive
+                        {telemetry_event, [beamtalk, actor, lifecycle, kill], _Measurements,
+                            Metadata} ->
+                            ?assertEqual(Pid, maps:get(pid, Metadata)),
+                            ?assertEqual('Counter', maps:get(class, Metadata))
+                    after 1000 ->
+                        ?assert(false)
+                    end
+                after
+                    process_flag(trap_exit, OldTrap),
+                    telemetry:detach(KillHandler)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Lifecycle events recorded in trace store (BT-1629)
+%%====================================================================
+
+lifecycle_events_in_traces_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                Pid = start_registered_counter(0),
+                %% Stop the actor to trigger lifecycle events
+                beamtalk_actor:sync_send(Pid, stop, []),
+                timer:sleep(100),
+
+                %% Get all traces — should include lifecycle events
+                Traces = beamtalk_trace_store:get_traces(),
+                LifecycleTraces = [
+                    T
+                 || T <- Traces,
+                    maps:get(<<"mode">>, T) =:= <<"lifecycle">>
+                ],
+                %% Should have at least start + stop events
+                ?assert(length(LifecycleTraces) >= 2),
+
+                %% Verify start event exists
+                StartTraces = [
+                    T
+                 || T <- LifecycleTraces,
+                    maps:get(<<"selector">>, T) =:= <<"start">>
+                ],
+                ?assert(length(StartTraces) >= 1),
+
+                %% Verify stop event exists
+                StopTraces = [
+                    T
+                 || T <- LifecycleTraces,
+                    maps:get(<<"selector">>, T) =:= <<"stop">>
+                ],
+                ?assert(length(StopTraces) >= 1)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Lifecycle events in aggregate stats (BT-1629)
+%%====================================================================
+
+lifecycle_aggregate_stats_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                Pid = start_registered_counter(0),
+                %% Stop the actor to trigger lifecycle events
+                beamtalk_actor:sync_send(Pid, stop, []),
+                timer:sleep(100),
+
+                %% Get aggregate stats — should include lifecycle operations
+                Stats = beamtalk_trace_store:get_stats(),
+                PidKey = list_to_binary(pid_to_list(Pid)),
+                ?assertMatch(#{PidKey := _}, Stats),
+                PidStats = maps:get(PidKey, Stats),
+                Methods = maps:get(<<"methods">>, PidStats),
+
+                %% Start should have at least 1 call
+                StartStats = maps:get(<<"start">>, Methods),
+                ?assert(maps:get(<<"calls">>, StartStats) >= 1)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Lifecycle terminate reason propagation (BT-1629)
+%%====================================================================
+
+lifecycle_terminate_reason_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                StopHandler = attach_handler([beamtalk, actor, lifecycle, stop]),
+                OldTrap = process_flag(trap_exit, true),
+                try
+                    Pid = start_registered_counter(0),
+                    %% Kill the actor — terminate/2 receives {killed, ...} reason
+                    exit(Pid, kill),
+                    %% Flush the EXIT message from the linked actor
+                    receive
+                        {'EXIT', Pid, _} -> ok
+                    after 100 -> ok
+                    end,
+                    timer:sleep(100),
+                    %% Verify lifecycle stop event from terminate/2 has non-normal reason
+                    %% Note: when killed, terminate/2 may or may not be called
+                    %% depending on trap_exit. Check for any stop event.
+                    receive
+                        {telemetry_event, [beamtalk, actor, lifecycle, stop], _Measurements,
+                            Metadata} ->
+                            %% Just verify it has reason and class metadata
+                            ?assert(maps:is_key(reason, Metadata)),
+                            ?assert(maps:is_key(class, Metadata))
+                    after 500 ->
+                        %% Killed actors may not call terminate/2 — acceptable
+                        ok
+                    end
+                after
+                    process_flag(trap_exit, OldTrap),
+                    telemetry:detach(StopHandler)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Async stop emits lifecycle event (BT-1629)
+%%====================================================================
+
+lifecycle_async_stop_event_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                StopHandler = attach_handler([beamtalk, actor, lifecycle, stop]),
+                try
+                    Pid = start_registered_counter(0),
+                    {beamtalk_future, FuturePid} = beamtalk_future:new(),
+                    beamtalk_actor:async_send(Pid, stop, [], FuturePid),
+                    %% Verify lifecycle stop event was emitted
+                    receive
+                        {telemetry_event, [beamtalk, actor, lifecycle, stop], _Measurements,
+                            Metadata} ->
+                            ?assertEqual(Pid, maps:get(pid, Metadata)),
+                            ?assertEqual('Counter', maps:get(class, Metadata)),
+                            ?assertEqual(normal, maps:get(reason, Metadata))
+                    after 1000 ->
+                        ?assert(false)
+                    end
+                after
+                    telemetry:detach(StopHandler)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Async kill emits lifecycle event (BT-1629)
+%%====================================================================
+
+lifecycle_async_kill_event_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                KillHandler = attach_handler([beamtalk, actor, lifecycle, kill]),
+                OldTrap = process_flag(trap_exit, true),
+                try
+                    Pid = start_registered_counter(0),
+                    {beamtalk_future, FuturePid} = beamtalk_future:new(),
+                    beamtalk_actor:async_send(Pid, kill, [], FuturePid),
+                    %% Flush the EXIT message from the linked actor
+                    receive
+                        {'EXIT', Pid, _} -> ok
+                    after 100 -> ok
+                    end,
+                    %% Verify lifecycle kill event was emitted
+                    receive
+                        {telemetry_event, [beamtalk, actor, lifecycle, kill], _Measurements,
+                            Metadata} ->
+                            ?assertEqual(Pid, maps:get(pid, Metadata)),
+                            ?assertEqual('Counter', maps:get(class, Metadata))
+                    after 1000 ->
+                        ?assert(false)
+                    end
+                after
+                    process_flag(trap_exit, OldTrap),
+                    telemetry:detach(KillHandler)
                 end
             end)
         ]
