@@ -36,7 +36,8 @@
     result_failures/1,
     result_has_passed/1,
     result_summary/1,
-    result_print_string/1
+    result_print_string/1,
+    result_to_json/1
 ]).
 
 %% FFI shims for (Erlang beamtalk_test_runner) dispatch
@@ -231,6 +232,46 @@ result_summary(#{
 result_print_string(Result) ->
     Summary = result_summary(Result),
     <<"TestResult(", Summary/binary, ")">>.
+
+%% @doc Serialize a TestResult to JSON for CLI consumption.
+%%
+%% Returns a JSON binary that can be parsed by the CLI to reconstruct the result.
+%% Includes all test details (pass/fail/skip per test, durations, errors).
+-spec result_to_json(map()) -> binary().
+result_to_json(#{
+    '$beamtalk_class' := 'TestResult',
+    total := Total,
+    passed := Passed,
+    failed := Failed,
+    skipped := Skipped,
+    duration := Duration,
+    tests := Tests
+}) ->
+    JsonStruct = #{
+        <<"total">> => Total,
+        <<"passed">> => Passed,
+        <<"failed">> => Failed,
+        <<"skipped">> => Skipped,
+        <<"duration">> => Duration,
+        <<"tests">> => [serialize_test_result(T) || T <- Tests]
+    },
+    jsx:encode(JsonStruct).
+
+%% @doc Serialize a single test result.
+-spec serialize_test_result(map()) -> map().
+serialize_test_result(#{name := Name, status := Status} = Test) ->
+    Base = #{
+        <<"name">> => atom_to_binary(Name, utf8),
+        <<"status">> => atom_to_binary(Status, utf8)
+    },
+    case Test of
+        #{error := Error} when is_binary(Error) ->
+            Base#{<<"error">> => Error};
+        #{error := Error} ->
+            Base#{<<"error">> => iolist_to_binary(io_lib:format("~p", [Error]))};
+        _ ->
+            Base
+    end.
 
 %%====================================================================
 %% Internal: test execution (uses class registry, not module_info)
