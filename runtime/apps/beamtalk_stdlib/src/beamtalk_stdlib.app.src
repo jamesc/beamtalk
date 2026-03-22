@@ -78,6 +78,7 @@
             {'bt@stdlib@throw_error', 'ThrowError', 'BEAMError'},
             {'bt@stdlib@time', 'Time', 'Object'},
             {'bt@stdlib@timer', 'Timer', 'Object'},
+            {'bt@stdlib@tracing', 'Tracing', 'Object'},
             {'bt@stdlib@transcript_stream', 'TranscriptStream', 'Actor'},
             {'bt@stdlib@true', 'True', 'Boolean'},
             {'bt@stdlib@tuple', 'Tuple', 'Collection'},

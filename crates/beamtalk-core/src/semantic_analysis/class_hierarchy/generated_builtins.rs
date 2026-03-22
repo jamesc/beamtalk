@@ -90,6 +90,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ThrowError"
             | "Time"
             | "Timer"
+            | "Tracing"
             | "TranscriptStream"
             | "True"
             | "Tuple"
@@ -2547,6 +2548,45 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "after:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: true, spawns_block: true, return_type: Some("Timer".into()), param_types: vec![Some("Integer".into()), Some("Block".into())], doc: Some("Evaluate `block` once after `ms` milliseconds. Returns a cancellable Timer.\n\n## Examples\n```beamtalk\nt := Timer after: 100 do: ['fired' printNl]\nt class    // => Timer\n```".into()) },
                 MethodInfo { selector: "every:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: true, spawns_block: true, return_type: Some("Timer".into()), param_types: vec![Some("Integer".into()), Some("Block".into())], doc: Some("Evaluate `block` every `ms` milliseconds. Returns a cancellable Timer.\n\n## Examples\n```beamtalk\nt := Timer every: 100 do: ['tick' printNl]\nt class    // => Timer\nt cancel   // => true\n```".into()) },
                 MethodInfo { selector: "sleep:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Integer".into())], doc: Some("Block the current process for `ms` milliseconds.\n\n## Examples\n```beamtalk\nTimer sleep: 10    // => nil\n```".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Tracing".into(),
+        ClassInfo {
+            name: "Tracing".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "enable".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Start capturing trace events (aggregates are always on).\n\n## Examples\n```beamtalk\nTracing enable\n// => nil\n```".into()) },
+                MethodInfo { selector: "disable".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Stop capturing trace events.\n\n## Examples\n```beamtalk\nTracing disable\n// => nil\n```".into()) },
+                MethodInfo { selector: "isEnabled".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Check whether trace capture is active.\n\n## Examples\n```beamtalk\nTracing isEnabled\n// => _\n```".into()) },
+                MethodInfo { selector: "clear".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Clear all trace events and aggregate stats.\n\n## Examples\n```beamtalk\nTracing clear\n// => nil\n```".into()) },
+                MethodInfo { selector: "traces".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("All captured trace events (up to buffer limit), newest first.\nReturns [] when not enabled.\n\n## Examples\n```beamtalk\nTracing traces\n// => _\n```".into()) },
+                MethodInfo { selector: "tracesFor:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Object".into())], doc: Some("Trace events for a specific actor.\n\n## Examples\n```beamtalk\n// Tracing tracesFor: myCounter\n// => _\n```".into()) },
+                MethodInfo { selector: "tracesFor:selector:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Object".into()), Some("Symbol".into())], doc: Some("Trace events for a specific actor + method.\n\n## Examples\n```beamtalk\n// Tracing tracesFor: myCounter selector: #increment\n// => _\n```".into()) },
+                MethodInfo { selector: "stats".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![], doc: Some("Per-actor, per-method aggregate stats (always available, even without tracing).\n\n## Examples\n```beamtalk\nTracing stats\n// => _\n```".into()) },
+                MethodInfo { selector: "statsFor:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![Some("Object".into())], doc: Some("Aggregate stats for a specific actor.\nReturns #{} for unknown actors.\n\n## Examples\n```beamtalk\n// Tracing statsFor: myCounter\n// => _\n```".into()) },
+                MethodInfo { selector: "slowMethods:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Integer".into())], doc: Some("Top N methods by average duration (descending).\n\n## Examples\n```beamtalk\nTracing slowMethods: 10\n// => _\n```".into()) },
+                MethodInfo { selector: "hotMethods:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Integer".into())], doc: Some("Top N methods by call count (descending).\n\n## Examples\n```beamtalk\nTracing hotMethods: 10\n// => _\n```".into()) },
+                MethodInfo { selector: "errorMethods:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Integer".into())], doc: Some("Top N methods by error + timeout rate (descending).\n\n## Examples\n```beamtalk\nTracing errorMethods: 5\n// => _\n```".into()) },
+                MethodInfo { selector: "bottlenecks:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Integer".into())], doc: Some("Top N actors by message queue length — live snapshot.\n\n## Examples\n```beamtalk\nTracing bottlenecks: 5\n// => _\n```".into()) },
+                MethodInfo { selector: "healthFor:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![Some("Object".into())], doc: Some("Live process info: queue depth, memory, reductions, status.\nReturns status=dead for dead actors.\n\n## Examples\n```beamtalk\n// Tracing healthFor: myCounter\n// => _\n```".into()) },
+                MethodInfo { selector: "systemHealth".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![], doc: Some("VM overview: scheduler count, memory breakdown, process count, run queue lengths.\n\n## Examples\n```beamtalk\nTracing systemHealth\n// => _\n```".into()) },
+                MethodInfo { selector: "maxEvents".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current ring buffer capacity.\n\n## Examples\n```beamtalk\nTracing maxEvents\n// => _\n```".into()) },
+                MethodInfo { selector: "maxEvents:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Integer".into())], doc: Some("Set ring buffer capacity.\n\n## Examples\n```beamtalk\nTracing maxEvents: 50000\n// => nil\n```".into()) },
             ],
             class_variables: vec![],
             type_params: vec![],

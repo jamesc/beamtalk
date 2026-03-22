@@ -1,0 +1,217 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Tracing — Actor observability and performance telemetry.
+///
+/// Provides class methods for controlling trace capture, querying
+/// aggregate stats, analyzing performance bottlenecks, and checking
+/// actor/VM health. All methods are class-side — Tracing has no
+/// instances. Aggregate stats (call counts, durations) are always-on
+/// with negligible overhead (~150ns/call). Detailed trace events
+/// require explicit enable/disable.
+///
+/// ## Examples
+/// ```beamtalk
+/// // Always-on aggregates — no setup needed
+/// Tracing stats
+/// // => _
+///
+/// // Enable trace capture for detailed events
+/// Tracing enable
+/// // => nil
+/// Tracing isEnabled
+/// // => true
+///
+/// // Query traces
+/// Tracing traces
+/// // => _
+///
+/// // Analysis
+/// Tracing slowMethods: 5
+/// // => _
+///
+/// // Clean up
+/// Tracing disable
+/// // => nil
+/// Tracing clear
+/// // => nil
+/// ```
+sealed Object subclass: Tracing
+
+  // === Tracing lifecycle ===
+
+  /// Start capturing trace events (aggregates are always on).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing enable
+  /// // => nil
+  /// ```
+  class sealed enable -> Nil => (Erlang beamtalk_tracing) enable
+
+  /// Stop capturing trace events.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing disable
+  /// // => nil
+  /// ```
+  class sealed disable -> Nil => (Erlang beamtalk_tracing) disable
+
+  /// Check whether trace capture is active.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing isEnabled
+  /// // => _
+  /// ```
+  class sealed isEnabled -> Boolean => (Erlang beamtalk_tracing) isEnabled
+
+  /// Clear all trace events and aggregate stats.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing clear
+  /// // => nil
+  /// ```
+  class sealed clear -> Nil => (Erlang beamtalk_tracing) clear
+
+  // === Trace event queries ===
+
+  /// All captured trace events (up to buffer limit), newest first.
+  /// Returns [] when not enabled.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing traces
+  /// // => _
+  /// ```
+  class sealed traces -> List => (Erlang beamtalk_tracing) traces
+
+  /// Trace events for a specific actor.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // Tracing tracesFor: myCounter
+  /// // => _
+  /// ```
+  class sealed tracesFor: actor :: Object -> List =>
+    (Erlang beamtalk_tracing) tracesFor: actor
+
+  /// Trace events for a specific actor + method.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // Tracing tracesFor: myCounter selector: #increment
+  /// // => _
+  /// ```
+  class sealed tracesFor: actor :: Object selector: sel :: Symbol -> List =>
+    (Erlang beamtalk_tracing) tracesFor: actor selector: sel
+
+  // === Aggregate stats ===
+
+  /// Per-actor, per-method aggregate stats (always available, even without tracing).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing stats
+  /// // => _
+  /// ```
+  class sealed stats -> Dictionary => (Erlang beamtalk_tracing) stats
+
+  /// Aggregate stats for a specific actor.
+  /// Returns #{} for unknown actors.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // Tracing statsFor: myCounter
+  /// // => _
+  /// ```
+  class sealed statsFor: actor :: Object -> Dictionary =>
+    (Erlang beamtalk_tracing) statsFor: actor
+
+  // === Analysis (computed from aggregates) ===
+
+  /// Top N methods by average duration (descending).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing slowMethods: 10
+  /// // => _
+  /// ```
+  class sealed slowMethods: limit :: Integer -> List =>
+    (Erlang beamtalk_tracing) slowMethods: limit
+
+  /// Top N methods by call count (descending).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing hotMethods: 10
+  /// // => _
+  /// ```
+  class sealed hotMethods: limit :: Integer -> List =>
+    (Erlang beamtalk_tracing) hotMethods: limit
+
+  /// Top N methods by error + timeout rate (descending).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing errorMethods: 5
+  /// // => _
+  /// ```
+  class sealed errorMethods: limit :: Integer -> List =>
+    (Erlang beamtalk_tracing) errorMethods: limit
+
+  /// Top N actors by message queue length — live snapshot.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing bottlenecks: 5
+  /// // => _
+  /// ```
+  class sealed bottlenecks: limit :: Integer -> List =>
+    (Erlang beamtalk_tracing) bottlenecks: limit
+
+  // === Live process health ===
+
+  /// Live process info: queue depth, memory, reductions, status.
+  /// Returns status=dead for dead actors.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // Tracing healthFor: myCounter
+  /// // => _
+  /// ```
+  class sealed healthFor: actor :: Object -> Dictionary =>
+    (Erlang beamtalk_tracing) healthFor: actor
+
+  /// VM overview: scheduler count, memory breakdown, process count, run queue lengths.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing systemHealth
+  /// // => _
+  /// ```
+  class sealed systemHealth -> Dictionary =>
+    (Erlang beamtalk_tracing) systemHealth
+
+  // === Configuration ===
+
+  /// Current ring buffer capacity.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing maxEvents
+  /// // => _
+  /// ```
+  class sealed maxEvents -> Integer => (Erlang beamtalk_tracing) maxEvents
+
+  /// Set ring buffer capacity.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing maxEvents: 50000
+  /// // => nil
+  /// ```
+  class sealed maxEvents: size :: Integer -> Nil =>
+    (Erlang beamtalk_tracing) maxEvents: size
