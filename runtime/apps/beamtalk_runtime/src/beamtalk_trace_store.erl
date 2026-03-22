@@ -156,8 +156,10 @@ record_trace_event(Pid, Class, Selector, Mode, Duration, Outcome, Metadata, _Pha
     case is_enabled() of
         true ->
             Key = {erlang:monotonic_time(nanosecond), erlang:unique_integer([monotonic])},
+            WallClockUs = erlang:system_time(microsecond),
             ets:insert(
-                ?TRACE_EVENTS, {Key, Pid, Class, Selector, Mode, Duration, Outcome, Metadata}
+                ?TRACE_EVENTS,
+                {Key, Pid, Class, Selector, Mode, Duration, Outcome, Metadata, WallClockUs}
             ),
             ok;
         false ->
@@ -323,6 +325,20 @@ handle_call(clear, _From, State) ->
     do_clear(),
     ?LOG_INFO("Trace store cleared", #{}),
     {reply, ok, State};
+handle_call({grow_counters, CallerRef, CallerSize}, _From, State) ->
+    %% BT-1621: Serialized counter grow to prevent concurrent persistent_term overwrites.
+    %% Check if another caller already grew while we were queued.
+    CurrentRef = persistent_term:get(?PT_COUNTERS),
+    Result =
+        case CurrentRef =:= CallerRef of
+            true ->
+                %% We're still on the same ref — grow is needed
+                grow_counters(CallerRef, CallerSize);
+            false ->
+                %% Another call already grew — return the current ref
+                CurrentRef
+        end,
+    {reply, Result, State};
 handle_call({get_traces, Pid, Selector}, _From, State) ->
     Result = do_get_traces(Pid, Selector),
     {reply, Result, State};
@@ -485,11 +501,12 @@ allocate_counter_slot(Key) ->
     CounterRef = persistent_term:get(?PT_COUNTERS),
     SlotBase = allocate_next_slot(),
     #{size := CounterSize} = counters:info(CounterRef),
-    %% Grow counters if needed
+    %% Grow counters if needed — serialized through the gen_server (BT-1621)
+    %% to prevent concurrent grows from overwriting each other's persistent_term.
     NewCounterRef =
         case SlotBase + ?SLOTS_PER_KEY > CounterSize of
             true ->
-                grow_counters(CounterRef, CounterSize);
+                gen_server:call(?MODULE, {grow_counters, CounterRef, CounterSize});
             false ->
                 CounterRef
         end,
@@ -626,7 +643,9 @@ delete_oldest_n(Table, N) ->
 do_get_traces(Pid, Selector) ->
     All = ets:tab2list(?TRACE_EVENTS),
     Filtered = lists:filter(
-        fun({_Key, EvPid, _Class, EvSel, _Mode, _Dur, _Out, _Meta}) ->
+        fun(Ev) ->
+            EvPid = element(2, Ev),
+            EvSel = element(4, Ev),
             (Pid =:= undefined orelse EvPid =:= Pid) andalso
                 (Selector =:= undefined orelse EvSel =:= Selector)
         end,
@@ -637,11 +656,37 @@ do_get_traces(Pid, Selector) ->
     [trace_event_to_map(Ev) || Ev <- Sorted].
 
 %% @private Convert a trace event tuple to a map.
+%% Supports both 9-tuple (with wall-clock) and legacy 8-tuple (without) formats.
 trace_event_to_map({
-    {TimestampNs, _Unique}, Pid, Class, Selector, Mode, DurationNs, Outcome, Metadata
+    {_MonotonicNs, _Unique},
+    Pid,
+    Class,
+    Selector,
+    Mode,
+    DurationNs,
+    Outcome,
+    Metadata,
+    WallClockUs
 }) ->
     Base = #{
-        timestamp_us => TimestampNs div 1000,
+        timestamp_us => WallClockUs,
+        actor => Pid,
+        class => Class,
+        selector => Selector,
+        mode => Mode,
+        duration_us => DurationNs div 1000,
+        outcome => Outcome
+    },
+    case maps:size(Metadata) of
+        0 -> Base;
+        _ -> maps:merge(Base, Metadata)
+    end;
+trace_event_to_map({
+    {MonotonicNs, _Unique}, Pid, Class, Selector, Mode, DurationNs, Outcome, Metadata
+}) ->
+    %% Legacy format (pre-BT-1620): fall back to monotonic-derived timestamp
+    Base = #{
+        timestamp_us => MonotonicNs div 1000,
         actor => Pid,
         class => Class,
         selector => Selector,
