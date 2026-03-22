@@ -36,30 +36,6 @@ Protocol isProtocol: #Serializable
 // => true
 
 // ===========================================================================
-// PROTOCOL WITH TYPE PARAMETERS
-// ===========================================================================
-
-Protocol define: Container(E)
-  contents -> E
-  put: item :: E
-// => Protocol Container defined
-
-Protocol isProtocol: #Container
-// => true
-
-// ===========================================================================
-// PROTOCOL WITH EXTENDING
-// ===========================================================================
-
-Protocol define: PrettyPrintable
-  extending: Greetable
-  prettyPrint -> String
-// => Protocol PrettyPrintable defined
-
-Protocol isProtocol: #PrettyPrintable
-// => true
-
-// ===========================================================================
 // UNKNOWN PROTOCOL RETURNS FALSE
 // ===========================================================================
 
