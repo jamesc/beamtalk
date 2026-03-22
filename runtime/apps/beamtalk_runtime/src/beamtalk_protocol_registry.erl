@@ -122,14 +122,15 @@ register_protocol(BadInfo) ->
 %%
 %% Structural conformance: a class conforms if it responds to all required
 %% selectors of the protocol (including inherited requirements from
-%% `extending` protocols).
+%% `extending` protocols), and all required class methods (BT-1611).
 %%
 %% Returns `true` if:
-%% - The class responds to all required selectors
+%% - The class responds to all required instance selectors
+%% - The class responds to all required class method selectors
 %% - The protocol is not registered (unknown protocols — conservative)
 %%
 %% Returns `false` if:
-%% - The class is missing one or more required selectors
+%% - The class is missing one or more required selectors (instance or class)
 -spec conforms_to(atom(), atom()) -> boolean().
 conforms_to(ClassName, ProtocolName) ->
     case protocol_info(ProtocolName) of
@@ -138,15 +139,23 @@ conforms_to(ClassName, ProtocolName) ->
             true;
         Info ->
             AllMethods = all_required_methods(Info),
+            AllClassMethods = all_required_class_methods(Info),
             try
-                lists:all(
+                InstanceOk = lists:all(
                     fun(#{selector := Selector}) ->
                         beamtalk_behaviour_intrinsics:classCanUnderstandFromName(
                             ClassName, Selector
                         )
                     end,
                     AllMethods
-                )
+                ),
+                ClassOk = lists:all(
+                    fun(#{selector := Selector}) ->
+                        class_has_class_method(ClassName, Selector)
+                    end,
+                    AllClassMethods
+                ),
+                InstanceOk andalso ClassOk
             catch
                 _:_ ->
                     %% If the class process is dead or unreachable, assume non-conformance
@@ -167,6 +176,8 @@ protocols_for_class(ClassName) ->
 %% @doc Return the required method selectors for a protocol.
 %%
 %% Returns a list of selector atoms. Includes methods from extended protocols.
+%% BT-1611: Class method selectors are included with a `class ` prefix atom
+%% (e.g., `'class fromString:'`) to distinguish them from instance methods.
 %% Returns `[]` if the protocol is not registered.
 -spec required_methods(atom()) -> [atom()].
 required_methods(ProtocolName) ->
@@ -175,7 +186,13 @@ required_methods(ProtocolName) ->
             [];
         Info ->
             AllMethods = all_required_methods(Info),
-            [Sel || #{selector := Sel} <- AllMethods]
+            InstanceSels = [Sel || #{selector := Sel} <- AllMethods],
+            AllClassMethods = all_required_class_methods(Info),
+            ClassSels = [
+                list_to_atom("class " ++ atom_to_list(Sel))
+             || #{selector := Sel} <- AllClassMethods
+            ],
+            InstanceSels ++ ClassSels
     end.
 
 %% @doc Return the list of classes conforming to a protocol.
@@ -241,7 +258,7 @@ all_protocol_names() ->
 %%% Internal Helpers
 %%% ============================================================================
 
-%% @private Collect all required methods including from extending protocols.
+%% @private Collect all required instance methods including from extending protocols.
 -spec all_required_methods(map()) -> [map()].
 all_required_methods(#{required_methods := Methods} = Info) ->
     ParentMethods =
@@ -264,3 +281,53 @@ all_required_methods(#{required_methods := Methods} = Info) ->
     Methods ++ FilteredParent;
 all_required_methods(_) ->
     [].
+
+%% @private Collect all required class methods including from extending protocols (BT-1611).
+-spec all_required_class_methods(map()) -> [map()].
+all_required_class_methods(Info) ->
+    ClassMethods = maps:get(required_class_methods, Info, []),
+    ParentClassMethods =
+        case maps:get(extending, Info, undefined) of
+            undefined ->
+                [];
+            ParentName ->
+                case protocol_info(ParentName) of
+                    undefined -> [];
+                    ParentInfo -> all_required_class_methods(ParentInfo)
+                end
+        end,
+    %% Merge: own class methods take precedence over parent with same selector
+    OwnSelectors = [S || #{selector := S} <- ClassMethods],
+    FilteredParent = [
+        M
+     || #{selector := S} = M <- ParentClassMethods,
+        not lists:member(S, OwnSelectors)
+    ],
+    ClassMethods ++ FilteredParent.
+
+%% @private Check if a class has a class-side method (walks hierarchy) (BT-1611).
+%%
+%% Walks the superclass chain checking each class's local class methods map.
+%% This mirrors the compile-time `resolves_class_selector` check.
+-spec class_has_class_method(atom(), atom()) -> boolean().
+class_has_class_method(ClassName, Selector) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            false;
+        ClassPid ->
+            try
+                ClassMethods = beamtalk_object_class:local_class_methods(ClassPid),
+                case lists:member(Selector, ClassMethods) of
+                    true ->
+                        true;
+                    false ->
+                        %% Walk superclass chain
+                        case beamtalk_object_class:superclass(ClassPid) of
+                            none -> false;
+                            SuperName -> class_has_class_method(SuperName, Selector)
+                        end
+                end
+            catch
+                _:_ -> false
+            end
+    end.

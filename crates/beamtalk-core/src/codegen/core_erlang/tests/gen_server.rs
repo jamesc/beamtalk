@@ -3415,6 +3415,7 @@ fn protocol_only_module_generates_register_class() {
                 doc_comment: None,
                 span: Span::new(0, 0),
             }],
+            class_method_signatures: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: Span::new(0, 0),
@@ -3455,6 +3456,12 @@ fn protocol_only_module_generates_register_class() {
     assert!(
         code.contains("'Displayable'"),
         "Should reference protocol name. Got:\n{code}"
+    );
+
+    // BT-1611: Should include required_class_methods key
+    assert!(
+        code.contains("'required_class_methods'"),
+        "Should include required_class_methods key. Got:\n{code}"
     );
 
     // Should NOT have class builder calls (no classes)

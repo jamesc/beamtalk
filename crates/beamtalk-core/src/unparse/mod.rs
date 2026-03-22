@@ -443,10 +443,17 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
         ]);
     }
 
-    // Method signatures (indented by 2 spaces)
+    // Instance method signatures (indented by 2 spaces)
     for sig in &protocol.method_signatures {
         docs.push(line());
         docs.push(Document::Str("  "));
+        docs.push(unparse_protocol_method_signature(sig));
+    }
+
+    // Class method signatures (BT-1611, indented by 2 spaces, prefixed with `class`)
+    for sig in &protocol.class_method_signatures {
+        docs.push(line());
+        docs.push(Document::Str("  class "));
         docs.push(unparse_protocol_method_signature(sig));
     }
 

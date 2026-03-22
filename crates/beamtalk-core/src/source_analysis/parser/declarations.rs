@@ -1274,6 +1274,7 @@ impl Parser {
                 type_params: Vec::new(),
                 extending: None,
                 method_signatures: Vec::new(),
+                class_method_signatures: Vec::new(),
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: start,
@@ -1297,7 +1298,7 @@ impl Parser {
         };
 
         // Parse protocol body (method signatures without =>)
-        let method_signatures = self.parse_protocol_body();
+        let (method_signatures, class_method_signatures) = self.parse_protocol_body();
 
         // Determine end span
         let mut end = name.span;
@@ -1310,6 +1311,9 @@ impl Parser {
         if let Some(sig) = method_signatures.last() {
             end = end.merge(sig.span);
         }
+        if let Some(sig) = class_method_signatures.last() {
+            end = end.merge(sig.span);
+        }
         let span = start.merge(end);
 
         ProtocolDefinition {
@@ -1317,6 +1321,7 @@ impl Parser {
             type_params,
             extending,
             method_signatures,
+            class_method_signatures,
             comments,
             doc_comment,
             span,
@@ -1327,15 +1332,21 @@ impl Parser {
     ///
     /// Protocol method signatures have the same selector and parameter syntax as
     /// class methods, but end before `=>`. They may include optional type annotations
-    /// and return types.
+    /// and return types. Signatures prefixed with `class` are collected separately
+    /// as class method requirements (BT-1611).
     ///
     /// The body ends when we hit:
     /// - EOF
     /// - Another protocol definition (`Protocol define:`)
     /// - A class definition (`Superclass subclass:`)
     /// - A standalone method definition (`Class >>`)
-    fn parse_protocol_body(&mut self) -> Vec<ProtocolMethodSignature> {
+    ///
+    /// Returns `(instance_signatures, class_method_signatures)`.
+    fn parse_protocol_body(
+        &mut self,
+    ) -> (Vec<ProtocolMethodSignature>, Vec<ProtocolMethodSignature>) {
         let mut signatures = Vec::new();
+        let mut class_signatures = Vec::new();
 
         // Skip any periods/statement terminators
         while self.match_token(&TokenKind::Period) {}
@@ -1345,8 +1356,24 @@ impl Parser {
             && !self.is_at_class_definition()
             && !self.is_at_standalone_method_definition()
         {
+            // BT-1611: Detect `class` prefix for class method signatures.
+            // Use the same lookahead as class definition parsing: `class` followed
+            // by something other than `=>` or `-> Type =>` means it's a modifier.
+            let is_class_method = matches!(
+                self.current_kind(),
+                TokenKind::Identifier(name) if name == "class"
+            ) && !self.is_fat_arrow_or_return_type(1);
+
+            if is_class_method {
+                self.advance(); // consume `class`
+            }
+
             if let Some(sig) = self.parse_protocol_method_signature() {
-                signatures.push(sig);
+                if is_class_method {
+                    class_signatures.push(sig);
+                } else {
+                    signatures.push(sig);
+                }
             } else {
                 // Not a valid signature start — end of protocol body
                 break;
@@ -1356,7 +1383,7 @@ impl Parser {
             while self.match_token(&TokenKind::Period) {}
         }
 
-        signatures
+        (signatures, class_signatures)
     }
 
     /// Parses a single protocol method signature (no `=>` body).

@@ -9,3 +9,6 @@ Protocol define: Displayable
   printString -> String
 Protocol define: HasSize
   size -> Integer
+// BT-1611: Protocol with class method requirement
+Protocol define: Creatable
+  class create -> Self

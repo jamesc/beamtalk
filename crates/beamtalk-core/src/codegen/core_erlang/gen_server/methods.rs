@@ -1643,37 +1643,43 @@ impl CoreErlangGenerator {
         for protocol in &module.protocols {
             let name = protocol.name.name.to_string();
 
-            // Build the required_methods list
-            let methods: Vec<Document<'static>> = protocol
-                .method_signatures
-                .iter()
-                .map(|sig| {
-                    let selector = sig.selector.name().to_string();
-                    let arity = sig.selector.arity();
-                    docvec![
-                        "~{'selector' => '",
-                        Document::String(selector),
-                        "', 'arity' => ",
-                        Document::String(arity.to_string()),
-                        "}~"
-                    ]
-                })
-                .collect();
+            // Helper: build a Core Erlang list of method requirement maps
+            let build_method_list =
+                |sigs: &[crate::ast::ProtocolMethodSignature]| -> Document<'static> {
+                    let items: Vec<Document<'static>> = sigs
+                        .iter()
+                        .map(|sig| {
+                            let selector = sig.selector.name().to_string();
+                            let arity = sig.selector.arity();
+                            docvec![
+                                "~{'selector' => '",
+                                Document::String(selector),
+                                "', 'arity' => ",
+                                Document::String(arity.to_string()),
+                                "}~"
+                            ]
+                        })
+                        .collect();
 
-            let methods_doc = if methods.is_empty() {
-                Document::Str("[]")
-            } else {
-                let mut list_parts: Vec<Document<'static>> = Vec::new();
-                list_parts.push(Document::Str("["));
-                for (i, m) in methods.into_iter().enumerate() {
-                    if i > 0 {
-                        list_parts.push(Document::Str(", "));
+                    if items.is_empty() {
+                        Document::Str("[]")
+                    } else {
+                        let mut list_parts: Vec<Document<'static>> = Vec::new();
+                        list_parts.push(Document::Str("["));
+                        for (i, m) in items.into_iter().enumerate() {
+                            if i > 0 {
+                                list_parts.push(Document::Str(", "));
+                            }
+                            list_parts.push(m);
+                        }
+                        list_parts.push(Document::Str("]"));
+                        Document::Vec(list_parts)
                     }
-                    list_parts.push(m);
-                }
-                list_parts.push(Document::Str("]"));
-                Document::Vec(list_parts)
-            };
+                };
+
+            // Build the required_methods and required_class_methods lists
+            let methods_doc = build_method_list(&protocol.method_signatures);
+            let class_methods_doc = build_method_list(&protocol.class_method_signatures);
 
             // Build type_params list
             let type_params: Vec<String> = protocol
@@ -1698,6 +1704,8 @@ impl CoreErlangGenerator {
                 Document::String(name),
                 "', 'required_methods' => ",
                 methods_doc,
+                ", 'required_class_methods' => ",
+                class_methods_doc,
                 ", 'type_params' => ",
                 type_params_doc,
                 ", 'extending' => ",

@@ -1163,6 +1163,15 @@ impl ClassHierarchy {
         false
     }
 
+    /// Check if a class can respond to a given class-side selector (local or inherited).
+    ///
+    /// BT-1611: Used by protocol conformance checking to verify class method requirements.
+    /// Walks the superclass chain checking `class_methods` at each level.
+    #[must_use]
+    pub fn resolves_class_selector(&self, class_name: &str, selector: &str) -> bool {
+        self.find_class_method(class_name, selector).is_some()
+    }
+
     /// Find a method by selector in a class (including inherited methods).
     ///
     /// Returns the first matching primary method found in MRO order.
