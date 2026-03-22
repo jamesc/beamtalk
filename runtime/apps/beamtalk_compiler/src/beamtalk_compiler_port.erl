@@ -54,6 +54,7 @@ open(BinaryPath) ->
 %% Returns `{ok, CoreErlang, Warnings}' on success,
 %% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
 %% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
+%% `{ok, protocol_definition, ProtocolInfo}' for protocol definitions (BT-1612),
 %% or `{error, Diagnostics}' on failure, where each diagnostic is a map with
 %% `message', `line' (1-based), and optionally `hint'.
 -spec compile_expression(port(), binary(), binary(), [binary()]) ->
@@ -330,14 +331,19 @@ handle_response(#{
         method_source => MethodSource,
         warnings => Warnings
     }};
-%% BT-1612: Protocol definition response — pass protocol metadata through.
+%% BT-1612: Protocol definition response
 handle_response(#{
     status := ok,
     kind := protocol_definition,
+    core_erlang := CoreErlang,
+    module_name := ModuleName,
     protocols := Protocols,
     warnings := Warnings
 }) ->
+    PrettyCore = maybe_pretty_core(CoreErlang),
     {ok, protocol_definition, #{
+        core_erlang => PrettyCore,
+        module_name => ModuleName,
         protocols => Protocols,
         warnings => Warnings
     }};
