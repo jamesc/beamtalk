@@ -36,6 +36,7 @@
     clear/0,
     %% Trace queries
     traces/0,
+    traces/1,
     tracesFor/1,
     tracesFor/2,
     %% Export
@@ -110,19 +111,27 @@ clear() ->
 traces() ->
     call_trace_store_default(fun beamtalk_trace_store:get_traces/0, []).
 
+%% @doc Trace events with opts map filter, newest first.
+%% Opts supports: actor, selector, class, outcome, min_duration_ns.
+-spec traces(map()) -> [map()].
+traces(Opts) when is_map(Opts) ->
+    call_trace_store_default(fun() -> beamtalk_trace_store:get_traces(Opts) end, []).
+
 %% @doc Trace events for a specific actor.
 %% FFI: (Erlang beamtalk_tracing) tracesFor: actor
 -spec tracesFor(term()) -> [map()].
 tracesFor(Actor) ->
     Pid = extract_pid(Actor),
-    call_trace_store_default(fun() -> beamtalk_trace_store:get_traces(Pid) end, []).
+    call_trace_store_default(fun() -> beamtalk_trace_store:get_traces(#{actor => Pid}) end, []).
 
 %% @doc Trace events for a specific actor + selector.
 %% FFI: (Erlang beamtalk_tracing) tracesFor: actor selector: sel
 -spec tracesFor(term(), atom()) -> [map()].
 tracesFor(Actor, Selector) ->
     Pid = extract_pid(Actor),
-    call_trace_store_default(fun() -> beamtalk_trace_store:get_traces(Pid, Selector) end, []).
+    call_trace_store_default(
+        fun() -> beamtalk_trace_store:get_traces(#{actor => Pid, selector => Selector}) end, []
+    ).
 
 %% @doc Export trace events to a JSON file with optional filters.
 %% Opts is a map with optional keys: path, actor (pid), selector (atom), limit (integer).
