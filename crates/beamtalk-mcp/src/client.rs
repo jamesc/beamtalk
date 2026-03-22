@@ -659,6 +659,33 @@ impl ReplClient {
         self.send(&request).await
     }
 
+    /// Send an export-traces operation with optional filters and path (ADR 0069).
+    pub async fn export_traces(
+        &self,
+        path: Option<&str>,
+        actor: Option<&str>,
+        selector: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<ReplResponse, String> {
+        let mut request = serde_json::json!({
+            "op": "export-traces",
+            "id": next_msg_id()
+        });
+        if let Some(p) = path {
+            request["path"] = serde_json::Value::String(p.to_owned());
+        }
+        if let Some(a) = actor {
+            request["actor"] = serde_json::Value::String(a.to_owned());
+        }
+        if let Some(s) = selector {
+            request["selector"] = serde_json::Value::String(s.to_owned());
+        }
+        if let Some(l) = limit {
+            request["limit"] = serde_json::json!(l);
+        }
+        self.send(&request).await
+    }
+
     /// Send a load-project operation.
     ///
     /// Uses [`send_once`] (no retry) because `load-project` loads multiple files

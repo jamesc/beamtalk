@@ -177,7 +177,9 @@ counters_aggregates_test_() ->
                 ?assertEqual(2, maps:get(<<"ok">>, IncStats)),
                 ?assertEqual(1, maps:get(<<"errors">>, IncStats)),
                 ?assertEqual(6000, maps:get(<<"total_duration_ns">>, IncStats)),
-                ?assertEqual(2000, maps:get(<<"avg_duration_ns">>, IncStats))
+                ?assertEqual(2000, maps:get(<<"avg_duration_ns">>, IncStats)),
+                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, IncStats)),
+                ?assertEqual(3000, maps:get(<<"max_duration_ns">>, IncStats))
             end)
         ]
     end}.
@@ -595,7 +597,7 @@ serialized_counter_grow_test_() ->
         [
             ?_test(begin
                 %% Fill up counter slots to trigger a grow.
-                %% Initial size is 6000 slots, 6 per key = 1000 keys before grow.
+                %% Initial size is 8000 slots, 8 per key = 1000 keys before grow.
                 %% Record enough unique {Pid, Selector} keys to force a grow.
                 TestPid = self(),
                 lists:foreach(
@@ -605,7 +607,7 @@ serialized_counter_grow_test_() ->
                     end,
                     lists:seq(1, 1010)
                 ),
-                %% Verify the counters grew — stats should have all 1010 methods
+                %% Verify the atomics grew — stats should have all 1010 methods
                 Stats = beamtalk_trace_store:get_stats(),
                 PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats = maps:get(PidKey, Stats),
@@ -614,3 +616,313 @@ serialized_counter_grow_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% Test: Min/max duration tracking (BT-1628)
+%%====================================================================
+
+min_max_duration_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                TestPid = self(),
+
+                %% Single call — min and max should be the same
+                beamtalk_trace_store:record_dispatch(TestPid, ping, 5000, ok, sync),
+                Stats1 = beamtalk_trace_store:get_stats(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
+                PidStats1 = maps:get(PidKey, Stats1),
+                PingStats1 = maps:get(<<"ping">>, maps:get(<<"methods">>, PidStats1)),
+                ?assertEqual(5000, maps:get(<<"min_duration_ns">>, PingStats1)),
+                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, PingStats1)),
+
+                %% Add a faster call — min should decrease, max stays
+                beamtalk_trace_store:record_dispatch(TestPid, ping, 1000, ok, sync),
+                Stats2 = beamtalk_trace_store:get_stats(TestPid),
+                PidStats2 = maps:get(PidKey, Stats2),
+                PingStats2 = maps:get(<<"ping">>, maps:get(<<"methods">>, PidStats2)),
+                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, PingStats2)),
+                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, PingStats2)),
+
+                %% Add a slower call — max should increase, min stays
+                beamtalk_trace_store:record_dispatch(TestPid, ping, 11000, ok, sync),
+                Stats3 = beamtalk_trace_store:get_stats(TestPid),
+                PidStats3 = maps:get(PidKey, Stats3),
+                PingStats3 = maps:get(<<"ping">>, maps:get(<<"methods">>, PidStats3)),
+                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, PingStats3)),
+                ?assertEqual(11000, maps:get(<<"max_duration_ns">>, PingStats3))
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Min/max CAS correctness under concurrent updates (BT-1628)
+%%====================================================================
+
+min_max_concurrent_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {timeout, 30,
+                ?_test(begin
+                    TestPid = self(),
+
+                    %% Pre-allocate the slot with an initial dispatch to avoid the
+                    %% first-observation allocation race between concurrent writers.
+                    beamtalk_trace_store:record_dispatch(
+                        TestPid, concurrent_method, 5000, ok, sync
+                    ),
+
+                    %% Spawn multiple processes that all record dispatches concurrently
+                    %% with varying durations. The known min is 199, max is 10000.
+                    NumProcesses = 10,
+                    CallsPerProcess = 100,
+                    Parent = self(),
+                    Pids = [
+                        spawn(fun() ->
+                            lists:foreach(
+                                fun(J) ->
+                                    Duration = 100 + (J * 99),
+                                    beamtalk_trace_store:record_dispatch(
+                                        TestPid, concurrent_method, Duration, ok, sync
+                                    )
+                                end,
+                                lists:seq(1, CallsPerProcess)
+                            ),
+                            Parent ! {done, self()}
+                        end)
+                     || _ <- lists:seq(1, NumProcesses)
+                    ],
+
+                    %% Wait for all processes to finish
+                    lists:foreach(
+                        fun(Pid) ->
+                            receive
+                                {done, Pid} -> ok
+                            end
+                        end,
+                        Pids
+                    ),
+
+                    %% Verify min and max
+                    Stats = beamtalk_trace_store:get_stats(TestPid),
+                    PidKey = list_to_binary(pid_to_list(TestPid)),
+                    PidStats = maps:get(PidKey, Stats),
+                    MethodStats = maps:get(
+                        <<"concurrent_method">>,
+                        maps:get(<<"methods">>, PidStats)
+                    ),
+
+                    %% Slot pre-allocated, so all concurrent increments hit the same slot.
+                    %% 1 pre-allocation + NumProcesses * CallsPerProcess
+                    ExpectedCalls = 1 + NumProcesses * CallsPerProcess,
+                    ?assertEqual(ExpectedCalls, maps:get(<<"calls">>, MethodStats)),
+                    %% Min should be 100 + (1 * 99) = 199 (lower than pre-alloc 5000)
+                    ?assertEqual(199, maps:get(<<"min_duration_ns">>, MethodStats)),
+                    %% Max should be 100 + (100 * 99) = 10000 (higher than pre-alloc 5000)
+                    ?assertEqual(10000, maps:get(<<"max_duration_ns">>, MethodStats))
+                end)}
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Clear resets min sentinel (BT-1628)
+%%====================================================================
+
+clear_resets_min_sentinel_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                TestPid = self(),
+
+                %% Record a dispatch to establish min/max
+                beamtalk_trace_store:record_dispatch(TestPid, sentinel_check, 5000, ok, sync),
+                Stats1 = beamtalk_trace_store:get_stats(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
+                PidStats1 = maps:get(PidKey, Stats1),
+                MethodStats1 = maps:get(
+                    <<"sentinel_check">>,
+                    maps:get(<<"methods">>, PidStats1)
+                ),
+                ?assertEqual(5000, maps:get(<<"min_duration_ns">>, MethodStats1)),
+                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, MethodStats1)),
+
+                %% Clear stats
+                beamtalk_trace_store:clear(),
+
+                %% Stats should be empty
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
+
+                %% Record a new dispatch — min should be set fresh, not stuck
+                beamtalk_trace_store:record_dispatch(TestPid, sentinel_check, 8000, ok, sync),
+                Stats2 = beamtalk_trace_store:get_stats(TestPid),
+                PidStats2 = maps:get(PidKey, Stats2),
+                MethodStats2 = maps:get(
+                    <<"sentinel_check">>,
+                    maps:get(<<"methods">>, PidStats2)
+                ),
+                ?assertEqual(8000, maps:get(<<"min_duration_ns">>, MethodStats2)),
+                ?assertEqual(8000, maps:get(<<"max_duration_ns">>, MethodStats2))
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Slow methods sort by max duration (BT-1628)
+%%====================================================================
+
+slow_methods_sort_by_max_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                TestPid = self(),
+
+                %% Method 'steady' has high avg but low max (consistent)
+                beamtalk_trace_store:record_dispatch(TestPid, steady, 9000, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, steady, 9000, ok, sync),
+
+                %% Method 'spiky' has low avg but high max (outlier)
+                beamtalk_trace_store:record_dispatch(TestPid, spiky, 1000, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, spiky, 20000, ok, sync),
+
+                %% By avg, 'steady' should be first (avg=9000 vs avg=10500)
+                %% Actually spiky avg = (1000+20000)/2 = 10500, steady avg = 9000
+                %% So by avg, spiky is first
+                ByAvg = beamtalk_trace_store:slow_methods(2),
+                ?assertEqual(spiky, maps:get(<<"selector">>, hd(ByAvg))),
+
+                %% By max, 'spiky' should still be first (max=20000 vs max=9000)
+                ByMax = beamtalk_trace_store:slow_methods(2, max_duration_ns),
+                ?assertEqual(spiky, maps:get(<<"selector">>, hd(ByMax))),
+
+                %% Verify the second entry is 'steady' when sorted by max
+                [_, Second] = ByMax,
+                ?assertEqual(steady, maps:get(<<"selector">>, Second))
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: export_traces
+%%====================================================================
+
+export_traces_no_filters_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {"export with no traces produces empty file",
+                ?_test(begin
+                    TmpFile = tmp_export_path("no_traces"),
+                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                    ?assertMatch({ok, #{path := TmpFile, count := 0}}, Result),
+                    %% Verify file exists and contains valid JSON
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    ?assertEqual(
+                        0, maps:get(<<"total_events">>, maps:get(<<"metadata">>, Decoded))
+                    ),
+                    ?assertEqual([], maps:get(<<"traces">>, Decoded)),
+                    file:delete(TmpFile)
+                end)},
+            {"export captures recorded trace events",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
+                    ),
+                    TmpFile = tmp_export_path("with_traces"),
+                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                    ?assertMatch({ok, #{count := 2}}, Result),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Meta = maps:get(<<"metadata">>, Decoded),
+                    ?assertEqual(2, maps:get(<<"total_events">>, Meta)),
+                    Traces = maps:get(<<"traces">>, Decoded),
+                    ?assertEqual(2, length(Traces)),
+                    file:delete(TmpFile)
+                end)}
+        ]
+    end}.
+
+export_traces_with_filters_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {"export with selector filter",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
+                    ),
+                    TmpFile = tmp_export_path("filtered"),
+                    Result = beamtalk_trace_store:export_traces(#{
+                        path => TmpFile,
+                        actor => TestPid,
+                        selector => increment
+                    }),
+                    ?assertMatch({ok, #{count := 1}}, Result),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Traces = maps:get(<<"traces">>, Decoded),
+                    ?assertEqual(1, length(Traces)),
+                    [Trace] = Traces,
+                    ?assertEqual(<<"increment">>, maps:get(<<"selector">>, Trace)),
+                    file:delete(TmpFile)
+                end)},
+            {"export with limit",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    lists:foreach(
+                        fun(I) ->
+                            Sel = list_to_atom("m_" ++ integer_to_list(I)),
+                            beamtalk_trace_store:record_trace_event(
+                                TestPid, 'Counter', Sel, sync, 1000, ok, #{}, stop
+                            )
+                        end,
+                        lists:seq(1, 10)
+                    ),
+                    TmpFile = tmp_export_path("limited"),
+                    Result = beamtalk_trace_store:export_traces(#{
+                        path => TmpFile,
+                        limit => 3
+                    }),
+                    ?assertMatch({ok, #{count := 3}}, Result),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    ?assertEqual(3, length(maps:get(<<"traces">>, Decoded))),
+                    file:delete(TmpFile)
+                end)}
+        ]
+    end}.
+
+export_traces_default_path_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {"export with default path generates timestamped file",
+                ?_test(begin
+                    Result = beamtalk_trace_store:export_traces(#{}),
+                    ?assertMatch({ok, #{path := _, count := 0}}, Result),
+                    {ok, #{path := Path}} = Result,
+                    %% Verify the default path matches the expected pattern
+                    ?assertMatch(<<"traces-", _/binary>>, Path),
+                    ?assert(binary:match(Path, <<".json">>) =/= nomatch),
+                    file:delete(Path)
+                end)}
+        ]
+    end}.
+
+%% @private Generate a unique temporary export path.
+tmp_export_path(Tag) ->
+    iolist_to_binary([
+        "beamtalk_test_export_",
+        Tag,
+        "_",
+        integer_to_list(erlang:unique_integer([positive])),
+        ".json"
+    ]).
