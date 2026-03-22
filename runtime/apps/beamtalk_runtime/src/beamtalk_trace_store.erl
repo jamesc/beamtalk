@@ -40,6 +40,8 @@
     get_traces/0,
     get_traces/1,
     get_traces/2,
+    %% Export
+    export_traces/1,
     get_stats/0,
     get_stats/1,
     slow_methods/1,
@@ -182,6 +184,19 @@ get_traces(Pid) ->
 -spec get_traces(pid() | undefined, atom() | undefined) -> [map()].
 get_traces(Pid, Selector) ->
     gen_server:call(?MODULE, {get_traces, Pid, Selector}).
+
+%% @doc Export trace events to a JSON file.
+%% Opts is a map with optional keys:
+%%   path     - binary file path (default: timestamped file in cwd)
+%%   actor    - pid() to filter by actor
+%%   selector - atom() to filter by selector
+%%   limit    - integer() max events to export
+%% Returns {ok, #{path => Path, count => Count}} on success.
+-spec export_traces(map()) -> {ok, map()} | {error, term()}.
+export_traces(Opts) when is_map(Opts) ->
+    gen_server:call(?MODULE, {export_traces, Opts});
+export_traces(_) ->
+    {error, badarg}.
 
 %% @doc Get aggregate stats for all actors.
 -spec get_stats() -> map().
@@ -358,6 +373,9 @@ handle_call({grow_counters, CallerRef, CallerSize}, _From, State) ->
     {reply, Result, State};
 handle_call({get_traces, Pid, Selector}, _From, State) ->
     Result = do_get_traces(Pid, Selector),
+    {reply, Result, State};
+handle_call({export_traces, Opts}, _From, State) ->
+    Result = do_export_traces(Opts),
     {reply, Result, State};
 handle_call(get_stats, _From, State) ->
     Result = to_binary_keys(do_get_stats(undefined)),
@@ -679,6 +697,75 @@ do_get_traces(Pid, Selector) ->
     %% Sort newest first (reverse of ordered_set natural order)
     Sorted = lists:reverse(Filtered),
     [trace_event_to_map(Ev) || Ev <- Sorted].
+
+%% @private Export traces to a JSON file with optional filters.
+do_export_traces(Opts) ->
+    Pid = maps:get(actor, Opts, undefined),
+    Selector = maps:get(selector, Opts, undefined),
+    Limit = maps:get(limit, Opts, undefined),
+    Traces = do_get_traces(Pid, Selector),
+    Limited =
+        case Limit of
+            undefined -> Traces;
+            L when is_integer(L), L > 0 -> lists:sublist(Traces, L);
+            _ -> Traces
+        end,
+    Count = length(Limited),
+    Path =
+        case maps:get(path, Opts, undefined) of
+            undefined -> default_export_path();
+            P -> P
+        end,
+    %% Build metadata header
+    FilterParams = maps:without([path], Opts),
+    FilterMap = maps:fold(
+        fun(K, V, Acc) ->
+            BinKey = atom_to_binary(K, utf8),
+            BinVal =
+                case V of
+                    _ when is_pid(V) -> list_to_binary(pid_to_list(V));
+                    _ when is_atom(V) -> atom_to_binary(V, utf8);
+                    _ when is_integer(V) -> V;
+                    _ when is_binary(V) -> V;
+                    _ -> iolist_to_binary(io_lib:format("~p", [V]))
+                end,
+            Acc#{BinKey => BinVal}
+        end,
+        #{},
+        FilterParams
+    ),
+    {{Year, Month, Day}, {Hour, Min, Sec}} = calendar:universal_time(),
+    TimestampBin = iolist_to_binary(
+        io_lib:format(
+            "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0BZ",
+            [Year, Month, Day, Hour, Min, Sec]
+        )
+    ),
+    Export = #{
+        <<"metadata">> => #{
+            <<"export_timestamp">> => TimestampBin,
+            <<"filters">> => FilterMap,
+            <<"total_events">> => Count
+        },
+        <<"traces">> => Limited
+    },
+    JsonBin = jsx:encode(Export, [{space, 2}, {indent, 2}]),
+    case file:write_file(Path, JsonBin) of
+        ok ->
+            {ok, #{path => Path, count => Count}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% @private Generate a default export path with timestamp.
+default_export_path() ->
+    {{Year, Month, Day}, {Hour, Min, Sec}} = calendar:universal_time(),
+    Unique = erlang:unique_integer([positive, monotonic]),
+    Filename = io_lib:format(
+        "traces-~4..0B-~2..0B-~2..0BT~2..0B-~2..0B-~2..0B-~B.json",
+        [Year, Month, Day, Hour, Min, Sec, Unique]
+    ),
+    iolist_to_binary(Filename).
 
 %% @private Convert a trace event tuple to a map.
 %% Supports both 9-tuple (with wall-clock) and legacy 8-tuple (without) formats.

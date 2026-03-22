@@ -150,6 +150,79 @@ actor_stats_test_() ->
     end}.
 
 %%====================================================================
+%% export-traces tests
+%%====================================================================
+
+export_traces_test_() ->
+    {setup, fun setup_trace_store/0, fun cleanup_trace_store/1, fun(_Setup) ->
+        [
+            {"export-traces with no traces returns path and count", fun() ->
+                TmpFile = tmp_export_path("ops_no_traces"),
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"export-traces">>,
+                    #{<<"path">> => TmpFile},
+                    make_msg(<<"export-traces">>),
+                    self()
+                ),
+                Decoded = decode_response(Result),
+                ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+                Value = maps:get(<<"value">>, Decoded),
+                ?assertEqual(0, maps:get(<<"count">>, Value)),
+                ?assert(is_binary(maps:get(<<"path">>, Value))),
+                file:delete(TmpFile)
+            end},
+            {"export-traces with filters", fun() ->
+                beamtalk_trace_store:enable(),
+                beamtalk_trace_store:record_trace_event(
+                    self(), 'Counter', increment, sync, 5000, ok, #{}, stop
+                ),
+                TmpFile = tmp_export_path("ops_filtered"),
+                PidStr = list_to_binary(pid_to_list(self())),
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"export-traces">>,
+                    #{
+                        <<"path">> => TmpFile,
+                        <<"actor">> => PidStr,
+                        <<"selector">> => <<"increment">>,
+                        <<"limit">> => 10
+                    },
+                    make_msg(<<"export-traces">>),
+                    self()
+                ),
+                Decoded = decode_response(Result),
+                ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+                Value = maps:get(<<"value">>, Decoded),
+                ?assertEqual(1, maps:get(<<"count">>, Value)),
+                file:delete(TmpFile)
+            end},
+            {"export-traces with default path", fun() ->
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"export-traces">>,
+                    #{},
+                    make_msg(<<"export-traces">>),
+                    self()
+                ),
+                Decoded = decode_response(Result),
+                ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+                Value = maps:get(<<"value">>, Decoded),
+                Path = maps:get(<<"path">>, Value),
+                ?assert(is_binary(Path)),
+                file:delete(Path)
+            end}
+        ]
+    end}.
+
+%% @private Generate a unique temporary export path.
+tmp_export_path(Tag) ->
+    iolist_to_binary([
+        "beamtalk_test_ops_export_",
+        Tag,
+        "_",
+        integer_to_list(erlang:unique_integer([positive])),
+        ".json"
+    ]).
+
+%%====================================================================
 %% Error handling tests
 %%====================================================================
 
