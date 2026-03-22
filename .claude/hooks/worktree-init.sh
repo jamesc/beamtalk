@@ -7,6 +7,21 @@
 
 set -euo pipefail
 
+# --- Proxy-safe rebar3 / hex configuration ---
+# In cloud/proxy environments, hex.pm is unreachable. If deps are already
+# cached in _build, set HEX_OFFLINE=1 in the shell profile so all subsequent
+# rebar3 invocations (including from cargo build.rs) skip network fetches.
+RUNTIME_DIR="${CLAUDE_PROJECT_DIR:-${PWD}}/runtime"
+if [[ -d "${RUNTIME_DIR}/_build/default/lib" ]]; then
+  PROFILE="${HOME}/.bashrc"
+  if ! grep -q 'HEX_OFFLINE' "$PROFILE" 2>/dev/null; then
+    echo 'export HEX_OFFLINE=1  # Added by beamtalk session setup — skip hex.pm in proxy envs' >> "$PROFILE"
+    echo "Set HEX_OFFLINE=1 in ${PROFILE} for offline rebar3 operation."
+  fi
+  # Also export for the remainder of this script
+  export HEX_OFFLINE=1
+fi
+
 # --- Cloud environment bootstrap ---
 # Run setup-cloud.sh on first session (marker file prevents re-runs).
 # The setup script is idempotent so it's safe to run even if some tools exist.
@@ -41,8 +56,13 @@ if [[ ! -f "${MARKER}" ]]; then
   fi
 fi
 
-# Ensure the pre-push lint hook is active (local config, needs setting per-clone/worktree)
-git config core.hooksPath .githooks 2>/dev/null || true
+# Ensure the pre-push lint hook is active (local config, needs setting per-clone/worktree).
+# Use the repo-root-relative path so it works in both the main checkout and worktrees.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "${CLAUDE_PROJECT_DIR:-${PWD}}")"
+if [[ -d "${REPO_ROOT}/.githooks" ]]; then
+  git config core.hooksPath "${REPO_ROOT}/.githooks"
+  echo "Git hooksPath set to ${REPO_ROOT}/.githooks"
+fi
 
 GIT_DIR_FILE="${PWD}/.git"
 

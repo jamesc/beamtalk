@@ -293,6 +293,23 @@ if [ -d "$RUNTIME_DIR" ] && have rebar3; then
   else
     warn "rebar3 plugin pre-compilation failed — erlfmt may compile on first use"
   fi
+
+  # Generate rebar.lock so subsequent rebar3 invocations don't try to fetch
+  # from hex.pm (which fails through the cloud proxy).
+  if [ ! -f "$RUNTIME_DIR/rebar.lock" ]; then
+    info "Generating rebar.lock for offline operation..."
+    if (cd "$RUNTIME_DIR" && rebar3 lock >/dev/null 2>&1); then
+      ok "rebar.lock generated"
+    else
+      # Fallback: just run rebar3 compile which implicitly creates the lock
+      (cd "$RUNTIME_DIR" && rebar3 compile >/dev/null 2>&1) || true
+      if [ -f "$RUNTIME_DIR/rebar.lock" ]; then
+        ok "rebar.lock generated via compile"
+      else
+        warn "Could not generate rebar.lock — rebar3 may try to fetch deps on each run"
+      fi
+    fi
+  fi
 fi
 
 # --- Skills repo (Claude Code skills & agents) ---
