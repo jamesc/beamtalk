@@ -127,7 +127,10 @@ pub(crate) fn discover_test_classes(
             }
         }
 
-        // Check for `class serial => true` in class methods (BT-1624)
+        // Check for `class serial` in class methods (BT-1624).
+        // Presence of the override is sufficient — the base TestCase.serial
+        // returns false and isn't in class_methods (which is per-class, not
+        // inherited). A subclass only overrides serial to return true.
         let is_serial = class
             .class_methods
             .iter()

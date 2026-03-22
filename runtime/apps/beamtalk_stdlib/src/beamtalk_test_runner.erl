@@ -70,13 +70,16 @@ run_all() ->
 %% @doc Run all tests across all loaded TestCase subclasses with concurrency.
 %%
 %% MaxJobs controls how many test classes run concurrently:
+%% - `0`: auto (uses `erlang:system_info(schedulers)`)
 %% - `1`: sequential (backward-compatible)
 %% - `N > 1`: up to N concurrent classes
 %%
 %% Classes declaring `serial => true` are run sequentially after all
 %% concurrent classes complete. Classes that do not override `serial`
 %% (default `false`) run concurrently.
--spec run_all(pos_integer()) -> map().
+-spec run_all(non_neg_integer()) -> map().
+run_all(0) ->
+    run_all(erlang:system_info(schedulers));
 run_all(MaxJobs) when is_integer(MaxJobs), MaxJobs >= 1 ->
     Classes = beamtalk_test_case:find_test_classes(),
     case Classes of
