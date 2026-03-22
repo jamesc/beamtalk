@@ -383,7 +383,12 @@ hot_reload_class(ModuleName, ClassMap) ->
         undefined ->
             ok;
         _ ->
-            Pids = beamtalk_runtime_api:all_instances(ClassName),
+            Pids =
+                try
+                    beamtalk_runtime_api:all_instances(ClassName)
+                catch
+                    error:badarg -> []
+                end,
             case Pids of
                 [] ->
                     ok;
