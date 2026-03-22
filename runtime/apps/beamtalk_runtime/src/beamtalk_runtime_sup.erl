@@ -77,6 +77,15 @@ init([]) ->
             shutdown => 5000,
             type => supervisor,
             modules => [beamtalk_reactive_subprocess_sup]
+        },
+        %% Trace store for actor observability (ADR 0069)
+        #{
+            id => beamtalk_trace_store,
+            start => {beamtalk_trace_store, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_trace_store]
         }
     ],
 
