@@ -198,38 +198,6 @@ Object subclass: Actor
   /// ```
   sealed kill -> Symbol => @primitive "actorKill"
 
-  /// Migrate this actor to a new class, preserving state.
-  ///
-  /// Spawns a new actor of the target class with the current actor's state,
-  /// then terminates this actor. The caller receives the new object reference
-  /// and must update any stored references. This is the BEAM-compatible
-  /// alternative to Smalltalk's `become:` (identity swap), which is impossible
-  /// with immutable process identifiers.
-  ///
-  /// WARNING: Existing references to this actor become invalid after migration.
-  /// All callers must update their reference to the returned new object.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// counterV2 := counter migrate: CounterV2
-  /// // counter is now stopped; use counterV2 going forward
-  /// ```
-  sealed migrate: newClass => @primitive "actorMigrate"
-
-  /// Migrate this actor to a new class with state transformation.
-  ///
-  /// Like `migrate:`, but applies a transformer block to the actor's state
-  /// before spawning the new actor. The block receives the current state as
-  /// a Map (user fields only, no internal keys) and must return a Map.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// counterV2 := counter migrate: CounterV2 with: [:state |
-  ///   state at: #newField put: "default"
-  /// ]
-  /// ```
-  sealed migrate: newClass with: transformer => @primitive "actorMigrateWith"
-
   /// Check if this actor's process is still alive.
   ///
   /// WARNING: isAlive check-then-act is inherently racy. The actor could die
