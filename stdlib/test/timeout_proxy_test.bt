@@ -49,3 +49,12 @@ TestCase subclass: TimeoutProxyTest
     result := proxy getValue
     self assert: result equals: 42
     proxy stop
+
+  testProxyTimeoutExceedsDefaultFiveSeconds =>
+    // Regression: caller→proxy hop must not use the default 5000ms timeout.
+    // Without the fix, a 5200ms delay would timeout at the outer hop even
+    // though the proxy is configured with a 10000ms timeout.
+    proxy := self.actor withTimeout: 10000
+    result := proxy slowGet: 5200
+    self assert: result equals: 42
+    proxy stop

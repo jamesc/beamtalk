@@ -648,7 +648,18 @@ sync_send(ActorPid, Selector, Args) ->
                     %%   2. Error = {ErlType, Value} — raw Erlang exception caught by safe_dispatch
                     %% We re-raise both forms as Erlang exceptions so the caller sees them correctly.
                     PropCtx = get_propagated_ctx(),
-                    case gen_server:call(ActorPid, {Selector, Args, PropCtx}) of
+                    %% BT-1190: TimeoutProxy manages its own timeout on the inner
+                    %% (proxy→target) hop. The outer (caller→proxy) hop must use
+                    %% infinity so it doesn't time out before the proxy's configured
+                    %% timeout expires. For all other actors, use gen_server:call/2
+                    %% which defaults to 5000ms.
+                    CallResult = case Class of
+                        'TimeoutProxy' ->
+                            gen_server:call(ActorPid, {Selector, Args, PropCtx}, infinity);
+                        _ ->
+                            gen_server:call(ActorPid, {Selector, Args, PropCtx})
+                    end,
+                    case CallResult of
                         {ok, Result} ->
                             {Result, Metadata#{outcome => ok}};
                         {error, {_ErlType, ErrorValue}} ->
