@@ -20,6 +20,10 @@ init(Config) ->
     InitialValue = maps:get(initial, Config, 0),
     {ok, #{value => InitialValue}}.
 
+%% BT-1604: Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
+handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    handle_call({Selector, Args}, From, State);
 handle_call({increment, []}, _From, #{value := V} = State) ->
     NewV = V + 1,
     {reply, {ok, NewV}, State#{value := NewV}};

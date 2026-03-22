@@ -136,6 +136,10 @@ init([MaxBuffer]) ->
 %% @doc Handle synchronous calls: recent, clear, and unknown selectors.
 -spec handle_call(term(), {pid(), term()}, state()) ->
     {reply, term(), state()}.
+%% BT-1604: Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
+handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    handle_call({Selector, Args}, From, State);
 handle_call(recent, _From, #state{buffer = Buffer} = State) ->
     {reply, queue:to_list(Buffer), State};
 handle_call(clear, _From, #state{self_ref = SelfRef} = State) ->
@@ -199,6 +203,12 @@ handle_call(Request, _From, State) ->
 %% @private
 %% @doc Handle asynchronous casts: show:, cr, subscribe, unsubscribe.
 -spec handle_cast(term(), state()) -> {noreply, state()}.
+%% BT-1604: Strip propagated context from 4-tuple async messages (ADR 0069 Phase 2b)
+handle_cast({Selector, Args, FuturePid, PropCtx}, State) when
+    is_pid(FuturePid), is_atom(Selector), is_list(Args), is_map(PropCtx)
+->
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    handle_cast({Selector, Args, FuturePid}, State);
 %% Actor protocol: {Selector, Args, FuturePid} from beamtalk_actor:async_send/4
 handle_cast({'show:', [Value], FuturePid}, #state{self_ref = SelfRef} = State) when
     is_pid(FuturePid)

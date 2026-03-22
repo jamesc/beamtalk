@@ -82,6 +82,10 @@ init(_) ->
 %% @doc Dispatch sync calls from `self delegate` methods.
 -spec handle_call(term(), term(), map()) ->
     {reply, term(), map()}.
+%% BT-1604: Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
+handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
+    beamtalk_actor:restore_propagated_ctx(PropCtx),
+    handle_call({Selector, Args}, From, State);
 handle_call({port, []}, _From, #{actual_port := ActualPort} = State) ->
     {reply, ActualPort, State};
 handle_call({printString, []}, _From, #{actual_port := ActualPort} = State) ->
