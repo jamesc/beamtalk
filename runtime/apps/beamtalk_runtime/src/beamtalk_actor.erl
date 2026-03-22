@@ -505,7 +505,7 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
     %% actor death during message processing. The watcher monitors both the
     %% actor and future processes: if the actor dies before the future is
     %% resolved, the watcher rejects the future with a structured error.
-    telemetry:span([beamtalk, actor, dispatch], Metadata, fun() ->
+    maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
         case is_process_alive(ActorPid) of
             true ->
                 gen_server:cast(ActorPid, {Selector, Args, FuturePid}),
@@ -532,7 +532,7 @@ cast_send(ActorPid, Selector, Args) ->
     %% Measures dispatch-to-mailbox time for cast sends.
     Class = lookup_class(ActorPid),
     Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => cast},
-    telemetry:span([beamtalk, actor, dispatch], Metadata, fun() ->
+    maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
         case is_process_alive(ActorPid) of
             true ->
                 gen_server:cast(ActorPid, {cast, Selector, Args}),
@@ -655,7 +655,7 @@ sync_send(ActorPid, Selector, Args) ->
     Class = lookup_class(ActorPid),
     Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
     try
-        telemetry:span([beamtalk, actor, dispatch], Metadata, fun() ->
+        maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
             case is_process_alive(ActorPid) of
                 true ->
                     %% BT-918: Generated handle_call/3 wraps replies as {ok, Result} or {error, Error}.
@@ -742,6 +742,19 @@ actor_dead_error(Selector) ->
         <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
     ),
     {error, Error}.
+
+%% @private
+%% @doc Wrap a function in telemetry:span/3 if telemetry is available, else run directly.
+%% BUnit tests don't load telemetry, so we must gracefully degrade.
+-spec maybe_span(list(), map(), fun(() -> {term(), map()})) -> term().
+maybe_span(EventPrefix, Metadata, Fun) ->
+    case erlang:function_exported(telemetry, span, 3) of
+        true ->
+            telemetry:span(EventPrefix, Metadata, Fun);
+        false ->
+            {Result, _UpdatedMeta} = Fun(),
+            Result
+    end.
 
 %% @private
 %% @doc Resolve actor class name via beamtalk_object_instances reverse lookup.
