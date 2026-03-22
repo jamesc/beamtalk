@@ -554,6 +554,6 @@ The test `sys.config` sets `logger_level` to `error` to suppress log noise durin
 
 ## References
 - Related issues: BT-1423 (Runtime Observability Logging epic), BT-1424 (SASL), BT-1429 (Runtime metrics ADR), BT-1434 (Implementation epic)
-- Related ADRs: ADR 0040 (Workspace-Native REPL Commands — two-object model), ADR 0010 (Global Objects and Singleton Dispatch)
+- Related ADRs: ADR 0040 (Workspace-Native REPL Commands — two-object model), ADR 0010 (Global Objects and Singleton Dispatch), [ADR 0069](0069-actor-observability-and-tracing.md) (Actor Observability and Tracing — complementary performance telemetry: timing, call counts, bottleneck detection)
 - OTP Logger docs: https://www.erlang.org/doc/apps/kernel/logger.html
 - Elixir Logger docs: https://hexdocs.pm/logger/Logger.html

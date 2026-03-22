@@ -25,6 +25,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Supervision Trees (ADR 0059)](#supervision-trees-adr-0059)
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
+- [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
 - [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
 - [Tooling](#tooling)
@@ -1931,6 +1932,162 @@ the REPL.
 
 ---
 
+## Actor Observability and Tracing (ADR 0069)
+
+The `Tracing` class provides actor observability and performance telemetry. It is a sealed, class-only facade (like `System` and `Logger`) — all methods are class-side, there are no instances. See [ADR 0069](ADR/0069-actor-observability-and-tracing.md) for the full design.
+
+Two levels of instrumentation are available:
+
+- **Always-on aggregates** — per-actor, per-method call counts and durations with negligible overhead (~150ns/call). No setup required.
+- **Detailed trace events** — individual call/return/error records captured to a ring buffer. Requires explicit `Tracing enable`.
+
+### Tracing Lifecycle
+
+```beamtalk
+// Enable detailed trace capture
+Tracing enable
+// => nil
+
+// Check if tracing is active
+Tracing isEnabled
+// => true
+
+// Disable trace capture (aggregates continue)
+Tracing disable
+// => nil
+
+// Clear all trace events and aggregate stats
+Tracing clear
+// => nil
+```
+
+### Aggregate Stats (Always-On)
+
+Aggregate stats are collected for every actor dispatch, even when trace capture is disabled. They include call counts, total duration, min/max/average times, and error counts.
+
+```beamtalk
+// All per-actor, per-method stats
+Tracing stats
+// => #{...}  (Dictionary keyed by actor/selector)
+
+// Stats for a specific actor
+Tracing statsFor: myCounter
+// => #{...}
+```
+
+### Trace Event Queries
+
+When trace capture is enabled, individual call events are recorded to a ring buffer. These are available for querying even after the actor has stopped.
+
+```beamtalk
+// All captured events (newest first)
+Tracing traces
+// => #(...)
+
+// Events for a specific actor
+Tracing tracesFor: myCounter
+// => #(...)
+
+// Events for a specific actor + method
+Tracing tracesFor: myCounter selector: #increment
+// => #(...)
+```
+
+### Analysis Methods
+
+Analysis methods compute rankings from aggregate stats. Each takes a limit parameter for the number of results.
+
+```beamtalk
+// Top N methods by average duration (slowest first)
+Tracing slowMethods: 10
+// => #(...)
+
+// Top N methods by call count (most called first)
+Tracing hotMethods: 10
+// => #(...)
+
+// Top N methods by error + timeout rate
+Tracing errorMethods: 5
+// => #(...)
+
+// Top N actors by message queue length (live snapshot)
+Tracing bottlenecks: 5
+// => #(...)
+```
+
+### Live Health
+
+Health methods provide point-in-time snapshots of actor and VM state.
+
+```beamtalk
+// Per-actor health: queue depth, memory, reductions, status
+Tracing healthFor: myCounter
+// => #{queue_len => 0, memory => 1234, status => #waiting, ...}
+
+// VM overview: schedulers, memory, process count, run queues
+Tracing systemHealth
+// => #{scheduler_count => 8, process_count => 42, ...}
+```
+
+### Configuration
+
+The trace event ring buffer has a configurable capacity (default 10,000 events). When full, the oldest events are evicted.
+
+```beamtalk
+// Query current buffer capacity
+Tracing maxEvents
+// => 10000
+
+// Set buffer capacity
+Tracing maxEvents: 50000
+// => nil
+```
+
+### Typical Workflow
+
+```beamtalk
+// 1. Create and exercise an actor
+c := Counter spawn
+10 timesRepeat: [c increment]
+
+// 2. Check always-on aggregates (no enable needed)
+Tracing statsFor: c
+// => #{increment => #{count => 10, avg_us => 42, ...}, ...}
+
+// 3. Enable trace capture for detailed events
+Tracing enable
+
+// 4. Exercise the actor some more
+5 timesRepeat: [c increment]
+
+// 5. Query detailed traces
+Tracing tracesFor: c selector: #increment
+// => #(#{selector => #increment, duration_us => 38, ...}, ...)
+
+// 6. Find bottlenecks
+Tracing slowMethods: 5
+// => #(...)
+
+// 7. Clean up
+Tracing disable
+Tracing clear
+```
+
+### Propagated Context (Advanced)
+
+Actor messages automatically carry a propagated context map across boundaries. This is invisible to Beamtalk code — no user action is required. The context enables distributed tracing when OpenTelemetry is added as a project dependency: parent/child span correlation across actor calls works immediately with no Beamtalk changes. See [ADR 0069](ADR/0069-actor-observability-and-tracing.md) for details.
+
+### Relationship to Logging (ADR 0064)
+
+`Tracing` and `Logger` address complementary observability concerns:
+
+| Concern | API | ADR |
+|---------|-----|-----|
+| **What is happening** — log messages, debug output | `Logger info:`, `Beamtalk enableDebug:` | [ADR 0064](ADR/0064-runtime-logging-control-and-observability-api.md) |
+| **How fast is it happening** — timing, call counts, bottlenecks | `Tracing stats`, `Tracing slowMethods:` | [ADR 0069](ADR/0069-actor-observability-and-tracing.md) |
+
+---
+
 ## Namespace and Class Visibility
 
 Beamtalk v0.1 uses a **flat global namespace** (ADR 0031). All classes are globally
@@ -2132,6 +2289,12 @@ Class names must be globally unique. A module/import system is planned for a fut
 | **HTTPServer**, **HTTPClient** | HTTP server and client |
 | **HTTPRouter**, **HTTPRoute**, **HTTPRouteBuilder** | Declarative HTTP routing |
 | **HTTPRequest**, **HTTPResponse** | Request/response objects |
+
+**Observability:**
+
+| Class | Description |
+|-------|-------------|
+| **Tracing** | Actor observability and performance telemetry — always-on aggregates + opt-in trace capture ([ADR 0069](ADR/0069-actor-observability-and-tracing.md)) |
 
 **Reflection and meta:**
 
