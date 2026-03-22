@@ -355,6 +355,9 @@ fn generate_bunit_wrappers(
 
         for test_class in &test_classes {
             let eunit_module = format!("{}_tests", test_class.module_name);
+            // BT-1631: Doc tests still use EUnit wrappers for now.
+            // TODO: Migrate doc tests to use BUnit runner directly like `beamtalk test` does.
+            /*
             let erl_source =
                 super::test::generate_eunit_wrapper(test_class, fixture.fixture_path.as_str());
             let erl_file = build_dir.join(format!("{eunit_module}.erl"));
@@ -362,6 +365,7 @@ fn generate_bunit_wrappers(
                 .into_diagnostic()
                 .wrap_err_with(|| format!("Failed to write EUnit wrapper for '{eunit_module}'"))?;
             all_erl_files.push(erl_file);
+            */
             compiled_files.push(CompiledTestFile {
                 source_file: fixture.source_md.clone(),
                 module_name: eunit_module,

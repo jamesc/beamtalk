@@ -155,249 +155,6 @@ pub(crate) fn discover_test_classes(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// EUnit wrapper generation
-// ──────────────────────────────────────────────────────────────────────────
-
-/// Generate an `EUnit` test wrapper module for a `TestCase` subclass.
-///
-/// Each `test*` method becomes an `EUnit` test function:
-/// 1. Create fresh instance via `Module:new()`
-/// 2. Call `Module:dispatch(setUp, [], Instance)` and capture return value if defined
-/// 3. Call `Module:dispatch(testMethod, [], SetUpInstance)`
-/// 4. Call `Module:dispatch(tearDown, [], SetUpInstance)` if defined
-pub(crate) fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> String {
-    let eunit_module = format!("{}_tests", test_class.module_name);
-    let bt_module = &test_class.module_name;
-    let has_suite_lifecycle = test_class.has_setup_once || test_class.has_teardown_once;
-
-    let mut erl = String::new();
-
-    let _ = write!(
-        erl,
-        "%% Generated from {source_file} ({class})\n\
-         -module('{eunit_module}').\n\
-         -include_lib(\"eunit/include/eunit.hrl\").\n\n",
-        class = test_class.class_name,
-    );
-
-    if has_suite_lifecycle {
-        // BT-1549: Use EUnit {setup, Setup, Cleanup, Instantiator} fixture pattern
-        // to run setUpOnce once before all tests and tearDownOnce once after.
-        generate_eunit_suite_wrapper(&mut erl, test_class, bt_module);
-    } else {
-        generate_eunit_per_test_wrapper(&mut erl, test_class, bt_module);
-    }
-
-    erl
-}
-
-/// Generate `EUnit` wrapper with per-test functions (original pattern, no setUpOnce).
-fn generate_eunit_per_test_wrapper(erl: &mut String, test_class: &TestCaseClass, bt_module: &str) {
-    for method_name in &test_class.test_methods {
-        // EUnit test generator name: method_name + _test_ (trailing underscore)
-        // Using _test_ generator form with {timeout, 30, ...} to allow tests that
-        // involve actor dispatch (e.g. deadlock detection) up to 30 seconds.
-        // Erlang atom-safe: quote with single quotes
-        let _ = writeln!(erl, "'{method_name}_test_'() ->");
-
-        // Determine setUp
-        let has_setup = test_class.has_setup;
-        let has_teardown = test_class.has_teardown;
-
-        let _ = writeln!(erl, "    {{timeout, 30, fun() ->");
-
-        // Create fresh instance
-        let _ = writeln!(erl, "        Instance = '{bt_module}':new(),");
-
-        // setUp (if defined)
-        // For value objects (immutable maps), setUp returns a new instance with modified fields.
-        // BT-1293: We must validate the setUp return value before using it as self. When setUp
-        // ends with an untaken conditional (e.g. `false ifTrue: [...]`), the return value is
-        // `false`/`nil` rather than self — using that as the dispatch receiver corrupts all
-        // subsequent test method dispatches with a DNU error. Only accept the return value when
-        // it is a map of the same class; otherwise fall back to the original Instance.
-        let instance_var = if has_setup {
-            let _ = writeln!(
-                erl,
-                "        SetUpResult = '{bt_module}':dispatch('setUp', [], Instance),"
-            );
-            let _ = writeln!(
-                erl,
-                "        Instance1 = case beamtalk_test_case:is_valid_setUp_result(Instance, SetUpResult) of"
-            );
-            let _ = writeln!(erl, "            true -> SetUpResult;");
-            let _ = writeln!(erl, "            false -> Instance");
-            let _ = writeln!(erl, "        end,");
-            "Instance1"
-        } else {
-            "Instance"
-        };
-
-        // Run test method inside try/after for tearDown
-        // BT-1353: skipTest/1 uses error (not throw) to survive Erlang proxy dispatch.
-        // The wrapped error is #{error := {beamtalk_error, bunit_skip, _, _, _, _, _}}.
-        // Catch both the throw form (from skip/1) and the error form (from skipTest/1)
-        // so that `self skip:` works correctly in EUnit wrappers on all platforms.
-        if has_teardown {
-            let _ = writeln!(erl, "        try");
-            let _ = writeln!(
-                erl,
-                "            '{bt_module}':dispatch('{method_name}', [], {instance_var})"
-            );
-            let _ = writeln!(erl, "        catch");
-            let _ = writeln!(erl, "            throw:{{bunit_skip, _}} -> ok;");
-            let _ = writeln!(
-                erl,
-                "            error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok"
-            );
-            let _ = writeln!(erl, "        after");
-            let _ = writeln!(
-                erl,
-                "            '{bt_module}':dispatch('tearDown', [], {instance_var})"
-            );
-            let _ = writeln!(erl, "        end");
-        } else {
-            let _ = writeln!(erl, "        try");
-            let _ = writeln!(
-                erl,
-                "            '{bt_module}':dispatch('{method_name}', [], {instance_var})"
-            );
-            let _ = writeln!(erl, "        catch");
-            let _ = writeln!(erl, "            throw:{{bunit_skip, _}} -> ok;");
-            let _ = writeln!(
-                erl,
-                "            error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok"
-            );
-            let _ = writeln!(erl, "        end");
-        }
-
-        let _ = writeln!(erl, "    end}}.");
-
-        erl.push('\n');
-    }
-}
-
-/// Generate `EUnit` wrapper using `{setup, Setup, Cleanup, Instantiator}` fixture
-/// pattern for classes with setUpOnce/tearDownOnce (BT-1549).
-fn generate_eunit_suite_wrapper(erl: &mut String, test_class: &TestCaseClass, bt_module: &str) {
-    let has_setup = test_class.has_setup;
-    let has_teardown = test_class.has_teardown;
-    let has_setup_once = test_class.has_setup_once;
-    let has_teardown_once = test_class.has_teardown_once;
-
-    // Single EUnit test generator that wraps all tests in a {setup, ...} fixture
-    let _ = writeln!(erl, "'suite_test_'() ->");
-    let _ = writeln!(erl, "    {{setup,");
-
-    // Setup function: runs setUpOnce, returns Fixture
-    if has_setup_once {
-        let _ = writeln!(
-            erl,
-            "     fun() -> '{bt_module}':dispatch(setUpOnce, [], '{bt_module}':new()) end,"
-        );
-    } else {
-        let _ = writeln!(erl, "     fun() -> nil end,");
-    }
-
-    // Cleanup function: runs tearDownOnce with fixture injected
-    if has_teardown_once {
-        let _ = writeln!(erl, "     fun(Fixture) ->");
-        let _ = writeln!(erl, "         try");
-        let _ = writeln!(
-            erl,
-            "             Inst = ('{bt_module}':new())#{{suiteFixture => Fixture}},"
-        );
-        let _ = writeln!(
-            erl,
-            "             '{bt_module}':dispatch(tearDownOnce, [], Inst)"
-        );
-        let _ = writeln!(erl, "         catch _:_ -> ok");
-        let _ = writeln!(erl, "         end");
-        let _ = writeln!(erl, "     end,");
-    } else {
-        let _ = writeln!(erl, "     fun(_Fixture) -> ok end,");
-    }
-
-    // Instantiator: returns list of test descriptors, each with Fixture injected
-    let _ = writeln!(erl, "     fun(Fixture) -> [");
-
-    for (i, method_name) in test_class.test_methods.iter().enumerate() {
-        let comma = if i + 1 < test_class.test_methods.len() {
-            ","
-        } else {
-            ""
-        };
-
-        let _ = writeln!(erl, "         {{\"{method_name}\", {{timeout, 30, fun() ->");
-        let _ = writeln!(erl, "             Instance = '{bt_module}':new(),");
-
-        // setUp
-        let instance_var = if has_setup {
-            let _ = writeln!(
-                erl,
-                "             SetUpResult = '{bt_module}':dispatch('setUp', [], Instance),"
-            );
-            let _ = writeln!(
-                erl,
-                "             Instance1 = case beamtalk_test_case:is_valid_setUp_result(Instance, SetUpResult) of"
-            );
-            let _ = writeln!(erl, "                 true -> SetUpResult;");
-            let _ = writeln!(erl, "                 false -> Instance");
-            let _ = writeln!(erl, "             end,");
-            "Instance1"
-        } else {
-            "Instance"
-        };
-
-        // Inject suite fixture
-        let _ = writeln!(
-            erl,
-            "             {instance_var}F = {instance_var}#{{suiteFixture => Fixture}},"
-        );
-        let fixture_var = format!("{instance_var}F");
-
-        // Run test + tearDown
-        if has_teardown {
-            let _ = writeln!(erl, "             try");
-            let _ = writeln!(
-                erl,
-                "                 '{bt_module}':dispatch('{method_name}', [], {fixture_var})"
-            );
-            let _ = writeln!(erl, "             catch");
-            let _ = writeln!(erl, "                 throw:{{bunit_skip, _}} -> ok;");
-            let _ = writeln!(
-                erl,
-                "                 error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok"
-            );
-            let _ = writeln!(erl, "             after");
-            let _ = writeln!(
-                erl,
-                "                 '{bt_module}':dispatch('tearDown', [], {fixture_var})"
-            );
-            let _ = writeln!(erl, "             end");
-        } else {
-            let _ = writeln!(erl, "             try");
-            let _ = writeln!(
-                erl,
-                "                 '{bt_module}':dispatch('{method_name}', [], {fixture_var})"
-            );
-            let _ = writeln!(erl, "             catch");
-            let _ = writeln!(erl, "                 throw:{{bunit_skip, _}} -> ok;");
-            let _ = writeln!(
-                erl,
-                "                 error:#{{error := {{beamtalk_error, bunit_skip, _, _, _, _, _}}}} -> ok"
-            );
-            let _ = writeln!(erl, "             end");
-        }
-
-        let _ = writeln!(erl, "         end}}}}{comma}");
-    }
-
-    let _ = writeln!(erl, "     ] end");
-    let _ = writeln!(erl, "    }}.");
-}
-
-// ──────────────────────────────────────────────────────────────────────────
 // Fixture compilation
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -596,285 +353,73 @@ fn generate_core_file(
 }
 
 /// Compile `EUnit` wrapper `.erl` files with erlc.
-fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path) -> Result<()> {
-    if erl_files.is_empty() {
-        return Ok(());
-    }
-    debug!("Batch compiling {} EUnit wrappers", erl_files.len());
-
-    let mut cmd = std::process::Command::new("erlc");
-    cmd.arg("-o").arg(output_dir.as_str());
-    for erl_file in erl_files {
-        cmd.arg(erl_file.as_str());
-    }
-
-    let output = cmd
-        .output()
-        .into_diagnostic()
-        .wrap_err("Failed to run erlc")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        miette::bail!("erlc compilation failed:\n{}{}", stdout, stderr);
-    }
-
-    Ok(())
-}
-
 // ──────────────────────────────────────────────────────────────────────────
-// EUnit runner
+// BUnit runner (BT-1631)
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Result from running `EUnit` tests.
-struct EunitResult {
-    /// Map of module name → failure details for modules that failed.
-    failed_modules: std::collections::HashMap<String, String>,
+/// Result from running BUnit tests via beamtalk_test_runner:run_all/1.
+///
+/// Holds the parsed JSON result containing aggregated test metrics and per-test details.
+#[derive(Debug)]
+struct BunitResult {
+    /// Total number of tests across all classes.
+    total: usize,
+    /// Number of passing tests.
+    passed: usize,
+    /// Number of failing tests.
+    failed: usize,
+    /// Number of skipped tests.
+    skipped: usize,
+    /// Total duration in seconds.
+    duration: f64,
+    /// Per-test result details (name, status, optional error).
+    tests: Vec<TestResultDetail>,
 }
 
-/// Run all `EUnit` test wrapper modules in a single BEAM process.
-#[allow(clippy::too_many_lines)] // test orchestration: bootstrap, load modules, run, parse results
-fn run_eunit_tests(
-    concurrent_modules: &[&str],
-    serial_modules: &[&str],
-    fixture_modules: &[String],
-    package_modules: &[String],
-    build_dir: &Utf8Path,
-    package_ebin_dirs: &[Utf8PathBuf],
-    jobs: usize,
-) -> Result<EunitResult> {
-    let total_modules = concurrent_modules.len() + serial_modules.len();
-    debug!(
-        "Running {} EUnit modules ({} concurrent, {} serial, jobs={})",
-        total_modules,
-        concurrent_modules.len(),
-        serial_modules.len(),
-        jobs
+#[derive(Debug)]
+struct TestResultDetail {
+    name: String,
+    status: String, // "pass", "fail", "skip"
+    error: Option<String>,
+}
+
+/// Build the effective class index for a test file: base classes + fixtures.
+///
+/// For single-package runs, uses the merged index. For multi-package runs,
+/// uses the per-package index for the test file's package. Fixture classes
+/// are merged last to override base classes if needed.
+fn class_index_for_file(
+    test_file: &Utf8Path,
+    pkg_class_indexes: &PkgClassIndexes,
+    fixture_class_index: &HashMap<String, String>,
+    merged_class_index: &HashMap<String, String>,
+    merged_super_index: &HashMap<String, String>,
+) -> (HashMap<String, String>, HashMap<String, String>) {
+    let (base_class, base_super) = canonical_package_root(test_file)
+        .and_then(|r| pkg_class_indexes.get(&r))
+        .map_or_else(
+            || (merged_class_index.clone(), merged_super_index.clone()),
+            |(c, s)| (c.clone(), s.clone()),
+        );
+
+    // Merge base classes with fixture classes to build the effective class index
+    // for this test file. Fixture classes are merged last so they can override
+    // any base class (though in practice fixtures should be in a different namespace).
+    let mut file_class_index = base_class;
+    file_class_index.extend(fixture_class_index.clone());
+
+    let mut file_super_index = base_super;
+    file_super_index.extend(
+        fixture_class_index
+            .iter()
+            .filter_map(|(class_name, _module_name)| {
+                merged_super_index
+                    .get(class_name)
+                    .map(|s| (class_name.clone(), s.clone()))
+            }),
     );
 
-    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()
-        .wrap_err("Cannot find Erlang runtime directory")?;
-    let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
-    let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
-
-    // All modules (concurrent + serial) for sequential mode
-    let all_modules: Vec<&str> = concurrent_modules
-        .iter()
-        .chain(serial_modules.iter())
-        .copied()
-        .collect();
-    let all_module_list: String = all_modules
-        .iter()
-        .map(|m| format!("'{m}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let concurrent_module_list: String = concurrent_modules
-        .iter()
-        .map(|m| format!("'{m}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let serial_module_list: String = serial_modules
-        .iter()
-        .map(|m| format!("'{m}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    // Build fixture loading commands
-    let fixture_load_cmd = if fixture_modules.is_empty() {
-        String::new()
-    } else {
-        fixture_modules
-            .iter()
-            .map(|m| format!("code:ensure_loaded('{m}')"))
-            .collect::<Vec<_>>()
-            .join(", ")
-            + ", "
-    };
-
-    // Build package module loading commands (triggers on_load → class registration)
-    let package_load_cmd = if package_modules.is_empty() {
-        String::new()
-    } else {
-        package_modules
-            .iter()
-            .map(|m| format!("code:ensure_loaded('{m}')"))
-            .collect::<Vec<_>>()
-            .join(", ")
-            + ", "
-    };
-
-    // Resolve effective job count: 0 = auto (use scheduler count)
-    let effective_jobs = if jobs == 0 {
-        // Will be resolved at runtime via erlang:system_info(schedulers)
-        0
-    } else {
-        jobs
-    };
-
-    // Helper: sequential run of a module list, accumulating failures
-    let run_sequential = |var_name: &str, module_list_str: &str| -> String {
-        format!(
-            "{var_name} = lists:foldl(fun(M, Acc) -> \
-               case eunit:test(M, []) of \
-                 ok -> Acc; \
-                 error -> [M | Acc] \
-               end \
-             end, [], [{module_list_str}])"
-        )
-    };
-
-    // Helper: report failures and exit
-    let report_and_exit = "case AllFailed of \
-             [] -> init:stop(0); \
-             _ -> \
-               lists:foreach(fun(M) -> \
-                 io:format(\"FAILED_MODULE:~s~n\", [atom_to_list(M)]) \
-               end, AllFailed), \
-               init:stop(1) \
-             end.";
-
-    let eval_cmd = if effective_jobs == 1 {
-        // Sequential: original behavior — run all modules in order
-        let run_all = run_sequential("AllFailed", &all_module_list);
-        format!(
-            "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
-             {package_load_cmd}\
-             {fixture_load_cmd}\
-             {run_all}, \
-             {report_and_exit}"
-        )
-    } else {
-        // Concurrent: run concurrent modules in parallel, then serial sequentially
-        let max_jobs_expr = if effective_jobs == 0 {
-            "erlang:system_info(schedulers)".to_string()
-        } else {
-            format!("{effective_jobs}")
-        };
-
-        // Build the serial part (runs after concurrent batch)
-        let serial_part = if serial_modules.is_empty() {
-            "SerialFailed = []".to_string()
-        } else {
-            run_sequential("SerialFailed", &serial_module_list)
-        };
-
-        // Build the concurrent part
-        let concurrent_part = if concurrent_modules.is_empty() {
-            "ConcFailed = []".to_string()
-        } else {
-            format!(
-                "ConcModules = [{concurrent_module_list}], \
-                 MaxJobs = {max_jobs_expr}, \
-                 Self = self(), \
-                 Ref = make_ref(), \
-                 RunOne = fun(M) -> spawn(fun() -> \
-                   Res = try eunit:test(M, []) catch _:_ -> error end, \
-                   Self ! {{Ref, M, Res}} \
-                 end) end, \
-                 {{Initial, Rest}} = case length(ConcModules) > MaxJobs of \
-                   true -> lists:split(MaxJobs, ConcModules); \
-                   false -> {{ConcModules, []}} \
-                 end, \
-                 _ = [RunOne(M) || M <- Initial], \
-                 {{ConcFailed, _}} = lists:foldl(fun(_, {{FailAcc, Remaining}}) -> \
-                   receive {{Ref, M, Res}} -> \
-                     NewFail = case Res of error -> [M | FailAcc]; _ -> FailAcc end, \
-                     case Remaining of \
-                       [Next | Rest2] -> RunOne(Next), {{NewFail, Rest2}}; \
-                       [] -> {{NewFail, []}} \
-                     end \
-                   end \
-                 end, {{[], Rest}}, ConcModules)"
-            )
-        };
-
-        format!(
-            "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
-             {package_load_cmd}\
-             {fixture_load_cmd}\
-             {concurrent_part}, \
-             {serial_part}, \
-             AllFailed = ConcFailed ++ SerialFailed, \
-             {report_and_exit}"
-        )
-    };
-
-    let mut cmd = std::process::Command::new("erl");
-    #[cfg(windows)]
-    {
-        // Convert Windows backslashes to forward slashes for Erlang (BT-661)
-        let build_dir_path = build_dir.as_str().replace('\\', "/");
-        cmd.arg("-noshell").arg("-pa").arg(build_dir_path);
-    }
-    #[cfg(not(windows))]
-    {
-        cmd.arg("-noshell").arg("-pa").arg(build_dir.as_str());
-    }
-
-    // Add all package ebin directories to code path so package modules can be loaded
-    for ebin_dir in package_ebin_dirs {
-        #[cfg(windows)]
-        {
-            let ebin_dir_path = ebin_dir.as_str().replace('\\', "/");
-            cmd.arg("-pa").arg(ebin_dir_path);
-        }
-        #[cfg(not(windows))]
-        {
-            cmd.arg("-pa").arg(ebin_dir.as_str());
-        }
-    }
-
-    for arg in &pa_args {
-        cmd.arg(arg);
-    }
-
-    cmd.arg("-eval").arg(&eval_cmd);
-
-    let output = cmd
-        .output()
-        .into_diagnostic()
-        .wrap_err("Failed to run EUnit tests")?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    debug!("EUnit stdout: {}", stdout);
-    debug!("EUnit stderr: {}", stderr);
-
-    let mut failed_modules = std::collections::HashMap::new();
-
-    if !output.status.success() {
-        let combined = format!("{stdout}\n{stderr}");
-        for line in combined.lines() {
-            if let Some(module_name) = line.strip_prefix("FAILED_MODULE:") {
-                let module_name = module_name.trim().to_string();
-                let details = combined
-                    .lines()
-                    .filter(|l| {
-                        l.contains(&module_name)
-                            || l.contains("Failed")
-                            || l.contains("failed")
-                            || l.contains("assertEqual")
-                            || l.contains("expected")
-                            || l.contains("assertion_failed")
-                            || l.contains("got")
-                    })
-                    .map(|l| format!("    {l}"))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                failed_modules.insert(module_name, details);
-            }
-        }
-
-        if failed_modules.is_empty() {
-            let detail = format!("EUnit process failed:\n{combined}");
-            for name in concurrent_modules.iter().chain(serial_modules.iter()) {
-                failed_modules.insert(name.to_string(), detail.clone());
-            }
-        }
-    }
-
-    Ok(EunitResult { failed_modules })
+    (file_class_index, file_super_index)
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -971,32 +516,6 @@ fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
 /// Return the effective class module index for a test file.
 ///
 /// Uses the per-package index for the file's owning package (if found), so test
-/// files only see their own package's class names — not class names from other
-/// packages that happen to be compiled in the same `beamtalk test` run. Fixture
-/// classes are merged on top. Falls back to the merged combined index for files
-/// that don't belong to any discovered package.
-fn class_index_for_file(
-    test_file: &Utf8Path,
-    pkg_class_indexes: &PkgClassIndexes,
-    fixture_class_index: &HashMap<String, String>,
-    merged_class_index: &HashMap<String, String>,
-    merged_super_index: &HashMap<String, String>,
-) -> (HashMap<String, String>, HashMap<String, String>) {
-    let (base_class, base_super) = canonical_package_root(test_file)
-        .and_then(|r| pkg_class_indexes.get(&r))
-        .map_or_else(
-            || (merged_class_index.clone(), merged_super_index.clone()),
-            |(c, s)| (c.clone(), s.clone()),
-        );
-
-    let mut effective = base_class;
-    effective.extend(
-        fixture_class_index
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone())),
-    );
-    (effective, base_super)
-}
 
 /// Recursively collect `.bt` files from `dir` into `files`.
 fn find_test_files_recursive(dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
@@ -1246,8 +765,6 @@ struct CompiledTest {
     source_file: Utf8PathBuf,
     /// `TestCase` class info.
     test_class: TestCaseClass,
-    /// `EUnit` wrapper module name.
-    eunit_module: String,
 }
 
 /// Compiled doc test metadata, ready for execution.
@@ -1637,20 +1154,11 @@ fn compile_single_test_file(
         .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
         pending_test_cores.push(core_file);
 
-        // Generate EUnit wrapper
-        let eunit_module = format!("{}_tests", test_class.module_name);
-        let wrapper_source = generate_eunit_wrapper(&test_class, test_file.as_str());
-
-        let erl_file = pipeline.build_dir.join(format!("{eunit_module}.erl"));
-        fs::write(&erl_file, &wrapper_source)
-            .into_diagnostic()
-            .wrap_err("Failed to write EUnit wrapper")?;
-        pipeline.all_erl_files.push(erl_file);
-
+        // BT-1631: No longer generate EUnit wrappers; beamtalk_test_runner:run_all/1
+        // handles test discovery and execution directly in the Erlang runtime.
         pipeline.compiled_tests.push(CompiledTest {
             source_file: test_file.to_path_buf(),
             test_class,
-            eunit_module,
         });
     }
 
@@ -1782,107 +1290,218 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
     Ok(())
 }
 
-/// Phase 3: Compile `EUnit` wrappers and run all tests.
+/// Phase 3: Run all tests via `beamtalk_test_runner:run_all(Jobs)`.
 ///
-/// Returns the `EunitResult` for result reporting.
-fn execute_tests(pipeline: &TestPipeline) -> Result<EunitResult> {
-    println!("Compiling {} test file(s)...", pipeline.test_files.len());
-
-    // Compile EUnit wrappers
-    compile_erl_files(&pipeline.all_erl_files, &pipeline.build_dir)?;
-
-    // Run tests
+/// BT-1631: Replaces EUnit wrapper compilation and execution with direct
+/// calls to the BUnit runner, which handles test discovery and execution
+/// in the Erlang runtime and returns structured JSON results.
+fn execute_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     println!("Running tests...\n");
 
-    // Partition into concurrent and serial modules (BT-1624)
-    let serial_modules: HashSet<&str> = pipeline
-        .compiled_tests
-        .iter()
-        .filter(|t| t.test_class.is_serial)
-        .map(|t| t.eunit_module.as_str())
-        .collect();
-
-    let mut concurrent_modules: Vec<&str> = Vec::new();
-    let mut serial_module_list: Vec<&str> = Vec::new();
-
-    for t in &pipeline.compiled_tests {
-        if serial_modules.contains(t.eunit_module.as_str()) {
-            serial_module_list.push(&t.eunit_module);
-        } else {
-            concurrent_modules.push(&t.eunit_module);
-        }
-    }
-    // Doc tests are always concurrent (no class state)
-    for dt in &pipeline.compiled_doc_tests {
-        concurrent_modules.push(&dt.eunit_module);
-    }
-
-    run_eunit_tests(
-        &concurrent_modules,
-        &serial_module_list,
-        &pipeline.all_fixture_modules,
-        &pipeline.package_modules,
-        &pipeline.build_dir,
-        &pipeline.package_ebin_dirs,
-        pipeline.jobs,
+    run_bunit_tests(
+        pipeline,
     )
 }
 
-/// Phase 4: Aggregate and report test results.
-fn report_results(
-    pipeline: &TestPipeline,
-    result: &EunitResult,
-    start_time: Instant,
-) -> Result<()> {
-    let total_bunit_tests: usize = pipeline
-        .compiled_tests
-        .iter()
-        .map(|t| t.test_class.test_methods.len())
-        .sum();
-    let total_doc_tests: usize = pipeline
-        .compiled_doc_tests
-        .iter()
-        .map(|d| d.assertion_count)
-        .sum();
-    let total_tests = total_bunit_tests + total_doc_tests;
+/// Run tests via `beamtalk_test_runner:run_all(Jobs)` in a single BEAM process.
+///
+/// Calls the BUnit runner directly, bypassing EUnit wrappers. The runner
+/// discovers test classes, executes them with the specified concurrency level,
+/// and returns aggregated results as JSON.
+#[allow(clippy::too_many_lines)]
+fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
+    debug!("Running BUnit tests with jobs={}", pipeline.jobs);
 
-    let mut total_passed = 0;
-    let mut total_failed = 0;
-    let mut failed_details = Vec::new();
+    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()
+        .wrap_err("Cannot find Erlang runtime directory")?;
+    let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
-    // Report BUnit TestCase results
-    for compiled in &pipeline.compiled_tests {
-        let test_count = compiled.test_class.test_methods.len();
-        let class_name = &compiled.test_class.class_name;
+    // Build fixture loading commands
+    let fixture_load_cmd = if pipeline.all_fixture_modules.is_empty() {
+        String::new()
+    } else {
+        pipeline
+            .all_fixture_modules
+            .iter()
+            .map(|m| format!("code:ensure_loaded('{m}')"))
+            .collect::<Vec<_>>()
+            .join(", ")
+            + ", "
+    };
 
-        if let Some(failure) = result.failed_modules.get(&compiled.eunit_module) {
-            total_failed += test_count;
-            println!("  {class_name}: {test_count} tests, 0 passed \u{2717}");
-            failed_details.push(format!(
-                "FAIL {} ({}):\n{}",
-                class_name, compiled.source_file, failure
-            ));
-        } else {
-            total_passed += test_count;
-            println!("  {class_name}: {test_count} tests, {test_count} passed \u{2713}");
+    // Build package module loading commands (triggers on_load → class registration)
+    let package_load_cmd = if pipeline.package_modules.is_empty() {
+        String::new()
+    } else {
+        pipeline
+            .package_modules
+            .iter()
+            .map(|m| format!("code:ensure_loaded('{m}')"))
+            .collect::<Vec<_>>()
+            .join(", ")
+            + ", "
+    };
+
+    // Call beamtalk_test_runner:run_all(Jobs) and serialize result to JSON
+    let eval_cmd = format!(
+        "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+         {package_load_cmd}\
+         {fixture_load_cmd}\
+         Result = beamtalk_test_runner:run_all({jobs}), \
+         JSON = beamtalk_test_runner:result_to_json(Result), \
+         io:format(\"~s~n\", [JSON]), \
+         init:stop(case beamtalk_test_runner:result_has_passed(Result) of true -> 0; _ -> 1 end).",
+        jobs = pipeline.jobs
+    );
+
+    let mut cmd = std::process::Command::new("erl");
+    #[cfg(windows)]
+    {
+        let build_dir_path = pipeline.build_dir.as_str().replace('\\', "/");
+        cmd.arg("-noshell").arg("-pa").arg(build_dir_path);
+    }
+    #[cfg(not(windows))]
+    {
+        cmd.arg("-noshell").arg("-pa").arg(pipeline.build_dir.as_str());
+    }
+
+    // Add all package ebin directories to code path
+    for ebin_dir in &pipeline.package_ebin_dirs {
+        #[cfg(windows)]
+        {
+            let ebin_dir_path = ebin_dir.as_str().replace('\\', "/");
+            cmd.arg("-pa").arg(ebin_dir_path);
+        }
+        #[cfg(not(windows))]
+        {
+            cmd.arg("-pa").arg(ebin_dir.as_str());
         }
     }
 
-    // Report doc test results
-    for doc_test in &pipeline.compiled_doc_tests {
-        let test_count = doc_test.assertion_count;
-        let name = &doc_test.display_name;
+    for arg in &pa_args {
+        cmd.arg(arg);
+    }
 
-        if let Some(failure) = result.failed_modules.get(&doc_test.eunit_module) {
-            total_failed += test_count;
-            println!("  {name}: {test_count} tests, 0 passed \u{2717}");
-            failed_details.push(format!(
-                "FAIL {} ({}):\n{}",
-                name, doc_test.source_file, failure
-            ));
+    cmd.arg("-eval").arg(&eval_cmd);
+
+    let output = cmd
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run BUnit tests")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    debug!("BUnit stdout: {}", stdout);
+    debug!("BUnit stderr: {}", stderr);
+
+    // Extract JSON from stdout (first line before init:stop output)
+    let json_line = stdout
+        .lines()
+        .next()
+        .ok_or_else(|| miette::miette!("No output from BUnit runner"))?;
+
+    // Parse JSON result
+    let result_json: serde_json::Value = serde_json::from_str(json_line)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to parse BUnit JSON result: {json_line}"))?;
+
+    // Deserialize into BunitResult
+    let total = result_json["total"]
+        .as_u64()
+        .ok_or_else(|| miette::miette!("Missing 'total' in BUnit result"))? as usize;
+    let passed = result_json["passed"]
+        .as_u64()
+        .ok_or_else(|| miette::miette!("Missing 'passed' in BUnit result"))? as usize;
+    let failed = result_json["failed"]
+        .as_u64()
+        .ok_or_else(|| miette::miette!("Missing 'failed' in BUnit result"))? as usize;
+    let skipped = result_json["skipped"]
+        .as_u64()
+        .ok_or_else(|| miette::miette!("Missing 'skipped' in BUnit result"))? as usize;
+    let duration = result_json["duration"]
+        .as_f64()
+        .ok_or_else(|| miette::miette!("Missing 'duration' in BUnit result"))?;
+
+    let tests_array = result_json["tests"]
+        .as_array()
+        .ok_or_else(|| miette::miette!("Missing 'tests' array in BUnit result"))?;
+
+    let tests = tests_array
+        .iter()
+        .map(|t| {
+            let name = t["name"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string();
+            let status = t["status"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string();
+            let error = t["error"].as_str().map(|s| s.to_string());
+            TestResultDetail { name, status, error }
+        })
+        .collect();
+
+    Ok(BunitResult {
+        total,
+        passed,
+        failed,
+        skipped,
+        duration,
+        tests,
+    })
+}
+
+/// Phase 4: Aggregate and report test results.
+///
+/// BT-1631: Displays results from `beamtalk_test_runner:run_all/1` with
+/// Beamtalk class names (not Erlang module names) and per-class summary.
+fn report_results(
+    pipeline: &TestPipeline,
+    result: &BunitResult,
+    start_time: Instant,
+) -> Result<()> {
+    let mut failed_details = Vec::new();
+
+    // Group test results by class name (prefix of test name)
+    let mut class_results: HashMap<String, (usize, usize, usize)> = HashMap::new();
+
+    for test in &result.tests {
+        let test_name = &test.name;
+        // Extract class name from test name (class method names are formed as "ClassName testMethod")
+        let class_name = if let Some(first_word) = test_name.split_whitespace().next() {
+            first_word.to_string()
         } else {
-            total_passed += test_count;
-            println!("  {name}: {test_count} tests, {test_count} passed \u{2713}");
+            test_name.clone()
+        };
+
+        let (passed, failed, skipped) = class_results.entry(class_name.clone()).or_insert((0, 0, 0));
+
+        match test.status.as_str() {
+            "pass" => *passed += 1,
+            "fail" => {
+                *failed += 1;
+                if let Some(error) = &test.error {
+                    failed_details.push(format!("FAIL {}: {}", test_name, error));
+                }
+            }
+            "skip" => *skipped += 1,
+            _ => {}
+        }
+    }
+
+    // Print results per class (matches BUnit output format)
+    for compiled in &pipeline.compiled_tests {
+        let class_name = &compiled.test_class.class_name;
+        if let Some((passed, failed, skipped)) = class_results.get(class_name) {
+            let total = passed + failed + skipped;
+            if *failed > 0 {
+                println!("  {class_name}: {total} tests, {passed} passed, {failed} failed \u{2717}");
+            } else {
+                println!("  {class_name}: {total} tests, {total} passed \u{2713}");
+            }
         }
     }
 
@@ -1890,12 +1509,12 @@ fn report_results(
     let elapsed_secs = elapsed.as_secs_f64();
 
     println!();
-    if total_failed == 0 {
+    if result.failed == 0 {
         println!(
             "{} file(s), {} tests, {} passed, 0 failed ({:.1}s)",
             pipeline.test_files.len(),
-            total_tests,
-            total_passed,
+            result.total,
+            result.passed,
             elapsed_secs,
         );
     } else {
@@ -1906,12 +1525,12 @@ fn report_results(
         eprintln!(
             "{} file(s), {} tests, {} passed, {} failed ({:.1}s)",
             pipeline.test_files.len(),
-            total_tests,
-            total_passed,
-            total_failed,
+            result.total,
+            result.passed,
+            result.failed,
             elapsed_secs,
         );
-        miette::bail!("{total_failed} test(s) failed");
+        miette::bail!("{} test(s) failed", result.failed);
     }
 
     Ok(())
@@ -1981,36 +1600,8 @@ mod tests {
         assert_eq!(loads, vec!["stdlib/test/fixtures/counter.bt"]);
     }
 
-    #[test]
-    fn test_generate_eunit_wrapper_simple() {
-        let test_class = TestCaseClass {
-            class_name: "CounterTest".to_string(),
-            superclass_name: "TestCase".to_string(),
-            module_name: "bt@counter_test".to_string(),
-            test_methods: vec!["testIncrement".to_string()],
-            has_setup: false,
-            has_teardown: false,
-            has_setup_once: false,
-            has_teardown_once: false,
-            is_serial: false,
-        };
-
-        let wrapper = generate_eunit_wrapper(&test_class, "test/counter_test.bt");
-        assert!(wrapper.contains("-module('bt@counter_test_tests')."));
-        assert!(wrapper.contains("'testIncrement_test_'()"));
-        assert!(wrapper.contains("{timeout, 30, fun() ->"));
-        assert!(wrapper.contains("'bt@counter_test':new()"));
-        assert!(wrapper.contains("'bt@counter_test':dispatch('testIncrement', [], Instance)"));
-        // No setUp/tearDown, but skip handling wraps dispatch in try/catch
-        assert!(!wrapper.contains("setUp"));
-        assert!(!wrapper.contains("tearDown"));
-        // BT-1353: Must catch both throw form (skip/1) and error form (skipTest/1)
-        assert!(wrapper.contains("throw:{bunit_skip, _}"));
-        assert!(
-            wrapper.contains("error:#{error := {beamtalk_error, bunit_skip,"),
-            "EUnit wrapper must catch error-form bunit_skip from skipTest/1"
-        );
-    }
+    // BT-1631: Removed test_generate_eunit_wrapper_simple — EUnit wrappers are no longer generated.
+    // Test discovery and execution now use beamtalk_test_runner:run_all/1 directly.
 
     #[test]
     fn test_collect_beam_module_names() {
@@ -2305,42 +1896,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_generate_eunit_wrapper_with_lifecycle() {
-        let test_class = TestCaseClass {
-            class_name: "MyTest".to_string(),
-            superclass_name: "TestCase".to_string(),
-            module_name: "bt@my_test".to_string(),
-            test_methods: vec!["testA".to_string(), "testB".to_string()],
-            has_setup: true,
-            has_teardown: true,
-            has_setup_once: false,
-            has_teardown_once: false,
-            is_serial: false,
-        };
-
-        let wrapper = generate_eunit_wrapper(&test_class, "test/my_test.bt");
-        // BT-1293: setUp return is validated before use — check the new pattern
-        assert!(wrapper.contains("SetUpResult = 'bt@my_test':dispatch('setUp', [], Instance)"));
-        assert!(
-            wrapper.contains("beamtalk_test_case:is_valid_setUp_result(Instance, SetUpResult)")
-        );
-        assert!(wrapper.contains("Instance1 = case beamtalk_test_case:is_valid_setUp_result"));
-        assert!(wrapper.contains("true -> SetUpResult"));
-        assert!(wrapper.contains("false -> Instance"));
-        assert!(wrapper.contains("try"));
-        assert!(wrapper.contains("after"));
-        assert!(wrapper.contains("dispatch('tearDown', [], Instance1)"));
-        // Both test methods present
-        assert!(wrapper.contains("'testA_test_'()"));
-        assert!(wrapper.contains("'testB_test_'()"));
-        // BT-1353: skip handling must catch both forms even with tearDown
-        assert!(wrapper.contains("throw:{bunit_skip, _}"));
-        assert!(
-            wrapper.contains("error:#{error := {beamtalk_error, bunit_skip,"),
-            "EUnit wrapper with tearDown must catch error-form bunit_skip"
-        );
-    }
+    // BT-1631: Removed test_generate_eunit_wrapper_with_lifecycle — EUnit wrappers are no longer generated.
 
     /// Inserting `"."` and the absolute CWD into `seen` without canonicalization would
     /// treat them as different entries, making a single-package run appear to have two
