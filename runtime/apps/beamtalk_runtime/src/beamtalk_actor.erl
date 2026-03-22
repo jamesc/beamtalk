@@ -167,7 +167,7 @@
 -export([get_propagated_ctx/0, restore_propagated_ctx/1]).
 
 %% Application-level trace context (BT-1625)
--export([set_trace_context/1, get_trace_context/0]).
+-export([set_trace_context/1, get_trace_context/0, clear_trace_context/0]).
 
 %% gen_server callbacks (for generated actors to delegate to)
 -export([
@@ -799,7 +799,7 @@ set_trace_context(Ctx) when is_map(Ctx) ->
     OldCtx = get_trace_context(),
     Merged = maps:merge(OldCtx, Ctx),
     put('$beamtalk_trace_ctx', Merged),
-    logger:update_process_metadata(Ctx),
+    logger:update_process_metadata(Merged),
     ok.
 
 %% @doc Get the current application-level trace context (BT-1625).
@@ -810,8 +810,27 @@ set_trace_context(Ctx) when is_map(Ctx) ->
 get_trace_context() ->
     case get('$beamtalk_trace_ctx') of
         undefined -> #{};
-        Ctx when is_map(Ctx) -> Ctx
+        Ctx when is_map(Ctx) -> Ctx;
+        _Other -> #{}
     end.
+
+%% @doc Clear the application-level trace context and remove its keys from logger metadata.
+%%
+%% Used when restoring an empty propagated trace context to prevent stale metadata
+%% from leaking across unrelated messages in the same actor process.
+-spec clear_trace_context() -> ok.
+clear_trace_context() ->
+    OldCtx = get_trace_context(),
+    erase('$beamtalk_trace_ctx'),
+    %% Remove the trace context keys from logger metadata
+    case logger:get_process_metadata() of
+        undefined ->
+            ok;
+        LogMeta ->
+            Cleaned = maps:without(maps:keys(OldCtx), LogMeta),
+            logger:set_process_metadata(Cleaned)
+    end,
+    ok.
 
 %% @doc Build a propagated context map for cross-actor message sends (ADR 0069 Phase 2b).
 %%
@@ -860,12 +879,17 @@ restore_propagated_ctx(PropCtx) when is_map(PropCtx) ->
                     ok
             end
     end,
-    %% Restore application-level trace context if present (BT-1625)
+    %% Restore application-level trace context if present (BT-1625).
+    %% When trace_ctx is an empty map, we must still clear any previously
+    %% restored context to prevent stale metadata leaking across messages.
     case maps:get(trace_ctx, PropCtx, undefined) of
         undefined ->
             ok;
         TraceCtx when is_map(TraceCtx), map_size(TraceCtx) > 0 ->
             set_trace_context(TraceCtx);
+        TraceCtx when is_map(TraceCtx) ->
+            %% Empty map: clear any previously restored trace context
+            clear_trace_context();
         _ ->
             ok
     end,

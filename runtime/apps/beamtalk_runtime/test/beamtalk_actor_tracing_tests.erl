@@ -889,8 +889,9 @@ set_trace_context_test_() ->
                 ?assertEqual(<<"wf-123">>, maps:get(workflowId, Ctx)),
                 ?assertEqual(<<"a-1">>, maps:get(activityId, Ctx)),
 
-                %% Clean up process dictionary
-                erase('$beamtalk_trace_ctx')
+                %% Clean up process dictionary and logger metadata
+                erase('$beamtalk_trace_ctx'),
+                logger:set_process_metadata(#{})
             end)
         ]
     end}.
