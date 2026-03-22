@@ -1,0 +1,144 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests the Tracing class — lifecycle (enable/disable/isEnabled/clear),
+// configuration (maxEvents/maxEvents:), error behavior (empty results),
+// live health queries, and systemHealth VM overview.
+//
+// Note: telemetry is not available in BUnit, so dispatch-based aggregates
+// and trace events are not auto-populated. We test the API surface, error
+// behavior, and live health rather than trace data content.
+
+TestCase subclass: TracingTest
+
+  setUp =>
+    // Ensure a clean state before each test
+    Tracing clear
+    Tracing disable
+
+  // === Lifecycle ===
+  testEnableReturnsNil => self assert: Tracing enable equals: nil
+
+  testDisableReturnsNil => self assert: Tracing disable equals: nil
+
+  testIsEnabledReturnsFalseByDefault => self deny: Tracing isEnabled
+
+  testEnableDisableCycle =>
+    Tracing enable
+    self assert: Tracing isEnabled
+    Tracing disable
+    self deny: Tracing isEnabled
+
+  testClearReturnsNil => self assert: Tracing clear equals: nil
+
+  testClearResetsEnabled =>
+    // clear does not change enabled state — test that enable persists
+    Tracing enable
+    Tracing clear
+    // isEnabled should still be true (clear resets data, not enabled flag)
+    self assert: Tracing isEnabled
+
+  // === Configuration ===
+  testMaxEventsDefault =>
+    // Default is 100000
+    self assert: Tracing maxEvents equals: 100000
+
+  testMaxEventsSetAndGet =>
+    Tracing maxEvents: 50000
+    self assert: Tracing maxEvents equals: 50000
+    // Reset to default
+    Tracing maxEvents: 100000
+
+  testMaxEventsReturnsNil =>
+    self assert: (Tracing maxEvents: 25000) equals: nil
+    // Reset to default
+    Tracing maxEvents: 100000
+
+  // === Traces (empty when not enabled / no telemetry) ===
+  testTracesReturnsEmptyList =>
+    // traces returns [] when not enabled
+    self assert: Tracing traces equals: #()
+
+  testTracesReturnsEmptyListWhenEnabled =>
+    // traces returns [] when enabled but no dispatches recorded
+    // (telemetry not available in BUnit)
+    Tracing enable
+    self assert: Tracing traces equals: #()
+
+  // === Stats (empty when no dispatches recorded) ===
+  testStatsReturnsEmptyDictionary => self assert: Tracing stats equals: #{}
+
+  testStatsForUnknownActorReturnsEmptyDictionary =>
+    // statsFor: a live actor with no dispatches returns {}
+    c := Counter spawn
+    self assert: (Tracing statsFor: c) equals: #{}
+    c stop
+
+  // === Analysis (empty results) ===
+  testSlowMethodsReturnsEmptyList =>
+    self assert: (Tracing slowMethods: 10) equals: #()
+
+  testHotMethodsReturnsEmptyList =>
+    self assert: (Tracing hotMethods: 10) equals: #()
+
+  testErrorMethodsReturnsEmptyList =>
+    self assert: (Tracing errorMethods: 5) equals: #()
+
+  testBottlenecksReturnsEmptyList =>
+    // No actors with recorded dispatches, so bottlenecks is empty
+    self assert: (Tracing bottlenecks: 5) equals: #()
+
+  // === Live health ===
+  testHealthForLiveActor =>
+    c := Counter spawn
+    health := Tracing healthFor: c
+    // Should have status key (waiting or running, not dead)
+    self deny: ((health at: #status) =:= #dead)
+    // Should have queue_depth key
+    self assert: ((health at: #queue_depth) >= 0)
+    // Should have memory_kb key
+    self assert: ((health at: #memory_kb) >= 0)
+    // Should have reductions key
+    self assert: ((health at: #reductions) >= 0)
+    c stop
+
+  testHealthForDeadActor =>
+    c := Counter spawn
+    c stop
+    // Small delay to ensure process is dead
+    Timer sleep: 50
+    health := Tracing healthFor: c
+    // Dead actor should have status=dead
+    self assert: (health at: #status) equals: #dead
+    // Dead actor should have error message
+    self assert: (health at: #error) equals: "process not alive"
+
+  testSystemHealth =>
+    health := Tracing systemHealth
+    // Should have scheduler_count (positive integer)
+    self assert: ((health at: #scheduler_count) > 0)
+    // Should have process_count
+    self assert: ((health at: #process_count) > 0)
+    // Should have process_limit
+    self assert: ((health at: #process_limit) > 0)
+    // Should have memory map
+    mem := health at: #memory
+    self assert: ((mem at: #total_mb) >= 0)
+    // Should have run_queue
+    self assert: ((health at: #run_queue) >= 0)
+
+  // === Type error validation ===
+  testSlowMethodsRequiresPositiveInteger =>
+    self should: [Tracing slowMethods: 0] raise: #runtime_error
+
+  testHotMethodsRequiresPositiveInteger =>
+    self should: [Tracing hotMethods: -1] raise: #runtime_error
+
+  testErrorMethodsRequiresPositiveInteger =>
+    self should: [Tracing errorMethods: 0] raise: #runtime_error
+
+  testBottlenecksRequiresPositiveInteger =>
+    self should: [Tracing bottlenecks: 0] raise: #runtime_error
+
+  testMaxEventsRequiresPositiveInteger =>
+    self should: [Tracing maxEvents: 0] raise: #runtime_error
