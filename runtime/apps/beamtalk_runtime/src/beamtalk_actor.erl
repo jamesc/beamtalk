@@ -497,20 +497,27 @@ async_send(ActorPid, 'onExit:', [Block], FuturePid) ->
     end,
     ok;
 async_send(ActorPid, Selector, Args, FuturePid) ->
+    %% BT-1603: Instrument with telemetry:span/3 (ADR 0069 Phase 2a).
+    %% Measures dispatch-to-mailbox time for async sends.
+    Class = lookup_class(ActorPid),
+    Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => async},
     %% BT-886: Check liveness before sending, and spawn a watcher to detect
     %% actor death during message processing. The watcher monitors both the
     %% actor and future processes: if the actor dies before the future is
     %% resolved, the watcher rejects the future with a structured error.
-    case is_process_alive(ActorPid) of
-        true ->
-            gen_server:cast(ActorPid, {Selector, Args, FuturePid}),
-            spawn_future_watcher(ActorPid, FuturePid, Selector),
-            ok;
-        false ->
-            {error, Error} = actor_dead_error(Selector),
-            beamtalk_future:reject(FuturePid, Error),
-            ok
-    end.
+    maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
+        case is_process_alive(ActorPid) of
+            true ->
+                gen_server:cast(ActorPid, {Selector, Args, FuturePid}),
+                spawn_future_watcher(ActorPid, FuturePid, Selector),
+                {ok, Metadata#{outcome => ok}};
+            false ->
+                {error, Error} = actor_dead_error(Selector),
+                beamtalk_future:reject(FuturePid, Error),
+                {ok, Metadata#{outcome => error}}
+        end
+    end),
+    ok.
 
 %% @doc Send a fire-and-forget message to an actor (no future, no return value).
 %%
@@ -521,13 +528,20 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
 %% The actor could die between the alive check and the gen_server:cast.
 -spec cast_send(pid(), atom(), list()) -> ok.
 cast_send(ActorPid, Selector, Args) ->
-    case is_process_alive(ActorPid) of
-        true ->
-            gen_server:cast(ActorPid, {cast, Selector, Args}),
-            ok;
-        false ->
-            ok
-    end.
+    %% BT-1603: Instrument with telemetry:span/3 (ADR 0069 Phase 2a).
+    %% Measures dispatch-to-mailbox time for cast sends.
+    Class = lookup_class(ActorPid),
+    Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => cast},
+    maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
+        case is_process_alive(ActorPid) of
+            true ->
+                gen_server:cast(ActorPid, {cast, Selector, Args}),
+                {ok, Metadata#{outcome => cast}};
+            false ->
+                {ok, Metadata#{outcome => cast}}
+        end
+    end),
+    ok.
 
 %% @doc Send a synchronous message to an actor, with lifecycle handling.
 %%
@@ -632,44 +646,54 @@ sync_send(ActorPid, 'onExit:', [Block]) ->
         timeout -> raise_timeout('onExit:')
     end;
 sync_send(ActorPid, Selector, Args) ->
-    case is_process_alive(ActorPid) of
-        true ->
-            try
-                %% BT-918: Generated handle_call/3 wraps replies as {ok, Result} or {error, Error}.
-                %% Unwrap here so callers receive the value directly.
-                %%
-                %% The {error, Error} case has two sub-forms due to the safe_dispatch layer:
-                %%   1. Error = #beamtalk_error{} — returned by dispatch_user_method try/catch
-                %%   2. Error = {ErlType, Value} — raw Erlang exception caught by safe_dispatch
-                %% We re-raise both forms as Erlang exceptions so the caller sees them correctly.
-                case gen_server:call(ActorPid, {Selector, Args}) of
-                    {ok, Result} ->
-                        Result;
-                    {error, {_ErlType, ErrorValue}} ->
-                        %% safe_dispatch caught an Erlang exception; re-raise the actual value
-                        error(beamtalk_exception_handler:ensure_wrapped(ErrorValue));
-                    {error, Error} ->
-                        error(beamtalk_exception_handler:ensure_wrapped(Error));
-                    DirectValue ->
-                        %% Backward compat: actors using beamtalk_actor:handle_call/3 directly
-                        %% (rather than the generated handle_call) return values unwrapped.
-                        DirectValue
-                end
-            catch
-                exit:{noproc, _} ->
-                    raise_actor_dead(Selector);
-                exit:{normal, _} ->
-                    raise_actor_dead(Selector);
-                exit:{shutdown, _} ->
-                    raise_actor_dead(Selector);
-                exit:{timeout, _} ->
-                    raise_timeout(Selector);
-                exit:{_Reason, _} ->
-                    %% Catch-all for other exit reasons: {shutdown, Term}, killed,
-                    %% custom stop reasons, etc. All indicate the actor is unavailable.
+    %% BT-1603: Instrument with telemetry:span/3 (ADR 0069 Phase 2a).
+    %% Measures caller-perspective round-trip time for sync sends.
+    %% telemetry:span/3 emits start/stop/exception events automatically.
+    %% On exception, span catches it, emits the exception event, and re-raises
+    %% via erlang:raise/3 — preserving the original exit class and reason for
+    %% the outer try/catch to convert to structured beamtalk_error records.
+    Class = lookup_class(ActorPid),
+    Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
+    try
+        maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
+            case is_process_alive(ActorPid) of
+                true ->
+                    %% BT-918: Generated handle_call/3 wraps replies as {ok, Result} or {error, Error}.
+                    %% Unwrap here so callers receive the value directly.
+                    %%
+                    %% The {error, Error} case has two sub-forms due to the safe_dispatch layer:
+                    %%   1. Error = #beamtalk_error{} — returned by dispatch_user_method try/catch
+                    %%   2. Error = {ErlType, Value} — raw Erlang exception caught by safe_dispatch
+                    %% We re-raise both forms as Erlang exceptions so the caller sees them correctly.
+                    case gen_server:call(ActorPid, {Selector, Args}) of
+                        {ok, Result} ->
+                            {Result, Metadata#{outcome => ok}};
+                        {error, {_ErlType, ErrorValue}} ->
+                            %% safe_dispatch caught an Erlang exception; re-raise the actual value
+                            error(beamtalk_exception_handler:ensure_wrapped(ErrorValue));
+                        {error, Error} ->
+                            error(beamtalk_exception_handler:ensure_wrapped(Error));
+                        DirectValue ->
+                            %% Backward compat: actors using beamtalk_actor:handle_call/3 directly
+                            %% (rather than the generated handle_call) return values unwrapped.
+                            {DirectValue, Metadata#{outcome => ok}}
+                    end;
+                false ->
                     raise_actor_dead(Selector)
-            end;
-        false ->
+            end
+        end)
+    catch
+        exit:{noproc, _} ->
+            raise_actor_dead(Selector);
+        exit:{normal, _} ->
+            raise_actor_dead(Selector);
+        exit:{shutdown, _} ->
+            raise_actor_dead(Selector);
+        exit:{timeout, _} ->
+            raise_timeout(Selector);
+        exit:{_Reason, _} ->
+            %% Catch-all for other exit reasons: {shutdown, Term}, killed,
+            %% custom stop reasons, etc. All indicate the actor is unavailable.
             raise_actor_dead(Selector)
     end.
 
@@ -718,6 +742,32 @@ actor_dead_error(Selector) ->
         <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
     ),
     {error, Error}.
+
+%% @private
+%% @doc Wrap a function in telemetry:span/3 if telemetry is available, else run directly.
+%% BUnit tests don't load telemetry, so we must gracefully degrade.
+-spec maybe_span(list(), map(), fun(() -> {term(), map()})) -> term().
+maybe_span(EventPrefix, Metadata, Fun) ->
+    case erlang:function_exported(telemetry, span, 3) of
+        true ->
+            telemetry:span(EventPrefix, Metadata, Fun);
+        false ->
+            {Result, _UpdatedMeta} = Fun(),
+            Result
+    end.
+
+%% @private
+%% @doc Resolve actor class name via beamtalk_object_instances reverse lookup.
+%% Returns the class atom if found, or 'unknown' for non-Beamtalk PIDs.
+%% Uses ets:match on the bag table — single ETS read (~50-100ns).
+-spec lookup_class(pid()) -> atom().
+lookup_class(Pid) ->
+    try ets:match(beamtalk_instance_registry, {'$1', Pid}) of
+        [[Class] | _] -> Class;
+        [] -> unknown
+    catch
+        error:badarg -> unknown
+    end.
 
 %% @doc Spawn a lightweight watcher that monitors both the actor and future.
 %% BT-886: Closes the TOCTOU race in async_send — if the actor dies during
