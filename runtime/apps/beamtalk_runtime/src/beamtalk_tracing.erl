@@ -134,7 +134,8 @@ tracesFor(Actor, Selector) ->
     ).
 
 %% @doc Export trace events to a JSON file with optional filters.
-%% Opts is a map with optional keys: path, actor (pid), selector (atom), limit (integer).
+%% Opts is a map with optional keys: path, actor (pid), selector (atom), class,
+%% outcome, min_duration_ns, limit (integer).
 -spec exportTraces(map()) -> {ok, map()} | {error, term()}.
 exportTraces(Opts) ->
     call_trace_store_default(

@@ -111,17 +111,26 @@ build_trace_filter_opts(Params) ->
     Opts3 =
         case maps:get(<<"class">>, Params, undefined) of
             undefined -> Opts2;
-            ClassBin -> Opts2#{class => parse_selector(ClassBin)}
+            ClassBin -> Opts2#{class => parse_class(ClassBin)}
         end,
     Opts4 =
         case maps:get(<<"outcome">>, Params, undefined) of
             undefined -> Opts3;
-            OutcomeBin -> Opts3#{outcome => parse_selector(OutcomeBin)}
+            OutcomeBin -> Opts3#{outcome => parse_outcome(OutcomeBin)}
         end,
     case maps:get(<<"min_duration_ns">>, Params, undefined) of
         undefined -> Opts4;
-        MinNs when is_integer(MinNs) -> Opts4#{min_duration_ns => MinNs};
-        _ -> Opts4
+        MinNs when is_integer(MinNs), MinNs >= 0 -> Opts4#{min_duration_ns => MinNs};
+        BadNs ->
+            error(#beamtalk_error{
+                kind = invalid_argument,
+                class = 'Tracing',
+                message = iolist_to_binary(
+                    io_lib:format("Invalid min_duration_ns: ~p", [BadNs])
+                ),
+                hint = <<"min_duration_ns must be a non-negative integer (nanoseconds).">>,
+                details = #{}
+            })
     end.
 
 %% @private Get stats with optional actor filter.
@@ -179,6 +188,44 @@ parse_selector(SelectorBin) ->
                 details = #{}
             })
     end.
+
+%% @private Parse a class filter binary to an existing atom.
+%% Uses binary_to_existing_atom to avoid atom table exhaustion from user input.
+%% Raises a structured beamtalk_error if the class name is unknown.
+-spec parse_class(binary()) -> atom().
+parse_class(ClassBin) ->
+    try
+        binary_to_existing_atom(ClassBin, utf8)
+    catch
+        error:badarg ->
+            error(#beamtalk_error{
+                kind = invalid_argument,
+                class = 'Tracing',
+                message = iolist_to_binary(
+                    [<<"Unknown class: ">>, ClassBin]
+                ),
+                hint = <<"The class must match an existing actor class name.">>,
+                details = #{}
+            })
+    end.
+
+%% @private Parse an outcome filter binary to one of the valid outcome atoms.
+%% Valid outcomes: ok, error, timeout.
+%% Raises a structured beamtalk_error for invalid values.
+-spec parse_outcome(binary()) -> ok | error | timeout.
+parse_outcome(<<"ok">>) -> ok;
+parse_outcome(<<"error">>) -> error;
+parse_outcome(<<"timeout">>) -> timeout;
+parse_outcome(OutcomeBin) ->
+    error(#beamtalk_error{
+        kind = invalid_argument,
+        class = 'Tracing',
+        message = iolist_to_binary(
+            [<<"Invalid outcome: ">>, OutcomeBin]
+        ),
+        hint = <<"Valid outcomes are: ok, error, timeout.">>,
+        details = #{}
+    }).
 
 %%====================================================================
 %% Op descriptors for dynamic describe
