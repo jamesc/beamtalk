@@ -85,6 +85,27 @@ Object subclass: Actor
     spec := SupervisionSpec new withActorClass: self
     spec withRestart: policy
 
+  // === Timeout proxy ===
+
+  /// Wrap this actor with a custom message timeout.
+  ///
+  /// Returns a TimeoutProxy that forwards all messages to this actor using
+  /// the given timeout (in milliseconds, or `#infinity`) for `gen_server:call`.
+  /// The default OTP timeout is 5000ms.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// slowDb := db withTimeout: 30000
+  /// slowDb query: sql              // forwarded with 30s timeout
+  ///
+  /// (db withTimeout: #infinity) query: sql   // infinite timeout
+  /// ```
+  withTimeout: ms =>
+    proxy := TimeoutProxy spawn
+    proxy setTarget: self
+    proxy setTimeoutMs: ms
+    proxy
+
   // === Lifecycle hooks ===
 
   /// Optional lifecycle hook called automatically after spawn.

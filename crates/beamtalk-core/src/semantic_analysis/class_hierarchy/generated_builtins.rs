@@ -89,6 +89,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "TestRunner"
             | "ThrowError"
             | "Time"
+            | "TimeoutProxy"
             | "Timer"
             | "Tracing"
             | "TranscriptStream"
@@ -123,6 +124,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
+                MethodInfo { selector: "withTimeout:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Wrap this actor with a custom message timeout.\n\nReturns a TimeoutProxy that forwards all messages to this actor using\nthe given timeout (in milliseconds, or `#infinity`) for `gen_server:call`.\nThe default OTP timeout is 5000ms.\n\n## Examples\n```beamtalk\nslowDb := db withTimeout: 30000\nslowDb query: sql              // forwarded with 30s timeout\n\n(db withTimeout: #infinity) query: sql   // infinite timeout\n```".into()) },
                 MethodInfo { selector: "initialize".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Optional lifecycle hook called automatically after spawn.\n\nOverride in subclasses to perform setup that goes beyond `state:` defaults,\nsuch as opening resources or computing derived state. Called synchronously\nbefore the spawned object is returned to the caller.\n\nIf `initialize` raises an error, the spawn fails with a catchable\n`InstantiationError`. Under a supervisor, the child start fails and the\nsupervisor applies its restart strategy.\n\n## Examples\n```beamtalk\nActor subclass: Stack\n  state: items = nil\n  initialize => self.items := #()\n```".into()) },
                 MethodInfo { selector: "terminate:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Optional lifecycle hook called when the actor is shutting down.\n\nOverride in subclasses to perform cleanup such as closing resources,\nflushing buffers, or notifying dependents. Called synchronously during\ngraceful shutdown (`stop`). The `reason` parameter is a Symbol indicating\nwhy the actor is stopping (e.g., `#normal` for graceful stop).\n\nNot called when the actor is forcefully killed (`kill`).\nIf `terminate:` raises an error, shutdown proceeds anyway.\nActor state (`self.field`) is accessible during `terminate:`.\n\n## Examples\n```beamtalk\nActor subclass: Logger\n  state: logFile = nil\n  terminate: reason =>\n    self.logFile isNil ifFalse: [self.logFile close]\n```".into()) },
                 MethodInfo { selector: "delegate".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Delegate message dispatch to the backing Erlang module.\n\nThis method is a sentinel — non-native Actors do not have a backing\nErlang module, so calling delegate raises an Error at runtime.\nNative Actors (declared with `native:` in ClassBuilder) override this\nintrinsic via the compiler's codegen phase.\n\n## Examples\n```beamtalk\ncounter delegate   // => ERROR: delegate called on a non-native Actor\n```".into()) },
@@ -1748,6 +1750,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "class".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Return the class of the receiver.\n\n## Examples\n```beamtalk\n42 class            // => Integer\n\"hello\" class       // => String\n```".into()) },
                 MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None, None], doc: Some("Handle messages the receiver does not understand. Override for custom dispatch.\n\n## Examples\n```beamtalk\n42 unknownMessage   // => ERROR: does_not_understand\n```".into()) },
                 MethodInfo { selector: "perform:withArguments:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None, None], doc: Some("Send a message dynamically with an arguments list.\n\n## Examples\n```beamtalk\n42 perform: #abs withArguments: #()   // => 42\n```".into()) },
+                MethodInfo { selector: "perform:withArguments:timeout:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None, None, None], doc: Some("Send a message dynamically with an arguments list and explicit timeout.\n\nThe timeout (in milliseconds or `#infinity`) applies to the gen_server:call\nwhen the receiver is an actor. For value types, timeout is ignored.\n\n## Examples\n```beamtalk\nactor perform: #query withArguments: #(sql) timeout: 30000\n```".into()) },
             ],
             class_methods: vec![],
             class_variables: vec![],
@@ -2518,6 +2521,31 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "nowMs".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in milliseconds since the Unix epoch.\n\nWraps `erlang:system_time(millisecond)`.\n\n## Examples\n```beamtalk\nTime nowMs   // => _\n```".into()) },
                 MethodInfo { selector: "nowUs".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in microseconds since the Unix epoch.\n\nWraps `erlang:system_time(microsecond)`.\n\n## Examples\n```beamtalk\nTime nowUs   // => _\n```".into()) },
             ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "TimeoutProxy".into(),
+        ClassInfo {
+            name: "TimeoutProxy".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec!["target".into(), "timeoutMs".into()],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "setTarget:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Set the target actor to forward messages to.".into()) },
+                MethodInfo { selector: "setTimeoutMs:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Set the timeout in milliseconds (or `#infinity`).".into()) },
+                MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![None, None], doc: Some("Forward all unknown messages to the target with the configured timeout.".into()) },
+            ],
+            class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],

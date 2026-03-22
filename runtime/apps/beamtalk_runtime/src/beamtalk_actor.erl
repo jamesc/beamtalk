@@ -161,7 +161,7 @@
 -export([await_initialize/1, safe_spawn/2]).
 
 %% Message send helpers (lifecycle-aware wrappers)
--export([async_send/4, sync_send/3, cast_send/3]).
+-export([async_send/4, sync_send/3, sync_send/4, cast_send/3]).
 
 %% Propagated context (ADR 0069 Phase 2b)
 -export([get_propagated_ctx/0, restore_propagated_ctx/1]).
@@ -680,6 +680,47 @@ sync_send(ActorPid, Selector, Args) ->
             raise_actor_dead(Selector)
     end.
 
+%% @doc Sync-send with explicit timeout (BT-1190).
+%%
+%% Same as sync_send/3 but passes the given Timeout to gen_server:call/3.
+%% Timeout is a non-negative integer (milliseconds) or the atom `infinity`.
+%% Used by TimeoutProxy to forward messages with a custom timeout.
+-spec sync_send(pid(), atom(), list(), timeout()) -> term().
+sync_send(ActorPid, Selector, Args, Timeout) ->
+    Class = lookup_class(ActorPid),
+    Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
+    try
+        maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
+            case is_process_alive(ActorPid) of
+                true ->
+                    PropCtx = get_propagated_ctx(),
+                    case gen_server:call(ActorPid, {Selector, Args, PropCtx}, Timeout) of
+                        {ok, Result} ->
+                            {Result, Metadata#{outcome => ok}};
+                        {error, {_ErlType, ErrorValue}} ->
+                            error(beamtalk_exception_handler:ensure_wrapped(ErrorValue));
+                        {error, Error} ->
+                            error(beamtalk_exception_handler:ensure_wrapped(Error));
+                        DirectValue ->
+                            {DirectValue, Metadata#{outcome => ok}}
+                    end;
+                false ->
+                    raise_actor_dead(Selector)
+            end
+        end)
+    catch
+        exit:{noproc, _} ->
+            raise_actor_dead(Selector);
+        exit:{normal, _} ->
+            raise_actor_dead(Selector);
+        exit:{shutdown, _} ->
+            raise_actor_dead(Selector);
+        exit:{timeout, _} ->
+            raise_timeout(Selector);
+        exit:{_Reason, _} ->
+            raise_actor_dead(Selector)
+    end.
+
 %% @private
 %% @doc Raise a structured actor_dead error as an Erlang exception.
 %%
@@ -1147,6 +1188,29 @@ dispatch(Selector, Args, Self, State) ->
                 false ->
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error = beamtalk_error:new(type_error, ClassName, 'perform:withArguments:'),
+                    {error, Error, State}
+            end;
+        'perform:withArguments:timeout:' when length(Args) =:= 3 ->
+            %% BT-1190: Dynamic message send with explicit timeout.
+            %% For self-sends (inside an actor's handle_call), the timeout is
+            %% irrelevant — just dispatch locally like perform:withArguments:.
+            %% Cross-actor sends are intercepted in beamtalk_message_dispatch:send/3
+            %% which rewrites to send/4 with the custom timeout.
+            [TargetSelector, ArgList, Timeout] = Args,
+            case
+                is_atom(TargetSelector) andalso is_list(ArgList) andalso
+                    (is_integer(Timeout) andalso Timeout >= 0 orelse Timeout =:= infinity)
+            of
+                true ->
+                    dispatch(TargetSelector, ArgList, Self, State);
+                false ->
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
+                    Error = beamtalk_error:new(
+                        type_error,
+                        ClassName,
+                        'perform:withArguments:timeout:',
+                        <<"Expected atom selector, list of arguments, and non-negative integer or #infinity timeout">>
+                    ),
                     {error, Error, State}
             end;
         _ ->

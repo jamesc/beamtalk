@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// TimeoutProxy — Transparent forwarding proxy with configurable timeout.
+///
+/// Wraps an actor reference and forwards all messages to it using a custom
+/// timeout for `gen_server:call`. Created via `Actor >> withTimeout:`.
+///
+/// ## Examples
+/// ```beamtalk
+/// slowDb := db withTimeout: 30000
+/// slowDb query: sql              // forwarded with 30s timeout
+///
+/// // One-shot usage
+/// (db withTimeout: 30000) query: sql
+///
+/// // Infinite timeout (use with care)
+/// (db withTimeout: #infinity) query: sql
+/// ```
+///
+/// ## Design
+///
+/// Uses `doesNotUnderstand:args:` to intercept all messages and forward them
+/// via `perform:withArguments:timeout:`, which is intercepted at the dispatch
+/// level to apply the custom timeout to the `gen_server:call`.
+///
+/// Cast sends (`!`) are forwarded without timeout (fire-and-forget).
+///
+/// @see Actor#withTimeout:
+Actor subclass: TimeoutProxy
+  state: target = nil
+  state: timeoutMs = 5000
+
+  /// Set the target actor to forward messages to.
+  setTarget: newTarget => self.target := newTarget
+
+  /// Set the timeout in milliseconds (or `#infinity`).
+  setTimeoutMs: ms => self.timeoutMs := ms
+
+  /// Forward all unknown messages to the target with the configured timeout.
+  doesNotUnderstand: selector args: arguments =>
+    self.target
+      perform: selector
+      withArguments: arguments
+      timeout: self.timeoutMs
