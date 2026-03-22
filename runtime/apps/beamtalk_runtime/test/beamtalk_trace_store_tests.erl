@@ -52,15 +52,15 @@ direct_insert_and_query_test_() ->
 
                 %% Check stats
                 Stats = beamtalk_trace_store:get_stats(),
-                PidKey = pid_to_list(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
                 ?assertMatch(#{PidKey := _}, Stats),
                 PidStats = maps:get(PidKey, Stats),
-                Methods = maps:get(methods, PidStats),
-                IncStats = maps:get("increment", Methods),
-                ?assertEqual(1, maps:get(calls, IncStats)),
-                ?assertEqual(1, maps:get(ok, IncStats)),
-                ?assertEqual(0, maps:get(errors, IncStats)),
-                ?assertEqual(5000, maps:get(total_duration_ns, IncStats))
+                Methods = maps:get(<<"methods">>, PidStats),
+                IncStats = maps:get(<<"increment">>, Methods),
+                ?assertEqual(1, maps:get(<<"calls">>, IncStats)),
+                ?assertEqual(1, maps:get(<<"ok">>, IncStats)),
+                ?assertEqual(0, maps:get(<<"errors">>, IncStats)),
+                ?assertEqual(5000, maps:get(<<"total_duration_ns">>, IncStats))
             end)
         ]
     end}.
@@ -96,7 +96,7 @@ trace_event_recording_test_() ->
 
                 %% Newest first
                 [First | _] = Traces,
-                ?assertEqual(decrement, maps:get(selector, First)),
+                ?assertEqual(<<"decrement">>, maps:get(<<"selector">>, First)),
 
                 %% Filter by pid
                 TracesForPid = beamtalk_trace_store:get_traces(TestPid),
@@ -105,7 +105,7 @@ trace_event_recording_test_() ->
                 %% Filter by pid + selector
                 TracesForSel = beamtalk_trace_store:get_traces(TestPid, increment),
                 ?assertEqual(1, length(TracesForSel)),
-                ?assertEqual(increment, maps:get(selector, hd(TracesForSel)))
+                ?assertEqual(<<"increment">>, maps:get(<<"selector">>, hd(TracesForSel)))
             end)
         ]
     end}.
@@ -169,15 +169,15 @@ counters_aggregates_test_() ->
 
                 %% Check aggregated stats
                 Stats = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = pid_to_list(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats = maps:get(PidKey, Stats),
-                IncStats = maps:get("increment", maps:get(methods, PidStats)),
+                IncStats = maps:get(<<"increment">>, maps:get(<<"methods">>, PidStats)),
 
-                ?assertEqual(3, maps:get(calls, IncStats)),
-                ?assertEqual(2, maps:get(ok, IncStats)),
-                ?assertEqual(1, maps:get(errors, IncStats)),
-                ?assertEqual(6000, maps:get(total_duration_ns, IncStats)),
-                ?assertEqual(2000, maps:get(avg_duration_ns, IncStats))
+                ?assertEqual(3, maps:get(<<"calls">>, IncStats)),
+                ?assertEqual(2, maps:get(<<"ok">>, IncStats)),
+                ?assertEqual(1, maps:get(<<"errors">>, IncStats)),
+                ?assertEqual(6000, maps:get(<<"total_duration_ns">>, IncStats)),
+                ?assertEqual(2000, maps:get(<<"avg_duration_ns">>, IncStats))
             end)
         ]
     end}.
@@ -258,7 +258,7 @@ slow_methods_test_() ->
                 Result = beamtalk_trace_store:slow_methods(2),
                 ?assertEqual(2, length(Result)),
                 [Slowest | _] = Result,
-                ?assertEqual(slow, maps:get(selector, Slowest))
+                ?assertEqual(slow, maps:get(<<"selector">>, Slowest))
             end)
         ]
     end}.
@@ -284,7 +284,7 @@ hot_methods_test_() ->
 
                 Result = beamtalk_trace_store:hot_methods(1),
                 ?assertEqual(1, length(Result)),
-                ?assertEqual(popular, maps:get(selector, hd(Result)))
+                ?assertEqual(popular, maps:get(<<"selector">>, hd(Result)))
             end)
         ]
     end}.
@@ -307,7 +307,7 @@ error_methods_test_() ->
 
                 Result = beamtalk_trace_store:error_methods(1),
                 ?assertEqual(1, length(Result)),
-                ?assertEqual(flaky, maps:get(selector, hd(Result)))
+                ?assertEqual(flaky, maps:get(<<"selector">>, hd(Result)))
             end)
         ]
     end}.
@@ -323,19 +323,19 @@ actor_health_test_() ->
                 %% Health of a live process
                 TestPid = self(),
                 Health = beamtalk_trace_store:actor_health(TestPid),
-                ?assertEqual(TestPid, maps:get(pid, Health)),
-                ?assertNotEqual(dead, maps:get(status, Health)),
-                ?assert(is_integer(maps:get(queue_depth, Health))),
-                ?assert(is_integer(maps:get(memory_kb, Health))),
-                ?assert(is_integer(maps:get(reductions, Health)))
+                ?assertEqual(list_to_binary(pid_to_list(TestPid)), maps:get(<<"pid">>, Health)),
+                ?assertNotEqual(dead, maps:get(<<"status">>, Health)),
+                ?assert(is_integer(maps:get(<<"queue_depth">>, Health))),
+                ?assert(is_integer(maps:get(<<"memory_kb">>, Health))),
+                ?assert(is_integer(maps:get(<<"reductions">>, Health)))
             end),
             ?_test(begin
                 %% Health of a dead process
                 DeadPid = spawn(fun() -> ok end),
                 timer:sleep(50),
                 Health = beamtalk_trace_store:actor_health(DeadPid),
-                ?assertEqual(dead, maps:get(status, Health)),
-                ?assertEqual(<<"process not alive">>, maps:get(error, Health))
+                ?assertEqual(dead, maps:get(<<"status">>, Health)),
+                ?assertEqual(<<"process not alive">>, maps:get(<<"error">>, Health))
             end)
         ]
     end}.
@@ -349,13 +349,13 @@ system_health_test_() ->
         [
             ?_test(begin
                 Health = beamtalk_trace_store:system_health(),
-                ?assert(is_integer(maps:get(scheduler_count, Health))),
-                ?assert(maps:get(scheduler_count, Health) > 0),
-                ?assert(is_integer(maps:get(process_count, Health))),
-                ?assert(is_map(maps:get(memory, Health))),
-                Memory = maps:get(memory, Health),
-                ?assert(is_integer(maps:get(total_mb, Memory))),
-                ?assert(is_integer(maps:get(run_queue, Health)))
+                ?assert(is_integer(maps:get(<<"scheduler_count">>, Health))),
+                ?assert(maps:get(<<"scheduler_count">>, Health) > 0),
+                ?assert(is_integer(maps:get(<<"process_count">>, Health))),
+                ?assert(is_map(maps:get(<<"memory">>, Health))),
+                Memory = maps:get(<<"memory">>, Health),
+                ?assert(is_integer(maps:get(<<"total_mb">>, Memory))),
+                ?assert(is_integer(maps:get(<<"run_queue">>, Health)))
             end)
         ]
     end}.
@@ -385,8 +385,9 @@ bottlenecks_test_() ->
                 Result = beamtalk_trace_store:bottlenecks(10),
                 ?assert(is_list(Result)),
                 %% Our spawned process should be in the list
-                Pids = [maps:get(actor, R) || R <- Result],
-                ?assert(lists:member(Pid, Pids)),
+                PidBin = list_to_binary(pid_to_list(Pid)),
+                Pids = [maps:get(<<"actor">>, R) || R <- Result],
+                ?assert(lists:member(PidBin, Pids)),
 
                 Pid ! stop
             end)
@@ -421,7 +422,7 @@ telemetry_dispatch_stop_handler_test_() ->
 
                 %% Verify aggregate was recorded
                 Stats = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = pid_to_list(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
                 ?assertMatch(#{PidKey := _}, Stats)
             end)
         ]
@@ -456,10 +457,10 @@ telemetry_dispatch_exception_handler_test_() ->
 
                 %% Verify error was recorded
                 Stats = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = pid_to_list(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats = maps:get(PidKey, Stats),
-                MethodStats = maps:get("badmethod", maps:get(methods, PidStats)),
-                ?assertEqual(1, maps:get(errors, MethodStats))
+                MethodStats = maps:get(<<"badmethod">>, maps:get(<<"methods">>, PidStats)),
+                ?assertEqual(1, maps:get(<<"errors">>, MethodStats))
             end)
         ]
     end}.
@@ -551,7 +552,7 @@ vm_measurements_handler_test_() ->
 
                 %% System health should include the VM stats
                 Health = beamtalk_trace_store:system_health(),
-                VmStats = maps:get(vm_stats, Health),
+                VmStats = maps:get(<<"vm_stats">>, Health),
                 ?assert(is_map(VmStats))
             end)
         ]
@@ -575,7 +576,7 @@ wall_clock_timestamp_test_() ->
                 After = erlang:system_time(microsecond),
 
                 [Trace] = beamtalk_trace_store:get_traces(),
-                Ts = maps:get(timestamp_us, Trace),
+                Ts = maps:get(<<"timestamp_us">>, Trace),
                 %% Wall-clock timestamp should be between Before and After
                 ?assert(Ts >= Before),
                 ?assert(Ts =< After),
@@ -606,9 +607,9 @@ serialized_counter_grow_test_() ->
                 ),
                 %% Verify the counters grew — stats should have all 1010 methods
                 Stats = beamtalk_trace_store:get_stats(),
-                PidKey = pid_to_list(TestPid),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats = maps:get(PidKey, Stats),
-                Methods = maps:get(methods, PidStats),
+                Methods = maps:get(<<"methods">>, PidStats),
                 ?assert(maps:size(Methods) >= 1010)
             end)
         ]

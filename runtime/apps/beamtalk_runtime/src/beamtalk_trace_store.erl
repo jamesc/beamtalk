@@ -51,6 +51,8 @@
     %% Configuration
     max_events/0,
     max_events/1,
+    %% Health check
+    telemetry_attached/0,
     %% Telemetry handler callbacks
     handle_dispatch_stop/4,
     handle_dispatch_exception/4,
@@ -235,6 +237,21 @@ max_events() ->
 max_events(Size) when is_integer(Size), Size > 0 ->
     gen_server:call(?MODULE, {max_events, Size}).
 
+%% @doc Check whether telemetry handlers are attached to actor dispatch events.
+%% Returns true if the trace store's telemetry handlers are active, false if
+%% telemetry is unavailable or handlers failed to attach.
+-spec telemetry_attached() -> boolean().
+telemetry_attached() ->
+    try
+        Handlers = telemetry:list_handlers([beamtalk, actor, dispatch, stop]),
+        lists:any(
+            fun(#{id := Id}) -> Id =:= beamtalk_trace_store_dispatch_stop end,
+            Handlers
+        )
+    catch
+        error:undef -> false
+    end.
+
 %%====================================================================
 %% Telemetry handler callbacks
 %%====================================================================
@@ -343,28 +360,28 @@ handle_call({get_traces, Pid, Selector}, _From, State) ->
     Result = do_get_traces(Pid, Selector),
     {reply, Result, State};
 handle_call(get_stats, _From, State) ->
-    Result = do_get_stats(undefined),
+    Result = to_binary_keys(do_get_stats(undefined)),
     {reply, Result, State};
 handle_call({get_stats, Pid}, _From, State) ->
-    Result = do_get_stats(Pid),
+    Result = to_binary_keys(do_get_stats(Pid)),
     {reply, Result, State};
 handle_call({slow_methods, Limit}, _From, State) ->
-    Result = do_slow_methods(Limit),
+    Result = [to_binary_keys(M) || M <- do_slow_methods(Limit)],
     {reply, Result, State};
 handle_call({hot_methods, Limit}, _From, State) ->
-    Result = do_hot_methods(Limit),
+    Result = [to_binary_keys(M) || M <- do_hot_methods(Limit)],
     {reply, Result, State};
 handle_call({error_methods, Limit}, _From, State) ->
-    Result = do_error_methods(Limit),
+    Result = [to_binary_keys(M) || M <- do_error_methods(Limit)],
     {reply, Result, State};
 handle_call({bottlenecks, Limit}, _From, State) ->
-    Result = do_bottlenecks(Limit),
+    Result = [to_binary_keys(M) || M <- do_bottlenecks(Limit)],
     {reply, Result, State};
 handle_call({actor_health, Pid}, _From, State) ->
-    Result = do_actor_health(Pid),
+    Result = to_binary_keys(do_actor_health(Pid)),
     {reply, Result, State};
 handle_call(system_health, _From, State) ->
-    Result = do_system_health(State),
+    Result = to_binary_keys(do_system_health(State)),
     {reply, Result, State};
 handle_call({max_events, Size}, _From, State) ->
     persistent_term:put(?PT_MAX_EVENTS, Size),
@@ -677,13 +694,13 @@ trace_event_to_map({
     WallClockUs
 }) ->
     Base = #{
-        timestamp_us => WallClockUs,
-        actor => Pid,
-        class => Class,
-        selector => Selector,
-        mode => Mode,
-        duration_us => DurationNs div 1000,
-        outcome => Outcome
+        <<"timestamp_us">> => WallClockUs,
+        <<"actor">> => list_to_binary(pid_to_list(Pid)),
+        <<"class">> => atom_to_binary(Class, utf8),
+        <<"selector">> => atom_to_binary(Selector, utf8),
+        <<"mode">> => atom_to_binary(Mode, utf8),
+        <<"duration_us">> => DurationNs div 1000,
+        <<"outcome">> => atom_to_binary(Outcome, utf8)
     },
     case maps:size(Metadata) of
         0 -> Base;
@@ -694,13 +711,13 @@ trace_event_to_map({
 }) ->
     %% Legacy format (pre-BT-1620): fall back to monotonic-derived timestamp
     Base = #{
-        timestamp_us => MonotonicNs div 1000,
-        actor => Pid,
-        class => Class,
-        selector => Selector,
-        mode => Mode,
-        duration_us => DurationNs div 1000,
-        outcome => Outcome
+        <<"timestamp_us">> => MonotonicNs div 1000,
+        <<"actor">> => list_to_binary(pid_to_list(Pid)),
+        <<"class">> => atom_to_binary(Class, utf8),
+        <<"selector">> => atom_to_binary(Selector, utf8),
+        <<"mode">> => atom_to_binary(Mode, utf8),
+        <<"duration_us">> => DurationNs div 1000,
+        <<"outcome">> => atom_to_binary(Outcome, utf8)
     },
     case maps:size(Metadata) of
         0 -> Base;
@@ -714,10 +731,14 @@ do_get_stats(FilterPid) ->
             case FilterPid =:= undefined orelse Pid =:= FilterPid of
                 true ->
                     Stats = read_counter_stats(CounterRef, SlotBase),
-                    PidKey = pid_to_list(Pid),
-                    PidStats = maps:get(PidKey, Acc, #{methods => #{}}),
+                    PidKey = list_to_binary(pid_to_list(Pid)),
+                    PidStats =
+                        case maps:find(PidKey, Acc) of
+                            {ok, Existing} -> Existing;
+                            error -> #{class => lookup_class_for_pid(Pid), methods => #{}}
+                        end,
                     Methods = maps:get(methods, PidStats),
-                    SelKey = atom_to_list(Selector),
+                    SelKey = atom_to_binary(Selector, utf8),
                     NewMethods = maps:put(SelKey, Stats, Methods),
                     maps:put(PidKey, PidStats#{methods => NewMethods}, Acc);
                 false ->
@@ -754,7 +775,14 @@ collect_method_stats() ->
     ets:foldl(
         fun({{Pid, Selector}, CounterRef, SlotBase}, Acc) ->
             Stats = read_counter_stats(CounterRef, SlotBase),
-            [Stats#{pid => Pid, selector => Selector} | Acc]
+            [
+                Stats#{
+                    pid => list_to_binary(pid_to_list(Pid)),
+                    class => lookup_class_for_pid(Pid),
+                    selector => Selector
+                }
+                | Acc
+            ]
         end,
         [],
         ?AGG_INDEX
@@ -822,7 +850,8 @@ do_bottlenecks(Limit) ->
                             QLen = proplists:get_value(message_queue_len, Info, 0),
                             Mem = proplists:get_value(memory, Info, 0),
                             {true, #{
-                                actor => Pid,
+                                actor => list_to_binary(pid_to_list(Pid)),
+                                class => lookup_class_for_pid(Pid),
                                 queue_depth => QLen,
                                 memory_kb => Mem div 1024
                             }}
@@ -849,10 +878,16 @@ do_actor_health(Pid) ->
                 ])
             of
                 undefined ->
-                    #{pid => Pid, status => dead, error => <<"process not alive">>};
+                    #{
+                        pid => list_to_binary(pid_to_list(Pid)),
+                        class => lookup_class_for_pid(Pid),
+                        status => dead,
+                        error => <<"process not alive">>
+                    };
                 Info ->
                     #{
-                        pid => Pid,
+                        pid => list_to_binary(pid_to_list(Pid)),
+                        class => lookup_class_for_pid(Pid),
                         status => proplists:get_value(status, Info),
                         queue_depth => proplists:get_value(message_queue_len, Info, 0),
                         memory_kb => proplists:get_value(memory, Info, 0) div 1024,
@@ -860,7 +895,12 @@ do_actor_health(Pid) ->
                     }
             end;
         false ->
-            #{pid => Pid, status => dead, error => <<"process not alive">>}
+            #{
+                pid => list_to_binary(pid_to_list(Pid)),
+                class => lookup_class_for_pid(Pid),
+                status => dead,
+                error => <<"process not alive">>
+            }
     end.
 
 %% @private VM overview.
@@ -879,6 +919,40 @@ do_system_health(State) ->
         run_queue => erlang:statistics(run_queue),
         vm_stats => State#state.vm_stats
     }.
+
+%% @private Convert atom map keys to binary for user-facing output.
+%% Nested maps are converted recursively.
+-spec to_binary_keys(map()) -> map().
+to_binary_keys(Map) when is_map(Map) ->
+    maps:fold(
+        fun(K, V, Acc) ->
+            BinKey =
+                case K of
+                    _ when is_atom(K) -> atom_to_binary(K, utf8);
+                    _ when is_binary(K) -> K;
+                    _ -> iolist_to_binary(io_lib:format("~p", [K]))
+                end,
+            BinVal =
+                case V of
+                    _ when is_map(V) -> to_binary_keys(V);
+                    _ -> V
+                end,
+            maps:put(BinKey, BinVal, Acc)
+        end,
+        #{},
+        Map
+    ).
+
+%% @private Resolve actor class name from pid via beamtalk_object_instances.
+%% Returns binary class name or <<"unknown">>.
+-spec lookup_class_for_pid(pid()) -> binary().
+lookup_class_for_pid(Pid) ->
+    try ets:match(beamtalk_instance_registry, {'$1', Pid}) of
+        [[Class] | _] -> atom_to_binary(Class, utf8);
+        [] -> <<"unknown">>
+    catch
+        error:badarg -> <<"unknown">>
+    end.
 
 %%====================================================================
 %% Internal: Clear
