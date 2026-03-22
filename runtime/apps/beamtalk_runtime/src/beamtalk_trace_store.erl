@@ -58,6 +58,7 @@
     %% Telemetry handler callbacks
     handle_dispatch_stop/4,
     handle_dispatch_exception/4,
+    handle_lifecycle_event/4,
     handle_vm_measurements/4
 ]).
 
@@ -298,6 +299,32 @@ handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config
     ok;
 handle_dispatch_exception(_EventName, _Measurements, _Metadata, _Config) ->
     ok.
+
+%% @doc Handler for [beamtalk, actor, lifecycle, *] events (BT-1629).
+%% Lifecycle events (start, stop, kill) are instantaneous — no duration.
+%% Recorded in the shared trace ring buffer with mode => lifecycle.
+-spec handle_lifecycle_event([atom()], map(), map(), map()) -> ok.
+handle_lifecycle_event(EventName, _Measurements, Metadata, _Config) ->
+    #{pid := Pid, class := Class} = Metadata,
+    %% Extract lifecycle action from event name: [beamtalk, actor, lifecycle, Action]
+    Action = lists:last(EventName),
+    %% Derive outcome from reason for stop events: normal/shutdown = ok, crash = error
+    Outcome = lifecycle_outcome(Action, Metadata),
+    %% Record aggregate stats with selector = lifecycle action (e.g., start, stop, kill)
+    record_dispatch(Pid, Action, 0, Outcome, lifecycle),
+    %% Record trace event with mode => lifecycle, duration 0 (instantaneous)
+    EventMeta = maps:without([pid, class], Metadata),
+    record_trace_event(Pid, Class, Action, lifecycle, 0, Outcome, EventMeta, stop),
+    ok.
+
+%% @private Derive outcome from lifecycle event action and metadata.
+%% For stop events, normal/shutdown exits are ok; anything else is an error.
+%% Start and kill events are always ok.
+lifecycle_outcome(stop, #{reason := normal}) -> ok;
+lifecycle_outcome(stop, #{reason := shutdown}) -> ok;
+lifecycle_outcome(stop, #{reason := {shutdown, _}}) -> ok;
+lifecycle_outcome(stop, #{reason := _}) -> error;
+lifecycle_outcome(_, _) -> ok.
 
 %% @doc Handler for telemetry_poller VM measurement events.
 -spec handle_vm_measurements([atom()], map(), map(), map()) -> ok.
@@ -618,6 +645,25 @@ attach_telemetry_handlers() ->
         fun ?MODULE:handle_dispatch_exception/4,
         #{}
     ),
+    %% BT-1629: Lifecycle event handlers (start, stop, kill)
+    ok = telemetry:attach(
+        beamtalk_trace_store_lifecycle_start,
+        [beamtalk, actor, lifecycle, start],
+        fun ?MODULE:handle_lifecycle_event/4,
+        #{}
+    ),
+    ok = telemetry:attach(
+        beamtalk_trace_store_lifecycle_stop,
+        [beamtalk, actor, lifecycle, stop],
+        fun ?MODULE:handle_lifecycle_event/4,
+        #{}
+    ),
+    ok = telemetry:attach(
+        beamtalk_trace_store_lifecycle_kill,
+        [beamtalk, actor, lifecycle, kill],
+        fun ?MODULE:handle_lifecycle_event/4,
+        #{}
+    ),
     ok = telemetry:attach(
         beamtalk_trace_store_vm_measurements,
         [vm, memory],
@@ -631,6 +677,10 @@ detach_telemetry_handlers() ->
     try
         telemetry:detach(beamtalk_trace_store_dispatch_stop),
         telemetry:detach(beamtalk_trace_store_dispatch_exception),
+        %% BT-1629: Lifecycle event handlers
+        telemetry:detach(beamtalk_trace_store_lifecycle_start),
+        telemetry:detach(beamtalk_trace_store_lifecycle_stop),
+        telemetry:detach(beamtalk_trace_store_lifecycle_kill),
         telemetry:detach(beamtalk_trace_store_vm_measurements)
     catch
         error:undef -> ok
