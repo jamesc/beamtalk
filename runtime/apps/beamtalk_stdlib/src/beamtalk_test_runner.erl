@@ -526,11 +526,23 @@ run_concurrent_loop(Remaining, Ref, Self, Expected, Acc) ->
             end
     end.
 
-%% @doc Spawn a single worker process to run a test class.
+%% @doc Spawn a worker process to run a test class.
+%%
+%% The worker catches all exceptions so a crash in one test class
+%% doesn't take down the runner — it synthesizes a failed result instead.
 -spec spawn_class_worker(atom(), pid(), reference()) -> pid().
 spawn_class_worker(ClassName, Parent, Ref) ->
-    spawn_link(fun() ->
-        Result = run_class_by_name(ClassName),
+    spawn(fun() ->
+        Result = try
+            run_class_by_name(ClassName)
+        catch
+            Class:Reason:ST ->
+                ErrMsg = iolist_to_binary(
+                    io_lib:format("Test class crashed: ~p:~p~n~p", [Class, Reason, ST])
+                ),
+                make_test_result(1, 0, 1, 0, 0.0,
+                    [#{name => ClassName, status => fail, error => ErrMsg}])
+        end,
         Parent ! {Ref, Result}
     end).
 

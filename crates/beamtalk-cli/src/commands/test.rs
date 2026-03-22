@@ -764,8 +764,8 @@ fn run_eunit_tests(
                  MaxJobs = {max_jobs_expr}, \
                  Self = self(), \
                  Ref = make_ref(), \
-                 RunOne = fun(M) -> spawn_link(fun() -> \
-                   Res = eunit:test(M, []), \
+                 RunOne = fun(M) -> spawn(fun() -> \
+                   Res = try eunit:test(M, []) catch _:_ -> error end, \
                    Self ! {{Ref, M, Res}} \
                  end) end, \
                  {{Initial, Rest}} = case length(ConcModules) > MaxJobs of \
