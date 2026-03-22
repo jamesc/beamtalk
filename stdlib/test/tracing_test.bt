@@ -93,7 +93,7 @@ TestCase subclass: TracingTest
     c := Counter spawn
     health := Tracing healthFor: c
     // Should have status key (waiting or running, not dead)
-    self deny: ((health at: "status") == "dead")
+    self deny: ((health at: "status") == #dead)
     // Should have queue_depth key
     self assert: ((health at: "queue_depth") >= 0)
     // Should have memory_kb key

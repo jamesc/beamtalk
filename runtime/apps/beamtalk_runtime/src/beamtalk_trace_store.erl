@@ -732,8 +732,11 @@ do_get_stats(FilterPid) ->
                 true ->
                     Stats = read_counter_stats(CounterRef, SlotBase),
                     PidKey = list_to_binary(pid_to_list(Pid)),
-                    ClassName = lookup_class_for_pid(Pid),
-                    PidStats = maps:get(PidKey, Acc, #{class => ClassName, methods => #{}}),
+                    PidStats =
+                        case maps:find(PidKey, Acc) of
+                            {ok, Existing} -> Existing;
+                            error -> #{class => lookup_class_for_pid(Pid), methods => #{}}
+                        end,
                     Methods = maps:get(methods, PidStats),
                     SelKey = atom_to_binary(Selector, utf8),
                     NewMethods = maps:put(SelKey, Stats, Methods),
@@ -877,6 +880,7 @@ do_actor_health(Pid) ->
                 undefined ->
                     #{
                         pid => list_to_binary(pid_to_list(Pid)),
+                        class => lookup_class_for_pid(Pid),
                         status => dead,
                         error => <<"process not alive">>
                     };
@@ -893,6 +897,7 @@ do_actor_health(Pid) ->
         false ->
             #{
                 pid => list_to_binary(pid_to_list(Pid)),
+                class => lookup_class_for_pid(Pid),
                 status => dead,
                 error => <<"process not alive">>
             }

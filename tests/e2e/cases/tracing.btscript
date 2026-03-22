@@ -147,8 +147,9 @@ health := Tracing healthFor: c
 health at: "class"
 // => Counter
 
-health at: "status"
-// => waiting
+// Status should not be dead (could be waiting, running, etc.)
+(health at: "status") == #dead
+// => false
 
 // ---------------------------------------------------------------------------
 // systemHealth returns VM info

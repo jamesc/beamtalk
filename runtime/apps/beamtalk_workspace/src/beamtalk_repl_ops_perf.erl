@@ -7,6 +7,7 @@
 %%%
 %%% Provides REPL protocol ops for the MCP tracing workflow:
 %%% - enable-tracing: start trace event capture
+%%% - disable-tracing: stop trace event capture
 %%% - get-traces: query trace events with filtering
 %%% - actor-stats: query aggregate actor statistics
 %%%
@@ -131,7 +132,8 @@ describe_ops() ->
         <<"disable-tracing">> => #{<<"params">> => []},
         <<"get-traces">> => #{
             <<"params">> => [],
-            <<"optional">> => [<<"actor">>, <<"selector">>, <<"limit">>]
+            <<"optional">> => [<<"actor">>, <<"limit">>],
+            <<"notes">> => <<"selector requires actor to be set">>
         },
         <<"actor-stats">> => #{
             <<"params">> => [],
