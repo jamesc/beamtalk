@@ -232,9 +232,11 @@ class_method_extension_conforms_test() ->
     ExtFun = fun(_Args, _Self) -> ok end,
     beamtalk_extensions:register('TestExtClass class', 'fromString:', ExtFun, test),
     %% Verify conformance — class has no process but extension satisfies class method
-    ?assert(beamtalk_protocol_registry:conforms_to('TestExtClass', 'Parseable')),
-    %% Cleanup
-    ets:delete(beamtalk_extensions, {'TestExtClass class', 'fromString:'}).
+    try
+        ?assert(beamtalk_protocol_registry:conforms_to('TestExtClass', 'Parseable'))
+    after
+        ets:delete(beamtalk_extensions, {'TestExtClass class', 'fromString:'})
+    end.
 
 %% @doc Protocol with class method requirement NOT satisfied (no extension, no process)
 %% should report non-conformance.
