@@ -53,6 +53,8 @@ pub(crate) struct TestCaseClass {
     pub(crate) has_setup_once: bool,
     /// Whether a `tearDownOnce` method is defined (BT-1549).
     pub(crate) has_teardown_once: bool,
+    /// Whether `serial => true` is declared (BT-1624).
+    pub(crate) is_serial: bool,
 }
 
 /// Discover `TestCase` subclasses in a `.bt` file by parsing the AST.
@@ -125,6 +127,12 @@ pub(crate) fn discover_test_classes(
             }
         }
 
+        // Check for `class serial => true` in class methods (BT-1624)
+        let is_serial = class
+            .class_methods
+            .iter()
+            .any(|m| m.selector.name() == "serial");
+
         if !test_methods.is_empty() {
             test_classes.push(TestCaseClass {
                 class_name,
@@ -135,6 +143,7 @@ pub(crate) fn discover_test_classes(
                 has_teardown,
                 has_setup_once,
                 has_teardown_once,
+                is_serial,
             });
         }
     }
@@ -623,15 +632,21 @@ struct EunitResult {
 /// Run all `EUnit` test wrapper modules in a single BEAM process.
 #[allow(clippy::too_many_lines)] // test orchestration: bootstrap, load modules, run, parse results
 fn run_eunit_tests(
-    test_module_names: &[&str],
+    concurrent_modules: &[&str],
+    serial_modules: &[&str],
     fixture_modules: &[String],
     package_modules: &[String],
     build_dir: &Utf8Path,
     package_ebin_dirs: &[Utf8PathBuf],
+    jobs: usize,
 ) -> Result<EunitResult> {
+    let total_modules = concurrent_modules.len() + serial_modules.len();
     debug!(
-        "Running {} EUnit modules in single process",
-        test_module_names.len()
+        "Running {} EUnit modules ({} concurrent, {} serial, jobs={})",
+        total_modules,
+        concurrent_modules.len(),
+        serial_modules.len(),
+        jobs
     );
 
     let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()
@@ -639,7 +654,23 @@ fn run_eunit_tests(
     let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
     let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
-    let module_list: String = test_module_names
+    // All modules (concurrent + serial) for sequential mode
+    let all_modules: Vec<&str> = concurrent_modules
+        .iter()
+        .chain(serial_modules.iter())
+        .copied()
+        .collect();
+    let all_module_list: String = all_modules
+        .iter()
+        .map(|m| format!("'{m}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let concurrent_module_list: String = concurrent_modules
+        .iter()
+        .map(|m| format!("'{m}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let serial_module_list: String = serial_modules
         .iter()
         .map(|m| format!("'{m}'"))
         .collect::<Vec<_>>()
@@ -669,26 +700,101 @@ fn run_eunit_tests(
             + ", "
     };
 
-    let eval_cmd = format!(
-        "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
-         {package_load_cmd}\
-         {fixture_load_cmd}\
-         Modules = [{module_list}], \
-         Failed = lists:foldl(fun(M, Acc) -> \
-           case eunit:test(M, []) of \
-             ok -> Acc; \
-             error -> [M | Acc] \
-           end \
-         end, [], Modules), \
-         case Failed of \
-           [] -> init:stop(0); \
-           _ -> \
-             lists:foreach(fun(M) -> \
-               io:format(\"FAILED_MODULE:~s~n\", [atom_to_list(M)]) \
-             end, Failed), \
-             init:stop(1) \
-         end."
-    );
+    // Resolve effective job count: 0 = auto (use scheduler count)
+    let effective_jobs = if jobs == 0 {
+        // Will be resolved at runtime via erlang:system_info(schedulers)
+        0
+    } else {
+        jobs
+    };
+
+    // Helper: sequential run of a module list, accumulating failures
+    let run_sequential = |var_name: &str, module_list_str: &str| -> String {
+        format!(
+            "{var_name} = lists:foldl(fun(M, Acc) -> \
+               case eunit:test(M, []) of \
+                 ok -> Acc; \
+                 error -> [M | Acc] \
+               end \
+             end, [], [{module_list_str}])"
+        )
+    };
+
+    // Helper: report failures and exit
+    let report_and_exit = "case AllFailed of \
+             [] -> init:stop(0); \
+             _ -> \
+               lists:foreach(fun(M) -> \
+                 io:format(\"FAILED_MODULE:~s~n\", [atom_to_list(M)]) \
+               end, AllFailed), \
+               init:stop(1) \
+             end.";
+
+    let eval_cmd = if effective_jobs == 1 {
+        // Sequential: original behavior — run all modules in order
+        let run_all = run_sequential("AllFailed", &all_module_list);
+        format!(
+            "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+             {package_load_cmd}\
+             {fixture_load_cmd}\
+             {run_all}, \
+             {report_and_exit}"
+        )
+    } else {
+        // Concurrent: run concurrent modules in parallel, then serial sequentially
+        let max_jobs_expr = if effective_jobs == 0 {
+            "erlang:system_info(schedulers)".to_string()
+        } else {
+            format!("{effective_jobs}")
+        };
+
+        // Build the serial part (runs after concurrent batch)
+        let serial_part = if serial_modules.is_empty() {
+            "SerialFailed = []".to_string()
+        } else {
+            run_sequential("SerialFailed", &serial_module_list)
+        };
+
+        // Build the concurrent part
+        let concurrent_part = if concurrent_modules.is_empty() {
+            "ConcFailed = []".to_string()
+        } else {
+            format!(
+                "ConcModules = [{concurrent_module_list}], \
+                 MaxJobs = {max_jobs_expr}, \
+                 Self = self(), \
+                 Ref = make_ref(), \
+                 RunOne = fun(M) -> spawn_link(fun() -> \
+                   Res = eunit:test(M, []), \
+                   Self ! {{Ref, M, Res}} \
+                 end) end, \
+                 {{Initial, Rest}} = case length(ConcModules) > MaxJobs of \
+                   true -> lists:split(MaxJobs, ConcModules); \
+                   false -> {{ConcModules, []}} \
+                 end, \
+                 _ = [RunOne(M) || M <- Initial], \
+                 {{ConcFailed, _}} = lists:foldl(fun(_, {{FailAcc, Remaining}}) -> \
+                   receive {{Ref, M, Res}} -> \
+                     NewFail = case Res of error -> [M | FailAcc]; _ -> FailAcc end, \
+                     case Remaining of \
+                       [Next | Rest2] -> RunOne(Next), {{NewFail, Rest2}}; \
+                       [] -> {{NewFail, []}} \
+                     end \
+                   end \
+                 end, {{[], Rest}}, ConcModules)"
+            )
+        };
+
+        format!(
+            "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+             {package_load_cmd}\
+             {fixture_load_cmd}\
+             {concurrent_part}, \
+             {serial_part}, \
+             AllFailed = ConcFailed ++ SerialFailed, \
+             {report_and_exit}"
+        )
+    };
 
     let mut cmd = std::process::Command::new("erl");
     #[cfg(windows)]
@@ -759,7 +865,7 @@ fn run_eunit_tests(
 
         if failed_modules.is_empty() {
             let detail = format!("EUnit process failed:\n{combined}");
-            for name in test_module_names {
+            for name in concurrent_modules.iter().chain(serial_modules.iter()) {
                 failed_modules.insert(name.to_string(), detail.clone());
             }
         }
@@ -1194,14 +1300,19 @@ struct TestPipeline {
     package_modules: Vec<String>,
     /// Package ebin directories (for code path).
     package_ebin_dirs: Vec<Utf8PathBuf>,
+    /// Max concurrent test classes (0 = auto, 1 = sequential).
+    jobs: usize,
 }
 
 /// Run `BUnit` tests.
 ///
 /// Discovers `TestCase` subclasses in `.bt` files, compiles them, generates
 /// `EUnit` wrappers, and runs all tests in a single BEAM process.
+///
+/// `jobs` controls test class concurrency: `0` = auto (scheduler count),
+/// `1` = sequential, `N` = up to N concurrent classes.
 #[instrument(skip_all)]
-pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
+pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize) -> Result<()> {
     info!("Starting BUnit test run");
     let start_time = Instant::now();
 
@@ -1228,7 +1339,8 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
     let build_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
         .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
 
-    let mut pipeline = initialize_pipeline(test_path, test_files, build_dir, warnings_as_errors)?;
+    let mut pipeline =
+        initialize_pipeline(test_path, test_files, build_dir, warnings_as_errors, jobs)?;
     compile_fixtures(&mut pipeline)?;
     discover_and_compile_tests(&mut pipeline)?;
 
@@ -1248,6 +1360,7 @@ fn initialize_pipeline(
     test_files: Vec<Utf8PathBuf>,
     build_dir: Utf8PathBuf,
     warnings_as_errors: bool,
+    jobs: usize,
 ) -> Result<TestPipeline> {
     // Discover all unique package roots: walk up from each test file's directory,
     // and also check the CWD. This allows `beamtalk test .` from a parent directory
@@ -1348,6 +1461,7 @@ fn initialize_pipeline(
         compiled_doc_tests: Vec::new(),
         package_modules: Vec::new(),
         package_ebin_dirs: Vec::new(),
+        jobs,
     })
 }
 
@@ -1677,21 +1791,37 @@ fn execute_tests(pipeline: &TestPipeline) -> Result<EunitResult> {
     // Run tests
     println!("Running tests...\n");
 
-    let mut eunit_modules: Vec<&str> = pipeline
+    // Partition into concurrent and serial modules (BT-1624)
+    let serial_modules: HashSet<&str> = pipeline
         .compiled_tests
         .iter()
+        .filter(|t| t.test_class.is_serial)
         .map(|t| t.eunit_module.as_str())
         .collect();
+
+    let mut concurrent_modules: Vec<&str> = Vec::new();
+    let mut serial_module_list: Vec<&str> = Vec::new();
+
+    for t in &pipeline.compiled_tests {
+        if serial_modules.contains(t.eunit_module.as_str()) {
+            serial_module_list.push(&t.eunit_module);
+        } else {
+            concurrent_modules.push(&t.eunit_module);
+        }
+    }
+    // Doc tests are always concurrent (no class state)
     for dt in &pipeline.compiled_doc_tests {
-        eunit_modules.push(&dt.eunit_module);
+        concurrent_modules.push(&dt.eunit_module);
     }
 
     run_eunit_tests(
-        &eunit_modules,
+        &concurrent_modules,
+        &serial_module_list,
         &pipeline.all_fixture_modules,
         &pipeline.package_modules,
         &pipeline.build_dir,
         &pipeline.package_ebin_dirs,
+        pipeline.jobs,
     )
 }
 
@@ -1859,6 +1989,7 @@ mod tests {
             has_teardown: false,
             has_setup_once: false,
             has_teardown_once: false,
+            is_serial: false,
         };
 
         let wrapper = generate_eunit_wrapper(&test_class, "test/counter_test.bt");
@@ -2182,6 +2313,7 @@ mod tests {
             has_teardown: true,
             has_setup_once: false,
             has_teardown_once: false,
+            is_serial: false,
         };
 
         let wrapper = generate_eunit_wrapper(&test_class, "test/my_test.bt");

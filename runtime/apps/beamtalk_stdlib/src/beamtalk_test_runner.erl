@@ -22,6 +22,7 @@
 -export([
     %% TestRunner class-side primitives
     run_all/0,
+    run_all/1,
     run_file/1,
     run_class/1,
     run_class_by_name/1,
@@ -39,7 +40,7 @@
 ]).
 
 %% FFI shims for (Erlang beamtalk_test_runner) dispatch
--export([runAll/0, run/1, run/2]).
+-export([runAll/0, runAll/1, run/1, run/2]).
 %% Exported for testing
 -export([path_suffix_match/2]).
 %% TestResult instance-side
@@ -59,24 +60,40 @@
 %% TestRunner primitives
 %%====================================================================
 
-%% @doc Run all tests across all loaded TestCase subclasses.
+%% @doc Run all tests across all loaded TestCase subclasses (sequential).
 %%
-%% Discovers all TestCase subclasses, runs each, and aggregates
-%% results into a single TestResult.
+%% Equivalent to `run_all(1)` — runs all classes sequentially.
 -spec run_all() -> map().
 run_all() ->
+    run_all(1).
+
+%% @doc Run all tests across all loaded TestCase subclasses with concurrency.
+%%
+%% MaxJobs controls how many test classes run concurrently:
+%% - `1`: sequential (backward-compatible)
+%% - `N > 1`: up to N concurrent classes
+%%
+%% Classes declaring `serial => true` are run sequentially after all
+%% concurrent classes complete. Classes that do not override `serial`
+%% (default `false`) run concurrently.
+-spec run_all(pos_integer()) -> map().
+run_all(MaxJobs) when is_integer(MaxJobs), MaxJobs >= 1 ->
     Classes = beamtalk_test_case:find_test_classes(),
     case Classes of
         [] ->
             make_test_result(0, 0, 0, 0, 0.0, []);
+        _ when MaxJobs =:= 1 ->
+            %% Sequential: original behavior
+            ClassResults = lists:map(fun run_class_by_name/1, Classes),
+            aggregate_results(ClassResults);
         _ ->
-            ClassResults = lists:map(
-                fun(ClassName) ->
-                    run_class_by_name(ClassName)
-                end,
-                Classes
-            ),
-            aggregate_results(ClassResults)
+            %% Partition into concurrent and serial classes
+            {Concurrent, Serial} = partition_classes(Classes),
+            %% Run concurrent classes with bounded parallelism
+            ConcurrentResults = run_classes_concurrent(Concurrent, MaxJobs),
+            %% Run serial classes one at a time
+            SerialResults = lists:map(fun run_class_by_name/1, Serial),
+            aggregate_results(ConcurrentResults ++ SerialResults)
     end.
 
 %% @doc Run all TestCase subclasses whose source file matches FilePath.
@@ -442,11 +459,98 @@ aggregate_results(ClassResults) ->
     ).
 
 %%====================================================================
+%% Internal: concurrent test execution (BT-1624)
+%%====================================================================
+
+%% @doc Partition classes into concurrent (default) and serial sets.
+%%
+%% Queries each class's `serial` class method. Classes returning `true`
+%% go into the serial list; all others are concurrent.
+-spec partition_classes([atom()]) -> {[atom()], [atom()]}.
+partition_classes(Classes) ->
+    lists:partition(
+        fun(ClassName) -> not is_serial(ClassName) end,
+        Classes
+    ).
+
+%% @doc Check whether a class declares `serial => true`.
+%%
+%% Sends the `serial` class method message to the class process.
+%% Returns `false` if the class is not registered or doesn't respond.
+-spec is_serial(atom()) -> boolean().
+is_serial(ClassName) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            false;
+        ClassPid ->
+            try
+                beamtalk_object_class:class_send(ClassPid, serial, []) =:= true
+            catch
+                _:_ -> false
+            end
+    end.
+
+%% @doc Run test classes concurrently with bounded parallelism.
+%%
+%% Spawns up to MaxJobs processes at a time, each running one test class.
+%% Collects results via message passing as each process completes.
+-spec run_classes_concurrent([atom()], pos_integer()) -> [map()].
+run_classes_concurrent([], _MaxJobs) ->
+    [];
+run_classes_concurrent(Classes, MaxJobs) ->
+    Ref = make_ref(),
+    Total = length(Classes),
+    {Initial, Rest} = safe_split(MaxJobs, Classes),
+    %% Start initial batch
+    _ = [spawn_class_worker(ClassName, self(), Ref) || ClassName <- Initial],
+    %% Run the feed-and-collect loop
+    run_concurrent_loop(Rest, Ref, self(), Total, []).
+
+%% @doc Feed remaining classes as workers complete, collecting all results.
+%%
+%% Each time a result arrives, we spawn the next class (if any remain)
+%% and accumulate the result. When all results are collected, we're done.
+-spec run_concurrent_loop([atom()], reference(), pid(), non_neg_integer(), [map()]) -> [map()].
+run_concurrent_loop(_Remaining, _Ref, _Self, 0, Acc) ->
+    lists:reverse(Acc);
+run_concurrent_loop(Remaining, Ref, Self, Expected, Acc) ->
+    receive
+        {Ref, Result} ->
+            %% Spawn next class if any remain
+            case Remaining of
+                [Next | Rest] ->
+                    spawn_class_worker(Next, Self, Ref),
+                    run_concurrent_loop(Rest, Ref, Self, Expected - 1, [Result | Acc]);
+                [] ->
+                    run_concurrent_loop([], Ref, Self, Expected - 1, [Result | Acc])
+            end
+    end.
+
+%% @doc Spawn a single worker process to run a test class.
+-spec spawn_class_worker(atom(), pid(), reference()) -> pid().
+spawn_class_worker(ClassName, Parent, Ref) ->
+    spawn_link(fun() ->
+        Result = run_class_by_name(ClassName),
+        Parent ! {Ref, Result}
+    end).
+
+%% @doc Split a list at position N, clamping to list length.
+-spec safe_split(non_neg_integer(), [T]) -> {[T], [T]} when T :: term().
+safe_split(N, List) ->
+    case length(List) of
+        Len when Len =< N -> {List, []};
+        _ -> lists:split(N, List)
+    end.
+
+%%====================================================================
 %% FFI shims — (Erlang beamtalk_test_runner) dispatch
 %%====================================================================
 
 %% runAll → runAll/0  (TestRunner runAll)
 runAll() -> run_all().
+
+%% runAll: → runAll/1  (TestRunner runAll: maxJobs)
+runAll(MaxJobs) -> run_all(MaxJobs).
 
 %% run: → run/1  (TestRunner run: testClass)
 run(TestClass) -> run_class(TestClass).

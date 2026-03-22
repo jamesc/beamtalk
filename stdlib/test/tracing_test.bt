@@ -11,6 +11,8 @@
 
 TestCase subclass: TracingTest
 
+  class serial -> Boolean => true
+
   setUp =>
     // Ensure a clean state before each test
     Tracing clear
