@@ -293,12 +293,23 @@ handle_lifecycle_event(EventName, _Measurements, Metadata, _Config) ->
     #{pid := Pid, class := Class} = Metadata,
     %% Extract lifecycle action from event name: [beamtalk, actor, lifecycle, Action]
     Action = lists:last(EventName),
+    %% Derive outcome from reason for stop events: normal/shutdown = ok, crash = error
+    Outcome = lifecycle_outcome(Action, Metadata),
     %% Record aggregate stats with selector = lifecycle action (e.g., start, stop, kill)
-    record_dispatch(Pid, Action, 0, ok, lifecycle),
+    record_dispatch(Pid, Action, 0, Outcome, lifecycle),
     %% Record trace event with mode => lifecycle, duration 0 (instantaneous)
     EventMeta = maps:without([pid, class], Metadata),
-    record_trace_event(Pid, Class, Action, lifecycle, 0, ok, EventMeta, stop),
+    record_trace_event(Pid, Class, Action, lifecycle, 0, Outcome, EventMeta, stop),
     ok.
+
+%% @private Derive outcome from lifecycle event action and metadata.
+%% For stop events, normal/shutdown exits are ok; anything else is an error.
+%% Start and kill events are always ok.
+lifecycle_outcome(stop, #{reason := normal}) -> ok;
+lifecycle_outcome(stop, #{reason := shutdown}) -> ok;
+lifecycle_outcome(stop, #{reason := {shutdown, _}}) -> ok;
+lifecycle_outcome(stop, #{reason := _}) -> error;
+lifecycle_outcome(_, _) -> ok.
 
 %% @doc Handler for telemetry_poller VM measurement events.
 -spec handle_vm_measurements([atom()], map(), map(), map()) -> ok.

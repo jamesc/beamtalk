@@ -356,13 +356,8 @@ async_send(ActorPid, isAlive, [], FuturePid) ->
     ok;
 async_send(ActorPid, stop, [], FuturePid) ->
     %% stop is handled locally - gracefully stops the actor process
-    %% BT-1629: Emit lifecycle telemetry event for async stop request.
-    Class = lookup_class(ActorPid),
-    maybe_execute_telemetry(
-        [beamtalk, actor, lifecycle, stop],
-        #{},
-        #{pid => ActorPid, class => Class, reason => normal}
-    ),
+    %% BT-1629: No send-site telemetry for stop — terminate/2 handles it
+    %% to avoid double-counting (request + termination).
     try
         gen_server:stop(ActorPid, normal, 5000),
         beamtalk_future:resolve(FuturePid, ok)
@@ -557,13 +552,8 @@ sync_send(ActorPid, isAlive, []) ->
     is_process_alive(ActorPid);
 sync_send(ActorPid, stop, []) ->
     %% stop is handled locally - gracefully stops the actor process
-    %% BT-1629: Emit lifecycle telemetry event for stop request.
-    Class = lookup_class(ActorPid),
-    maybe_execute_telemetry(
-        [beamtalk, actor, lifecycle, stop],
-        #{},
-        #{pid => ActorPid, class => Class, reason => normal}
-    ),
+    %% BT-1629: No send-site telemetry for stop — terminate/2 handles it
+    %% to avoid double-counting (request + termination).
     try
         gen_server:stop(ActorPid, normal, 5000)
     catch
