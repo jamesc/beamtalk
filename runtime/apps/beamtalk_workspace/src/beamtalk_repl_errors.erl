@@ -103,6 +103,20 @@ ensure_structured_error({load_error, Reason}) ->
         Err0,
         iolist_to_binary([<<"Failed to load bytecode: ">>, format_name(Reason)])
     );
+ensure_structured_error({registration_error, {ModuleName, Reason}}) ->
+    Err0 = beamtalk_error:new(registration_error, 'Runtime'),
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary(
+            io_lib:format("Class registration failed for ~s: ~p", [ModuleName, Reason])
+        )
+    );
+ensure_structured_error({registration_error, Reason}) ->
+    Err0 = beamtalk_error:new(registration_error, 'Runtime'),
+    beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"Class registration failed: ">>, format_name(Reason)])
+    );
 ensure_structured_error({parse_error, Details}) ->
     Err0 = beamtalk_error:new(compile_error, 'Compiler'),
     beamtalk_error:with_message(
@@ -151,6 +165,8 @@ ensure_structured_error({load_error, _} = Reason, _Class) ->
 ensure_structured_error({parse_error, _} = Reason, _Class) ->
     ensure_structured_error(Reason);
 ensure_structured_error({invalid_request, _} = Reason, _Class) ->
+    ensure_structured_error(Reason);
+ensure_structured_error({registration_error, _} = Reason, _Class) ->
     ensure_structured_error(Reason);
 ensure_structured_error(Reason, Class) ->
     Err0 = beamtalk_error:new(internal_error, 'REPL'),

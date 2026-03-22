@@ -314,32 +314,65 @@ handle_protocol_definition(ProtocolInfo, Warnings, State) ->
     case code:load_binary(ModuleName, "", Binary) of
         {module, ModuleName} ->
             %% Call register_class/0 to register the protocol with the runtime
-            case erlang:function_exported(ModuleName, register_class, 0) of
-                true ->
-                    try
-                        ModuleName:register_class()
-                    catch
-                        _:_ -> ok
-                    end;
-                false ->
-                    ok
-            end,
-            NewState = beamtalk_repl_state:add_loaded_module(ModuleName, State),
-            %% Build display string: "Protocol Foo defined" or "Protocols Foo, Bar defined"
-            ProtocolNames = [binary_to_list(P) || P <- Protocols],
-            DisplayStr =
-                case ProtocolNames of
-                    [Single] ->
-                        list_to_binary("Protocol " ++ Single ++ " defined");
-                    Multiple ->
-                        list_to_binary("Protocols " ++ string:join(Multiple, ", ") ++ " defined")
-                end,
-            {ok, DisplayStr, <<>>, Warnings, NewState};
+            case maybe_register_protocol_class(ModuleName) of
+                ok ->
+                    NewState = beamtalk_repl_state:add_loaded_module(ModuleName, State),
+                    %% Build display string: "Protocol Foo defined" or "Protocols Foo, Bar defined"
+                    ProtocolNames = [binary_to_list(P) || P <- Protocols],
+                    DisplayStr =
+                        case ProtocolNames of
+                            [Single] ->
+                                list_to_binary("Protocol " ++ Single ++ " defined");
+                            Multiple ->
+                                list_to_binary(
+                                    "Protocols " ++ string:join(Multiple, ", ") ++ " defined"
+                                )
+                        end,
+                    {ok, DisplayStr, <<>>, Warnings, NewState};
+                {error, RegError} ->
+                    %% Registration failed — clean up the loaded module to avoid
+                    %% leaving it resident but untracked in State.
+                    RegistryPid = beamtalk_repl_state:get_actor_registry(State),
+                    cleanup_module(ModuleName, RegistryPid),
+                    {error, RegError, <<>>, Warnings, State}
+            end;
         {error, Reason} ->
-            ErrMsg = iolist_to_binary(
-                io_lib:format("Failed to load protocol module: ~p", [Reason])
-            ),
-            {error, {load_error, ErrMsg}, <<>>, Warnings, State}
+            wrap_load_err(Reason, Warnings, State)
+    end.
+
+%% @private Attempt to call register_class/0 on a protocol module.
+%% Returns ok if successful or not exported, or {error, #beamtalk_error{}} on failure.
+-spec maybe_register_protocol_class(atom()) -> ok | {error, #beamtalk_error{}}.
+maybe_register_protocol_class(ModuleName) ->
+    case erlang:function_exported(ModuleName, register_class, 0) of
+        true ->
+            try ModuleName:register_class() of
+                {error, RegReason} ->
+                    ?LOG_ERROR(
+                        "Protocol register_class/0 returned error for ~p: ~p",
+                        [ModuleName, RegReason],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    Err = beamtalk_repl_errors:ensure_structured_error(
+                        {registration_error, {ModuleName, RegReason}}
+                    ),
+                    {error, Err};
+                _Ok ->
+                    ok
+            catch
+                Class:Reason:Stacktrace ->
+                    ?LOG_ERROR(
+                        "Protocol register_class/0 failed for ~p: ~p:~p~n~p",
+                        [ModuleName, Class, Reason, Stacktrace],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    Err = beamtalk_repl_errors:ensure_structured_error(
+                        {registration_error, {ModuleName, Reason}}
+                    ),
+                    {error, Err}
+            end;
+        false ->
+            ok
     end.
 
 %% @doc Evaluate a loaded module: capture IO, execute, process result, cleanup.
