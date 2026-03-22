@@ -82,6 +82,22 @@ run_all() ->
 run_all(0) ->
     run_all(erlang:system_info(schedulers));
 run_all(MaxJobs) when is_integer(MaxJobs), MaxJobs >= 1 ->
+    run_all_impl(MaxJobs);
+run_all(Invalid) ->
+    Msg = iolist_to_binary(
+        io_lib:format(
+            "runAll: expects a non-negative integer, got: ~p",
+            [Invalid]
+        )
+    ),
+    Error0 = beamtalk_error:new(invalid_argument, 'TestRunner'),
+    Error1 = beamtalk_error:with_selector(Error0, 'runAll:'),
+    Error2 = beamtalk_error:with_message(Error1, Msg),
+    beamtalk_error:raise(Error2).
+
+%% @private Implementation of run_all after argument validation.
+-spec run_all_impl(pos_integer()) -> map().
+run_all_impl(MaxJobs) ->
     Classes = beamtalk_test_case:find_test_classes(),
     case Classes of
         [] ->
@@ -91,13 +107,18 @@ run_all(MaxJobs) when is_integer(MaxJobs), MaxJobs >= 1 ->
             ClassResults = lists:map(fun run_class_by_name/1, Classes),
             aggregate_results(ClassResults);
         _ ->
+            StartTime = erlang:monotonic_time(millisecond),
             %% Partition into concurrent and serial classes
             {Concurrent, Serial} = partition_classes(Classes),
             %% Run concurrent classes with bounded parallelism
             ConcurrentResults = run_classes_concurrent(Concurrent, MaxJobs),
             %% Run serial classes one at a time
             SerialResults = lists:map(fun run_class_by_name/1, Serial),
-            aggregate_results(ConcurrentResults ++ SerialResults)
+            EndTime = erlang:monotonic_time(millisecond),
+            WallDuration = (EndTime - StartTime) / 1000.0,
+            Aggregated = aggregate_results(ConcurrentResults ++ SerialResults),
+            %% Replace summed per-class durations with actual wall-clock time
+            Aggregated#{duration => WallDuration}
     end.
 
 %% @doc Run all TestCase subclasses whose source file matches FilePath.
@@ -545,38 +566,71 @@ run_classes_concurrent(Classes, MaxJobs) ->
     Ref = make_ref(),
     Total = length(Classes),
     {Initial, Rest} = safe_split(MaxJobs, Classes),
-    %% Start initial batch
-    _ = [spawn_class_worker(ClassName, self(), Ref) || ClassName <- Initial],
+    %% Start initial batch with monitors
+    PidMap = lists:foldl(
+        fun(ClassName, Acc) ->
+            {Pid, MonRef} = spawn_class_worker(ClassName, self(), Ref),
+            Acc#{MonRef => ClassName, Pid => MonRef}
+        end,
+        #{},
+        Initial
+    ),
     %% Run the feed-and-collect loop
-    run_concurrent_loop(Rest, Ref, self(), Total, []).
+    run_concurrent_loop(Rest, Ref, self(), Total, [], PidMap).
 
 %% @doc Feed remaining classes as workers complete, collecting all results.
 %%
 %% Each time a result arrives, we spawn the next class (if any remain)
-%% and accumulate the result. When all results are collected, we're done.
--spec run_concurrent_loop([atom()], reference(), pid(), non_neg_integer(), [map()]) -> [map()].
-run_concurrent_loop(_Remaining, _Ref, _Self, 0, Acc) ->
+%% and accumulate the result. Handles 'DOWN' messages for workers that
+%% die without sending a result (OOM, kill signal, etc.) to prevent
+%% indefinite hangs.
+-spec run_concurrent_loop([atom()], reference(), pid(), non_neg_integer(), [map()], map()) ->
+    [map()].
+run_concurrent_loop(_Remaining, _Ref, _Self, 0, Acc, _PidMap) ->
     lists:reverse(Acc);
-run_concurrent_loop(Remaining, Ref, Self, Expected, Acc) ->
+run_concurrent_loop(Remaining, Ref, Self, Expected, Acc, PidMap) ->
     receive
         {Ref, Result} ->
             %% Spawn next class if any remain
             case Remaining of
                 [Next | Rest] ->
-                    spawn_class_worker(Next, Self, Ref),
-                    run_concurrent_loop(Rest, Ref, Self, Expected - 1, [Result | Acc]);
+                    {Pid, MonRef} = spawn_class_worker(Next, Self, Ref),
+                    NewPidMap = PidMap#{MonRef => Next, Pid => MonRef},
+                    run_concurrent_loop(Rest, Ref, Self, Expected - 1, [Result | Acc], NewPidMap);
                 [] ->
-                    run_concurrent_loop([], Ref, Self, Expected - 1, [Result | Acc])
+                    run_concurrent_loop([], Ref, Self, Expected - 1, [Result | Acc], PidMap)
+            end;
+        {'DOWN', _MonRef, process, _Pid, normal} ->
+            %% Worker exited normally after sending its result — ignore
+            run_concurrent_loop(Remaining, Ref, Self, Expected, Acc, PidMap);
+        {'DOWN', MonRef, process, _Pid, Reason} ->
+            %% Worker died without sending a result — synthesize a failure
+            ClassName = maps:get(MonRef, PidMap, unknown_class),
+            ErrMsg = iolist_to_binary(
+                io_lib:format("Test worker crashed: ~p", [Reason])
+            ),
+            Result = make_test_result(
+                1, 0, 1, 0, 0.0,
+                [#{name => ClassName, status => fail, error => ErrMsg}]
+            ),
+            case Remaining of
+                [Next | Rest] ->
+                    {NewPid, NewMonRef} = spawn_class_worker(Next, Self, Ref),
+                    NewPidMap = PidMap#{NewMonRef => Next, NewPid => NewMonRef},
+                    run_concurrent_loop(Rest, Ref, Self, Expected - 1, [Result | Acc], NewPidMap);
+                [] ->
+                    run_concurrent_loop([], Ref, Self, Expected - 1, [Result | Acc], PidMap)
             end
     end.
 
-%% @doc Spawn a worker process to run a test class.
+%% @doc Spawn a monitored worker process to run a test class.
 %%
-%% The worker catches all exceptions so a crash in one test class
-%% doesn't take down the runner — it synthesizes a failed result instead.
--spec spawn_class_worker(atom(), pid(), reference()) -> pid().
+%% Uses spawn_monitor so the runner detects worker crashes (OOM, kill,
+%% etc.) that bypass the try/catch. Returns {Pid, MonitorRef}.
+%% The worker still catches trapped exceptions to produce friendly errors.
+-spec spawn_class_worker(atom(), pid(), reference()) -> {pid(), reference()}.
 spawn_class_worker(ClassName, Parent, Ref) ->
-    spawn(fun() ->
+    spawn_monitor(fun() ->
         Result =
             try
                 run_class_by_name(ClassName)
