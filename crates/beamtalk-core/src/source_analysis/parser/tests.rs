@@ -5803,31 +5803,32 @@ fn incomplete_protocol_define_no_methods() {
 }
 
 #[test]
-fn complete_protocol_define_with_method() {
-    // Protocol with at least one method signature is complete
-    assert!(is_input_complete(
+fn incomplete_protocol_define_with_method() {
+    // Protocol definitions are always incomplete — the REPL needs a blank line
+    // to know the definition is finished (protocols can have multiple methods).
+    assert!(!is_input_complete(
         "Protocol define: Greetable\n  greet -> String"
     ));
 }
 
 #[test]
-fn complete_protocol_define_with_multiple_methods() {
-    assert!(is_input_complete(
+fn incomplete_protocol_define_with_multiple_methods() {
+    // Still incomplete even with multiple methods — needs blank line to submit
+    assert!(!is_input_complete(
         "Protocol define: Serializable\n  serialize -> String\n  deserialize: data :: String -> Self"
     ));
 }
 
 #[test]
 fn incomplete_protocol_define_extending_only() {
-    // Protocol with only extending: and no methods is still incomplete
     assert!(!is_input_complete(
         "Protocol define: PrettyPrintable\n  extending: Greetable"
     ));
 }
 
 #[test]
-fn complete_protocol_define_extending_with_method() {
-    assert!(is_input_complete(
+fn incomplete_protocol_define_extending_with_method() {
+    assert!(!is_input_complete(
         "Protocol define: PrettyPrintable\n  extending: Greetable\n  prettyPrint -> String"
     ));
 }

@@ -245,7 +245,6 @@ pub fn is_input_complete(source: &str) -> bool {
     let mut has_subclass_keyword = false;
     let mut has_protocol_define = false;
     let mut has_method_arrow = false;
-    let mut has_thin_arrow = false;
 
     for token in &tokens {
         let kind = token.kind();
@@ -298,11 +297,6 @@ pub fn is_input_complete(source: &str) -> bool {
             TokenKind::FatArrow if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 => {
                 has_method_arrow = true;
             }
-            // Track `->` for protocol method signatures (e.g., `greet -> String`)
-            TokenKind::Arrow if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 => {
-                has_thin_arrow = true;
-            }
-
             TokenKind::Eof => break,
             _ => {}
         }
@@ -354,10 +348,11 @@ pub fn is_input_complete(source: &str) -> bool {
         return false;
     }
 
-    // Protocol definition: incomplete until at least one method signature is defined.
-    // "Protocol define: Greetable" alone is incomplete — waiting for method sigs.
-    // "Protocol define: Greetable\n  greet -> String" is complete.
-    if has_protocol_define && !has_thin_arrow {
+    // Protocol definition: always incomplete — protocols can have multiple method
+    // signatures, so we can't know when the definition ends from tokens alone.
+    // In the REPL, the user submits with a blank line. In E2E tests, the
+    // `// =>` assertion or blank line terminates the continuation collection.
+    if has_protocol_define {
         return false;
     }
 
