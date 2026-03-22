@@ -165,6 +165,14 @@ send(Receiver, Selector, Args) ->
 %% types, metaclasses, and class objects, timeout is ignored and dispatch
 %% falls through to the normal synchronous path.
 -spec send(term(), atom(), list(), timeout()) -> term().
+send({beamtalk_future, _} = Future, Selector, Args, Timeout) ->
+    %% BT-840 parity: auto-await futures before re-dispatching with timeout.
+    Value = beamtalk_future:await(Future),
+    send(Value, Selector, Args, Timeout);
+send({beamtalk_supervisor, _, _, _} = Sup, Selector, Args, _Timeout) ->
+    %% Supervisors dispatch via hierarchy walk (in-process, not gen_server:call),
+    %% so timeout is irrelevant. Delegate to send/3.
+    send(Sup, Selector, Args);
 send(Receiver, Selector, Args, Timeout) ->
     case is_actor(Receiver) of
         true ->
