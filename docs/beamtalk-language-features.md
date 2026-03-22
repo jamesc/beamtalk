@@ -2873,6 +2873,32 @@ TestCase subclass: DatabaseTest
 - If `setUpOnce` raises an error, all tests in the class fail with a clear message.
 - Per-test `setUp`/`tearDown` still run for each test, providing both shared and per-test state.
 
+#### Parallel Test Execution
+
+By default, `beamtalk test` runs test classes concurrently (`--jobs 0` = auto, uses BEAM scheduler count). Each class runs in its own process.
+
+Test classes that touch global state (persistent_term, registered process names, global ETS tables) must opt out by overriding `serial`:
+
+```beamtalk
+TestCase subclass: TracingTest
+
+  class serial -> Boolean => true
+
+  setUp => Tracing clear. Tracing disable
+  testEnable => self assert: Tracing enable equals: nil
+```
+
+Serial classes run alone after all concurrent classes complete.
+
+Use `--jobs 1` for fully sequential execution, or `--jobs N` to limit concurrency.
+
+From the REPL, use `TestRunner runAll: maxJobs` to control concurrency programmatically:
+
+```beamtalk
+TestRunner runAll: 4        // run up to 4 classes concurrently
+TestRunner runAll            // sequential (default from REPL)
+```
+
 ---
 
 See [Tooling](beamtalk-tooling.md) for CLI tools, REPL, VS Code extension, and testing framework.

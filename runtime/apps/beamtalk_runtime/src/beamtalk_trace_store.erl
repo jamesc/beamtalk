@@ -5,19 +5,19 @@
 %%%
 %%% **DDD Context:** Runtime Context
 %%%
-%%% Owns ETS tables and counters refs for lock-free aggregate tracking and
+%%% Owns ETS tables and atomics refs for lock-free aggregate tracking and
 %%% opt-in trace event capture. The gen_server handles queries and lifecycle
 %%% but is NOT in the write path — all writes happen in the calling process
-%%% via counters:add/3 and ets:insert/2.
+%%% via atomics:add/3, CAS loops, and ets:insert/2.
 %%%
 %%% Storage layout:
 %%% - beamtalk_agg_index (ETS set): {Pid, Selector} → {Key, CounterRef, SlotBase}
 %%% - beamtalk_trace_events (ETS ordered_set): composite key → trace event
-%%% - counters ref in persistent_term: lock-free aggregate increments (~50ns)
+%%% - atomics ref in persistent_term: lock-free aggregate increments + CAS min/max (~50ns)
 %%% - persistent_term toggle: beamtalk_tracing_enabled (true | false)
 %%%
 %%% ETS tables use {heir, SupervisorPid, HeirData} for crash resilience.
-%%% Counter refs stored in persistent_term survive gen_server crashes.
+%%% Atomics refs stored in persistent_term survive gen_server crashes.
 %%%
 %%% @see docs/ADR/0069-actor-observability-and-tracing.md
 -module(beamtalk_trace_store).
@@ -45,6 +45,7 @@
     get_stats/0,
     get_stats/1,
     slow_methods/1,
+    slow_methods/2,
     hot_methods/1,
     error_methods/1,
     bottlenecks/1,
@@ -72,14 +73,20 @@
     code_change/3
 ]).
 
-%% Counter slot offsets (per {Pid, Selector} entry)
+%% Atomics slot offsets (per {Pid, Selector} entry)
 -define(SLOT_CALLS, 1).
 -define(SLOT_OK, 2).
 -define(SLOT_ERRORS, 3).
 -define(SLOT_TIMEOUTS, 4).
 -define(SLOT_TOTAL_DURATION, 5).
--define(SLOT_RESERVED, 6).
--define(SLOTS_PER_KEY, 6).
+-define(SLOT_MIN_DURATION, 6).
+-define(SLOT_MAX_DURATION, 7).
+-define(SLOT_RESERVED, 8).
+-define(SLOTS_PER_KEY, 8).
+
+%% Sentinel value for min duration — large enough that any real duration will be smaller.
+%% 2^62 - 1 (~4.6 × 10^18 ns ≈ 146 years). Fits comfortably in a signed 64-bit integer.
+-define(MIN_SENTINEL, 4611686018427387903).
 
 %% Table names
 -define(AGG_INDEX, beamtalk_agg_index).
@@ -93,8 +100,8 @@
 
 %% Defaults
 -define(DEFAULT_MAX_EVENTS, 100000).
-% 1000 unique keys × 6 slots
--define(INITIAL_COUNTER_SIZE, 6000).
+% 1000 unique keys × 8 slots
+-define(INITIAL_COUNTER_SIZE, 8000).
 -define(EVICTION_INTERVAL_MS, 1000).
 -define(EVICTION_PERCENT, 10).
 
@@ -141,16 +148,19 @@ clear() ->
 %% This runs in the calling process for lock-free performance.
 -spec record_dispatch(pid(), atom(), non_neg_integer(), atom(), atom()) -> ok.
 record_dispatch(Pid, Selector, Duration, Outcome, _Mode) ->
-    {CounterRef, SlotBase} = ensure_counter_slot(Pid, Selector),
-    counters:add(CounterRef, SlotBase + ?SLOT_CALLS, 1),
-    counters:add(CounterRef, SlotBase + ?SLOT_TOTAL_DURATION, Duration),
+    {AtomicsRef, SlotBase} = ensure_counter_slot(Pid, Selector),
+    atomics:add(AtomicsRef, SlotBase + ?SLOT_CALLS, 1),
+    atomics:add(AtomicsRef, SlotBase + ?SLOT_TOTAL_DURATION, Duration),
     case Outcome of
-        ok -> counters:add(CounterRef, SlotBase + ?SLOT_OK, 1);
-        error -> counters:add(CounterRef, SlotBase + ?SLOT_ERRORS, 1);
-        timeout -> counters:add(CounterRef, SlotBase + ?SLOT_TIMEOUTS, 1);
-        cast -> counters:add(CounterRef, SlotBase + ?SLOT_OK, 1);
+        ok -> atomics:add(AtomicsRef, SlotBase + ?SLOT_OK, 1);
+        error -> atomics:add(AtomicsRef, SlotBase + ?SLOT_ERRORS, 1);
+        timeout -> atomics:add(AtomicsRef, SlotBase + ?SLOT_TIMEOUTS, 1);
+        cast -> atomics:add(AtomicsRef, SlotBase + ?SLOT_OK, 1);
         _ -> ok
     end,
+    %% Update min/max duration using lock-free CAS loops
+    cas_min(AtomicsRef, SlotBase + ?SLOT_MIN_DURATION, Duration),
+    cas_max(AtomicsRef, SlotBase + ?SLOT_MAX_DURATION, Duration),
     ok.
 
 %% @doc Record a trace event (called from telemetry handler, NOT via gen_server).
@@ -216,6 +226,12 @@ get_stats(Pid) ->
 -spec slow_methods(pos_integer()) -> [map()].
 slow_methods(Limit) ->
     gen_server:call(?MODULE, {slow_methods, Limit}).
+
+%% @doc Top N methods sorted by the given duration metric (descending).
+%% SortBy can be: avg_duration_ns | max_duration_ns | min_duration_ns.
+-spec slow_methods(pos_integer(), atom()) -> [map()].
+slow_methods(Limit, SortBy) ->
+    gen_server:call(?MODULE, {slow_methods, Limit, SortBy}).
 
 %% @doc Top N methods by call count (descending).
 -spec hot_methods(pos_integer()) -> [map()].
@@ -349,7 +365,7 @@ init([]) ->
     %% Create or inherit ETS tables
     ensure_ets_tables(SupPid),
 
-    %% Initialise counters in persistent_term (if not already present from crash recovery)
+    %% Initialise atomics in persistent_term (if not already present from crash recovery)
     ensure_counters(),
 
     %% Initialise persistent_term defaults
@@ -388,7 +404,7 @@ handle_call(clear, _From, State) ->
     ?LOG_INFO("Trace store cleared", #{}),
     {reply, ok, State};
 handle_call({grow_counters, CallerRef, CallerSize}, _From, State) ->
-    %% BT-1621: Serialized counter grow to prevent concurrent persistent_term overwrites.
+    %% BT-1621: Serialized atomics grow to prevent concurrent persistent_term overwrites.
     %% Check if another caller already grew while we were queued.
     CurrentRef = persistent_term:get(?PT_COUNTERS),
     Result =
@@ -415,6 +431,9 @@ handle_call({get_stats, Pid}, _From, State) ->
     {reply, Result, State};
 handle_call({slow_methods, Limit}, _From, State) ->
     Result = [to_binary_keys(M) || M <- do_slow_methods(Limit)],
+    {reply, Result, State};
+handle_call({slow_methods, Limit, SortBy}, _From, State) ->
+    Result = [to_binary_keys(M) || M <- do_slow_methods(Limit, SortBy)],
     {reply, Result, State};
 handle_call({hot_methods, Limit}, _From, State) ->
     Result = [to_binary_keys(M) || M <- do_hot_methods(Limit)],
@@ -512,13 +531,13 @@ ensure_table(Name, Opts) ->
             ok
     end.
 
-%% @private Ensure counters ref and slot allocator exist in persistent_term.
+%% @private Ensure atomics ref and slot allocator exist in persistent_term.
 ensure_counters() ->
     try persistent_term:get(?PT_COUNTERS) of
         _Ref -> ok
     catch
         error:badarg ->
-            Ref = counters:new(?INITIAL_COUNTER_SIZE, [write_concurrency]),
+            Ref = atomics:new(?INITIAL_COUNTER_SIZE, [{signed, true}]),
             persistent_term:put(?PT_COUNTERS, Ref),
             %% Atomic slot allocator — single atomics ref with 1 element for the next slot base.
             %% atomics:add_get/3 is truly atomic, preventing concurrent slot collisions.
@@ -546,45 +565,57 @@ init_persistent_terms() ->
 %% Internal: Counter slot allocation
 %%====================================================================
 
-%% @private Get or allocate counter slots for a {Pid, Selector} pair.
+%% @private Get or allocate atomics slots for a {Pid, Selector} pair.
 %% Called from the write path (calling process), not the gen_server.
--spec ensure_counter_slot(pid(), atom()) -> {counters:counters_ref(), non_neg_integer()}.
+-spec ensure_counter_slot(pid(), atom()) -> {atomics:atomics_ref(), non_neg_integer()}.
 ensure_counter_slot(Pid, Selector) ->
     Key = {Pid, Selector},
     case ets:lookup(?AGG_INDEX, Key) of
-        [{_Key, CounterRef, SlotBase}] ->
-            {CounterRef, SlotBase};
+        [{_Key, AtomicsRef, SlotBase}] ->
+            {AtomicsRef, SlotBase};
         [] ->
             allocate_counter_slot(Key)
     end.
 
-%% @private Allocate new counter slots for a key.
+%% @private Allocate new atomics slots for a key.
 %% Uses atomics-style CAS on persistent_term slot counter.
 %% In the rare concurrent allocation race, both callers get valid (different) slots
 %% and the last ets:insert wins — acceptable for first-observation allocation.
 allocate_counter_slot(Key) ->
-    CounterRef = persistent_term:get(?PT_COUNTERS),
+    AtomicsRef = persistent_term:get(?PT_COUNTERS),
     SlotBase = allocate_next_slot(),
-    #{size := CounterSize} = counters:info(CounterRef),
-    %% Grow counters if needed — serialized through the gen_server (BT-1621)
+    #{size := AtomicsSize} = atomics:info(AtomicsRef),
+    %% Grow atomics if needed — serialized through the gen_server (BT-1621)
     %% to prevent concurrent grows from overwriting each other's persistent_term.
-    NewCounterRef =
-        case SlotBase + ?SLOTS_PER_KEY > CounterSize of
-            true ->
-                %% Grow serialized through gen_server (BT-1621). Gracefully degrade
-                %% if the trace store is down or slow — observability should never
-                %% crash the actor being observed.
-                try
-                    gen_server:call(?MODULE, {grow_counters, CounterRef, CounterSize}, 10000)
-                catch
-                    exit:{noproc, _} -> CounterRef;
-                    exit:{timeout, _} -> CounterRef
-                end;
-            false ->
-                CounterRef
-        end,
-    ets:insert(?AGG_INDEX, {Key, NewCounterRef, SlotBase}),
-    {NewCounterRef, SlotBase}.
+    case SlotBase + ?SLOTS_PER_KEY > AtomicsSize of
+        true ->
+            %% Grow serialized through gen_server (BT-1621). Gracefully degrade
+            %% if the trace store is down or slow — observability should never
+            %% crash the actor being observed.
+            try
+                NewAtomicsRef = gen_server:call(
+                    ?MODULE, {grow_counters, AtomicsRef, AtomicsSize}, 10000
+                ),
+                %% Initialise min duration to sentinel so first call sets it
+                atomics:put(NewAtomicsRef, SlotBase + ?SLOT_MIN_DURATION, ?MIN_SENTINEL),
+                ets:insert(?AGG_INDEX, {Key, NewAtomicsRef, SlotBase}),
+                {NewAtomicsRef, SlotBase}
+            catch
+                exit:{noproc, _} ->
+                    %% Trace store down — slot was allocated but can't grow.
+                    %% Return a dummy ref that safely absorbs writes.
+                    DummyRef = atomics:new(?SLOTS_PER_KEY, [{signed, true}]),
+                    {DummyRef, 0};
+                exit:{timeout, _} ->
+                    DummyRef = atomics:new(?SLOTS_PER_KEY, [{signed, true}]),
+                    {DummyRef, 0}
+            end;
+        false ->
+            %% Initialise min duration to sentinel so first call sets it
+            atomics:put(AtomicsRef, SlotBase + ?SLOT_MIN_DURATION, ?MIN_SENTINEL),
+            ets:insert(?AGG_INDEX, {Key, AtomicsRef, SlotBase}),
+            {AtomicsRef, SlotBase}
+    end.
 
 %% @private Atomically allocate the next slot base.
 %% Uses atomics:add_get/3 for true lock-free atomic allocation — no race condition
@@ -595,25 +626,25 @@ allocate_next_slot() ->
     NewVal = atomics:add_get(Allocator, 1, ?SLOTS_PER_KEY),
     NewVal - ?SLOTS_PER_KEY.
 
-%% @private Grow the counters array by doubling its size.
+%% @private Grow the atomics array by doubling its size.
 grow_counters(OldRef, OldSize) ->
     NewSize = OldSize * 2,
-    NewRef = counters:new(NewSize, [write_concurrency]),
-    %% Copy existing counter values
+    NewRef = atomics:new(NewSize, [{signed, true}]),
+    %% Copy existing values
     copy_counters(OldRef, NewRef, 1, OldSize),
     persistent_term:put(?PT_COUNTERS, NewRef),
     %% Update all index entries to point to new ref
     update_counter_refs(NewRef),
     NewRef.
 
-%% @private Copy counter values from old ref to new ref.
+%% @private Copy atomics values from old ref to new ref.
 copy_counters(_OldRef, _NewRef, Idx, MaxIdx) when Idx > MaxIdx ->
     ok;
 copy_counters(OldRef, NewRef, Idx, MaxIdx) ->
-    Val = counters:get(OldRef, Idx),
+    Val = atomics:get(OldRef, Idx),
     case Val of
         0 -> ok;
-        _ -> counters:add(NewRef, Idx, Val)
+        _ -> atomics:put(NewRef, Idx, Val)
     end,
     copy_counters(OldRef, NewRef, Idx + 1, MaxIdx).
 
@@ -901,17 +932,25 @@ do_get_stats(FilterPid) ->
         ?AGG_INDEX
     ).
 
-%% @private Read counter stats for a slot.
-read_counter_stats(CounterRef, SlotBase) ->
-    Calls = counters:get(CounterRef, SlotBase + ?SLOT_CALLS),
-    Ok = counters:get(CounterRef, SlotBase + ?SLOT_OK),
-    Errors = counters:get(CounterRef, SlotBase + ?SLOT_ERRORS),
-    Timeouts = counters:get(CounterRef, SlotBase + ?SLOT_TIMEOUTS),
-    TotalDuration = counters:get(CounterRef, SlotBase + ?SLOT_TOTAL_DURATION),
+%% @private Read stats from atomics slots.
+read_counter_stats(AtomicsRef, SlotBase) ->
+    Calls = atomics:get(AtomicsRef, SlotBase + ?SLOT_CALLS),
+    Ok = atomics:get(AtomicsRef, SlotBase + ?SLOT_OK),
+    Errors = atomics:get(AtomicsRef, SlotBase + ?SLOT_ERRORS),
+    Timeouts = atomics:get(AtomicsRef, SlotBase + ?SLOT_TIMEOUTS),
+    TotalDuration = atomics:get(AtomicsRef, SlotBase + ?SLOT_TOTAL_DURATION),
+    RawMin = atomics:get(AtomicsRef, SlotBase + ?SLOT_MIN_DURATION),
+    MaxDuration = atomics:get(AtomicsRef, SlotBase + ?SLOT_MAX_DURATION),
     AvgDuration =
         case Calls of
             0 -> 0;
             _ -> TotalDuration div Calls
+        end,
+    %% If min is still the sentinel, report 0 (no calls recorded)
+    MinDuration =
+        case RawMin of
+            ?MIN_SENTINEL -> 0;
+            _ -> RawMin
         end,
     #{
         calls => Calls,
@@ -919,7 +958,9 @@ read_counter_stats(CounterRef, SlotBase) ->
         errors => Errors,
         timeouts => Timeouts,
         total_duration_ns => TotalDuration,
-        avg_duration_ns => AvgDuration
+        avg_duration_ns => AvgDuration,
+        min_duration_ns => MinDuration,
+        max_duration_ns => MaxDuration
     }.
 
 %% @private Collect all method stats as a flat list for sorting.
@@ -942,12 +983,23 @@ collect_method_stats() ->
 
 %% @private Top N methods by average duration (descending).
 do_slow_methods(Limit) ->
+    do_slow_methods(Limit, avg_duration_ns).
+
+%% @private Top N methods sorted by the given duration metric (descending).
+do_slow_methods(Limit, SortBy) when
+    SortBy =:= avg_duration_ns;
+    SortBy =:= max_duration_ns;
+    SortBy =:= min_duration_ns
+->
     AllStats = collect_method_stats(),
     Sorted = lists:sort(
-        fun(A, B) -> maps:get(avg_duration_ns, A) >= maps:get(avg_duration_ns, B) end,
+        fun(A, B) -> maps:get(SortBy, A) >= maps:get(SortBy, B) end,
         AllStats
     ),
-    lists:sublist(Sorted, Limit).
+    lists:sublist(Sorted, Limit);
+do_slow_methods(Limit, _SortBy) ->
+    %% Fall back to avg for unknown sort keys
+    do_slow_methods(Limit, avg_duration_ns).
 
 %% @private Top N methods by call count (descending).
 do_hot_methods(Limit) ->
@@ -1116,10 +1168,50 @@ do_clear() ->
     ets:delete_all_objects(?TRACE_EVENTS),
     %% Clear agg index
     ets:delete_all_objects(?AGG_INDEX),
-    %% Reset counters — create a fresh counters ref
-    NewRef = counters:new(?INITIAL_COUNTER_SIZE, [write_concurrency]),
+    %% Reset atomics — create a fresh atomics ref
+    NewRef = atomics:new(?INITIAL_COUNTER_SIZE, [{signed, true}]),
     persistent_term:put(?PT_COUNTERS, NewRef),
     %% Reset the atomic slot allocator
     Allocator = persistent_term:get(?PT_SLOT_ALLOCATOR),
     atomics:put(Allocator, 1, 1),
     ok.
+
+%%====================================================================
+%% Internal: Lock-free CAS loops for min/max
+%%====================================================================
+
+%% @private CAS loop to update the minimum value in an atomics slot.
+%% If NewVal < current value, atomically swap it in. Retries on contention.
+-spec cas_min(atomics:atomics_ref(), pos_integer(), integer()) -> ok.
+cas_min(Ref, Idx, NewVal) ->
+    Current = atomics:get(Ref, Idx),
+    case NewVal < Current of
+        true ->
+            case atomics:compare_exchange(Ref, Idx, Current, NewVal) of
+                ok ->
+                    ok;
+                _OtherVal ->
+                    %% Another writer changed it — retry
+                    cas_min(Ref, Idx, NewVal)
+            end;
+        false ->
+            ok
+    end.
+
+%% @private CAS loop to update the maximum value in an atomics slot.
+%% If NewVal > current value, atomically swap it in. Retries on contention.
+-spec cas_max(atomics:atomics_ref(), pos_integer(), integer()) -> ok.
+cas_max(Ref, Idx, NewVal) ->
+    Current = atomics:get(Ref, Idx),
+    case NewVal > Current of
+        true ->
+            case atomics:compare_exchange(Ref, Idx, Current, NewVal) of
+                ok ->
+                    ok;
+                _OtherVal ->
+                    %% Another writer changed it — retry
+                    cas_max(Ref, Idx, NewVal)
+            end;
+        false ->
+            ok
+    end.
