@@ -3663,8 +3663,10 @@ mod tests {
             "Y should be captured by nested block. Got:\n{code}"
         );
         // The foldl lambda must use `let _ = <Timer_expr> in StateAcc`, not bare `<Timer_expr> in StateAcc`
+        // BT-1639: Timer is now a direct call (no class_registry lookup), so check
+        // for the `let _ =` wrapping of the Timer class method call.
         assert!(
-            code.contains("let _ = case call 'beamtalk_class_registry'"),
+            code.contains("let _ = call 'bt@stdlib@timer':'class_after:do:'"),
             "Last expr in do: body with plain lets must use let _ = binding. Got:\n{code}"
         );
     }
@@ -3704,8 +3706,10 @@ mod tests {
         );
         let code = codegen(src);
         // The last expr (Timer send) must be wrapped with `let _ =`
+        // BT-1639: Timer is now a direct call (no class_registry lookup), so check
+        // for the `let _ =` wrapping of the Timer class method call.
         assert!(
-            code.contains("let _ = case call 'beamtalk_class_registry'"),
+            code.contains("let _ = call 'bt@stdlib@timer':'class_after:do:'"),
             "Last expr after field mutation must use let _ = binding. Got:\n{code}"
         );
     }

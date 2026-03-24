@@ -556,6 +556,13 @@ pub fn generate_module_with_warnings(
         generator.is_server_subclass = hierarchy.is_server_subclass(&class.name.name);
     }
 
+    // BT-1639: Pre-compute direct-call eligible class methods from the hierarchy.
+    // For sealed classes with no class variables, their class methods can be called
+    // directly (bypassing gen_server dispatch). This is safe because the methods
+    // are pure functions that don't mutate class state.
+    generator.direct_call_eligible =
+        CoreErlangGenerator::compute_direct_call_eligible(&hierarchy, &generator);
+
     // BT-213: Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?
@@ -837,6 +844,24 @@ impl ReplContext {
     }
 }
 
+/// BT-1639: Information about a sealed class eligible for direct-call optimization.
+///
+/// A class is eligible only if it is sealed and declares **no** class variables.
+/// In that case, its `class sealed` methods can be called directly (bypassing
+/// `gen_server` dispatch) since they don't mutate class state. This avoids the
+/// ~5-10us `gen_server` round-trip overhead for utility-style class methods
+/// (e.g., `File exists:`, `Json parse:`). The implementation does not inspect
+/// individual method bodies for class-variable access; any presence of class
+/// variables on the class makes the entire class ineligible.
+#[derive(Debug, Clone)]
+pub(super) struct DirectCallClassInfo {
+    /// The compiled Erlang module name (e.g., `bt@stdlib@tracing`).
+    pub module_name: String,
+    /// Set of selector names eligible for direct call (e.g., `{"setContext:", "context", ...}`).
+    /// Excludes `startLink`-family selectors and non-sealed class methods.
+    pub selectors: std::collections::HashSet<String>,
+}
+
 /// BT-1461: Class/actor-specific codegen state.
 ///
 /// Groups fields that are only relevant when compiling a class definition
@@ -1069,6 +1094,12 @@ pub(crate) struct CoreErlangGenerator {
     /// When true, `generate_handle_info` dispatches to `handleInfo:` with
     /// log-and-continue error semantics instead of the default ignore-all stub.
     is_server_subclass: bool,
+    /// BT-1639: Pre-computed direct-call eligible class methods.
+    ///
+    /// Maps class name → `DirectCallClassInfo` for sealed classes whose class methods
+    /// can be called directly (without `gen_server` dispatch). Computed from the class
+    /// hierarchy in `generate_module_with_warnings`.
+    direct_call_eligible: std::collections::HashMap<String, DirectCallClassInfo>,
     /// BT-1461: REPL-specific codegen state. `Some` when in REPL mode.
     repl_context: Option<ReplContext>,
     /// BT-1461: Class/actor-specific codegen state. `Some` when compiling a class.
@@ -1106,6 +1137,7 @@ impl CoreErlangGenerator {
             warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
             current_method_selector: None,
             is_server_subclass: false,
+            direct_call_eligible: std::collections::HashMap::new(),
             repl_context: Some(ReplContext::new()),
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),
@@ -1888,6 +1920,75 @@ impl CoreErlangGenerator {
     }
 
     /// BT-213: Determines if a class is an actor (process-based) or value type (plain term).
+    /// BT-1639: Computes the set of sealed classes whose class methods are eligible
+    /// for direct calls (bypassing `gen_server` dispatch).
+    ///
+    /// A class method is eligible when all four conditions hold:
+    /// 1. The class is sealed (all methods visible at compile time)
+    /// 2. The class has no class variables (no state to mutate)
+    /// 3. The method is a class method (not instance-side)
+    /// 4. The selector is not a supervisor constructor (`startLink`, `startLink:`)
+    ///
+    /// Returns a mapping from class name to `DirectCallClassInfo` with the module
+    /// name and set of eligible selectors.
+    fn compute_direct_call_eligible(
+        hierarchy: &crate::semantic_analysis::class_hierarchy::ClassHierarchy,
+        generator: &CoreErlangGenerator,
+    ) -> std::collections::HashMap<String, DirectCallClassInfo> {
+        // Selectors that depend on gen_server process state and must NOT be
+        // called directly: supervisor constructors (`startLink` family) and
+        // `basicNew`/`basicNewWith` constructors (`new`/`new:`) which read
+        // `beamtalk_class_name`/`beamtalk_class_module` from the process dictionary.
+        let excluded_selectors: std::collections::HashSet<&str> =
+            ["startLink", "startLink:", "new", "new:"]
+                .into_iter()
+                .collect();
+        let mut result = std::collections::HashMap::new();
+
+        for (class_name, class_info) in hierarchy.classes() {
+            // Gate 1: Class must be sealed
+            if !class_info.is_sealed {
+                continue;
+            }
+            // Gate 2: Class must have no class variables
+            if !class_info.class_variables.is_empty() {
+                continue;
+            }
+            // Gate 3: Class must have class methods
+            if class_info.class_methods.is_empty() {
+                continue;
+            }
+
+            let mut selectors = std::collections::HashSet::new();
+            for method in &class_info.class_methods {
+                // Gate 4: Skip selectors that depend on gen_server process state
+                if excluded_selectors.contains(method.selector.as_str()) {
+                    continue;
+                }
+                // Gate 5: Only optimize `class sealed` methods (is_sealed=true).
+                // Non-sealed class methods may reference `self` (the class object)
+                // for factory patterns or delegation, which would break with nil ClassSelf.
+                if !method.is_sealed {
+                    continue;
+                }
+                selectors.insert(method.selector.to_string());
+            }
+
+            if !selectors.is_empty() {
+                let module_name = generator.compiled_module_name(class_name);
+                result.insert(
+                    class_name.to_string(),
+                    DirectCallClassInfo {
+                        module_name,
+                        selectors,
+                    },
+                );
+            }
+        }
+
+        result
+    }
+
     ///
     /// **Actor classes:** Inherit from Actor or its subclasses. Generate `gen_server` code.
     /// **Value types:** Inherit from Object (but not Actor). Generate plain Erlang maps/records.

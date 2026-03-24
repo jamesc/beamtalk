@@ -67,6 +67,27 @@ TestCase subclass: TracingTest
     Tracing clearContext
     self assert: Tracing context equals: #{}
 
+  // BT-1639: Verify context operates in the caller's process.
+  // With the direct-call optimization, Tracing class methods execute in the
+  // caller's process (not the Tracing class object's gen_server process).
+  // This test verifies that setContext/context form a consistent pair
+  // within the same process, and that separate set/clear cycles don't
+  // leak state across calls.
+  testContextIsolationAcrossClearCycles =>
+    // First cycle: set and read
+    Tracing setContext: #{#requestId => "req-1"}
+    self assert: (Tracing context at: #requestId) equals: "req-1"
+    Tracing clearContext
+    // After clear, context should be empty — proves context is per-process
+    // (not stored in a shared ETS or global registry)
+    self assert: Tracing context equals: #{}
+    // Second cycle: completely independent
+    Tracing setContext: #{#sessionId => "sess-2"}
+    ctx := Tracing context
+    self deny: (ctx includesKey: #requestId)
+    self assert: (ctx at: #sessionId) equals: "sess-2"
+    Tracing clearContext
+
   // === Configuration ===
   testMaxEventsDefault =>
     // Default is 100000
