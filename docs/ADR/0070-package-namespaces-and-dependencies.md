@@ -1,7 +1,7 @@
 # ADR 0070: Package Namespaces and Dependencies
 
 ## Status
-Proposed (2026-03-24)
+Accepted (2026-03-24)
 
 ## Context
 

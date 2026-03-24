@@ -94,7 +94,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0067](0067-separate-state-field-keywords-by-class-kind.md) | Separate state:/field: Keywords by Class Kind | Accepted | 2026-03-18 |
 | [0068](0068-parametric-types-and-protocols.md) | Parametric Types and Protocols | Accepted \| Implemented | 2026-03-20 |
 | [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Accepted \| Implemented | 2026-03-21 |
-| [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Proposed | 2026-03-24 |
+| [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Accepted | 2026-03-24 |
 
 ## Creating New ADRs
 
