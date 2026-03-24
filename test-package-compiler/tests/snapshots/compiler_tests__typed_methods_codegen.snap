@@ -270,6 +270,7 @@ module 'typed_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'TypedCounter',
       'superclass' => 'Actor',
       'fields' => ['value'],

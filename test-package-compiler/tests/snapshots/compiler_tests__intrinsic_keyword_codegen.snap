@@ -94,6 +94,7 @@ call 'bt@stdlib@foo':'dispatch'('size', [], Self)
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'Foo',
       'superclass' => 'Object',
       'fields' => [],

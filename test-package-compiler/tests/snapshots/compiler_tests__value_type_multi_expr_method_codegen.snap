@@ -100,6 +100,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'MultiExprTest',
       'superclass' => 'Object',
       'fields' => [],

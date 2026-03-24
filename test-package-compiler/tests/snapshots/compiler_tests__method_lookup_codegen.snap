@@ -95,6 +95,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'MethodLookupTest',
       'superclass' => 'Object',
       'fields' => [],

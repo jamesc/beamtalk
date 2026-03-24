@@ -1,8 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Fixture for class method :help display (BT-990)
+// Fixture for class method :help display (BT-990, BT-1634)
 
 Object subclass: HelpTestWidget
 
+  /// Create a new widget with the given name.
   class create: name :: String -> HelpTestWidget => self new: name
