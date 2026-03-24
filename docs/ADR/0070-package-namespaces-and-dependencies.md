@@ -172,7 +172,7 @@ Collision rules apply identically: if two dependencies define a protocol with th
 
 **Note on structural conformance:** Two packages may define protocols with the same name but different method sets (e.g., `json@Serializable` requires `toJson` while `xml@Serializable` requires `toXmlString`). A class conforming to one does not necessarily conform to the other. The qualified name syntax resolves the naming ambiguity in type annotations (`:: json@Serializable`), but library authors should choose distinctive protocol names to avoid confusion.
 
-### 6. REPL Behaviour
+### 6. REPL Behavior
 
 The REPL workspace remains a flat namespace:
 
@@ -395,7 +395,7 @@ json = "1.0"
 - **Incremental adoption** — path deps for local dev, git deps for sharing, registry later. Each stage is independently useful.
 - **REPL stays simple** — flat workspace, immediate access, qualified names available if needed.
 - **Lockfile from day one** — reproducible builds are table stakes.
-- **Cross-package subclassing works with existing infrastructure** — `__beamtalk_meta/0` already emits full class metadata (kind, fields, field types, methods, generics, sealed/abstract flags), and `add_from_beam_meta` already injects this into the class hierarchy during compilation. Dependency resolution just needs to put `.beam` files on the code path — the same mechanism that handles cross-file inheritance within a package handles cross-package inheritance for free.
+- **Cross-package subclassing works with existing infrastructure** — `__beamtalk_meta/0` already emits class metadata (superclass, `is_value` flag, fields, field types, methods, generics, sealed/abstract flags), and `add_from_beam_meta` already injects this into the class hierarchy during compilation. ClassKind (Object/Value/Actor) is derived from the superclass chain and `is_value` flag, not stored as an explicit `kind` field. Dependency resolution just needs to put `.beam` files on the code path — the same mechanism that handles cross-file inheritance within a package handles cross-package inheritance for free.
 - **Dependency caching** — compiled dependencies don't recompile unless their lockfile entry changes. While there's no within-package parallelism (all classes see each other), the package boundary provides a natural caching boundary that eliminates redundant compilation of stable libraries.
 
 ### Negative
