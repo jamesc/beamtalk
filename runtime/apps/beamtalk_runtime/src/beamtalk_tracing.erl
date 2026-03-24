@@ -34,6 +34,10 @@
     disable/0,
     isEnabled/0,
     clear/0,
+    %% Trace context (BT-1639)
+    setContext/1,
+    context/0,
+    clearContext/0,
     %% Trace queries
     traces/0,
     traces/1,
@@ -99,6 +103,42 @@ isEnabled() ->
 -spec clear() -> nil.
 clear() ->
     call_trace_store(fun beamtalk_trace_store:clear/0),
+    nil.
+
+%%====================================================================
+%% Trace context (BT-1639)
+%%====================================================================
+
+%% @doc Set application-level trace context (merges with existing).
+%% Context propagates across actor boundaries automatically.
+%% FFI: (Erlang beamtalk_tracing) setContext: ctx
+-spec setContext(map()) -> nil.
+setContext(Ctx) when is_map(Ctx) ->
+    beamtalk_actor:set_trace_context(Ctx),
+    nil;
+setContext(Other) ->
+    error(#beamtalk_error{
+        kind = type_error,
+        class = 'Tracing',
+        selector = 'setContext:',
+        message = iolist_to_binary(
+            io_lib:format("setContext: requires a Dictionary, got: ~p", [Other])
+        ),
+        hint = <<"Pass a dictionary, e.g. Tracing setContext: #{#workflowId => \"wf-123\"}">>,
+        details = #{}
+    }).
+
+%% @doc Get the current application-level trace context.
+%% Returns #{} when no context has been set.
+-spec context() -> map().
+context() ->
+    beamtalk_actor:get_trace_context().
+
+%% @doc Clear the application-level trace context.
+%% Removes all trace context keys from the process and logger metadata.
+-spec clearContext() -> nil.
+clearContext() ->
+    beamtalk_actor:clear_trace_context(),
     nil.
 
 %%====================================================================
