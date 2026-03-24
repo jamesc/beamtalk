@@ -16,12 +16,12 @@ Object subclass: BlockExamples
   /// Multi-statement block: always breaks across lines.
   multiStatement =>
     [
-      self traceCr: "first"
-      self traceCr: "second"
+      self showCr: "first"
+      self showCr: "second"
     ] value
 
   /// Long block that breaks to multi-line due to width.
   longBlock: aVeryLongVariableNameThatExceedsTheEightyColumnLineWidthLimit =>
     aVeryLongVariableNameThatExceedsTheEightyColumnLineWidthLimit ifTrue: [
-      self traceCr: "yes"
+      self showCr: "yes"
     ]

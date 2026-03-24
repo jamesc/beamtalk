@@ -9,5 +9,5 @@ Value subclass: Main
   class run => self new run
 
   run =>
-    self traceCr: "Hello from gang_of_four!"
+    self showCr: "Hello from gang_of_four!"
     self

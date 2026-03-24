@@ -27,7 +27,7 @@ Value subclass: Hanoi
           from: source
           to: auxiliary
           via: target
-        self traceCr: "Move disk from " ++ source ++ " to " ++ target
+        self showCr: "Move disk from " ++ source ++ " to " ++ target
         self
           solve: n - 1
           from: auxiliary

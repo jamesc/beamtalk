@@ -12,4 +12,4 @@
 ///   a Hello
 Value subclass: Hello
 
-  greeting => self traceCr: "Hello, World!"
+  greeting => self showCr: "Hello, World!"

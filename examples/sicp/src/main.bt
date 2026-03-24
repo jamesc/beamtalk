@@ -14,5 +14,5 @@ Value subclass: Main
     eval := [:src | printer print: (ev eval: (reader read: src) in: env)]
     (WorkspaceInterface current) bind: eval as: #eval
 
-    self traceCr: "Run: eval value: ""(* 6 7)""."
+    self showCr: "Run: eval value: ""(* 6 7)""."
     self

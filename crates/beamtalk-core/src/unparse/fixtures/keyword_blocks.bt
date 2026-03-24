@@ -15,8 +15,8 @@ Object subclass: KeywordBlockExamples
   hanoiLike: flag =>
     flag
       ifTrue: [
-        self traceCr: "yes"
-        self traceCr: "done"
+        self showCr: "yes"
+        self showCr: "done"
       ]
       ifFalse: [nil]
 
@@ -24,16 +24,16 @@ Object subclass: KeywordBlockExamples
   doAll: coll =>
     coll
       do: [
-        self traceCr: "first"
-        self traceCr: "second"
+        self showCr: "first"
+        self showCr: "second"
       ]
 
   /// Single keyword with a parametrized multi-statement block.
   doEach: coll =>
     coll
       do: [:x |
-        self traceCr: x
-        self traceCr: "done"
+        self showCr: x
+        self showCr: "done"
       ]
 
   /// inject:into: with a multi-statement block on the second argument.
@@ -41,12 +41,12 @@ Object subclass: KeywordBlockExamples
     coll
       inject: 0
       into: [:sum :each |
-        self traceCr: each printString
+        self showCr: each printString
         sum + each
       ]
 
   /// Long receiver with single-statement block: keyword stays inline.
   longBlock: aVeryLongVariableNameThatExceedsTheEightyColumnLineWidthLimit =>
     aVeryLongVariableNameThatExceedsTheEightyColumnLineWidthLimit ifTrue: [
-      self traceCr: "yes"
+      self showCr: "yes"
     ]

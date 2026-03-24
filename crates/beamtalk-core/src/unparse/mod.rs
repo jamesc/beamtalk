@@ -2718,7 +2718,7 @@ mod tests {
     #[test]
     fn keyword_multi_stmt_block_breaks_keywords() {
         // Multi-statement block: all keywords break to their own indented lines.
-        let source = "Object subclass: A\n  m =>\n    flag\n      ifTrue: [\n        a traceCr: \"x\"\n        b traceCr: \"y\"\n      ]\n      ifFalse: [nil]\n";
+        let source = "Object subclass: A\n  m =>\n    flag\n      ifTrue: [\n        a showCr: \"x\"\n        b showCr: \"y\"\n      ]\n      ifFalse: [nil]\n";
         let module = parse_source(source);
         let out = unparse_module(&module);
         assert!(
@@ -2734,14 +2734,14 @@ mod tests {
     #[test]
     fn keyword_multi_stmt_block_idempotent() {
         assert_idempotent(
-            "Object subclass: A\n  m =>\n    flag\n      ifTrue: [\n        self traceCr: \"yes\"\n        self traceCr: \"done\"\n      ]\n      ifFalse: [nil]\n",
+            "Object subclass: A\n  m =>\n    flag\n      ifTrue: [\n        self showCr: \"yes\"\n        self showCr: \"done\"\n      ]\n      ifFalse: [nil]\n",
         );
     }
 
     #[test]
     fn keyword_single_keyword_multi_stmt_breaks() {
         // Single keyword with a multi-statement block: keyword breaks to own line.
-        let source = "Object subclass: A\n  m =>\n    coll\n      do: [\n        self traceCr: \"a\"\n        self traceCr: \"b\"\n      ]\n";
+        let source = "Object subclass: A\n  m =>\n    coll\n      do: [\n        self showCr: \"a\"\n        self showCr: \"b\"\n      ]\n";
         let module = parse_source(source);
         let out = unparse_module(&module);
         assert!(
@@ -2832,11 +2832,11 @@ mod tests {
     #[test]
     fn block_with_single_short_keyword_stays_inline() {
         // Single-statement block whose body is a short 1-keyword send must stay inline.
-        let source = "Object subclass: A\n  m => flag ifTrue: [self traceCr: \"yes\"]\n";
+        let source = "Object subclass: A\n  m => flag ifTrue: [self showCr: \"yes\"]\n";
         let module = parse_source(source);
         let out = unparse_module(&module);
         assert!(
-            out.contains("ifTrue: [self traceCr: \"yes\"]"),
+            out.contains("ifTrue: [self showCr: \"yes\"]"),
             "short single-keyword block body should stay inline: {out}"
         );
     }
