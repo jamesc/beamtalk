@@ -1561,13 +1561,13 @@ impl CoreErlangGenerator {
     /// In workspace mode, checks REPL bindings first for convenience names.
     /// If the name is found in bindings, it's an instance (e.g., Transcript is a
     /// `TranscriptStream` actor), so dispatch via `beamtalk_message_dispatch:send/3`.
-    /// If not found, fall back to `class_send` for actual class names.
+    /// If not found, fall back to direct call (BT-1639) or `class_send`.
     ///
     /// ```erlang
-    /// let ClassPid = call 'beamtalk_class_registry':'whereis_class'('Name') in
     /// case call 'maps':'find'('Name', State) of
     ///   <{'ok', BindingVal}> -> call 'beamtalk_message_dispatch':'send'(BindingVal, Sel, Args)
-    ///   <'error'> -> call 'beamtalk_object_class':'class_send'(ClassPid, Sel, Args)
+    ///   <'error'> -> call 'module':'class_selector'('nil', #{}, Args)  %% BT-1639 direct
+    ///                %% OR: class_send fallback for non-eligible classes
     /// end
     /// ```
     fn generate_binding_aware_class_send(
@@ -1584,11 +1584,32 @@ impl CoreErlangGenerator {
         // exceeds the limit).
         let raw = selector.to_erlang_atom();
         let instance_selector = super::selector_mangler::safe_atom_name(&raw);
-        let class_selector = super::selector_mangler::safe_class_method_selector(&raw);
-        let class_pid_var = self.fresh_var("ClassPid");
         let binding_val_var = self.fresh_var("BindingVal");
         let state_var = self.current_state_var();
         let args_doc = self.capture_argument_list_doc(arguments)?;
+
+        // BT-1639: Build the class-side fallback: direct call or gen_server
+        let class_fallback: Document<'static> =
+            if let Some(info) = self.direct_call_eligible.get(class_name) {
+                if info.selectors.contains(&raw) {
+                    let safe_fn = super::selector_mangler::safe_class_method_fn_name(&raw);
+                    let comma = if arguments.is_empty() { "" } else { ", " };
+                    docvec![
+                        "call '",
+                        Document::String(info.module_name.clone()),
+                        "':'",
+                        Document::String(safe_fn),
+                        "'('nil', ~{}~",
+                        comma,
+                        args_doc.clone(),
+                        ")"
+                    ]
+                } else {
+                    self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
+                }
+            } else {
+                self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
+            };
 
         let doc = docvec![
             Document::String(format!(
@@ -1598,17 +1619,11 @@ impl CoreErlangGenerator {
             Document::String(format!(
                 "call 'beamtalk_message_dispatch':'send'({binding_val_var}, '{instance_selector}', ["
             )),
-            args_doc.clone(),
+            args_doc,
             "]) ",
             "<'error'> when 'true' -> ",
-            Document::String(format!(
-                "let {class_pid_var} = call 'beamtalk_class_registry':'whereis_class'('{class_name}') in "
-            )),
-            Document::String(format!(
-                "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{class_selector}', ["
-            )),
-            args_doc,
-            "]) end"
+            class_fallback,
+            " end"
         ];
 
         Ok(doc)
@@ -1616,18 +1631,32 @@ impl CoreErlangGenerator {
 
     /// Generates workspace-mode class send for actor/value-type methods.
     ///
-    /// Tries `class_send` first (for real class names like `Counter`),
-    /// returns nil for unresolved names. ADR 0019 Phase 4: No `persistent_term`
-    /// fallback — convenience names resolve via session bindings in REPL context.
+    /// BT-1639: For sealed classes eligible for direct call, generates a direct
+    /// function call instead of `gen_server` dispatch. Otherwise tries `class_send`
+    /// first (for real class names like `Counter`), returns nil for unresolved names.
+    /// ADR 0019 Phase 4: No `persistent_term` fallback — convenience names resolve
+    /// via session bindings in REPL context.
     fn generate_workspace_class_send(
         &mut self,
         class_name: &str,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
+        let raw_selector = selector.to_erlang_atom();
+
+        // BT-1639: Direct call optimization for sealed class methods
+        if let Some(info) = self.direct_call_eligible.get(class_name) {
+            if info.selectors.contains(&raw_selector) {
+                return self.generate_direct_class_method_call(
+                    &info.module_name.clone(),
+                    &raw_selector,
+                    arguments,
+                );
+            }
+        }
+
         // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
-        let selector_atom =
-            super::selector_mangler::safe_class_method_selector(&selector.to_erlang_atom());
+        let selector_atom = super::selector_mangler::safe_class_method_selector(&raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
@@ -1649,26 +1678,48 @@ impl CoreErlangGenerator {
 
     /// Generates a class-level method call (BT-215).
     ///
-    /// Class methods are just module functions, so we generate a direct call:
+    /// For sealed classes with no class variables (BT-1639), generates a direct
+    /// function call to `module:class_<selector>(nil, #{}, Args...)`, bypassing
+    /// the `gen_server` round-trip. This is safe because the methods are pure functions.
+    ///
+    /// For all other classes (or unrecognized selectors), falls back to the
+    /// `gen_server` dispatch path via `beamtalk_object_class:class_send/3`.
+    ///
+    /// # Generated Code (direct call, BT-1639)
+    ///
     /// ```erlang
-    /// call 'ModuleName':'methodName'(Args)
+    /// call 'bt@stdlib@tracing':'class_setContext:'('nil', #{}, Ctx)
     /// ```
     ///
-    /// Examples:
-    /// - `Beamtalk allClasses` → `call 'Beamtalk':'allClasses'()`
-    /// - `Point new` → `call 'Point':'new'()`
-    /// - `Counter spawn` → Already handled by `generate_actor_spawn`
-    /// - `File exists: 'test.txt'` → `call 'beamtalk_file':'exists:'(...)` (BT-336)
+    /// # Generated Code (`gen_server` fallback)
+    ///
+    /// ```erlang
+    /// let ClassPid = call 'beamtalk_class_registry':'whereis_class'('Tracing') in
+    /// call 'beamtalk_object_class':'class_send'(ClassPid, 'setContext:', [Ctx])
+    /// ```
     fn generate_class_method_call(
         &mut self,
         class_name: &str,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
+        let raw_selector = selector.to_erlang_atom();
+
+        // BT-1639: Check if this class method is eligible for direct call optimization.
+        if let Some(info) = self.direct_call_eligible.get(class_name) {
+            if info.selectors.contains(&raw_selector) {
+                return self.generate_direct_class_method_call(
+                    &info.module_name.clone(),
+                    &raw_selector,
+                    arguments,
+                );
+            }
+        }
+
+        // Fallback: gen_server dispatch via class_send
         // BT-1408: Hash long selector atoms (e.g. keyword constructors with many
         // fields) to stay within Erlang's 255-char atom limit.
-        let selector_atom =
-            super::selector_mangler::safe_class_method_selector(&selector.to_erlang_atom());
+        let selector_atom = super::selector_mangler::safe_class_method_selector(&raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
@@ -1684,6 +1735,63 @@ impl CoreErlangGenerator {
         ];
 
         Ok(doc)
+    }
+
+    /// BT-1639: Generates a direct function call to a sealed class method.
+    ///
+    /// Passes `nil` for `ClassSelf` and `#{}` for `ClassVars` since sealed classes
+    /// with no class variables never reference these parameters.
+    ///
+    /// ```erlang
+    /// call 'module':'class_<selector>'('nil', #{}, Args...)
+    /// ```
+    fn generate_direct_class_method_call(
+        &mut self,
+        module_name: &str,
+        selector: &str,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        // BT-1408: Hash long selector atoms to stay within Erlang's 255-char atom limit.
+        let safe_fn = super::selector_mangler::safe_class_method_fn_name(selector);
+        let args_doc = self.capture_argument_list_doc(arguments)?;
+        let comma = if arguments.is_empty() { "" } else { ", " };
+
+        // Core Erlang empty map is ~{}~ (not #{} which is Erlang source syntax)
+        let doc = docvec![
+            "call '",
+            Document::String(module_name.to_string()),
+            "':'",
+            Document::String(safe_fn),
+            "'('nil', ~{}~",
+            comma,
+            args_doc,
+            ")"
+        ];
+
+        Ok(doc)
+    }
+
+    /// BT-1639: Generates the `gen_server` `class_send` fallback for binding-aware dispatch.
+    ///
+    /// Used when a class method is not eligible for direct call optimization.
+    fn generate_class_send_fallback(
+        &mut self,
+        class_name: &str,
+        raw_selector: &str,
+        args_doc: Document<'static>,
+    ) -> Document<'static> {
+        let class_selector = super::selector_mangler::safe_class_method_selector(raw_selector);
+        let class_pid_var = self.fresh_var("ClassPid");
+        docvec![
+            Document::String(format!(
+                "let {class_pid_var} = call 'beamtalk_class_registry':'whereis_class'('{class_name}') in "
+            )),
+            Document::String(format!(
+                "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{class_selector}', ["
+            )),
+            args_doc,
+            "])"
+        ]
     }
 
     /// BT-851: Pre-scans a class for self-sends that pass Tier 2 (stateful) block arguments.
