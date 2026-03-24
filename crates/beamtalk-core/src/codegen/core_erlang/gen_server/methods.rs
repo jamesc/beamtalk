@@ -1209,6 +1209,7 @@ impl CoreErlangGenerator {
     ///             'classState' => ~{}~,
     ///             'classDoc' => 'none',
     ///             'methodDocs' => ~{}~,
+    ///             'classMethodDocs' => ~{}~,
     ///             'meta' => ~{...}~
     ///         }~
     ///         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -1310,6 +1311,14 @@ impl CoreErlangGenerator {
                     .map(|doc| Document::String(Self::binary_string_literal(doc)))
             });
 
+            // BT-1634: Class method doc comments
+            let class_method_docs_doc =
+                Self::build_selector_map_filtered(&class_methods_primary, |m| {
+                    m.doc_comment
+                        .as_ref()
+                        .map(|doc| Document::String(Self::binary_string_literal(doc)))
+                });
+
             // BT-877: Detect non-constructible classes at compile time.
             // Emit `isConstructible = false` for: abstract classes, actors, and
             // classes with `new => self error: "..."`. For all others, omit the key
@@ -1336,6 +1345,7 @@ impl CoreErlangGenerator {
                 class_vars_doc,
                 class_doc_value,
                 method_docs_doc,
+                class_method_docs_doc,
                 meta_doc,
                 is_non_constructible,
                 self.stdlib_mode(),
@@ -1505,6 +1515,7 @@ impl CoreErlangGenerator {
         class_vars_doc: Document<'static>,
         class_doc_value: Document<'static>,
         method_docs_doc: Document<'static>,
+        class_method_docs_doc: Document<'static>,
         meta_doc: Document<'static>,
         is_non_constructible: bool,
         stdlib_mode: bool,
@@ -1558,6 +1569,10 @@ impl CoreErlangGenerator {
                     line(),
                     "'methodDocs' => ~{",
                     method_docs_doc,
+                    "}~,",
+                    line(),
+                    "'classMethodDocs' => ~{",
+                    class_method_docs_doc,
                     "}~,",
                     // ADR 0050 Phase 5: Include meta map in BuilderState so that
                     // beamtalk_object_class:init/1 can access it during on_load.

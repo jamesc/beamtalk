@@ -21865,8 +21865,8 @@
         "object",
         "subclassing"
       ],
-      "source": "// Fixture for class method :help display (BT-990)\n\nObject subclass: HelpTestWidget\n\n  class create: name :: String -> HelpTestWidget => self new: name",
-      "explanation": "Fixture for class method :help display (BT-990)"
+      "source": "// Fixture for class method :help display (BT-990, BT-1634)\n\nObject subclass: HelpTestWidget\n\n  /// Create a new widget with the given name.\n  class create: name :: String -> HelpTestWidget => self new: name",
+      "explanation": "Fixture for class method :help display (BT-990, BT-1634)"
     },
     {
       "id": "tests-e2e-fixtures-class-method-help-sub-fixture",

@@ -129,6 +129,7 @@ call 'beamtalk_tuple':'as_string'(Self)
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'Tuple',
       'superclass' => 'Object',
       'fields' => [],

@@ -90,6 +90,7 @@ call 'erlang':'*'(Self, 2)
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'MyInt',
       'superclass' => 'Integer',
       'fields' => [],

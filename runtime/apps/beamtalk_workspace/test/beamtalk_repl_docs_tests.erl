@@ -570,6 +570,16 @@ format_method_doc_known_test_() ->
 
 format_method_doc_class_side_test_() ->
     {setup, fun integration_setup/0, fun(_) -> ok end, [
+        %% BT-1634: Class method doc comments should be displayed by :help
+        {"format_method_doc_class_side shows doc text for System getEnv:", fun() ->
+            {ok, Result} = beamtalk_repl_docs:format_method_doc_class_side(
+                'System', <<"getEnv:">>
+            ),
+            ?assert(is_binary(Result)),
+            ?assert(binary:match(Result, <<"getEnv:">>) =/= nomatch),
+            %% The doc comment should be present (not just signature)
+            ?assert(binary:match(Result, <<"environment variable">>) =/= nomatch)
+        end},
         {"format_method_doc_class_side resolves allMethods on Integer", fun() ->
             {ok, Result} = beamtalk_repl_docs:format_method_doc_class_side(
                 'Integer', <<"allMethods">>

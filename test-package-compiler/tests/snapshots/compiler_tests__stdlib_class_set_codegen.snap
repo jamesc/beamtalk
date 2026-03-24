@@ -171,6 +171,7 @@ call 'beamtalk_set':'do'(Self, _block9)
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'Set',
       'superclass' => 'Value',
       'fields' => ['elements'],
