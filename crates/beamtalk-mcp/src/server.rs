@@ -334,12 +334,22 @@ pub struct GetTracesParams {
         description = "Optional actor PID to filter traces, e.g. \"<0.123.0>\". Omit to get all traces."
     )]
     pub actor: Option<String>,
-    /// Optional method selector to further filter traces (e.g. "increment").
-    /// Requires `actor` to also be specified.
-    #[schemars(
-        description = "Optional method selector to filter traces (e.g. \"increment\"). Requires 'actor' to be specified."
-    )]
+    /// Optional method selector to filter traces (e.g. "increment").
+    #[schemars(description = "Optional method selector to filter traces (e.g. \"increment\").")]
     pub selector: Option<String>,
+    /// Optional class name to filter traces (e.g. "`EventStore`").
+    #[schemars(description = "Optional actor class name to filter traces (e.g. \"EventStore\").")]
+    pub class: Option<String>,
+    /// Optional outcome to filter traces (e.g. "error", "ok", "timeout").
+    #[schemars(
+        description = "Optional outcome to filter traces (e.g. \"error\", \"ok\", \"timeout\")."
+    )]
+    pub outcome: Option<String>,
+    /// Optional minimum duration in nanoseconds — only return traces slower than this.
+    #[schemars(
+        description = "Optional minimum duration in nanoseconds. Only returns traces with duration >= this value (e.g. 5000000 for 5ms)."
+    )]
+    pub min_duration_ns: Option<u64>,
     /// Maximum number of trace events to return. Traces are newest-first.
     #[schemars(description = "Maximum number of trace events to return. Traces are newest-first.")]
     pub limit: Option<u32>,
@@ -370,12 +380,26 @@ pub struct ExportTracesParams {
         description = "Optional actor PID to filter exported traces, e.g. \"<0.123.0>\". Omit to export all traces."
     )]
     pub actor: Option<String>,
-    /// Optional method selector to further filter traces (e.g. "increment").
-    /// Requires `actor` to also be specified.
+    /// Optional method selector to filter exported traces (e.g. "increment").
     #[schemars(
-        description = "Optional method selector to filter exported traces (e.g. \"increment\"). Requires 'actor' to be specified."
+        description = "Optional method selector to filter exported traces (e.g. \"increment\")."
     )]
     pub selector: Option<String>,
+    /// Optional class name to filter exported traces (e.g. "`EventStore`").
+    #[schemars(
+        description = "Optional actor class name to filter exported traces (e.g. \"EventStore\")."
+    )]
+    pub class: Option<String>,
+    /// Optional outcome to filter exported traces (e.g. "error", "ok", "timeout").
+    #[schemars(
+        description = "Optional outcome to filter exported traces (e.g. \"error\", \"ok\", \"timeout\")."
+    )]
+    pub outcome: Option<String>,
+    /// Optional minimum duration in nanoseconds — only export traces slower than this.
+    #[schemars(
+        description = "Optional minimum duration in nanoseconds. Only exports traces with duration >= this value."
+    )]
+    pub min_duration_ns: Option<u64>,
     /// Maximum number of trace events to export. Traces are newest-first.
     #[schemars(description = "Maximum number of trace events to export. Traces are newest-first.")]
     pub limit: Option<u32>,
@@ -1248,7 +1272,7 @@ impl BeamtalkMcp {
 
     /// Get captured trace events with optional filtering (ADR 0069).
     #[tool(
-        description = "Get captured trace events, newest first. Optionally filter by actor PID, method selector, or limit the number of results. Returns structured JSON with actor, selector, duration, result, and timestamp for each event."
+        description = "Get captured trace events, newest first. Filter by actor PID, method selector, class name, outcome (ok/error/timeout), minimum duration, or limit the number of results. Returns structured JSON with actor, class, selector, duration, outcome, and timestamp for each event."
     )]
     async fn get_traces(
         &self,
@@ -1259,22 +1283,21 @@ impl BeamtalkMcp {
             tool = "get_traces",
             actor = ?params.actor,
             selector = ?params.selector,
+            class = ?params.class,
+            outcome = ?params.outcome,
+            min_duration_ns = ?params.min_duration_ns,
             limit = ?params.limit,
             "tool invoked"
         );
-
-        // Reject selector without actor
-        if params.selector.is_some() && params.actor.is_none() {
-            return Ok(error_result(
-                "ERROR: 'selector' requires 'actor' to be specified.",
-            ));
-        }
 
         let response = self
             .client
             .get_traces(
                 params.actor.as_deref(),
                 params.selector.as_deref(),
+                params.class.as_deref(),
+                params.outcome.as_deref(),
+                params.min_duration_ns,
                 params.limit,
             )
             .await
@@ -1296,7 +1319,7 @@ impl BeamtalkMcp {
 
     /// Export trace events to a JSON file with optional filtering (ADR 0069).
     #[tool(
-        description = "Export captured trace events to a JSON file. Optionally filter by actor PID, method selector, or limit the number of events. Returns the file path and event count. The output file contains a metadata header with export timestamp, filters used, and total event count, followed by the trace events array."
+        description = "Export captured trace events to a JSON file. Filter by actor PID, method selector, class name, outcome (ok/error/timeout), minimum duration, or limit the number of events. Returns the file path and event count."
     )]
     async fn export_traces(
         &self,
@@ -1308,16 +1331,12 @@ impl BeamtalkMcp {
             path = ?params.path,
             actor = ?params.actor,
             selector = ?params.selector,
+            class = ?params.class,
+            outcome = ?params.outcome,
+            min_duration_ns = ?params.min_duration_ns,
             limit = ?params.limit,
             "tool invoked"
         );
-
-        // Reject selector without actor
-        if params.selector.is_some() && params.actor.is_none() {
-            return Ok(error_result(
-                "ERROR: 'selector' requires 'actor' to be specified.",
-            ));
-        }
 
         let response = self
             .client
@@ -1325,6 +1344,9 @@ impl BeamtalkMcp {
                 params.path.as_deref(),
                 params.actor.as_deref(),
                 params.selector.as_deref(),
+                params.class.as_deref(),
+                params.outcome.as_deref(),
+                params.min_duration_ns,
                 params.limit,
             )
             .await
