@@ -562,6 +562,22 @@ Existing multi-file projects that rely on implicit class availability across dir
 
 This is opt-in — the old single-file and single-package workflows are unaffected.
 
+## Implementation Tracking
+
+**Epic:** [BT-1643](https://linear.app/beamtalk/issue/BT-1643) — Epic: Package Namespaces and Dependencies (ADR 0070)
+
+| Phase | Issues | Description |
+|-------|--------|-------------|
+| 1. Dependency Resolution | BT-1644, BT-1645, BT-1646, BT-1647, BT-1648, BT-1649 | TOML parsing, path/git resolution, lockfile, topo sort, CLI |
+| 2. Qualified Names | BT-1650, BT-1651, BT-1652 | Lexer, parser, AST, semantic analysis, codegen for `package@Class` |
+| 3. Collision Detection | BT-1653, BT-1654, BT-742 | Cross-package collisions, transitive dep warnings, collision key update |
+| 4. Cross-Package Metadata | BT-1655 | `.app` metadata extension, `package` in `__beamtalk_meta/0` |
+| 5. Package Reflection | BT-1656, BT-1657, BT-1658 | `beamtalk_package.erl`, `Package.bt`, LSP/MCP integration |
+| 6. REPL + E2E | BT-1659, BT-1660 | REPL integration, end-to-end btscript tests |
+
+**Status:** Planned
+**Recommended start:** BT-1644 (Phase 1, no dependencies)
+
 ## References
 
 - Related issues:
