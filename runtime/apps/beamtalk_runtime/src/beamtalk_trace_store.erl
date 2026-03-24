@@ -54,6 +54,8 @@
     %% Configuration
     max_events/0,
     max_events/1,
+    %% Causal trace linking (BT-1633)
+    next_span_id/0,
     %% Health check
     telemetry_attached/0,
     %% Telemetry handler callbacks
@@ -97,6 +99,7 @@
 -define(PT_COUNTERS, beamtalk_trace_counters).
 -define(PT_MAX_EVENTS, beamtalk_trace_max_events).
 -define(PT_SLOT_ALLOCATOR, beamtalk_trace_slot_allocator).
+-define(PT_SPAN_ID_COUNTER, beamtalk_span_id_counter).
 
 %% Defaults
 -define(DEFAULT_MAX_EVENTS, 100000).
@@ -138,6 +141,14 @@ is_enabled() ->
     catch
         error:badarg -> false
     end.
+
+%% @doc Generate the next monotonic span ID for causal trace linking (BT-1633).
+%% Uses a global atomics counter — one atomics:add_get/3 call (~10ns).
+%% Only called from within maybe_span when tracing is enabled.
+-spec next_span_id() -> pos_integer().
+next_span_id() ->
+    Ref = persistent_term:get(?PT_SPAN_ID_COUNTER),
+    atomics:add_get(Ref, 1, 1).
 
 %% @doc Clear all trace events and aggregate stats.
 -spec clear() -> ok.
@@ -304,7 +315,11 @@ handle_dispatch_stop(_EventName, #{duration := Duration}, Metadata, _Config) ->
     case is_enabled() of
         true ->
             TraceCtx = beamtalk_actor:get_trace_context(),
-            record_trace_event(Pid, Class, Selector, Mode, DurationNs, Outcome, TraceCtx, stop);
+            %% BT-1633: Merge causal trace IDs (trace_id, span_id, parent_span_id)
+            %% from process dictionary into trace event metadata.
+            CausalCtx = beamtalk_actor:get_causal_ctx(),
+            EventMeta = maps:merge(TraceCtx, CausalCtx),
+            record_trace_event(Pid, Class, Selector, Mode, DurationNs, Outcome, EventMeta, stop);
         false ->
             ok
     end,
@@ -326,12 +341,10 @@ handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config
     case is_enabled() of
         true ->
             TraceCtx = beamtalk_actor:get_trace_context(),
+            %% BT-1633: Merge causal trace IDs into exception metadata.
+            CausalCtx = beamtalk_actor:get_causal_ctx(),
             BaseMeta = #{error => Reason, kind => Kind},
-            EventMeta =
-                case map_size(TraceCtx) of
-                    0 -> BaseMeta;
-                    _ -> maps:merge(TraceCtx, BaseMeta)
-                end,
+            EventMeta = maps:merge(maps:merge(TraceCtx, CausalCtx), BaseMeta),
             record_trace_event(Pid, Class, Selector, Mode, DurationNs, error, EventMeta, exception);
         false ->
             ok
@@ -565,6 +578,15 @@ ensure_counters() ->
             Allocator = atomics:new(1, [{signed, false}]),
             atomics:put(Allocator, 1, 1),
             persistent_term:put(?PT_SLOT_ALLOCATOR, Allocator)
+    end,
+    %% BT-1633: Span ID counter for causal trace linking.
+    %% Monotonically incrementing integers, one atomics:add_get/3 per span (~10ns).
+    try persistent_term:get(?PT_SPAN_ID_COUNTER) of
+        _SpanRef -> ok
+    catch
+        error:badarg ->
+            SpanIdRef = atomics:new(1, [{signed, false}]),
+            persistent_term:put(?PT_SPAN_ID_COUNTER, SpanIdRef)
     end.
 
 %% @private Initialise persistent_term defaults.
@@ -788,13 +810,14 @@ delete_oldest_n(Table, N) ->
 %%====================================================================
 
 %% @private Get trace events, filtered by opts map.
-%% Supported opts: actor, selector, class, outcome, min_duration_ns.
+%% Supported opts: actor, selector, class, outcome, min_duration_ns, trace_id (BT-1633).
 do_get_traces(Opts) when is_map(Opts) ->
     Pid = maps:get(actor, Opts, undefined),
     Selector = maps:get(selector, Opts, undefined),
     Class = maps:get(class, Opts, undefined),
     Outcome = maps:get(outcome, Opts, undefined),
     MinDurationNs = maps:get(min_duration_ns, Opts, undefined),
+    TraceId = maps:get(trace_id, Opts, undefined),
     All = ets:tab2list(?TRACE_EVENTS),
     Filtered = lists:filter(
         fun(Ev) ->
@@ -803,11 +826,15 @@ do_get_traces(Opts) when is_map(Opts) ->
             EvSel = element(4, Ev),
             EvDuration = element(6, Ev),
             EvOutcome = element(7, Ev),
+            EvMetadata = element(8, Ev),
             (Pid =:= undefined orelse EvPid =:= Pid) andalso
                 (Selector =:= undefined orelse EvSel =:= Selector) andalso
                 (Class =:= undefined orelse EvClass =:= Class) andalso
                 (Outcome =:= undefined orelse EvOutcome =:= Outcome) andalso
-                (MinDurationNs =:= undefined orelse EvDuration >= MinDurationNs)
+                (MinDurationNs =:= undefined orelse EvDuration >= MinDurationNs) andalso
+                (TraceId =:= undefined orelse
+                    (is_map(EvMetadata) andalso
+                        maps:get(trace_id, EvMetadata, undefined) =:= TraceId))
         end,
         All
     ),
