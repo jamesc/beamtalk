@@ -72,7 +72,7 @@ stacker = "0.1"
 
 # WebSocket (ADR 0020 — REPL protocol transport)
 tungstenite = "0.28"
-tokio-tungstenite = "0.28"
+tokio-tungstenite = "0.29"
 
 # Windows process management (native replacement for sysinfo, BT-1039)
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
