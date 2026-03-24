@@ -1,7 +1,7 @@
 # ADR 0068: Parametric Types and Protocols
 
 ## Status
-Accepted (2026-03-20)
+Accepted | Implemented (2026-03-20)
 
 ## Context
 
