@@ -150,12 +150,14 @@ impl TypeChecker {
         span: Span,
         hierarchy: &ClassHierarchy,
     ) {
-        // BT-1636: Emit deprecation warning for old trace:/traceCr: selectors.
-        self.check_deprecated_selector(selector, span);
-
         if !hierarchy.has_class(class_name) {
             return;
         }
+
+        // BT-1636: Emit deprecation warning for old trace:/traceCr: selectors.
+        // Placed after has_class guard so we only warn on known Beamtalk classes,
+        // not on unknown/external receivers that may define their own trace: methods.
+        self.check_deprecated_selector(selector, span);
 
         // Classes with instance-side doesNotUnderstand: override accept any message
         if hierarchy.has_instance_dnu_override(class_name) {
