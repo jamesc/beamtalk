@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1635: Tests that Foo class methods returns user-defined class methods,
+// not an empty array. Verifies metaclass dispatch for methods, allMethods,
+// includesSelector:, and canUnderstand: on class objects.
+
+TestCase subclass: ClassMethodsMetaclassTest
+
+  // BT-1635: Sealed class with many class methods — methods returns them
+  testTracingClassMethodsReturnsClassMethods =>
+    methods := Tracing class methods
+    self deny: methods isEmpty
+    self assert: (methods includes: #enable)
+    self assert: (methods includes: #disable)
+    self assert: (methods includes: #clear)
+    self assert: (methods includes: #traces)
+    self assert: (methods includes: #stats)
+    self assert: (methods includes: #isEnabled)
+
+  // BT-1635: Actor with no user-defined class methods — instance
+  // methods are not leaked into class methods
+  testCounterClassMethodsExcludesInstanceMethods =>
+    methods := Counter class methods
+    // Counter's instance methods should NOT appear as class methods
+    self deny: (methods includes: #increment)
+    self deny: (methods includes: #getValue)
+    self deny: (methods includes: #decrement)
+
+  // BT-1635: allMethods on metaclass still includes Behaviour protocol
+  testAllMethodsIncludesBehaviourProtocol =>
+    methods := Tracing class allMethods
+    // User-defined class methods are present
+    self assert: (methods includes: #enable)
+    self assert: (methods includes: #disable)
+    // Behaviour protocol methods are present
+    self assert: (methods includes: #superclass)
+    self assert: (methods includes: #reload)
+
+  // BT-1635: Instance-side methods unchanged
+  testInstanceSideMethodsUnchanged =>
+    counterLocal := Counter methods
+    self deny: counterLocal isEmpty
+    self assert: (counterLocal includes: #increment)
+    self assert: (counterLocal includes: #getValue)
+    // allMethods includes inherited
+    counterAll := Counter allMethods
+    self assert: (counterAll includes: #increment)
+    self assert: (counterAll includes: #isNil)
+
+  // BT-1635: includesSelector: on metaclass checks class methods
+  testIncludesSelectorOnMetaclass =>
+    self assert: (Tracing class includesSelector: #enable)
+    self assert: (Tracing class includesSelector: #disable)
+    self deny: (Tracing class includesSelector: #bogusNotAMethod)
+
+  // BT-1635: canUnderstand: on metaclass checks class methods
+  testCanUnderstandOnMetaclass =>
+    self assert: (Tracing class canUnderstand: #enable)
+    self assert: (Tracing class canUnderstand: #superclass)
+    self deny: (Tracing class canUnderstand: #bogusNotAMethod)
