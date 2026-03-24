@@ -185,6 +185,9 @@
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
 
+%% Lifecycle telemetry (BT-1638: called from compiled actor init/terminate)
+-export([maybe_execute_telemetry/3]).
+
 %%% Public API
 
 %% @doc Start an actor as part of a supervision tree.
