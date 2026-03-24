@@ -7457,7 +7457,7 @@
         "unless",
         "value"
       ],
-      "source": "/// Towers of Hanoi\n/// A classic recursive algorithm that moves n disks between three pegs\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load examples/hanoi.bt\n///   > h := Hanoi new\n///   > h solve: 3 from: \"A\" to: \"C\" via: \"B\"\n///   Move disk from A to C\n///   Move disk from A to B\n///   Move disk from C to B\n///   Move disk from A to C\n///   Move disk from B to A\n///   Move disk from B to C\n///   Move disk from A to C\n///   nil\nValue subclass: Hanoi\n\n  solve: n from: source to: target via: auxiliary =>\n    (n > 0)\n      ifTrue: [\n        self\n          solve: n - 1\n          from: source\n          to: auxiliary\n          via: target\n        self traceCr: \"Move disk from \" ++ source ++ \" to \" ++ target\n        self\n          solve: n - 1\n          from: auxiliary\n          to: target\n          via: source\n      ]\n      ifFalse: [nil]",
+      "source": "/// Towers of Hanoi\n/// A classic recursive algorithm that moves n disks between three pegs\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load examples/hanoi.bt\n///   > h := Hanoi new\n///   > h solve: 3 from: \"A\" to: \"C\" via: \"B\"\n///   Move disk from A to C\n///   Move disk from A to B\n///   Move disk from C to B\n///   Move disk from A to C\n///   Move disk from B to A\n///   Move disk from B to C\n///   Move disk from A to C\n///   nil\nValue subclass: Hanoi\n\n  solve: n from: source to: target via: auxiliary =>\n    (n > 0)\n      ifTrue: [\n        self\n          solve: n - 1\n          from: source\n          to: auxiliary\n          via: target\n        self showCr: \"Move disk from \" ++ source ++ \" to \" ++ target\n        self\n          solve: n - 1\n          from: auxiliary\n          to: target\n          via: source\n      ]\n      ifFalse: [nil]",
       "explanation": ""
     },
     {
@@ -7478,7 +7478,7 @@
         "subclassing",
         "value"
       ],
-      "source": "/// Simple hello world example\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load \"examples/getting-started/src/hello.bt\"\n///   nil\n///   > Hello new greeting\n///   │ Hello, World!\n///   a Hello\nValue subclass: Hello\n\n  greeting => self traceCr: \"Hello, World!\"",
+      "source": "/// Simple hello world example\n///\n/// Try it in the REPL:\n///   $ beamtalk repl\n///   > :load \"examples/getting-started/src/hello.bt\"\n///   nil\n///   > Hello new greeting\n///   │ Hello, World!\n///   a Hello\nValue subclass: Hello\n\n  greeting => self showCr: \"Hello, World!\"",
       "explanation": ""
     },
     {
@@ -7496,7 +7496,7 @@
         "object",
         "subclassing"
       ],
-      "source": "/// LoggingCounter demonstrates the \"super\" keyword for calling superclass methods\n///\n/// This class extends Counter and adds logging via `traceCr:` before\n/// delegating to the superclass implementation using \"super\".\n///\n/// IMPORTANT: Load counter.bt first to define the Counter class:\n///   > :load examples/counter.bt\n///   > :load examples/logging_counter.bt\nCounter subclass: LoggingCounter\n\n  // Override increment to add logging before delegating to superclass\n  // The \"super\" keyword calls Counter's increment method\n  increment =>\n    self traceCr: \"increment called\"\n    super increment",
+      "source": "/// LoggingCounter demonstrates the \"super\" keyword for calling superclass methods\n///\n/// This class extends Counter and adds logging via `showCr:` before\n/// delegating to the superclass implementation using \"super\".\n///\n/// IMPORTANT: Load counter.bt first to define the Counter class:\n///   > :load examples/counter.bt\n///   > :load examples/logging_counter.bt\nCounter subclass: LoggingCounter\n\n  // Override increment to add logging before delegating to superclass\n  // The \"super\" keyword calls Counter's increment method\n  increment =>\n    self showCr: \"increment called\"\n    super increment",
       "explanation": ""
     },
     {
@@ -7676,7 +7676,7 @@
         "testGreeting",
         "testTwoInstancesHaveSameGreeting"
       ],
-      "source": "// BUnit tests for the Hello value type.\n//\n// Run in the REPL:\n//   > :load src/hello.bt\n//   > :load test/hello_test.bt\n//   > HelloTest runAll\n\nTestCase subclass: HelloTest\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    TranscriptStream current ifNotNil: [:t | t stop]\n    TranscriptStream resetCurrent\n    self\n\n  testGreeting =>\n    // greeting outputs \"Hello, World!\" via traceCr: and returns self\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testTwoInstancesHaveSameGreeting =>\n    // Both instances output the same text\n    Hello new greeting\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testClassIsHello =>\n    // Hello is a value type — class name is the symbol #Hello\n    self assert: Hello new class name equals: #Hello",
+      "source": "// BUnit tests for the Hello value type.\n//\n// Run in the REPL:\n//   > :load src/hello.bt\n//   > :load test/hello_test.bt\n//   > HelloTest runAll\n\nTestCase subclass: HelloTest\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    TranscriptStream current ifNotNil: [:t | t stop]\n    TranscriptStream resetCurrent\n    self\n\n  testGreeting =>\n    // greeting outputs \"Hello, World!\" via showCr: and returns self\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testTwoInstancesHaveSameGreeting =>\n    // Both instances output the same text\n    Hello new greeting\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testClassIsHello =>\n    // Hello is a value type — class name is the symbol #Hello\n    self assert: Hello new class name equals: #Hello",
       "explanation": "BUnit tests for the Hello value type.  Run in the REPL:   > :load src/hello.bt   > :load test/hello_test.bt   > HelloTest runAll"
     },
     {
@@ -8448,7 +8448,7 @@
         "subclassing",
         "value"
       ],
-      "source": "/// Main entry point for gang_of_four.\n/// Auto-runs via [run].entry in beamtalk.toml when you start `beamtalk repl`.\n/// Or load manually: :load src/main.bt\nValue subclass: Main\n\n  class run => self new run\n\n  run =>\n    self traceCr: \"Hello from gang_of_four!\"\n    self",
+      "source": "/// Main entry point for gang_of_four.\n/// Auto-runs via [run].entry in beamtalk.toml when you start `beamtalk repl`.\n/// Or load manually: :load src/main.bt\nValue subclass: Main\n\n  class run => self new run\n\n  run =>\n    self showCr: \"Hello from gang_of_four!\"\n    self",
       "explanation": ""
     },
     {
@@ -9234,7 +9234,7 @@
         "subclassing",
         "value"
       ],
-      "source": "Value subclass: Main\n\n  class run => self new run\n\n  run =>\n    reader := SchemeReader new\n    ev := SchemeEval new\n    printer := SchemePrinter new\n    env := ev defaultEnv\n\n    eval := [:src | printer print: (ev eval: (reader read: src) in: env)]\n    (WorkspaceInterface current) bind: eval as: #eval\n\n    self traceCr: \"Run: eval value: \"\"(* 6 7)\"\".\"\n    self",
+      "source": "Value subclass: Main\n\n  class run => self new run\n\n  run =>\n    reader := SchemeReader new\n    ev := SchemeEval new\n    printer := SchemePrinter new\n    env := ev defaultEnv\n\n    eval := [:src | printer print: (ev eval: (reader read: src) in: env)]\n    (WorkspaceInterface current) bind: eval as: #eval\n\n    self showCr: \"Run: eval value: \"\"(* 6 7)\"\".\"\n    self",
       "explanation": ""
     },
     {
@@ -20764,14 +20764,16 @@
         "setUp",
         "subclassing",
         "tearDown",
-        "testTraceCrNilSafeWhenNoTranscript",
-        "testTraceCrRoutesOutputWhenTranscriptSet",
-        "testTraceNilSafeWhenNoTranscript",
-        "testTraceRoutesOutputWhenTranscriptSet",
+        "testDeprecatedTraceCrStillWorks",
+        "testDeprecatedTraceStillWorks",
+        "testShowCrNilSafeWhenNoTranscript",
+        "testShowCrRoutesOutputWhenTranscriptSet",
+        "testShowNilSafeWhenNoTranscript",
+        "testShowRoutesOutputWhenTranscriptSet",
         "trace_cr_test"
       ],
-      "source": "// BT-984: BUnit tests for Object>>trace: and Object>>traceCr:\n//\n// Verifies:\n// - Silent no-op when TranscriptStream current is nil\n// - Output is routed when a transcript instance is set as current\n\nTestCase subclass: TraceCrTest\n\n  setUp =>\n    // Ensure current is nil before each test (default in test environment)\n    TranscriptStream resetCurrent\n    self\n\n  tearDown =>\n    // Stop per-test transcript actor when one was set\n    TranscriptStream current ifNotNil: [:t | t stop]\n    // Restore nil state after each test\n    TranscriptStream resetCurrent\n    self\n\n  testTraceCrNilSafeWhenNoTranscript =>\n    // When TranscriptStream current is nil, traceCr: is a no-op and returns self\n    TranscriptStream resetCurrent\n    self assert: (42 traceCr: \"hello\") equals: 42\n\n  testTraceNilSafeWhenNoTranscript =>\n    // When TranscriptStream current is nil, trace: is a no-op and returns self\n    TranscriptStream resetCurrent\n    self assert: (42 trace: \"hello\") equals: 42\n\n  testTraceCrRoutesOutputWhenTranscriptSet =>\n    // When a TranscriptStream is set as current, traceCr: routes output to it\n    ts := TranscriptStream spawn\n    TranscriptStream current: ts\n    42 traceCr: \"hello\"\n    self assert: (ts recent includes: \"hello\")\n\n  testTraceRoutesOutputWhenTranscriptSet =>\n    // When a TranscriptStream is set as current, trace: routes output to it\n    ts := TranscriptStream spawn\n    TranscriptStream current: ts\n    42 trace: \"world\"\n    self assert: (ts recent includes: \"world\")",
-      "explanation": "BT-984: BUnit tests for Object>>trace: and Object>>traceCr:  Verifies: - Silent no-op when TranscriptStream current is nil - Output is routed when a transcript instance is set as current"
+      "source": "// BT-984: BUnit tests for Object>>show: and Object>>showCr:\n// (renamed from trace:/traceCr: in BT-1636)\n//\n// Verifies:\n// - Silent no-op when TranscriptStream current is nil\n// - Output is routed when a transcript instance is set as current\n// - Deprecated trace:/traceCr: still work but emit compiler warnings\n\nTestCase subclass: TraceCrTest\n\n  setUp =>\n    // Ensure current is nil before each test (default in test environment)\n    TranscriptStream resetCurrent\n    self\n\n  tearDown =>\n    // Stop per-test transcript actor when one was set\n    TranscriptStream current ifNotNil: [:t | t stop]\n    // Restore nil state after each test\n    TranscriptStream resetCurrent\n    self\n\n  testShowCrNilSafeWhenNoTranscript =>\n    // When TranscriptStream current is nil, showCr: is a no-op and returns self\n    TranscriptStream resetCurrent\n    self assert: (42 showCr: \"hello\") equals: 42\n\n  testShowNilSafeWhenNoTranscript =>\n    // When TranscriptStream current is nil, show: is a no-op and returns self\n    TranscriptStream resetCurrent\n    self assert: (42 show: \"hello\") equals: 42\n\n  testShowCrRoutesOutputWhenTranscriptSet =>\n    // When a TranscriptStream is set as current, showCr: routes output to it\n    ts := TranscriptStream spawn\n    TranscriptStream current: ts\n    42 showCr: \"hello\"\n    self assert: (ts recent includes: \"hello\")\n\n  testShowRoutesOutputWhenTranscriptSet =>\n    // When a TranscriptStream is set as current, show: routes output to it\n    ts := TranscriptStream spawn\n    TranscriptStream current: ts\n    42 show: \"world\"\n    self assert: (ts recent includes: \"world\")\n\n  testDeprecatedTraceCrStillWorks =>\n    // trace:/traceCr: still work (backward compatibility) but emit deprecation warnings\n    ts := TranscriptStream spawn\n    TranscriptStream current: ts\n    @expect deprecation\n    42 traceCr: \"legacy\"\n    self assert: (ts recent includes: \"legacy\")\n\n  testDeprecatedTraceStillWorks =>\n    // trace: still works (backward compatibility) but emits a deprecation warning\n    ts := TranscriptStream spawn\n    TranscriptStream current: ts\n    @expect deprecation\n    42 trace: \"legacy\"\n    self assert: (ts recent includes: \"legacy\")",
+      "explanation": "BT-984: BUnit tests for Object>>show: and Object>>showCr: (renamed from trace:/traceCr: in BT-1636)  Verifies: - Silent no-op when TranscriptStream current is nil - Output is routed when a transcript instance is set as current - Deprecated trace:/traceCr: still work but emit compiler warnings"
     },
     {
       "id": "stdlib-test-tracing-test",

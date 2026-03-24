@@ -1,11 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-984: BUnit tests for Object>>trace: and Object>>traceCr:
+// BT-984: BUnit tests for Object>>show: and Object>>showCr:
+// (renamed from trace:/traceCr: in BT-1636)
 //
 // Verifies:
 // - Silent no-op when TranscriptStream current is nil
 // - Output is routed when a transcript instance is set as current
+// - Deprecated trace:/traceCr: still work but emit compiler warnings
 
 TestCase subclass: TraceCrTest
 
@@ -21,26 +23,42 @@ TestCase subclass: TraceCrTest
     TranscriptStream resetCurrent
     self
 
-  testTraceCrNilSafeWhenNoTranscript =>
-    // When TranscriptStream current is nil, traceCr: is a no-op and returns self
+  testShowCrNilSafeWhenNoTranscript =>
+    // When TranscriptStream current is nil, showCr: is a no-op and returns self
     TranscriptStream resetCurrent
-    self assert: (42 traceCr: "hello") equals: 42
+    self assert: (42 showCr: "hello") equals: 42
 
-  testTraceNilSafeWhenNoTranscript =>
-    // When TranscriptStream current is nil, trace: is a no-op and returns self
+  testShowNilSafeWhenNoTranscript =>
+    // When TranscriptStream current is nil, show: is a no-op and returns self
     TranscriptStream resetCurrent
-    self assert: (42 trace: "hello") equals: 42
+    self assert: (42 show: "hello") equals: 42
 
-  testTraceCrRoutesOutputWhenTranscriptSet =>
-    // When a TranscriptStream is set as current, traceCr: routes output to it
+  testShowCrRoutesOutputWhenTranscriptSet =>
+    // When a TranscriptStream is set as current, showCr: routes output to it
     ts := TranscriptStream spawn
     TranscriptStream current: ts
-    42 traceCr: "hello"
+    42 showCr: "hello"
     self assert: (ts recent includes: "hello")
 
-  testTraceRoutesOutputWhenTranscriptSet =>
-    // When a TranscriptStream is set as current, trace: routes output to it
+  testShowRoutesOutputWhenTranscriptSet =>
+    // When a TranscriptStream is set as current, show: routes output to it
     ts := TranscriptStream spawn
     TranscriptStream current: ts
-    42 trace: "world"
+    42 show: "world"
     self assert: (ts recent includes: "world")
+
+  testDeprecatedTraceCrStillWorks =>
+    // trace:/traceCr: still work (backward compatibility) but emit deprecation warnings
+    ts := TranscriptStream spawn
+    TranscriptStream current: ts
+    @expect deprecation
+    42 traceCr: "legacy"
+    self assert: (ts recent includes: "legacy")
+
+  testDeprecatedTraceStillWorks =>
+    // trace: still works (backward compatibility) but emits a deprecation warning
+    ts := TranscriptStream spawn
+    TranscriptStream current: ts
+    @expect deprecation
+    42 trace: "legacy"
+    self assert: (ts recent includes: "legacy")

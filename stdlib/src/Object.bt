@@ -202,9 +202,9 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 42 trace: "value: "
+  /// 42 show: "value: "
   /// ```
-  trace: aValue =>
+  show: aValue =>
     TranscriptStream current ifNotNil: [:t | t show: aValue]
     self
 
@@ -214,11 +214,17 @@ ProtoObject subclass: Object
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 42 traceCr: "hello world"
+  /// 42 showCr: "hello world"
   /// ```
-  traceCr: aValue =>
+  showCr: aValue =>
     TranscriptStream current ifNotNil: [:t | t show: aValue; cr]
     self
+
+  /// **Deprecated:** Use `show:` instead.
+  trace: aValue => self show: aValue
+
+  /// **Deprecated:** Use `showCr:` instead.
+  traceCr: aValue => self showCr: aValue
 
   /// Test if the receiver is an instance of aClass or any of its subclasses.
   ///

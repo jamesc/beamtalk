@@ -154,6 +154,11 @@ impl TypeChecker {
             return;
         }
 
+        // BT-1636: Emit deprecation warning for old trace:/traceCr: selectors.
+        // Placed after has_class guard so we only warn on known Beamtalk classes,
+        // not on unknown/external receivers that may define their own trace: methods.
+        self.check_deprecated_selector(selector, span);
+
         // Classes with instance-side doesNotUnderstand: override accept any message
         if hierarchy.has_instance_dnu_override(class_name) {
             return;
@@ -168,6 +173,20 @@ impl TypeChecker {
         if !hierarchy.resolves_selector(class_name, selector) {
             self.emit_unknown_selector_warning(class_name, selector, span, hierarchy, false);
         }
+    }
+
+    /// BT-1636: Emit a deprecation warning when deprecated selectors are used.
+    fn check_deprecated_selector(&mut self, selector: &str, span: Span) {
+        let replacement = match selector {
+            "trace:" => "show:",
+            "traceCr:" => "showCr:",
+            _ => return,
+        };
+        let message: EcoString =
+            format!("'{selector}' is deprecated, use '{replacement}' instead").into();
+        self.diagnostics.push(
+            Diagnostic::warning(message, span).with_category(DiagnosticCategory::Deprecation),
+        );
     }
 
     /// Check that methods in typed classes have proper type annotations.

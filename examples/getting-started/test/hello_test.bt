@@ -21,7 +21,7 @@ TestCase subclass: HelloTest
     self
 
   testGreeting =>
-    // greeting outputs "Hello, World!" via traceCr: and returns self
+    // greeting outputs "Hello, World!" via showCr: and returns self
     Hello new greeting
     self assert: (self.ts recent includes: "Hello, World!")
 
