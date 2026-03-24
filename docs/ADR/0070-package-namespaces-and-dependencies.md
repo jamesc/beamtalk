@@ -505,7 +505,9 @@ Affected components: `crates/beamtalk-core/src/codegen/` (metadata emission), `r
 6. **MCP** — `list_packages` and `package_classes` tools backed by `Package` class methods
 7. **REPL** — `:help ClassName` shows package provenance; `Workspace dependencies` returns the dependency graph
 
-Affected components: `runtime/apps/beamtalk_stdlib/src/` (Package class), `lib/Package.bt` (Beamtalk wrapper), `crates/beamtalk-lsp/` (hover/go-to-def), `runtime/apps/beamtalk_runtime/src/` (MCP tools)
+The `Package` class lives in stdlib (like `System`, `File`, `Metaclass`) — it needs access to the class registry, `.app` metadata, and BEAM code server, and must exist before any package loading happens.
+
+Affected components: `runtime/apps/beamtalk_stdlib/src/` (Erlang backing module), `stdlib/src/Package.bt` (Beamtalk facade), `crates/beamtalk-lsp/` (hover/go-to-def), `runtime/apps/beamtalk_runtime/src/` (MCP tools)
 
 ## Migration Path
 
