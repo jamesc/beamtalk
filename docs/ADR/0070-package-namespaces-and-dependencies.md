@@ -76,7 +76,7 @@ Within a package, all classes see each other (unchanged from v0.1). Across packa
 
 **Transitive dependencies are visible but warn.** If `my_app` depends on `json` and `json` depends on `utils`, `my_app` CAN reference classes from `utils` — the runtime sees them (they're on the BEAM code path), the REPL sees them, and the compiler allows it. But using a transitive dependency's class emits a **warning**:
 
-```
+```text
 warning[W0302]: Class 'StringUtils' is from transitive dependency 'utils' (via 'json')
   --> src/app.bt:5:12
    |
@@ -99,7 +99,7 @@ When `strict-deps = true`, referencing a transitive dependency's class is a comp
 
 If two dependencies export the same class name, the compiler emits an **error** — not a warning, not silent shadowing:
 
-```
+```text
 error[E0301]: Class name 'Parser' is exported by multiple dependencies
   --> src/app.bt:5:12
    |
@@ -181,7 +181,7 @@ The REPL workspace remains a flat namespace:
 - Qualified names (`json@Parser`) work in the REPL
 - Collisions in the REPL produce a warning (not an error) with a hint to use the qualified name — the REPL is exploratory, and hard errors would break the interactive flow
 
-```
+```text
 beamtalk> json@Parser parse: '{"a": 1}'
 // => Dictionary("a" -> 1)
 
@@ -191,7 +191,7 @@ beamtalk> Parser parse: '{"a": 1}'
 // => Dictionary("a" -> 1)
 ```
 
-The REPL resolves ambiguous names by using the **first-loaded** package's definition (with a warning). This matches Smalltalk's "last definition wins" tradition but with visibility — the user always knows what happened.
+The REPL resolves ambiguous names by using the **first-loaded** package's definition (with a warning). This keeps interactive behavior deterministic while preserving visibility — the user always knows what happened.
 
 **Hot reload of dependency classes** is not supported in the initial implementation. `Counter reload` continues to work for classes defined in the current package (recompile from source). For dependency classes, the BEAM's code loading model does not prevent hot reload — `code:load_binary/3` doesn't care where a `.beam` came from — so a future version could support reloading path dependencies from modified source or reloading any dependency from recompiled `.beam` files.
 
