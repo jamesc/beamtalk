@@ -954,7 +954,12 @@ restore_propagated_ctx(PropCtx) when is_map(PropCtx) ->
             put('$beamtalk_trace_id', InTraceId),
             put('$beamtalk_parent_span_id', InSpanId);
         _ ->
-            ok
+            %% No causal context in this message — clear stale IDs from
+            %% a previous traced message so they don't leak into untraced
+            %% dispatches or get_propagated_ctx/0.
+            erase('$beamtalk_trace_id'),
+            erase('$beamtalk_span_id'),
+            erase('$beamtalk_parent_span_id')
     end,
     ok;
 restore_propagated_ctx(_) ->
