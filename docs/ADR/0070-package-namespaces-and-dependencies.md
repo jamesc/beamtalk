@@ -218,7 +218,7 @@ This allows the compiler to:
 
 ### 8. Package Reflection: The `Package` Class
 
-Packages are first-class objects, inspectable via messages like any other part of the system:
+Packages are first-class objects, inspectable via messages like any other part of the system. The `Package` class ships with the package system — it is the Smalltalk answer to "where does this class come from?" and a core part of the tooling story for LSP, MCP, and AI agents.
 
 ```beamtalk
 // Discover loaded packages
@@ -504,7 +504,19 @@ Affected components: `crates/beamtalk-core/src/semantic_analysis/` (name resolut
 
 Affected components: `crates/beamtalk-core/src/codegen/` (metadata emission), `runtime/apps/beamtalk_runtime/src/` (metadata format), `crates/beamtalk-lsp/` (cross-package navigation)
 
-### Phase 5: Class Visibility
+### Phase 5: Package Reflection
+
+1. **`Package` stdlib class** — Erlang-backed Object class (class methods only, like `File` or `System`) wrapping the OTP application metadata and class registry
+2. **Core API** — `Package all`, `Package named:`, `name`, `version`, `classes`, `dependencies`, `source`
+3. **Reverse lookup** — `packageName` and `package` methods on `Metaclass`, so any class can report its owning package. Derived from the `bt@{package}@{class}` BEAM module name.
+4. **Visibility integration** — `Package named: "json" classes` returns all classes with a `visibility` attribute; `Package named: "json" publicClasses` returns only public ones
+5. **LSP** — use `Package` metadata for "from package json" in hover tooltips and go-to-definition across packages
+6. **MCP** — `list_packages` and `package_classes` tools backed by `Package` class methods
+7. **REPL** — `:help ClassName` shows package provenance; `Workspace dependencies` returns the dependency graph
+
+Affected components: `runtime/apps/beamtalk_stdlib/src/` (Package class), `lib/Package.bt` (Beamtalk wrapper), `crates/beamtalk-lsp/` (hover/go-to-def), `runtime/apps/beamtalk_runtime/src/` (MCP tools)
+
+### Phase 6: Class Visibility
 
 1. **Parser** — recognize `private` as a class modifier before the superclass clause (`private Value subclass: ParserState`)
 2. **AST** — add `is_private: bool` to `ClassDefinition`
