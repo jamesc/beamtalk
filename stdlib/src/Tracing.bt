@@ -1,17 +1,30 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// Tracing — Actor observability and performance telemetry.
+/// Tracing — Actor observability, trace context, and performance telemetry.
 ///
-/// Provides class methods for controlling trace capture, querying
-/// aggregate stats, analyzing performance bottlenecks, and checking
-/// actor/VM health. All methods are class-side — Tracing has no
-/// instances. Aggregate stats (call counts, durations) are always-on
+/// Provides class methods for controlling trace capture, setting
+/// application-level trace context, querying aggregate stats,
+/// analyzing performance bottlenecks, and checking actor/VM health.
+/// All methods are class-side — Tracing has no instances.
+///
+/// Trace context (setContext:/context/clearContext) propagates
+/// automatically across actor boundaries, so workflow IDs and
+/// request metadata flow through actor call chains without manual
+/// threading.
+///
+/// Aggregate stats (call counts, durations) are always-on
 /// with negligible overhead (~150ns/call). Detailed trace events
 /// require explicit enable/disable.
 ///
 /// ## Examples
 /// ```beamtalk
+/// // Set application-level trace context
+/// Tracing setContext: #{#workflowId => "wf-123"}
+/// // => nil
+/// Tracing context
+/// // => _
+///
 /// // Always-on aggregates — no setup needed
 /// Tracing stats
 /// // => _
@@ -31,12 +44,48 @@
 /// // => _
 ///
 /// // Clean up
+/// Tracing clearContext
+/// // => nil
 /// Tracing disable
 /// // => nil
 /// Tracing clear
 /// // => nil
 /// ```
 sealed Object subclass: Tracing
+
+  // === Trace context ===
+
+  /// Set application-level trace context that propagates across actor calls.
+  /// Merges with any existing context. Use for workflow correlation IDs,
+  /// request IDs, or any application-level metadata you want in traces and logs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing setContext: #{#workflowId => "wf-123", #workflowType => "OrderWorkflow"}
+  /// // => nil
+  /// ```
+  class sealed setContext: ctx :: Dictionary -> Nil =>
+    (Erlang beamtalk_tracing) setContext: ctx
+
+  /// Get the current application-level trace context.
+  /// Returns an empty dictionary when no context has been set.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing context
+  /// // => _
+  /// ```
+  class sealed context -> Dictionary => (Erlang beamtalk_tracing) context
+
+  /// Clear the application-level trace context.
+  /// Removes all trace context keys from the process and logger metadata.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tracing clearContext
+  /// // => nil
+  /// ```
+  class sealed clearContext -> Nil => (Erlang beamtalk_tracing) clearContext
 
   // === Tracing lifecycle ===
 
