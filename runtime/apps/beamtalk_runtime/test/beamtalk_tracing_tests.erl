@@ -209,7 +209,7 @@ query_with_data_test_() ->
             {"stats populated after record_dispatch",
                 ?_test(begin
                     TestPid = self(),
-                    beamtalk_trace_store:record_dispatch(TestPid, increment, 5000, ok, sync),
+                    beamtalk_trace_store:record_dispatch(TestPid, increment, 5000, ok, sync, 'Counter'),
                     Stats = beamtalk_tracing:stats(),
                     PidKey = list_to_binary(pid_to_list(TestPid)),
                     ?assert(maps:is_key(PidKey, Stats)),
