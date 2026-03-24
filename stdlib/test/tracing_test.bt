@@ -1,9 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests the Tracing class — lifecycle (enable/disable/isEnabled/clear),
-// configuration (maxEvents/maxEvents:), error behavior (empty results),
-// live health queries, and systemHealth VM overview.
+// Tests the Tracing class — trace context (setContext:/context/clearContext),
+// lifecycle (enable/disable/isEnabled/clear), configuration (maxEvents/maxEvents:),
+// error behavior (empty results), live health queries, and systemHealth VM overview.
 //
 // Note: telemetry is not available in BUnit, so dispatch-based aggregates
 // and trace events are not auto-populated. We test the API surface, error
@@ -17,6 +17,7 @@ TestCase subclass: TracingTest
     // Ensure a clean state before each test
     Tracing clear
     Tracing disable
+    Tracing clearContext
 
   // === Lifecycle ===
   testEnableReturnsNil => self assert: Tracing enable equals: nil
@@ -39,6 +40,32 @@ TestCase subclass: TracingTest
     Tracing clear
     // isEnabled should still be true (clear resets data, not enabled flag)
     self assert: Tracing isEnabled
+
+  // === Trace context (BT-1639) ===
+  testContextReturnsEmptyDictionaryByDefault =>
+    self assert: Tracing context equals: #{}
+
+  testSetContextReturnsNil =>
+    self assert: (Tracing setContext: #{#workflowId => "wf-123"}) equals: nil
+
+  testSetContextAndRetrieve =>
+    Tracing setContext: #{#workflowId => "wf-456"}
+    ctx := Tracing context
+    self assert: (ctx at: #workflowId) equals: "wf-456"
+
+  testSetContextMerges =>
+    Tracing setContext: #{#workflowId => "wf-789"}
+    Tracing setContext: #{#activityId => "a-1"}
+    ctx := Tracing context
+    self assert: (ctx at: #workflowId) equals: "wf-789"
+    self assert: (ctx at: #activityId) equals: "a-1"
+
+  testClearContextReturnsNil => self assert: Tracing clearContext equals: nil
+
+  testClearContextRemovesAll =>
+    Tracing setContext: #{#workflowId => "wf-clear"}
+    Tracing clearContext
+    self assert: Tracing context equals: #{}
 
   // === Configuration ===
   testMaxEventsDefault =>
