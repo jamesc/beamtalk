@@ -216,7 +216,37 @@ This allows the compiler to:
 - Resolve protocol names in type annotations without loading the dependency's source
 - Provide chain completion and `:help` for dependency classes in the REPL and LSP
 
-### 8. Visibility: Planned Follow-Up
+### 8. Package Reflection: The `Package` Class
+
+Packages are first-class objects, inspectable via messages like any other part of the system:
+
+```beamtalk
+// Discover loaded packages
+Package all
+// => #(Package("json"), Package("utils"), Package("my_app"))
+
+// Introspect a package
+pkg := Package named: "json"
+pkg name          // => "json"
+pkg version       // => "1.0.0"
+pkg classes       // => #(JSON, JSONError, Parser)
+pkg dependencies  // => #(Package("utils"))
+
+// Reverse lookup — which package owns this class?
+JSON package      // => Package("json")
+JSON packageName  // => "json"
+```
+
+This addresses the "where does this class come from?" discoverability gap without per-file imports — you ask the object. The class registry already knows the BEAM module name (`bt@json@parser`), so extracting the package segment is trivial.
+
+For tooling, `Package` enables:
+- **LSP:** cross-package go-to-definition and hover ("from package json")
+- **MCP tools:** `list_packages`, `package_classes` without custom Erlang
+- **AI agents:** discover available classes by querying the runtime, not parsing TOML
+- **`:help`:** show package provenance alongside class documentation
+- **Workspace:** `Workspace dependencies` returns the current package's dependency graph
+
+### 9. Visibility: Planned Follow-Up
 
 This ADR ships with all classes public — Smalltalk tradition. However, once packages are distributed and third-party libraries exist, library authors need **stable API boundaries**. Without visibility control, every class in a package is part of its public API, constraining internal refactoring.
 
