@@ -671,12 +671,13 @@ sync_send(ActorPid, Selector, Args) ->
                     %% infinity so it doesn't time out before the proxy's configured
                     %% timeout expires. For all other actors, use gen_server:call/2
                     %% which defaults to 5000ms.
-                    CallResult = case Class of
-                        'TimeoutProxy' ->
-                            gen_server:call(ActorPid, {Selector, Args, PropCtx}, infinity);
-                        _ ->
-                            gen_server:call(ActorPid, {Selector, Args, PropCtx})
-                    end,
+                    CallResult =
+                        case Class of
+                            'TimeoutProxy' ->
+                                gen_server:call(ActorPid, {Selector, Args, PropCtx}, infinity);
+                            _ ->
+                                gen_server:call(ActorPid, {Selector, Args, PropCtx})
+                        end,
                     case CallResult of
                         {ok, Result} ->
                             {Result, Metadata#{outcome => ok}};
