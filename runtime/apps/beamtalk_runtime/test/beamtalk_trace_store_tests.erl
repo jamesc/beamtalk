@@ -210,7 +210,9 @@ counters_aggregates_test_() ->
                 %% Record multiple dispatches
                 beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync, 'Counter'),
                 beamtalk_trace_store:record_dispatch(TestPid, increment, 2000, ok, sync, 'Counter'),
-                beamtalk_trace_store:record_dispatch(TestPid, increment, 3000, error, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, increment, 3000, error, sync, 'Counter'
+                ),
 
                 %% Check aggregated stats
                 Stats = beamtalk_trace_store:get_stats(TestPid),
@@ -324,7 +326,9 @@ hot_methods_test_() ->
                 beamtalk_trace_store:record_dispatch(TestPid, rare, 100, ok, sync, 'Counter'),
                 lists:foreach(
                     fun(_) ->
-                        beamtalk_trace_store:record_dispatch(TestPid, popular, 100, ok, sync, 'Counter')
+                        beamtalk_trace_store:record_dispatch(
+                            TestPid, popular, 100, ok, sync, 'Counter'
+                        )
                     end,
                     lists:seq(1, 10)
                 ),
@@ -572,7 +576,9 @@ gen_server_crash_recovery_test_() ->
                 end,
 
                 %% Store should be functional with inherited persistent_terms
-                beamtalk_trace_store:record_dispatch(TestPid, after_restart, 500, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, after_restart, 500, ok, sync, 'Counter'
+                ),
                 StatsAfterRestart = beamtalk_trace_store:get_stats(),
                 ?assertNotEqual(#{}, StatsAfterRestart)
             end)
@@ -780,7 +786,9 @@ clear_resets_min_sentinel_test_() ->
                 TestPid = self(),
 
                 %% Record a dispatch to establish min/max
-                beamtalk_trace_store:record_dispatch(TestPid, sentinel_check, 5000, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, sentinel_check, 5000, ok, sync, 'Counter'
+                ),
                 Stats1 = beamtalk_trace_store:get_stats(TestPid),
                 PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats1 = maps:get(PidKey, Stats1),
@@ -798,7 +806,9 @@ clear_resets_min_sentinel_test_() ->
                 ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
 
                 %% Record a new dispatch — min should be set fresh, not stuck
-                beamtalk_trace_store:record_dispatch(TestPid, sentinel_check, 8000, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, sentinel_check, 8000, ok, sync, 'Counter'
+                ),
                 Stats2 = beamtalk_trace_store:get_stats(TestPid),
                 PidStats2 = maps:get(PidKey, Stats2),
                 MethodStats2 = maps:get(
