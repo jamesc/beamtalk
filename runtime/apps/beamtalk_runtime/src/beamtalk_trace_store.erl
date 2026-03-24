@@ -191,7 +191,7 @@ get_traces() ->
 -spec get_traces(map() | pid() | undefined) -> [map()].
 get_traces(Opts) when is_map(Opts) ->
     gen_server:call(?MODULE, {get_traces, Opts});
-get_traces(Pid) ->
+get_traces(Pid) when is_pid(Pid); Pid =:= undefined ->
     get_traces(#{actor => Pid}).
 
 %% @doc Get trace events for a specific actor + selector, newest first.

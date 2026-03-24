@@ -119,7 +119,8 @@ build_trace_filter_opts(Params) ->
             OutcomeBin -> Opts3#{outcome => parse_outcome(OutcomeBin)}
         end,
     case maps:get(<<"min_duration_ns">>, Params, undefined) of
-        undefined -> Opts4;
+        undefined ->
+            Opts4;
         MinNs when is_integer(MinNs), MinNs >= 0 -> Opts4#{min_duration_ns => MinNs};
         BadNs ->
             error(#beamtalk_error{
@@ -213,9 +214,12 @@ parse_class(ClassBin) ->
 %% Valid outcomes: ok, error, timeout.
 %% Raises a structured beamtalk_error for invalid values.
 -spec parse_outcome(binary()) -> ok | error | timeout.
-parse_outcome(<<"ok">>) -> ok;
-parse_outcome(<<"error">>) -> error;
-parse_outcome(<<"timeout">>) -> timeout;
+parse_outcome(<<"ok">>) ->
+    ok;
+parse_outcome(<<"error">>) ->
+    error;
+parse_outcome(<<"timeout">>) ->
+    timeout;
 parse_outcome(OutcomeBin) ->
     error(#beamtalk_error{
         kind = invalid_argument,
