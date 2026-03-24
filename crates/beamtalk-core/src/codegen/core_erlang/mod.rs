@@ -846,16 +846,19 @@ impl ReplContext {
 
 /// BT-1639: Information about a sealed class eligible for direct-call optimization.
 ///
-/// When a sealed class has no class variables, its class methods can be called
-/// directly (bypassing `gen_server` dispatch) since they are pure functions that
-/// don't mutate class state. This avoids the ~5-10us `gen_server` round-trip
-/// overhead for utility-style class methods (e.g., `File exists:`, `Json parse:`).
+/// A class is eligible only if it is sealed and declares **no** class variables.
+/// In that case, its `class sealed` methods can be called directly (bypassing
+/// `gen_server` dispatch) since they don't mutate class state. This avoids the
+/// ~5-10us `gen_server` round-trip overhead for utility-style class methods
+/// (e.g., `File exists:`, `Json parse:`). The implementation does not inspect
+/// individual method bodies for class-variable access; any presence of class
+/// variables on the class makes the entire class ineligible.
 #[derive(Debug, Clone)]
 pub(super) struct DirectCallClassInfo {
     /// The compiled Erlang module name (e.g., `bt@stdlib@tracing`).
     pub module_name: String,
     /// Set of selector names eligible for direct call (e.g., `{"setContext:", "context", ...}`).
-    /// Excludes `startLink`-family selectors and any methods that reference class vars.
+    /// Excludes `startLink`-family selectors and non-sealed class methods.
     pub selectors: std::collections::HashSet<String>,
 }
 

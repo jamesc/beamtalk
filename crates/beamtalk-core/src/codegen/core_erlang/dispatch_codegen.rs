@@ -1566,7 +1566,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// case call 'maps':'find'('Name', State) of
     ///   <{'ok', BindingVal}> -> call 'beamtalk_message_dispatch':'send'(BindingVal, Sel, Args)
-    ///   <'error'> -> call 'module':'class_selector'('nil', #{}, Args)  %% BT-1639 direct
+    ///   <'error'> -> call 'module':'class_selector'('nil', ~{}~, Args)  %% BT-1639 direct
     ///                %% OR: class_send fallback for non-eligible classes
     /// end
     /// ```
@@ -1688,7 +1688,7 @@ impl CoreErlangGenerator {
     /// # Generated Code (direct call, BT-1639)
     ///
     /// ```erlang
-    /// call 'bt@stdlib@tracing':'class_setContext:'('nil', #{}, Ctx)
+    /// call 'bt@stdlib@tracing':'class_setContext:'('nil', ~{}~, Ctx)
     /// ```
     ///
     /// # Generated Code (`gen_server` fallback)
