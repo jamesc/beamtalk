@@ -488,7 +488,7 @@ json = "1.0"
 
 ## Implementation
 
-### Phase 1: Dependency Resolution
+### Phase 1: Dependency Resolution and CLI
 
 1. **Parse `[dependencies]`** in `beamtalk.toml` — path and git sources
 2. **Path resolution** — resolve relative paths, locate `beamtalk.toml`, validate package name
@@ -496,8 +496,10 @@ json = "1.0"
 4. **Lockfile** — generate `beamtalk.lock` with exact commit SHAs for git deps; path deps are not locked (they're local)
 5. **Topological compilation** — build dependencies before the root package; detect cycles
 6. **Code path** — add each dependency's `ebin/` to the BEAM code path at compile and runtime
+7. **Implicit fetch** — `beamtalk build`, `beamtalk test`, and `beamtalk repl` trigger resolution automatically when the lockfile is missing or stale
+8. **`beamtalk deps` subcommand** — `add` (write to `beamtalk.toml` + resolve), `list` (show resolved deps with sources and pinned SHAs), `update` (advance lockfile entries to latest matching spec)
 
-Affected components: `crates/beamtalk-cli/` (dep fetching, lockfile), `crates/beamtalk-core/` (compilation ordering), `beamtalk.toml` schema
+Affected components: `crates/beamtalk-cli/` (dep fetching, lockfile, `deps` subcommand), `crates/beamtalk-core/` (compilation ordering), `beamtalk.toml` schema
 
 ### Phase 2: Qualified Name Syntax
 
