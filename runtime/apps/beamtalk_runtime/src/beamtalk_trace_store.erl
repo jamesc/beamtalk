@@ -34,7 +34,7 @@
     is_enabled/0,
     clear/0,
     %% Write-path helpers (called from telemetry handlers, NOT via gen_server)
-    record_dispatch/5,
+    record_dispatch/6,
     record_trace_event/8,
     %% Query API
     get_traces/0,
@@ -92,6 +92,7 @@
 
 %% Table names
 -define(AGG_INDEX, beamtalk_agg_index).
+-define(AGG_CLASS, beamtalk_agg_class).
 -define(TRACE_EVENTS, beamtalk_trace_events).
 
 %% persistent_term keys
@@ -157,8 +158,15 @@ clear() ->
 
 %% @doc Record a dispatch aggregate (called from telemetry handler, NOT via gen_server).
 %% This runs in the calling process for lock-free performance.
--spec record_dispatch(pid(), atom(), non_neg_integer(), atom(), atom()) -> ok.
-record_dispatch(Pid, Selector, Duration, Outcome, _Mode) ->
+%% Class comes from telemetry metadata — the authoritative source (BT-1640).
+-spec record_dispatch(pid(), atom(), non_neg_integer(), atom(), atom(), atom()) -> ok.
+record_dispatch(Pid, Selector, Duration, Outcome, _Mode, Class) ->
+    %% BT-1640: Store Pid→Class mapping from telemetry metadata so actor_stats
+    %% shows correct class names instead of relying on instance registry lookup.
+    case Class of
+        unknown -> ok;
+        _ -> ets:insert(?AGG_CLASS, {Pid, Class})
+    end,
     {AtomicsRef, SlotBase} = ensure_counter_slot(Pid, Selector),
     atomics:add(AtomicsRef, SlotBase + ?SLOT_CALLS, 1),
     atomics:add(AtomicsRef, SlotBase + ?SLOT_TOTAL_DURATION, Duration),
@@ -309,7 +317,7 @@ handle_dispatch_stop(_EventName, #{duration := Duration}, Metadata, _Config) ->
     Outcome = maps:get(outcome, Metadata, ok),
     Class = maps:get(class, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
-    record_dispatch(Pid, Selector, DurationNs, Outcome, Mode),
+    record_dispatch(Pid, Selector, DurationNs, Outcome, Mode, Class),
     %% BT-1625: Only fetch trace context when tracing is enabled to avoid
     %% per-dispatch overhead when trace capture is disabled.
     case is_enabled() of
@@ -335,7 +343,7 @@ handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config
     Kind = maps:get(kind, Metadata, error),
     Reason = maps:get(reason, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
-    record_dispatch(Pid, Selector, DurationNs, error, Mode),
+    record_dispatch(Pid, Selector, DurationNs, error, Mode, Class),
     %% BT-1625: Only fetch trace context and build enriched metadata when
     %% tracing is enabled to avoid per-dispatch overhead.
     case is_enabled() of
@@ -364,7 +372,7 @@ handle_lifecycle_event(EventName, _Measurements, Metadata, _Config) ->
     %% Derive outcome from reason for stop events: normal/shutdown = ok, crash = error
     Outcome = lifecycle_outcome(Action, Metadata),
     %% Record aggregate stats with selector = lifecycle action (e.g., start, stop, kill)
-    record_dispatch(Pid, Action, 0, Outcome, lifecycle),
+    record_dispatch(Pid, Action, 0, Outcome, lifecycle, Class),
     %% Record trace event with mode => lifecycle, duration 0 (instantaneous)
     EventMeta = maps:without([pid, class], Metadata),
     record_trace_event(Pid, Class, Action, lifecycle, 0, Outcome, EventMeta, stop),
@@ -518,6 +526,8 @@ terminate(_Reason, State) ->
 
 %% @private
 code_change(OldVsn, State, Extra) ->
+    %% Ensure new ETS tables (e.g. beamtalk_agg_class) exist after live upgrade.
+    ensure_ets_tables(find_supervisor()),
     beamtalk_hot_reload:code_change(OldVsn, State, Extra).
 
 %%====================================================================
@@ -540,6 +550,14 @@ ensure_ets_tables(SupPid) ->
         {write_concurrency, true},
         {read_concurrency, true},
         {heir, SupPid, ?AGG_INDEX}
+    ]),
+    ensure_table(?AGG_CLASS, [
+        named_table,
+        public,
+        set,
+        {write_concurrency, true},
+        {read_concurrency, true},
+        {heir, SupPid, ?AGG_CLASS}
     ]),
     ensure_table(?TRACE_EVENTS, [
         named_table,
@@ -1195,10 +1213,22 @@ to_binary_keys(Map) when is_map(Map) ->
         Map
     ).
 
-%% @private Resolve actor class name from pid via beamtalk_object_instances.
-%% Returns binary class name or <<"unknown">>.
+%% @private Resolve actor class name from the aggregate class table (BT-1640).
+%% The agg class table is populated from telemetry metadata — the authoritative
+%% source — during record_dispatch/6. Falls back to instance registry lookup.
 -spec lookup_class_for_pid(pid()) -> binary().
 lookup_class_for_pid(Pid) ->
+    try ets:lookup(?AGG_CLASS, Pid) of
+        [{_, Class}] -> atom_to_binary(Class, utf8);
+        [] -> lookup_class_from_registry(Pid)
+    catch
+        error:badarg -> lookup_class_from_registry(Pid)
+    end.
+
+%% @private Fallback: resolve actor class name from beamtalk_instance_registry.
+%% Returns binary class name or <<"unknown">>.
+-spec lookup_class_from_registry(pid()) -> binary().
+lookup_class_from_registry(Pid) ->
     try ets:match(beamtalk_instance_registry, {'$1', Pid}) of
         [[Class] | _] -> atom_to_binary(Class, utf8);
         [] -> <<"unknown">>
@@ -1214,8 +1244,9 @@ lookup_class_for_pid(Pid) ->
 do_clear() ->
     %% Clear trace events
     ets:delete_all_objects(?TRACE_EVENTS),
-    %% Clear agg index
+    %% Clear agg index and class mappings
     ets:delete_all_objects(?AGG_INDEX),
+    ets:delete_all_objects(?AGG_CLASS),
     %% Reset atomics — create a fresh atomics ref
     NewRef = atomics:new(?INITIAL_COUNTER_SIZE, [{signed, true}]),
     persistent_term:put(?PT_COUNTERS, NewRef),

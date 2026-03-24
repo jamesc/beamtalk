@@ -47,7 +47,7 @@ direct_insert_and_query_test_() ->
                 %% Record a dispatch directly (bypassing telemetry)
                 TestPid = self(),
                 beamtalk_trace_store:record_dispatch(
-                    TestPid, increment, 5000, ok, sync
+                    TestPid, increment, 5000, ok, sync, 'Counter'
                 ),
 
                 %% Check stats
@@ -62,6 +62,51 @@ direct_insert_and_query_test_() ->
                 ?assertEqual(0, maps:get(<<"errors">>, IncStats)),
                 ?assertEqual(5000, maps:get(<<"total_duration_ns">>, IncStats))
             end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Class name wired into actor stats (BT-1640)
+%%====================================================================
+
+class_in_actor_stats_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {"class from telemetry metadata appears in get_stats",
+                ?_test(begin
+                    TestPid = self(),
+                    beamtalk_trace_store:record_dispatch(
+                        TestPid, increment, 5000, ok, sync, 'EventStore'
+                    ),
+                    Stats = beamtalk_trace_store:get_stats(),
+                    PidKey = list_to_binary(pid_to_list(TestPid)),
+                    PidStats = maps:get(PidKey, Stats),
+                    ?assertEqual(<<"EventStore">>, maps:get(<<"class">>, PidStats))
+                end)},
+            {"class unknown when not provided uses fallback",
+                ?_test(begin
+                    %% Use a fake pid that won't be in agg_class table
+                    %% to verify the fallback to instance registry
+                    FakePid = list_to_pid("<0.99999.0>"),
+                    beamtalk_trace_store:record_dispatch(
+                        FakePid, increment, 5000, ok, sync, unknown
+                    ),
+                    Stats = beamtalk_trace_store:get_stats(),
+                    PidKey = list_to_binary(pid_to_list(FakePid)),
+                    PidStats = maps:get(PidKey, Stats),
+                    %% Class=unknown not stored in agg_class, falls back to registry → unknown
+                    ?assertEqual(<<"unknown">>, maps:get(<<"class">>, PidStats))
+                end)},
+            {"class appears in collect_method_stats via slow_methods",
+                ?_test(begin
+                    TestPid = self(),
+                    beamtalk_trace_store:record_dispatch(
+                        TestPid, slow_op, 50000, ok, sync, 'WorkflowEngine'
+                    ),
+                    Result = beamtalk_trace_store:slow_methods(1),
+                    [Top | _] = Result,
+                    ?assertEqual(<<"WorkflowEngine">>, maps:get(<<"class">>, Top))
+                end)}
         ]
     end}.
 
@@ -163,9 +208,11 @@ counters_aggregates_test_() ->
                 TestPid = self(),
 
                 %% Record multiple dispatches
-                beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync),
-                beamtalk_trace_store:record_dispatch(TestPid, increment, 2000, ok, sync),
-                beamtalk_trace_store:record_dispatch(TestPid, increment, 3000, error, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(TestPid, increment, 2000, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, increment, 3000, error, sync, 'Counter'
+                ),
 
                 %% Check aggregated stats
                 Stats = beamtalk_trace_store:get_stats(TestPid),
@@ -195,7 +242,7 @@ clear_resets_all_test_() ->
                 TestPid = self(),
 
                 %% Insert some data
-                beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync, 'Counter'),
                 beamtalk_trace_store:enable(),
                 beamtalk_trace_store:record_trace_event(
                     TestPid, 'Counter', increment, sync, 1000, ok, #{}, stop
@@ -253,9 +300,9 @@ slow_methods_test_() ->
                 TestPid = self(),
 
                 %% Record methods with different durations
-                beamtalk_trace_store:record_dispatch(TestPid, fast, 100, ok, sync),
-                beamtalk_trace_store:record_dispatch(TestPid, slow, 10000, ok, sync),
-                beamtalk_trace_store:record_dispatch(TestPid, medium, 5000, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, fast, 100, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(TestPid, slow, 10000, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(TestPid, medium, 5000, ok, sync, 'Counter'),
 
                 Result = beamtalk_trace_store:slow_methods(2),
                 ?assertEqual(2, length(Result)),
@@ -276,10 +323,12 @@ hot_methods_test_() ->
                 TestPid = self(),
 
                 %% Record methods with different call counts
-                beamtalk_trace_store:record_dispatch(TestPid, rare, 100, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, rare, 100, ok, sync, 'Counter'),
                 lists:foreach(
                     fun(_) ->
-                        beamtalk_trace_store:record_dispatch(TestPid, popular, 100, ok, sync)
+                        beamtalk_trace_store:record_dispatch(
+                            TestPid, popular, 100, ok, sync, 'Counter'
+                        )
                     end,
                     lists:seq(1, 10)
                 ),
@@ -302,10 +351,10 @@ error_methods_test_() ->
                 TestPid = self(),
 
                 %% Record methods with different error rates
-                beamtalk_trace_store:record_dispatch(TestPid, reliable, 100, ok, sync),
-                beamtalk_trace_store:record_dispatch(TestPid, reliable, 100, ok, sync),
-                beamtalk_trace_store:record_dispatch(TestPid, flaky, 100, error, sync),
-                beamtalk_trace_store:record_dispatch(TestPid, flaky, 100, timeout, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, reliable, 100, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(TestPid, reliable, 100, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(TestPid, flaky, 100, error, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(TestPid, flaky, 100, timeout, sync, 'Counter'),
 
                 Result = beamtalk_trace_store:error_methods(1),
                 ?assertEqual(1, length(Result)),
@@ -382,7 +431,7 @@ bottlenecks_test_() ->
                     ready -> ok
                 end,
 
-                beamtalk_trace_store:record_dispatch(Pid, test_method, 100, ok, sync),
+                beamtalk_trace_store:record_dispatch(Pid, test_method, 100, ok, sync, 'Counter'),
 
                 Result = beamtalk_trace_store:bottlenecks(10),
                 ?assert(is_list(Result)),
@@ -504,7 +553,7 @@ gen_server_crash_recovery_test_() ->
                 TestPid = self(),
 
                 %% Insert data via persistent_term counters
-                beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync, 'Counter'),
                 beamtalk_trace_store:enable(),
 
                 %% Verify data exists
@@ -527,7 +576,9 @@ gen_server_crash_recovery_test_() ->
                 end,
 
                 %% Store should be functional with inherited persistent_terms
-                beamtalk_trace_store:record_dispatch(TestPid, after_restart, 500, ok, sync),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, after_restart, 500, ok, sync, 'Counter'
+                ),
                 StatsAfterRestart = beamtalk_trace_store:get_stats(),
                 ?assertNotEqual(#{}, StatsAfterRestart)
             end)
@@ -603,7 +654,7 @@ serialized_counter_grow_test_() ->
                 lists:foreach(
                     fun(I) ->
                         Sel = list_to_atom("method_" ++ integer_to_list(I)),
-                        beamtalk_trace_store:record_dispatch(TestPid, Sel, 100, ok, sync)
+                        beamtalk_trace_store:record_dispatch(TestPid, Sel, 100, ok, sync, 'Counter')
                     end,
                     lists:seq(1, 1010)
                 ),
@@ -628,7 +679,7 @@ min_max_duration_test_() ->
                 TestPid = self(),
 
                 %% Single call — min and max should be the same
-                beamtalk_trace_store:record_dispatch(TestPid, ping, 5000, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, ping, 5000, ok, sync, 'Counter'),
                 Stats1 = beamtalk_trace_store:get_stats(TestPid),
                 PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats1 = maps:get(PidKey, Stats1),
@@ -637,7 +688,7 @@ min_max_duration_test_() ->
                 ?assertEqual(5000, maps:get(<<"max_duration_ns">>, PingStats1)),
 
                 %% Add a faster call — min should decrease, max stays
-                beamtalk_trace_store:record_dispatch(TestPid, ping, 1000, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, ping, 1000, ok, sync, 'Counter'),
                 Stats2 = beamtalk_trace_store:get_stats(TestPid),
                 PidStats2 = maps:get(PidKey, Stats2),
                 PingStats2 = maps:get(<<"ping">>, maps:get(<<"methods">>, PidStats2)),
@@ -645,7 +696,7 @@ min_max_duration_test_() ->
                 ?assertEqual(5000, maps:get(<<"max_duration_ns">>, PingStats2)),
 
                 %% Add a slower call — max should increase, min stays
-                beamtalk_trace_store:record_dispatch(TestPid, ping, 11000, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, ping, 11000, ok, sync, 'Counter'),
                 Stats3 = beamtalk_trace_store:get_stats(TestPid),
                 PidStats3 = maps:get(PidKey, Stats3),
                 PingStats3 = maps:get(<<"ping">>, maps:get(<<"methods">>, PidStats3)),
@@ -669,7 +720,7 @@ min_max_concurrent_test_() ->
                     %% Pre-allocate the slot with an initial dispatch to avoid the
                     %% first-observation allocation race between concurrent writers.
                     beamtalk_trace_store:record_dispatch(
-                        TestPid, concurrent_method, 5000, ok, sync
+                        TestPid, concurrent_method, 5000, ok, sync, 'Counter'
                     ),
 
                     %% Spawn multiple processes that all record dispatches concurrently
@@ -683,7 +734,7 @@ min_max_concurrent_test_() ->
                                 fun(J) ->
                                     Duration = 100 + (J * 99),
                                     beamtalk_trace_store:record_dispatch(
-                                        TestPid, concurrent_method, Duration, ok, sync
+                                        TestPid, concurrent_method, Duration, ok, sync, 'Counter'
                                     )
                                 end,
                                 lists:seq(1, CallsPerProcess)
@@ -735,7 +786,9 @@ clear_resets_min_sentinel_test_() ->
                 TestPid = self(),
 
                 %% Record a dispatch to establish min/max
-                beamtalk_trace_store:record_dispatch(TestPid, sentinel_check, 5000, ok, sync),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, sentinel_check, 5000, ok, sync, 'Counter'
+                ),
                 Stats1 = beamtalk_trace_store:get_stats(TestPid),
                 PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats1 = maps:get(PidKey, Stats1),
@@ -753,7 +806,9 @@ clear_resets_min_sentinel_test_() ->
                 ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
 
                 %% Record a new dispatch — min should be set fresh, not stuck
-                beamtalk_trace_store:record_dispatch(TestPid, sentinel_check, 8000, ok, sync),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, sentinel_check, 8000, ok, sync, 'Counter'
+                ),
                 Stats2 = beamtalk_trace_store:get_stats(TestPid),
                 PidStats2 = maps:get(PidKey, Stats2),
                 MethodStats2 = maps:get(
@@ -777,12 +832,12 @@ slow_methods_sort_by_max_test_() ->
                 TestPid = self(),
 
                 %% Method 'steady' has high avg but low max (consistent)
-                beamtalk_trace_store:record_dispatch(TestPid, steady, 9000, ok, sync),
-                beamtalk_trace_store:record_dispatch(TestPid, steady, 9000, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, steady, 9000, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(TestPid, steady, 9000, ok, sync, 'Counter'),
 
                 %% Method 'spiky' has low avg but high max (outlier)
-                beamtalk_trace_store:record_dispatch(TestPid, spiky, 1000, ok, sync),
-                beamtalk_trace_store:record_dispatch(TestPid, spiky, 20000, ok, sync),
+                beamtalk_trace_store:record_dispatch(TestPid, spiky, 1000, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_dispatch(TestPid, spiky, 20000, ok, sync, 'Counter'),
 
                 %% By avg, 'steady' should be first (avg=9000 vs avg=10500)
                 %% Actually spiky avg = (1000+20000)/2 = 10500, steady avg = 9000
