@@ -6,6 +6,8 @@
 TestCase subclass: TimeoutProxyTest
   field: actor = nil
 
+  class serial -> Boolean => true
+
   setUp => self.actor := SlowActor spawn
 
   tearDown => self.actor isAlive ifTrue: [self.actor stop]

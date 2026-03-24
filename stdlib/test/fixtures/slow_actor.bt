@@ -7,9 +7,11 @@
 Actor subclass: SlowActor
   state: value = 42
 
-  // Returns value after sleeping for the given milliseconds
+  // Returns value after sleeping for the given milliseconds.
+  // Uses Erlang FFI directly to avoid the 5000ms class method dispatch timeout
+  // that Timer sleep: would hit for delays >5s.
   slowGet: ms =>
-    Timer sleep: ms
+    (Erlang timer) sleep: ms
     self.value
 
   // Fast getter for comparison
