@@ -1570,6 +1570,42 @@ sync_send_to_dead_actor_test() ->
     ).
 
 %%% ============================================================================
+%%% BT-1190: sync_send/4 (explicit timeout) tests
+%%% ============================================================================
+
+sync_send_4_succeeds_with_sufficient_timeout_test() ->
+    {ok, Counter} = test_counter:start_link(42),
+    %% slowGet: sleeps 50ms then returns value; 2000ms timeout is plenty
+    Result = beamtalk_actor:sync_send(Counter, 'slowGet:', [50], 2000),
+    ?assertEqual(42, Result),
+    gen_server:stop(Counter).
+
+sync_send_4_times_out_with_short_timeout_test() ->
+    {ok, Counter} = test_counter:start_link(42),
+    %% slowGet: sleeps 500ms; 50ms timeout should trigger timeout
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = timeout}},
+        beamtalk_actor:sync_send(Counter, 'slowGet:', [500], 50)
+    ),
+    gen_server:stop(Counter).
+
+sync_send_4_infinity_timeout_test() ->
+    {ok, Counter} = test_counter:start_link(42),
+    %% infinity timeout should never time out
+    Result = beamtalk_actor:sync_send(Counter, 'slowGet:', [50], infinity),
+    ?assertEqual(42, Result),
+    gen_server:stop(Counter).
+
+sync_send_4_dead_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
+        beamtalk_actor:sync_send(Counter, getValue, [], 5000)
+    ).
+
+%%% ============================================================================
 %%% BT-917: cast_send/3 and fire-and-forget handle_cast wire format tests
 %%% ============================================================================
 

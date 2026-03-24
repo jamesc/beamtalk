@@ -68,6 +68,65 @@ class_object_returns_value() ->
     ?assertEqual('Object', Result).
 
 %% ============================================================================
+%% BT-1190: send/4 (explicit timeout) dispatch tests
+%% ============================================================================
+
+send4_actor_succeeds_with_timeout() ->
+    {ok, Counter} = test_counter:start_link(42),
+    Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
+    %% slowGet: sleeps 50ms; 2000ms timeout is plenty
+    Result = beamtalk_message_dispatch:send(Obj, 'slowGet:', [50], 2000),
+    ?assertEqual(42, Result),
+    gen_server:stop(Counter).
+
+send4_actor_timeout_raises_error() ->
+    {ok, Counter} = test_counter:start_link(42),
+    Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
+    %% slowGet: sleeps 500ms; 50ms timeout should fail
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = timeout}},
+        beamtalk_message_dispatch:send(Obj, 'slowGet:', [500], 50)
+    ),
+    gen_server:stop(Counter).
+
+send4_value_type_ignores_timeout() ->
+    %% Value types have no timeout semantics — just dispatches normally
+    Result = beamtalk_message_dispatch:send(2, '+', [3], 30000),
+    ?assertEqual(5, Result).
+
+perform_with_timeout_intercept_succeeds() ->
+    %% perform:withArguments:timeout: is intercepted in send/3 and rewrites to send/4
+    {ok, Counter} = test_counter:start_link(42),
+    Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
+    Result = beamtalk_message_dispatch:send(
+        Obj, 'perform:withArguments:timeout:', [getValue, [], 2000]
+    ),
+    ?assertEqual(42, Result),
+    gen_server:stop(Counter).
+
+perform_with_timeout_intercept_times_out() ->
+    {ok, Counter} = test_counter:start_link(42),
+    Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = timeout}},
+        beamtalk_message_dispatch:send(
+            Obj, 'perform:withArguments:timeout:', ['slowGet:', [500], 50]
+        )
+    ),
+    gen_server:stop(Counter).
+
+send4_test_() ->
+    {setup, fun actor_setup/0, fun actor_teardown/1, [
+        {"send/4 actor succeeds with timeout", fun send4_actor_succeeds_with_timeout/0},
+        {"send/4 actor timeout raises error", fun send4_actor_timeout_raises_error/0},
+        {"send/4 value type ignores timeout", fun send4_value_type_ignores_timeout/0},
+        {"perform:withArguments:timeout: intercept succeeds",
+            fun perform_with_timeout_intercept_succeeds/0},
+        {"perform:withArguments:timeout: intercept times out",
+            fun perform_with_timeout_intercept_times_out/0}
+    ]}.
+
+%% ============================================================================
 %% Primitive dispatch tests (no bootstrap needed)
 %% ============================================================================
 

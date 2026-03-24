@@ -25,7 +25,8 @@
     handle_decrement/2,
     handle_getValue/2,
     'handle_setValue:'/2,
-    handle_test_make_self/2
+    handle_test_make_self/2,
+    'handle_slowGet:'/2
 ]).
 
 start_link(InitialValue) ->
@@ -44,7 +45,8 @@ init(InitialValue) ->
             decrement => fun ?MODULE:handle_decrement/2,
             getValue => fun ?MODULE:handle_getValue/2,
             'setValue:' => fun ?MODULE:'handle_setValue:'/2,
-            test_make_self => fun ?MODULE:handle_test_make_self/2
+            test_make_self => fun ?MODULE:handle_test_make_self/2,
+            'slowGet:' => fun ?MODULE:'handle_slowGet:'/2
         },
         value => InitialValue
     }).
@@ -82,3 +84,10 @@ handle_test_make_self([], State) ->
     %% Test helper to expose make_self/1
     Self = beamtalk_actor:make_self(State),
     {reply, Self, State}.
+
+%% BT-1190: Slow method that sleeps for the given milliseconds before returning.
+%% Used to test timeout behavior.
+'handle_slowGet:'([SleepMs], State) ->
+    timer:sleep(SleepMs),
+    Value = maps:get(value, State),
+    {reply, Value, State}.

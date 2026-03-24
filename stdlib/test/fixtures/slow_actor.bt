@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// SlowActor — Test fixture that sleeps before responding.
+// Used by TimeoutProxyTest to verify timeout behavior.
+
+Actor subclass: SlowActor
+  state: value = 42
+
+  // Returns value after sleeping for the given milliseconds.
+  // Uses Erlang FFI directly to avoid the 5000ms class method dispatch timeout
+  // that Timer sleep: would hit for delays >5s.
+  slowGet: ms =>
+    (Erlang timer) sleep: ms
+    self.value
+
+  // Fast getter for comparison
+  getValue => self.value

@@ -1,0 +1,67 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for actor timeout proxy (BT-1190)
+//
+// Tests the withTimeout: method on Actor and the TimeoutProxy class.
+
+// @load tests/e2e/fixtures/slow_actor_fixture.bt
+
+// ===========================================================================
+// BASIC TIMEOUT PROXY
+// ===========================================================================
+
+// Create a slow actor
+slow := SlowE2EActor spawn
+// => #Actor<SlowE2EActor,_>
+
+// Wrap with a generous timeout
+proxy := slow withTimeout: 5000
+// => #Actor<TimeoutProxy,_>
+
+// Proxy forwards messages to the target
+proxy getValue
+// => 42
+
+// One-shot usage
+(slow withTimeout: 5000) getValue
+// => 42
+
+// ===========================================================================
+// TIMEOUT TRIGGERS ERROR
+// ===========================================================================
+
+// Short timeout with slow response should raise timeout error
+shortProxy := slow withTimeout: 50
+// => #Actor<TimeoutProxy,_>
+
+// slowGet: sleeps 500ms; 50ms timeout should fail
+[shortProxy slowGet: 500] on: Error do: [:e | e kind]
+// => timeout
+
+// ===========================================================================
+// INFINITY TIMEOUT
+// ===========================================================================
+
+// Infinity timeout should never time out
+infProxy := slow withTimeout: #infinity
+// => #Actor<TimeoutProxy,_>
+
+infProxy slowGet: 50
+// => 42
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+slow stop
+// => _
+
+proxy stop
+// => _
+
+shortProxy stop
+// => _
+
+infProxy stop
+// => _

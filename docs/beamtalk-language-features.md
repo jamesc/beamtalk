@@ -1325,6 +1325,26 @@ self should: [a callPeer] raise: #timeout
 
 Design actor interactions to avoid circular synchronous calls. Use `!` (cast) when an actor needs to notify another without expecting a response.
 
+### Custom Timeouts
+
+The default `.` send timeout is 5000ms. For actors that may take longer (database queries, HTTP calls), use `withTimeout:` to create a timeout proxy:
+
+```beamtalk
+// Wrap an actor with a custom timeout (milliseconds)
+slowDb := db withTimeout: 30000
+slowDb query: sql              // forwarded with 30s timeout
+slowDb stop                    // stop the proxy when done
+
+// Infinite timeout (use with care — blocks indefinitely)
+infDb := db withTimeout: #infinity
+infDb query: sql
+infDb stop
+```
+
+`withTimeout:` returns a `TimeoutProxy` — a lightweight actor that forwards ordinary messages to the target via `doesNotUnderstand:args:` using the specified timeout. Lifecycle messages such as `stop` apply to the proxy itself, not the target. This is pure message passing with no special syntax or reserved keywords.
+
+**Lifecycle:** The proxy is a separate actor process. Capture the reference and call `stop` when finished to avoid leaking processes.
+
 ### BEAM Mapping
 
 | Beamtalk | BEAM |
@@ -1332,6 +1352,7 @@ Design actor interactions to avoid circular synchronous calls. Use `!` (cast) wh
 | `.` send (sync) | `gen_server:call` — blocks until reply |
 | `!` send (async cast) | `gen_server:cast` — returns immediately |
 | Timeout | `gen_server:call` default 5000ms timeout |
+| `withTimeout:` | Proxy wrapping `gen_server:call/3` with custom timeout |
 
 ### Actor-to-Actor Coordination
 

@@ -58,3 +58,15 @@ abstract nil subclass: ProtoObject
   /// ```
   perform: selector withArguments: arguments =>
     @primitive "perform:withArguments:"
+
+  /// Send a message dynamically with an arguments list and explicit timeout.
+  ///
+  /// The timeout (in milliseconds or `#infinity`) applies to the gen_server:call
+  /// when the receiver is an actor. For value types, timeout is ignored.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// actor perform: #query withArguments: #(sql) timeout: 30000
+  /// ```
+  perform: selector withArguments: arguments timeout: timeoutMs =>
+    @primitive "perform:withArguments:timeout:"
