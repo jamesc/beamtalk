@@ -204,16 +204,17 @@ The `.app` file's `{env, [{classes, [...]}]}` metadata is extended to include cl
   {classes, [
     #{name => 'Parser',
       kind => object,        % object | value | actor
-      protocols => [],       % protocol names this class conforms to
       type_params => []      % generic type parameters (ADR 0068)
     }
   ]}
 ]}
 ```
 
+Protocol conformance is **not** stored in class metadata. Beamtalk uses structural conformance (ADR 0068) — a class conforms to a protocol if it has the right methods, with no explicit declaration. Pre-computing conformance in `.app` metadata would be stale the moment a new protocol is defined. Instead, the compiler checks conformance at the use site by comparing the class's method signatures (already in `__beamtalk_meta/0`) against the protocol's requirements (in the protocol's defining package).
+
 This allows the compiler to:
 - Propagate ClassKind across package boundaries (ADR 0067 hierarchy resolution)
-- Resolve protocol names in type annotations without loading the dependency's source
+- Check protocol conformance at use sites using method signatures from `__beamtalk_meta/0`
 - Provide chain completion and `:help` for dependency classes in the REPL and LSP
 
 ### 8. Package Reflection: The `Package` Class
@@ -482,9 +483,9 @@ Affected components: `crates/beamtalk-core/src/semantic_analysis/` (name resolut
 
 ### Phase 4: Cross-Package Metadata
 
-1. **Extend `.app` metadata** — add `kind`, `protocols`, `type_params` to the class registry entries
+1. **Extend `.app` metadata** — add `kind` and `type_params` to the class registry entries (protocol conformance is checked at use sites via method signatures, not pre-computed in metadata)
 2. **Emit metadata during compilation** — codegen writes extended class info to `.app.src`
-3. **Read metadata during dependency resolution** — the compiler loads dependency `.app` files to resolve ClassKind, protocol names, and generic signatures
+3. **Read metadata during dependency resolution** — the compiler loads dependency `.app` files to resolve ClassKind and generic signatures; protocol conformance is checked by comparing `__beamtalk_meta/0` method signatures against protocol requirements
 4. **LSP integration** — use metadata for cross-package hover, go-to-definition, and chain completion
 
 Affected components: `crates/beamtalk-core/src/codegen/` (metadata emission), `runtime/apps/beamtalk_runtime/src/` (metadata format), `crates/beamtalk-lsp/` (cross-package navigation)
