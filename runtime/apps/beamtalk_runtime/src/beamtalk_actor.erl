@@ -886,6 +886,7 @@ restore_propagated_ctx(PropCtx) when is_map(PropCtx) ->
         undefined ->
             ok;
         TraceCtx when is_map(TraceCtx), map_size(TraceCtx) > 0 ->
+            clear_trace_context(),
             set_trace_context(TraceCtx);
         TraceCtx when is_map(TraceCtx) ->
             %% Empty map: clear any previously restored trace context
