@@ -60,6 +60,37 @@ A **lockfile** (`beamtalk.lock`) pins exact commit SHAs for git dependencies, en
 
 Registry-based resolution (`json = "1.0"` via Hex.pm or a custom registry) is out of scope for this ADR and will be addressed when the ecosystem warrants it.
 
+### CLI Experience
+
+Dependencies are managed via the `beamtalk deps` subcommand:
+
+```bash
+# Add a dependency (writes to beamtalk.toml, resolves, updates lockfile)
+beamtalk deps add json --git https://github.com/jamesc/beamtalk-json --tag v1.0.0
+beamtalk deps add utils --path ../my-utils
+
+# List resolved dependencies with sources and pinned versions
+beamtalk deps list
+# json  v1.0.0  (git: github.com/jamesc/beamtalk-json @ abc1234)
+# utils 0.1.0   (path: ../my-utils)
+
+# Update lockfile — advance git deps to latest matching their spec
+beamtalk deps update          # all deps
+beamtalk deps update json     # just one
+```
+
+**Implicit fetch on build:** `beamtalk build`, `beamtalk test`, and `beamtalk repl` automatically fetch and compile dependencies if the lockfile is missing or stale. No separate `deps get` step is required — the Cargo model, not the Mix model. This keeps the common workflow to:
+
+```bash
+beamtalk new my_app
+cd my_app
+# edit beamtalk.toml to add dependencies (or use `beamtalk deps add`)
+beamtalk repl
+# => deps fetched, compiled, on code path — just use the classes
+```
+
+Manually editing `beamtalk.toml` is always supported — the CLI commands are convenience, not the only path.
+
 ### 2. Class Visibility: Package-Scoped by Default
 
 When a package declares a dependency, **all classes from that dependency are available by their short name** throughout the depending package:
