@@ -1783,12 +1783,16 @@ impl CoreErlangGenerator {
         let class_selector = super::selector_mangler::safe_class_method_selector(raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
         docvec![
-            Document::String(format!(
-                "let {class_pid_var} = call 'beamtalk_class_registry':'whereis_class'('{class_name}') in "
-            )),
-            Document::String(format!(
-                "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{class_selector}', ["
-            )),
+            "let ",
+            Document::String(class_pid_var.clone()),
+            " = call 'beamtalk_class_registry':'whereis_class'('",
+            Document::String(class_name.to_string()),
+            "') in ",
+            "call 'beamtalk_object_class':'class_send'(",
+            Document::String(class_pid_var),
+            ", '",
+            Document::String(class_selector),
+            "', [",
             args_doc,
             "])"
         ]

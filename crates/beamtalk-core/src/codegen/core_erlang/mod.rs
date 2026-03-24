@@ -1935,8 +1935,14 @@ impl CoreErlangGenerator {
         hierarchy: &crate::semantic_analysis::class_hierarchy::ClassHierarchy,
         generator: &CoreErlangGenerator,
     ) -> std::collections::HashMap<String, DirectCallClassInfo> {
-        let supervisor_selectors: std::collections::HashSet<&str> =
-            ["startLink", "startLink:"].into_iter().collect();
+        // Selectors that depend on gen_server process state and must NOT be
+        // called directly: supervisor constructors (`startLink` family) and
+        // `basicNew`/`basicNewWith` constructors (`new`/`new:`) which read
+        // `beamtalk_class_name`/`beamtalk_class_module` from the process dictionary.
+        let excluded_selectors: std::collections::HashSet<&str> =
+            ["startLink", "startLink:", "new", "new:"]
+                .into_iter()
+                .collect();
         let mut result = std::collections::HashMap::new();
 
         for (class_name, class_info) in hierarchy.classes() {
@@ -1955,8 +1961,8 @@ impl CoreErlangGenerator {
 
             let mut selectors = std::collections::HashSet::new();
             for method in &class_info.class_methods {
-                // Gate 4: Skip supervisor constructor selectors
-                if supervisor_selectors.contains(method.selector.as_str()) {
+                // Gate 4: Skip selectors that depend on gen_server process state
+                if excluded_selectors.contains(method.selector.as_str()) {
                     continue;
                 }
                 // Gate 5: Only optimize `class sealed` methods (is_sealed=true).
