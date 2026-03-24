@@ -70,10 +70,48 @@ TestCase subclass: TracingTest
   // === Stats (empty when no dispatches recorded) ===
   testStatsReturnsEmptyDictionary => self assert: Tracing stats equals: #{}
 
-  testStatsForUnknownActorReturnsEmptyDictionary =>
-    // statsFor: a live actor with no dispatches returns {}
+  testStatsForActorIncludesLifecycleStart =>
+    // BT-1638: Compiled actors emit lifecycle start telemetry in init,
+    // so statsFor: a freshly spawned actor includes a "start" entry.
     c := Counter spawn
-    self assert: (Tracing statsFor: c) equals: #{}
+    stats := Tracing statsFor: c
+    self deny: stats isEmpty
+    c stop
+
+  // === BT-1638: Lifecycle telemetry from compiled actors ===
+  testLifecycleStartEventRecordedOnSpawn =>
+    // Compiled actors emit [beamtalk, actor, lifecycle, start] in init/1
+    Tracing enable
+    Tracing clear
+    c := Counter spawn
+    // Small delay to ensure telemetry handler has processed
+    Timer sleep: 50
+    traces := Tracing traces
+    startEvents := traces select: [:t | (t at: "selector") == "start"]
+    self deny: startEvents isEmpty
+    c stop
+
+  testLifecycleStopEventRecordedOnStop =>
+    // Compiled actors emit [beamtalk, actor, lifecycle, stop] in terminate/2
+    Tracing enable
+    Tracing clear
+    c := Counter spawn
+    c stop
+    // Small delay to ensure termination and telemetry processing
+    Timer sleep: 100
+    traces := Tracing traces
+    stopEvents := traces select: [:t | (t at: "selector") == "stop"]
+    self deny: stopEvents isEmpty
+
+  testLifecycleEventsHaveCorrectMode =>
+    // Lifecycle events are recorded with mode => lifecycle
+    Tracing enable
+    Tracing clear
+    c := Counter spawn
+    Timer sleep: 50
+    traces := Tracing traces
+    lifecycleEvents := traces select: [:t | (t at: "mode") == "lifecycle"]
+    self deny: lifecycleEvents isEmpty
     c stop
 
   // === Analysis (empty results) ===

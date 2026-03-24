@@ -98,10 +98,12 @@ impl CoreErlangGenerator {
         // dispatch initialize first, then return {ok, NewState} / {stop, Error}.
         // When has_initialize is true, we wrap the dispatch in a guard that
         // checks __skip_initialize__ in InitArgs, so parent helpers skip it.
+        // BT-1638: Lifecycle start telemetry is emitted here, guarded by
+        // __skip_initialize__ so parent helper calls don't double-fire.
         let init_return = if has_initialize {
-            Self::init_initialize_guarded_doc()
+            Self::init_initialize_guarded_doc(&module_name)
         } else {
-            Document::Str("in {'ok', FinalState}")
+            Self::init_plain_return_doc(&module_name)
         };
 
         if has_parent_init {
@@ -232,6 +234,66 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-1638: Generate the lifecycle start telemetry call for init/1.
+    ///
+    /// Emits `[beamtalk, actor, lifecycle, start]` via `beamtalk_actor:maybe_execute_telemetry/3`.
+    /// Uses a `let` binding for `self()` since Core Erlang map literals cannot contain calls.
+    fn lifecycle_start_telemetry_doc(module_name: &str) -> Document<'static> {
+        docvec![
+            "let _TelPid = call 'erlang':'self'() in",
+            line(),
+            docvec![
+                "let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(",
+                "['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => '",
+                Document::String(module_name.to_owned()),
+                "'}~) in",
+            ],
+        ]
+    }
+
+    /// BT-1638: Generate a plain init return with lifecycle telemetry.
+    ///
+    /// For classes WITHOUT `initialize`, emits lifecycle start telemetry
+    /// guarded by `__skip_initialize__` so parent helper calls don't double-fire.
+    /// When called as a parent helper (flag is 'true'), skips telemetry and
+    /// returns `{ok, State}` directly.
+    fn init_plain_return_doc(module_name: &str) -> Document<'static> {
+        docvec![
+            // BT-1638: Guard telemetry behind __skip_initialize__ to avoid
+            // double-fire when called as parent state-building helper
+            "in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'true'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "let CleanState = call 'maps':'remove'('__skip_initialize__', FinalState) in",
+                            line(),
+                            "{'ok', CleanState}",
+                        ]
+                    ),
+                    line(),
+                    "<'false'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            Self::lifecycle_start_telemetry_doc(module_name),
+                            line(),
+                            "{'ok', FinalState}",
+                        ]
+                    ),
+                ]
+            ),
+            line(),
+            "end",
+        ]
+    }
+
     /// BT-1417/BT-1541: Generate the guarded initialize dispatch block for init/1.
     ///
     /// Checks `__skip_initialize__` in `InitArgs` — when a child's init calls
@@ -243,7 +305,9 @@ impl CoreErlangGenerator {
     /// initialize inline. This ensures the `gen_server` message loop is running
     /// when initialize executes, so self-sends don't deadlock. OTP guarantees
     /// no messages arrive before `handle_continue` runs.
-    fn init_initialize_guarded_doc() -> Document<'static> {
+    ///
+    /// BT-1638: Also emits lifecycle start telemetry in the non-helper branch.
+    fn init_initialize_guarded_doc(module_name: &str) -> Document<'static> {
         docvec![
             "%% BT-1417/BT-1541: Defer initialize to handle_continue unless called as a parent helper",
             line(),
@@ -271,6 +335,9 @@ impl CoreErlangGenerator {
                             line(),
                             // Strip the flag from state before returning
                             "let CleanState1 = call 'maps':'remove'('__skip_initialize__', FinalState) in",
+                            line(),
+                            // BT-1638: Emit lifecycle start telemetry before returning
+                            Self::lifecycle_start_telemetry_doc(module_name),
                             line(),
                             // BT-1541: Return {ok, State, {continue, initialize}} to defer
                             // initialize dispatch to handle_continue where the loop is running
@@ -685,6 +752,16 @@ impl CoreErlangGenerator {
             nest(
                 INDENT,
                 docvec![
+                    line(),
+                    // BT-1638: Emit lifecycle stop telemetry from compiled terminate
+                    "let _TelPid = call 'erlang':'self'() in",
+                    line(),
+                    docvec![
+                        "let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(",
+                        "['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => '",
+                        Document::String(module_name.clone()),
+                        "', 'reason' => Reason}~) in",
+                    ],
                     line(),
                     "%% Call terminate: method if defined — exceptions must not prevent shutdown",
                     line(),

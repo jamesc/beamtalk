@@ -76,7 +76,15 @@ module 'nested_keyword_messages' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
         '__class_mod__' => 'nested_keyword_messages'
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
-    in {'ok', FinalState}
+    in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' ->
+            let CleanState = call 'maps':'remove'('__skip_initialize__', FinalState) in
+            {'ok', CleanState}
+        <'false'> when 'true' ->
+            let _TelPid = call 'erlang':'self'() in
+            let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'nested_keyword_messages'}~) in
+            {'ok', FinalState}
+    end
 
 
 'handle_continue'/2 = fun (Continue, State) ->
@@ -144,6 +152,8 @@ module 'nested_keyword_messages' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
 
 
 'terminate'/2 = fun (Reason, State) ->
+    let _TelPid = call 'erlang':'self'() in
+    let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => 'nested_keyword_messages', 'reason' => Reason}~) in
     %% Call terminate: method if defined — exceptions must not prevent shutdown
     let Self = call 'beamtalk_actor':'make_self'(State) in
     let _TermDisp = try call 'nested_keyword_messages':'dispatch'('terminate:', [Reason], Self, State)
