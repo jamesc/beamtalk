@@ -41,6 +41,19 @@ Value subclass: TestCase
   class run: testName -> String =>
     (Erlang beamtalk_test_case) runClass: self withTest: testName
 
+  /// Whether this test class must run serially (not concurrently).
+  ///
+  /// Override to return `true` in test classes that touch global state
+  /// (persistent_term, registered process names, global ETS tables).
+  /// Serial classes run alone after all concurrent classes complete.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// TestCase subclass: TracingTest
+  ///   class serial -> Boolean => true
+  /// ```
+  class serial -> Boolean => false
+
   /// Prepare the test fixture. Called before each test method.
   /// Override in subclasses to set up shared state or resources.
   ///

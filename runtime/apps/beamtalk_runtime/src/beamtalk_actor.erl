@@ -356,6 +356,8 @@ async_send(ActorPid, isAlive, [], FuturePid) ->
     ok;
 async_send(ActorPid, stop, [], FuturePid) ->
     %% stop is handled locally - gracefully stops the actor process
+    %% BT-1629: No send-site telemetry for stop — terminate/2 handles it
+    %% to avoid double-counting (request + termination).
     try
         gen_server:stop(ActorPid, normal, 5000),
         beamtalk_future:resolve(FuturePid, ok)
@@ -385,6 +387,13 @@ async_send(ActorPid, kill, [], FuturePid) ->
     %% the BEAM scheduler had not yet processed the kill signal.
     %% Waiting for the DOWN message guarantees the process is gone before ok
     %% is delivered.  If the process is already dead, the DOWN arrives instantly.
+    %% BT-1629: Emit lifecycle telemetry event for async kill request.
+    Class = lookup_class(ActorPid),
+    maybe_execute_telemetry(
+        [beamtalk, actor, lifecycle, kill],
+        #{},
+        #{pid => ActorPid, class => Class}
+    ),
     Ref = erlang:monitor(process, ActorPid),
     exit(ActorPid, kill),
     case
@@ -543,6 +552,8 @@ sync_send(ActorPid, isAlive, []) ->
     is_process_alive(ActorPid);
 sync_send(ActorPid, stop, []) ->
     %% stop is handled locally - gracefully stops the actor process
+    %% BT-1629: No send-site telemetry for stop — terminate/2 handles it
+    %% to avoid double-counting (request + termination).
     try
         gen_server:stop(ActorPid, normal, 5000)
     catch
@@ -560,6 +571,13 @@ sync_send(ActorPid, kill, []) ->
     %% kill is handled locally - forcefully kills the actor process.
     %% Same monitor-before-kill pattern as async_send/4: wait for the DOWN
     %% message so that is_process_alive returns false immediately after kill.
+    %% BT-1629: Emit lifecycle telemetry event for kill request.
+    Class = lookup_class(ActorPid),
+    maybe_execute_telemetry(
+        [beamtalk, actor, lifecycle, kill],
+        #{},
+        #{pid => ActorPid, class => Class}
+    ),
     Ref = erlang:monitor(process, ActorPid),
     exit(ActorPid, kill),
     case
@@ -802,6 +820,18 @@ maybe_span(EventPrefix, Metadata, Fun) ->
             Result
     end.
 
+%% @doc Emit a telemetry:execute/3 event if telemetry is available (BT-1629).
+%% Used for lifecycle events (start, stop, kill) which are instantaneous —
+%% no duration/span needed. Gracefully degrades when telemetry is not loaded.
+-spec maybe_execute_telemetry(list(), map(), map()) -> ok.
+maybe_execute_telemetry(EventName, Measurements, Metadata) ->
+    case erlang:function_exported(telemetry, execute, 3) of
+        true ->
+            telemetry:execute(EventName, Measurements, Metadata);
+        false ->
+            ok
+    end.
+
 %% @private
 %% @doc Resolve actor class name via beamtalk_object_instances reverse lookup.
 %% Returns the class atom if found, or 'unknown' for non-Beamtalk PIDs.
@@ -908,6 +938,13 @@ init(State) when is_map(State) ->
                         state_keys => StateKeys,
                         domain => [beamtalk, runtime]
                     }),
+                    %% BT-1629: Emit lifecycle telemetry event for actor start.
+                    %% Recorded in the shared trace ring buffer with mode => lifecycle.
+                    maybe_execute_telemetry(
+                        [beamtalk, actor, lifecycle, start],
+                        #{},
+                        #{pid => self(), class => Class}
+                    ),
                     {ok, State};
                 false ->
                     {stop, {missing_key, '__methods__'}}
@@ -1063,6 +1100,13 @@ terminate(Reason, State) ->
         reason => Reason,
         domain => [beamtalk, runtime]
     }),
+    %% BT-1629: Emit lifecycle telemetry event for actor stop.
+    %% Reason distinguishes normal shutdown from crash.
+    maybe_execute_telemetry(
+        [beamtalk, actor, lifecycle, stop],
+        #{},
+        #{pid => self(), class => Class, reason => Reason}
+    ),
     ok.
 
 %%% Helper Functions

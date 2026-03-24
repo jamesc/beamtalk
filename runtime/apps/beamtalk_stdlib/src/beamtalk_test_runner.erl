@@ -22,6 +22,7 @@
 -export([
     %% TestRunner class-side primitives
     run_all/0,
+    run_all/1,
     run_file/1,
     run_class/1,
     run_class_by_name/1,
@@ -35,11 +36,12 @@
     result_failures/1,
     result_has_passed/1,
     result_summary/1,
-    result_print_string/1
+    result_print_string/1,
+    result_to_json/1
 ]).
 
 %% FFI shims for (Erlang beamtalk_test_runner) dispatch
--export([runAll/0, run/1, run/2]).
+-export([runAll/0, runAll/1, run/1, run/2]).
 %% Exported for testing
 -export([path_suffix_match/2]).
 %% TestResult instance-side
@@ -59,24 +61,64 @@
 %% TestRunner primitives
 %%====================================================================
 
-%% @doc Run all tests across all loaded TestCase subclasses.
+%% @doc Run all tests across all loaded TestCase subclasses (sequential).
 %%
-%% Discovers all TestCase subclasses, runs each, and aggregates
-%% results into a single TestResult.
+%% Equivalent to `run_all(1)` — runs all classes sequentially.
 -spec run_all() -> map().
 run_all() ->
+    run_all(1).
+
+%% @doc Run all tests across all loaded TestCase subclasses with concurrency.
+%%
+%% MaxJobs controls how many test classes run concurrently:
+%% - `0`: auto (uses `erlang:system_info(schedulers)`)
+%% - `1`: sequential (backward-compatible)
+%% - `N > 1`: up to N concurrent classes
+%%
+%% Classes declaring `serial => true` are run sequentially after all
+%% concurrent classes complete. Classes that do not override `serial`
+%% (default `false`) run concurrently.
+-spec run_all(non_neg_integer()) -> map().
+run_all(0) ->
+    run_all(erlang:system_info(schedulers));
+run_all(MaxJobs) when is_integer(MaxJobs), MaxJobs >= 1 ->
+    run_all_impl(MaxJobs);
+run_all(Invalid) ->
+    Msg = iolist_to_binary(
+        io_lib:format(
+            "runAll: expects a non-negative integer, got: ~p",
+            [Invalid]
+        )
+    ),
+    Error0 = beamtalk_error:new(invalid_argument, 'TestRunner'),
+    Error1 = beamtalk_error:with_selector(Error0, 'runAll:'),
+    Error2 = beamtalk_error:with_message(Error1, Msg),
+    beamtalk_error:raise(Error2).
+
+%% @private Implementation of run_all after argument validation.
+-spec run_all_impl(pos_integer()) -> map().
+run_all_impl(MaxJobs) ->
     Classes = beamtalk_test_case:find_test_classes(),
     case Classes of
         [] ->
             make_test_result(0, 0, 0, 0, 0.0, []);
+        _ when MaxJobs =:= 1 ->
+            %% Sequential: original behavior
+            ClassResults = lists:map(fun run_class_by_name/1, Classes),
+            aggregate_results(ClassResults);
         _ ->
-            ClassResults = lists:map(
-                fun(ClassName) ->
-                    run_class_by_name(ClassName)
-                end,
-                Classes
-            ),
-            aggregate_results(ClassResults)
+            StartTime = erlang:monotonic_time(millisecond),
+            %% Partition into concurrent and serial classes
+            {Concurrent, Serial} = partition_classes(Classes),
+            %% Run concurrent classes with bounded parallelism
+            ConcurrentResults = run_classes_concurrent(Concurrent, MaxJobs),
+            %% Run serial classes one at a time
+            SerialResults = lists:map(fun run_class_by_name/1, Serial),
+            EndTime = erlang:monotonic_time(millisecond),
+            WallDuration = (EndTime - StartTime) / 1000.0,
+            Aggregated = aggregate_results(ConcurrentResults ++ SerialResults),
+            %% Replace summed per-class durations with actual wall-clock time
+            Aggregated#{duration => WallDuration}
     end.
 
 %% @doc Run all TestCase subclasses whose source file matches FilePath.
@@ -211,6 +253,46 @@ result_summary(#{
 result_print_string(Result) ->
     Summary = result_summary(Result),
     <<"TestResult(", Summary/binary, ")">>.
+
+%% @doc Serialize a TestResult to JSON for CLI consumption.
+%%
+%% Returns a JSON binary that can be parsed by the CLI to reconstruct the result.
+%% Includes all test details (pass/fail/skip per test, durations, errors).
+-spec result_to_json(map()) -> binary().
+result_to_json(#{
+    '$beamtalk_class' := 'TestResult',
+    total := Total,
+    passed := Passed,
+    failed := Failed,
+    skipped := Skipped,
+    duration := Duration,
+    tests := Tests
+}) ->
+    JsonStruct = #{
+        <<"total">> => Total,
+        <<"passed">> => Passed,
+        <<"failed">> => Failed,
+        <<"skipped">> => Skipped,
+        <<"duration">> => Duration,
+        <<"tests">> => [serialize_test_result(T) || T <- Tests]
+    },
+    jsx:encode(JsonStruct).
+
+%% @doc Serialize a single test result.
+-spec serialize_test_result(map()) -> map().
+serialize_test_result(#{name := Name, status := Status} = Test) ->
+    Base = #{
+        <<"name">> => atom_to_binary(Name, utf8),
+        <<"status">> => atom_to_binary(Status, utf8)
+    },
+    case Test of
+        #{error := Error} when is_binary(Error) ->
+            Base#{<<"error">> => Error};
+        #{error := Error} ->
+            Base#{<<"error">> => iolist_to_binary(io_lib:format("~p", [Error]))};
+        _ ->
+            Base
+    end.
 
 %%====================================================================
 %% Internal: test execution (uses class registry, not module_info)
@@ -442,11 +524,154 @@ aggregate_results(ClassResults) ->
     ).
 
 %%====================================================================
+%% Internal: concurrent test execution (BT-1624)
+%%====================================================================
+
+%% @doc Partition classes into concurrent (default) and serial sets.
+%%
+%% Queries each class's `serial` class method. Classes returning `true`
+%% go into the serial list; all others are concurrent.
+-spec partition_classes([atom()]) -> {[atom()], [atom()]}.
+partition_classes(Classes) ->
+    lists:partition(
+        fun(ClassName) -> not is_serial(ClassName) end,
+        Classes
+    ).
+
+%% @doc Check whether a class declares `serial => true`.
+%%
+%% Sends the `serial` class method message to the class process.
+%% Returns `false` if the class is not registered or doesn't respond.
+-spec is_serial(atom()) -> boolean().
+is_serial(ClassName) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            false;
+        ClassPid ->
+            try
+                beamtalk_object_class:class_send(ClassPid, serial, []) =:= true
+            catch
+                _:_ -> false
+            end
+    end.
+
+%% @doc Run test classes concurrently with bounded parallelism.
+%%
+%% Spawns up to MaxJobs processes at a time, each running one test class.
+%% Collects results via message passing as each process completes.
+-spec run_classes_concurrent([atom()], pos_integer()) -> [map()].
+run_classes_concurrent([], _MaxJobs) ->
+    [];
+run_classes_concurrent(Classes, MaxJobs) ->
+    Ref = make_ref(),
+    Total = length(Classes),
+    {Initial, Rest} = safe_split(MaxJobs, Classes),
+    %% Start initial batch with monitors
+    PidMap = lists:foldl(
+        fun(ClassName, Acc) ->
+            {Pid, MonRef} = spawn_class_worker(ClassName, self(), Ref),
+            Acc#{MonRef => ClassName, Pid => MonRef}
+        end,
+        #{},
+        Initial
+    ),
+    %% Run the feed-and-collect loop
+    run_concurrent_loop(Rest, Ref, self(), Total, [], PidMap).
+
+%% @doc Feed remaining classes as workers complete, collecting all results.
+%%
+%% Each time a result arrives, we spawn the next class (if any remain)
+%% and accumulate the result. Handles 'DOWN' messages for workers that
+%% die without sending a result (OOM, kill signal, etc.) to prevent
+%% indefinite hangs.
+-spec run_concurrent_loop([atom()], reference(), pid(), non_neg_integer(), [map()], map()) ->
+    [map()].
+run_concurrent_loop(_Remaining, _Ref, _Self, 0, Acc, _PidMap) ->
+    lists:reverse(Acc);
+run_concurrent_loop(Remaining, Ref, Self, Expected, Acc, PidMap) ->
+    receive
+        {Ref, Result} ->
+            %% Spawn next class if any remain
+            case Remaining of
+                [Next | Rest] ->
+                    {Pid, MonRef} = spawn_class_worker(Next, Self, Ref),
+                    NewPidMap = PidMap#{MonRef => Next, Pid => MonRef},
+                    run_concurrent_loop(Rest, Ref, Self, Expected - 1, [Result | Acc], NewPidMap);
+                [] ->
+                    run_concurrent_loop([], Ref, Self, Expected - 1, [Result | Acc], PidMap)
+            end;
+        {'DOWN', _MonRef, process, _Pid, normal} ->
+            %% Worker exited normally after sending its result — ignore
+            run_concurrent_loop(Remaining, Ref, Self, Expected, Acc, PidMap);
+        {'DOWN', MonRef, process, _Pid, Reason} ->
+            %% Worker died without sending a result — synthesize a failure
+            ClassName = maps:get(MonRef, PidMap, unknown_class),
+            ErrMsg = iolist_to_binary(
+                io_lib:format("Test worker crashed: ~p", [Reason])
+            ),
+            Result = make_test_result(
+                1,
+                0,
+                1,
+                0,
+                0.0,
+                [#{name => ClassName, status => fail, error => ErrMsg}]
+            ),
+            case Remaining of
+                [Next | Rest] ->
+                    {NewPid, NewMonRef} = spawn_class_worker(Next, Self, Ref),
+                    NewPidMap = PidMap#{NewMonRef => Next, NewPid => NewMonRef},
+                    run_concurrent_loop(Rest, Ref, Self, Expected - 1, [Result | Acc], NewPidMap);
+                [] ->
+                    run_concurrent_loop([], Ref, Self, Expected - 1, [Result | Acc], PidMap)
+            end
+    end.
+
+%% @doc Spawn a monitored worker process to run a test class.
+%%
+%% Uses spawn_monitor so the runner detects worker crashes (OOM, kill,
+%% etc.) that bypass the try/catch. Returns {Pid, MonitorRef}.
+%% The worker still catches trapped exceptions to produce friendly errors.
+-spec spawn_class_worker(atom(), pid(), reference()) -> {pid(), reference()}.
+spawn_class_worker(ClassName, Parent, Ref) ->
+    spawn_monitor(fun() ->
+        Result =
+            try
+                run_class_by_name(ClassName)
+            catch
+                Class:Reason:ST ->
+                    ErrMsg = iolist_to_binary(
+                        io_lib:format("Test class crashed: ~p:~p~n~p", [Class, Reason, ST])
+                    ),
+                    make_test_result(
+                        1,
+                        0,
+                        1,
+                        0,
+                        0.0,
+                        [#{name => ClassName, status => fail, error => ErrMsg}]
+                    )
+            end,
+        Parent ! {Ref, Result}
+    end).
+
+%% @doc Split a list at position N, clamping to list length.
+-spec safe_split(non_neg_integer(), [T]) -> {[T], [T]} when T :: term().
+safe_split(N, List) ->
+    case length(List) of
+        Len when Len =< N -> {List, []};
+        _ -> lists:split(N, List)
+    end.
+
+%%====================================================================
 %% FFI shims — (Erlang beamtalk_test_runner) dispatch
 %%====================================================================
 
 %% runAll → runAll/0  (TestRunner runAll)
 runAll() -> run_all().
+
+%% runAll: → runAll/1  (TestRunner runAll: maxJobs)
+runAll(MaxJobs) -> run_all(MaxJobs).
 
 %% run: → run/1  (TestRunner run: testClass)
 run(TestClass) -> run_class(TestClass).

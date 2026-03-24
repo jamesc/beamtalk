@@ -246,6 +246,10 @@ enum Command {
         /// Treat warnings and hints as errors — fail if any are emitted
         #[arg(long)]
         warnings_as_errors: bool,
+
+        /// Max concurrent test classes. 0 = auto (scheduler count), 1 = sequential.
+        #[arg(long, short = 'j', default_value = "0")]
+        jobs: usize,
     },
 
     /// Check environment setup (Erlang, runtime, stdlib)
@@ -465,7 +469,8 @@ fn run() -> Result<()> {
         Command::Test {
             path,
             warnings_as_errors,
-        } => commands::test::run_tests(&path, warnings_as_errors),
+            jobs,
+        } => commands::test::run_tests(&path, warnings_as_errors, jobs),
         Command::Doctor { dev } => commands::doctor::run(dev),
         Command::Doc {
             path,
