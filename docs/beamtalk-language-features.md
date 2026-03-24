@@ -1341,7 +1341,7 @@ infDb query: sql
 infDb stop
 ```
 
-`withTimeout:` returns a `TimeoutProxy` — a lightweight actor that intercepts all messages via `doesNotUnderstand:args:` and forwards them to the target with the specified timeout. This is pure message passing with no special syntax or reserved keywords.
+`withTimeout:` returns a `TimeoutProxy` — a lightweight actor that forwards ordinary messages to the target via `doesNotUnderstand:args:` using the specified timeout. Lifecycle messages such as `stop` apply to the proxy itself, not the target. This is pure message passing with no special syntax or reserved keywords.
 
 **Lifecycle:** The proxy is a separate actor process. Capture the reference and call `stop` when finished to avoid leaking processes.
 
