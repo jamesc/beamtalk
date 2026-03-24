@@ -11,7 +11,7 @@ The infrastructure for namespaced packaging already exists:
 
 - **ADR 0016** defines BEAM module naming: `bt@{package}@{module}`, with `@` as separator (proven by Gleam's 5+ years of production use)
 - **ADR 0026** defines `beamtalk.toml` as the package manifest, with a reserved `[dependencies]` section
-- **ADR 0031** documents the flat namespace and identifies package-scoped imports as the leading v0.2 candidate
+- **ADR 0031** documents the flat namespace and identifies package-scoped imports as the leading v0.4 candidate
 - **ADR 0067** defines three class kinds (Object/Value/Actor) whose metadata must be resolvable across package boundaries
 - **ADR 0068** defines protocols with structural conformance — protocol names need a namespace story
 
@@ -404,7 +404,7 @@ Or in source:
 alias json@Parser as: JsonParser
 ```
 
-**Deferred, not rejected.** Aliases are sugar for "I use this qualified name often." The qualified name syntax (`json@Parser`) is sufficient for v0.2. If collisions turn out to be common enough that qualified names become noisy, aliases can be added as a non-breaking enhancement — likely in the manifest to keep source files import-free.
+**Deferred, not rejected.** Aliases are sugar for "I use this qualified name often." The qualified name syntax (`json@Parser`) is sufficient for v0.4. If collisions turn out to be common enough that qualified names become noisy, aliases can be added as a non-breaking enhancement — likely in the manifest to keep source files import-free.
 
 ### Alternative: Registry-Based Dependencies (Hex.pm)
 
