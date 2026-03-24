@@ -526,6 +526,8 @@ terminate(_Reason, State) ->
 
 %% @private
 code_change(OldVsn, State, Extra) ->
+    %% Ensure new ETS tables (e.g. beamtalk_agg_class) exist after live upgrade.
+    ensure_ets_tables(find_supervisor()),
     beamtalk_hot_reload:code_change(OldVsn, State, Extra).
 
 %%====================================================================
