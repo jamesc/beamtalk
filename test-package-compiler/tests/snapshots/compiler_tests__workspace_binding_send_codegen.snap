@@ -251,6 +251,7 @@ module 'workspace_binding_send' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'Greeter',
       'superclass' => 'Actor',
       'fields' => [],

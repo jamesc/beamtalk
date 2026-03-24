@@ -97,7 +97,9 @@
     class_method_return_types = #{} :: #{selector() => meta_type_repr()},
     %% ADR 0033: Runtime-embedded documentation
     doc = none :: binary() | none,
-    method_docs = #{} :: #{selector() => binary()}
+    method_docs = #{} :: #{selector() => binary()},
+    %% BT-1634: Class method doc comments
+    class_method_docs = #{} :: #{selector() => binary()}
 }).
 
 %%====================================================================
@@ -351,7 +353,8 @@ init({ClassName, ClassInfo}) ->
             ClassMethodReturnTypes
         ),
         doc = maps:get(doc, ClassInfo, none),
-        method_docs = maps:get(method_docs, ClassInfo, #{})
+        method_docs = maps:get(method_docs, ClassInfo, #{}),
+        class_method_docs = maps:get(class_method_docs, ClassInfo, #{})
     },
     {ok, State}.
 
@@ -480,7 +483,8 @@ handle_call(
     #class_state{
         superclass = Superclass,
         class_methods = ClassMethods,
-        class_method_signatures = ClassMethodSigs
+        class_method_signatures = ClassMethodSigs,
+        class_method_docs = ClassMethodDocs
     } = State
 ) ->
     Result =
@@ -492,7 +496,7 @@ handle_call(
                     '__source__' => <<"">>,
                     '__signature__' => maps:get(Selector, ClassMethodSigs, nil),
                     '__method_info__' => MethodInfo,
-                    '__doc__' => nil
+                    '__doc__' => maps:get(Selector, ClassMethodDocs, nil)
                 };
             error ->
                 %% Not found locally — walk superclass chain
@@ -928,5 +932,8 @@ apply_class_info(State, ClassInfo) ->
         ),
         is_constructible = maps:get(is_constructible, ClassInfo, undefined),
         doc = maps:get(doc, ClassInfo, State#class_state.doc),
-        method_docs = maps:get(method_docs, ClassInfo, State#class_state.method_docs)
+        method_docs = maps:get(method_docs, ClassInfo, State#class_state.method_docs),
+        class_method_docs = maps:get(
+            class_method_docs, ClassInfo, State#class_state.class_method_docs
+        )
     }.

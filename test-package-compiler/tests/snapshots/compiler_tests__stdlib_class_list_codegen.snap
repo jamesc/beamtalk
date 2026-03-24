@@ -313,6 +313,7 @@ call 'erlang':'++'(Self, [_item53|[]])
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'List',
       'superclass' => 'Object',
       'fields' => [],

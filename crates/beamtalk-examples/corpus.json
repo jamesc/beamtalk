@@ -19350,6 +19350,7 @@
         "object",
         "runtime_doc_test",
         "set",
+        "setUp",
         "subclassing",
         "testClassDocDefaultsToNil",
         "testCompiledMethodDocField",
@@ -19363,7 +19364,7 @@
         "testSetMethodDoc",
         "testSetMethodDocDifferentMethods"
       ],
-      "source": "// BUnit tests for runtime-embedded documentation (ADR 0033, BT-769)\n\nTestCase subclass: RuntimeDocTest\n\n  // --- Class doc ---\n  testClassDocDefaultsToNil => self assert: DocTestHelper doc equals: nil\n\n  testSetClassDoc =>\n    DocTestHelper doc: \"A helper for testing\"\n    self assert: DocTestHelper doc equals: \"A helper for testing\"\n\n  testSetClassDocOverwrites =>\n    DocTestHelper doc: \"First doc\"\n    DocTestHelper doc: \"Second doc\"\n    self assert: DocTestHelper doc equals: \"Second doc\"\n\n  // --- Method doc via >> and doc message ---\n  testMethodDocDefaultsToNil =>\n    m := DocTestHelper >> #greet\n    self assert: m doc equals: nil\n\n  testSetMethodDoc =>\n    DocTestHelper setDocForMethod: #greet to: \"Say hello\"\n    m := DocTestHelper >> #greet\n    self assert: m doc equals: \"Say hello\"\n\n  testSetMethodDocDifferentMethods =>\n    DocTestHelper setDocForMethod: #answer to: \"Return 42\"\n    m := DocTestHelper >> #answer\n    self assert: m doc equals: \"Return 42\"\n\n  // --- CompiledMethod doc accessor ---\n  testCompiledMethodDocField =>\n    DocTestHelper setDocForMethod: #greet to: \"Greeting method\"\n    m := DocTestHelper >> #greet\n    self assert: m doc equals: \"Greeting method\"\n    self assert: m selector equals: #greet\n\n  // --- doc: returns self (chainable) ---\n  testDocSetterReturnsSelf =>\n    result := DocTestHelper doc: \"Chainable\"\n    self assert: result equals: DocTestHelper\n\n  // --- docForMethod: ---\n  testDocForMethodReturnsDoc =>\n    DocTestHelper setDocForMethod: #greet to: \"Say hello\"\n    self assert: (DocTestHelper docForMethod: #greet) equals: \"Say hello\"\n\n  testDocForMethodNilWhenNoDoc =>\n    self assert: (DocTestHelper docForMethod: #add:to:) equals: nil\n\n  testDocForMethodNilForNonExistent =>\n    self assert: (DocTestHelper docForMethod: #nonExistent) equals: nil",
+      "source": "// BUnit tests for runtime-embedded documentation (ADR 0033, BT-769)\n\nTestCase subclass: RuntimeDocTest\n\n  // Reset global doc state before each test to avoid ordering dependencies.\n  // Class-level and method-level docs are global mutations on the class object,\n  // so earlier tests (e.g. testSetMethodDoc) would pollute later tests.\n  setUp =>\n    DocTestHelper doc: nil\n    DocTestHelper setDocForMethod: #greet to: nil\n    DocTestHelper setDocForMethod: #answer to: nil\n\n  // --- Class doc ---\n  testClassDocDefaultsToNil => self assert: DocTestHelper doc equals: nil\n\n  testSetClassDoc =>\n    DocTestHelper doc: \"A helper for testing\"\n    self assert: DocTestHelper doc equals: \"A helper for testing\"\n\n  testSetClassDocOverwrites =>\n    DocTestHelper doc: \"First doc\"\n    DocTestHelper doc: \"Second doc\"\n    self assert: DocTestHelper doc equals: \"Second doc\"\n\n  // --- Method doc via >> and doc message ---\n  testMethodDocDefaultsToNil =>\n    m := DocTestHelper >> #greet\n    self assert: m doc equals: nil\n\n  testSetMethodDoc =>\n    DocTestHelper setDocForMethod: #greet to: \"Say hello\"\n    m := DocTestHelper >> #greet\n    self assert: m doc equals: \"Say hello\"\n\n  testSetMethodDocDifferentMethods =>\n    DocTestHelper setDocForMethod: #answer to: \"Return 42\"\n    m := DocTestHelper >> #answer\n    self assert: m doc equals: \"Return 42\"\n\n  // --- CompiledMethod doc accessor ---\n  testCompiledMethodDocField =>\n    DocTestHelper setDocForMethod: #greet to: \"Greeting method\"\n    m := DocTestHelper >> #greet\n    self assert: m doc equals: \"Greeting method\"\n    self assert: m selector equals: #greet\n\n  // --- doc: returns self (chainable) ---\n  testDocSetterReturnsSelf =>\n    result := DocTestHelper doc: \"Chainable\"\n    self assert: result equals: DocTestHelper\n\n  // --- docForMethod: ---\n  testDocForMethodReturnsDoc =>\n    DocTestHelper setDocForMethod: #greet to: \"Say hello\"\n    self assert: (DocTestHelper docForMethod: #greet) equals: \"Say hello\"\n\n  testDocForMethodNilWhenNoDoc =>\n    self assert: (DocTestHelper docForMethod: #add:to:) equals: nil\n\n  testDocForMethodNilForNonExistent =>\n    self assert: (DocTestHelper docForMethod: #nonExistent) equals: nil",
       "explanation": "BUnit tests for runtime-embedded documentation (ADR 0033, BT-769)"
     },
     {
@@ -21768,8 +21769,8 @@
         "object",
         "subclassing"
       ],
-      "source": "// Fixture for class method :help display (BT-990)\n\nObject subclass: HelpTestWidget\n\n  class create: name :: String -> HelpTestWidget => self new: name",
-      "explanation": "Fixture for class method :help display (BT-990)"
+      "source": "// Fixture for class method :help display (BT-990, BT-1634)\n\nObject subclass: HelpTestWidget\n\n  /// Create a new widget with the given name.\n  class create: name :: String -> HelpTestWidget => self new: name",
+      "explanation": "Fixture for class method :help display (BT-990, BT-1634)"
     },
     {
       "id": "tests-e2e-fixtures-class-method-help-sub-fixture",

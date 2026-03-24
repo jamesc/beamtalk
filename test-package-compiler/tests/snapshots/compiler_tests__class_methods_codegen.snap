@@ -262,6 +262,7 @@ module 'class_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
             'classState' => ~{'instanceCount' => 0}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'ClassVarCounter',
       'superclass' => 'Actor',
       'fields' => ['count'],

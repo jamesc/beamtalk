@@ -142,6 +142,7 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'TypedPoint',
       'superclass' => 'Value',
       'fields' => ['x', 'y'],
