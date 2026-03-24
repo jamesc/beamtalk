@@ -953,7 +953,8 @@ trace_event_to_map({
     },
     case maps:size(Metadata) of
         0 -> Base;
-        _ -> maps:merge(Base, sanitize_metadata(Metadata))
+        %% Base wins on key collisions (metadata cannot override core fields)
+        _ -> maps:merge(sanitize_metadata(Metadata), Base)
     end;
 trace_event_to_map({
     {MonotonicNs, _Unique}, Pid, Class, Selector, Mode, DurationNs, Outcome, Metadata
@@ -970,7 +971,8 @@ trace_event_to_map({
     },
     case maps:size(Metadata) of
         0 -> Base;
-        _ -> maps:merge(Base, sanitize_metadata(Metadata))
+        %% Base wins on key collisions (metadata cannot override core fields)
+        _ -> maps:merge(sanitize_metadata(Metadata), Base)
     end.
 
 %% @private Sanitize metadata map values for JSON serialization (BT-1641).
@@ -982,9 +984,10 @@ sanitize_metadata(Meta) ->
     maps:fold(
         fun(K, V, Acc) ->
             BinKey =
-                case is_atom(K) of
-                    true -> atom_to_binary(K, utf8);
-                    false -> K
+                case K of
+                    _ when is_atom(K) -> atom_to_binary(K, utf8);
+                    _ when is_binary(K) -> K;
+                    _ -> iolist_to_binary(io_lib:format("~p", [K]))
                 end,
             Acc#{BinKey => sanitize_value(V)}
         end,
