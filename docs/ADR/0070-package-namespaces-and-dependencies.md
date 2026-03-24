@@ -28,7 +28,7 @@ These constraints shape the solution space:
 
 1. **Pragmatic over pure** — a working package system beats a theoretically perfect module system. Newspeak-style nested classes as modules (ADR 0031, Option C) is deferred.
 2. **No per-file ceremony** — Smalltalk has no imports. If your package declares a dependency, its classes are available everywhere in your package. No `import` statements.
-3. **All classes are public** — Smalltalk tradition. No visibility keywords (`pub`/`private`) on classes or methods. Revisit if real need arises.
+3. **Public by default, private opt-in** — Smalltalk tradition: everything is accessible unless explicitly hidden. Library authors can mark internal classes `private` to draw stable API boundaries.
 4. **Interactive-first** — the REPL workspace remains a flat namespace where loaded classes are immediately usable.
 5. **Collisions are errors, not surprises** — no silent shadowing.
 
@@ -246,11 +246,9 @@ For tooling, `Package` enables:
 - **`:help`:** show package provenance alongside class documentation
 - **Workspace:** `Workspace dependencies` returns the current package's dependency graph
 
-### 9. Visibility: Planned Follow-Up
+### 9. Class Visibility: `private`
 
-This ADR ships with all classes public — Smalltalk tradition. However, once packages are distributed and third-party libraries exist, library authors need **stable API boundaries**. Without visibility control, every class in a package is part of its public API, constraining internal refactoring.
-
-A follow-up ADR will introduce class-level visibility, likely as a `private` modifier on class declarations:
+Library authors need stable API boundaries. Without visibility control, every class in a package is part of its public API — internal refactoring becomes a breaking change for downstream users. Visibility ships with the package system, not as a follow-up.
 
 ```beamtalk
 // Public (default) — available to any package that depends on this one
@@ -262,13 +260,30 @@ private Value subclass: ParserState
   // Implementation detail, not part of the public API
 ```
 
-The design direction:
-- **Class-level only** — `private` hides a class from external packages. Methods remain public (Smalltalk tradition: if you have the object, you can send it any message).
-- **Default public** — no keyword needed for public classes. `private` is opt-in.
-- **Enforced by compiler** — referencing a `private` class from outside its package is a compile error. The LSP excludes private classes from external completion.
-- **REPL stays open** — private classes are accessible in the REPL for debugging and exploration, consistent with Smalltalk's "everything is inspectable" philosophy. The restriction is compile-time only.
+**Design:**
 
-This is explicitly deferred from this ADR because it can be added as a non-breaking change (marking a class `private` only removes external access) and is better designed after real library authoring experience. But it should follow shortly — the ecosystem cost of adding visibility grows with every published package that exposes internal classes.
+- **Class-level only** — `private` hides a class from external packages. Methods remain public (Smalltalk tradition: if you have the object, you can send it any message). Method-level visibility is a separate design question deferred to a future ADR on the full set of class/method modifiers.
+- **Default public** — no keyword needed for public classes. `private` is opt-in. This preserves the Smalltalk expectation that classes are accessible by default.
+- **Enforced by compiler** — referencing a `private` class from outside its package is a compile error:
+
+```text
+error[E0303]: Class 'ParserState' is private to package 'json'
+  --> src/app.bt:8:5
+   |
+   = note: 'ParserState' is declared private in package 'json'
+   = help: use the package's public API instead
+```
+
+- **LSP integration** — private classes are excluded from external completion and hover. When working *within* the package, private classes appear normally. The LSP uses the package qualifier on the class metadata to determine scope.
+- **MCP integration** — `list_classes` and `package_classes` MCP tools include a `visibility` field (`"public"` or `"private"`). Agents can filter accordingly when generating code for a consuming package.
+- **REPL stays open** — private classes are accessible in the REPL for debugging and exploration, consistent with Smalltalk's "everything is inspectable" philosophy. The restriction is compile-time only — at runtime, all classes are reachable. This means `Package named: "json" classes` returns all classes including private ones, with a `visibility` attribute for tooling to filter on.
+- **Metadata** — the `.app` class registry and `__beamtalk_meta/0` include a `private` flag so the compiler can enforce visibility across package boundaries without loading source.
+
+**What `private` does NOT do:**
+
+- Does not hide methods — if you have a reference to a private class's instance (e.g., returned from a public method), you can send it any message. Privacy is about *naming* the class, not about restricting message sends.
+- Does not affect subclassing within the same package — `private` classes can be freely subclassed by other classes in the same package.
+- Does not affect the REPL — private classes are accessible for interactive exploration and debugging.
 
 ## Prior Art
 
@@ -368,7 +383,7 @@ Elixir provides `alias`, `import`, `require`, `use` — four mechanisms for four
 | Operator | "Private classes reduce attack surface. If a class isn't public, it can't be exploited via the REPL or interop. With all-public packages, any vulnerability in any class is exposed." |
 | Language designer | "Every successful package ecosystem — Cargo, npm, pip, Hex — has visibility control. You're not deferring an optional feature, you're deferring table stakes. The longer you wait, the more internal classes get baked into downstream code, and the more painful the migration when visibility arrives." |
 
-**Counter-argument:** The library author concern is the strongest argument in this entire ADR and we take it seriously — class-level `private` visibility is a planned near-term follow-up (see Section 8). It is deferred from this ADR, not dismissed: designing visibility after real library authoring experience will produce a better system than designing it speculatively. But it must arrive before the ecosystem grows beyond a handful of packages, because the cost of adding visibility grows with every published library that accidentally exposes internal classes. The REPL will remain open for debugging (private is compile-time only) — "all inspectable" is preserved even with `private` classes.
+**Counter-argument:** We agree — class-level `private` visibility is included in this ADR (see Section 9). The library author and language designer arguments are compelling enough that visibility must ship with the package system, not after it. The REPL remains open for debugging (private is compile-time only) — "all inspectable" is preserved. Method-level visibility is deferred to a future ADR on the full modifier set.
 
 ## Alternatives Considered
 
@@ -431,7 +446,7 @@ json = "1.0"
 ### Negative
 
 - **"Where does this class come from?"** — without per-file imports, a reader must consult `beamtalk.toml` or the LSP to know which dependency provides a class. This is a real discoverability cost.
-- **No visibility control** — library authors cannot hide internal classes. Naming conventions are the only guardrail.
+- **Class-level visibility only** — `private` hides classes but not methods. If a public method returns a private class's instance, the caller can still interact with it. Method-level visibility is deferred.
 - **Lazy collision detection** means you discover collisions when you use the name, not when you add the dependency. This could surprise users who add a dependency and find existing code breaks.
 - **Git dependencies are brittle** — repositories can be deleted, force-pushed, or made private. The lockfile mitigates this but doesn't eliminate it. A registry is the long-term answer.
 - **No aliasing** — qualified names can be verbose for heavily-used collision cases. This is a known trade-off, deferring aliases until real usage patterns emerge.
@@ -488,6 +503,18 @@ Affected components: `crates/beamtalk-core/src/semantic_analysis/` (name resolut
 4. **LSP integration** — use metadata for cross-package hover, go-to-definition, and chain completion
 
 Affected components: `crates/beamtalk-core/src/codegen/` (metadata emission), `runtime/apps/beamtalk_runtime/src/` (metadata format), `crates/beamtalk-lsp/` (cross-package navigation)
+
+### Phase 5: Class Visibility
+
+1. **Parser** — recognize `private` as a class modifier before the superclass clause (`private Value subclass: ParserState`)
+2. **AST** — add `is_private: bool` to `ClassDefinition`
+3. **Metadata** — emit `private` flag in `__beamtalk_meta/0` and `.app` class registry entries
+4. **Semantic analysis** — when resolving a class reference, check if the target class is private and the reference originates from a different package. Emit error if so.
+5. **LSP** — exclude private classes from completion when editing a file outside the owning package. Show private classes normally when editing within the package.
+6. **MCP** — include `visibility` field in `list_classes` / `package_classes` tool responses
+7. **REPL** — no enforcement; private classes remain accessible for debugging
+
+Affected components: `crates/beamtalk-core/src/source_analysis/` (parser), `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/semantic_analysis/` (visibility checking), `crates/beamtalk-core/src/codegen/` (metadata), `crates/beamtalk-lsp/` (completion filtering), `runtime/apps/beamtalk_runtime/src/` (MCP tools)
 
 ## Migration Path
 
