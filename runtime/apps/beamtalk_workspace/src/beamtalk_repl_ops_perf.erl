@@ -36,10 +36,9 @@ handle(<<"disable-tracing">>, _Params, Msg, _SessionPid) ->
         <<"Tracing disabled">>, Msg, fun beamtalk_repl_json:term_to_json/1
     );
 handle(<<"get-traces">>, Params, Msg, _SessionPid) ->
-    Actor = maps:get(<<"actor">>, Params, undefined),
-    Selector = maps:get(<<"selector">>, Params, undefined),
     Limit = maps:get(<<"limit">>, Params, undefined),
-    Traces = get_traces(Actor, Selector),
+    Opts = build_trace_filter_opts(Params),
+    Traces = beamtalk_tracing:traces(Opts),
     Limited = apply_limit(Traces, Limit),
     beamtalk_repl_protocol:encode_result(
         Limited, Msg, fun beamtalk_repl_json:term_to_json/1
@@ -79,41 +78,61 @@ handle(<<"export-traces">>, Params, Msg, _SessionPid) ->
 %%% Internal helpers
 
 %% @private Build export options map from REPL params.
+%% Reuses build_trace_filter_opts for filter params, adds path and limit.
 -spec build_export_opts(map()) -> map().
 build_export_opts(Params) ->
-    Opts0 = #{},
+    FilterOpts = build_trace_filter_opts(Params),
     Opts1 =
         case maps:get(<<"path">>, Params, undefined) of
-            undefined -> Opts0;
-            PathBin -> Opts0#{path => PathBin}
-        end,
-    Opts2 =
-        case maps:get(<<"actor">>, Params, undefined) of
-            undefined -> Opts1;
-            ActorBin -> Opts1#{actor => parse_pid(ActorBin)}
-        end,
-    Opts3 =
-        case maps:get(<<"selector">>, Params, undefined) of
-            undefined -> Opts2;
-            SelectorBin -> Opts2#{selector => parse_selector(SelectorBin)}
+            undefined -> FilterOpts;
+            PathBin -> FilterOpts#{path => PathBin}
         end,
     case maps:get(<<"limit">>, Params, undefined) of
-        undefined -> Opts3;
-        Limit when is_integer(Limit) -> Opts3#{limit => Limit};
-        _ -> Opts3
+        undefined -> Opts1;
+        Limit when is_integer(Limit) -> Opts1#{limit => Limit};
+        _ -> Opts1
     end.
 
-%% @private Get traces with optional actor and selector filters.
--spec get_traces(binary() | undefined, binary() | undefined) -> [map()].
-get_traces(undefined, _Selector) ->
-    beamtalk_tracing:traces();
-get_traces(ActorBin, undefined) ->
-    Pid = parse_pid(ActorBin),
-    beamtalk_tracing:tracesFor(Pid);
-get_traces(ActorBin, SelectorBin) ->
-    Pid = parse_pid(ActorBin),
-    Sel = parse_selector(SelectorBin),
-    beamtalk_tracing:tracesFor(Pid, Sel).
+%% @private Build trace filter opts map from REPL protocol params.
+%% Supports: actor, selector, class, outcome, min_duration_ns.
+-spec build_trace_filter_opts(map()) -> map().
+build_trace_filter_opts(Params) ->
+    Opts0 = #{},
+    Opts1 =
+        case maps:get(<<"actor">>, Params, undefined) of
+            undefined -> Opts0;
+            ActorBin -> Opts0#{actor => parse_pid(ActorBin)}
+        end,
+    Opts2 =
+        case maps:get(<<"selector">>, Params, undefined) of
+            undefined -> Opts1;
+            SelectorBin -> Opts1#{selector => parse_selector(SelectorBin)}
+        end,
+    Opts3 =
+        case maps:get(<<"class">>, Params, undefined) of
+            undefined -> Opts2;
+            ClassBin -> Opts2#{class => parse_class(ClassBin)}
+        end,
+    Opts4 =
+        case maps:get(<<"outcome">>, Params, undefined) of
+            undefined -> Opts3;
+            OutcomeBin -> Opts3#{outcome => parse_outcome(OutcomeBin)}
+        end,
+    case maps:get(<<"min_duration_ns">>, Params, undefined) of
+        undefined ->
+            Opts4;
+        MinNs when is_integer(MinNs), MinNs >= 0 -> Opts4#{min_duration_ns => MinNs};
+        BadNs ->
+            error(#beamtalk_error{
+                kind = invalid_argument,
+                class = 'Tracing',
+                message = iolist_to_binary(
+                    io_lib:format("Invalid min_duration_ns: ~p", [BadNs])
+                ),
+                hint = <<"min_duration_ns must be a non-negative integer (nanoseconds).">>,
+                details = #{}
+            })
+    end.
 
 %% @private Get stats with optional actor filter.
 -spec get_stats(binary() | undefined) -> map().
@@ -171,6 +190,47 @@ parse_selector(SelectorBin) ->
             })
     end.
 
+%% @private Parse a class filter binary to an existing atom.
+%% Uses binary_to_existing_atom to avoid atom table exhaustion from user input.
+%% Raises a structured beamtalk_error if the class name is unknown.
+-spec parse_class(binary()) -> atom().
+parse_class(ClassBin) ->
+    try
+        binary_to_existing_atom(ClassBin, utf8)
+    catch
+        error:badarg ->
+            error(#beamtalk_error{
+                kind = invalid_argument,
+                class = 'Tracing',
+                message = iolist_to_binary(
+                    [<<"Unknown class: ">>, ClassBin]
+                ),
+                hint = <<"The class must match an existing actor class name.">>,
+                details = #{}
+            })
+    end.
+
+%% @private Parse an outcome filter binary to one of the valid outcome atoms.
+%% Valid outcomes: ok, error, timeout.
+%% Raises a structured beamtalk_error for invalid values.
+-spec parse_outcome(binary()) -> ok | error | timeout.
+parse_outcome(<<"ok">>) ->
+    ok;
+parse_outcome(<<"error">>) ->
+    error;
+parse_outcome(<<"timeout">>) ->
+    timeout;
+parse_outcome(OutcomeBin) ->
+    error(#beamtalk_error{
+        kind = invalid_argument,
+        class = 'Tracing',
+        message = iolist_to_binary(
+            [<<"Invalid outcome: ">>, OutcomeBin]
+        ),
+        hint = <<"Valid outcomes are: ok, error, timeout.">>,
+        details = #{}
+    }).
+
 %%====================================================================
 %% Op descriptors for dynamic describe
 %%====================================================================
@@ -183,8 +243,14 @@ describe_ops() ->
         <<"disable-tracing">> => #{<<"params">> => []},
         <<"get-traces">> => #{
             <<"params">> => [],
-            <<"optional">> => [<<"actor">>, <<"limit">>],
-            <<"notes">> => <<"selector requires actor to be set">>
+            <<"optional">> => [
+                <<"actor">>,
+                <<"selector">>,
+                <<"class">>,
+                <<"outcome">>,
+                <<"min_duration_ns">>,
+                <<"limit">>
+            ]
         },
         <<"actor-stats">> => #{
             <<"params">> => [],
@@ -192,7 +258,15 @@ describe_ops() ->
         },
         <<"export-traces">> => #{
             <<"params">> => [],
-            <<"optional">> => [<<"path">>, <<"actor">>, <<"selector">>, <<"limit">>],
-            <<"notes">> => <<"Exports trace events to a JSON file. selector requires actor.">>
+            <<"optional">> => [
+                <<"path">>,
+                <<"actor">>,
+                <<"selector">>,
+                <<"class">>,
+                <<"outcome">>,
+                <<"min_duration_ns">>,
+                <<"limit">>
+            ],
+            <<"notes">> => <<"Exports trace events to a JSON file with optional filters.">>
         }
     }.

@@ -166,6 +166,12 @@
 %% Propagated context (ADR 0069 Phase 2b)
 -export([get_propagated_ctx/0, restore_propagated_ctx/1]).
 
+%% Application-level trace context (BT-1625)
+-export([set_trace_context/1, get_trace_context/0, clear_trace_context/0]).
+
+%% Causal trace context (BT-1633)
+-export([get_causal_ctx/0]).
+
 %% gen_server callbacks (for generated actors to delegate to)
 -export([
     init/1,
@@ -811,8 +817,26 @@ actor_dead_error(Selector) ->
 %% @private
 %% @doc Wrap a function in telemetry:span/3 if telemetry is available, else run directly.
 %% BUnit tests don't load telemetry, so we must gracefully degrade.
+%% BT-1633: When tracing is enabled, generates a span_id and sets trace_id
+%% (root span if none exists) in the process dictionary for causal linking.
 -spec maybe_span(list(), map(), fun(() -> {term(), map()})) -> term().
 maybe_span(EventPrefix, Metadata, Fun) ->
+    %% BT-1633: Generate causal trace IDs when tracing is enabled.
+    %% Only incurs atomics cost (~10ns) when trace capture is active.
+    case beamtalk_trace_store:is_enabled() of
+        true ->
+            SpanId = beamtalk_trace_store:next_span_id(),
+            %% If no trace_id exists, this is a root span
+            case get('$beamtalk_trace_id') of
+                undefined ->
+                    put('$beamtalk_trace_id', SpanId),
+                    put('$beamtalk_span_id', SpanId);
+                _ExistingTraceId ->
+                    put('$beamtalk_span_id', SpanId)
+            end;
+        false ->
+            ok
+    end,
     case erlang:function_exported(telemetry, span, 3) of
         true ->
             telemetry:span(EventPrefix, Metadata, Fun);
@@ -846,17 +870,98 @@ lookup_class(Pid) ->
         error:badarg -> unknown
     end.
 
+%% @doc Set application-level trace context key-value pairs (BT-1625).
+%%
+%% Stores the provided map in the process dictionary under '$beamtalk_trace_ctx'.
+%% Also merges the keys into OTP logger process metadata so that ?LOG_ERROR,
+%% ?LOG_INFO etc. automatically include fields like workflowId without extra work.
+%%
+%% Example: set_trace_context(#{workflowId => <<"wf-123">>, activityId => <<"a-1">>})
+%%
+%% Cost: ~20-30ns (one put/2 + one logger:update_process_metadata/1).
+-spec set_trace_context(map()) -> ok.
+set_trace_context(Ctx) when is_map(Ctx) ->
+    OldCtx = get_trace_context(),
+    Merged = maps:merge(OldCtx, Ctx),
+    put('$beamtalk_trace_ctx', Merged),
+    logger:update_process_metadata(Merged),
+    ok.
+
+%% @doc Get the current application-level trace context (BT-1625).
+%%
+%% Returns the map stored by set_trace_context/1, or #{} if none set.
+%% Cost: ~10ns (one get/1).
+-spec get_trace_context() -> map().
+get_trace_context() ->
+    case get('$beamtalk_trace_ctx') of
+        undefined -> #{};
+        Ctx when is_map(Ctx) -> Ctx;
+        _Other -> #{}
+    end.
+
+%% @doc Clear the application-level trace context and remove its keys from logger metadata.
+%%
+%% Used when restoring an empty propagated trace context to prevent stale metadata
+%% from leaking across unrelated messages in the same actor process.
+-spec clear_trace_context() -> ok.
+clear_trace_context() ->
+    OldCtx = get_trace_context(),
+    erase('$beamtalk_trace_ctx'),
+    %% Remove the trace context keys from logger metadata
+    case logger:get_process_metadata() of
+        undefined ->
+            ok;
+        LogMeta ->
+            Cleaned = maps:without(maps:keys(OldCtx), LogMeta),
+            logger:set_process_metadata(Cleaned)
+    end,
+    ok.
+
+%% @doc Get the current causal trace context from the process dictionary (BT-1633).
+%%
+%% Returns a map with trace_id, span_id, and parent_span_id keys when
+%% causal tracing is active. Returns #{} when no causal context exists.
+%% Called by handle_dispatch_stop to merge causal IDs into trace event metadata.
+-spec get_causal_ctx() -> map().
+get_causal_ctx() ->
+    case get('$beamtalk_trace_id') of
+        undefined ->
+            #{};
+        TraceId ->
+            Base = #{trace_id => TraceId},
+            WithSpan =
+                case get('$beamtalk_span_id') of
+                    undefined -> Base;
+                    SpanId -> Base#{span_id => SpanId}
+                end,
+            case get('$beamtalk_parent_span_id') of
+                undefined -> WithSpan;
+                ParentSpanId -> WithSpan#{parent_span_id => ParentSpanId}
+            end
+    end.
+
 %% @doc Build a propagated context map for cross-actor message sends (ADR 0069 Phase 2b).
 %%
 %% Returns an extensible map containing context that should flow across actor
-%% boundaries. Currently captures OTel trace context when the otel_ctx module
-%% is loaded. Future keys (request_id, deadline, causality) will be added here.
+%% boundaries. Currently captures:
+%% - OTel trace context (when otel_ctx module is loaded)
+%% - Application-level trace context (BT-1625, set via set_trace_context/1)
+%% Future keys (request_id, deadline, causality) will be added here.
 %%
-%% Cost: ~10ns when OTel not loaded (erlang:function_exported check + map construction),
-%% ~40ns when OTel loaded (+ otel_ctx:get_current/0 call).
+%% Cost: ~20ns when OTel not loaded (function_exported check + get/1 + map construction),
+%% ~50ns when OTel loaded (+ otel_ctx:get_current/0 call).
 -spec get_propagated_ctx() -> map().
 get_propagated_ctx() ->
-    #{otel => get_otel_ctx()}.
+    Base = #{otel => get_otel_ctx(), trace_ctx => get_trace_context()},
+    %% BT-1633: Include causal trace IDs for cross-actor linking.
+    %% Only present when tracing is enabled and maybe_span has run.
+    case get('$beamtalk_trace_id') of
+        undefined ->
+            Base;
+        TraceId ->
+            SpanId = get('$beamtalk_span_id'),
+            Base#{causal => #{trace_id => TraceId, span_id => SpanId}}
+    end.
 
 %% @private
 %% @doc Get current OTel trace context if otel_ctx module is available.
@@ -871,18 +976,56 @@ get_otel_ctx() ->
 %% @doc Restore propagated context on the receiving actor side (ADR 0069 Phase 2b).
 %%
 %% Called by generated handle_call/handle_cast to restore context from the
-%% propagated context map. When OTel context is present and otel_ctx is loaded,
-%% attaches the trace context so spans created in this actor are linked to the
-%% caller's trace. No-op when OTel is not loaded or context is undefined.
+%% propagated context map. Restores two kinds of context:
+%% - OTel trace context: attaches to otel_ctx so spans are linked to caller's trace
+%% - Application-level trace context (BT-1625): restores key-value pairs set via
+%%   set_trace_context/1 and updates OTP logger process metadata
+%% No-op when context is not present or dependencies are not loaded.
 -spec restore_propagated_ctx(map()) -> ok.
-restore_propagated_ctx(#{otel := Ctx}) when Ctx =/= undefined ->
-    case erlang:function_exported(otel_ctx, attach, 1) of
-        true ->
-            erlang:apply(otel_ctx, attach, [Ctx]),
+restore_propagated_ctx(PropCtx) when is_map(PropCtx) ->
+    %% Restore OTel context if present
+    case maps:get(otel, PropCtx, undefined) of
+        undefined ->
             ok;
-        false ->
+        OtelCtx ->
+            case erlang:function_exported(otel_ctx, attach, 1) of
+                true ->
+                    erlang:apply(otel_ctx, attach, [OtelCtx]),
+                    ok;
+                false ->
+                    ok
+            end
+    end,
+    %% Restore application-level trace context if present (BT-1625).
+    %% When trace_ctx is an empty map, we must still clear any previously
+    %% restored context to prevent stale metadata leaking across messages.
+    case maps:get(trace_ctx, PropCtx, undefined) of
+        undefined ->
+            ok;
+        TraceCtx when is_map(TraceCtx), map_size(TraceCtx) > 0 ->
+            clear_trace_context(),
+            set_trace_context(TraceCtx);
+        TraceCtx when is_map(TraceCtx) ->
+            %% Empty map: clear any previously restored trace context
+            clear_trace_context();
+        _ ->
             ok
-    end;
+    end,
+    %% BT-1633: Restore causal trace context for parent-child linking.
+    %% The incoming span_id becomes our parent_span_id. We inherit the trace_id.
+    case maps:get(causal, PropCtx, undefined) of
+        #{trace_id := InTraceId, span_id := InSpanId} ->
+            put('$beamtalk_trace_id', InTraceId),
+            put('$beamtalk_parent_span_id', InSpanId);
+        _ ->
+            %% No causal context in this message — clear stale IDs from
+            %% a previous traced message so they don't leak into untraced
+            %% dispatches or get_propagated_ctx/0.
+            erase('$beamtalk_trace_id'),
+            erase('$beamtalk_span_id'),
+            erase('$beamtalk_parent_span_id')
+    end,
+    ok;
 restore_propagated_ctx(_) ->
     ok.
 

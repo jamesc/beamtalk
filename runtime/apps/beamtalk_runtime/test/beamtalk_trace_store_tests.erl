@@ -917,6 +917,194 @@ export_traces_default_path_test_() ->
         ]
     end}.
 
+%%====================================================================
+%% Test: Opts map filters (class, outcome, min_duration_ns)
+%%====================================================================
+
+opts_map_class_filter_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            {"filter by class returns only matching class",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'EventStore', put, sync, 3000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', decrement, sync, 2000, ok, #{}, stop
+                    ),
+                    All = beamtalk_trace_store:get_traces(),
+                    ?assertEqual(3, length(All)),
+
+                    CounterOnly = beamtalk_trace_store:get_traces(#{class => 'Counter'}),
+                    ?assertEqual(2, length(CounterOnly)),
+                    lists:foreach(
+                        fun(T) -> ?assertEqual(<<"Counter">>, maps:get(<<"class">>, T)) end,
+                        CounterOnly
+                    ),
+
+                    EventStoreOnly = beamtalk_trace_store:get_traces(#{class => 'EventStore'}),
+                    ?assertEqual(1, length(EventStoreOnly)),
+                    ?assertEqual(<<"EventStore">>, maps:get(<<"class">>, hd(EventStoreOnly)))
+                end)}
+        ]
+    end}.
+
+opts_map_outcome_filter_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            {"filter by outcome returns only matching outcome",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', decrement, sync, 3000, error, #{error => badarg}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', reset, sync, 2000, ok, #{}, stop
+                    ),
+                    All = beamtalk_trace_store:get_traces(),
+                    ?assertEqual(3, length(All)),
+
+                    Errors = beamtalk_trace_store:get_traces(#{outcome => error}),
+                    ?assertEqual(1, length(Errors)),
+                    ?assertEqual(<<"decrement">>, maps:get(<<"selector">>, hd(Errors))),
+
+                    Oks = beamtalk_trace_store:get_traces(#{outcome => ok}),
+                    ?assertEqual(2, length(Oks))
+                end)}
+        ]
+    end}.
+
+opts_map_min_duration_filter_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            {"filter by min_duration_ns returns only slow traces",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', fast_op, sync, 1000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', medium_op, sync, 5000000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', slow_op, sync, 10000000, ok, #{}, stop
+                    ),
+                    All = beamtalk_trace_store:get_traces(),
+                    ?assertEqual(3, length(All)),
+
+                    %% Only events >= 5ms (5_000_000 ns)
+                    Slow = beamtalk_trace_store:get_traces(#{min_duration_ns => 5000000}),
+                    ?assertEqual(2, length(Slow)),
+
+                    %% Only events >= 10ms
+                    VerySlow = beamtalk_trace_store:get_traces(#{min_duration_ns => 10000000}),
+                    ?assertEqual(1, length(VerySlow)),
+                    ?assertEqual(<<"slow_op">>, maps:get(<<"selector">>, hd(VerySlow)))
+                end)}
+        ]
+    end}.
+
+opts_map_combined_filters_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            {"combined class + outcome filter",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', decrement, sync, 3000, error, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'EventStore', put, sync, 4000, error, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'EventStore', get, sync, 2000, ok, #{}, stop
+                    ),
+
+                    %% Counter errors only
+                    CounterErrors = beamtalk_trace_store:get_traces(#{
+                        class => 'Counter', outcome => error
+                    }),
+                    ?assertEqual(1, length(CounterErrors)),
+                    ?assertEqual(<<"decrement">>, maps:get(<<"selector">>, hd(CounterErrors))),
+
+                    %% EventStore errors only
+                    ESErrors = beamtalk_trace_store:get_traces(#{
+                        class => 'EventStore', outcome => error
+                    }),
+                    ?assertEqual(1, length(ESErrors)),
+                    ?assertEqual(<<"put">>, maps:get(<<"selector">>, hd(ESErrors)))
+                end)},
+            {"selector without actor filter works independently",
+                ?_test(begin
+                    beamtalk_trace_store:clear(),
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
+                    ),
+
+                    %% Selector without actor should work
+                    Result = beamtalk_trace_store:get_traces(#{selector => increment}),
+                    ?assertEqual(1, length(Result)),
+                    ?assertEqual(<<"increment">>, maps:get(<<"selector">>, hd(Result)))
+                end)},
+            {"all filters combined: class + outcome + min_duration_ns + selector",
+                ?_test(begin
+                    beamtalk_trace_store:clear(),
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 1000, ok, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 10000000, error, #{}, stop
+                    ),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'EventStore', put, sync, 20000000, error, #{}, stop
+                    ),
+
+                    %% Counter + error + slow + increment
+                    Result = beamtalk_trace_store:get_traces(#{
+                        class => 'Counter',
+                        outcome => error,
+                        min_duration_ns => 5000000,
+                        selector => increment
+                    }),
+                    ?assertEqual(1, length(Result)),
+                    ?assertEqual(<<"Counter">>, maps:get(<<"class">>, hd(Result))),
+                    ?assertEqual(<<"increment">>, maps:get(<<"selector">>, hd(Result)))
+                end)},
+            {"empty opts map returns all traces",
+                ?_test(begin
+                    beamtalk_trace_store:clear(),
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                    ),
+                    All = beamtalk_trace_store:get_traces(#{}),
+                    ?assertEqual(1, length(All))
+                end)}
+        ]
+    end}.
+
 %% @private Generate a unique temporary export path.
 tmp_export_path(Tag) ->
     iolist_to_binary([

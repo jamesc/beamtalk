@@ -40,6 +40,10 @@ cleanup(_State) ->
     catch
         _:_ -> ok
     end,
+    %% BT-1633: Clean up causal trace context from process dictionary
+    erase('$beamtalk_trace_id'),
+    erase('$beamtalk_span_id'),
+    erase('$beamtalk_parent_span_id'),
     ok.
 
 %% @doc Attach a telemetry handler that sends events to the calling process.
@@ -864,6 +868,499 @@ lifecycle_async_kill_event_test_() ->
                     process_flag(trap_exit, OldTrap),
                     telemetry:detach(KillHandler)
                 end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: set_trace_context stores and retrieves context (BT-1625)
+%%====================================================================
+
+set_trace_context_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Initially empty
+                ?assertEqual(#{}, beamtalk_actor:get_trace_context()),
+
+                %% Set context
+                beamtalk_actor:set_trace_context(#{workflowId => <<"wf-123">>}),
+                ?assertEqual(#{workflowId => <<"wf-123">>}, beamtalk_actor:get_trace_context()),
+
+                %% Merge additional keys
+                beamtalk_actor:set_trace_context(#{activityId => <<"a-1">>}),
+                Ctx = beamtalk_actor:get_trace_context(),
+                ?assertEqual(<<"wf-123">>, maps:get(workflowId, Ctx)),
+                ?assertEqual(<<"a-1">>, maps:get(activityId, Ctx)),
+
+                %% Clean up process dictionary and logger metadata
+                erase('$beamtalk_trace_ctx'),
+                logger:set_process_metadata(#{})
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: set_trace_context updates OTP logger metadata (BT-1625)
+%%====================================================================
+
+set_trace_context_updates_logger_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Set trace context
+                beamtalk_actor:set_trace_context(#{workflowId => <<"wf-456">>}),
+
+                %% Verify logger process metadata includes workflowId
+                LoggerMeta = logger:get_process_metadata(),
+                ?assertEqual(<<"wf-456">>, maps:get(workflowId, LoggerMeta)),
+
+                %% Clean up
+                erase('$beamtalk_trace_ctx'),
+                logger:set_process_metadata(#{})
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Trace context appears in trace events (BT-1625)
+%%====================================================================
+
+trace_context_in_traces_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+
+                %% Set trace context in THIS process (caller side)
+                beamtalk_actor:set_trace_context(#{workflowId => <<"wf-trace-1">>}),
+
+                Pid = start_registered_counter(0),
+                try
+                    %% Sync send — telemetry handler runs in caller process
+                    _Result = beamtalk_actor:sync_send(Pid, getValue, []),
+                    timer:sleep(50),
+
+                    Traces = beamtalk_trace_store:get_traces(),
+                    DispatchTraces = [
+                        T
+                     || T <- Traces,
+                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                    ],
+                    ?assert(length(DispatchTraces) >= 1),
+                    [Trace | _] = DispatchTraces,
+                    %% Trace context should be merged into the trace event
+                    ?assertEqual(<<"wf-trace-1">>, maps:get(workflowId, Trace))
+                after
+                    gen_server:stop(Pid),
+                    erase('$beamtalk_trace_ctx'),
+                    logger:set_process_metadata(#{})
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Empty trace context produces no overhead (BT-1625)
+%%====================================================================
+
+empty_trace_context_no_overhead_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+
+                %% Do NOT set any trace context
+                erase('$beamtalk_trace_ctx'),
+
+                Pid = start_registered_counter(0),
+                try
+                    _Result = beamtalk_actor:sync_send(Pid, getValue, []),
+                    timer:sleep(50),
+
+                    Traces = beamtalk_trace_store:get_traces(),
+                    DispatchTraces = [
+                        T
+                     || T <- Traces,
+                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                    ],
+                    ?assert(length(DispatchTraces) >= 1),
+                    [Trace | _] = DispatchTraces,
+                    %% No workflowId key should be present
+                    ?assertEqual(error, maps:find(workflowId, Trace))
+                after
+                    gen_server:stop(Pid)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Trace context propagates across actor boundaries (BT-1625)
+%%====================================================================
+
+trace_context_propagation_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Set trace context in the caller process
+                beamtalk_actor:set_trace_context(#{workflowId => <<"wf-prop-1">>}),
+
+                %% Build a propagated context
+                PropCtx = beamtalk_actor:get_propagated_ctx(),
+
+                %% Verify trace_ctx is in propagated context
+                ?assertMatch(#{trace_ctx := #{workflowId := <<"wf-prop-1">>}}, PropCtx),
+
+                %% Simulate receiving side: clear context first
+                erase('$beamtalk_trace_ctx'),
+                logger:set_process_metadata(#{}),
+
+                %% Restore propagated context (as receiving actor would)
+                beamtalk_actor:restore_propagated_ctx(PropCtx),
+
+                %% Trace context should be restored
+                ?assertEqual(
+                    #{workflowId => <<"wf-prop-1">>},
+                    beamtalk_actor:get_trace_context()
+                ),
+
+                %% Logger metadata should also be updated
+                LoggerMeta = logger:get_process_metadata(),
+                ?assertEqual(<<"wf-prop-1">>, maps:get(workflowId, LoggerMeta)),
+
+                %% Clean up
+                erase('$beamtalk_trace_ctx'),
+                logger:set_process_metadata(#{})
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Propagation with no trace context is a no-op (BT-1625)
+%%====================================================================
+
+propagation_no_context_noop_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Ensure no trace context set
+                erase('$beamtalk_trace_ctx'),
+
+                %% Build propagated context (no trace context)
+                PropCtx = beamtalk_actor:get_propagated_ctx(),
+                ?assertMatch(#{trace_ctx := #{}}, PropCtx),
+
+                %% Restore should be a no-op
+                beamtalk_actor:restore_propagated_ctx(PropCtx),
+                ?assertEqual(#{}, beamtalk_actor:get_trace_context())
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Root span generates trace_id = span_id (BT-1633)
+%%====================================================================
+
+causal_root_span_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                %% Clean causal context
+                erase('$beamtalk_trace_id'),
+                erase('$beamtalk_span_id'),
+                erase('$beamtalk_parent_span_id'),
+
+                Pid = start_registered_counter(0),
+                try
+                    %% Sync send — first dispatch creates a root span
+                    _Result = beamtalk_actor:sync_send(Pid, getValue, []),
+                    timer:sleep(50),
+
+                    %% Verify causal context was set in process dictionary
+                    TraceId = get('$beamtalk_trace_id'),
+                    SpanId = get('$beamtalk_span_id'),
+                    ?assert(is_integer(TraceId)),
+                    ?assert(is_integer(SpanId)),
+                    %% Root span: trace_id = span_id
+                    ?assertEqual(TraceId, SpanId),
+                    %% No parent span for root
+                    ?assertEqual(undefined, get('$beamtalk_parent_span_id')),
+
+                    %% Verify trace event has causal IDs
+                    Traces = beamtalk_trace_store:get_traces(),
+                    DispatchTraces = [
+                        T
+                     || T <- Traces,
+                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                    ],
+                    ?assert(length(DispatchTraces) >= 1),
+                    [Trace | _] = DispatchTraces,
+                    ?assertEqual(TraceId, maps:get(trace_id, Trace)),
+                    ?assertEqual(SpanId, maps:get(span_id, Trace))
+                after
+                    gen_server:stop(Pid)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Parent-child causal linking across actor calls (BT-1633)
+%%====================================================================
+
+causal_parent_child_linking_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                erase('$beamtalk_trace_id'),
+                erase('$beamtalk_span_id'),
+                erase('$beamtalk_parent_span_id'),
+
+                Pid = start_registered_counter(0),
+                try
+                    %% First dispatch — creates root span
+                    _Result1 = beamtalk_actor:sync_send(Pid, getValue, []),
+                    timer:sleep(50),
+
+                    RootTraceId = get('$beamtalk_trace_id'),
+                    RootSpanId = get('$beamtalk_span_id'),
+                    ?assert(is_integer(RootTraceId)),
+
+                    %% Build propagated context (as if sending to another actor)
+                    PropCtx = beamtalk_actor:get_propagated_ctx(),
+                    ?assertMatch(#{causal := #{trace_id := _, span_id := _}}, PropCtx),
+                    #{causal := #{trace_id := PropTraceId, span_id := PropSpanId}} = PropCtx,
+                    ?assertEqual(RootTraceId, PropTraceId),
+                    ?assertEqual(RootSpanId, PropSpanId),
+
+                    %% Simulate receiving side: restore propagated context
+                    beamtalk_actor:restore_propagated_ctx(PropCtx),
+
+                    %% After restore: trace_id inherited, parent_span_id set
+                    ?assertEqual(RootTraceId, get('$beamtalk_trace_id')),
+                    ?assertEqual(RootSpanId, get('$beamtalk_parent_span_id'))
+                after
+                    gen_server:stop(Pid)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Trace ID filter retrieves full causal chain (BT-1633)
+%%====================================================================
+
+causal_trace_id_filter_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                erase('$beamtalk_trace_id'),
+                erase('$beamtalk_span_id'),
+                erase('$beamtalk_parent_span_id'),
+
+                Pid = start_registered_counter(0),
+                try
+                    %% First dispatch — root span with trace_id T1
+                    _Result1 = beamtalk_actor:sync_send(Pid, getValue, []),
+                    timer:sleep(50),
+                    T1 = get('$beamtalk_trace_id'),
+
+                    %% Second dispatch under same trace — different span_id, same trace_id
+                    _Result2 = beamtalk_actor:sync_send(Pid, increment, []),
+                    timer:sleep(50),
+
+                    %% Start a new trace by clearing causal context
+                    erase('$beamtalk_trace_id'),
+                    erase('$beamtalk_span_id'),
+                    erase('$beamtalk_parent_span_id'),
+
+                    %% Third dispatch — new root span with trace_id T2
+                    _Result3 = beamtalk_actor:sync_send(Pid, getValue, []),
+                    timer:sleep(50),
+                    T2 = get('$beamtalk_trace_id'),
+                    ?assertNotEqual(T1, T2),
+
+                    %% Filter by T1 — should get exactly 2 trace events
+                    T1Traces = beamtalk_trace_store:get_traces(#{trace_id => T1}),
+                    T1Dispatch = [
+                        T
+                     || T <- T1Traces,
+                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                    ],
+                    ?assertEqual(2, length(T1Dispatch)),
+
+                    %% Filter by T2 — should get exactly 1 trace event
+                    T2Traces = beamtalk_trace_store:get_traces(#{trace_id => T2}),
+                    T2Dispatch = [
+                        T
+                     || T <- T2Traces,
+                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                    ],
+                    ?assertEqual(1, length(T2Dispatch))
+                after
+                    gen_server:stop(Pid)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Multi-hop causal chain A->B->C (BT-1633)
+%%====================================================================
+
+causal_multi_hop_chain_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                erase('$beamtalk_trace_id'),
+                erase('$beamtalk_span_id'),
+                erase('$beamtalk_parent_span_id'),
+
+                %% Simulate a 3-hop chain: A -> B -> C
+                %% All done in the same process to test the context propagation logic.
+
+                %% Hop 1: Actor A dispatches (root span)
+                PidA = start_registered_counter(0),
+                try
+                    _ResultA = beamtalk_actor:sync_send(PidA, getValue, []),
+                    timer:sleep(50),
+
+                    TraceId = get('$beamtalk_trace_id'),
+                    SpanA = get('$beamtalk_span_id'),
+                    ?assert(is_integer(TraceId)),
+                    %% root span
+                    ?assertEqual(TraceId, SpanA),
+
+                    %% Actor A sends to Actor B: propagate context
+                    PropCtxAB = beamtalk_actor:get_propagated_ctx(),
+
+                    %% Hop 2: Actor B receives and dispatches
+                    beamtalk_actor:restore_propagated_ctx(PropCtxAB),
+                    ?assertEqual(TraceId, get('$beamtalk_trace_id')),
+                    ?assertEqual(SpanA, get('$beamtalk_parent_span_id')),
+
+                    %% Actor B's own dispatch generates new span_id
+                    _ResultB = beamtalk_actor:sync_send(PidA, increment, []),
+                    timer:sleep(50),
+                    SpanB = get('$beamtalk_span_id'),
+                    ?assertNotEqual(SpanA, SpanB),
+                    ?assertEqual(TraceId, get('$beamtalk_trace_id')),
+
+                    %% Actor B sends to Actor C: propagate context
+                    PropCtxBC = beamtalk_actor:get_propagated_ctx(),
+                    #{causal := #{trace_id := BCTraceId, span_id := BCSpanId}} = PropCtxBC,
+                    ?assertEqual(TraceId, BCTraceId),
+                    ?assertEqual(SpanB, BCSpanId),
+
+                    %% Hop 3: Actor C receives
+                    beamtalk_actor:restore_propagated_ctx(PropCtxBC),
+                    ?assertEqual(TraceId, get('$beamtalk_trace_id')),
+                    ?assertEqual(SpanB, get('$beamtalk_parent_span_id')),
+
+                    %% Actor C dispatches
+                    _ResultC = beamtalk_actor:sync_send(PidA, getValue, []),
+                    timer:sleep(50),
+                    SpanC = get('$beamtalk_span_id'),
+                    ?assertNotEqual(SpanB, SpanC),
+                    ?assertEqual(TraceId, get('$beamtalk_trace_id')),
+
+                    %% All events should be under the same trace_id
+                    AllTraces = beamtalk_trace_store:get_traces(#{trace_id => TraceId}),
+                    DispatchTraces = [
+                        T
+                     || T <- AllTraces,
+                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                    ],
+                    %% 3 dispatches: A getValue, B increment, C getValue
+                    ?assertEqual(3, length(DispatchTraces)),
+
+                    %% Verify different span_ids
+                    SpanIds = [maps:get(span_id, T) || T <- DispatchTraces],
+                    ?assertEqual(3, length(lists:usort(SpanIds)))
+                after
+                    gen_server:stop(PidA)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: No causal overhead when tracing disabled (BT-1633)
+%%====================================================================
+
+causal_no_overhead_when_disabled_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:disable(),
+                erase('$beamtalk_trace_id'),
+                erase('$beamtalk_span_id'),
+                erase('$beamtalk_parent_span_id'),
+
+                Pid = start_registered_counter(0),
+                try
+                    %% Dispatch with tracing disabled
+                    _Result = beamtalk_actor:sync_send(Pid, getValue, []),
+                    timer:sleep(50),
+
+                    %% No causal context should be set
+                    ?assertEqual(undefined, get('$beamtalk_trace_id')),
+                    ?assertEqual(undefined, get('$beamtalk_span_id')),
+                    ?assertEqual(undefined, get('$beamtalk_parent_span_id')),
+
+                    %% Propagated context should not have causal key
+                    PropCtx = beamtalk_actor:get_propagated_ctx(),
+                    ?assertEqual(error, maps:find(causal, PropCtx))
+                after
+                    gen_server:stop(Pid)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: Span IDs are monotonically increasing (BT-1633)
+%%====================================================================
+
+causal_span_ids_monotonic_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Generate several span IDs and verify monotonicity
+                Id1 = beamtalk_trace_store:next_span_id(),
+                Id2 = beamtalk_trace_store:next_span_id(),
+                Id3 = beamtalk_trace_store:next_span_id(),
+                ?assert(Id1 > 0),
+                ?assert(Id2 > Id1),
+                ?assert(Id3 > Id2)
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Test: get_causal_ctx returns empty map when no context (BT-1633)
+%%====================================================================
+
+causal_ctx_empty_when_none_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                erase('$beamtalk_trace_id'),
+                erase('$beamtalk_span_id'),
+                erase('$beamtalk_parent_span_id'),
+                ?assertEqual(#{}, beamtalk_actor:get_causal_ctx())
             end)
         ]
     end}.
