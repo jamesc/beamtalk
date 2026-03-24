@@ -1160,6 +1160,126 @@ opts_map_combined_filters_test_() ->
         ]
     end}.
 
+%%====================================================================
+%% Test: export_traces with atom/non-JSON metadata (BT-1641)
+%%====================================================================
+
+export_traces_atom_metadata_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {"export succeeds with atom values in metadata",
+                ?_test(begin
+                    beamtalk_trace_store:clear(),
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    %% Simulate lifecycle stop event metadata: reason => normal (atom)
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid,
+                        'EventStore',
+                        stop,
+                        lifecycle,
+                        0,
+                        ok,
+                        #{reason => normal},
+                        stop
+                    ),
+                    TmpFile = tmp_export_path("atom_meta"),
+                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                    ?assertMatch({ok, #{count := 1}}, Result),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    [Trace] = maps:get(<<"traces">>, Decoded),
+                    %% Atom reason should be converted to binary string
+                    ?assertEqual(<<"normal">>, maps:get(<<"reason">>, Trace)),
+                    file:delete(TmpFile)
+                end)},
+            {"export succeeds with pid values in metadata",
+                ?_test(begin
+                    beamtalk_trace_store:clear(),
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid,
+                        'EventStore',
+                        stop,
+                        lifecycle,
+                        0,
+                        ok,
+                        #{caller => TestPid},
+                        stop
+                    ),
+                    TmpFile = tmp_export_path("pid_meta"),
+                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                    ?assertMatch({ok, #{count := 1}}, Result),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    [Trace] = maps:get(<<"traces">>, Decoded),
+                    %% Pid should be converted to string
+                    CallerBin = maps:get(<<"caller">>, Trace),
+                    ?assert(is_binary(CallerBin)),
+                    file:delete(TmpFile)
+                end)},
+            {"export succeeds with tuple values in metadata",
+                ?_test(begin
+                    beamtalk_trace_store:clear(),
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid,
+                        'EventStore',
+                        stop,
+                        lifecycle,
+                        0,
+                        error,
+                        #{reason => {shutdown, timeout}},
+                        stop
+                    ),
+                    TmpFile = tmp_export_path("tuple_meta"),
+                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                    ?assertMatch({ok, #{count := 1}}, Result),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    [Trace] = maps:get(<<"traces">>, Decoded),
+                    %% Tuple should be converted to string representation
+                    ReasonBin = maps:get(<<"reason">>, Trace),
+                    ?assert(is_binary(ReasonBin)),
+                    file:delete(TmpFile)
+                end)},
+            {"export succeeds with mixed metadata types",
+                ?_test(begin
+                    beamtalk_trace_store:clear(),
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid,
+                        'EventStore',
+                        stop,
+                        lifecycle,
+                        0,
+                        ok,
+                        #{
+                            reason => normal,
+                            count => 42,
+                            name => <<"test">>,
+                            flag => true
+                        },
+                        stop
+                    ),
+                    TmpFile = tmp_export_path("mixed_meta"),
+                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                    ?assertMatch({ok, #{count := 1}}, Result),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    Decoded = jsx:decode(Bin, [return_maps]),
+                    [Trace] = maps:get(<<"traces">>, Decoded),
+                    ?assertEqual(<<"normal">>, maps:get(<<"reason">>, Trace)),
+                    ?assertEqual(42, maps:get(<<"count">>, Trace)),
+                    ?assertEqual(<<"test">>, maps:get(<<"name">>, Trace)),
+                    ?assertEqual(true, maps:get(<<"flag">>, Trace)),
+                    file:delete(TmpFile)
+                end)}
+        ]
+    end}.
+
 %% @private Generate a unique temporary export path.
 tmp_export_path(Tag) ->
     iolist_to_binary([

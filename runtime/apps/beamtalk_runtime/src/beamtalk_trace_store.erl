@@ -953,7 +953,8 @@ trace_event_to_map({
     },
     case maps:size(Metadata) of
         0 -> Base;
-        _ -> maps:merge(Base, Metadata)
+        %% Base wins on key collisions (metadata cannot override core fields)
+        _ -> maps:merge(sanitize_metadata(Metadata), Base)
     end;
 trace_event_to_map({
     {MonotonicNs, _Unique}, Pid, Class, Selector, Mode, DurationNs, Outcome, Metadata
@@ -970,8 +971,44 @@ trace_event_to_map({
     },
     case maps:size(Metadata) of
         0 -> Base;
-        _ -> maps:merge(Base, Metadata)
+        %% Base wins on key collisions (metadata cannot override core fields)
+        _ -> maps:merge(sanitize_metadata(Metadata), Base)
     end.
+
+%% @private Sanitize metadata map values for JSON serialization (BT-1641).
+%% JSX requires all values to be JSON-compatible (binaries, numbers, booleans,
+%% null, lists, maps). Atom values like `normal` from lifecycle events, pid
+%% values, and tuples must be converted to binary strings.
+-spec sanitize_metadata(map()) -> map().
+sanitize_metadata(Meta) ->
+    maps:fold(
+        fun(K, V, Acc) ->
+            BinKey =
+                case K of
+                    _ when is_atom(K) -> atom_to_binary(K, utf8);
+                    _ when is_binary(K) -> K;
+                    _ -> iolist_to_binary(io_lib:format("~p", [K]))
+                end,
+            Acc#{BinKey => sanitize_value(V)}
+        end,
+        #{},
+        Meta
+    ).
+
+%% @private Convert a single value to a JSON-safe representation.
+-spec sanitize_value(term()) -> jsx:json_term().
+sanitize_value(V) when is_binary(V) -> V;
+sanitize_value(V) when is_integer(V) -> V;
+sanitize_value(V) when is_float(V) -> V;
+sanitize_value(true) -> true;
+sanitize_value(false) -> false;
+sanitize_value(null) -> null;
+sanitize_value(undefined) -> null;
+sanitize_value(V) when is_atom(V) -> atom_to_binary(V, utf8);
+sanitize_value(V) when is_pid(V) -> list_to_binary(pid_to_list(V));
+sanitize_value(V) when is_list(V) -> [sanitize_value(E) || E <- V];
+sanitize_value(V) when is_map(V) -> sanitize_metadata(V);
+sanitize_value(V) -> iolist_to_binary(io_lib:format("~p", [V])).
 
 %% @private Get aggregate stats, optionally filtered by Pid.
 do_get_stats(FilterPid) ->
