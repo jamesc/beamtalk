@@ -56,6 +56,21 @@ register_class(ClassName, FieldSpecs, MethodSpecs) ->
     ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = Pid},
     {ClassObj, Pid}.
 
+%% BT-1635: Create a class with class methods and return {ClassObj, Pid}.
+register_class_with_class_methods(ClassName, FieldSpecs, MethodSpecs, ClassMethodSpecs) ->
+    State = #{
+        className => ClassName,
+        superclassRef => 'Object',
+        fieldSpecs => FieldSpecs,
+        methodSpecs => MethodSpecs,
+        classMethods => ClassMethodSpecs
+    },
+    {ok, Pid} = beamtalk_class_builder:register(State),
+    Tag = beamtalk_class_registry:class_object_tag(ClassName),
+    Module = beamtalk_object_class:module_name(Pid),
+    ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = Pid},
+    {ClassObj, Pid}.
+
 %%% ============================================================================
 %%% metaclassNew/0 — always raises user_error
 %%% ============================================================================
@@ -141,6 +156,100 @@ class_local_methods_with_methods_test_() ->
                     Methods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
                     ?assert(lists:member('getValue', Methods)),
                     ?assert(lists:member('setValue:', Methods))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
+
+%% BT-1635: classLocalMethods on metaclass object returns class methods
+class_local_methods_metaclass_with_class_methods_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                {_ClassObj, Pid} = register_class_with_class_methods(
+                    'BT1635MetaHasMethods',
+                    #{},
+                    #{},
+                    #{'myClassMethod' => ClassMethodFun, 'otherClassMethod' => ClassMethodFun}
+                ),
+                try
+                    %% Build metaclass object: class = 'Metaclass', same pid
+                    MetaObj = #beamtalk_object{
+                        class = 'Metaclass',
+                        class_mod = beamtalk_metaclass_bt,
+                        pid = Pid
+                    },
+                    Methods = beamtalk_behaviour_intrinsics:classLocalMethods(MetaObj),
+                    ?assert(is_list(Methods)),
+                    ?assert(lists:member('myClassMethod', Methods)),
+                    ?assert(lists:member('otherClassMethod', Methods))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
+
+%% BT-1635: classLocalMethods on metaclass with no class methods returns []
+class_local_methods_metaclass_no_class_methods_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {_ClassObj, Pid} = register_class(
+                    'BT1635MetaNoMethods',
+                    #{},
+                    #{'instanceMethod' => MethodFun}
+                ),
+                try
+                    MetaObj = #beamtalk_object{
+                        class = 'Metaclass',
+                        class_mod = beamtalk_metaclass_bt,
+                        pid = Pid
+                    },
+                    Methods = beamtalk_behaviour_intrinsics:classLocalMethods(MetaObj),
+                    ?assert(is_list(Methods)),
+                    ?assertEqual([], Methods),
+                    %% Verify instance methods are NOT returned
+                    ?assertNot(lists:member('instanceMethod', Methods))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
+
+%% BT-1635: classIncludesSelector on metaclass checks class methods
+class_includes_selector_metaclass_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassMethodFun = fun(_Self, ClassVars) -> {reply, ok, ClassVars} end,
+                {_ClassObj, Pid} = register_class_with_class_methods(
+                    'BT1635MetaIncludes',
+                    #{},
+                    #{},
+                    #{'myClassMethod' => ClassMethodFun}
+                ),
+                try
+                    MetaObj = #beamtalk_object{
+                        class = 'Metaclass',
+                        class_mod = beamtalk_metaclass_bt,
+                        pid = Pid
+                    },
+                    ?assert(
+                        beamtalk_behaviour_intrinsics:classIncludesSelector(
+                            MetaObj, 'myClassMethod'
+                        )
+                    ),
+                    ?assertNot(
+                        beamtalk_behaviour_intrinsics:classIncludesSelector(
+                            MetaObj, 'bogusMethod'
+                        )
+                    )
                 after
                     catch gen_server:stop(Pid, normal, 5000)
                 end

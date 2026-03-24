@@ -165,7 +165,13 @@ classAllSubclasses(Self) ->
 %%
 %% BT-942: Uses __beamtalk_meta/0 when available; falls back to gen_server
 %% for dynamic classes created via beamtalk_class_builder.
+%%
+%% BT-1635: When called on a metaclass object (Foo class methods), returns
+%% user-defined class methods instead of instance methods.
 -spec classLocalMethods(#beamtalk_object{}) -> [atom()].
+classLocalMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
+    %% BT-1635: Metaclass receiver — return user-defined class methods.
+    maps:keys(beamtalk_object_class:local_class_methods_map(ClassPid));
 classLocalMethods(Self) ->
     ClassPid = erlang:element(4, Self),
     Module = beamtalk_object_class:module_name(ClassPid),
@@ -197,7 +203,25 @@ classAllSuperclasses(Self) ->
 %%
 %% BT-942: Uses __beamtalk_meta/0 at each hierarchy level when available;
 %% falls back to gen_server for dynamic classes.
+%%
+%% BT-1635: When called on a metaclass object (Foo class allMethods), walks
+%% the hierarchy collecting user-defined class methods at each level instead
+%% of instance methods.
 -spec classMethods(#beamtalk_object{}) -> [atom()].
+classMethods(#beamtalk_object{class = 'Metaclass', pid = ClassPid}) ->
+    %% BT-1635: Metaclass receiver — collect class methods up the hierarchy.
+    ClassName = gen_server:call(ClassPid, class_name),
+    Acc = walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, A) ->
+            ClassMethods = maps:keys(
+                beamtalk_object_class:local_class_methods_map(CPid)
+            ),
+            {cont, ordsets:union(A, ordsets:from_list(ClassMethods))}
+        end,
+        ordsets:new()
+    ),
+    ordsets:to_list(Acc);
 classMethods(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
@@ -347,7 +371,14 @@ classAllFieldNames(Self) ->
 %%
 %% Does NOT check superclasses — local containment only.
 %% Full chain walk for canUnderstand: is implemented via classCanUnderstand.
+%%
+%% BT-1635: When called on a metaclass object, checks class methods instead
+%% of instance methods.
 -spec classIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
+classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Selector) ->
+    %% BT-1635: Metaclass receiver — check class methods.
+    ClassMethods = beamtalk_object_class:local_class_methods_map(ClassPid),
+    maps:is_key(Selector, ClassMethods);
 classIncludesSelector(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
     LocalMethods = gen_server:call(ClassPid, methods),
