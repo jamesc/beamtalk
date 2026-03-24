@@ -184,17 +184,20 @@ record_trace_event(Pid, Class, Selector, Mode, Duration, Outcome, Metadata, _Pha
 %% @doc Get all trace events, newest first.
 -spec get_traces() -> [map()].
 get_traces() ->
-    get_traces(undefined, undefined).
+    get_traces(#{}).
 
-%% @doc Get trace events for a specific actor pid, newest first.
--spec get_traces(pid() | undefined) -> [map()].
-get_traces(Pid) ->
-    get_traces(Pid, undefined).
+%% @doc Get trace events filtered by opts map or actor pid, newest first.
+%% Opts map supports: actor, selector, class, outcome, min_duration_ns.
+-spec get_traces(map() | pid() | undefined) -> [map()].
+get_traces(Opts) when is_map(Opts) ->
+    gen_server:call(?MODULE, {get_traces, Opts});
+get_traces(Pid) when is_pid(Pid); Pid =:= undefined ->
+    get_traces(#{actor => Pid}).
 
 %% @doc Get trace events for a specific actor + selector, newest first.
 -spec get_traces(pid() | undefined, atom() | undefined) -> [map()].
 get_traces(Pid, Selector) ->
-    gen_server:call(?MODULE, {get_traces, Pid, Selector}).
+    get_traces(#{actor => Pid, selector => Selector}).
 
 %% @doc Export trace events to a JSON file.
 %% Opts is a map with optional keys:
@@ -296,7 +299,15 @@ handle_dispatch_stop(_EventName, #{duration := Duration}, Metadata, _Config) ->
     Class = maps:get(class, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
     record_dispatch(Pid, Selector, DurationNs, Outcome, Mode),
-    record_trace_event(Pid, Class, Selector, Mode, DurationNs, Outcome, #{}, stop),
+    %% BT-1625: Only fetch trace context when tracing is enabled to avoid
+    %% per-dispatch overhead when trace capture is disabled.
+    case is_enabled() of
+        true ->
+            TraceCtx = beamtalk_actor:get_trace_context(),
+            record_trace_event(Pid, Class, Selector, Mode, DurationNs, Outcome, TraceCtx, stop);
+        false ->
+            ok
+    end,
     ok;
 handle_dispatch_stop(_EventName, _Measurements, _Metadata, _Config) ->
     ok.
@@ -310,8 +321,21 @@ handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config
     Reason = maps:get(reason, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
     record_dispatch(Pid, Selector, DurationNs, error, Mode),
-    EventMeta = #{error => Reason, kind => Kind},
-    record_trace_event(Pid, Class, Selector, Mode, DurationNs, error, EventMeta, exception),
+    %% BT-1625: Only fetch trace context and build enriched metadata when
+    %% tracing is enabled to avoid per-dispatch overhead.
+    case is_enabled() of
+        true ->
+            TraceCtx = beamtalk_actor:get_trace_context(),
+            BaseMeta = #{error => Reason, kind => Kind},
+            EventMeta =
+                case map_size(TraceCtx) of
+                    0 -> BaseMeta;
+                    _ -> maps:merge(TraceCtx, BaseMeta)
+                end,
+            record_trace_event(Pid, Class, Selector, Mode, DurationNs, error, EventMeta, exception);
+        false ->
+            ok
+    end,
     ok;
 handle_dispatch_exception(_EventName, _Measurements, _Metadata, _Config) ->
     ok.
@@ -414,8 +438,8 @@ handle_call({grow_counters, CallerRef, CallerSize}, _From, State) ->
                 CurrentRef
         end,
     {reply, Result, State};
-handle_call({get_traces, Pid, Selector}, _From, State) ->
-    Result = do_get_traces(Pid, Selector),
+handle_call({get_traces, Opts}, _From, State) when is_map(Opts) ->
+    Result = do_get_traces(Opts),
     {reply, Result, State};
 handle_call({export_traces, Opts}, _From, State) ->
     Result = do_export_traces(Opts),
@@ -763,15 +787,27 @@ delete_oldest_n(Table, N) ->
 %% Internal: Query implementations
 %%====================================================================
 
-%% @private Get trace events, optionally filtered by Pid and Selector.
-do_get_traces(Pid, Selector) ->
+%% @private Get trace events, filtered by opts map.
+%% Supported opts: actor, selector, class, outcome, min_duration_ns.
+do_get_traces(Opts) when is_map(Opts) ->
+    Pid = maps:get(actor, Opts, undefined),
+    Selector = maps:get(selector, Opts, undefined),
+    Class = maps:get(class, Opts, undefined),
+    Outcome = maps:get(outcome, Opts, undefined),
+    MinDurationNs = maps:get(min_duration_ns, Opts, undefined),
     All = ets:tab2list(?TRACE_EVENTS),
     Filtered = lists:filter(
         fun(Ev) ->
             EvPid = element(2, Ev),
+            EvClass = element(3, Ev),
             EvSel = element(4, Ev),
+            EvDuration = element(6, Ev),
+            EvOutcome = element(7, Ev),
             (Pid =:= undefined orelse EvPid =:= Pid) andalso
-                (Selector =:= undefined orelse EvSel =:= Selector)
+                (Selector =:= undefined orelse EvSel =:= Selector) andalso
+                (Class =:= undefined orelse EvClass =:= Class) andalso
+                (Outcome =:= undefined orelse EvOutcome =:= Outcome) andalso
+                (MinDurationNs =:= undefined orelse EvDuration >= MinDurationNs)
         end,
         All
     ),
@@ -781,10 +817,10 @@ do_get_traces(Pid, Selector) ->
 
 %% @private Export traces to a JSON file with optional filters.
 do_export_traces(Opts) ->
-    Pid = maps:get(actor, Opts, undefined),
-    Selector = maps:get(selector, Opts, undefined),
     Limit = maps:get(limit, Opts, undefined),
-    Traces = do_get_traces(Pid, Selector),
+    %% Pass filter opts through to do_get_traces (actor, selector, class, outcome, min_duration_ns)
+    FilterOpts = maps:without([path, limit], Opts),
+    Traces = do_get_traces(FilterOpts),
     Limited =
         case Limit of
             undefined -> Traces;

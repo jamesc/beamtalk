@@ -629,6 +629,9 @@ impl ReplClient {
         &self,
         actor: Option<&str>,
         selector: Option<&str>,
+        class: Option<&str>,
+        outcome: Option<&str>,
+        min_duration_ns: Option<u64>,
         limit: Option<u32>,
     ) -> Result<ReplResponse, String> {
         let mut request = serde_json::json!({
@@ -640,6 +643,15 @@ impl ReplClient {
         }
         if let Some(s) = selector {
             request["selector"] = serde_json::Value::String(s.to_owned());
+        }
+        if let Some(c) = class {
+            request["class"] = serde_json::Value::String(c.to_owned());
+        }
+        if let Some(o) = outcome {
+            request["outcome"] = serde_json::Value::String(o.to_owned());
+        }
+        if let Some(d) = min_duration_ns {
+            request["min_duration_ns"] = serde_json::json!(d);
         }
         if let Some(l) = limit {
             request["limit"] = serde_json::json!(l);
@@ -660,11 +672,15 @@ impl ReplClient {
     }
 
     /// Send an export-traces operation with optional filters and path (ADR 0069).
+    #[allow(clippy::too_many_arguments)]
     pub async fn export_traces(
         &self,
         path: Option<&str>,
         actor: Option<&str>,
         selector: Option<&str>,
+        class: Option<&str>,
+        outcome: Option<&str>,
+        min_duration_ns: Option<u64>,
         limit: Option<u32>,
     ) -> Result<ReplResponse, String> {
         let mut request = serde_json::json!({
@@ -679,6 +695,15 @@ impl ReplClient {
         }
         if let Some(s) = selector {
             request["selector"] = serde_json::Value::String(s.to_owned());
+        }
+        if let Some(c) = class {
+            request["class"] = serde_json::Value::String(c.to_owned());
+        }
+        if let Some(o) = outcome {
+            request["outcome"] = serde_json::Value::String(o.to_owned());
+        }
+        if let Some(d) = min_duration_ns {
+            request["min_duration_ns"] = serde_json::json!(d);
         }
         if let Some(l) = limit {
             request["limit"] = serde_json::json!(l);
