@@ -203,12 +203,15 @@ The `.app` file's `{env, [{classes, [...]}]}` metadata is extended to include cl
 {env, [
   {classes, [
     #{name => 'Parser',
+      package => 'json',     % package name — also emitted in __beamtalk_meta/0
       kind => object,        % object | value | actor
       type_params => []      % generic type parameters (ADR 0068)
     }
   ]}
 ]}
 ```
+
+The `package` field is also emitted in `__beamtalk_meta/0` alongside `class` and `superclass`. The compiler already knows the package name at codegen time (from `beamtalk.toml`), so this is a compile-time constant — zero runtime cost for `ClassName packageName`.
 
 Protocol conformance is **not** stored in class metadata. Beamtalk uses structural conformance (ADR 0068) — a class conforms to a protocol if it has the right methods, with no explicit declaration. Pre-computing conformance in `.app` metadata would be stale the moment a new protocol is defined. Instead, the compiler checks conformance at the use site by comparing the class's method signatures (already in `__beamtalk_meta/0`) against the protocol's requirements (in the protocol's defining package).
 
