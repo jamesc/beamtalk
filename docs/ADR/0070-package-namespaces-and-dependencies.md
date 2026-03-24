@@ -221,6 +221,8 @@ This allows the compiler to:
 
 Packages are first-class objects, inspectable via messages like any other part of the system. The `Package` class ships with the package system — it is the Smalltalk answer to "where does this class come from?" and a core part of the tooling story for LSP, MCP, and AI agents.
 
+Possible API (illustrative, not final):
+
 ```beamtalk
 // Discover loaded packages
 Package all
@@ -236,6 +238,10 @@ pkg dependencies  // => #(Package("utils"))
 // Reverse lookup — which package owns this class?
 JSON package      // => Package("json")
 JSON packageName  // => "json"
+
+// Workspace-level view
+Workspace dependencies
+// => Dictionary("json" -> Package("json"), "utils" -> Package("utils"))
 ```
 
 This addresses the "where does this class come from?" discoverability gap without per-file imports — you ask the object. The class registry already knows the BEAM module name (`bt@json@parser`), so extracting the package segment is trivial.
