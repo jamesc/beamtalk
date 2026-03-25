@@ -22,3 +22,13 @@ TestCase subclass: ValueTypeNonLocalReturnTest
     self assert: (NlrDoubler new test: -1) equals: 0
     self assert: (NlrOnDo new test: #()) equals: "early"
     self assert: (NlrOnDo new test: #(1)) equals: "not early"
+
+  testNonLocalReturnInMatchArms =>
+    // ^ in a matching arm exits the method, skipping code after match:
+    self assert: (NlrMatch new findStatus: #completed) equals: "done"
+    self assert: (NlrMatch new findStatus: #failed) equals: "error"
+    // _ arm has no ^, so code after match: executes
+    self assert: (NlrMatch new findStatus: #pending) equals: "fallthrough"
+    // Only #stop arm has ^
+    self assert: (NlrMatch new classify: #stop) equals: "stopped early"
+    self assert: (NlrMatch new classify: #other) equals: "continued"

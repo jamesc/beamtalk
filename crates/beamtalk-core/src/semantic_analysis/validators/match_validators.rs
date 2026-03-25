@@ -119,6 +119,75 @@ fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnosti
     }
 }
 
+// ── Assignment-in-match-arm footgun warning ─────────────────────────────────
+
+/// Warn when a match arm body contains a local variable assignment (`:=`).
+///
+/// Core Erlang `case` arm bodies are single expressions — `let` bindings
+/// inside an arm do not escape to the enclosing scope.  A local assignment
+/// like `result := "success"` inside a match arm silently evaluates to the
+/// RHS value without updating the variable for code after the match.
+///
+/// The correct pattern is to capture the match result:
+/// ```beamtalk
+/// result := value match: [
+///   #ok -> "success";
+///   _ -> "default"
+/// ]
+/// ```
+pub(crate) fn warn_assignment_in_match_arms(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    walk_module(module, &mut |expr| {
+        visit_assignment_in_match_arm(expr, diagnostics);
+    });
+}
+
+fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    let Expression::Match { arms, .. } = expr else {
+        return;
+    };
+
+    for arm in arms {
+        if let Expression::Assignment { target, span, .. } = &arm.body {
+            match target.as_ref() {
+                Expression::Identifier(id) => {
+                    diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Assignment to `{}` inside a match arm has no effect — \
+                                 the variable is not updated after the match expression.",
+                                id.name,
+                            ),
+                            *span,
+                        )
+                        .with_hint(format!(
+                            "Capture the match result instead: `{} := value match: [...]`",
+                            id.name,
+                        )),
+                    );
+                }
+                Expression::FieldAccess { field, .. } => {
+                    diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Assignment to `self.{}` inside a match arm has no effect — \
+                                 the state update is lost after the match expression.",
+                                field.name,
+                            ),
+                            *span,
+                        )
+                        .with_hint(
+                            "Move the field assignment outside the match, \
+                             or use an `ifTrue:ifFalse:` chain instead."
+                                .to_string(),
+                        ),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,6 +415,45 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no error: both unguarded arms present, got: {diagnostics:?}"
+        );
+    }
+
+    // ── Assignment-in-match-arm footgun warning ─────────────────────────────
+
+    /// Local assignment inside a match arm body → warning.
+    #[test]
+    fn assignment_in_match_arm_warns() {
+        let src = r#"x match: [#ok -> result := "yes"; _ -> result := "no"]"#;
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        warn_assignment_in_match_arms(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            2,
+            "Expected 2 warnings (one per arm), got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("result"),
+            "Expected variable name in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// No assignment in match arm → no warning.
+    #[test]
+    fn no_assignment_in_match_arm_no_warning() {
+        let src = r#"x match: [#ok -> "yes"; _ -> "no"]"#;
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        warn_assignment_in_match_arms(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings, got: {diagnostics:?}"
         );
     }
 }

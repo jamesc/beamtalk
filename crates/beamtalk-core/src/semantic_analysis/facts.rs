@@ -183,7 +183,7 @@ fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
                     arm.guard
                         .as_ref()
                         .is_some_and(|g| expr_has_block_nlr(g, inside_block))
-                        || expr_has_block_nlr(&arm.body, inside_block)
+                        || expr_has_block_nlr(&arm.body, true)
                 })
         }
         Expression::MapLiteral { pairs, .. } => pairs.iter().any(|pair| {
