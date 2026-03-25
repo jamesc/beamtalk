@@ -7652,25 +7652,31 @@
         "TestCase",
         "assign",
         "assignment",
+        "branch",
+        "conditional",
         "constructor",
         "create",
         "extends",
         "hanoi_test",
+        "if",
         "inherit",
         "inheritance",
         "instantiate",
         "mutate",
         "mutation",
         "object",
+        "serial",
         "set",
+        "setUp",
         "subclassing",
+        "tearDown",
         "testOneDiskIsNil",
         "testPegNamesArePreserved",
         "testThreeDisksReturnsNil",
         "testTwoSeparateInstances",
         "testZeroDisksReturnsNil"
       ],
-      "source": "// BUnit tests for the Hanoi value type\n//\n// Note: solve:from:to:via: prints move instructions to Transcript\n// These tests verify correctness of the algorithm, not Transcript output\n// The number of moves for n disks is always 2^n - 1\n//\n// Run in the REPL:\n//   > :load src/hanoi.bt\n//   > :load test/hanoi_test.bt\n//   > HanoiTest runAll\n\nTestCase subclass: HanoiTest\n\n  testZeroDisksReturnsNil =>\n    // Base case: no disks to move\n    self\n      assert: (Hanoi new\n        solve: 0\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testOneDiskIsNil =>\n    // One disk: makes one move (printed to Transcript), returns nil\n    self\n      assert: (Hanoi new\n        solve: 1\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testThreeDisksReturnsNil =>\n    // Smoke test: 3 disks (7 moves) completes without error\n    self\n      assert: (Hanoi new\n        solve: 3\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testPegNamesArePreserved =>\n    // Works with any string peg names\n    self\n      assert: (Hanoi new\n        solve: 1\n        from: \"Left\"\n        to: \"Right\"\n        via: \"Middle\")\n      equals: nil\n\n  testTwoSeparateInstances =>\n    // Value types — each call is on a fresh instance with no shared state\n    h1 := Hanoi new\n    h2 := Hanoi new\n    self\n      assert: (h1\n        solve: 2\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n    self\n      assert: (h2\n        solve: 2\n        from: \"X\"\n        to: \"Z\"\n        via: \"Y\")\n      equals: nil",
+      "source": "// BUnit tests for the Hanoi value type\n//\n// Note: solve:from:to:via: prints move instructions to Transcript\n// These tests verify correctness of the algorithm, not Transcript output\n// The number of moves for n disks is always 2^n - 1\n//\n// Run in the REPL:\n//   > :load src/hanoi.bt\n//   > :load test/hanoi_test.bt\n//   > HanoiTest runAll\n\nTestCase subclass: HanoiTest\n  class serial -> Boolean => true\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]\n    self.ts ifNotNil: [:t | t stop]\n    self\n\n  testZeroDisksReturnsNil =>\n    // Base case: no disks to move\n    self\n      assert: (Hanoi new\n        solve: 0\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testOneDiskIsNil =>\n    // One disk: makes one move (printed to Transcript), returns nil\n    self\n      assert: (Hanoi new\n        solve: 1\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testThreeDisksReturnsNil =>\n    // Smoke test: 3 disks (7 moves) completes without error\n    self\n      assert: (Hanoi new\n        solve: 3\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testPegNamesArePreserved =>\n    // Works with any string peg names\n    self\n      assert: (Hanoi new\n        solve: 1\n        from: \"Left\"\n        to: \"Right\"\n        via: \"Middle\")\n      equals: nil\n\n  testTwoSeparateInstances =>\n    // Value types — each call is on a fresh instance with no shared state\n    h1 := Hanoi new\n    h2 := Hanoi new\n    self\n      assert: (h1\n        solve: 2\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n    self\n      assert: (h2\n        solve: 2\n        from: \"X\"\n        to: \"Z\"\n        via: \"Y\")\n      equals: nil",
       "explanation": "BUnit tests for the Hanoi value type  Note: solve:from:to:via: prints move instructions to Transcript These tests verify correctness of the algorithm, not Transcript output The number of moves for n disks is always 2^n - 1  Run in the REPL:   > :load src/hanoi.bt   > :load test/hanoi_test.bt   > HanoiTest runAll"
     },
     {
@@ -7695,6 +7701,7 @@
         "mutate",
         "mutation",
         "object",
+        "serial",
         "set",
         "setUp",
         "subclassing",
@@ -7703,7 +7710,7 @@
         "testGreeting",
         "testTwoInstancesHaveSameGreeting"
       ],
-      "source": "// BUnit tests for the Hello value type.\n//\n// Run in the REPL:\n//   > :load src/hello.bt\n//   > :load test/hello_test.bt\n//   > HelloTest runAll\n\nTestCase subclass: HelloTest\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    self.ts ifNotNil: [:t | t stop]\n    TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]\n    self\n\n  testGreeting =>\n    // greeting outputs \"Hello, World!\" via showCr: and returns self\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testTwoInstancesHaveSameGreeting =>\n    // Both instances output the same text\n    Hello new greeting\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testClassIsHello =>\n    // Hello is a value type — class name is the symbol #Hello\n    self assert: Hello new class name equals: #Hello",
+      "source": "// BUnit tests for the Hello value type.\n//\n// Run in the REPL:\n//   > :load src/hello.bt\n//   > :load test/hello_test.bt\n//   > HelloTest runAll\n\nTestCase subclass: HelloTest\n  class serial -> Boolean => true\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]\n    self.ts ifNotNil: [:t | t stop]\n    self\n\n  testGreeting =>\n    // greeting outputs \"Hello, World!\" via showCr: and returns self\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testTwoInstancesHaveSameGreeting =>\n    // Both instances output the same text\n    Hello new greeting\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testClassIsHello =>\n    // Hello is a value type — class name is the symbol #Hello\n    self assert: Hello new class name equals: #Hello",
       "explanation": "BUnit tests for the Hello value type.  Run in the REPL:   > :load src/hello.bt   > :load test/hello_test.bt   > HelloTest runAll"
     },
     {
@@ -7733,6 +7740,7 @@
         "mutation",
         "object",
         "process",
+        "serial",
         "set",
         "setUp",
         "subclassing",
@@ -7745,7 +7753,7 @@
         "testIndependentInstances",
         "testInitialValueIsZero"
       ],
-      "source": "// BUnit tests for the LoggingCounter actor\n//\n// Requires counter.bt loaded first (LoggingCounter extends Counter)\n//\n// Run in the REPL:\n//   > :load src/counter.bt\n//   > :load src/logging_counter.bt\n//   > :load test/logging_counter_test.bt\n//   > LoggingCounterTest runAll\n\nTestCase subclass: LoggingCounterTest\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    self.ts ifNotNil: [:t | t stop]\n    TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]\n    self\n\n  testInitialValueIsZero =>\n    // Inherits Counter's initial state\n    self assert: LoggingCounter spawn getValue equals: 0\n\n  testIncrementDelegatesToSuper =>\n    // LoggingCounter#increment logs then delegates to super — returns new value\n    self assert: LoggingCounter spawn increment equals: 1\n    self assert: (self.ts recent includes: \"increment called\")\n\n  testIncrementLogs =>\n    // Each increment call produces a log message\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: (self.ts recent includes: \"increment called\")\n\n  testDecrementIsInherited =>\n    // decrement is inherited from Counter unchanged\n    self assert: LoggingCounter spawn decrement equals: -1\n\n  testGetValueIsInherited =>\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: lc getValue equals: 2\n\n  testIncrementAndDecrementInteraction =>\n    lc := LoggingCounter spawn\n    lc increment; increment; increment; decrement\n    self assert: lc getValue equals: 2\n\n  testIndependentInstances =>\n    // Each spawned actor has independent state\n    lc1 := LoggingCounter spawn\n    lc2 := LoggingCounter spawn\n    lc1 increment\n    lc1 increment\n    lc2 increment\n    self assert: lc1 getValue equals: 2\n    self assert: lc2 getValue equals: 1",
+      "source": "// BUnit tests for the LoggingCounter actor\n//\n// Requires counter.bt loaded first (LoggingCounter extends Counter)\n//\n// Run in the REPL:\n//   > :load src/counter.bt\n//   > :load src/logging_counter.bt\n//   > :load test/logging_counter_test.bt\n//   > LoggingCounterTest runAll\n\nTestCase subclass: LoggingCounterTest\n  class serial -> Boolean => true\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]\n    self.ts ifNotNil: [:t | t stop]\n    self\n\n  testInitialValueIsZero =>\n    // Inherits Counter's initial state\n    self assert: LoggingCounter spawn getValue equals: 0\n\n  testIncrementDelegatesToSuper =>\n    // LoggingCounter#increment logs then delegates to super — returns new value\n    self assert: LoggingCounter spawn increment equals: 1\n    self assert: (self.ts recent includes: \"increment called\")\n\n  testIncrementLogs =>\n    // Each increment call produces a log message\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: (self.ts recent includes: \"increment called\")\n\n  testDecrementIsInherited =>\n    // decrement is inherited from Counter unchanged\n    self assert: LoggingCounter spawn decrement equals: -1\n\n  testGetValueIsInherited =>\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: lc getValue equals: 2\n\n  testIncrementAndDecrementInteraction =>\n    lc := LoggingCounter spawn\n    lc increment; increment; increment; decrement\n    self assert: lc getValue equals: 2\n\n  testIndependentInstances =>\n    // Each spawned actor has independent state\n    lc1 := LoggingCounter spawn\n    lc2 := LoggingCounter spawn\n    lc1 increment\n    lc1 increment\n    lc2 increment\n    self assert: lc1 getValue equals: 2\n    self assert: lc2 getValue equals: 1",
       "explanation": "BUnit tests for the LoggingCounter actor  Requires counter.bt loaded first (LoggingCounter extends Counter)  Run in the REPL:   > :load src/counter.bt   > :load src/logging_counter.bt   > :load test/logging_counter_test.bt   > LoggingCounterTest runAll"
     },
     {
@@ -15913,6 +15921,25 @@
       "explanation": "BT-754: NlrFoo — ifTrue:ifFalse: non-local return fixture"
     },
     {
+      "id": "stdlib-test-fixtures-nlr-match",
+      "title": "NlrMatch",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "NlrMatch",
+        "Object",
+        "classify:",
+        "extends",
+        "findStatus:",
+        "inherit",
+        "inheritance",
+        "nlr_match",
+        "object",
+        "subclassing"
+      ],
+      "source": "// NlrMatch — non-local return inside match arm bodies\n\nObject subclass: NlrMatch\n\n  // ^ in a match arm should exit the method early\n  findStatus: status =>\n    status match: [\n      #completed -> ^\"done\";\n      #failed -> ^\"error\";\n      _ -> nil\n    ]\n    \"fallthrough\"\n\n  // Only some arms have ^, others fall through\n  classify: value =>\n    value match: [\n      #stop -> ^\"stopped early\";\n      _ -> nil\n    ]\n    \"continued\"",
+      "explanation": "NlrMatch — non-local return inside match arm bodies"
+    },
+    {
       "id": "stdlib-test-fixtures-nlr-nested-hom",
       "title": "NlrNestedHom",
       "category": "stdlib-fixtures",
@@ -21332,10 +21359,11 @@
         "object",
         "process",
         "subclassing",
+        "testNonLocalReturnInMatchArms",
         "testNonLocalReturnInValueTypeMethods",
         "value_type_non_local_return_test"
       ],
-      "source": "// BT-754: Tests non-local return (^) inside block arguments in Object subclass\n// (non-actor) methods — empty/non-empty arrays, classify, check, double, and\n// on:do: with NLR\n\nTestCase subclass: ValueTypeNonLocalReturnTest\n\n  testNonLocalReturnInValueTypeMethods =>\n    self assert: (NlrReturnTest new test: #()) equals: \"empty\"\n    self assert: (NlrReturnTest new test: #(1)) equals: \"not empty\"\n    self assert: (NlrFoo new classify: 5) equals: \"positive\"\n    self assert: (NlrFoo new classify: -1) equals: \"non-positive\"\n    self assert: (NlrFoo new classify: 0) equals: \"non-positive\"\n    self assert: (NlrBar new check: #()) equals: \"empty\"\n    self assert: (NlrBar new check: #(1)) equals: \"not empty\"\n    self assert: (NlrBaz new double: 5) equals: 10\n    self assert: (NlrSkipper new test: #()) equals: \"early\"\n    self assert: (NlrSkipper new test: #(1, 2, 3)) equals: \"middle\"\n    self assert: (NlrDoubler new test: 5) equals: 10\n    self assert: (NlrDoubler new test: -1) equals: 0\n    self assert: (NlrOnDo new test: #()) equals: \"early\"\n    self assert: (NlrOnDo new test: #(1)) equals: \"not early\"",
+      "source": "// BT-754: Tests non-local return (^) inside block arguments in Object subclass\n// (non-actor) methods — empty/non-empty arrays, classify, check, double, and\n// on:do: with NLR\n\nTestCase subclass: ValueTypeNonLocalReturnTest\n\n  testNonLocalReturnInValueTypeMethods =>\n    self assert: (NlrReturnTest new test: #()) equals: \"empty\"\n    self assert: (NlrReturnTest new test: #(1)) equals: \"not empty\"\n    self assert: (NlrFoo new classify: 5) equals: \"positive\"\n    self assert: (NlrFoo new classify: -1) equals: \"non-positive\"\n    self assert: (NlrFoo new classify: 0) equals: \"non-positive\"\n    self assert: (NlrBar new check: #()) equals: \"empty\"\n    self assert: (NlrBar new check: #(1)) equals: \"not empty\"\n    self assert: (NlrBaz new double: 5) equals: 10\n    self assert: (NlrSkipper new test: #()) equals: \"early\"\n    self assert: (NlrSkipper new test: #(1, 2, 3)) equals: \"middle\"\n    self assert: (NlrDoubler new test: 5) equals: 10\n    self assert: (NlrDoubler new test: -1) equals: 0\n    self assert: (NlrOnDo new test: #()) equals: \"early\"\n    self assert: (NlrOnDo new test: #(1)) equals: \"not early\"\n\n  testNonLocalReturnInMatchArms =>\n    // ^ in a matching arm exits the method, skipping code after match:\n    self assert: (NlrMatch new findStatus: #completed) equals: \"done\"\n    self assert: (NlrMatch new findStatus: #failed) equals: \"error\"\n    // _ arm has no ^, so code after match: executes\n    self assert: (NlrMatch new findStatus: #pending) equals: \"fallthrough\"\n    // Only #stop arm has ^\n    self assert: (NlrMatch new classify: #stop) equals: \"stopped early\"\n    self assert: (NlrMatch new classify: #other) equals: \"continued\"",
       "explanation": "BT-754: Tests non-local return (^) inside block arguments in Object subclass (non-actor) methods — empty/non-empty arrays, classify, check, double, and on:do: with NLR"
     },
     {

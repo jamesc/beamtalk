@@ -12,6 +12,7 @@
 //   > LoggingCounterTest runAll
 
 TestCase subclass: LoggingCounterTest
+  class serial -> Boolean => true
 
   setUp =>
     self.ts := TranscriptStream spawn
@@ -19,8 +20,8 @@ TestCase subclass: LoggingCounterTest
     self
 
   tearDown =>
-    self.ts ifNotNil: [:t | t stop]
     TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]
+    self.ts ifNotNil: [:t | t stop]
     self
 
   testInitialValueIsZero =>
