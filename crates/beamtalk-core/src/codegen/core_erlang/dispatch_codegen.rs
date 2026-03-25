@@ -1186,7 +1186,7 @@ impl CoreErlangGenerator {
                 // asType: (compile-time erasure)
                 "asType:"
                 // ProtoObject
-                | "class" | "perform:" | "perform:withArguments:"
+                | "class" | "perform:" | "perform:withArguments:" | "performLocally:withArguments:"
                 // Object reflection
                 | "fieldAt:" | "fieldAt:put:" | "fieldNames" | "respondsTo:"
                 // Nil protocol

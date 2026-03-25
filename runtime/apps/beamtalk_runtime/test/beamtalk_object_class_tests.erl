@@ -110,7 +110,11 @@ teardown(_) ->
             beamtalk_class_MultiShadowInteger,
             beamtalk_class_MultiShadowHelper,
             beamtalk_class_SelfCallTestClass,
-            beamtalk_class_BT1185StaleSuper
+            beamtalk_class_BT1185StaleSuper,
+            beamtalk_class_LocalCallTestClass,
+            beamtalk_class_LocalCallKwTestClass,
+            beamtalk_class_LocalCallDnuTestClass,
+            beamtalk_class_LocalCallCvarTestClass
         ]
     ),
     %% Clean up ETS hierarchy table entries
@@ -1463,3 +1467,112 @@ apply_class_info_preserves_dynamic_class_superclass_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% local_call/3 Tests (BT-1664)
+%%====================================================================
+
+local_call_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"local_call success path — calls class method in caller's process",
+                fun test_local_call_success/0},
+            {"local_call with keyword argument", fun test_local_call_keyword_arg/0},
+            {"local_call method not found raises does_not_understand",
+                fun test_local_call_method_not_found/0},
+            {"local_call unwraps class_var_result tuple", fun test_local_call_class_var_result/0},
+            {"local_call on non-class receiver raises type_error",
+                fun test_local_call_non_class_receiver/0},
+            {"local_call on non-object raises type_error", fun test_local_call_non_object/0}
+        ]
+    end}.
+
+test_local_call_success() ->
+    ClassInfo = #{
+        name => 'LocalCallTestClass',
+        module => beamtalk_class_dispatch_test_helper,
+        superclass => none,
+        class_methods => #{testSuccess => <<>>},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link('LocalCallTestClass', ClassInfo),
+    ClassObj = #beamtalk_object{
+        class = 'LocalCallTestClass class',
+        class_mod = beamtalk_class_dispatch_test_helper,
+        pid = Pid
+    },
+    Result = beamtalk_object_class:local_call(ClassObj, testSuccess, []),
+    ?assertEqual(test_success_result, Result).
+
+test_local_call_keyword_arg() ->
+    ClassInfo = #{
+        name => 'LocalCallKwTestClass',
+        module => beamtalk_class_dispatch_test_helper,
+        superclass => none,
+        class_methods => #{'testWith:' => <<>>},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link('LocalCallKwTestClass', ClassInfo),
+    ClassObj = #beamtalk_object{
+        class = 'LocalCallKwTestClass class',
+        class_mod = beamtalk_class_dispatch_test_helper,
+        pid = Pid
+    },
+    Result = beamtalk_object_class:local_call(ClassObj, 'testWith:', [hello]),
+    ?assertEqual({with_arg, hello}, Result).
+
+test_local_call_method_not_found() ->
+    ClassInfo = #{
+        name => 'LocalCallDnuTestClass',
+        module => beamtalk_class_dispatch_test_helper,
+        superclass => none,
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link('LocalCallDnuTestClass', ClassInfo),
+    ClassObj = #beamtalk_object{
+        class = 'LocalCallDnuTestClass class',
+        class_mod = beamtalk_class_dispatch_test_helper,
+        pid = Pid
+    },
+    ?assertError(
+        #{error := #beamtalk_error{kind = does_not_understand}},
+        beamtalk_object_class:local_call(ClassObj, nonExistentMethod, [])
+    ).
+
+test_local_call_class_var_result() ->
+    ClassInfo = #{
+        name => 'LocalCallCvarTestClass',
+        module => beamtalk_class_dispatch_test_helper,
+        superclass => none,
+        class_methods => #{testClassVar => <<>>},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link('LocalCallCvarTestClass', ClassInfo),
+    ClassObj = #beamtalk_object{
+        class = 'LocalCallCvarTestClass class',
+        class_mod = beamtalk_class_dispatch_test_helper,
+        pid = Pid
+    },
+    %% testClassVar returns {class_var_result, Value, NewVars} — local_call
+    %% should unwrap and return just the value
+    Result = beamtalk_object_class:local_call(ClassObj, testClassVar, []),
+    ?assertEqual(class_var_updated_value, Result).
+
+test_local_call_non_class_receiver() ->
+    %% An actor instance (class name does NOT end with " class") should fail
+    FakeActor = #beamtalk_object{
+        class = 'Counter',
+        class_mod = counter,
+        pid = self()
+    },
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_object_class:local_call(FakeActor, testSuccess, [])
+    ).
+
+test_local_call_non_object() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_object_class:local_call(not_an_object, testSuccess, [])
+    ).

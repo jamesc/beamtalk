@@ -42,6 +42,7 @@
     class_name/1,
     module_name/1,
     class_send/3,
+    local_call/3,
     set_class_var/3,
     update_class/2,
     local_class_methods/1,
@@ -207,6 +208,67 @@ module_name(ClassPid) ->
 -spec class_send(pid() | undefined, atom(), list()) -> term().
 class_send(ClassPid, Selector, Args) ->
     beamtalk_class_dispatch:class_send(ClassPid, Selector, Args).
+
+%% @doc Execute a class method in the caller's process (BT-1664).
+%%
+%% Resolves the target module from the class object, then calls
+%% Module:class_<Selector>(nil, #{}, Args) directly — bypassing the class
+%% object's gen_server. The caller takes responsibility for knowing the
+%% method does not mutate class state (nil is passed for ClassSelf).
+%%
+%% Raises beamtalk_error if the receiver is not a class object, or if the
+%% class does not define the requested method.
+-spec local_call(term(), atom(), list()) -> term().
+local_call(Receiver = #beamtalk_object{class_mod = Module}, Selector, Args) when
+    is_atom(Selector), is_list(Args)
+->
+    case beamtalk_class_registry:is_class_object(Receiver) of
+        true ->
+            FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
+            code:ensure_loaded(Module),
+            case erlang:function_exported(Module, FunName, length(Args) + 2) of
+                true ->
+                    case erlang:apply(Module, FunName, [nil, #{} | Args]) of
+                        {class_var_result, Value, _NewClassVars} ->
+                            %% Discard class var mutations — local_call does not
+                            %% update the class object's state.
+                            Value;
+                        Result ->
+                            Result
+                    end;
+                false ->
+                    ClassName = Receiver#beamtalk_object.class,
+                    Error = beamtalk_error:new(
+                        does_not_understand,
+                        ClassName,
+                        Selector,
+                        <<"Class does not understand this message">>
+                    ),
+                    beamtalk_error:raise(Error)
+            end;
+        false ->
+            ClassName = Receiver#beamtalk_object.class,
+            Error = beamtalk_error:new(
+                type_error,
+                ClassName,
+                'performLocally:withArguments:',
+                <<"Receiver is not a class object">>
+            ),
+            beamtalk_error:raise(Error)
+    end;
+local_call(Receiver, _Selector, _Args) ->
+    ClassName =
+        case Receiver of
+            #beamtalk_object{class = C} -> C;
+            _ -> erlang
+        end,
+    Error = beamtalk_error:new(
+        type_error,
+        ClassName,
+        'performLocally:withArguments:',
+        <<"Receiver is not a class object">>
+    ),
+    beamtalk_error:raise(Error).
 
 %% @doc Get a compiled method object.
 %% Delegates to beamtalk_method_resolver.

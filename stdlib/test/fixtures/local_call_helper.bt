@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1664: Test fixture for performLocally:withArguments:
+// Non-sealed class with a class method that returns the caller's Erlang PID.
+
+Object subclass: LocalCallHelper
+
+  class callerPid => Erlang erlang self
+
+  class echo: value => value
+
+  class add: a to: b => a + b
