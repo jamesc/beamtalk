@@ -1071,6 +1071,40 @@ impl CoreErlangGenerator {
                         ];
                         Ok(Some(doc))
                     }
+                    // BT-1664: Execute a class method in the caller's process,
+                    // bypassing the class object's gen_server.
+                    "performLocally:withArguments:" if arguments.len() == 2 => {
+                        let receiver_var = self.fresh_var("Receiver");
+                        let selector_var = self.fresh_var("Selector");
+                        let args_var = self.fresh_var("Args");
+
+                        let recv_code = self.expression_doc(receiver)?;
+                        let sel_code = self.expression_doc(&arguments[0])?;
+                        let args_code = self.expression_doc(&arguments[1])?;
+
+                        let doc = docvec![
+                            "let ",
+                            Document::String(receiver_var.clone()),
+                            " = ",
+                            recv_code,
+                            " in let ",
+                            Document::String(selector_var.clone()),
+                            " = ",
+                            sel_code,
+                            " in let ",
+                            Document::String(args_var.clone()),
+                            " = ",
+                            args_code,
+                            " in call 'beamtalk_object_class':'local_call'(",
+                            Document::String(receiver_var),
+                            ", ",
+                            Document::String(selector_var),
+                            ", ",
+                            Document::String(args_var),
+                            ")",
+                        ];
+                        Ok(Some(doc))
+                    }
                     "perform:" if arguments.len() == 1 => {
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");

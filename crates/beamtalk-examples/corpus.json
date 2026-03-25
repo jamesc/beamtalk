@@ -15364,6 +15364,26 @@
       "explanation": "BT-413: Test fixture for instance-side class variable access (Actor)"
     },
     {
+      "id": "stdlib-test-fixtures-local-call-helper",
+      "title": "LocalCallHelper",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "LocalCallHelper",
+        "Object",
+        "add:to:",
+        "callerPid",
+        "echo:",
+        "extends",
+        "inherit",
+        "inheritance",
+        "local_call_helper",
+        "object",
+        "subclassing"
+      ],
+      "source": "// BT-1664: Test fixture for performLocally:withArguments:\n// Non-sealed class with a class method that returns the caller's Erlang PID.\n\nObject subclass: LocalCallHelper\n\n  class callerPid => Erlang erlang self\n\n  class echo: value => value\n\n  class add: a to: b => a + b",
+      "explanation": "BT-1664: Test fixture for performLocally:withArguments: Non-sealed class with a class method that returns the caller's Erlang PID."
+    },
+    {
       "id": "stdlib-test-fixtures-local-mutation-actor",
       "title": "LocalMutationActor",
       "category": "stdlib-fixtures",
@@ -18894,6 +18914,32 @@
       ],
       "source": "// BT-406: Tests the match: expression — literal arms (integer, symbol, string),\n// wildcard arms, variable capture, guards (when:), and multi-arm dispatch\n\nTestCase subclass: PatternMatchingTest\n\n  testPatternMatchingWithGuards =>\n    self assert: (42 match: [_ -> \"matched\"]) equals: \"matched\"\n    // Match integer literal — first arm\n    self\n      assert: (1 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"one\"\n    // Match integer literal — second arm\n    self\n      assert: (2 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"two\"\n    // Match integer literal — fallthrough to wildcard\n    self\n      assert: (3 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"other\"\n    // Match symbol literal\n    self\n      assert: (#ok match: [\n        #ok -> \"success\";\n        #error -> \"failure\";\n        _ -> \"unknown\"\n      ])\n      equals: \"success\"\n    // ═══════════════════════════════════════════════════════════════════════════\n    self\n      assert: (#error match: [\n        #ok -> \"success\";\n        #error -> \"failure\";\n        _ -> \"unknown\"\n      ])\n      equals: \"failure\"\n    // Match string literal\n    self\n      assert: (\"hello\" match: [\n        \"hello\" -> \"greeting\";\n        _ -> \"other\"\n      ])\n      equals: \"greeting\"\n    // Variable captures the matched value\n    self assert: (42 match: [x -> x + 1]) equals: 43\n    // Match with guard — positive\n    self\n      assert: (10 match: [\n        x when: [x > 0] -> \"positive\";\n        _ -> \"non-positive\"\n      ])\n      equals: \"positive\"\n    // Match with guard — non-positive\n    self\n      assert: (-5 match: [\n        x when: [x > 0] -> \"positive\";\n        _ -> \"non-positive\"\n      ])\n      equals: \"non-positive\"\n    // Guard with arithmetic comparison\n    self\n      assert: (42 match: [\n        x when: [x > 100] -> \"big\";\n        x when: [x > 10] -> \"medium\";\n        _ -> \"small\"\n      ])\n      equals: \"medium\"\n    // Match on expression result\n    self\n      assert: ((3 + 4) match: [\n        7 -> \"correct\";\n        _ -> \"wrong\"\n      ])\n      equals: \"correct\"\n    // Match negative integer\n    self\n      assert: (-1 match: [\n        -1 -> \"minus one\";\n        0 -> \"zero\";\n        _ -> \"other\"\n      ])\n      equals: \"minus one\"\n    // ═══════════════════════════════════════════════════════════════════════════\n    self\n      assert: (0 match: [\n        -1 -> \"minus one\";\n        0 -> \"zero\";\n        _ -> \"other\"\n      ])\n      equals: \"zero\"\n\n  testArrayPatternInMatchArm =>\n    // BT-1296: Array pattern arms — basic 2-element match\n    arr := #[10, 20]\n    self\n      assert: (arr match: [\n        #[h, t] -> h + t;\n        _ -> 0\n      ])\n      equals: 30\n    // Array arm fallthrough: subject is not an array\n    self\n      assert: (42 match: [\n        #[a, b] -> a + b;\n        _ -> 0\n      ])\n      equals: 0\n    // Array arm fallthrough: subject is a dict (plain map — must not crash on missing key)\n    self\n      assert: (#{#x => 1} match: [\n        #[a, b] -> a + b;\n        _ -> 0\n      ])\n      equals: 0\n    // Array arm fallthrough: wrong size\n    self\n      assert: (#[1, 2, 3] match: [\n        #[a, b] -> a + b;\n        _ -> 0\n      ])\n      equals: 0\n    // Wildcard elements in array pattern\n    self\n      assert: (#[1, 2, 3] match: [\n        #[_, v, _] -> v;\n        _ -> 0\n      ])\n      equals: 2\n    // Multiple array arms with different sizes\n    self\n      assert: (#[1, 2, 3] match: [\n        #[x] -> \"one\";\n        #[x, y] -> \"two\";\n        #[x, y, z] -> \"three\";\n        _ -> \"other\"\n      ])\n      equals: \"three\"\n    // Array arm with guard — positive (exercises guard-success branch)\n    self\n      assert: (#[1, 2] match: [\n        #[x, y] when: [x < y] -> \"ascending\";\n        _ -> \"other\"\n      ])\n      equals: \"ascending\"\n    // Array arm with guard — negative (exercises guard-fail fallthrough)\n    self\n      assert: (#[2, 1] match: [\n        #[x, y] when: [x < y] -> \"ascending\";\n        _ -> \"other\"\n      ])\n      equals: \"other\"\n\n  testMapPatternInMatchArm =>\n    // BT-1296: Map/Dict pattern arms\n    d := #{#event => \"click\", #x => 5}\n    self\n      assert: (d match: [\n        #{#event => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"click\"\n    // Dict arm fallthrough: key missing\n    self\n      assert: (#{#kind => \"x\"} match: [\n        #{#event => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"unknown\"\n    // Dict arm fallthrough: subject is not a map\n    self\n      assert: (42 match: [\n        #{#event => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"unknown\"\n    // Multiple key bindings\n    self\n      assert: (#{#a => 1, #b => 2} match: [\n        #{#a => x, #b => y} -> x + y;\n        _ -> 0\n      ])\n      equals: 3\n\n  testNestedArrayPatternInMatchArm =>\n    // BT-1296: Nested array pattern: #[#[a, b], c] -> ...\n    nested := #[#[1, 2], 3]\n    self\n      assert: (nested match: [\n        #[#[a, b], c] -> a + b + c;\n        _ -> 0\n      ])\n      equals: 6\n    // Nested array fallthrough: inner wrong size\n    self\n      assert: (#[#[1, 2, 3], 4] match: [\n        #[#[a, b], c] -> a + b + c;\n        _ -> 0\n      ])\n      equals: 0\n\n  testDuplicateVariableInArrayMatchArm =>\n    // BT-1315: Duplicate variable names act as equality constraints\n    // Adjacent duplicate — equal values\n    self\n      assert: (#[3, 3] match: [\n        #[x, x] -> \"equal\";\n        _ -> \"differ\"\n      ])\n      equals: \"equal\"\n    // Adjacent duplicate — unequal values\n    self\n      assert: (#[1, 2] match: [\n        #[x, x] -> \"equal\";\n        _ -> \"differ\"\n      ])\n      equals: \"differ\"\n    // Non-adjacent duplicate — equal values\n    self\n      assert: (#[5, 9, 5] match: [\n        #[x, y, x] -> \"match\";\n        _ -> \"no match\"\n      ])\n      equals: \"match\"\n    // Non-adjacent duplicate — unequal values\n    self\n      assert: (#[5, 9, 7] match: [\n        #[x, y, x] -> \"match\";\n        _ -> \"no match\"\n      ])\n      equals: \"no match\"\n    // Duplicate mixed with non-duplicate; body uses bound variable\n    self\n      assert: (#[4, 4, 10] match: [\n        #[x, x, z] -> z;\n        _ -> 0\n      ])\n      equals: 10\n\n  // BT-1297: Constructor patterns for sealed types (Result ok: / Result error:)\n  testConstructorPatternOkArm =>\n    // ok arm matched — variable captures the wrapped value\n    self\n      assert: ((Result ok: 42) match: [\n        Result ok: v -> v;\n        Result error: _ -> 0\n      ])\n      equals: 42\n\n  testConstructorPatternErrorArm =>\n    // error arm matched — variable captures the error reason\n    self\n      assert: ((Result error: #oops) match: [\n        Result ok: _ -> #none;\n        Result error: e -> e\n      ])\n      equals: #oops\n\n  testConstructorPatternWildcardBinding =>\n    // Wildcard in value position: arm matches but nothing is bound\n    self\n      assert: ((Result ok: 99) match: [\n        Result ok: _ -> \"any ok\";\n        Result error: _ -> \"any error\"\n      ])\n      equals: \"any ok\"\n\n  testConstructorPatternLiteralBinding =>\n    // Literal in binding position: arm only matches when value equals literal\n    self\n      assert: ((Result ok: 0) match: [\n        Result ok: 0 -> \"zero\";\n        Result ok: _ -> \"other\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"zero\"\n    self\n      assert: ((Result ok: 1) match: [\n        Result ok: 0 -> \"zero\";\n        Result ok: _ -> \"other\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"other\"\n\n  testConstructorPatternWithGuard =>\n    // when: guard must not be consumed as a constructor keyword (BT-1297 bug fix)\n    self\n      assert: ((Result ok: 5) match: [\n        Result ok: v when: [v > 3] -> \"big\";\n        Result ok: _ -> \"small\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"big\"\n    self\n      assert: ((Result ok: 1) match: [\n        Result ok: v when: [v > 3] -> \"big\";\n        Result ok: _ -> \"small\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"small\"\n\n  testConstructorPatternNegativeLiteral =>\n    // Negative numeric literal in binding position (BT-1297 bug fix)\n    self\n      assert: ((Result ok: -1) match: [\n        Result ok: -1 -> \"neg one\";\n        Result ok: _ -> \"other\";\n        Result error: _ -> \"err\"\n      ])\n      equals: \"neg one\"\n\n  testStringKeyDictPattern =>\n    // BT-1295: String keys in dict patterns — capture variable\n    d := #{\"event\" => \"click\", \"x\" => 5}\n    self\n      assert: (d match: [\n        #{\"event\" => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"click\"\n    // String-key dict arm fallthrough: key missing\n    self\n      assert: (#{\"kind\" => \"x\"} match: [\n        #{\"event\" => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"unknown\"\n    // String-key dict arm fallthrough: subject is not a map\n    self\n      assert: (42 match: [\n        #{\"event\" => evName} -> evName;\n        _ -> \"unknown\"\n      ])\n      equals: \"unknown\"\n    // String-key value equality check\n    self\n      assert: (d match: [\n        #{\"event\" => \"click\"} -> \"got click\";\n        #{\"event\" => _} -> \"other event\";\n        _ -> \"no event\"\n      ])\n      equals: \"got click\"\n    // Mixed symbol and string keys in one pattern\n    mixed := #{#id => 42, \"name\" => \"alice\"}\n    self\n      assert: (mixed match: [\n        #{#id => id, \"name\" => name} -> name;\n        _ -> \"no match\"\n      ])\n      equals: \"alice\"\n    // Multiple string-key bindings\n    resp := #{\"status\" => \"ok\", \"data\" => 99}\n    self\n      assert: (resp match: [\n        #{\"status\" => status, \"data\" => data} -> data;\n        _ -> 0\n      ])\n      equals: 99\n    // Negative integer literal value equality check\n    neg := #{\"score\" => -1}\n    self\n      assert: (neg match: [\n        #{\"score\" => -1} -> \"neg one\";\n        #{\"score\" => _} -> \"other\";\n        _ -> \"no score\"\n      ])\n      equals: \"neg one\"\n\n  testTuplePatternInMatchArm =>\n    // Tuple pattern arms — basic tagged tuple match\n    t := Erlang erlang list_to_tuple: #(#ok, 42)\n    self\n      assert: (t match: [\n        {#ok, v} -> v;\n        {#error, _} -> 0;\n        _ -> -1\n      ])\n      equals: 42\n    // Tuple arm fallthrough: tag doesn't match\n    t2 := Erlang erlang list_to_tuple: #(#error, \"oops\")\n    self\n      assert: (t2 match: [\n        {#ok, v} -> v;\n        {#error, msg} -> msg;\n        _ -> \"unknown\"\n      ])\n      equals: \"oops\"\n    // Tuple arm fallthrough: subject is not a tuple\n    self\n      assert: (42 match: [\n        {a, b} -> a + b;\n        _ -> 0\n      ])\n      equals: 0\n    // Tuple arm with variable binding\n    t3 := Erlang erlang list_to_tuple: #(10, 20)\n    self\n      assert: (t3 match: [\n        {a, b} -> a + b;\n        _ -> 0\n      ])\n      equals: 30",
       "explanation": "BT-406: Tests the match: expression — literal arms (integer, symbol, string), wildcard arms, variable capture, guards (when:), and multi-arm dispatch"
+    },
+    {
+      "id": "stdlib-test-perform-locally-test",
+      "title": "PerformLocallyTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "PerformLocallyTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "perform_locally_test",
+        "set",
+        "subclassing",
+        "testKeywordClassMethod",
+        "testMultiKeywordClassMethod",
+        "testRunsInCallerProcess",
+        "testUnaryClassMethod"
+      ],
+      "source": "// BT-1664: Tests for performLocally:withArguments:\n\nTestCase subclass: PerformLocallyTest\n\n  testRunsInCallerProcess =>\n    // Normal class method dispatch runs in the class object's gen_server process\n    classGenServerPid := LocalCallHelper callerPid\n    // performLocally: runs in the caller's (test) process\n    callerPid := LocalCallHelper performLocally: #callerPid withArguments: #()\n    testProcessPid := Erlang erlang self\n    // The locally-dispatched call should return the test process's PID\n    self assert: callerPid equals: testProcessPid\n    // The normal dispatch should return a different PID (the class gen_server)\n    self deny: (classGenServerPid == testProcessPid)\n\n  testUnaryClassMethod =>\n    // performLocally: works with zero-argument class methods\n    result := LocalCallHelper performLocally: #callerPid withArguments: #()\n    self assert: result notNil\n\n  testKeywordClassMethod =>\n    // performLocally: works with one-argument keyword methods\n    result := LocalCallHelper performLocally: #echo: withArguments: #(42)\n    self assert: result equals: 42\n\n  testMultiKeywordClassMethod =>\n    // performLocally: works with multi-keyword methods\n    result := LocalCallHelper performLocally: #add:to: withArguments: #(3, 7)\n    self assert: result equals: 10",
+      "explanation": "BT-1664: Tests for performLocally:withArguments:"
     },
     {
       "id": "stdlib-test-pid-test",
@@ -22784,6 +22830,27 @@
       ],
       "source": "// TaskWorker - actor in a subdirectory of a nested fixture directory.\n// Used by load_nested_directory.bt to regression-test that actors loaded\n// from subdirectories generate the correct BEAM module name so that\n// spawn/0 resolves correctly (bt@...@workers@task_worker, not bt@...@task_worker).\n\nActor subclass: TaskWorker\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\n  getCount => self.count",
       "explanation": "TaskWorker - actor in a subdirectory of a nested fixture directory. Used by load_nested_directory.bt to regression-test that actors loaded from subdirectories generate the correct BEAM module name so that spawn/0 resolves correctly (bt@...@workers@task_worker, not bt@...@task_worker)."
+    },
+    {
+      "id": "tests-e2e-fixtures-perform-locally-fixture",
+      "title": "LocalDispatchHelper",
+      "category": "e2e-fixtures",
+      "tags": [
+        "LocalDispatchHelper",
+        "Object",
+        "add:to:",
+        "callerPid",
+        "echo:",
+        "extends",
+        "greeting",
+        "inherit",
+        "inheritance",
+        "object",
+        "perform_locally_fixture",
+        "subclassing"
+      ],
+      "source": "// BT-1664: E2E fixture for performLocally:withArguments: tests\n\nObject subclass: LocalDispatchHelper\n\n  class callerPid => Erlang erlang self\n\n  class greeting => \"hello from local dispatch\"\n\n  class echo: value => value\n\n  class add: a to: b => a + b",
+      "explanation": "BT-1664: E2E fixture for performLocally:withArguments: tests"
     },
     {
       "id": "tests-e2e-fixtures-point",

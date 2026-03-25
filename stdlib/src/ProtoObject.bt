@@ -59,6 +59,23 @@ abstract nil subclass: ProtoObject
   perform: selector withArguments: arguments =>
     @primitive "perform:withArguments:"
 
+  /// Execute a class method in the caller's process, bypassing gen_server dispatch.
+  ///
+  /// The caller takes responsibility for knowing the method does not mutate
+  /// class state. Useful for long-running class methods that would otherwise
+  /// block the class object's gen_server.
+  ///
+  /// Limitations: only resolves methods defined directly on the target class
+  /// module (does not walk the superclass chain). Class variables and `self`
+  /// are not available to the method (`nil` and `#{}` are passed).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// MyClass performLocally: #run:ctx: withArguments: {input. ctx}
+  /// ```
+  performLocally: selector withArguments: arguments =>
+    @primitive "performLocally:withArguments:"
+
   /// Send a message dynamically with an arguments list and explicit timeout.
   ///
   /// The timeout (in milliseconds or `#infinity`) applies to the gen_server:call
