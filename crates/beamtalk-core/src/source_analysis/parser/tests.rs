@@ -5135,7 +5135,10 @@ fn class_method_before_field_declarations() {
     );
     // Verify the class method parsed correctly
     assert!(
-        class.class_methods.iter().any(|m| m.selector == MessageSelector::Unary("serial".into())),
+        class
+            .class_methods
+            .iter()
+            .any(|m| m.selector == MessageSelector::Unary("serial".into())),
         "Should find 'serial' class method"
     );
 }
