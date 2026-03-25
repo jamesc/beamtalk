@@ -5104,6 +5104,126 @@ fn class_members_fully_interleaved() {
 }
 
 #[test]
+fn class_method_before_field_declarations() {
+    // A class method (like `class serial`) before state:/field: declarations
+    // should parse correctly — the `class` modifier must not confuse boundary detection.
+    let module = parse_ok(
+        "Object subclass: Foo
+  class serial -> Boolean => true
+  field: x = 0
+  state: y = 1
+  doSomething => self.x + self.y",
+    );
+    let class = &module.classes[0];
+    assert_eq!(
+        class.class_methods.len(),
+        1,
+        "Should have 1 class method (serial), got {}",
+        class.class_methods.len()
+    );
+    assert_eq!(
+        class.methods.len(),
+        1,
+        "Should have 1 instance method (doSomething), got {}",
+        class.methods.len()
+    );
+    assert_eq!(
+        class.state.len(),
+        2,
+        "Should have 2 state fields (x, y), got {}",
+        class.state.len()
+    );
+    // Verify the class method parsed correctly
+    assert!(
+        class
+            .class_methods
+            .iter()
+            .any(|m| m.selector == MessageSelector::Unary("serial".into())),
+        "Should find 'serial' class method"
+    );
+}
+
+#[test]
+fn sealed_method_before_field_declarations() {
+    // `sealed` modifier before fields — boundary detection must skip the modifier.
+    let module = parse_ok(
+        "Object subclass: Foo
+  sealed helper => 42
+  field: x = 0
+  doSomething => self.x",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 2, "Should have 2 methods");
+    assert_eq!(class.state.len(), 1, "Should have 1 field");
+    assert!(class.methods.iter().any(|m| m.is_sealed));
+}
+
+#[test]
+fn sealed_class_method_before_field_declarations() {
+    // Both `sealed` and `class` modifiers before fields.
+    let module = parse_ok(
+        "Object subclass: Foo
+  sealed class create -> Foo => Foo new
+  field: x = 0
+  doSomething => self.x",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.class_methods.len(), 1, "Should have 1 class method");
+    assert_eq!(class.methods.len(), 1, "Should have 1 instance method");
+    assert_eq!(class.state.len(), 1, "Should have 1 field");
+    assert!(class.class_methods[0].is_sealed);
+}
+
+#[test]
+fn class_keyword_method_before_field_declarations() {
+    // Class method with keyword selector (multi-token) before fields.
+    let module = parse_ok(
+        "Object subclass: Foo
+  class withValue: v => Foo new
+  field: x = 0
+  doSomething => self.x",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.class_methods.len(), 1, "Should have 1 class method");
+    assert_eq!(class.methods.len(), 1, "Should have 1 instance method");
+    assert_eq!(class.state.len(), 1, "Should have 1 field");
+}
+
+#[test]
+fn class_method_before_classstate() {
+    // Class method before classState: declaration.
+    let module = parse_ok(
+        "Actor subclass: Foo
+  class serial -> Boolean => true
+  classState: count = 0
+  state: x = 0
+  doSomething => self.x",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.class_methods.len(), 1, "Should have 1 class method");
+    assert_eq!(class.methods.len(), 1, "Should have 1 instance method");
+    assert_eq!(class.class_variables.len(), 1, "Should have 1 classState");
+    assert_eq!(class.state.len(), 1, "Should have 1 state field");
+}
+
+#[test]
+fn multiple_class_methods_before_fields() {
+    // Multiple class methods interleaved with fields.
+    let module = parse_ok(
+        "Object subclass: Foo
+  class serial -> Boolean => true
+  class create -> Foo => Foo new
+  field: x = 0
+  state: y = 1
+  doSomething => self.x + self.y",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.class_methods.len(), 2, "Should have 2 class methods");
+    assert_eq!(class.methods.len(), 1, "Should have 1 instance method");
+    assert_eq!(class.state.len(), 2, "Should have 2 fields");
+}
+
+#[test]
 fn binary_segment_conflicting_signedness_specifiers_error() {
     // `/signed-unsigned` — two signedness specifiers: error on the second
     let diagnostics = parse_err(
