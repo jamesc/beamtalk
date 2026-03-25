@@ -396,12 +396,17 @@ decode_beam_error(Other) ->
 %% @doc Format a BEAM stacktrace for display in test failure messages.
 %%
 %% Filters out internal test runner and OTP frames; shows up to 3 user frames.
+%% Caller frames are shown first (most useful for jumping to the failing line),
+%% with assertion/library frames below.
 %% Returns an empty binary when no relevant frames exist.
 -spec format_stacktrace(list()) -> binary().
 format_stacktrace([]) ->
     <<>>;
 format_stacktrace(Frames) ->
-    Relevant = lists:sublist(filter_stackframes(Frames), 3),
+    %% BEAM stacktraces are most-recent-first. Reverse to caller-first, then
+    %% take up to 3 so the test method (outermost caller) is always included.
+    CallerFirst = lists:reverse(filter_stackframes(Frames)),
+    Relevant = lists:sublist(CallerFirst, 3),
     case Relevant of
         [] ->
             <<>>;
@@ -412,22 +417,59 @@ format_stacktrace(Frames) ->
 
 %% @doc Format a single stacktrace frame for display using Beamtalk names.
 %%
-%% Translates Erlang module names to Beamtalk class names where possible
-%% and strips absolute paths to just the filename.
+%% Translates Erlang module names to Beamtalk class names where possible.
+%% Stdlib frames show just the basename (the absolute path baked at compile time
+%% won't exist on the user's machine). User code frames show workspace-relative
+%% paths for terminal clickability.
 -spec format_stackframe({atom(), atom(), non_neg_integer() | [term()], list()}) -> iolist().
 format_stackframe({Mod, Fun, ArityOrArgs, Loc}) ->
     DisplayMod = format_module(Mod),
     DisplayFun = format_fun_name(Fun),
-    A = normalize_arity(ArityOrArgs),
+    %% arity not displayed — Beamtalk selectors encode it
+    _ = ArityOrArgs,
     File = proplists:get_value(file, Loc, ""),
     Line = proplists:get_value(line, Loc, 0),
     case {File, Line} of
         {"", 0} ->
-            io_lib:format("~s>>~s/~p", [DisplayMod, DisplayFun, A]);
+            io_lib:format("~s>>~s", [DisplayMod, DisplayFun]);
         _ ->
-            io_lib:format("~s>>~s/~p (~s:~p)", [
-                DisplayMod, DisplayFun, A, filename:basename(File), Line
+            DisplayFile = format_file_path(Mod, File),
+            io_lib:format("~s>>~s (~s:~p)", [
+                DisplayMod, DisplayFun, DisplayFile, Line
             ])
+    end.
+
+%% @doc Format a file path for display based on module origin.
+%%
+%% Stdlib modules (bt@stdlib@*) use basename only — the compile-time absolute
+%% path won't exist on the user's machine. User code paths are made relative
+%% to CWD for terminal clickability in VS Code.
+-spec format_file_path(atom(), string()) -> string().
+format_file_path(Mod, File) ->
+    ModStr = atom_to_list(Mod),
+    case lists:prefix("bt@stdlib@", ModStr) of
+        true ->
+            filename:basename(File);
+        false ->
+            make_relative(File)
+    end.
+
+%% @doc Make a file path relative to CWD if it's under it, otherwise basename.
+-spec make_relative(string()) -> string().
+make_relative(File) ->
+    case file:get_cwd() of
+        {ok, Cwd} ->
+            CwdComps = filename:split(Cwd),
+            FileComps = filename:split(File),
+            case lists:prefix(CwdComps, FileComps) of
+                true ->
+                    RelComps = lists:nthtail(length(CwdComps), FileComps),
+                    filename:join(RelComps);
+                false ->
+                    filename:basename(File)
+            end;
+        _ ->
+            filename:basename(File)
     end.
 
 %% @doc Translate an Erlang module name to a Beamtalk class name for display.
@@ -453,12 +495,6 @@ format_fun_name(Fun) ->
         _ ->
             FunStr
     end.
-
-%% @doc Normalize arity field: stacktrace frames may contain an argument list
-%% instead of an arity integer. Convert to integer for display.
--spec normalize_arity(non_neg_integer() | [term()]) -> non_neg_integer().
-normalize_arity(Args) when is_list(Args) -> length(Args);
-normalize_arity(Arity) when is_integer(Arity) -> Arity.
 
 %% @doc Filter stacktrace frames, removing internal test runner and OTP frames.
 -spec filter_stackframes(list()) -> list().
@@ -500,6 +536,51 @@ format_test_error(Class, Reason, Stacktrace) ->
     Msg = <<ClassBin/binary, ": ", ReasonBin/binary>>,
     ST = format_stacktrace(Stacktrace),
     <<Msg/binary, ST/binary>>.
+
+%% @doc Ensure the test method location appears in the failure message.
+%%
+%% When the BEAM stacktrace is truncated (default depth is 8), the test method
+%% frame can be lost. This function checks whether the test module appears in
+%% the filtered stacktrace; if not, it prepends a synthetic frame so the user
+%% always sees where the failing test is defined.
+-spec ensure_test_context(binary(), atom(), atom(), list()) -> binary().
+ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
+    %% Check the rendered frames (after filter + reverse + limit), not the full
+    %% stack. A helper from the same module doesn't count — we need the actual
+    %% test method frame to be visible.
+    Rendered = lists:sublist(lists:reverse(filter_stackframes(Stacktrace)), 3),
+    HasTestFrame = lists:any(
+        fun({Mod, Fun, _Arity, _Loc}) ->
+            Mod =:= Module andalso Fun =:= MethodName
+        end,
+        Rendered
+    ),
+    case HasTestFrame of
+        true ->
+            FailMsg;
+        false ->
+            ClassName = format_module(Module),
+            MethodStr = atom_to_list(MethodName),
+            Context = iolist_to_binary(
+                io_lib:format("\n  at ~s>>~s", [ClassName, MethodStr])
+            ),
+            inject_test_context(FailMsg, Context)
+    end.
+
+%% @doc Insert the test context line after the error message, before any stacktrace.
+%%
+%% If FailMsg already contains "\n  at " lines, the context is inserted
+%% before them (so it appears first). Otherwise it is appended.
+-spec inject_test_context(binary(), binary()) -> binary().
+inject_test_context(FailMsg, Context) ->
+    case binary:match(FailMsg, <<"\n  at ">>) of
+        {Pos, _Len} ->
+            Head = binary:part(FailMsg, 0, Pos),
+            Tail = binary:part(FailMsg, Pos, byte_size(FailMsg) - Pos),
+            <<Head/binary, Context/binary, Tail/binary>>;
+        nomatch ->
+            <<FailMsg/binary, Context/binary>>
+    end.
 
 %% @doc Extract the error kind from an exception.
 %%
@@ -658,22 +739,30 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                 %% skip: called via FFI — proxy wraps the throw, we detect bunit_skip error kind
                 error:#{error := #beamtalk_error{kind = bunit_skip, message = SkipReason}} ->
                     {skip, MethodName, SkipReason};
-                error:#beamtalk_error{kind = assertion_failed, message = AssertMsg} ->
-                    {fail, MethodName, AssertMsg};
-                error:#beamtalk_error{message = ErrMsg} ->
-                    {fail, MethodName, ErrMsg};
+                %% Bare #beamtalk_error{} clauses: normally errors are wrapped
+                %% by beamtalk_error:raise/1 and caught by the TestReason clause
+                %% below. These remain as a safety net for any path that raises
+                %% an unwrapped record directly.
+                error:#beamtalk_error{kind = assertion_failed, message = AssertMsg}:TestST0 ->
+                    ST0 = format_stacktrace(TestST0),
+                    FailMsg0 = <<AssertMsg/binary, ST0/binary>>,
+                    {fail, MethodName, ensure_test_context(FailMsg0, Module, MethodName, TestST0)};
+                error:#beamtalk_error{message = ErrMsg}:TestST1 ->
+                    ST1 = format_stacktrace(TestST1),
+                    FailMsg1 = <<ErrMsg/binary, ST1/binary>>,
+                    {fail, MethodName, ensure_test_context(FailMsg1, Module, MethodName, TestST1)};
                 error:undef:TestST ->
                     #{error := #beamtalk_error{message = FailMsg}} =
                         beamtalk_exception_handler:ensure_wrapped(
                             error, undef, TestST
                         ),
-                    {fail, MethodName, FailMsg};
+                    {fail, MethodName, ensure_test_context(FailMsg, Module, MethodName, TestST)};
                 error:TestReason:TestST ->
                     FailMsg = format_test_error(error, TestReason, TestST),
-                    {fail, MethodName, FailMsg};
+                    {fail, MethodName, ensure_test_context(FailMsg, Module, MethodName, TestST)};
                 TestClass:TestReason:TestST ->
                     FailMsg = format_test_error(TestClass, TestReason, TestST),
-                    {fail, MethodName, FailMsg}
+                    {fail, MethodName, ensure_test_context(FailMsg, Module, MethodName, TestST)}
             after
                 case HasTearDown of
                     true ->
