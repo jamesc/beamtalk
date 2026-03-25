@@ -9,15 +9,17 @@
 //   > HelloTest runAll
 
 TestCase subclass: HelloTest
+  class serial -> Boolean => true
 
   setUp =>
+    self.old_ts := TranscriptStream current
     self.ts := TranscriptStream spawn
     TranscriptStream current: self.ts
     self
 
   tearDown =>
+    TranscriptStream current: self.old_ts
     self.ts ifNotNil: [:t | t stop]
-    TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]
     self
 
   testGreeting =>

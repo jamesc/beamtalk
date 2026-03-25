@@ -13,6 +13,18 @@
 //   > HanoiTest runAll
 
 TestCase subclass: HanoiTest
+  class serial -> Boolean => true
+
+  setUp =>
+    self.old_ts := TranscriptStream current
+    self.ts := TranscriptStream spawn
+    TranscriptStream current: self.ts
+    self
+
+  tearDown =>
+    TranscriptStream current: self.old_ts
+    self.ts ifNotNil: [:t | t stop]
+    self
 
   testZeroDisksReturnsNil =>
     // Base case: no disks to move
