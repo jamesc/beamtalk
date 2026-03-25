@@ -1102,9 +1102,52 @@ impl Parser {
             self.error("Expected '->' after pattern in match arm");
         }
 
-        // Parse body expression — use keyword message level to avoid consuming
-        // semicolons (arm separators) or assignment operators
-        let body = self.parse_keyword_message();
+        // Parse body expression.  We use keyword-message level as the base
+        // because `parse_cascade` would consume `;` (the arm separator) as
+        // cascade syntax.  We add explicit support for `^` (non-local return)
+        // and `:=` (assignment) on top, since both are valid in arm bodies.
+        let body = if self.match_token(&TokenKind::Caret) {
+            // Build a Return node using keyword-message level for the value
+            // (not parse_return which goes through parse_assignment/cascade).
+            let start = self.tokens[self.current - 1].span();
+            let value = Box::new(self.parse_keyword_message());
+            let end = value.span();
+            Expression::Return {
+                value,
+                span: start.merge(end),
+            }
+        } else {
+            let expr = self.parse_keyword_message();
+            if self.match_token(&TokenKind::Assign) {
+                // Build assignment inline using keyword-message level for
+                // the RHS — parse_assign_rhs would go through parse_cascade
+                // which consumes `;` (arm separators).
+                if matches!(
+                    expr,
+                    Expression::Identifier(_) | Expression::FieldAccess { .. }
+                ) {
+                    let value = Box::new(self.parse_keyword_message());
+                    let span = expr.span().merge(value.span());
+                    Expression::Assignment {
+                        target: Box::new(expr),
+                        value,
+                        span,
+                    }
+                } else {
+                    let span = expr.span();
+                    self.diagnostics.push(Diagnostic::error(
+                        "Assignment target must be an identifier or field access",
+                        span,
+                    ));
+                    Expression::Error {
+                        message: "Invalid assignment target".into(),
+                        span,
+                    }
+                }
+            } else {
+                expr
+            }
+        };
         let span = pat_span.merge(body.span());
 
         let mut arm = if let Some(guard_expr) = guard {

@@ -183,7 +183,10 @@ fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
                     arm.guard
                         .as_ref()
                         .is_some_and(|g| expr_has_block_nlr(g, inside_block))
-                        || expr_has_block_nlr(&arm.body, inside_block)
+                        // Force `inside_block = true`: match arm bodies compile
+                        // to Core Erlang `case` arms, which (like block closures)
+                        // cannot return directly — `^` needs the NLR throw/catch.
+                        || expr_has_block_nlr(&arm.body, true)
                 })
         }
         Expression::MapLiteral { pairs, .. } => pairs.iter().any(|pair| {

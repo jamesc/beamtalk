@@ -3838,6 +3838,39 @@ fn codegen_empty_match_errors() {
     assert!(result.is_err(), "Empty match should fail codegen");
 }
 
+/// Non-local return (`^`) inside a match arm body should parse as `Return`.
+#[test]
+fn match_arm_with_non_local_return() {
+    let module = parse_ok("x match: [#ok -> ^42; _ -> nil]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("Expected Match expression");
+    };
+    assert!(
+        matches!(arms[0].body, Expression::Return { .. }),
+        "Expected Return in first arm body, got: {:?}",
+        arms[0].body
+    );
+}
+
+/// Assignment (`:=`) inside a match arm body should parse as `Assignment`.
+#[test]
+fn match_arm_with_assignment() {
+    let module = parse_ok("x match: [#ok -> result := 1; _ -> result := 2]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("Expected Match expression");
+    };
+    assert!(
+        matches!(arms[0].body, Expression::Assignment { .. }),
+        "Expected Assignment in first arm body, got: {:?}",
+        arms[0].body
+    );
+    assert!(
+        matches!(arms[1].body, Expression::Assignment { .. }),
+        "Expected Assignment in second arm body, got: {:?}",
+        arms[1].body
+    );
+}
+
 /// Regression test: unclosed map literal at EOF must not infinite-loop.
 ///
 /// The fuzzer discovered that `#{key` (no `=>`, no `}`) followed by EOF

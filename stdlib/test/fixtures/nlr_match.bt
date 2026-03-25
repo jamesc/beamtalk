@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// NlrMatch — non-local return inside match arm bodies
+
+Object subclass: NlrMatch
+
+  // ^ in a match arm should exit the method early
+  findStatus: status =>
+    status match: [
+      #completed -> ^"done";
+      #failed -> ^"error";
+      _ -> nil
+    ]
+    "fallthrough"
+
+  // Only some arms have ^, others fall through
+  classify: value =>
+    value match: [
+      #stop -> ^"stopped early";
+      _ -> nil
+    ]
+    "continued"
