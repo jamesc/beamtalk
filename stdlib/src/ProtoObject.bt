@@ -71,7 +71,7 @@ abstract nil subclass: ProtoObject
   ///
   /// ## Examples
   /// ```beamtalk
-  /// MyClass performLocally: #run:ctx: withArguments: {input. ctx}
+  /// MyClass performLocally: #run:ctx: withArguments: #(input, ctx)
   /// ```
   performLocally: selector withArguments: arguments =>
     @primitive "performLocally:withArguments:"

@@ -247,19 +247,25 @@ local_call(Receiver = #beamtalk_object{class_mod = Module}, Selector, Args) when
                     beamtalk_error:raise(Error)
             end;
         false ->
+            ClassName = Receiver#beamtalk_object.class,
             Error = beamtalk_error:new(
                 type_error,
+                ClassName,
                 'performLocally:withArguments:',
-                Selector,
                 <<"Receiver is not a class object">>
             ),
             beamtalk_error:raise(Error)
     end;
-local_call(_Receiver, Selector, _Args) ->
+local_call(Receiver, _Selector, _Args) ->
+    ClassName =
+        case Receiver of
+            #beamtalk_object{class = C} -> C;
+            _ -> erlang
+        end,
     Error = beamtalk_error:new(
         type_error,
+        ClassName,
         'performLocally:withArguments:',
-        Selector,
         <<"Receiver is not a class object">>
     ),
     beamtalk_error:raise(Error).
