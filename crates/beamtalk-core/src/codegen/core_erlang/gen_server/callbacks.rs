@@ -94,6 +94,13 @@ impl CoreErlangGenerator {
 
         let module_name = self.module_name.clone();
 
+        // BT-1642: Use the clean Beamtalk class name (e.g., "EventStore") for
+        // lifecycle telemetry metadata instead of the compiled Erlang module name
+        // (e.g., "bt@exdura@event_store"). This matches how dispatch traces
+        // report class names via lookup_class/1.
+        let class_name =
+            current_class.map_or_else(|| module_name.clone().into(), |c| c.name.name.clone());
+
         // BT-1417: Generate the init return — either plain {ok, State} or
         // dispatch initialize first, then return {ok, NewState} / {stop, Error}.
         // When has_initialize is true, we wrap the dispatch in a guard that
@@ -101,9 +108,9 @@ impl CoreErlangGenerator {
         // BT-1638: Lifecycle start telemetry is emitted here, guarded by
         // __skip_initialize__ so parent helper calls don't double-fire.
         let init_return = if has_initialize {
-            Self::init_initialize_guarded_doc(&module_name)
+            Self::init_initialize_guarded_doc(&class_name)
         } else {
-            Self::init_plain_return_doc(&module_name)
+            Self::init_plain_return_doc(&class_name)
         };
 
         if has_parent_init {
@@ -238,14 +245,16 @@ impl CoreErlangGenerator {
     ///
     /// Emits `[beamtalk, actor, lifecycle, start]` via `beamtalk_actor:maybe_execute_telemetry/3`.
     /// Uses a `let` binding for `self()` since Core Erlang map literals cannot contain calls.
-    fn lifecycle_start_telemetry_doc(module_name: &str) -> Document<'static> {
+    /// BT-1642: Takes the clean Beamtalk class name (e.g., `EventStore`), not the
+    /// compiled module name, so lifecycle traces match dispatch trace format.
+    fn lifecycle_start_telemetry_doc(class_name: &str) -> Document<'static> {
         docvec![
             "let _TelPid = call 'erlang':'self'() in",
             line(),
             docvec![
                 "let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(",
                 "['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => '",
-                Document::String(module_name.to_owned()),
+                Document::String(class_name.to_owned()),
                 "'}~) in",
             ],
         ]
@@ -257,7 +266,7 @@ impl CoreErlangGenerator {
     /// guarded by `__skip_initialize__` so parent helper calls don't double-fire.
     /// When called as a parent helper (flag is 'true'), skips telemetry and
     /// returns `{ok, State}` directly.
-    fn init_plain_return_doc(module_name: &str) -> Document<'static> {
+    fn init_plain_return_doc(class_name: &str) -> Document<'static> {
         docvec![
             // BT-1638: Guard telemetry behind __skip_initialize__ to avoid
             // double-fire when called as parent state-building helper
@@ -282,7 +291,7 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![
                             line(),
-                            Self::lifecycle_start_telemetry_doc(module_name),
+                            Self::lifecycle_start_telemetry_doc(class_name),
                             line(),
                             "{'ok', FinalState}",
                         ]
@@ -307,7 +316,7 @@ impl CoreErlangGenerator {
     /// no messages arrive before `handle_continue` runs.
     ///
     /// BT-1638: Also emits lifecycle start telemetry in the non-helper branch.
-    fn init_initialize_guarded_doc(module_name: &str) -> Document<'static> {
+    fn init_initialize_guarded_doc(class_name: &str) -> Document<'static> {
         docvec![
             "%% BT-1417/BT-1541: Defer initialize to handle_continue unless called as a parent helper",
             line(),
@@ -337,7 +346,7 @@ impl CoreErlangGenerator {
                             "let CleanState1 = call 'maps':'remove'('__skip_initialize__', FinalState) in",
                             line(),
                             // BT-1638: Emit lifecycle start telemetry before returning
-                            Self::lifecycle_start_telemetry_doc(module_name),
+                            Self::lifecycle_start_telemetry_doc(class_name),
                             line(),
                             // BT-1541: Return {ok, State, {continue, initialize}} to defer
                             // initialize dispatch to handle_continue where the loop is running
@@ -744,9 +753,19 @@ impl CoreErlangGenerator {
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_terminate(
         &mut self,
-        _module: &Module,
+        module: &Module,
     ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
+
+        // BT-1642: Use the clean Beamtalk class name for lifecycle telemetry
+        // metadata, matching how dispatch traces report class names.
+        let current_class = module.classes.iter().find(|c| {
+            use super::super::util::module_matches_class;
+            module_matches_class(&self.module_name, &c.name.name)
+        });
+        let class_name =
+            current_class.map_or_else(|| module_name.clone().into(), |c| c.name.name.clone());
+
         let doc = docvec![
             "'terminate'/2 = fun (Reason, State) ->",
             nest(
@@ -759,7 +778,7 @@ impl CoreErlangGenerator {
                     docvec![
                         "let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(",
                         "['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => '",
-                        Document::String(module_name.clone()),
+                        Document::String(class_name.to_string()),
                         "', 'reason' => Reason}~) in",
                     ],
                     line(),
