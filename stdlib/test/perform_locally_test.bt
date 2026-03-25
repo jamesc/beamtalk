@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1664: Tests for performLocally:withArguments:
+
+TestCase subclass: PerformLocallyTest
+
+  testRunsInCallerProcess =>
+    // Normal class method dispatch runs in the class object's gen_server process
+    classGenServerPid := LocalCallHelper callerPid
+    // performLocally: runs in the caller's (test) process
+    callerPid := LocalCallHelper performLocally: #callerPid withArguments: #()
+    testProcessPid := Erlang erlang self
+    // The locally-dispatched call should return the test process's PID
+    self assert: callerPid equals: testProcessPid
+    // The normal dispatch should return a different PID (the class gen_server)
+    self deny: (classGenServerPid == testProcessPid)
+
+  testUnaryClassMethod =>
+    // performLocally: works with zero-argument class methods
+    result := LocalCallHelper performLocally: #callerPid withArguments: #()
+    self assert: result notNil
+
+  testKeywordClassMethod =>
+    // performLocally: works with one-argument keyword methods
+    result := LocalCallHelper performLocally: #echo: withArguments: #(42)
+    self assert: result equals: 42
+
+  testMultiKeywordClassMethod =>
+    // performLocally: works with multi-keyword methods
+    result := LocalCallHelper performLocally: #add:to: withArguments: #(3, 7)
+    self assert: result equals: 10

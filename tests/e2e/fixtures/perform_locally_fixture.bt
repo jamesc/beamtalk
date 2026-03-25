@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1664: E2E fixture for performLocally:withArguments: tests
+
+Object subclass: LocalDispatchHelper
+
+  class callerPid => Erlang erlang self
+
+  class greeting => "hello from local dispatch"
+
+  class echo: value => value
+
+  class add: a to: b => a + b
