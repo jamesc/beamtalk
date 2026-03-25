@@ -403,13 +403,15 @@ decode_beam_error(Other) ->
 format_stacktrace([]) ->
     <<>>;
 format_stacktrace(Frames) ->
-    Relevant = lists:sublist(filter_stackframes(Frames), 3),
+    %% BEAM stacktraces are most-recent-first. Reverse to caller-first, then
+    %% take up to 3 so the test method (outermost caller) is always included.
+    CallerFirst = lists:reverse(filter_stackframes(Frames)),
+    Relevant = lists:sublist(CallerFirst, 3),
     case Relevant of
         [] ->
             <<>>;
         _ ->
-            %% Reverse so caller (test method) appears first, assertion impl last
-            Lines = [format_stackframe(F) || F <- lists:reverse(Relevant)],
+            Lines = [format_stackframe(F) || F <- Relevant],
             iolist_to_binary(["\n  at " | lists:join("\n  at ", Lines)])
     end.
 
@@ -457,10 +459,12 @@ format_file_path(Mod, File) ->
 make_relative(File) ->
     case file:get_cwd() of
         {ok, Cwd} ->
-            CwdSlash = Cwd ++ "/",
-            case lists:prefix(CwdSlash, File) of
+            CwdComps = filename:split(Cwd),
+            FileComps = filename:split(File),
+            case lists:prefix(CwdComps, FileComps) of
                 true ->
-                    lists:nthtail(length(CwdSlash), File);
+                    RelComps = lists:nthtail(length(CwdComps), FileComps),
+                    filename:join(RelComps);
                 false ->
                     filename:basename(File)
             end;
@@ -541,10 +545,15 @@ format_test_error(Class, Reason, Stacktrace) ->
 %% always sees where the failing test is defined.
 -spec ensure_test_context(binary(), atom(), atom(), list()) -> binary().
 ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
-    Filtered = filter_stackframes(Stacktrace),
+    %% Check the rendered frames (after filter + reverse + limit), not the full
+    %% stack. A helper from the same module doesn't count — we need the actual
+    %% test method frame to be visible.
+    Rendered = lists:sublist(lists:reverse(filter_stackframes(Stacktrace)), 3),
     HasTestFrame = lists:any(
-        fun({Mod, _Fun, _Arity, _Loc}) -> Mod =:= Module end,
-        Filtered
+        fun({Mod, Fun, _Arity, _Loc}) ->
+            Mod =:= Module andalso Fun =:= MethodName
+        end,
+        Rendered
     ),
     case HasTestFrame of
         true ->
