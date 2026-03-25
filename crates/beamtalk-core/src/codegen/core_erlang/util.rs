@@ -229,9 +229,14 @@ impl CoreErlangGenerator {
 
     /// Build the `beamtalk_source` Core Erlang attribute fragment (BT-845/BT-860).
     ///
-    /// Returns `, 'beamtalk_source' = ["<path>"]` when `source_path` is set,
-    /// or `Document::Nil` for stdlib and ClassBuilder-created classes.
+    /// Returns `, 'beamtalk_source' = ["<path>"]` when `source_path` is set
+    /// and NOT in stdlib mode. Stdlib classes return nil from `sourceFile` at
+    /// runtime, but still use `source_path` for line annotations and the
+    /// `'file'` attribute (BEAM stacktrace debug info).
     pub(super) fn source_path_attr(&self) -> Document<'static> {
+        if self.stdlib_mode() {
+            return Document::Nil;
+        }
         match &self.source_path {
             Some(path) => {
                 let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");

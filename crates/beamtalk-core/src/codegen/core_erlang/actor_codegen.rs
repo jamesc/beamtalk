@@ -502,7 +502,7 @@ impl CoreErlangGenerator {
                 nest(INDENT, docvec![line(), method_body_doc,]),
             ];
             let fun_doc = if let Some(line_num) = self.span_to_line(method.span) {
-                Self::annotate_with_line(fun_doc, line_num)
+                self.annotate_with_line(fun_doc, line_num)
             } else {
                 fun_doc
             };

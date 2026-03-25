@@ -28,7 +28,8 @@
 -export([
     wrap/1,
     dispatch/3,
-    has_method/1
+    has_method/1,
+    module_to_class/1
 ]).
 
 %% @doc Convert an Erlang stacktrace (list of tuples) to a list of StackFrame objects.
