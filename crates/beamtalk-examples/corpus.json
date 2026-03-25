@@ -7682,10 +7682,13 @@
         "TestCase",
         "assign",
         "assignment",
+        "branch",
+        "conditional",
         "constructor",
         "create",
         "extends",
         "hello_test",
+        "if",
         "inherit",
         "inheritance",
         "instantiate",
@@ -7700,7 +7703,7 @@
         "testGreeting",
         "testTwoInstancesHaveSameGreeting"
       ],
-      "source": "// BUnit tests for the Hello value type.\n//\n// Run in the REPL:\n//   > :load src/hello.bt\n//   > :load test/hello_test.bt\n//   > HelloTest runAll\n\nTestCase subclass: HelloTest\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    TranscriptStream current ifNotNil: [:t | t stop]\n    TranscriptStream resetCurrent\n    self\n\n  testGreeting =>\n    // greeting outputs \"Hello, World!\" via showCr: and returns self\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testTwoInstancesHaveSameGreeting =>\n    // Both instances output the same text\n    Hello new greeting\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testClassIsHello =>\n    // Hello is a value type — class name is the symbol #Hello\n    self assert: Hello new class name equals: #Hello",
+      "source": "// BUnit tests for the Hello value type.\n//\n// Run in the REPL:\n//   > :load src/hello.bt\n//   > :load test/hello_test.bt\n//   > HelloTest runAll\n\nTestCase subclass: HelloTest\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    self.ts ifNotNil: [:t | t stop]\n    TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]\n    self\n\n  testGreeting =>\n    // greeting outputs \"Hello, World!\" via showCr: and returns self\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testTwoInstancesHaveSameGreeting =>\n    // Both instances output the same text\n    Hello new greeting\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testClassIsHello =>\n    // Hello is a value type — class name is the symbol #Hello\n    self assert: Hello new class name equals: #Hello",
       "explanation": "BUnit tests for the Hello value type.  Run in the REPL:   > :load src/hello.bt   > :load test/hello_test.bt   > HelloTest runAll"
     },
     {
@@ -7713,12 +7716,15 @@
         "assign",
         "assignment",
         "async",
+        "branch",
         "concurrent",
+        "conditional",
         "constructor",
         "create",
         "extends",
         "gen_server",
         "genserver",
+        "if",
         "inherit",
         "inheritance",
         "instantiate",
@@ -7739,7 +7745,7 @@
         "testIndependentInstances",
         "testInitialValueIsZero"
       ],
-      "source": "// BUnit tests for the LoggingCounter actor\n//\n// Requires counter.bt loaded first (LoggingCounter extends Counter)\n//\n// Run in the REPL:\n//   > :load src/counter.bt\n//   > :load src/logging_counter.bt\n//   > :load test/logging_counter_test.bt\n//   > LoggingCounterTest runAll\n\nTestCase subclass: LoggingCounterTest\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    TranscriptStream current ifNotNil: [:t | t stop]\n    TranscriptStream resetCurrent\n    self\n\n  testInitialValueIsZero =>\n    // Inherits Counter's initial state\n    self assert: LoggingCounter spawn getValue equals: 0\n\n  testIncrementDelegatesToSuper =>\n    // LoggingCounter#increment logs then delegates to super — returns new value\n    self assert: LoggingCounter spawn increment equals: 1\n    self assert: (self.ts recent includes: \"increment called\")\n\n  testIncrementLogs =>\n    // Each increment call produces a log message\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: (self.ts recent includes: \"increment called\")\n\n  testDecrementIsInherited =>\n    // decrement is inherited from Counter unchanged\n    self assert: LoggingCounter spawn decrement equals: -1\n\n  testGetValueIsInherited =>\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: lc getValue equals: 2\n\n  testIncrementAndDecrementInteraction =>\n    lc := LoggingCounter spawn\n    lc increment; increment; increment; decrement\n    self assert: lc getValue equals: 2\n\n  testIndependentInstances =>\n    // Each spawned actor has independent state\n    lc1 := LoggingCounter spawn\n    lc2 := LoggingCounter spawn\n    lc1 increment\n    lc1 increment\n    lc2 increment\n    self assert: lc1 getValue equals: 2\n    self assert: lc2 getValue equals: 1",
+      "source": "// BUnit tests for the LoggingCounter actor\n//\n// Requires counter.bt loaded first (LoggingCounter extends Counter)\n//\n// Run in the REPL:\n//   > :load src/counter.bt\n//   > :load src/logging_counter.bt\n//   > :load test/logging_counter_test.bt\n//   > LoggingCounterTest runAll\n\nTestCase subclass: LoggingCounterTest\n\n  setUp =>\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    self.ts ifNotNil: [:t | t stop]\n    TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]\n    self\n\n  testInitialValueIsZero =>\n    // Inherits Counter's initial state\n    self assert: LoggingCounter spawn getValue equals: 0\n\n  testIncrementDelegatesToSuper =>\n    // LoggingCounter#increment logs then delegates to super — returns new value\n    self assert: LoggingCounter spawn increment equals: 1\n    self assert: (self.ts recent includes: \"increment called\")\n\n  testIncrementLogs =>\n    // Each increment call produces a log message\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: (self.ts recent includes: \"increment called\")\n\n  testDecrementIsInherited =>\n    // decrement is inherited from Counter unchanged\n    self assert: LoggingCounter spawn decrement equals: -1\n\n  testGetValueIsInherited =>\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: lc getValue equals: 2\n\n  testIncrementAndDecrementInteraction =>\n    lc := LoggingCounter spawn\n    lc increment; increment; increment; decrement\n    self assert: lc getValue equals: 2\n\n  testIndependentInstances =>\n    // Each spawned actor has independent state\n    lc1 := LoggingCounter spawn\n    lc2 := LoggingCounter spawn\n    lc1 increment\n    lc1 increment\n    lc2 increment\n    self assert: lc1 getValue equals: 2\n    self assert: lc2 getValue equals: 1",
       "explanation": "BUnit tests for the LoggingCounter actor  Requires counter.bt loaded first (LoggingCounter extends Counter)  Run in the REPL:   > :load src/counter.bt   > :load src/logging_counter.bt   > :load test/logging_counter_test.bt   > LoggingCounterTest runAll"
     },
     {
