@@ -410,17 +410,48 @@ format_stacktrace(Frames) ->
             iolist_to_binary(["\n  at " | lists:join("\n  at ", Lines)])
     end.
 
-%% @doc Format a single stacktrace frame for display.
+%% @doc Format a single stacktrace frame for display using Beamtalk names.
+%%
+%% Translates Erlang module names to Beamtalk class names where possible
+%% and strips absolute paths to just the filename.
 -spec format_stackframe({atom(), atom(), non_neg_integer() | [term()], list()}) -> iolist().
-format_stackframe({Mod, Fun, ArityOrArgs, []}) ->
-    io_lib:format("~p:~p/~p", [Mod, Fun, normalize_arity(ArityOrArgs)]);
 format_stackframe({Mod, Fun, ArityOrArgs, Loc}) ->
+    DisplayMod = format_module(Mod),
+    DisplayFun = format_fun_name(Fun),
     A = normalize_arity(ArityOrArgs),
     File = proplists:get_value(file, Loc, ""),
     Line = proplists:get_value(line, Loc, 0),
     case {File, Line} of
-        {"", 0} -> io_lib:format("~p:~p/~p", [Mod, Fun, A]);
-        _ -> io_lib:format("~p:~p/~p (~s:~p)", [Mod, Fun, A, File, Line])
+        {"", 0} ->
+            io_lib:format("~s>>~s/~p", [DisplayMod, DisplayFun, A]);
+        _ ->
+            io_lib:format("~s>>~s/~p (~s:~p)", [
+                DisplayMod, DisplayFun, A, filename:basename(File), Line
+            ])
+    end.
+
+%% @doc Translate an Erlang module name to a Beamtalk class name for display.
+-spec format_module(atom()) -> string().
+format_module(Mod) ->
+    case beamtalk_stack_frame:module_to_class(Mod) of
+        nil -> atom_to_list(Mod);
+        ClassName -> atom_to_list(ClassName)
+    end.
+
+%% @doc Clean up Erlang function names for display.
+%%
+%% Strips anonymous fun wrappers (e.g., '-sync_send/3-fun-1-' → 'sync_send')
+%% and returns the base function name as a string.
+-spec format_fun_name(atom()) -> string().
+format_fun_name(Fun) ->
+    FunStr = atom_to_list(Fun),
+    case FunStr of
+        [$- | Rest] ->
+            %% Anonymous fun: '-base_name/N-fun-M-' → base_name
+            [BaseName | _] = string:split(Rest, "/"),
+            BaseName;
+        _ ->
+            FunStr
     end.
 
 %% @doc Normalize arity field: stacktrace frames may contain an argument list
@@ -435,13 +466,12 @@ filter_stackframes(Frames) ->
     lists:filter(
         fun
             ({Mod, _Fun, _Arity, _Loc}) ->
+                %% Only show Beamtalk user and stdlib code frames (bt@* modules).
+                %% Internal runtime, OTP, and test infrastructure frames are noise —
+                %% the error message from #beamtalk_error{} already carries the
+                %% class, selector, and details.
                 ModStr = atom_to_list(Mod),
-                not lists:prefix("beamtalk_test", ModStr) andalso
-                    not lists:prefix("beamtalk_object", ModStr) andalso
-                    not lists:prefix("beamtalk_class", ModStr) andalso
-                    not lists:prefix("erlang", ModStr) andalso
-                    Mod =/= gen_server andalso
-                    Mod =/= proc_lib;
+                lists:prefix("bt@", ModStr);
             (_) ->
                 false
         end,

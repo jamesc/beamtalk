@@ -1241,7 +1241,7 @@ impl CoreErlangGenerator {
             docvec![format!("fun ({}) ->\n", params.join(", ")), body_doc]
         };
         let fun_doc = if let Some(line_num) = line_annotation {
-            Self::annotate_with_line(fun_doc, line_num)
+            self.annotate_with_line(fun_doc, line_num)
         } else {
             fun_doc
         };

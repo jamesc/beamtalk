@@ -28,7 +28,8 @@
 -export([
     wrap/1,
     dispatch/3,
-    has_method/1
+    has_method/1,
+    module_to_class/1
 ]).
 
 %% @doc Convert an Erlang stacktrace (list of tuples) to a list of StackFrame objects.
@@ -90,10 +91,11 @@ wrap_frame(_Other) ->
 module_to_class(Module) when is_atom(Module) ->
     ModStr = atom_to_list(Module),
     case ModStr of
-        "bt@stdlib@" ++ Rest ->
-            snake_to_class(Rest);
         "bt@" ++ Rest ->
-            snake_to_class(Rest);
+            %% bt@stdlib@integer, bt@exdura@workflow_engine, bt@counter
+            %% Take the segment after the last '@' for the class name.
+            Parts = string:split(Rest, "@", all),
+            snake_to_class(lists:last(Parts));
         "beamtalk_" ++ Rest ->
             %% Runtime primitive modules like beamtalk_integer, beamtalk_string
             snake_to_class(Rest);

@@ -850,21 +850,16 @@ pub(crate) fn compile_source_with_bindings(
 
     // Generate Core Erlang (with source text for CompiledMethod introspection BT-101, and bindings BT-295)
     // BT-374: Pass workspace_mode for workspace binding dispatch
-    // BT-845/BT-860: Embed beamtalk_source attribute only for non-stdlib user files.
-    // Stdlib classes have no user-supplied source path — they return nil from sourceFile.
-    let embed_source_path = if options.stdlib_mode {
-        None
-    } else {
-        // BT-845: Use an absolute path so reload works regardless of the
-        // working directory at reload time.
-        Some(
-            std::fs::canonicalize(source_path)
-                .ok()
-                .and_then(|p| p.into_os_string().into_string().ok())
-                .unwrap_or_else(|| source_path.as_str().to_string()),
-        )
-    };
-    let embed_source_path = embed_source_path.as_deref();
+    // BT-845: Use an absolute path so reload works regardless of the
+    // working directory at reload time. Always pass the source path so that
+    // line annotations and the 'file' attribute populate BEAM stacktraces
+    // (even for stdlib). The `beamtalk_source` attribute is suppressed for
+    // stdlib mode in codegen (source_path_attr checks stdlib_mode).
+    let embed_source_path = std::fs::canonicalize(source_path)
+        .ok()
+        .and_then(|p| p.into_os_string().into_string().ok())
+        .unwrap_or_else(|| source_path.as_str().to_string());
+    let embed_source_path = Some(embed_source_path.as_str());
     write_core_erlang_with_bindings(
         &module,
         module_name,

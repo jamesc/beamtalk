@@ -1619,16 +1619,42 @@ impl CoreErlangGenerator {
 
     /// BT-940: Wraps a Document with a Core Erlang line annotation.
     ///
-    /// Produces `( Doc -| [{'line', N}] )` which `erlc` preserves into BEAM
-    /// `debug_info`. The BEAM VM surfaces this as `{line, N}` in stacktraces.
-    pub(super) fn annotate_with_line(doc: Document<'static>, line_num: u32) -> Document<'static> {
-        docvec![
-            "( ",
-            doc,
-            " -| [{'line', ",
-            Document::String(line_num.to_string()),
-            "}] )"
-        ]
+    /// Produces `( Doc -| [{Line, 1}, {'file', "path.bt"}] )` which the BEAM compiler
+    /// preserves into the Line chunk. The VM surfaces this as
+    /// `[{file, "path.bt"}, {line, N}]` in stacktrace frames.
+    ///
+    /// The annotation format must match what Erlang's own compiler produces
+    /// (`{Line, Column}` tuple + `{file, Path}`) — the `{'line', N}` format
+    /// is not propagated into the BEAM line table.
+    pub(super) fn annotate_with_line(
+        &self,
+        doc: Document<'static>,
+        line_num: u32,
+    ) -> Document<'static> {
+        match &self.source_path {
+            Some(path) => {
+                let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+                docvec![
+                    "( ",
+                    doc,
+                    " -| [{",
+                    Document::String(line_num.to_string()),
+                    ", 1}, {'file', \"",
+                    Document::String(escaped),
+                    "\"}] )"
+                ]
+            }
+            None => {
+                // No source path — use bare line number annotation
+                docvec![
+                    "( ",
+                    doc,
+                    " -| [",
+                    Document::String(line_num.to_string()),
+                    "] )"
+                ]
+            }
+        }
     }
 
     /// BT-153/BT-245/BT-598: Check if mutation threading should be used for a block.
@@ -2202,7 +2228,7 @@ impl CoreErlangGenerator {
                     && self.direct_params_list_op_result.is_none()
                 {
                     if let Some(line_num) = self.span_to_line(*span) {
-                        return Ok(Self::annotate_with_line(doc, line_num));
+                        return Ok(self.annotate_with_line(doc, line_num));
                     }
                 }
                 Ok(doc)
