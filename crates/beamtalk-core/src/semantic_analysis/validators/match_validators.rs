@@ -165,7 +165,13 @@ fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagno
                         )),
                     );
                 }
-                Expression::FieldAccess { field, .. } => {
+                Expression::FieldAccess {
+                    receiver, field, ..
+                } if matches!(
+                    receiver.as_ref(),
+                    Expression::Identifier(r) if r.name == "self"
+                ) =>
+                {
                     diagnostics.push(
                         Diagnostic::warning(
                             format!(
