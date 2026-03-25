@@ -16,8 +16,8 @@ TestCase subclass: HelloTest
     self
 
   tearDown =>
-    TranscriptStream current ifNotNil: [:t | t stop]
-    TranscriptStream resetCurrent
+    self.ts ifNotNil: [:t | t stop]
+    TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]
     self
 
   testGreeting =>
