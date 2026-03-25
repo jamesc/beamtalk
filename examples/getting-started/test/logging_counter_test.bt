@@ -20,7 +20,7 @@ TestCase subclass: LoggingCounterTest
 
   tearDown =>
     self.ts ifNotNil: [:t | t stop]
-    TranscriptStream resetCurrent
+    TranscriptStream current == self.ts ifTrue: [TranscriptStream resetCurrent]
     self
 
   testInitialValueIsZero =>
