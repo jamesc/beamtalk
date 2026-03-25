@@ -3,10 +3,10 @@
 
 /// A simple greeting value type — canonical formatter fixture.
 ///
-/// Demonstrates: value class with doc comment, state declaration,
+/// Demonstrates: value class with doc comment, field declaration,
 /// and short single-expression methods.
 Value subclass: Greeter
-  state: name = "World"
+  field: name = "World"
 
   /// Returns a personalised greeting string.
   greet => "Hello, " ++ self.name ++ "!"

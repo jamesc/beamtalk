@@ -4,7 +4,7 @@
 /// A class demonstrating comment attachment — canonical formatter fixture.
 ///
 /// Demonstrates: leading line comments on methods and doc comments on methods.
-Object subclass: CommentedMethods
+Actor subclass: CommentedMethods
   state: value = 0
 
   // A plain leading comment describes this method.
