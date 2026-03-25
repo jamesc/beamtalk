@@ -405,6 +405,10 @@ fn analyse_full(
     // BT-1299: Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
     validators::check_match_exhaustiveness(module, &mut result.diagnostics);
 
+    // Warn on local variable assignments inside match arm bodies (footgun — the
+    // assignment has no effect because Core Erlang case arms don't leak bindings).
+    validators::warn_assignment_in_match_arms(module, &mut result.diagnostics);
+
     // BT-951/BT-979: Lint on effect-free statements (suppressed during normal compile).
     // Module-level expressions are checked by default; set skip_module_expression_lint
     // to opt out (bootstrap-test compilation uses this).

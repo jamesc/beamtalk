@@ -30,7 +30,7 @@ pub(crate) use lint_validators::{
     check_effect_free_statements, check_empty_method_bodies, check_literal_boolean_condition,
     check_redundant_assignment,
 };
-pub(crate) use match_validators::check_match_exhaustiveness;
+pub(crate) use match_validators::{check_match_exhaustiveness, warn_assignment_in_match_arms};
 pub(crate) use native_validators::{check_native_delegate_return_type, check_native_state_fields};
 pub(crate) use supervision_validators::{
     check_children_supervision_policy, check_supervision_policy_override,
