@@ -141,3 +141,31 @@ sealed Class subclass: Metaclass
   /// ```
   sealed classIncludesSelector: selector -> Boolean =>
     @primitive "metaclassIncludesSelector"
+
+  // --- Package reflection (ADR 0070 Phase 5) ---
+
+  /// Return the name of the package that owns the described class.
+  ///
+  /// Extracts the package name from the class registry or .app metadata.
+  /// Returns nil if the class has no package association.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Integer class packageName   // => "stdlib"
+  /// ```
+  sealed packageName -> String | Nil =>
+    (Erlang beamtalk_package) packageNameFor: self thisClass name
+
+  /// Return a Dictionary of package info for the package that owns the described class.
+  ///
+  /// Returns a Dictionary with keys: #name, #version, #classes, #dependencies, #source.
+  /// Returns nil if the class has no package association.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Integer class package   // => _
+  /// ```
+  sealed package -> Dictionary | Nil =>
+    name := self packageName
+    name isNil ifTrue: [^nil]
+    Package named: name

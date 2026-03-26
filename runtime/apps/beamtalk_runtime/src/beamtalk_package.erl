@@ -29,7 +29,9 @@
     named/1,
     package_name/1,
     classes/1,
-    dependencies/1
+    dependencies/1,
+    %% Beamtalk FFI shim: `Package packageNameFor: #ClassName`
+    packageNameFor/1
 ]).
 
 %%% ============================================================================
@@ -160,6 +162,13 @@ dependencies(Name) when is_binary(Name) ->
         error ->
             []
     end.
+
+%% @doc Beamtalk FFI shim for `Package packageNameFor: #ClassName`.
+%%
+%% Delegates to `package_name/1`. The Beamtalk FFI maps `packageNameFor:`
+%% to `packageNameFor/1`.
+-spec packageNameFor(atom()) -> binary() | nil.
+packageNameFor(ClassName) -> package_name(ClassName).
 
 %%% ============================================================================
 %%% Internal Helpers

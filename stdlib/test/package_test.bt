@@ -1,0 +1,70 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests the Package class — all, named:, classes:, dependencies:, packageNameFor:
+// and Metaclass packageName/package methods (ADR 0070 Phase 5)
+
+TestCase subclass: PackageTest
+
+  testAll =>
+    // Package all returns a collection of package name strings
+    pkgs := Package all
+    // The stdlib package is always present
+    self assert: (pkgs includes: "stdlib")
+
+  testNamedStdlib =>
+    // Package named: returns a Dictionary with package info
+    info := Package named: "stdlib"
+    self assert: (info class =:= Dictionary)
+    // Contains required keys
+    self assert: (info at: #name) equals: "stdlib"
+    // version is a non-empty string
+    self assert: ((info at: #version) class =:= String)
+    self assert: ((info at: #version) size > 0)
+    // classes is a non-empty collection of atoms
+    classes := info at: #classes
+    self assert: (classes includes: #Object)
+
+  testNamedNotFound =>
+    // Package named: with unknown name raises a runtime_error (via Erlang FFI)
+    self should: [
+      Package named: "nonexistent_package_xyz_99"
+    ] raise: #runtime_error
+
+  testClassesStdlib =>
+    // Package classes: returns the class names in the package
+    classes := Package classes: "stdlib"
+    self assert: (classes includes: #Object)
+    self assert: (classes includes: #Integer)
+    self assert: (classes includes: #String)
+
+  testClassesUnknown =>
+    // Package classes: with unknown package returns empty collection
+    classes := Package classes: "nonexistent_package_xyz_99"
+    self assert: (classes isEmpty)
+
+  testDependenciesStdlib =>
+    // Package dependencies: returns dependency package names as a collection
+    deps := Package dependencies: "stdlib"
+    self deny: deps isNil
+
+  testPackageNameFor =>
+    // Package packageNameFor: returns the package name for a known class
+    name := Package packageNameFor: #Object
+    self assert: name equals: "stdlib"
+
+  testPackageNameForUnknown =>
+    // Package packageNameFor: returns nil for an unknown class
+    name := Package packageNameFor: #NonexistentClassXYZ99
+    self assert: name equals: nil
+
+  testMetaclassPackageName =>
+    // Metaclass packageName returns the package name string
+    name := Integer class packageName
+    self assert: name equals: "stdlib"
+
+  testMetaclassPackage =>
+    // Metaclass package returns a Dictionary of package info
+    pkg := Integer class package
+    self assert: (pkg class =:= Dictionary)
+    self assert: (pkg at: #name) equals: "stdlib"
