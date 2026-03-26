@@ -337,7 +337,9 @@ resolve_package_module_src_match_test() ->
     ProjectRoot = filename:join(Cwd, "myproject"),
     AbsPath = filename:join([ProjectRoot, "src", "Counter.bt"]),
     OrigPath = filename:join([ProjectRoot, "src", "Counter.bt"]),
-    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"mypkg">>, OrigPath),
+    Result = beamtalk_repl_loader:resolve_package_module(
+        AbsPath, ProjectRoot, <<"mypkg">>, OrigPath
+    ),
     ?assertEqual(<<"bt@mypkg@counter">>, Result).
 
 resolve_package_module_test_match_test() ->
@@ -345,7 +347,9 @@ resolve_package_module_test_match_test() ->
     ProjectRoot = filename:join(Cwd, "myproject"),
     AbsPath = filename:join([ProjectRoot, "test", "CounterTest.bt"]),
     OrigPath = AbsPath,
-    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"mypkg">>, OrigPath),
+    Result = beamtalk_repl_loader:resolve_package_module(
+        AbsPath, ProjectRoot, <<"mypkg">>, OrigPath
+    ),
     ?assertEqual(<<"bt@mypkg@test@counter_test">>, Result).
 
 resolve_package_module_no_match_test() ->
