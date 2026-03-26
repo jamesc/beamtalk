@@ -10,9 +10,11 @@
 //! these passes coordinate cross-file concerns like extension method indexing
 //! and conflict detection.
 
+pub mod dependency;
 pub mod extension_conflicts;
 pub mod extension_index;
 
+pub use dependency::{DependencyMap, DependencySource, DependencySpec, GitReference};
 pub use extension_conflicts::{
     ExtensionConflict, conflict_diagnostics, detect_extension_conflicts, shadowing_diagnostics,
 };
