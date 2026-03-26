@@ -206,6 +206,7 @@ mod tests {
     ) -> StandaloneMethodDefinition {
         StandaloneMethodDefinition {
             class_name: Identifier::new(class_name, span),
+            package: None,
             is_class_method,
             method: MethodDefinition::new(
                 MessageSelector::Unary(selector.into()),

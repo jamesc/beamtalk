@@ -22,6 +22,7 @@ Module {
                     },
                 },
             ),
+            superclass_package: None,
             class_kind: Actor,
             is_abstract: false,
             is_sealed: false,

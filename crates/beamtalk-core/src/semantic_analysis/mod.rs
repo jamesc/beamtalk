@@ -203,7 +203,7 @@ pub enum MutationKind {
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
 pub fn analyse(module: &Module) -> AnalysisResult {
-    analyse_full(module, &[], false, false, vec![])
+    analyse_full(module, &[], false, false, vec![], None)
 }
 
 /// Analyse a module with pre-defined variables (for REPL context).
@@ -217,7 +217,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// services. Pre-defining known variables is essential for REPL contexts where
 /// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
-    analyse_full(module, known_vars, false, false, vec![])
+    analyse_full(module, known_vars, false, false, vec![], None)
 }
 
 /// Analyse a module with compiler options controlling stdlib-specific behaviour.
@@ -231,6 +231,7 @@ pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -
         options.stdlib_mode,
         options.skip_module_expression_lint,
         vec![],
+        None,
     )
 }
 
@@ -250,6 +251,7 @@ pub fn analyse_with_options_and_classes(
         options.stdlib_mode,
         options.skip_module_expression_lint,
         pre_loaded_classes,
+        None,
     )
 }
 
@@ -263,7 +265,29 @@ pub fn analyse_with_known_vars_and_classes(
     known_vars: &[&str],
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
 ) -> AnalysisResult {
-    analyse_full(module, known_vars, false, false, pre_loaded_classes)
+    analyse_full(module, known_vars, false, false, pre_loaded_classes, None)
+}
+
+/// Analyse a module with known package dependencies (ADR 0070 Phase 2).
+///
+/// Package qualifiers in class references and extension targets are validated
+/// against the provided set of known package names. Unknown package qualifiers
+/// produce compile errors.
+#[allow(clippy::implicit_hasher)] // concrete HashSet is simpler for callers
+pub fn analyse_with_packages(
+    module: &Module,
+    options: &crate::CompilerOptions,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    known_packages: std::collections::HashSet<String>,
+) -> AnalysisResult {
+    analyse_full(
+        module,
+        &[],
+        options.stdlib_mode,
+        options.skip_module_expression_lint,
+        pre_loaded_classes,
+        Some(known_packages),
+    )
 }
 
 /// Internal: full analysis with all knobs.
@@ -273,6 +297,7 @@ fn analyse_full(
     stdlib_mode: bool,
     skip_module_expression_lint: bool,
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    known_packages: Option<std::collections::HashSet<String>>,
 ) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
@@ -421,6 +446,11 @@ fn analyse_full(
     // Phase 6: Module-level validation (BT-349, BT-1666)
     let module_diags = module_validator::validate_single_definition(module);
     result.diagnostics.extend(module_diags);
+
+    // Phase 7: Package qualifier validation (ADR 0070 Phase 2)
+    if let Some(packages) = known_packages {
+        validators::check_package_qualifiers(module, &packages, &mut result.diagnostics);
+    }
 
     result
 }
@@ -1171,6 +1201,7 @@ mod tests {
         let class_def = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -1546,6 +1577,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -1616,6 +1648,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("MyInt", test_span()),
             superclass: Some(Identifier::new("Integer", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -1896,6 +1929,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Shape", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: true,
             is_sealed: false,
@@ -1993,6 +2027,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2062,6 +2097,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2143,6 +2179,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2202,6 +2239,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2259,6 +2297,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2320,6 +2359,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: crate::ast::ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2379,6 +2419,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             is_abstract: false,
             class_kind: crate::ast::ClassKind::Actor,
             is_sealed: false,
@@ -2442,6 +2483,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Array", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -2508,6 +2550,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Actor", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -2572,6 +2615,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2635,6 +2679,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2695,6 +2740,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2756,6 +2802,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2822,6 +2869,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2894,6 +2942,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -2966,6 +3015,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3031,6 +3081,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3083,6 +3134,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3161,6 +3213,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -3265,6 +3318,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3340,6 +3394,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3413,6 +3468,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3571,6 +3627,7 @@ mod tests {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: true,
             is_sealed: false,
@@ -3696,6 +3753,7 @@ mod tests {
 
         let standalone = StandaloneMethodDefinition {
             class_name: Identifier::new("Foo", test_span()),
+            package: None,
             is_class_method: false,
             method: MethodDefinition {
                 selector: MessageSelector::Unary("build".into()),
@@ -3745,6 +3803,7 @@ mod tests {
         let counter = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -3777,6 +3836,7 @@ mod tests {
 
         let standalone = StandaloneMethodDefinition {
             class_name: Identifier::new("Foo", test_span()),
+            package: None,
             is_class_method: false,
             method: MethodDefinition {
                 selector: MessageSelector::Unary("build".into()),

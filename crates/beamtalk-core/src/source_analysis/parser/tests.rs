@@ -6284,3 +6284,83 @@ fn parse_qualified_lowercase_after_at_is_error() {
         "expected error for lowercase class name after @"
     );
 }
+
+// ========================================================================
+// Package-qualified standalone method definitions (ADR 0070 Phase 2, BT-1651)
+// ========================================================================
+
+#[test]
+fn parse_qualified_standalone_method_definition() {
+    // `json@Parser >> lenient => 42` — cross-package extension method
+    let module = parse_ok("json@Parser >> lenient => 42");
+    assert_eq!(module.method_definitions.len(), 1);
+    let method_def = &module.method_definitions[0];
+    assert_eq!(method_def.class_name.name.as_str(), "Parser");
+    let pkg = method_def
+        .package
+        .as_ref()
+        .expect("expected package qualifier");
+    assert_eq!(pkg.name.as_str(), "json");
+    assert!(!method_def.is_class_method);
+}
+
+#[test]
+fn parse_qualified_standalone_class_method() {
+    // `json@Parser class >> fromString: s => 42` — cross-package class-side extension
+    let module = parse_ok("json@Parser class >> fromString: s => 42");
+    assert_eq!(module.method_definitions.len(), 1);
+    let method_def = &module.method_definitions[0];
+    assert_eq!(method_def.class_name.name.as_str(), "Parser");
+    assert_eq!(
+        method_def
+            .package
+            .as_ref()
+            .expect("expected package")
+            .name
+            .as_str(),
+        "json"
+    );
+    assert!(method_def.is_class_method);
+}
+
+#[test]
+fn parse_unqualified_standalone_method_has_no_package() {
+    // `Counter >> increment => 42` — no package qualifier
+    let module = parse_ok("Counter >> increment => 42");
+    assert_eq!(module.method_definitions.len(), 1);
+    assert!(
+        module.method_definitions[0].package.is_none(),
+        "unqualified standalone method should have package = None"
+    );
+}
+
+// ========================================================================
+// Package-qualified superclass in class definitions (ADR 0070 Phase 2, BT-1651)
+// ========================================================================
+
+#[test]
+fn parse_qualified_superclass() {
+    // `json@Parser subclass: LenientParser` — subclassing from another package
+    let module = parse_ok("json@Parser subclass: LenientParser\n  parse => 42");
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.name.name.as_str(), "LenientParser");
+    let superclass = class.superclass.as_ref().expect("expected superclass");
+    assert_eq!(superclass.name.as_str(), "Parser");
+    let pkg = class
+        .superclass_package
+        .as_ref()
+        .expect("expected superclass_package");
+    assert_eq!(pkg.name.as_str(), "json");
+}
+
+#[test]
+fn parse_unqualified_superclass_has_no_package() {
+    // `Object subclass: Foo` — no package qualifier on superclass
+    let module = parse_ok("Object subclass: Foo\n  bar => 42");
+    assert_eq!(module.classes.len(), 1);
+    assert!(
+        module.classes[0].superclass_package.is_none(),
+        "unqualified superclass should have superclass_package = None"
+    );
+}
