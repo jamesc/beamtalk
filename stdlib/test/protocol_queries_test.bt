@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // ADR 0068 Phase 2c: Runtime protocol query tests.
-// Protocol definitions (Displayable, HasSize) are in
-// fixtures/protocol_test_protos.bt.
+// Protocol definitions are in separate fixture files:
+// fixtures/protocol_displayable.bt, protocol_has_size.bt, protocol_creatable.bt.
 
 TestCase subclass: ProtocolQueriesTest
 

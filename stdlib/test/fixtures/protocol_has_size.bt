@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test protocol definition for protocol_queries_test.bt (ADR 0068 Phase 2c).
+Protocol define: HasSize
+  size -> Integer
