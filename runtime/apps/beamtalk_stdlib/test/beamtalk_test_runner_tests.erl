@@ -107,3 +107,64 @@ path_suffix_windows_boundary_no_partial_match_test() ->
             <<"oo_test.bt">>
         )
     ).
+
+%%% ============================================================================
+%%% result_print_string/1 tests (BT-1669)
+%%% ============================================================================
+
+print_string_all_pass_test() ->
+    Result = make_result(2, 2, 0, 0, 1.5, [
+        #{name => testA, class => 'MyTest', status => pass},
+        #{name => testB, class => 'MyTest', status => pass}
+    ]),
+    Str = beamtalk_test_runner:result_print_string(Result),
+    %% No failure details, just the summary line
+    ?assertEqual(<<"TestResult(2 tests, 2 passed (1.5s))">>, Str).
+
+print_string_with_failures_test() ->
+    Result = make_result(3, 1, 2, 0, 2.0, [
+        #{name => testA, class => 'MyTest', status => pass},
+        #{
+            name => testB,
+            class => 'MyTest',
+            status => fail,
+            error => <<"Expected 4, got 6 (my_test.bt:42)">>
+        },
+        #{
+            name => testC,
+            class => 'OtherTest',
+            status => fail,
+            error => <<"Assertion failed (other_test.bt:10)">>
+        }
+    ]),
+    Str = beamtalk_test_runner:result_print_string(Result),
+    %% Should contain failure details before the summary
+    ?assertNotEqual(nomatch, binary:match(Str, <<"MyTest>>testB">>)),
+    ?assertNotEqual(nomatch, binary:match(Str, <<"Expected 4, got 6">>)),
+    ?assertNotEqual(nomatch, binary:match(Str, <<"OtherTest>>testC">>)),
+    %% Summary at the end
+    ?assertNotEqual(nomatch, binary:match(Str, <<"TestResult(3 tests, 1 passed, 2 failed">>)).
+
+print_string_failure_without_class_test() ->
+    %% Legacy entries without class key should still format correctly
+    Result = make_result(1, 0, 1, 0, 0.5, [
+        #{name => testX, status => fail, error => <<"boom">>}
+    ]),
+    Str = beamtalk_test_runner:result_print_string(Result),
+    ?assertNotEqual(nomatch, binary:match(Str, <<"unknown>>testX">>)),
+    ?assertNotEqual(nomatch, binary:match(Str, <<"boom">>)).
+
+%%% ============================================================================
+%%% Helpers
+%%% ============================================================================
+
+make_result(Total, Passed, Failed, Skipped, Duration, Tests) ->
+    #{
+        '$beamtalk_class' => 'TestResult',
+        total => Total,
+        passed => Passed,
+        failed => Failed,
+        skipped => Skipped,
+        duration => Duration,
+        tests => Tests
+    }.

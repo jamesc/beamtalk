@@ -262,7 +262,13 @@ run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
         skipped := non_neg_integer(),
         duration := float(),
         tests := [
-            #{name := atom(), status := pass | fail | skip, error => binary(), reason => binary()}
+            #{
+                name := atom(),
+                class := atom(),
+                status := pass | fail | skip,
+                error => binary(),
+                reason => binary()
+            }
         ]
     }.
 run_all_structured(ClassName) ->
@@ -310,7 +316,13 @@ run_all_structured(ClassName) ->
         skipped := non_neg_integer(),
         duration := float(),
         tests := [
-            #{name := atom(), status := pass | fail | skip, error => binary(), reason => binary()}
+            #{
+                name := atom(),
+                class := atom(),
+                status := pass | fail | skip,
+                error => binary(),
+                reason => binary()
+            }
         ]
     }.
 run_single_structured(ClassName, TestMethodName) when is_atom(TestMethodName) ->
@@ -960,7 +972,13 @@ format_results(Results, Duration) ->
         skipped := non_neg_integer(),
         duration := float(),
         tests := [
-            #{name := atom(), status := pass | fail | skip, error => binary(), reason => binary()}
+            #{
+                name := atom(),
+                class := atom(),
+                status := pass | fail | skip,
+                error => binary(),
+                reason => binary()
+            }
         ]
     }.
 structure_results(ClassName, Results, Duration) ->
@@ -971,11 +989,11 @@ structure_results(ClassName, Results, Duration) ->
     Tests = lists:map(
         fun
             ({pass, Name}) ->
-                #{name => Name, status => pass};
+                #{name => Name, class => ClassName, status => pass};
             ({skip, Name, Reason}) ->
-                #{name => Name, status => skip, reason => Reason};
+                #{name => Name, class => ClassName, status => skip, reason => Reason};
             ({fail, Name, Msg}) ->
-                #{name => Name, status => fail, error => Msg}
+                #{name => Name, class => ClassName, status => fail, error => Msg}
         end,
         Results
     ),

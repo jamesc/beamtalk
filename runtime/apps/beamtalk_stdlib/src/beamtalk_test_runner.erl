@@ -249,10 +249,70 @@ result_summary(#{
     end.
 
 %% @doc printString representation for REPL display.
+%%
+%% When there are failures, prints each failure with class>>method, error
+%% message, and source location before the summary line. This matches the
+%% output format of `beamtalk test` (CLI).
 -spec result_print_string(map()) -> binary().
-result_print_string(Result) ->
+result_print_string(#{'$beamtalk_class' := 'TestResult', tests := Tests} = Result) ->
     Summary = result_summary(Result),
-    <<"TestResult(", Summary/binary, ")">>.
+    SummaryLine = <<"TestResult(", Summary/binary, ")">>,
+    FailureLines = format_failure_details(Tests),
+    case FailureLines of
+        <<>> -> SummaryLine;
+        _ -> <<FailureLines/binary, SummaryLine/binary>>
+    end.
+
+%% @doc Format failure details for display.
+%%
+%% Returns a binary with one line per failure in the format:
+%%   ✗ ClassName>>testMethod
+%%     Error message (source_file.bt:42)
+%% Returns an empty binary if there are no failures.
+-spec format_failure_details([map()]) -> binary().
+format_failure_details(Tests) ->
+    Failures = [T || #{status := fail} = T <- Tests],
+    case Failures of
+        [] ->
+            <<>>;
+        _ ->
+            Lines = lists:map(fun format_single_failure/1, Failures),
+            iolist_to_binary(Lines)
+    end.
+
+%% @doc Format a single test failure for display.
+-spec format_single_failure(map()) -> iolist().
+format_single_failure(#{name := Name, error := Error} = Entry) ->
+    ClassName = maps:get(class, Entry, unknown),
+    NameStr = atom_to_list(Name),
+    ClassStr = atom_to_list(ClassName),
+    ErrorBin =
+        case is_binary(Error) of
+            true -> Error;
+            false -> iolist_to_binary(io_lib:format("~p", [Error]))
+        end,
+    [
+        "  \xe2\x9c\x97 ",
+        ClassStr,
+        ">>",
+        NameStr,
+        "\n",
+        "    ",
+        ErrorBin,
+        "\n"
+    ];
+format_single_failure(#{name := Name} = Entry) ->
+    %% Fallback for fail entries without an error message
+    ClassName = maps:get(class, Entry, unknown),
+    NameStr = atom_to_list(Name),
+    ClassStr = atom_to_list(ClassName),
+    [
+        "  \xe2\x9c\x97 ",
+        ClassStr,
+        ">>",
+        NameStr,
+        "\n"
+    ].
 
 %% @doc Serialize a TestResult to JSON for CLI consumption.
 %%
@@ -281,10 +341,17 @@ result_to_json(#{
 %% @doc Serialize a single test result.
 -spec serialize_test_result(map()) -> map().
 serialize_test_result(#{name := Name, status := Status} = Test) ->
-    Base = #{
+    Base0 = #{
         <<"name">> => atom_to_binary(Name, utf8),
         <<"status">> => atom_to_binary(Status, utf8)
     },
+    Base =
+        case Test of
+            #{class := ClassName} when is_atom(ClassName) ->
+                Base0#{<<"class">> => atom_to_binary(ClassName, utf8)};
+            _ ->
+                Base0
+        end,
     case Test of
         #{error := Error} when is_binary(Error) ->
             Base#{<<"error">> => Error};

@@ -512,23 +512,39 @@ encode_test_results(
 
 %% @private
 -spec encode_test_entry(map()) -> map().
-encode_test_entry(#{name := Name, status := pass}) ->
-    #{<<"name">> => atom_to_binary(Name, utf8), <<"status">> => <<"pass">>};
-encode_test_entry(#{name := Name, status := fail, error := Error}) ->
+encode_test_entry(#{name := Name, status := pass} = Entry) ->
+    maybe_add_class(
+        #{<<"name">> => atom_to_binary(Name, utf8), <<"status">> => <<"pass">>},
+        Entry
+    );
+encode_test_entry(#{name := Name, status := fail, error := Error} = Entry) ->
     ErrorBin =
         case is_binary(Error) of
             true -> Error;
             false -> iolist_to_binary(io_lib:format("~p", [Error]))
         end,
-    #{
-        <<"name">> => atom_to_binary(Name, utf8),
-        <<"status">> => <<"fail">>,
-        <<"error">> => ErrorBin
-    };
+    maybe_add_class(
+        #{
+            <<"name">> => atom_to_binary(Name, utf8),
+            <<"status">> => <<"fail">>,
+            <<"error">> => ErrorBin
+        },
+        Entry
+    );
 encode_test_entry(Entry) ->
     %% Fallback for unexpected shapes
     Name = maps:get(name, Entry, unknown),
-    #{<<"name">> => atom_to_binary(Name, utf8), <<"status">> => <<"unknown">>}.
+    maybe_add_class(
+        #{<<"name">> => atom_to_binary(Name, utf8), <<"status">> => <<"unknown">>},
+        Entry
+    ).
+
+%% @private Add class name to encoded test entry if available.
+-spec maybe_add_class(map(), map()) -> map().
+maybe_add_class(Encoded, #{class := ClassName}) when is_atom(ClassName) ->
+    Encoded#{<<"class">> => atom_to_binary(ClassName, utf8)};
+maybe_add_class(Encoded, _Entry) ->
+    Encoded.
 
 %% @doc Encode a trace result response (BT-1238).
 %%
