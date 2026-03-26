@@ -41,7 +41,7 @@
     safe_binary_to_atom/1,
     safe_list_to_atom/1,
     safe_atom_result/1,
-    resolve_package_module/3,
+    resolve_package_module/4,
     try_package_relative/3,
     maybe_add_loaded_module/2,
     store_file_class_sources/3,
@@ -590,7 +590,10 @@ safe_atom_result({error, badarg}) -> false.
 
 %% Compute a package-qualified module name for a file (BT-775 / BT-1670).
 %%
-%% With package context: derives `bt@{package}@{relative_path_segments}`.
+%% With package context: derives `bt@{package}@{relative_path_segments}`
+%% for files under src/ or test/.  Files outside those directories (e.g.
+%% examples/, fixtures/) fall back to `bt@{stem_snake_case}` so the same
+%% class always gets the same module name regardless of load path.
 %% Without package context: returns `undefined` so the compiler port
 %% derives the name from the class name instead.  This is intentional —
 %% class-name-based naming in the REPL enables hot reload across file
@@ -604,14 +607,15 @@ compute_package_module_name(Path) ->
         ->
             AbsPath = filename:absname(Path),
             ProjectRoot = binary_to_list(ProjectPath),
-            resolve_package_module(AbsPath, ProjectRoot, PackageName);
+            resolve_package_module(AbsPath, ProjectRoot, PackageName, Path);
         _ ->
             undefined
     end.
 
 %% Try src/ then test/ to resolve the package module name.
--spec resolve_package_module(string(), string(), binary()) -> binary() | undefined.
-resolve_package_module(AbsPath, ProjectRoot, PackageName) ->
+%% Falls back to bt@{stem} for files outside src/ and test/ (e.g. examples/).
+-spec resolve_package_module(string(), string(), binary(), string()) -> binary().
+resolve_package_module(AbsPath, ProjectRoot, PackageName, OrigPath) ->
     case try_package_relative(AbsPath, ProjectRoot, "src") of
         {ok, ModuleName} ->
             iolist_to_binary(["bt@", PackageName, "@", ModuleName]);
@@ -620,9 +624,16 @@ resolve_package_module(AbsPath, ProjectRoot, PackageName) ->
                 {ok, ModuleName} ->
                     iolist_to_binary(["bt@", PackageName, "@test@", ModuleName]);
                 undefined ->
-                    undefined
+                    stem_module_name(OrigPath)
             end
     end.
+
+%% Derive module name from the file stem: bt@{snake_case_stem}.
+-spec stem_module_name(string()) -> binary().
+stem_module_name(Path) ->
+    Basename = filename:basename(Path, ".bt"),
+    Snake = to_snake_case(Basename),
+    iolist_to_binary(["bt@", Snake]).
 
 %% Check if AbsPath is under ProjectRoot/SubDir and return the relative module path.
 -spec try_package_relative(string(), string(), string()) ->

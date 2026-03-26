@@ -37,6 +37,32 @@ fi
 # Ensure the pre-push lint hook is active (local config, needs setting per-clone/worktree)
 git config core.hooksPath .githooks 2>/dev/null || true
 
+# --- Hex bridge proxy for cloud environments ---
+# Erlang's httpc can't negotiate TLS through egress proxies that do MITM
+# interception. Start a local HTTP-to-HTTPS bridge so rebar3/hex can fetch
+# packages. Only starts when HTTP_PROXY is set and the proxy uses auth.
+if [[ -n "${HTTP_PROXY:-}" ]] && [[ "${HTTP_PROXY}" == *"@"* ]]; then
+  HEX_BRIDGE_PORT="${HEX_BRIDGE_PORT:-18081}"
+  HEX_BRIDGE_SCRIPT="${CLAUDE_PROJECT_DIR:-${PWD}}/scripts/hex-bridge-proxy.py"
+  # Start the bridge if not already running
+  if [[ -f "${HEX_BRIDGE_SCRIPT}" ]] && ! lsof -i:"${HEX_BRIDGE_PORT}" &>/dev/null; then
+    HEX_BRIDGE_PORT="${HEX_BRIDGE_PORT}" python3 "${HEX_BRIDGE_SCRIPT}" &>/dev/null &
+    disown
+    sleep 1
+    echo "Started hex-bridge proxy on localhost:${HEX_BRIDGE_PORT}"
+  fi
+  # Always configure rebar3 to use the bridge (project-local, not global)
+  HEX_BRIDGE_REBAR="${CLAUDE_PROJECT_DIR:-${PWD}}/runtime/hex_bridge_rebar.config"
+  cat > "${HEX_BRIDGE_REBAR}" << REBAR_CONF
+{hex, [{repos, [
+    #{name => <<"hexpm">>,
+      repo_url => <<"http://127.0.0.1:${HEX_BRIDGE_PORT}">>,
+      repo_verify_origin => false}
+]}]}.
+REBAR_CONF
+  export REBAR_GLOBAL_CONFIG_DIR="${CLAUDE_PROJECT_DIR:-${PWD}}/runtime"
+fi
+
 GIT_DIR_FILE="${PWD}/.git"
 
 # Only act when we are inside a worktree (.git is a file, not a directory)

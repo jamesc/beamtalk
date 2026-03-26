@@ -222,6 +222,7 @@ mod tests {
         run_git(repo_path, &["init"]);
         run_git(repo_path, &["config", "user.email", "test@test.com"]);
         run_git(repo_path, &["config", "user.name", "Test"]);
+        run_git(repo_path, &["config", "commit.gpgsign", "false"]);
 
         // Create a beamtalk.toml so it looks like a valid package
         std::fs::write(
