@@ -65,6 +65,19 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
         .into_diagnostic()
         .wrap_err("Failed to create build directory")?;
 
+    // ADR 0070 Phase 1: Resolve and compile path dependencies before the main build.
+    // This ensures dependency classes are compiled and their ebin directories are
+    // available on the BEAM code path when the main package runs.
+    let resolved_deps = if pkg_manifest.is_some() {
+        let resolved = super::deps::resolve_path_dependencies(&project_root, options)?;
+        if !resolved.is_empty() {
+            info!(count = resolved.len(), "Resolved path dependencies");
+        }
+        resolved
+    } else {
+        Vec::new()
+    };
+
     // Determine the source root for computing relative module paths
     let src_dir = project_root.join("src");
     let source_root = if src_dir.exists() {
@@ -77,12 +90,26 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     // This allows later files to resolve cross-file class references (including
     // classes in package subdirectories) during code generation.
     let mut file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
-    let (class_module_index, class_superclass_index, all_class_infos, cached_asts) =
+    let (mut class_module_index, class_superclass_index, all_class_infos, cached_asts) =
         if let Some(ref pkg) = pkg_manifest {
             build_class_module_index(&source_files, source_root.as_deref(), &pkg.name)?
         } else {
             (HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
         };
+
+    // ADR 0070: Merge dependency class indexes into the main package's indexes
+    // so cross-package class references resolve during compilation.
+    for dep in &resolved_deps {
+        for (class_name, module_name) in &dep.class_module_index {
+            debug!(
+                dep = %dep.name,
+                class = %class_name,
+                module = %module_name,
+                "Adding dependency class to index"
+            );
+            class_module_index.insert(class_name.clone(), module_name.clone());
+        }
+    }
 
     for file in &source_files {
         let stem = file
@@ -433,7 +460,10 @@ pub fn collect_formattable_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8Path
 /// - `src/util/math.bt` → `util@math`
 ///
 /// Falls back to the file stem when no source root is available.
-fn compute_relative_module(file: &Utf8Path, source_root: Option<&Utf8Path>) -> Result<String> {
+pub(crate) fn compute_relative_module(
+    file: &Utf8Path,
+    source_root: Option<&Utf8Path>,
+) -> Result<String> {
     if let Some(root) = source_root {
         if let Ok(relative) = file.strip_prefix(root) {
             let without_ext = relative.with_extension("");

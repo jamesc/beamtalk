@@ -197,6 +197,20 @@ fn run_script(
         args.push(OsString::from(ebin_dir.as_str()));
     }
 
+    // ADR 0070: Add dependency ebin directories to BEAM code path
+    for dep_ebin in super::deps::collect_dep_ebin_paths(project_root) {
+        args.push(OsString::from("-pa"));
+        #[cfg(windows)]
+        {
+            let dep_ebin_path = dep_ebin.as_str().replace('\\', "/");
+            args.push(OsString::from(dep_ebin_path));
+        }
+        #[cfg(not(windows))]
+        {
+            args.push(OsString::from(dep_ebin.as_str()));
+        }
+    }
+
     args.push(OsString::from("-eval"));
     args.push(OsString::from(&eval_cmd));
 
@@ -304,7 +318,12 @@ fn run_package_as_otp_application(
         .join("dev")
         .join("ebin")
         .into_std_path_buf();
-    let extra_code_paths = vec![ebin_dir.clone()];
+    let mut extra_code_paths = vec![ebin_dir.clone()];
+
+    // ADR 0070: Add dependency ebin directories to code path
+    for dep_ebin in super::deps::collect_dep_ebin_paths(project_root) {
+        extra_code_paths.push(dep_ebin.into_std_path_buf());
+    }
 
     let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
         project_root.as_std_path(),
