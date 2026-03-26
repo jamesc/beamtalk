@@ -371,8 +371,14 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Pragma directives
-            '@' => self.lex_at_directive(start),
+            // Package qualifier `@` (infix, ADR 0070) or pragma directive `@` (prefix).
+            //
+            // Infix `@` immediately follows an identifier (no whitespace between
+            // the previous token and `@`). The lexer detects this by checking whether
+            // the character immediately before `start` in the source text is part of
+            // an identifier. If so, `@` is a package qualifier; otherwise it's a
+            // directive prefix.
+            '@' => self.lex_at_or_directive(start),
 
             // Arrow: `->` return-type separator / binary method selector (ADR 0047)
             '-' if self.peek_char_n(1) == Some('>') => {
@@ -979,6 +985,28 @@ impl<'src> Lexer<'src> {
     }
 
     /// Lexes an `@` directive: `@primitive` or error for unknown directives.
+    /// Determines whether `@` is a package qualifier (infix) or a directive prefix,
+    /// then dispatches accordingly.
+    ///
+    /// Infix `@` (package qualifier): the byte immediately before `start` is an
+    /// identifier character (alphanumeric or `_`), meaning `@` appeared without
+    /// whitespace after an identifier token — e.g. `json@Parser`.
+    ///
+    /// Prefix `@` (directive): `@` appears at the start of a token sequence
+    /// (after whitespace/newline/BOF) — e.g. `@primitive`.
+    fn lex_at_or_directive(&mut self, start: u32) -> TokenKind {
+        // Check if the character immediately before this `@` is part of an identifier.
+        // If so, this is an infix `@` (package qualifier).
+        if start > 0 {
+            let prev_byte = self.source.as_bytes()[(start as usize) - 1];
+            if prev_byte.is_ascii_alphanumeric() || prev_byte == b'_' {
+                self.advance(); // consume @
+                return TokenKind::At;
+            }
+        }
+        self.lex_at_directive(start)
+    }
+
     fn lex_at_directive(&mut self, start: u32) -> TokenKind {
         self.advance(); // @
 
@@ -998,6 +1026,15 @@ impl<'src> Lexer<'src> {
             }
             if ident == "expect" {
                 return TokenKind::AtExpect;
+            }
+            // Check if this looks like a qualified class reference missing
+            // the package name (e.g., `@Parser` instead of `json@Parser`).
+            let first_char = ident.chars().next();
+            if first_char.is_some_and(char::is_uppercase) {
+                let text = self.text_for(self.span_from(start));
+                return TokenKind::Error(EcoString::from(format!(
+                    "missing package name before '@' in '{text}' — use 'package@{ident}' for qualified class references"
+                )));
             }
             let text = self.text_for(self.span_from(start));
             return TokenKind::Error(EcoString::from(format!(
@@ -2287,6 +2324,110 @@ mod tests {
                 .iter()
                 .any(|k| matches!(k, TokenKind::Error(msg) if msg.contains("doubled"))),
             "expected 'doubled' error, got: {kinds:?}"
+        );
+    }
+
+    // === Package qualifier `@` (ADR 0070) ===
+
+    #[test]
+    fn lex_package_qualifier_infix() {
+        // `json@Parser` — `@` immediately after identifier is a package qualifier
+        assert_eq!(
+            lex_kinds("json@Parser"),
+            vec![
+                TokenKind::Identifier("json".into()),
+                TokenKind::At,
+                TokenKind::Identifier("Parser".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_package_qualifier_in_expression() {
+        // `json@Parser parse: x` — qualified class reference used as receiver
+        assert_eq!(
+            lex_kinds("json@Parser parse: x"),
+            vec![
+                TokenKind::Identifier("json".into()),
+                TokenKind::At,
+                TokenKind::Identifier("Parser".into()),
+                TokenKind::Keyword("parse:".into()),
+                TokenKind::Identifier("x".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_package_qualifier_not_confused_with_directive() {
+        // `@primitive` should still be a directive
+        assert_eq!(lex_kinds("@primitive"), vec![TokenKind::AtPrimitive]);
+        // `@intrinsic` should still be a directive
+        assert_eq!(lex_kinds("@intrinsic"), vec![TokenKind::AtIntrinsic]);
+        // `@expect` should still be a directive
+        assert_eq!(lex_kinds("@expect"), vec![TokenKind::AtExpect]);
+    }
+
+    #[test]
+    fn lex_directive_then_package_qualifier() {
+        // `@primitive` followed by `json@Parser` on next line
+        assert_eq!(
+            lex_kinds("@primitive\njson@Parser"),
+            vec![
+                TokenKind::AtPrimitive,
+                TokenKind::Identifier("json".into()),
+                TokenKind::At,
+                TokenKind::Identifier("Parser".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_at_parser_no_package_gives_helpful_error() {
+        // `@Parser` — starts with `@` (directive position) but uppercase identifier
+        // should give a helpful error about missing package name
+        let kinds = lex_kinds("@Parser");
+        assert_eq!(kinds.len(), 1);
+        assert!(
+            matches!(&kinds[0], TokenKind::Error(msg) if msg.contains("missing package name")),
+            "expected 'missing package name' error, got: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn lex_space_before_at_is_directive_not_qualifier() {
+        // `json @Parser` — space before `@` means `json` is an identifier and
+        // `@Parser` is a directive-position `@` (which should error)
+        let kinds = lex_kinds("json @Parser");
+        assert_eq!(kinds.len(), 2);
+        assert_eq!(kinds[0], TokenKind::Identifier("json".into()));
+        assert!(matches!(&kinds[1], TokenKind::Error(_)));
+    }
+
+    #[test]
+    fn lex_package_qualifier_span_is_correct() {
+        let tokens = lex("json@Parser");
+        assert_eq!(tokens.len(), 3);
+        // `json` at 0..4
+        assert_eq!(tokens[0].span().start(), 0);
+        assert_eq!(tokens[0].span().end(), 4);
+        // `@` at 4..5
+        assert_eq!(tokens[1].span().start(), 4);
+        assert_eq!(tokens[1].span().end(), 5);
+        // `Parser` at 5..11
+        assert_eq!(tokens[2].span().start(), 5);
+        assert_eq!(tokens[2].span().end(), 11);
+    }
+
+    #[test]
+    fn lex_package_qualifier_with_underscore() {
+        // `my_pkg@MyClass` — underscore in package name
+        assert_eq!(
+            lex_kinds("my_pkg@MyClass"),
+            vec![
+                TokenKind::Identifier("my_pkg".into()),
+                TokenKind::At,
+                TokenKind::Identifier("MyClass".into()),
+            ]
         );
     }
 }

@@ -59,6 +59,7 @@ const FRAGMENTS: &[&str] = &[
     "Actor subclass: Wrapper native: my_mod",
     "[1] ensure: [nil]",
     "x match: { 1 => \"one\", _ => \"other\" }",
+    "json@Parser parse: x",
 ];
 
 /// Generates a Beamtalk fragment from the seed corpus.
