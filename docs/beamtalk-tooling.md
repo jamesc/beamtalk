@@ -52,7 +52,7 @@ The native forms work from compiled code, scripts, and actor methods — not jus
 
 ### Multi-line Input
 
-The REPL automatically detects incomplete input (unclosed brackets, trailing operators, etc.) and shows a `..> ` continuation prompt. For constructs where the REPL cannot determine completeness from syntax alone — protocol definitions and class definitions without methods — press **Enter on a blank line** to submit the accumulated input.
+The REPL automatically detects incomplete input (unclosed brackets, trailing operators, etc.) and shows a `..>` continuation prompt. For constructs where the REPL cannot determine completeness from syntax alone — protocol definitions and class definitions without methods — press **Enter on a blank line** to submit the accumulated input.
 
 ```beamtalk
 > Protocol define: Greetable

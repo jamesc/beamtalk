@@ -362,7 +362,7 @@ pub fn is_input_complete(source: &str) -> bool {
 
 /// Checks whether the given source text is only incomplete because it contains
 /// a construct that requires a blank line to signal completion (protocol
-/// definitions and class definitions with methods).
+/// definitions and class definitions without methods).
 ///
 /// The REPL uses this to decide whether a blank line should force-submit
 /// the accumulated buffer.  Returns `true` when the input has balanced
