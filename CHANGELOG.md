@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.3.1 — 2026-03-26
+
+### Language
+
+- **Actor message timeout configuration syntax** — configure per-message timeouts with language-level syntax (BT-1190)
+- **Rename `trace:`/`traceCr:` to `show:`/`showCr:` on Object** — clearer naming for debug output methods (BT-1636)
+- **Fix `^` and `:=` in match arm bodies** — non-local returns and assignments inside match arms now compile correctly
+- **Fix `whileTrue:` silently drops mutations in value-type context** (BT-1609)
+
+### Standard Library
+
+- **Tracing** — new `Tracing` stdlib class with Erlang shim for trace context, propagated context across actor boundaries, causal trace linking, and application-level metadata enrichment (BT-1604, BT-1605, BT-1625, BT-1633, BT-1639)
+- **Protocol enhancements** — class methods in protocol definitions, REPL support for `Protocol define:` declarations, fix protocol-only files not generating `register_class/0`, fix class prefix before doc comments in protocol signatures (BT-1610, BT-1611, BT-1612, BT-1616, BT-1617, BT-1618)
+- **`performLocally:withArguments:`** — new class method dispatch primitive that executes in the caller's process, enabling synchronous class method calls without actor messaging (BT-1664)
+- **`Foo class` methods return user-defined class methods** (BT-1635)
+- **Emit class method doc comments in codegen** (BT-1634)
+- Revert method combinations (`before/after` daemons) and `migrate:` protocol — removed BT-102 and BT-106 pending redesign
+
+### Compiler
+
+- **Direct-call optimization for sealed class methods** — sealed classes now emit direct function calls instead of dynamic dispatch, improving performance (BT-1639)
+- **Enforce `field:`/`state:` keyword alignment by class kind** — the compiler rejects `state:` in value classes and `field:` in stateful classes (BT-1663)
+- **Improved lint diagnostics** — origin tracing and severity levels in lint messages (BT-1588)
+- Surface `protocol register_class/0` failures as structured errors (BT-1616)
+
+### Runtime
+
+- **Actor tracing infrastructure** — trace store gen_server with lock-free storage, actor send wrapper telemetry, lifecycle telemetry from compiled actor `init`/`terminate`, lifecycle events (spawn, stop, destroy), aggregate actor stats with min/max duration and class name, outcome/class/duration trace filters, wall-clock timestamps with serialized counter, export_traces for trace snapshots (BT-1601, BT-1602, BT-1603, BT-1620, BT-1621, BT-1622, BT-1627, BT-1628, BT-1629, BT-1632, BT-1638, BT-1640, BT-1641, BT-1642)
+- Fix `String#asAtom` intermittent failures on valid strings (BT-1585)
+
+### Tooling
+
+- **MCP tracing tools** — lean surface for trace inspection, integration fixes, and e2e test coverage (BT-1606, BT-1622)
+- **BUnit parallel test runner** with serial opt-out (BT-1624)
+- **BUnit stack traces show Beamtalk class names and source line numbers** — test failures display `.bt` source locations instead of compiled Erlang module names
+- **Improved BUnit failure output** — caller-first stack frames and relative file paths
+- **Parallelize CI test suite** (BT-1623)
+- Fix MCP lint server reporting zero warnings when CLI finds real issues (BT-1587)
+- Fix flaky MCP REPL startup tests (BT-1599)
+
+### Documentation
+
+- ADR 0070: Package Namespaces and Dependencies (BT-714)
+- Tracing documentation and examples (BT-1607)
+
+### Internal
+
+- Add parser tests for class member ordering before fields
+- Fix flaky `testGreeting` — stop own actor in `tearDown` (BT-1662)
+- Fix `TranscriptStream` timing races in getting-started tests (BT-1662)
+- Fix `trigger_hot_reload` tests failing under cover compilation (BT-1630)
+- Dependency updates: tungstenite 0.29, tokio-tungstenite 0.29, actions/download-artifact v8
+
 ## 0.3.0 — 2026-03-21
 
 ### Language

@@ -2,7 +2,7 @@
 
 Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy and [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) for syntax design decisions.
 
-**Status:** v0.3.0 — implemented features are stable, including generics, protocols, union types, and control flow narrowing. See [ADR 0068](ADR/0068-parametric-types-and-protocols.md) for the type system design.
+**Status:** v0.3.1 — implemented features are stable, including generics, protocols, union types, and control flow narrowing. See [ADR 0068](ADR/0068-parametric-types-and-protocols.md) for the type system design.
 
 **Syntax note:** Beamtalk uses a modernised Smalltalk syntax: `//` comments (not `"..."`), standard math precedence (not left-to-right), and optional statement terminators (newlines work).
 
@@ -254,7 +254,7 @@ ProtoObject (minimal — identity, DNU)
 
 `Object subclass:` cannot have instance data (`field:` or `state:` is a compile error). Object serves three purposes:
 
-1. **Protocol provider** — common methods inherited by all Value and Actor subclasses: `isNil`, `respondsTo:`, `printString`, `hash`, `error:`, `yourself`
+1. **Protocol provider** — common methods inherited by all Value and Actor subclasses: `isNil`, `respondsTo:`, `printString`, `hash`, `error:`, `yourself`, `show:`, `showCr:` (debug output to Transcript; replaces the former `trace:`/`traceCr:` which are deprecated aliases)
 2. **FFI namespace** — zero-overhead class-method wrappers around Erlang modules and OTP primitives (e.g., `Json`, `System`, `File`, `Ets`, `Random`). No instances, no process
 3. **Abstract extension point** — framework contracts designed for subclassing, where subclasses define methods but hold no data (e.g., `Supervisor`, `DynamicSupervisor`)
 
@@ -304,6 +304,8 @@ Class definitions support optional modifier keywords before the superclass:
 Modifiers can be combined: `sealed typed Collection subclass: Array`.
 
 Most stdlib classes are `sealed` — this prevents user code from subclassing built-in types like `Integer`, `String`, `Array`, `Result`, and `Stream`. If you need custom behaviour, compose with these types rather than subclassing them.
+
+**Performance:** Sealed actor classes benefit from a direct-call optimization — self-sends within the class emit direct function calls instead of dynamic dispatch, since the compiler knows no subclass can override the method. This is automatic and requires no user intervention.
 
 ### Value subclass: in Depth
 
@@ -1353,6 +1355,24 @@ infDb stop
 | `!` send (async cast) | `gen_server:cast` — returns immediately |
 | Timeout | `gen_server:call` default 5000ms timeout |
 | `withTimeout:` | Proxy wrapping `gen_server:call/3` with custom timeout |
+| `performLocally:withArguments:` | Direct in-process call bypassing gen_server |
+
+### Caller-Process Class Method Dispatch
+
+Class methods normally execute inside the class object's gen_server process. For long-running class methods (batch processing, report generation) that would block all other messages to the class, use `performLocally:withArguments:` to execute in the caller's process instead:
+
+```beamtalk
+// Normal dispatch — runs in MyClass gen_server process
+MyClass computeReport
+
+// Local dispatch — runs in caller's process, doesn't block the class
+MyClass performLocally: #computeReport withArguments: #()
+
+// With arguments
+MyClass performLocally: #add:to: withArguments: #(3, 7)
+```
+
+**Limitations:** Local dispatch calls the method directly on the target class module — it does not walk the superclass chain. Class variable mutations are discarded (the call runs outside the class gen_server's state). Use this only for stateless or read-only class methods.
 
 ### Actor-to-Actor Coordination
 
@@ -1854,7 +1874,7 @@ Analogous to Pharo's `Smalltalk` image facade.
 
 ```beamtalk
 Beamtalk version
-// => "0.3.0"
+// => "0.3.1"
 
 Beamtalk allClasses includes: #Integer
 // => true

@@ -56,7 +56,7 @@ Two global objects provide introspection and project operations:
 
 **`Beamtalk`** — system reflection:
 ```beamtalk
-Beamtalk version             // => "0.3.0"
+Beamtalk version             // => "0.3.1"
 Beamtalk allClasses          // All registered class names
 Beamtalk classNamed: #Counter // Look up a class by name
 Beamtalk globals             // Snapshot of system namespace
@@ -89,8 +89,13 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 | `test` | Run tests (all, by class, or by file) |
 | `search_examples` | Search the bundled example corpus |
 | `search_classes` | Search class names and documentation |
+| `enable-tracing` | Enable detailed trace event capture for actor dispatch |
+| `disable-tracing` | Disable trace event capture (aggregate stats remain) |
+| `get-traces` | Retrieve trace events with optional filters (actor, selector, class, outcome, duration) |
+| `export-traces` | Export trace events to a JSON file |
+| `actor-stats` | Get aggregate per-actor, per-method statistics (call counts, durations, error rates) |
 
-All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the REPL.
+All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the REPL. The tracing tools correspond to the `Tracing` stdlib class (see [Language Features — Actor Observability](beamtalk-language-features.md#actor-observability-and-tracing-adr-0069)).
 
 ## VS Code Extension
 
@@ -155,6 +160,30 @@ Running 1 test class...
 > (Workspace test: CounterTest) failed
 // => 0
 ```
+
+### Parallel Test Runner
+
+By default, `beamtalk test` runs test classes concurrently using the BEAM scheduler count:
+
+```bash
+beamtalk test              # Auto parallelism (default)
+beamtalk test --jobs 4     # Up to 4 classes concurrently
+beamtalk test -j 1         # Sequential (backward-compatible)
+```
+
+From code: `TestRunner runAll: 0` (auto), `TestRunner runAll: 4` (bounded), `TestRunner runAll` (sequential).
+
+**Serial opt-out:** Test classes that touch global state (registered names, ETS tables, `TranscriptStream`) should override `serial` to prevent interference:
+
+```beamtalk
+TestCase subclass: TracingTest
+  class serial -> Boolean => true
+
+  testEnable =>
+    self assert: Tracing isEnabled equals: false
+```
+
+Serial classes run alone, sequentially, after all concurrent classes complete.
 
 ## Shared Protocol Architecture
 
