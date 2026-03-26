@@ -33,8 +33,8 @@
 
 %%% JSON Parsing
 
-%% @doc Parse JSON binary into a map.
--spec parse_json(binary()) -> {ok, map()} | {error, term()}.
+%% @doc Parse JSON binary into an Erlang term (maps, lists, binaries, etc.).
+-spec parse_json(binary()) -> {ok, term()} | {error, term()}.
 parse_json(Data) ->
     try
         Decoded = json:decode(Data),

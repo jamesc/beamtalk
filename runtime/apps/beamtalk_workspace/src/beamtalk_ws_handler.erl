@@ -301,7 +301,12 @@ handle_auth(Data, State) ->
             ),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
     catch
-        error:_ ->
+        error:Reason when
+            Reason =:= unexpected_end;
+            is_tuple(Reason) andalso
+                (element(1, Reason) =:= invalid_byte orelse
+                    element(1, Reason) =:= invalid_unicode)
+        ->
             ?LOG_WARNING("WebSocket auth failed: malformed JSON", #{
                 peer => State#ws_state.peer, domain => [beamtalk, runtime]
             }),
