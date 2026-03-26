@@ -544,12 +544,14 @@ utils = { path = "utils" }"#,
         fs::create_dir_all(&dep_dir).unwrap();
 
         // dep_a depends on my_app (circular)
+        // Use forward slashes for TOML compatibility on Windows
+        let project_root_str = project_root.as_str().replace('\\', "/");
         write_manifest(
             &dep_dir,
             "dep_a",
             &format!(
                 r#"[dependencies]
-my_app = {{ path = "{project_root}" }}"#,
+my_app = {{ path = "{project_root_str}" }}"#,
             ),
         );
 
