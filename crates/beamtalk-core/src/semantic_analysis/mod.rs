@@ -418,8 +418,8 @@ fn analyse_full(
         skip_module_expression_lint,
     );
 
-    // Phase 6: Module-level validation (BT-349)
-    let module_diags = module_validator::validate_single_class(module);
+    // Phase 6: Module-level validation (BT-349, BT-1666)
+    let module_diags = module_validator::validate_single_definition(module);
     result.diagnostics.extend(module_diags);
 
     result

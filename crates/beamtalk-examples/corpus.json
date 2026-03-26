@@ -16211,17 +16211,37 @@
       "explanation": "Point - a simple value type for testing BT-213"
     },
     {
-      "id": "stdlib-test-fixtures-protocol-test-protos",
-      "title": "Protocol Test Protos",
+      "id": "stdlib-test-fixtures-protocol-creatable",
+      "title": "Protocol Creatable",
       "category": "stdlib-fixtures",
       "tags": [
-        "protocol_test_protos",
+        "protocol_creatable"
+      ],
+      "source": "// BT-1611: Protocol with class method requirement.\n// Test protocol definition for protocol_queries_test.bt (ADR 0068 Phase 2c).\nProtocol define: Creatable\n  class create -> Self",
+      "explanation": "BT-1611: Protocol with class method requirement. Test protocol definition for protocol_queries_test.bt (ADR 0068 Phase 2c)."
+    },
+    {
+      "id": "stdlib-test-fixtures-protocol-displayable",
+      "title": "Protocol Displayable",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "protocol_displayable",
         "string conversion",
         "toString",
         "to_string"
       ],
-      "source": "// Test protocol definitions for protocol_queries_test.bt (ADR 0068 Phase 2c).\n// BT-1610: Protocol-only files now generate register_class/0 for protocol\n// registration — no dummy anchor class needed.\nProtocol define: Displayable\n  asString -> String\n  printString -> String\nProtocol define: HasSize\n  size -> Integer\n// BT-1611: Protocol with class method requirement\nProtocol define: Creatable\n  class create -> Self",
-      "explanation": "Test protocol definitions for protocol_queries_test.bt (ADR 0068 Phase 2c). BT-1610: Protocol-only files now generate register_class/0 for protocol registration — no dummy anchor class needed."
+      "source": "// Test protocol definition for protocol_queries_test.bt (ADR 0068 Phase 2c).\nProtocol define: Displayable\n  asString -> String\n  printString -> String",
+      "explanation": "Test protocol definition for protocol_queries_test.bt (ADR 0068 Phase 2c)."
+    },
+    {
+      "id": "stdlib-test-fixtures-protocol-has-size",
+      "title": "Protocol Has Size",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "protocol_has_size"
+      ],
+      "source": "// Test protocol definition for protocol_queries_test.bt (ADR 0068 Phase 2c).\nProtocol define: HasSize\n  size -> Integer",
+      "explanation": "Test protocol definition for protocol_queries_test.bt (ADR 0068 Phase 2c)."
     },
     {
       "id": "stdlib-test-fixtures-recursive-actor",
@@ -19040,8 +19060,8 @@
         "toString",
         "to_string"
       ],
-      "source": "// ADR 0068 Phase 2c: Runtime protocol query tests.\n// Protocol definitions (Displayable, HasSize) are in\n// fixtures/protocol_test_protos.bt.\n\nTestCase subclass: ProtocolQueriesTest\n\n  // --- Protocol.isProtocol: ---\n  testIsProtocolTrue =>\n    self assert: (Protocol isProtocol: #Displayable) equals: true\n\n  testIsProtocolFalse =>\n    self assert: (Protocol isProtocol: #NotARealProtocol) equals: false\n\n  // --- Protocol.requiredMethods: ---\n  testRequiredMethodsDisplayable =>\n    methods := Protocol requiredMethods: #Displayable\n    self assert: (methods includes: #asString) equals: true\n    self assert: (methods includes: #printString) equals: true\n    self assert: methods size equals: 2\n\n  testRequiredMethodsUnknown =>\n    methods := Protocol requiredMethods: #Unknown\n    self assert: methods size equals: 0\n\n  // --- Protocol.allProtocols ---\n  testAllProtocolsIncludesRegistered =>\n    protos := Protocol allProtocols\n    self assert: (protos includes: #Displayable) equals: true\n    self assert: (protos includes: #HasSize) equals: true\n\n  // --- conformsTo: (Behaviour method on class objects) ---\n  testStringConformsToDisplayable =>\n    self assert: (String conformsTo: #Displayable) equals: true\n\n  testIntegerConformsToDisplayable =>\n    self assert: (Integer conformsTo: #Displayable) equals: true\n\n  testStringConformsToHasSize =>\n    self assert: (String conformsTo: #HasSize) equals: true\n\n  testIntegerConformsToHasSize =>\n    // Integer does not have size\n    self assert: (Integer conformsTo: #HasSize) equals: false\n\n  // --- protocols (Behaviour method on class objects) ---\n  testStringProtocolsIncludesDisplayable =>\n    protos := String protocols\n    self assert: (protos includes: #Displayable) equals: true\n\n  testStringProtocolsIncludesHasSize =>\n    protos := String protocols\n    self assert: (protos includes: #HasSize) equals: true\n\n  // --- Protocol.conformingClasses: ---\n\n  // Note: conformingClasses with a known protocol is tested via EUnit\n  // (beamtalk_protocol_registry_tests.erl). The BUnit test environment\n  // makes iterating all live class processes unreliable due to gen_server\n  // timeouts during hierarchy walks.\n  testConformingClassesUnknownReturnsEmpty =>\n    // Unknown protocol returns empty list\n    classes := Protocol conformingClasses: #NonExistentProtocol\n    self assert: classes size equals: 0\n\n  // --- BT-1611: Class method protocol tests ---\n  testCreatableIsProtocol =>\n    self assert: (Protocol isProtocol: #Creatable) equals: true\n\n  testRequiredMethodsCreatable =>\n    // Creatable has one class method requirement: `class create`\n    // Required methods returns class methods with \"class \" prefix\n    methods := Protocol requiredMethods: #Creatable\n    self assert: methods size equals: 1\n    self assert: (methods includes: #'class create') equals: true",
-      "explanation": "ADR 0068 Phase 2c: Runtime protocol query tests. Protocol definitions (Displayable, HasSize) are in fixtures/protocol_test_protos.bt."
+      "source": "// ADR 0068 Phase 2c: Runtime protocol query tests.\n// Protocol definitions are in separate fixture files:\n// fixtures/protocol_displayable.bt, protocol_has_size.bt, protocol_creatable.bt.\n\nTestCase subclass: ProtocolQueriesTest\n\n  // --- Protocol.isProtocol: ---\n  testIsProtocolTrue =>\n    self assert: (Protocol isProtocol: #Displayable) equals: true\n\n  testIsProtocolFalse =>\n    self assert: (Protocol isProtocol: #NotARealProtocol) equals: false\n\n  // --- Protocol.requiredMethods: ---\n  testRequiredMethodsDisplayable =>\n    methods := Protocol requiredMethods: #Displayable\n    self assert: (methods includes: #asString) equals: true\n    self assert: (methods includes: #printString) equals: true\n    self assert: methods size equals: 2\n\n  testRequiredMethodsUnknown =>\n    methods := Protocol requiredMethods: #Unknown\n    self assert: methods size equals: 0\n\n  // --- Protocol.allProtocols ---\n  testAllProtocolsIncludesRegistered =>\n    protos := Protocol allProtocols\n    self assert: (protos includes: #Displayable) equals: true\n    self assert: (protos includes: #HasSize) equals: true\n\n  // --- conformsTo: (Behaviour method on class objects) ---\n  testStringConformsToDisplayable =>\n    self assert: (String conformsTo: #Displayable) equals: true\n\n  testIntegerConformsToDisplayable =>\n    self assert: (Integer conformsTo: #Displayable) equals: true\n\n  testStringConformsToHasSize =>\n    self assert: (String conformsTo: #HasSize) equals: true\n\n  testIntegerConformsToHasSize =>\n    // Integer does not have size\n    self assert: (Integer conformsTo: #HasSize) equals: false\n\n  // --- protocols (Behaviour method on class objects) ---\n  testStringProtocolsIncludesDisplayable =>\n    protos := String protocols\n    self assert: (protos includes: #Displayable) equals: true\n\n  testStringProtocolsIncludesHasSize =>\n    protos := String protocols\n    self assert: (protos includes: #HasSize) equals: true\n\n  // --- Protocol.conformingClasses: ---\n\n  // Note: conformingClasses with a known protocol is tested via EUnit\n  // (beamtalk_protocol_registry_tests.erl). The BUnit test environment\n  // makes iterating all live class processes unreliable due to gen_server\n  // timeouts during hierarchy walks.\n  testConformingClassesUnknownReturnsEmpty =>\n    // Unknown protocol returns empty list\n    classes := Protocol conformingClasses: #NonExistentProtocol\n    self assert: classes size equals: 0\n\n  // --- BT-1611: Class method protocol tests ---\n  testCreatableIsProtocol =>\n    self assert: (Protocol isProtocol: #Creatable) equals: true\n\n  testRequiredMethodsCreatable =>\n    // Creatable has one class method requirement: `class create`\n    // Required methods returns class methods with \"class \" prefix\n    methods := Protocol requiredMethods: #Creatable\n    self assert: methods size equals: 1\n    self assert: (methods includes: #'class create') equals: true",
+      "explanation": "ADR 0068 Phase 2c: Runtime protocol query tests. Protocol definitions are in separate fixture files: fixtures/protocol_displayable.bt, protocol_has_size.bt, protocol_creatable.bt."
     },
     {
       "id": "stdlib-test-protoobject-actors-test",
