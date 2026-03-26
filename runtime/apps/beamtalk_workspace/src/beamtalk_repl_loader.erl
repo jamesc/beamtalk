@@ -588,7 +588,14 @@ class_name_atoms(Classes) ->
 safe_atom_result({ok, Atom}) -> {true, Atom};
 safe_atom_result({error, badarg}) -> false.
 
-%% Compute a package-qualified module name for a file (BT-775).
+%% Compute a package-qualified module name for a file (BT-775 / BT-1670).
+%%
+%% With package context: derives `bt@{package}@{relative_path_segments}`.
+%% Without package context: returns `undefined` so the compiler port
+%% derives the name from the class name instead.  This is intentional —
+%% class-name-based naming in the REPL enables hot reload across file
+%% renames (e.g., hot_counter.bt and hot_counter_v2.bt both define
+%% HotCounter → same module bt@hot_counter).
 -spec compute_package_module_name(string()) -> binary() | undefined.
 compute_package_module_name(Path) ->
     case beamtalk_workspace_meta:get_metadata() of

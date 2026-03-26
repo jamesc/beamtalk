@@ -316,9 +316,15 @@ reload_class_file_compile_error_test() ->
 %%====================================================================
 
 compute_package_module_name_no_metadata_test() ->
-    %% Without workspace_meta started, returns undefined
+    %% BT-1670: Without workspace_meta, falls back to bt@{stem_snake_case}
+    %% instead of undefined, matching CLI build behavior.
     Result = beamtalk_repl_loader:compute_package_module_name("/some/path/src/Foo.bt"),
-    ?assertEqual(undefined, Result).
+    ?assertEqual(<<"bt@foo">>, Result).
+
+compute_package_module_name_no_metadata_camel_case_test() ->
+    %% BT-1670: CamelCase file stems are converted to snake_case.
+    Result = beamtalk_repl_loader:compute_package_module_name("/some/path/MyCounter.bt"),
+    ?assertEqual(<<"bt@my_counter">>, Result).
 
 %%====================================================================
 %% resolve_package_module/3
