@@ -591,11 +591,8 @@ safe_atom_result({error, badarg}) -> false.
 %% Compute a package-qualified module name for a file (BT-775 / BT-1670).
 %%
 %% With package context: derives `bt@{package}@{relative_path_segments}`.
-%% Without package context: returns `undefined` so the compiler port
-%% derives the name from the class name instead.  This is intentional —
-%% class-name-based naming in the REPL enables hot reload across file
-%% renames (e.g., hot_counter.bt and hot_counter_v2.bt both define
-%% HotCounter → same module bt@hot_counter).
+%% Without package context: falls back to `bt@{stem_snake_case}`,
+%% matching CLI build behavior.
 -spec compute_package_module_name(string()) -> binary() | undefined.
 compute_package_module_name(Path) ->
     case beamtalk_workspace_meta:get_metadata() of
@@ -606,7 +603,10 @@ compute_package_module_name(Path) ->
             ProjectRoot = binary_to_list(ProjectPath),
             resolve_package_module(AbsPath, ProjectRoot, PackageName);
         _ ->
-            undefined
+            %% No workspace metadata — derive from file stem (snake_case).
+            Basename = filename:basename(Path, ".bt"),
+            Snake = to_snake_case(Basename),
+            iolist_to_binary(["bt@", Snake])
     end.
 
 %% Try src/ then test/ to resolve the package module name.
