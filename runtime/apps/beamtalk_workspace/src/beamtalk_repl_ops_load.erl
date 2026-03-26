@@ -20,7 +20,9 @@
     find_bt_files/1,
     extract_bt_class_info/1,
     sort_bt_files_by_deps/1,
-    structured_file_errors/2
+    structured_file_errors/2,
+    format_collision_warning/3,
+    extract_package_from_module/1
 ]).
 -endif.
 
@@ -485,15 +487,51 @@ collect_load_warnings(Classes) ->
 %% @private
 -spec format_collision_warning(atom(), atom(), atom()) -> binary().
 format_collision_warning(ClassName, OldModule, NewModule) ->
+    ClassBin = atom_to_binary(ClassName, utf8),
+    OldPkg = extract_package_from_module(OldModule),
+    NewPkg = extract_package_from_module(NewModule),
+    %% BT-1659: When both modules come from packages, add a qualified-name hint.
+    QualifiedHint =
+        case {OldPkg, NewPkg} of
+            {OldP, NewP} when OldP =/= undefined, NewP =/= undefined ->
+                iolist_to_binary([
+                    ". Use ",
+                    OldP,
+                    "@",
+                    ClassBin,
+                    " or ",
+                    NewP,
+                    "@",
+                    ClassBin,
+                    " to be explicit"
+                ]);
+            _ ->
+                <<>>
+        end,
     iolist_to_binary([
         "Class '",
-        atom_to_binary(ClassName, utf8),
+        ClassBin,
         "' redefined (was ",
         atom_to_binary(OldModule, utf8),
         ", now ",
         atom_to_binary(NewModule, utf8),
-        ")"
+        ")",
+        QualifiedHint
     ]).
+
+%% @private Extract the package segment from a bt@{pkg}@{class} module name.
+%% Returns the package name binary or undefined.
+%% Only 3-part names (bt@{pkg}@{class}) have a package; 2-part names (bt@{class})
+%% are stdlib/unqualified and return undefined.
+-spec extract_package_from_module(atom()) -> binary() | undefined.
+extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
+    ModStr = atom_to_list(ModuleName),
+    case string:split(ModStr, "@", all) of
+        ["bt", Pkg, _Class | _Rest] when Pkg =/= [] ->
+            list_to_binary(Pkg);
+        _ ->
+            undefined
+    end.
 
 %% @private
 -spec do_reload(string(), atom() | undefined, beamtalk_repl_protocol:protocol_msg(), pid()) ->

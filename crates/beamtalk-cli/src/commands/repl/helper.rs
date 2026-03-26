@@ -322,7 +322,7 @@ impl Completer for ReplHelper {
             let arg_word_start = arg
                 .char_indices()
                 .rev()
-                .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':')
+                .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':' && c != '@')
                 .map_or(0, |(i, c)| i + c.len_utf8());
             let candidates: Vec<Pair> = completions
                 .into_iter()
@@ -348,7 +348,7 @@ impl Completer for ReplHelper {
         let word_start = line_to_pos
             .char_indices()
             .rev()
-            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':')
+            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':' && c != '@')
             .map_or(0, |(i, c)| i + c.len_utf8());
 
         // Query backend with full line context so it can perform receiver-aware
@@ -545,7 +545,7 @@ mod tests {
     fn find_word_start(line: &str) -> usize {
         line.char_indices()
             .rev()
-            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':')
+            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':' && c != '@')
             .map_or(0, |(i, c)| i + c.len_utf8())
     }
 
@@ -639,6 +639,20 @@ mod tests {
     fn test_word_boundary_underscore_in_identifier() {
         let start = find_word_start("my_var");
         assert_eq!(&"my_var"[start..], "my_var");
+    }
+
+    #[test]
+    fn test_word_boundary_qualified_name() {
+        // BT-1659: @ is an identifier char so json@Parser stays as one token
+        let start = find_word_start("json@Parser");
+        assert_eq!(&"json@Parser"[start..], "json@Parser");
+    }
+
+    #[test]
+    fn test_word_boundary_qualified_name_with_prefix() {
+        // After "json@Parser ", word start is at the space
+        let start = find_word_start("json@Parser pa");
+        assert_eq!(&"json@Parser pa"[start..], "pa");
     }
 
     // === Highlighting tests ===

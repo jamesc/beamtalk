@@ -182,3 +182,32 @@ structured_file_errors_non_compile_error_test() ->
     [E] = Result,
     ?assertEqual(<<"/src/Missing.bt">>, maps:get(<<"path">>, E)),
     ?assertEqual(<<"file_not_found">>, maps:get(<<"kind">>, E)).
+
+%%====================================================================
+%% format_collision_warning/3 (BT-1659)
+%%====================================================================
+
+format_collision_warning_with_packages_test() ->
+    %% When both modules are package-qualified, the warning should include a hint.
+    Result = beamtalk_repl_ops_load:format_collision_warning(
+        'Parser', 'bt@json@parser', 'bt@xml@parser'
+    ),
+    ?assert(binary:match(Result, <<"Class 'Parser' redefined">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"json@Parser">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"xml@Parser">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"to be explicit">>) =/= nomatch).
+
+format_collision_warning_without_packages_test() ->
+    %% When modules aren't package-qualified, no hint is added.
+    Result = beamtalk_repl_ops_load:format_collision_warning(
+        'Counter', 'bt@counter', 'bt@counter_v2'
+    ),
+    ?assert(binary:match(Result, <<"Class 'Counter' redefined">>) =/= nomatch),
+    %% No qualified name hint when there's no second @ segment
+    ?assertEqual(nomatch, binary:match(Result, <<"to be explicit">>)).
+
+extract_package_from_module_qualified_test() ->
+    ?assertEqual(<<"json">>, beamtalk_repl_ops_load:extract_package_from_module('bt@json@parser')).
+
+extract_package_from_module_unqualified_test() ->
+    ?assertEqual(undefined, beamtalk_repl_ops_load:extract_package_from_module('bt@counter')).
