@@ -1475,6 +1475,13 @@ mod tests {
     }
 
     #[test]
+    fn extract_hover_class_name_from_package_qualified_hover() {
+        // BT-1658: class name extraction must work with package provenance suffix
+        let text = "Class: `Parser` (from package `json`)";
+        assert_eq!(extract_hover_class_name(text), Some("Parser"));
+    }
+
+    #[test]
     fn extract_hover_class_name_from_resolved_method_hover() {
         let text = "```beamtalk\n+\n```\n\nResolved on `Integer` (defined in `Integer`)\n\n_instance-side, sealed_";
         assert_eq!(extract_hover_class_name(text), Some("Integer"));

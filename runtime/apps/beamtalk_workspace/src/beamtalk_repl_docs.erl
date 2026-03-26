@@ -41,7 +41,8 @@
     extract_see_also/1,
     alternative_classes/1,
     format_see_also/1,
-    build_see_also/3
+    build_see_also/3,
+    format_package_provenance/1
 ]).
 -endif.
 
@@ -508,6 +509,9 @@ format_class_output(
         %% Class modifiers
         format_modifiers(Modifiers),
 
+        %% Package provenance (ADR 0070 Phase 5, BT-1658)
+        format_package_provenance(ClassName),
+
         %% Module doc
         case ModuleDoc of
             none -> <<>>;
@@ -581,6 +585,21 @@ format_modifiers(#{is_abstract := true}) ->
     <<"\n[abstract]">>;
 format_modifiers(_) ->
     <<>>.
+
+%% @doc Format package provenance for a class (ADR 0070 Phase 5, BT-1658).
+%%
+%% Shows which package a class belongs to using `beamtalk_package:package_name/1`.
+%% Returns an empty binary if the class has no package or the lookup fails.
+-spec format_package_provenance(atom()) -> binary().
+format_package_provenance(ClassName) ->
+    try beamtalk_package:package_name(ClassName) of
+        nil ->
+            <<>>;
+        PkgName when is_binary(PkgName) ->
+            iolist_to_binary([<<"\nPackage: ">>, PkgName])
+    catch
+        _:_ -> <<>>
+    end.
 
 %% @doc Extract @see references from doc text.
 %%
