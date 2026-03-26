@@ -2680,3 +2680,179 @@ fn test_self_call_as_last_expression_threads_state() {
         "Last self-call must extract result via element(1, ...). Got:\n{code}"
     );
 }
+
+// --- ADR 0070 Phase 2: Package-qualified class reference codegen tests ---
+
+#[test]
+fn test_qualified_class_reference_standalone() {
+    // ADR 0070 Phase 2: `json@Parser` as a standalone expression should use
+    // the class registry with the short name 'Parser' and produce the
+    // display name 'json@Parser class' in the class object tuple.
+    use crate::ast::{Expression, Identifier, Module};
+    use crate::source_analysis::Span;
+
+    let expr = Expression::ClassReference {
+        name: Identifier::new("Parser", Span::new(5, 11)),
+        package: Some(Identifier::new("json", Span::new(0, 4))),
+        span: Span::new(0, 11),
+    };
+
+    let module = Module {
+        expressions: vec![bare(expr)],
+        classes: vec![],
+        method_definitions: Vec::new(),
+        protocols: Vec::new(),
+        span: Span::new(0, 11),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+
+    let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
+        .expect("codegen should succeed");
+
+    // Registry lookup uses the short class name
+    assert!(
+        code.contains("call 'beamtalk_class_registry':'whereis_class'('Parser')"),
+        "Should look up 'Parser' (short name) in class registry. Got:\n{code}"
+    );
+
+    // Display name in the class object tuple includes package qualifier
+    assert!(
+        code.contains("'json@Parser class'"),
+        "Class object tuple should use 'json@Parser class' as display name. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_qualified_class_method_call() {
+    // ADR 0070 Phase 2: `json@Parser parse: input` should use the class
+    // registry to find the class PID and dispatch the class method.
+    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("Parser", Span::new(5, 11)),
+        package: Some(Identifier::new("json", Span::new(0, 4))),
+        span: Span::new(0, 11),
+    };
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("parse:", Span::new(12, 18))]);
+    let arguments = vec![Expression::Identifier(Identifier::new(
+        "input",
+        Span::new(19, 24),
+    ))];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    // Should look up by short class name in class registry
+    assert!(
+        output.contains("'beamtalk_class_registry':'whereis_class'('Parser')"),
+        "Should use short class name for registry lookup. Got:\n{output}"
+    );
+
+    // Should dispatch via class_send
+    assert!(
+        output.contains("'beamtalk_object_class':'class_send'"),
+        "Should dispatch class method via class_send. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_qualified_actor_spawn() {
+    // ADR 0070 Phase 2: `json@Worker spawn` should use the fully-qualified
+    // BEAM module name 'bt@json@worker' for the spawn call.
+    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("Worker", Span::new(5, 11)),
+        package: Some(Identifier::new("json", Span::new(0, 4))),
+        span: Span::new(0, 11),
+    };
+    let selector = MessageSelector::Unary("spawn".into());
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &[])
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    // Should use the fully-qualified BEAM module name
+    assert!(
+        output.contains("call 'bt@json@worker':'spawn'()"),
+        "Qualified spawn should use 'bt@json@worker' module name. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_qualified_actor_spawn_with_args() {
+    // ADR 0070 Phase 2: `json@Worker spawnWith: config` should use the
+    // fully-qualified BEAM module name 'bt@json@worker'.
+    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("Worker", Span::new(5, 11)),
+        package: Some(Identifier::new("json", Span::new(0, 4))),
+        span: Span::new(0, 11),
+    };
+    let selector =
+        MessageSelector::Keyword(vec![KeywordPart::new("spawnWith:", Span::new(12, 22))]);
+    let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(23, 25))];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("call 'bt@json@worker':'spawn'(42)"),
+        "Qualified spawnWith: should use 'bt@json@worker' module name. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_qualified_class_reference_multi_word() {
+    // ADR 0070 Phase 2: `utils@MyClass spawn` should produce 'bt@utils@my_class'.
+    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("MyClass", Span::new(6, 13)),
+        package: Some(Identifier::new("utils", Span::new(0, 5))),
+        span: Span::new(0, 13),
+    };
+    let selector = MessageSelector::Unary("spawn".into());
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &[])
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("call 'bt@utils@my_class':'spawn'()"),
+        "Multi-word class name should use snake_case in qualified module name. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_unqualified_class_reference_unchanged() {
+    // ADR 0070 Phase 2: Unqualified class references should continue to
+    // work exactly as before — no regressions.
+    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("Counter", Span::new(0, 7)),
+        package: None,
+        span: Span::new(0, 7),
+    };
+    let selector = MessageSelector::Unary("spawn".into());
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &[])
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    // Unqualified spawn should use the existing heuristic module name
+    assert!(
+        output.contains("call 'bt@my_app@counter':'spawn'()"),
+        "Unqualified spawn should use package heuristic. Got:\n{output}"
+    );
+}

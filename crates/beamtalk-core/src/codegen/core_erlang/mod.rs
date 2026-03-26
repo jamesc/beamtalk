@@ -2197,7 +2197,9 @@ impl CoreErlangGenerator {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
-            Expression::ClassReference { name, .. } => self.generate_class_reference(&name.name),
+            Expression::ClassReference { name, package, .. } => {
+                self.generate_class_reference(&name.name, package.as_ref().map(|p| p.name.as_str()))
+            }
             Expression::Super(_) => {
                 // Super by itself is not a valid expression - it must be used
                 // as a message receiver (e.g., `super increment`)
@@ -2358,8 +2360,24 @@ impl CoreErlangGenerator {
     /// ADR 0019 Phase 3: In workspace mode, checks REPL bindings first for
     /// convenience names (Transcript, Beamtalk, Workspace), then falls back
     /// to class registry lookup. In batch mode, goes directly to the registry.
+    ///
+    /// ADR 0070 Phase 2: When `package` is `Some`, the class is from a known
+    /// dependency and the module name is deterministic (`bt@{pkg}@{snake}`).
+    /// The class registry lookup uses the class name for now — package-aware
+    /// registry disambiguation is a future phase.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
-    fn generate_class_reference(&mut self, class_name: &str) -> Result<Document<'static>> {
+    fn generate_class_reference(
+        &mut self,
+        class_name: &str,
+        package: Option<&str>,
+    ) -> Result<Document<'static>> {
+        // ADR 0070 Phase 2: For package-qualified references, we know the exact
+        // display name to use in the class object tuple.
+        let display_name = match package {
+            Some(pkg) => format!("{pkg}@{class_name}"),
+            None => class_name.to_string(),
+        };
+
         // ADR 0019 Phase 3: Only check bindings in REPL top-level context.
         // Actor methods compiled in workspace mode should NOT check REPL bindings.
         if self.workspace_mode() && self.context == CodeGenContext::Repl {
@@ -2379,7 +2397,7 @@ impl CoreErlangGenerator {
                     "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
                 ),
                 format!(
-                    "{{'beamtalk_object', '{class_name} class', {class_mod_var}, {class_pid_var}}} "
+                    "{{'beamtalk_object', '{display_name} class', {class_mod_var}, {class_pid_var}}} "
                 ),
                 "end end",
             ])
@@ -2398,7 +2416,7 @@ impl CoreErlangGenerator {
                     "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
                 ),
                 format!(
-                    "{{'beamtalk_object', '{class_name} class', {class_mod_var}, {class_pid_var}}} "
+                    "{{'beamtalk_object', '{display_name} class', {class_mod_var}, {class_pid_var}}} "
                 ),
                 "end",
             ])
@@ -2415,7 +2433,7 @@ impl CoreErlangGenerator {
                     "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
                 ),
                 format!(
-                    "{{'beamtalk_object', '{class_name} class', {class_mod_var}, {class_pid_var}}} "
+                    "{{'beamtalk_object', '{display_name} class', {class_mod_var}, {class_pid_var}}} "
                 ),
                 "end",
             ])
