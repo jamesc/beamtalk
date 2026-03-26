@@ -50,6 +50,27 @@ counter increment  // prints "incrementing", returns 2
 
 The native forms work from compiled code, scripts, and actor methods — not just the REPL.
 
+### Multi-line Input
+
+The REPL automatically detects incomplete input (unclosed brackets, trailing operators, etc.) and shows a `..>` continuation prompt. For constructs where the REPL cannot determine completeness from syntax alone — protocol definitions and class definitions without methods — press **Enter on a blank line** to submit the accumulated input.
+
+```beamtalk
+> Protocol define: Greetable
+..>   greet -> String
+..>                          ← blank line submits the definition
+Protocol Greetable defined
+```
+
+Class definitions with at least one method (`=>`) auto-submit. A blank line is only needed for class headers with state declarations only (before you have added methods):
+
+```beamtalk
+> Actor subclass: Config
+..>   state: verbose = false
+..>                          ← blank line submits the class
+```
+
+Use **Ctrl+C** to cancel multi-line input without submitting.
+
 ### Workspace and Reflection Singletons
 
 Two global objects provide introspection and project operations:

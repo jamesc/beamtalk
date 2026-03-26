@@ -59,7 +59,7 @@ use tracing::warn;
 
 use crate::commands::workspace;
 
-use beamtalk_core::source_analysis::is_input_complete;
+use beamtalk_core::source_analysis::{is_input_complete, needs_blank_line_to_complete};
 
 /// Maximum retries when connecting to REPL backend.
 const MAX_CONNECT_RETRIES: u32 = 10;
@@ -1009,9 +1009,26 @@ pub(crate) fn repl_loop(
         };
         let line = line.trim();
 
-        // In multi-line mode, empty line continues accumulation
+        // Empty line at the top level — ignore it
         if line.is_empty() && line_buffer.is_empty() {
             continue;
+        }
+
+        // Blank line while in multi-line mode: force-submit if the buffer
+        // contains a construct that can only be terminated by a blank line
+        // (protocol or class definitions).  For other incomplete input
+        // (unclosed delimiters, trailing operators) the blank line is pushed
+        // onto the buffer below and accumulation continues normally.
+        if line.is_empty() && !line_buffer.is_empty() {
+            let accumulated = line_buffer.join("\n");
+            if needs_blank_line_to_complete(&accumulated) {
+                let _ = rl.add_history_entry(&accumulated);
+                if eval_with_reconnect(client, &rl, &accumulated, &interrupted) {
+                    break;
+                }
+                line_buffer.clear();
+                continue;
+            }
         }
 
         // First line: check if it's a REPL command (only when not
