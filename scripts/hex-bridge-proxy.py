@@ -74,7 +74,12 @@ def https_get(path):
             raise ConnectionError("Upstream proxy closed connection")
         resp += chunk
     status_line = resp.split(b"\r\n", 1)[0]
-    if b"200" not in status_line:
+    # Parse numeric status code to avoid false matches on other "200" substrings
+    try:
+        status_code = int(status_line.split(b" ", 2)[1])
+    except (IndexError, ValueError):
+        status_code = 0
+    if status_code != 200:
         raise ConnectionError(f"CONNECT failed: {status_line.decode()}")
 
     # Wrap in TLS (verify_mode=NONE to accept MITM certs)
@@ -109,14 +114,26 @@ def https_get(path):
 
 
 def _dechunk(data):
-    """Decode an HTTP chunked transfer-encoded body."""
+    """Decode an HTTP chunked transfer-encoded body.
+
+    Handles chunk extensions (e.g. ``1a;foo=bar\\r\\n``) per RFC 7230 §4.1
+    by stripping everything after the first ``;`` on the size line.
+    """
     result = b""
     while data:
-        # Each chunk: hex-size\r\n<data>\r\n
+        # Each chunk: hex-size[;ext]\r\n<data>\r\n
         crlf = data.find(b"\r\n")
         if crlf < 0:
             break
-        size = int(data[:crlf], 16)
+        size_field = data[:crlf]
+        # Strip optional chunk extensions after ";"
+        semi = size_field.find(b";")
+        if semi >= 0:
+            size_field = size_field[:semi]
+        try:
+            size = int(size_field.strip(), 16)
+        except ValueError:
+            break
         if size == 0:
             break
         start = crlf + 2
@@ -130,10 +147,12 @@ class HexBridgeHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path
-        # Handle absolute URLs (http://host/path) from HTTP proxy clients
+        # Handle absolute URLs (http://host/path?q=1) from HTTP proxy clients
         if path.startswith("http"):
-            from urllib.parse import urlparse
-            path = urlparse(path).path
+            parsed = urlsplit(path)
+            path = parsed.path
+            if parsed.query:
+                path = f"{path}?{parsed.query}"
 
         try:
             raw = https_get(path)
