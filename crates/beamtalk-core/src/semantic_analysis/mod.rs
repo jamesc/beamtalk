@@ -51,8 +51,8 @@ pub use block_facts::analyze_block;
 pub use class_hierarchy::ClassHierarchy;
 pub use class_kind_writeback::apply_class_kind_writeback;
 pub use collision_checker::{
-    DependencyRegistry, build_dependency_registry, check_collision_at_use_sites,
-    check_stdlib_reservation,
+    DepInfo, DependencyRegistry, build_dependency_registry, build_dependency_registry_with_graph,
+    check_collision_at_use_sites, check_stdlib_reservation, check_transitive_dep_usage,
 };
 pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};

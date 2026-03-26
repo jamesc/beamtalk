@@ -83,6 +83,11 @@ pub struct PackageManifest {
     #[serde(default)]
     #[allow(dead_code)] // Read by future phases (Hex publishing)
     pub licenses: Option<Vec<String>>,
+    /// When `true`, using a class from a transitive dependency is a compile
+    /// error instead of a warning (ADR 0070 Phase 3).
+    /// Defaults to `false` (warning only).
+    #[serde(default, rename = "strict-deps")]
+    pub strict_deps: bool,
 }
 
 /// Validate and convert a single TOML dependency entry into a [`DependencySpec`].
@@ -276,6 +281,24 @@ pub fn find_manifest(project_root: &Utf8Path) -> Result<Option<PackageManifest>>
         .wrap_err_with(|| format!("Failed to stat manifest '{manifest_path}'"))?
     {
         parse_manifest(&manifest_path).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+/// Look for `beamtalk.toml` in the given directory and parse it fully
+/// (including dependencies) if found.
+///
+/// Returns `None` if no manifest file exists. Returns an error if the file
+/// exists but is malformed.
+pub fn find_manifest_full(project_root: &Utf8Path) -> Result<Option<ParsedManifest>> {
+    let manifest_path = project_root.join("beamtalk.toml");
+    if manifest_path
+        .try_exists()
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to stat manifest '{manifest_path}'"))?
+    {
+        parse_manifest_full(&manifest_path).map(Some)
     } else {
         Ok(None)
     }

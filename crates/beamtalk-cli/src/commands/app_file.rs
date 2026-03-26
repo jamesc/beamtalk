@@ -174,6 +174,7 @@ mod tests {
             version: version.to_string(),
             description: description.map(String::from),
             licenses: None,
+            strict_deps: false,
         }
     }
 
