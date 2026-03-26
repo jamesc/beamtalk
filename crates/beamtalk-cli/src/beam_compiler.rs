@@ -697,6 +697,7 @@ pub fn compile_source(
         &[],
         None,
         None,
+        false,
     )
 }
 
@@ -726,6 +727,7 @@ pub(crate) fn compile_source_with_bindings(
     pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     cached_ast: Option<crate::commands::build::CachedAst>,
     dep_registry: Option<&beamtalk_core::semantic_analysis::DependencyRegistry>,
+    strict_deps: bool,
 ) -> Result<()> {
     use crate::diagnostic::CompileDiagnostic;
 
@@ -798,6 +800,15 @@ pub(crate) fn compile_source_with_bindings(
         beamtalk_core::semantic_analysis::check_collision_at_use_sites(
             &module,
             registry,
+            &mut diagnostics,
+        );
+
+        // BT-1654 / ADR 0070 Phase 3: Warn on transitive dependency usage.
+        // When strict-deps is true, this promotes the warning to an error.
+        beamtalk_core::semantic_analysis::check_transitive_dep_usage(
+            &module,
+            registry,
+            strict_deps,
             &mut diagnostics,
         );
     }
