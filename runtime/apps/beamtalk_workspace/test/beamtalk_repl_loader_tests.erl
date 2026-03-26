@@ -327,7 +327,7 @@ compute_package_module_name_no_metadata_camel_case_test() ->
     ?assertEqual(<<"bt@my_counter">>, Result).
 
 %%====================================================================
-%% resolve_package_module/3
+%% resolve_package_module/4
 %%====================================================================
 
 resolve_package_module_src_match_test() ->
@@ -336,22 +336,26 @@ resolve_package_module_src_match_test() ->
     {ok, Cwd} = file:get_cwd(),
     ProjectRoot = filename:join(Cwd, "myproject"),
     AbsPath = filename:join([ProjectRoot, "src", "Counter.bt"]),
-    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"mypkg">>),
+    OrigPath = filename:join([ProjectRoot, "src", "Counter.bt"]),
+    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"mypkg">>, OrigPath),
     ?assertEqual(<<"bt@mypkg@counter">>, Result).
 
 resolve_package_module_test_match_test() ->
     {ok, Cwd} = file:get_cwd(),
     ProjectRoot = filename:join(Cwd, "myproject"),
     AbsPath = filename:join([ProjectRoot, "test", "CounterTest.bt"]),
-    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"mypkg">>),
+    OrigPath = AbsPath,
+    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"mypkg">>, OrigPath),
     ?assertEqual(<<"bt@mypkg@test@counter_test">>, Result).
 
 resolve_package_module_no_match_test() ->
+    %% File outside src/ and test/ falls back to bt@{stem_snake_case}
     {ok, Cwd} = file:get_cwd(),
     ProjectRoot = filename:join(Cwd, "myproject"),
     AbsPath = filename:join([Cwd, "other", "project", "Foo.bt"]),
-    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"pkg">>),
-    ?assertEqual(undefined, Result).
+    OrigPath = AbsPath,
+    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"pkg">>, OrigPath),
+    ?assertEqual(<<"bt@foo">>, Result).
 
 %%====================================================================
 %% try_package_relative/3
