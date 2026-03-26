@@ -6049,3 +6049,74 @@ fn non_protocol_define_is_complete() {
     // "define:" on a non-Protocol receiver should not trigger the protocol check
     assert!(is_input_complete("myObj define: something"));
 }
+
+// === needs_blank_line_to_complete tests ===
+
+#[test]
+fn blank_line_submit_protocol_define() {
+    // Protocol definitions need a blank line to complete
+    assert!(needs_blank_line_to_complete("Protocol define: Greetable"));
+    assert!(needs_blank_line_to_complete(
+        "Protocol define: Greetable\n  greet -> String"
+    ));
+    assert!(needs_blank_line_to_complete(
+        "Protocol define: Serializable\n  serialize -> String\n  deserialize: data :: String -> Self"
+    ));
+}
+
+#[test]
+fn blank_line_submit_class_definition_no_methods() {
+    // Class header without methods — needs blank line
+    assert!(needs_blank_line_to_complete("Actor subclass: Counter"));
+    assert!(needs_blank_line_to_complete(
+        "Actor subclass: Counter\n  state: value = 0"
+    ));
+}
+
+#[test]
+fn blank_line_submit_class_definition_with_state_map() {
+    // Map `=>` in state initializer should not count as a method arrow
+    assert!(needs_blank_line_to_complete(
+        "Object subclass: Config\n  state: opts = #{verbose => true}"
+    ));
+}
+
+#[test]
+fn no_blank_line_submit_for_complete_input() {
+    // Already complete — blank line not needed
+    assert!(!needs_blank_line_to_complete("3 + 4"));
+    assert!(!needs_blank_line_to_complete("x := 42"));
+    assert!(!needs_blank_line_to_complete(""));
+}
+
+#[test]
+fn no_blank_line_submit_for_unclosed_delimiters() {
+    // Unclosed delimiters — blank line should NOT force-submit
+    assert!(!needs_blank_line_to_complete("[:x | x * 2"));
+    assert!(!needs_blank_line_to_complete("#{name =>"));
+    assert!(!needs_blank_line_to_complete("#(1, 2"));
+    assert!(!needs_blank_line_to_complete("{1, 2"));
+}
+
+#[test]
+fn no_blank_line_submit_for_trailing_operators() {
+    // Trailing operators — user is mid-expression
+    assert!(!needs_blank_line_to_complete("x := 1 +"));
+    assert!(!needs_blank_line_to_complete("array at:"));
+    assert!(!needs_blank_line_to_complete("x :="));
+}
+
+#[test]
+fn no_blank_line_submit_non_protocol_define() {
+    // "define:" on a non-Protocol receiver should not trigger
+    assert!(!needs_blank_line_to_complete("myObj define: something"));
+}
+
+#[test]
+fn blank_line_submit_class_with_method_is_already_complete() {
+    // Class with at least one method is already complete via is_input_complete,
+    // so needs_blank_line_to_complete returns false
+    assert!(!needs_blank_line_to_complete(
+        "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1"
+    ));
+}

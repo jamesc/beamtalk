@@ -342,8 +342,9 @@ pub fn is_input_complete(source: &str) -> bool {
     // "Actor subclass: Counter" alone is incomplete — waiting for state/methods.
     // "Actor subclass: Counter\n  state: n = 0" is still incomplete — no methods.
     // "Actor subclass: Counter\n  increment => self.n := self.n + 1" is complete.
-    // In the REPL, user presses Enter on a blank line to submit; in E2E tests,
-    // the assertion line `// =>` follows immediately after the last method.
+    // In the REPL, the user submits with a blank line (see
+    // `needs_blank_line_to_complete`); in E2E tests, the `// =>` assertion
+    // or blank line terminates the continuation collection.
     if has_subclass_keyword && !has_method_arrow {
         return false;
     }
@@ -357,6 +358,123 @@ pub fn is_input_complete(source: &str) -> bool {
     }
 
     true
+}
+
+/// Checks whether the given source text is only incomplete because it contains
+/// a construct that requires a blank line to signal completion (protocol
+/// definitions and class definitions with methods).
+///
+/// The REPL uses this to decide whether a blank line should force-submit
+/// the accumulated buffer.  Returns `true` when the input has balanced
+/// delimiters and no trailing operators, but is kept incomplete solely
+/// because of a protocol or class definition.
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::source_analysis::needs_blank_line_to_complete;
+///
+/// // Protocol definition — blank line should submit
+/// assert!(needs_blank_line_to_complete("Protocol define: Greetable"));
+///
+/// // Class without methods — blank line should submit
+/// assert!(needs_blank_line_to_complete(
+///     "Actor subclass: Counter\n  state: n = 0"
+/// ));
+///
+/// // Unclosed block — blank line should NOT submit
+/// assert!(!needs_blank_line_to_complete("[:x | x * 2"));
+///
+/// // Already complete — not applicable
+/// assert!(!needs_blank_line_to_complete("3 + 4"));
+/// ```
+#[must_use]
+pub fn needs_blank_line_to_complete(source: &str) -> bool {
+    if source.trim().is_empty() {
+        return false;
+    }
+
+    // If the input is already complete, blank-line submission is not needed.
+    if is_input_complete(source) {
+        return false;
+    }
+
+    let tokens = lex_with_eof(source);
+
+    let mut bracket_depth: i32 = 0;
+    let mut paren_depth: i32 = 0;
+    let mut brace_depth: i32 = 0;
+    let mut binary_depth: i32 = 0;
+    let mut last_meaningful_kind: Option<&TokenKind> = None;
+    let mut has_subclass_keyword = false;
+    let mut has_protocol_define = false;
+
+    for token in &tokens {
+        let kind = token.kind();
+
+        if kind.is_eof() {
+            for trivia in token.leading_trivia() {
+                if let Trivia::BlockComment(text) = trivia {
+                    if !text.ends_with("*/") {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        match kind {
+            TokenKind::Error(msg) => {
+                if !is_diagnostic_error(msg) {
+                    return false;
+                }
+            }
+            TokenKind::LeftBracket | TokenKind::ArrayOpen => bracket_depth += 1,
+            TokenKind::LeftParen | TokenKind::ListOpen => paren_depth += 1,
+            TokenKind::LeftBrace | TokenKind::MapOpen => brace_depth += 1,
+            TokenKind::LtLt => binary_depth += 1,
+            TokenKind::RightBracket => bracket_depth -= 1,
+            TokenKind::RightParen => paren_depth -= 1,
+            TokenKind::RightBrace => brace_depth -= 1,
+            TokenKind::GtGt if binary_depth > 0 => binary_depth -= 1,
+            TokenKind::Keyword(k) if k == "subclass:" => has_subclass_keyword = true,
+            TokenKind::Keyword(k) if k == "define:" => {
+                if matches!(last_meaningful_kind, Some(TokenKind::Identifier(name)) if name == "Protocol")
+                {
+                    has_protocol_define = true;
+                }
+            }
+            TokenKind::Eof => break,
+            _ => {}
+        }
+
+        if !kind.is_eof() {
+            last_meaningful_kind = Some(kind);
+        }
+    }
+
+    // If there are unclosed delimiters, a blank line should NOT force-submit.
+    if bracket_depth > 0 || paren_depth > 0 || brace_depth > 0 || binary_depth > 0 {
+        return false;
+    }
+
+    // If there's a trailing operator/keyword, user is mid-expression — don't submit.
+    if matches!(
+        last_meaningful_kind,
+        Some(
+            TokenKind::Keyword(_)
+                | TokenKind::BinarySelector(_)
+                | TokenKind::Arrow
+                | TokenKind::GtGt
+                | TokenKind::Assign
+                | TokenKind::Semicolon
+                | TokenKind::Caret
+        )
+    ) {
+        return false;
+    }
+
+    // The only remaining reasons for incompleteness are protocol/class definitions.
+    has_protocol_define || has_subclass_keyword
 }
 
 /// Check if a lexer error message is a human-readable diagnostic (complete but

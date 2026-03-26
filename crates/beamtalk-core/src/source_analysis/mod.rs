@@ -50,7 +50,8 @@ mod lexer_property_tests;
 pub use error::{LexError, LexErrorKind};
 pub use lexer::{Lexer, lex, lex_with_eof};
 pub use parser::{
-    Diagnostic, DiagnosticCategory, DiagnosticNote, Severity, is_input_complete, parse,
+    Diagnostic, DiagnosticCategory, DiagnosticNote, Severity, is_input_complete,
+    needs_blank_line_to_complete, parse,
 };
 pub use span::Span;
 pub use token::{Token, TokenKind, Trivia};
