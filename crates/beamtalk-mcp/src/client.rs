@@ -23,6 +23,21 @@ use tracing::instrument;
 /// Default timeout for REPL I/O operations.
 const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Timeout for test operations, which can run large suites.
+///
+/// Defaults to 120 seconds, configurable via `BEAMTALK_MCP_TEST_TIMEOUT`
+/// environment variable (value in seconds).
+fn test_io_timeout() -> Duration {
+    static CACHED: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *CACHED.get_or_init(|| {
+        std::env::var("BEAMTALK_MCP_TEST_TIMEOUT")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&secs| secs > 0)
+            .map_or(Duration::from_secs(120), Duration::from_secs)
+    })
+}
+
 /// Timeout for establishing a WebSocket connection.
 ///
 /// On Linux, connecting to a closed port fails instantly ("connection refused").
@@ -587,26 +602,36 @@ impl ReplClient {
 
     /// Send a test operation to run `BUnit` tests for a specific class.
     ///
-    /// Uses [`send_once`] (no retry) — tests may have side effects; a retry
-    /// could run the same test suite twice and produce misleading results.
+    /// Uses [`send_once_with_timeout`] (no retry) — tests may have side effects;
+    /// a retry could run the same test suite twice and produce misleading results.
+    /// Uses the extended test timeout (default 120 s, configurable via
+    /// `BEAMTALK_MCP_TEST_TIMEOUT`) since test suites can take much longer than
+    /// the default 30 s I/O timeout.
     pub async fn test_class(&self, class: &str) -> Result<ReplResponse, String> {
-        self.send_once(&Self::request_with_param("test", "class", class))
-            .await
+        self.send_once_with_timeout(
+            &Self::request_with_param("test", "class", class),
+            test_io_timeout(),
+        )
+        .await
     }
 
     /// Send a test operation scoped to a specific source file path.
     ///
-    /// Uses [`send_once`] (no retry) — see [`test_class`] for rationale.
+    /// Uses [`send_once_with_timeout`] (no retry) — see [`test_class`] for rationale.
     pub async fn test_file(&self, file: &str) -> Result<ReplResponse, String> {
-        self.send_once(&Self::request_with_param("test", "file", file))
-            .await
+        self.send_once_with_timeout(
+            &Self::request_with_param("test", "file", file),
+            test_io_timeout(),
+        )
+        .await
     }
 
     /// Send a test-all operation to run all `BUnit` tests.
     ///
-    /// Uses [`send_once`] (no retry) — see [`test_class`] for rationale.
+    /// Uses [`send_once_with_timeout`] (no retry) — see [`test_class`] for rationale.
     pub async fn test_all(&self) -> Result<ReplResponse, String> {
-        self.send_once(&Self::request("test-all")).await
+        self.send_once_with_timeout(&Self::request("test-all"), test_io_timeout())
+            .await
     }
 
     /// Send a describe operation for capability discovery.
@@ -748,8 +773,23 @@ impl ReplClient {
     ///   would cause double-execution.
     ///
     /// Used by: [`eval`], [`evaluate_with_options`], [`load_file`], [`load_project`],
-    /// [`reload`], [`clear`], [`unload`], [`interrupt`], [`test_class`], [`test_file`], [`test_all`].
+    /// [`reload`], [`clear`], [`unload`], [`interrupt`].
+    ///
+    /// Test methods ([`test_class`], [`test_file`], [`test_all`]) call
+    /// [`send_once_with_timeout`] directly with a longer timeout.
     async fn send_once(&self, request: &serde_json::Value) -> Result<ReplResponse, String> {
+        self.send_once_with_timeout(request, REPL_IO_TIMEOUT).await
+    }
+
+    /// Like [`send_once`] but with an explicit receive-phase I/O timeout.
+    ///
+    /// Used for operations that may take longer than the default 30 s timeout
+    /// (e.g. running a full test suite via [`test_class`], [`test_file`], [`test_all`]).
+    async fn send_once_with_timeout(
+        &self,
+        request: &serde_json::Value,
+        timeout: Duration,
+    ) -> Result<ReplResponse, String> {
         let request_str =
             serde_json::to_string(request).map_err(|e| format!("Failed to serialize: {e}"))?;
 
@@ -758,6 +798,7 @@ impl ReplClient {
 
             // Send phase: apply REPL_IO_TIMEOUT so a half-open TCP connection
             // (send buffer full, OS hasn't yet detected the dead link) cannot block forever.
+            // The send timeout is always the default — sending a small JSON message is fast.
             let send_result = tokio::time::timeout(
                 REPL_IO_TIMEOUT,
                 inner.ws.send(Message::Text(request_str.clone().into())),
@@ -832,9 +873,9 @@ impl ReplClient {
                         }
                     }
                 } => result,
-                () = tokio::time::sleep(REPL_IO_TIMEOUT) => Err(format!(
+                () = tokio::time::sleep(timeout) => Err(format!(
                     "REPL I/O timed out after {}s — the REPL may be unresponsive",
-                    REPL_IO_TIMEOUT.as_secs()
+                    timeout.as_secs()
                 )),
             };
 
@@ -1887,5 +1928,14 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_io_timeout_default_is_120s() {
+        // When BEAMTALK_MCP_TEST_TIMEOUT is not set, default is 120s.
+        // Note: OnceLock makes this a one-shot test per process, so we only
+        // verify the default (env var is not set in the test environment).
+        let timeout = test_io_timeout();
+        assert_eq!(timeout, Duration::from_secs(120));
     }
 }
