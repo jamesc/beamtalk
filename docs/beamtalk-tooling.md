@@ -50,12 +50,6 @@ counter increment  // prints "incrementing", returns 2
 
 The native forms work from compiled code, scripts, and actor methods — not just the REPL.
 
-The REPL also supports defining protocols interactively:
-
-```beamtalk
-Protocol define: #Greetable methods: #(#greet)
-```
-
 ### Workspace and Reflection Singletons
 
 Two global objects provide introspection and project operations:
