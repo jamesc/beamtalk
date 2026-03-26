@@ -59,58 +59,70 @@ else:
 def https_get(path):
     """Perform HTTPS GET through the upstream proxy's CONNECT tunnel."""
     sock = socket.create_connection((UPSTREAM_HOST, UPSTREAM_PORT), timeout=30)
-    # Establish CONNECT tunnel with proxy auth
-    connect_req = (
-        f"CONNECT {TARGET_HOST}:443 HTTP/1.1\r\n"
-        f"Host: {TARGET_HOST}:443\r\n"
-        f"Proxy-Authorization: Basic {PROXY_AUTH}\r\n"
-        f"\r\n"
-    )
-    sock.sendall(connect_req.encode())
-    resp = b""
-    while b"\r\n\r\n" not in resp:
-        chunk = sock.recv(4096)
-        if not chunk:
-            raise ConnectionError("Upstream proxy closed connection")
-        resp += chunk
-    status_line = resp.split(b"\r\n", 1)[0]
-    # Parse numeric status code to avoid false matches on other "200" substrings
+    tls = None
     try:
-        status_code = int(status_line.split(b" ", 2)[1])
-    except (IndexError, ValueError):
-        status_code = 0
-    if status_code != 200:
-        raise ConnectionError(f"CONNECT failed: {status_line.decode()}")
-
-    # Wrap in TLS (verify_mode=NONE to accept MITM certs)
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    tls = ctx.wrap_socket(sock, server_hostname=TARGET_HOST)
-
-    # Send HTTP/1.1 request inside the tunnel
-    http_req = (
-        f"GET {path} HTTP/1.1\r\n"
-        f"Host: {TARGET_HOST}\r\n"
-        f"User-Agent: rebar3/hex-bridge\r\n"
-        f"Accept: */*\r\n"
-        f"Connection: close\r\n"
-        f"\r\n"
-    )
-    tls.sendall(http_req.encode())
-
-    # Read full response
-    data = b""
-    while True:
-        try:
-            chunk = tls.recv(65536)
+        # Establish CONNECT tunnel with proxy auth
+        connect_req = (
+            f"CONNECT {TARGET_HOST}:443 HTTP/1.1\r\n"
+            f"Host: {TARGET_HOST}:443\r\n"
+            f"Proxy-Authorization: Basic {PROXY_AUTH}\r\n"
+            f"\r\n"
+        )
+        sock.sendall(connect_req.encode())
+        resp = b""
+        while b"\r\n\r\n" not in resp:
+            chunk = sock.recv(4096)
             if not chunk:
+                raise ConnectionError("Upstream proxy closed connection")
+            resp += chunk
+        status_line = resp.split(b"\r\n", 1)[0]
+        # Parse numeric status code
+        try:
+            status_code = int(status_line.split(b" ", 2)[1])
+        except (IndexError, ValueError):
+            status_code = 0
+        if status_code != 200:
+            raise ConnectionError(f"CONNECT failed: {status_line.decode()}")
+
+        # Wrap in TLS (verify_mode=NONE to accept MITM certs)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        tls = ctx.wrap_socket(sock, server_hostname=TARGET_HOST)
+
+        # Send HTTP/1.1 request inside the tunnel
+        http_req = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {TARGET_HOST}\r\n"
+            f"User-Agent: rebar3/hex-bridge\r\n"
+            f"Accept: */*\r\n"
+            f"Connection: close\r\n"
+            f"\r\n"
+        )
+        tls.sendall(http_req.encode())
+
+        # Read full response
+        data = b""
+        while True:
+            try:
+                chunk = tls.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+            except ssl.SSLError:
                 break
-            data += chunk
-        except ssl.SSLError:
-            break
-    tls.close()
-    return data
+        return data
+    finally:
+        if tls is not None:
+            try:
+                tls.close()
+            except OSError:
+                pass
+        else:
+            try:
+                sock.close()
+            except OSError:
+                pass
 
 
 def _dechunk(data):
@@ -150,7 +162,7 @@ class HexBridgeHandler(http.server.BaseHTTPRequestHandler):
         # Handle absolute URLs (http://host/path?q=1) from HTTP proxy clients
         if path.startswith("http"):
             parsed = urlsplit(path)
-            path = parsed.path
+            path = parsed.path or "/"
             if parsed.query:
                 path = f"{path}?{parsed.query}"
 
