@@ -179,7 +179,7 @@ decode_whitespace_only_test() ->
 encode_result_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-001">>, <<"alice">>, false),
     Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"msg-001">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(<<"alice">>, maps:get(<<"session">>, Decoded)),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
@@ -188,7 +188,7 @@ encode_result_new_format_test() ->
 encode_error_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-002">>, <<"bob">>, false),
     Result = beamtalk_repl_protocol:encode_error(some_error, Msg, fun format_err/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"msg-002">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(<<"bob">>, maps:get(<<"session">>, Decoded)),
     ?assert(is_binary(maps:get(<<"error">>, Decoded))),
@@ -197,7 +197,7 @@ encode_error_new_format_test() ->
 encode_status_new_format_test() ->
     Msg = make_msg(<<"clear">>, <<"msg-003">>, undefined, false),
     Result = beamtalk_repl_protocol:encode_status(ok, Msg, fun atom_to_binary/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"msg-003">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(<<"ok">>, maps:get(<<"value">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
@@ -207,7 +207,7 @@ encode_bindings_new_format_test() ->
     Msg = make_msg(<<"bindings">>, <<"msg-004">>, undefined, false),
     Bindings = #{x => 42, y => <<"hello">>},
     Result = beamtalk_repl_protocol:encode_bindings(Bindings, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
     BindingsMap = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(42, maps:get(<<"x">>, BindingsMap)),
@@ -217,7 +217,7 @@ encode_loaded_new_format_test() ->
     Msg = make_msg(<<"load-file">>, <<"msg-005">>, undefined, false),
     Classes = [#{name => "Counter"}, #{name => "Logger"}],
     Result = beamtalk_repl_protocol:encode_loaded(Classes, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
     ?assertEqual([<<"Counter">>, <<"Logger">>], maps:get(<<"classes">>, Decoded)).
 
@@ -225,7 +225,7 @@ encode_sessions_new_format_test() ->
     Msg = make_msg(<<"sessions">>, <<"msg-006">>, undefined, false),
     Sessions = [#{id => <<"s1">>}, #{id => <<"s2">>, created_at => 12345}],
     Result = beamtalk_repl_protocol:encode_sessions(Sessions, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
     SessionList = maps:get(<<"sessions">>, Decoded),
     ?assertEqual(2, length(SessionList)).
@@ -235,7 +235,7 @@ encode_sessions_new_format_test() ->
 encode_result_legacy_format_test() ->
     Msg = make_msg(<<"eval">>, undefined, undefined, true),
     Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     ?assertEqual(error, maps:find(<<"status">>, Decoded)).
@@ -243,7 +243,7 @@ encode_result_legacy_format_test() ->
 encode_error_legacy_format_test() ->
     Msg = make_msg(<<"eval">>, undefined, undefined, true),
     Result = beamtalk_repl_protocol:encode_error(some_error, Msg, fun format_err/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assert(is_binary(maps:get(<<"message">>, Decoded))),
     ?assertEqual(error, maps:find(<<"status">>, Decoded)).
@@ -252,28 +252,28 @@ encode_bindings_legacy_format_test() ->
     Msg = make_msg(<<"bindings">>, undefined, undefined, true),
     Bindings = #{x => 42},
     Result = beamtalk_repl_protocol:encode_bindings(Bindings, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"bindings">>, maps:get(<<"type">>, Decoded)).
 
 encode_loaded_legacy_format_test() ->
     Msg = make_msg(<<"load-file">>, undefined, undefined, true),
     Classes = [#{name => "Counter"}],
     Result = beamtalk_repl_protocol:encode_loaded(Classes, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"loaded">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual([<<"Counter">>], maps:get(<<"classes">>, Decoded)).
 
 encode_actors_legacy_format_test() ->
     Msg = make_msg(<<"actors">>, undefined, undefined, true),
     Result = beamtalk_repl_protocol:encode_actors([], Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"actors">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual([], maps:get(<<"actors">>, Decoded)).
 
 encode_modules_legacy_format_test() ->
     Msg = make_msg(<<"modules">>, undefined, undefined, true),
     Result = beamtalk_repl_protocol:encode_modules([], Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual([], maps:get(<<"modules">>, Decoded)).
 
@@ -282,7 +282,7 @@ encode_modules_legacy_format_test() ->
 encode_result_with_output_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-010">>, <<"alice">>, false),
     Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1, <<"Hello\n">>),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"msg-010">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     ?assertEqual(<<"Hello\n">>, maps:get(<<"output">>, Decoded)),
@@ -291,7 +291,7 @@ encode_result_with_output_new_format_test() ->
 encode_result_with_empty_output_omitted_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-011">>, undefined, false),
     Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1, <<>>),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     %% Empty output should NOT appear in response
     ?assertEqual(error, maps:find(<<"output">>, Decoded)).
@@ -299,7 +299,7 @@ encode_result_with_empty_output_omitted_test() ->
 encode_result_with_output_legacy_format_test() ->
     Msg = make_msg(<<"eval">>, undefined, undefined, true),
     Result = beamtalk_repl_protocol:encode_result(<<"ok">>, Msg, fun identity/1, <<"World">>),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"ok">>, maps:get(<<"value">>, Decoded)),
     ?assertEqual(<<"World">>, maps:get(<<"output">>, Decoded)).
@@ -309,7 +309,7 @@ encode_error_with_output_new_format_test() ->
     Result = beamtalk_repl_protocol:encode_error(
         some_error, Msg, fun(R) -> list_to_binary(io_lib:format("~p", [R])) end, <<"Captured\n">>
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"msg-012">>, maps:get(<<"id">>, Decoded)),
     ?assert(maps:is_key(<<"error">>, Decoded)),
     ?assertEqual(<<"Captured\n">>, maps:get(<<"output">>, Decoded)),
@@ -320,7 +320,7 @@ encode_error_with_empty_output_omitted_test() ->
     Result = beamtalk_repl_protocol:encode_error(
         some_error, Msg, fun(R) -> list_to_binary(io_lib:format("~p", [R])) end, <<>>
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"output">>, Decoded)).
 
 %%% Roundtrip tests
@@ -329,7 +329,7 @@ roundtrip_new_format_test() ->
     Input = <<"{\"op\": \"eval\", \"id\": \"rt-1\", \"session\": \"s1\", \"code\": \"42\"}">>,
     {ok, Msg} = beamtalk_repl_protocol:decode(Input),
     Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     %% Response should echo id and session
     ?assertEqual(<<"rt-1">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(<<"s1">>, maps:get(<<"session">>, Decoded)),
@@ -339,7 +339,7 @@ roundtrip_legacy_format_test() ->
     Input = <<"{\"type\": \"eval\", \"expression\": \"42\"}">>,
     {ok, Msg} = beamtalk_repl_protocol:decode(Input),
     Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     %% Response should use legacy format
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(error, maps:find(<<"status">>, Decoded)).
@@ -390,7 +390,7 @@ encode_result_with_warnings_new_format_test() ->
     Result = beamtalk_repl_protocol:encode_result(
         42, Msg, fun identity/1, <<"out">>, [<<"warn1">>, <<"warn2">>]
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     ?assertEqual(<<"out">>, maps:get(<<"output">>, Decoded)),
     ?assertEqual([<<"warn1">>, <<"warn2">>], maps:get(<<"warnings">>, Decoded)),
@@ -401,7 +401,7 @@ encode_result_with_warnings_legacy_format_test() ->
     Result = beamtalk_repl_protocol:encode_result(
         99, Msg, fun identity/1, <<>>, [<<"w1">>]
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(99, maps:get(<<"value">>, Decoded)),
     ?assertEqual([<<"w1">>], maps:get(<<"warnings">>, Decoded)),
@@ -410,7 +410,7 @@ encode_result_with_warnings_legacy_format_test() ->
 encode_result_with_empty_warnings_omitted_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-w2">>, undefined, false),
     Result = beamtalk_repl_protocol:encode_result(1, Msg, fun identity/1, <<>>, []),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
 encode_error_with_warnings_new_format_test() ->
@@ -418,7 +418,7 @@ encode_error_with_warnings_new_format_test() ->
     Result = beamtalk_repl_protocol:encode_error(
         bad, Msg, fun format_err/1, <<"captured">>, [<<"w1">>]
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assert(is_binary(maps:get(<<"error">>, Decoded))),
     ?assertEqual(<<"captured">>, maps:get(<<"output">>, Decoded)),
     ?assertEqual([<<"w1">>], maps:get(<<"warnings">>, Decoded)),
@@ -429,7 +429,7 @@ encode_error_with_warnings_legacy_format_test() ->
     Result = beamtalk_repl_protocol:encode_error(
         oops, Msg, fun format_err/1, <<"out">>, [<<"w">>]
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"out">>, maps:get(<<"output">>, Decoded)),
     ?assertEqual([<<"w">>], maps:get(<<"warnings">>, Decoded)).
@@ -437,7 +437,7 @@ encode_error_with_warnings_legacy_format_test() ->
 encode_error_with_empty_warnings_omitted_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-e2">>, undefined, false),
     Result = beamtalk_repl_protocol:encode_error(err, Msg, fun format_err/1, <<>>, []),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
 %%% encode_error/6 — with metadata (BT-1235)
@@ -449,7 +449,7 @@ encode_error_with_metadata_new_format_test() ->
     Result = beamtalk_repl_protocol:encode_error(
         err, Msg, fun format_err/1, <<>>, [], Metadata
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(3, maps:get(<<"line">>, Decoded)),
     ?assertEqual(<<"prefix with _">>, maps:get(<<"hint">>, Decoded)),
     ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
@@ -460,7 +460,7 @@ encode_error_with_empty_metadata_test() ->
     Result = beamtalk_repl_protocol:encode_error(
         err, Msg, fun format_err/1, <<>>, [], #{}
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"line">>, Decoded)),
     ?assertEqual(error, maps:find(<<"hint">>, Decoded)).
 
@@ -471,7 +471,7 @@ encode_error_with_metadata_legacy_drops_metadata_test() ->
     Result = beamtalk_repl_protocol:encode_error(
         err, Msg, fun format_err/1, <<>>, [], Metadata
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"line">>, Decoded)),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)).
 
@@ -480,7 +480,7 @@ encode_error_with_metadata_legacy_drops_metadata_test() ->
 encode_inspect_binary_new_format_test() ->
     Msg = make_msg(<<"inspect">>, <<"msg-i1">>, <<"s1">>, false),
     Result = beamtalk_repl_protocol:encode_inspect(<<"state_str">>, Msg),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"msg-i1">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(<<"state_str">>, maps:get(<<"state">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
@@ -488,7 +488,7 @@ encode_inspect_binary_new_format_test() ->
 encode_inspect_binary_legacy_format_test() ->
     Msg = make_msg(<<"inspect">>, undefined, undefined, true),
     Result = beamtalk_repl_protocol:encode_inspect(<<"state_str">>, Msg),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"inspect">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"state_str">>, maps:get(<<"state">>, Decoded)).
 
@@ -499,7 +499,7 @@ encode_inspect_map_new_format_test() ->
     Result = beamtalk_repl_protocol:encode_inspect(
         #{count => 42, name => <<"foo">>}, Msg, fun identity/1
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     StateMap = maps:get(<<"state">>, Decoded),
     ?assertEqual(42, maps:get(<<"count">>, StateMap)),
     ?assertEqual(<<"foo">>, maps:get(<<"name">>, StateMap)),
@@ -510,7 +510,7 @@ encode_inspect_map_legacy_format_test() ->
     Result = beamtalk_repl_protocol:encode_inspect(
         #{x => 1}, Msg, fun identity/1
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"inspect">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(1, maps:get(<<"x">>, maps:get(<<"state">>, Decoded))).
 
@@ -519,7 +519,7 @@ encode_inspect_map_legacy_format_test() ->
 encode_docs_new_format_test() ->
     Msg = make_msg(<<"docs">>, <<"msg-d1">>, <<"s1">>, false),
     Result = beamtalk_repl_protocol:encode_docs(<<"Integer: A whole number">>, Msg),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"msg-d1">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(<<"Integer: A whole number">>, maps:get(<<"docs">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
@@ -527,7 +527,7 @@ encode_docs_new_format_test() ->
 encode_docs_legacy_format_test() ->
     Msg = make_msg(<<"docs">>, undefined, undefined, true),
     Result = beamtalk_repl_protocol:encode_docs(<<"Some docs">>, Msg),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"docs">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Some docs">>, maps:get(<<"docs">>, Decoded)).
 
@@ -537,7 +537,7 @@ encode_actors_new_format_test() ->
     Msg = make_msg(<<"actors">>, <<"msg-a1">>, undefined, false),
     Actors = [#{pid => self(), class => 'Counter', module => counter, spawned_at => 12345}],
     Result = beamtalk_repl_protocol:encode_actors(Actors, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
     ActorList = maps:get(<<"actors">>, Decoded),
     ?assertEqual(1, length(ActorList)),
@@ -559,7 +559,7 @@ encode_modules_new_format_test() ->
         }}
     ],
     Result = beamtalk_repl_protocol:encode_modules(Modules, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
     [M] = maps:get(<<"modules">>, Decoded),
     ?assertEqual(<<"Counter">>, maps:get(<<"name">>, M)),
@@ -571,7 +571,7 @@ encode_sessions_legacy_format_test() ->
     Msg = make_msg(<<"sessions">>, undefined, undefined, true),
     Sessions = [#{id => <<"s1">>}],
     Result = beamtalk_repl_protocol:encode_sessions(Sessions, Msg, fun identity/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"sessions">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(1, length(maps:get(<<"sessions">>, Decoded))).
 
@@ -607,7 +607,7 @@ decode_legacy_unknown_type_test() ->
 encode_status_legacy_format_test() ->
     Msg = make_msg(<<"clear">>, undefined, undefined, true),
     Result = beamtalk_repl_protocol:encode_status(ok, Msg, fun atom_to_binary/1),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"ok">>, maps:get(<<"value">>, Decoded)).
 
@@ -635,7 +635,7 @@ encode_describe_new_format_test() ->
     },
     Versions = #{<<"protocol">> => <<"1.0">>, <<"beamtalk">> => <<"0.1.0">>},
     Result = beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"msg-040">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
     ?assert(is_map(maps:get(<<"ops">>, Decoded))),
@@ -653,7 +653,7 @@ encode_describe_legacy_format_test() ->
     Ops = #{<<"health">> => #{<<"params">> => []}},
     Versions = #{<<"protocol">> => <<"1.0">>, <<"beamtalk">> => <<"0.1.0">>},
     Result = beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"describe">>, maps:get(<<"type">>, Decoded)),
     ?assert(is_map(maps:get(<<"ops">>, Decoded))),
     ?assertEqual(
@@ -666,7 +666,7 @@ encode_describe_legacy_format_test() ->
 encode_need_input_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-050">>, <<"sess1">>, false),
     Result = beamtalk_repl_protocol:encode_need_input(<<"Name: ">>, Msg),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"msg-050">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(<<"sess1">>, maps:get(<<"session">>, Decoded)),
     ?assertEqual([<<"need-input">>], maps:get(<<"status">>, Decoded)),
@@ -675,7 +675,7 @@ encode_need_input_new_format_test() ->
 encode_need_input_no_session_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-051">>, undefined, false),
     Result = beamtalk_repl_protocol:encode_need_input(<<"? ">>, Msg),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"msg-051">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual([<<"need-input">>], maps:get(<<"status">>, Decoded)),
     ?assertEqual(<<"? ">>, maps:get(<<"prompt">>, Decoded)),
@@ -686,7 +686,7 @@ encode_need_input_no_session_test() ->
 encode_trace_result_empty_steps_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"tr-001">>, <<"s1">>, false),
     Result = beamtalk_repl_protocol:encode_trace_result([], Msg, fun identity/1, <<>>, []),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"tr-001">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(<<"s1">>, maps:get(<<"session">>, Decoded)),
     ?assertEqual([], maps:get(<<"steps">>, Decoded)),
@@ -696,7 +696,7 @@ encode_trace_result_single_step_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"tr-002">>, <<"s1">>, false),
     Steps = [{<<"1 + 2">>, 3}],
     Result = beamtalk_repl_protocol:encode_trace_result(Steps, Msg, fun identity/1, <<>>, []),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     [Step] = maps:get(<<"steps">>, Decoded),
     ?assertEqual(<<"1 + 2">>, maps:get(<<"src">>, Step)),
     ?assertEqual(3, maps:get(<<"value">>, Step)),
@@ -706,7 +706,7 @@ encode_trace_result_multiple_steps_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"tr-003">>, undefined, false),
     Steps = [{<<"x := 1">>, 1}, {<<"y := 2">>, 2}, {<<"x + y">>, 3}],
     Result = beamtalk_repl_protocol:encode_trace_result(Steps, Msg, fun identity/1, <<>>, []),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     StepList = maps:get(<<"steps">>, Decoded),
     ?assertEqual(3, length(StepList)),
     [S1, S2, S3] = StepList,
@@ -723,14 +723,14 @@ encode_trace_result_with_output_new_format_test() ->
     Result = beamtalk_repl_protocol:encode_trace_result(
         Steps, Msg, fun identity/1, <<"hi\n">>, []
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"hi\n">>, maps:get(<<"output">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 encode_trace_result_empty_output_omitted_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"tr-005">>, undefined, false),
     Result = beamtalk_repl_protocol:encode_trace_result([], Msg, fun identity/1, <<>>, []),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"output">>, Decoded)).
 
 encode_trace_result_with_warnings_new_format_test() ->
@@ -739,20 +739,20 @@ encode_trace_result_with_warnings_new_format_test() ->
     Result = beamtalk_repl_protocol:encode_trace_result(
         Steps, Msg, fun identity/1, <<>>, [<<"unused var">>, <<"deprecated">>]
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual([<<"unused var">>, <<"deprecated">>], maps:get(<<"warnings">>, Decoded)).
 
 encode_trace_result_empty_warnings_omitted_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"tr-007">>, undefined, false),
     Result = beamtalk_repl_protocol:encode_trace_result([], Msg, fun identity/1, <<>>, []),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
 encode_trace_result_legacy_format_test() ->
     Msg = make_msg(<<"eval">>, undefined, undefined, true),
     Steps = [{<<"1">>, 1}, {<<"2">>, 2}],
     Result = beamtalk_repl_protocol:encode_trace_result(Steps, Msg, fun identity/1, <<>>, []),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(error, maps:find(<<"status">>, Decoded)),
     StepList = maps:get(<<"steps">>, Decoded),
@@ -764,7 +764,7 @@ encode_trace_result_legacy_with_output_test() ->
     Result = beamtalk_repl_protocol:encode_trace_result(
         Steps, Msg, fun identity/1, <<"x\n">>, []
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"x\n">>, maps:get(<<"output">>, Decoded)).
 
@@ -775,6 +775,6 @@ encode_trace_result_applies_term_to_json_test() ->
     Result = beamtalk_repl_protocol:encode_trace_result(
         Steps, Msg, fun(A) -> atom_to_binary(A, utf8) end, <<>>, []
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     [Step] = maps:get(<<"steps">>, Decoded),
     ?assertEqual(<<"hello">>, maps:get(<<"value">>, Step)).

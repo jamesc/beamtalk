@@ -15,7 +15,7 @@
 %%%  "domain":"runtime","class":"Counter","selector":"increment"}
 %%% ```
 %%%
-%%% Uses the `jsx` library (already a runtime dependency) for JSON encoding.
+%%% Uses the OTP `json` module (OTP 27+) for JSON encoding.
 
 -module(beamtalk_json_formatter).
 
@@ -62,7 +62,7 @@ format_json(Level, Msg, Meta) ->
     Fields6 = lists:foldl(fun({K, V}, Acc) -> maybe_add(K, V, Acc) end, Fields5, ReportFields),
     %% Append extra metadata fields (reason, stacktrace, etc.) not already handled
     Fields7 = append_extra_meta(Meta, Fields6),
-    Json = jsx:encode(lists:reverse(Fields7)),
+    Json = iolist_to_binary(json:encode(maps:from_list(lists:reverse(Fields7)))),
     [Json, $\n].
 
 %% @doc Validate formatter configuration. Accepts any config.

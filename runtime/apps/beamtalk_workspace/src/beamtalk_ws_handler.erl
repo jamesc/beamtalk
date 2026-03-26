@@ -55,7 +55,7 @@ init(Req, _Opts) ->
 websocket_init(State) ->
     %% Send a minimal welcome so clients know the connection is alive.
     %% Session details are sent after successful authentication.
-    Welcome = jsx:encode(#{<<"op">> => <<"auth-required">>}),
+    Welcome = iolist_to_binary(json:encode(#{<<"op">> => <<"auth-required">>})),
     {[{text, Welcome}], State}.
 
 %% @doc Handle incoming WebSocket text frame.
@@ -116,12 +116,14 @@ websocket_info(
     }};
 %% Bindings-changed broadcast from beamtalk_bindings_events pub/sub
 websocket_info({bindings_changed, SessionId}, State = #ws_state{authenticated = true}) ->
-    Push = jsx:encode(#{
-        <<"type">> => <<"push">>,
-        <<"channel">> => <<"bindings">>,
-        <<"event">> => <<"changed">>,
-        <<"data">> => #{<<"session">> => SessionId}
-    }),
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"bindings">>,
+            <<"event">> => <<"changed">>,
+            <<"data">> => #{<<"session">> => SessionId}
+        })
+    ),
     {[{text, Push}], State};
 %% BT-696: Eval completed with error
 websocket_info(
@@ -154,47 +156,57 @@ websocket_info({eval_error, _, _, _}, State = #ws_state{pending_eval = undefined
     {ok, State};
 %% Transcript push — forwarded from beamtalk_transcript_stream subscriber (ADR 0017)
 websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true}) ->
-    Push = jsx:encode(#{
-        <<"push">> => <<"transcript">>,
-        <<"text">> => Text
-    }),
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"push">> => <<"transcript">>,
+            <<"text">> => Text
+        })
+    ),
     {[{text, Push}], State};
 %% BT-690: Actor lifecycle push messages (ADR 0017 Phase 2)
 websocket_info({actor_spawned, Metadata}, State = #ws_state{authenticated = true}) ->
-    Push = jsx:encode(#{
-        <<"type">> => <<"push">>,
-        <<"channel">> => <<"actors">>,
-        <<"event">> => <<"spawned">>,
-        <<"data">> => encode_actor_metadata(Metadata)
-    }),
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"actors">>,
+            <<"event">> => <<"spawned">>,
+            <<"data">> => encode_actor_metadata(Metadata)
+        })
+    ),
     {[{text, Push}], State};
 websocket_info({actor_stopped, StopInfo}, State = #ws_state{authenticated = true}) ->
-    Push = jsx:encode(#{
-        <<"type">> => <<"push">>,
-        <<"channel">> => <<"actors">>,
-        <<"event">> => <<"stopped">>,
-        <<"data">> => encode_stop_info(StopInfo)
-    }),
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"actors">>,
+            <<"event">> => <<"stopped">>,
+            <<"data">> => encode_stop_info(StopInfo)
+        })
+    ),
     {[{text, Push}], State};
 %% BT-1020: Class-loaded push — broadcast when any session loads or reloads a class
 websocket_info({class_loaded, ClassName}, State = #ws_state{authenticated = true}) ->
-    Push = jsx:encode(#{
-        <<"type">> => <<"push">>,
-        <<"channel">> => <<"classes">>,
-        <<"event">> => <<"loaded">>,
-        <<"data">> => #{<<"class">> => atom_to_binary(ClassName, utf8)}
-    }),
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"classes">>,
+            <<"event">> => <<"loaded">>,
+            <<"data">> => #{<<"class">> => atom_to_binary(ClassName, utf8)}
+        })
+    ),
     {[{text, Push}], State};
 %% BT-1433: Log event push from beamtalk_ws_log_handler
 websocket_info(
     {log_event, EventData}, State = #ws_state{authenticated = true, log_subscribed = true}
 ) ->
-    Push = jsx:encode(#{
-        <<"type">> => <<"push">>,
-        <<"channel">> => <<"logs">>,
-        <<"event">> => <<"entry">>,
-        <<"data">> => encode_log_event(EventData)
-    }),
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"logs">>,
+            <<"event">> => <<"entry">>,
+            <<"data">> => encode_log_event(EventData)
+        })
+    ),
     {[{text, Push}], State};
 websocket_info({log_event, _EventData}, State) ->
     %% Not subscribed or not authenticated — drop silently
@@ -247,7 +259,7 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
 %% Validate the first WebSocket message as a cookie auth handshake.
 %% Expected: {"type":"auth","cookie":"<workspace cookie>"}
 handle_auth(Data, State) ->
-    try jsx:decode(Data, [return_maps]) of
+    try json:decode(Data) of
         #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie} = AuthMsg when
             is_binary(ProvidedCookie)
         ->
@@ -268,10 +280,12 @@ handle_auth(Data, State) ->
                         peer => State#ws_state.peer,
                         domain => [beamtalk, runtime]
                     }),
-                    Reply = jsx:encode(#{
-                        <<"type">> => <<"auth_error">>,
-                        <<"message">> => <<"Invalid cookie">>
-                    }),
+                    Reply = iolist_to_binary(
+                        json:encode(#{
+                            <<"type">> => <<"auth_error">>,
+                            <<"message">> => <<"Invalid cookie">>
+                        })
+                    ),
                     {[{text, Reply}, {close, 1008, <<"Authentication failed">>}], State}
             end;
         _ ->
@@ -279,20 +293,24 @@ handle_auth(Data, State) ->
                 peer => State#ws_state.peer,
                 domain => [beamtalk, runtime]
             }),
-            Reply = jsx:encode(#{
-                <<"type">> => <<"auth_error">>,
-                <<"message">> => <<"First message must be auth">>
-            }),
+            Reply = iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"auth_error">>,
+                    <<"message">> => <<"First message must be auth">>
+                })
+            ),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
     catch
-        error:badarg ->
+        error:_ ->
             ?LOG_WARNING("WebSocket auth failed: malformed JSON", #{
                 peer => State#ws_state.peer, domain => [beamtalk, runtime]
             }),
-            Reply = jsx:encode(#{
-                <<"type">> => <<"auth_error">>,
-                <<"message">> => <<"Malformed auth message">>
-            }),
+            Reply = iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"auth_error">>,
+                    <<"message">> => <<"Malformed auth message">>
+                })
+            ),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
     end.
 
@@ -353,11 +371,13 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                     beamtalk_class_events:subscribe(),
                     beamtalk_bindings_events:subscribe(),
                     InitialActors = actor_snapshot_frames(),
-                    AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
-                    SessionMsg = jsx:encode(#{
-                        <<"op">> => <<"session-started">>,
-                        <<"session">> => ResumeId
-                    }),
+                    AuthOk = iolist_to_binary(json:encode(#{<<"type">> => <<"auth_ok">>})),
+                    SessionMsg = iolist_to_binary(
+                        json:encode(#{
+                            <<"op">> => <<"session-started">>,
+                            <<"session">> => ResumeId
+                        })
+                    ),
                     {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors, State#ws_state{
                         authenticated = true,
                         session_id = ResumeId,
@@ -407,11 +427,13 @@ create_session(SessionId, State) ->
             beamtalk_class_events:subscribe(),
             beamtalk_bindings_events:subscribe(),
             InitialActors = actor_snapshot_frames(),
-            AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
-            SessionMsg = jsx:encode(#{
-                <<"op">> => <<"session-started">>,
-                <<"session">> => SessionId
-            }),
+            AuthOk = iolist_to_binary(json:encode(#{<<"type">> => <<"auth_ok">>})),
+            SessionMsg = iolist_to_binary(
+                json:encode(#{
+                    <<"op">> => <<"session-started">>,
+                    <<"session">> => SessionId
+                })
+            ),
             {[{text, AuthOk}, {text, SessionMsg}] ++ InitialActors, State#ws_state{
                 authenticated = true,
                 session_id = SessionId,
@@ -424,10 +446,12 @@ create_session(SessionId, State) ->
                 peer => State#ws_state.peer,
                 domain => [beamtalk, runtime]
             }),
-            ErrorJson = jsx:encode(#{
-                <<"type">> => <<"auth_error">>,
-                <<"message">> => <<"Session creation failed">>
-            }),
+            ErrorJson = iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"auth_error">>,
+                    <<"message">> => <<"Session creation failed">>
+                })
+            ),
             {[{text, ErrorJson}, {close, 1011, <<"Session creation failed">>}], State}
     end.
 
@@ -587,12 +611,14 @@ actor_snapshot_frames() ->
                 Actors ->
                     [
                         {text,
-                            jsx:encode(#{
-                                <<"type">> => <<"push">>,
-                                <<"channel">> => <<"actors">>,
-                                <<"event">> => <<"spawned">>,
-                                <<"data">> => encode_actor_metadata(M)
-                            })}
+                            iolist_to_binary(
+                                json:encode(#{
+                                    <<"type">> => <<"push">>,
+                                    <<"channel">> => <<"actors">>,
+                                    <<"event">> => <<"spawned">>,
+                                    <<"data">> => encode_actor_metadata(M)
+                                })
+                            )}
                      || M <- Actors
                     ]
             catch

@@ -1,12 +1,12 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc JSON class implementation — JSON encoding/decoding via jsx.
+%%% @doc JSON class implementation — JSON encoding/decoding via OTP json module.
 %%%
 %%% **DDD Context:** Object System Context
 %%%
 %%% JSON provides class-side methods for parsing and generating JSON strings.
-%%% Wraps the `jsx` library with proper type mapping and structured error handling.
+%%% Wraps the OTP `json` module (OTP 27+) with proper type mapping and structured error handling.
 %%%
 %%% ## Type Mapping
 %%%
@@ -51,12 +51,12 @@
 -spec 'parse:'(binary()) -> map().
 'parse:'(JsonStr) when is_binary(JsonStr) ->
     try
-        Value = jsx:decode(JsonStr, [return_maps]),
+        Value = json:decode(JsonStr),
         beamtalk_result:from_tagged_tuple({ok, normalize_decoded(Value)})
     catch
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
-        error:badarg ->
+        error:Reason when is_tuple(Reason); Reason =:= unexpected_end ->
             Error0 = beamtalk_error:new(parse_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Check that the string is valid JSON">>),
@@ -83,11 +83,11 @@
 'generate:'(Value) ->
     try
         Prepared = prepare_for_encode(Value),
-        jsx:encode(Prepared)
+        iolist_to_binary(json:encode(Prepared))
     catch
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
-        error:badarg ->
+        error:{unsupported_type, _} ->
             Error0 = beamtalk_error:new(type_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'generate:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Value cannot be converted to JSON">>),
@@ -105,12 +105,11 @@
 'prettyPrint:'(Value) ->
     try
         Prepared = prepare_for_encode(Value),
-        Compact = jsx:encode(Prepared),
-        jsx:prettify(Compact)
+        iolist_to_binary(json:format(Prepared))
     catch
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
-        error:badarg ->
+        error:{unsupported_type, _} ->
             Error0 = beamtalk_error:new(type_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'prettyPrint:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Value cannot be converted to JSON">>),
@@ -144,9 +143,9 @@ prettyPrint(X) -> 'prettyPrint:'(X).
 %%% ============================================================================
 
 %% @private
-%% @doc Normalize jsx decoded values to Beamtalk conventions.
+%% @doc Normalize JSON decoded values to Beamtalk conventions.
 %%
-%% jsx returns `null` as the atom `null`; Beamtalk uses `nil`.
+%% json:decode returns `null` as the atom `null`; Beamtalk uses `nil`.
 -spec normalize_decoded(term()) -> term().
 normalize_decoded(null) ->
     nil;
@@ -158,9 +157,9 @@ normalize_decoded(Other) ->
     Other.
 
 %% @private
-%% @doc Prepare a Beamtalk value for jsx encoding.
+%% @doc Prepare a Beamtalk value for JSON encoding.
 %%
-%% Beamtalk uses `nil` for null; jsx expects `null`.
+%% Beamtalk uses `nil` for null; json:encode expects `null`.
 %% Maps with `$beamtalk_class` tags are stripped of metadata.
 -spec prepare_for_encode(term()) -> term().
 prepare_for_encode(nil) ->

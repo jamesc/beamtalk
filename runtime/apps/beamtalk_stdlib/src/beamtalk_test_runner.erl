@@ -336,7 +336,7 @@ result_to_json(#{
         <<"duration">> => Duration,
         <<"tests">> => [serialize_test_result(T) || T <- Tests]
     },
-    jsx:encode(JsonStruct).
+    iolist_to_binary(json:encode(JsonStruct)).
 
 %% @doc Serialize a single test result.
 -spec serialize_test_result(map()) -> map().

@@ -120,7 +120,7 @@ init() ->
 %%
 %% Examples:
 %% ```
-%% JsonFun = fun([], Str) -> jsx:encode(Str) end,
+%% JsonFun = fun([], Str) -> iolist_to_binary(json:encode(Str)) end,
 %% register('String', 'json', JsonFun, mylib).
 %% ```
 -spec register(atom(), atom(), function(), atom()) -> ok.

@@ -31,21 +31,21 @@
 %% The `State` atom identifies which test endpoint to serve.
 -spec init(cowboy_req:req(), atom()) -> {ok, cowboy_req:req(), atom()}.
 init(Req0, get) ->
-    Body = jsx:encode(#{<<"method">> => <<"GET">>}),
+    Body = iolist_to_binary(json:encode(#{<<"method">> => <<"GET">>})),
     Req = cowboy_req:reply(200, ?JSON_CT, Body, Req0),
     {ok, Req, get};
 init(Req0, post) ->
     {ok, ReqBody, Req1} = cowboy_req:read_body(Req0),
-    Body = jsx:encode(#{<<"method">> => <<"POST">>, <<"body">> => ReqBody}),
+    Body = iolist_to_binary(json:encode(#{<<"method">> => <<"POST">>, <<"body">> => ReqBody})),
     Req = cowboy_req:reply(200, ?JSON_CT, Body, Req1),
     {ok, Req, post};
 init(Req0, put) ->
     {ok, ReqBody, Req1} = cowboy_req:read_body(Req0),
-    Body = jsx:encode(#{<<"method">> => <<"PUT">>, <<"body">> => ReqBody}),
+    Body = iolist_to_binary(json:encode(#{<<"method">> => <<"PUT">>, <<"body">> => ReqBody})),
     Req = cowboy_req:reply(200, ?JSON_CT, Body, Req1),
     {ok, Req, put};
 init(Req0, delete) ->
-    Body = jsx:encode(#{<<"method">> => <<"DELETE">>}),
+    Body = iolist_to_binary(json:encode(#{<<"method">> => <<"DELETE">>})),
     Req = cowboy_req:reply(200, ?JSON_CT, Body, Req0),
     {ok, Req, delete};
 init(Req0, status) ->
@@ -53,11 +53,11 @@ init(Req0, status) ->
     Req = cowboy_req:reply(Code, #{}, <<>>, Req0),
     {ok, Req, status};
 init(Req0, json) ->
-    Body = jsx:encode(#{<<"type">> => <<"json">>, <<"value">> => 42}),
+    Body = iolist_to_binary(json:encode(#{<<"type">> => <<"json">>, <<"value">> => 42})),
     Req = cowboy_req:reply(200, ?JSON_CT, Body, Req0),
     {ok, Req, json};
 init(Req0, echo_headers) ->
     Headers = cowboy_req:headers(Req0),
-    Body = jsx:encode(Headers),
+    Body = iolist_to_binary(json:encode(Headers)),
     Req = cowboy_req:reply(200, ?JSON_CT, Body, Req0),
     {ok, Req, echo_headers}.

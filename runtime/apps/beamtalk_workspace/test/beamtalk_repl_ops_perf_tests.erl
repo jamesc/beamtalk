@@ -21,7 +21,7 @@ make_msg(Op) ->
     {protocol_msg, Op, <<"test-1">>, <<"session-1">>, #{}, false}.
 
 decode_response(Bin) ->
-    jsx:decode(Bin, [return_maps]).
+    json:decode(Bin).
 
 %% @private Start trace store if not running.
 %% Returns `{started, Pid}` when we started it, `{existing, Pid}` if already running.

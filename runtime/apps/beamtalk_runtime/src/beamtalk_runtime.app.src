@@ -3,7 +3,7 @@
     {vsn, {cmd, "escript ../../../scripts/version.escript"}},
     {modules, []},
     {registered, [beamtalk_classes]},
-    {applications, [kernel, stdlib, jsx]},
+    {applications, [kernel, stdlib]},
     {mod, {beamtalk_runtime_app, []}},
     {env, [
         {repl_port, 9000},

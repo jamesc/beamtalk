@@ -618,7 +618,7 @@ debounce_coalesces_rapid_changes_test() ->
     %% Verify all 3 modules were persisted to disk
     ?assert(filelib:is_file(MetaFile)),
     {ok, Binary} = file:read_file(MetaFile),
-    Map = jsx:decode(Binary, [return_maps]),
+    Map = json:decode(Binary),
     PersistedModules = maps:get(<<"loaded_modules">>, Map, []),
     PersistedNames = [maps:get(<<"name">>, E) || E <- PersistedModules, is_map(E)],
     ?assert(lists:member(atom_to_binary(Mod1, utf8), PersistedNames)),

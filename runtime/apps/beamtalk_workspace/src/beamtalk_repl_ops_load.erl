@@ -70,7 +70,7 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
                 <<"classes">> => ClassNames,
                 <<"errors">> => Errors
             },
-            jsx:encode(Response)
+            iolist_to_binary(json:encode(Response))
     end;
 handle(<<"load-file">>, Params, Msg, SessionPid) ->
     Path = binary_to_list(maps:get(<<"path">>, Params, <<>>)),

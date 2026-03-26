@@ -30,7 +30,7 @@ format_returns_iodata_with_newline_test() ->
     ?assertEqual($\n, binary:last(Bin)),
     %% Should be valid JSON (minus the trailing newline)
     JsonBin = binary:part(Bin, 0, byte_size(Bin) - 1),
-    Decoded = jsx:decode(JsonBin, [return_maps]),
+    Decoded = json:decode(JsonBin),
     ?assert(is_map(Decoded)).
 
 format_includes_required_fields_test() ->
@@ -375,4 +375,4 @@ decode_event(Event) ->
     Result = beamtalk_json_formatter:format(Event, #{}),
     Bin = iolist_to_binary(Result),
     JsonBin = binary:part(Bin, 0, byte_size(Bin) - 1),
-    jsx:decode(JsonBin, [return_maps]).
+    json:decode(JsonBin).

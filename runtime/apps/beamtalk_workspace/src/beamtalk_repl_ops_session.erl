@@ -65,11 +65,13 @@ handle(<<"health">>, _Params, Msg, _SessionPid) ->
             {error, _} -> <<>>
         end,
     Base = beamtalk_repl_protocol:base_response(Msg),
-    jsx:encode(Base#{
-        <<"workspace_id">> => WorkspaceId,
-        <<"nonce">> => Nonce,
-        <<"status">> => [<<"done">>]
-    });
+    iolist_to_binary(
+        json:encode(Base#{
+            <<"workspace_id">> => WorkspaceId,
+            <<"nonce">> => Nonce,
+            <<"status">> => [<<"done">>]
+        })
+    );
 handle(<<"shutdown">>, Params, Msg, _SessionPid) ->
     ProvidedCookie = maps:get(<<"cookie">>, Params, <<>>),
     NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
