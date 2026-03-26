@@ -24,6 +24,7 @@ pub(crate) mod block_context;
 pub mod block_facts;
 pub mod class_hierarchy;
 pub mod class_kind_writeback;
+pub mod collision_checker;
 pub mod error;
 pub mod facts;
 pub(crate) mod method_validators;
@@ -49,6 +50,10 @@ pub use block_facts::BlockMutationAnalysis;
 pub use block_facts::analyze_block;
 pub use class_hierarchy::ClassHierarchy;
 pub use class_kind_writeback::apply_class_kind_writeback;
+pub use collision_checker::{
+    DependencyRegistry, build_dependency_registry, check_collision_at_use_sites,
+    check_stdlib_reservation,
+};
 pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use name_resolver::NameResolver;

@@ -95,6 +95,13 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
 
     // ADR 0070: Merge dependency class indexes into the main package's indexes
     // so cross-package class references resolve during compilation.
+    // Also build a DependencyRegistry for collision detection (Phase 3).
+    let dep_indexes: Vec<(String, HashMap<String, String>)> = resolved_deps
+        .iter()
+        .map(|dep| (dep.name.clone(), dep.class_module_index.clone()))
+        .collect();
+    let dep_registry = beamtalk_core::semantic_analysis::build_dependency_registry(&dep_indexes);
+
     for dep in &resolved_deps {
         for (class_name, module_name) in &dep.class_module_index {
             debug!(
@@ -104,6 +111,36 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
                 "Adding dependency class to index"
             );
             class_module_index.insert(class_name.clone(), module_name.clone());
+        }
+    }
+
+    // BT-1653 / ADR 0070 Phase 3: Eagerly check stdlib reservation violations.
+    // Dependencies must not export classes with stdlib-reserved names.
+    if !dep_registry.is_empty() && !options.stdlib_mode {
+        let mut reservation_diags = Vec::new();
+        beamtalk_core::semantic_analysis::check_stdlib_reservation(
+            &dep_registry,
+            &mut reservation_diags,
+        );
+        if !reservation_diags.is_empty() {
+            let has_errors = reservation_diags
+                .iter()
+                .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+            if has_errors {
+                // Collect all error messages for reporting
+                let messages: Vec<String> = reservation_diags
+                    .iter()
+                    .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+                    .map(|d| {
+                        if let Some(ref hint) = d.hint {
+                            format!("{}\n  help: {}", d.message, hint)
+                        } else {
+                            d.message.to_string()
+                        }
+                    })
+                    .collect();
+                miette::bail!("{}", messages.join("\n"));
+            }
         }
     }
 
@@ -140,6 +177,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     let mut cached_asts = cached_asts;
     let mut core_files = Vec::new();
     let mut module_names = Vec::new();
+    let registry_ref = if dep_registry.is_empty() {
+        None
+    } else {
+        Some(&dep_registry)
+    };
     for (file, module_name, core_file) in &file_module_pairs {
         let cached = cached_asts.remove(file);
         compile_file(
@@ -151,6 +193,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
             &class_superclass_index,
             &all_class_infos,
             cached,
+            registry_ref,
         )?;
         core_files.push(core_file.clone());
         module_names.push(module_name.clone());
@@ -503,6 +546,7 @@ fn compile_file(
     class_superclass_index: &HashMap<String, String>,
     pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     cached_ast: Option<CachedAst>,
+    dep_registry: Option<&beamtalk_core::semantic_analysis::DependencyRegistry>,
 ) -> Result<()> {
     debug!("Compiling {path}");
 
@@ -516,6 +560,7 @@ fn compile_file(
         class_superclass_index,
         pre_loaded_classes,
         cached_ast,
+        dep_registry,
     )?;
 
     debug!("Generated Core Erlang: {core_file}");
@@ -722,6 +767,7 @@ mod tests {
             &HashMap::new(),
             &[],
             None,
+            None,
         );
         assert!(result.is_ok());
         assert!(core_file.exists());
@@ -743,6 +789,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &[],
+            None,
             None,
         );
         assert!(result.is_err());
@@ -1207,6 +1254,7 @@ mod tests {
             &class_superclass_index,
             &all_class_infos,
             None,
+            None,
         )
         .unwrap();
 
@@ -1286,6 +1334,7 @@ mod tests {
             &class_module_index,
             &class_superclass_index,
             &all_class_infos,
+            None,
             None,
         )
         .expect("Cross-file inheritance should compile without errors");

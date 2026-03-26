@@ -696,6 +696,7 @@ pub fn compile_source(
         &std::collections::HashMap::new(),
         &[],
         None,
+        None,
     )
 }
 
@@ -724,6 +725,7 @@ pub(crate) fn compile_source_with_bindings(
     class_superclass_index: &std::collections::HashMap<String, String>,
     pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     cached_ast: Option<crate::commands::build::CachedAst>,
+    dep_registry: Option<&beamtalk_core::semantic_analysis::DependencyRegistry>,
 ) -> Result<()> {
     use crate::diagnostic::CompileDiagnostic;
 
@@ -787,6 +789,17 @@ pub(crate) fn compile_source_with_bindings(
             &mut stdlib_shadow_diags,
         );
         diagnostics.extend(stdlib_shadow_diags);
+    }
+
+    // BT-1653 / ADR 0070 Phase 3: Cross-package class collision detection.
+    // When dependencies are loaded, check for ambiguous unqualified class
+    // references and stdlib name reservation violations.
+    if let Some(registry) = dep_registry {
+        beamtalk_core::semantic_analysis::check_collision_at_use_sites(
+            &module,
+            registry,
+            &mut diagnostics,
+        );
     }
 
     // BT-782: Apply @expect directives to suppress matching diagnostics.
