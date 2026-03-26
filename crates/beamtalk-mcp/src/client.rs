@@ -33,6 +33,7 @@ fn test_io_timeout() -> Duration {
         std::env::var("BEAMTALK_MCP_TEST_TIMEOUT")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&secs| secs > 0)
             .map_or(Duration::from_secs(120), Duration::from_secs)
     })
 }
