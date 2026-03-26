@@ -594,9 +594,12 @@ safe_atom_result({error, badarg}) -> false.
 %% for files under src/ or test/.  Files outside those directories (e.g.
 %% examples/, fixtures/) fall back to `bt@{stem_snake_case}` so the same
 %% class always gets the same module name regardless of load path.
-%% Without package context: same `bt@{stem_snake_case}` fallback,
-%% matching CLI build behavior.
--spec compute_package_module_name(string()) -> binary().
+%% Without package context: returns `undefined` so the compiler port
+%% derives the name from the class name instead.  This is intentional —
+%% class-name-based naming in the REPL enables hot reload across file
+%% renames (e.g., hot_counter.bt and hot_counter_v2.bt both define
+%% HotCounter → same module bt@hot_counter).
+-spec compute_package_module_name(string()) -> binary() | undefined.
 compute_package_module_name(Path) ->
     case beamtalk_workspace_meta:get_metadata() of
         {ok, #{package_name := PackageName, project_path := ProjectPath}} when
@@ -606,7 +609,7 @@ compute_package_module_name(Path) ->
             ProjectRoot = binary_to_list(ProjectPath),
             resolve_package_module(AbsPath, ProjectRoot, PackageName, Path);
         _ ->
-            stem_module_name(Path)
+            undefined
     end.
 
 %% Try src/ then test/ to resolve the package module name.

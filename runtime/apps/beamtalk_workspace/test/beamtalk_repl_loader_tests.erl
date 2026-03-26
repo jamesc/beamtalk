@@ -316,15 +316,17 @@ reload_class_file_compile_error_test() ->
 %%====================================================================
 
 compute_package_module_name_no_metadata_test() ->
-    %% BT-1670: Without workspace_meta, falls back to bt@{stem_snake_case}
-    %% instead of undefined, matching CLI build behavior.
+    %% Without workspace_meta, returns undefined so the compiler port
+    %% derives the module name from the class name.  This preserves hot
+    %% reload semantics: hot_counter.bt and hot_counter_v2.bt both define
+    %% HotCounter → same module bt@hot_counter.
     Result = beamtalk_repl_loader:compute_package_module_name("/some/path/src/Foo.bt"),
-    ?assertEqual(<<"bt@foo">>, Result).
+    ?assertEqual(undefined, Result).
 
 compute_package_module_name_no_metadata_camel_case_test() ->
-    %% BT-1670: CamelCase file stems are converted to snake_case.
+    %% Same: no metadata → undefined (class-name-based naming).
     Result = beamtalk_repl_loader:compute_package_module_name("/some/path/MyCounter.bt"),
-    ?assertEqual(<<"bt@my_counter">>, Result).
+    ?assertEqual(undefined, Result).
 
 %%====================================================================
 %% resolve_package_module/4
