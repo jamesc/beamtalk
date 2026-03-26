@@ -103,6 +103,8 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'MultiExprTest',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -128,6 +130,8 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'MultiExprTest',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',

@@ -874,8 +874,12 @@ impl Parser {
                 // Class reference (e.g., Counter, Array, MyClass)
                 Expression::ClassReference {
                     name: Identifier::new(name.clone(), span),
+                    package: None,
                     span,
                 }
+            } else if self.check(&TokenKind::At) {
+                // Package-qualified class reference: `json@Parser` (ADR 0070, Section 4)
+                self.parse_package_qualified_class_reference(name, span)
             } else {
                 // Regular identifier (variable)
                 Expression::Identifier(Identifier::new(name.clone(), span))
@@ -920,6 +924,42 @@ impl Parser {
         }
 
         expr
+    }
+
+    /// Parses a package-qualified class reference: `json@Parser`.
+    ///
+    /// Called when we have already consumed the package identifier and the current
+    /// token is `At` (`@`). Expects an uppercase identifier to follow.
+    ///
+    /// Error recovery: if `@` is not followed by a class name, emits an error
+    /// and returns the package name as a plain identifier.
+    fn parse_package_qualified_class_reference(
+        &mut self,
+        package_name: &EcoString,
+        package_span: Span,
+    ) -> Expression {
+        self.advance(); // consume @
+
+        // Expect an uppercase identifier (class name) after `@`
+        if let TokenKind::Identifier(class_name) = self.current_kind() {
+            let first_char = class_name.chars().next();
+            if first_char.is_some_and(char::is_uppercase) {
+                let class_name = class_name.clone();
+                let class_span = self.current_token().span();
+                self.advance(); // consume class name
+                let full_span = Span::new(package_span.start(), class_span.end());
+                return Expression::ClassReference {
+                    name: Identifier::new(class_name, class_span),
+                    package: Some(Identifier::new(package_name.clone(), package_span)),
+                    span: full_span,
+                };
+            }
+        }
+
+        // Error: `@` not followed by a class name
+        self.error("expected class name after '@' in qualified reference (e.g., json@Parser)");
+        // Recover by treating the package name as a regular identifier
+        Expression::Identifier(Identifier::new(package_name.clone(), package_span))
     }
 
     /// Parses a block: `[:x :y | x + y]`

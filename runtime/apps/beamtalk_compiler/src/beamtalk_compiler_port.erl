@@ -105,10 +105,18 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
         end,
     %% ADR 0050 Phase 4: Forward class hierarchy to the Rust compiler port.
     ClassHierarchy = maps:get(class_hierarchy, Options, #{}),
-    Request =
+    Request3 =
         case map_size(ClassHierarchy) of
             0 -> Request2;
             _ -> Request2#{class_hierarchy => ClassHierarchy}
+        end,
+    %% BT-1670: Forward module_name override for inline class definitions
+    %% so package-mode produces consistent module names across all paths.
+    ModuleNameOverride = maps:get(module_name, Options, undefined),
+    Request =
+        case ModuleNameOverride of
+            undefined -> Request3;
+            _ -> Request3#{module_name => ModuleNameOverride}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of

@@ -307,7 +307,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                             ),
                             {reply, {error, undef}, ClassVars}
                     end;
-                ErrClass:Error:ST ->
+                ErrClass:Error:_ST ->
                     ?LOG_DEBUG(
                         "Class method ~p:~p failed",
                         [ClassName, Selector],

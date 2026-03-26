@@ -145,6 +145,8 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'Shape',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'true',
@@ -171,6 +173,8 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'Shape',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'true',

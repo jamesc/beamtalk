@@ -1128,6 +1128,7 @@ mod tests {
     fn class_ref(name: &str) -> Expression {
         Expression::ClassReference {
             name: ident(name),
+            package: None,
             span: span(),
         }
     }

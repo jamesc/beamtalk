@@ -65,15 +65,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
         .into_diagnostic()
         .wrap_err("Failed to create build directory")?;
 
-    // ADR 0070 Phase 1: Resolve and compile path dependencies before the main build.
-    // This ensures dependency classes are compiled and their ebin directories are
-    // available on the BEAM code path when the main package runs.
+    // ADR 0070 Phase 1: Resolve and compile dependencies when needed.
+    // Uses staleness detection: no-op when lockfile is fresh and deps are compiled.
+    // Otherwise resolves the full transitive graph in topological order.
     let resolved_deps = if pkg_manifest.is_some() {
-        let resolved = super::deps::resolve_path_dependencies(&project_root, options)?;
-        if !resolved.is_empty() {
-            info!(count = resolved.len(), "Resolved path dependencies");
-        }
-        resolved
+        super::deps::ensure_deps_resolved(&project_root, options)?
     } else {
         Vec::new()
     };

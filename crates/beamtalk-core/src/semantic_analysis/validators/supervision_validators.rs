@@ -128,7 +128,7 @@ fn check_children_literal_for_policy(
     };
     for element in elements {
         let (class_name, span) = match element {
-            Expression::ClassReference { name, span } => (name.name.as_str(), *span),
+            Expression::ClassReference { name, span, .. } => (name.name.as_str(), *span),
             Expression::Identifier(id) => (id.name.as_str(), id.span),
             _ => continue,
         };

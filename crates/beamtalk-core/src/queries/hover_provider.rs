@@ -634,7 +634,7 @@ fn find_hover_in_expr(
                 None
             }
         }
-        Expression::ClassReference { name, span } => {
+        Expression::ClassReference { name, span, .. } => {
             if offset >= span.start() && offset < span.end() {
                 Some(class_reference_hover_info(&name.name, *span, hierarchy))
             } else {

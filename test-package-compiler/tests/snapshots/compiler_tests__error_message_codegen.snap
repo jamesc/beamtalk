@@ -240,6 +240,8 @@ module 'error_message' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'TestActor',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -266,6 +268,8 @@ module 'error_message' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'TestActor',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',

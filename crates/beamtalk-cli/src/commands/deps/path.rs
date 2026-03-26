@@ -18,7 +18,7 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, info};
 
-use super::manifest::{self, ParsedManifest};
+use crate::commands::manifest::{self, ParsedManifest};
 
 /// A resolved dependency with its compiled ebin path and class index.
 #[derive(Debug)]
@@ -51,6 +51,7 @@ pub struct ResolvedDependency {
 /// - A path dependency has an invalid package name
 /// - A circular dependency is detected
 /// - Compilation of a dependency fails
+#[allow(dead_code)] // Used by tests; superseded by graph::resolve_dependency_graph
 pub fn resolve_path_dependencies(
     project_root: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
@@ -108,6 +109,7 @@ pub fn collect_dep_ebin_paths(project_root: &Utf8Path) -> Vec<Utf8PathBuf> {
 ///
 /// Tracks the set of visited package names to detect circular dependencies.
 /// Only path dependencies are resolved; git dependencies are logged and skipped.
+#[allow(dead_code)] // Used by tests; superseded by graph::resolve_dependency_graph
 fn resolve_deps_recursive(
     project_root: &Utf8Path,
     manifest: &ParsedManifest,
@@ -139,6 +141,7 @@ fn resolve_deps_recursive(
 }
 
 /// Resolve a single path dependency: validate, compile, and recurse into its deps.
+#[allow(dead_code)] // Used by tests; superseded by graph::resolve_dependency_graph
 fn resolve_single_path_dep(
     project_root: &Utf8Path,
     name: &str,
@@ -220,7 +223,10 @@ fn resolve_single_path_dep(
 ///
 /// Joins the relative path with the project root and canonicalizes the result.
 /// Does not require the target to exist (unlike `std::fs::canonicalize`).
-fn canonicalize_dep_path(project_root: &Utf8Path, relative_path: &Utf8Path) -> Utf8PathBuf {
+pub(crate) fn canonicalize_dep_path(
+    project_root: &Utf8Path,
+    relative_path: &Utf8Path,
+) -> Utf8PathBuf {
     let joined = project_root.join(relative_path);
 
     // Normalize the path by resolving `.` and `..` components
@@ -268,15 +274,56 @@ fn normalize_path(path: &Utf8Path) -> Utf8PathBuf {
     result
 }
 
+/// Compile a dependency and return a `ResolvedDependency`.
+///
+/// This is used by the topological graph resolver (`graph.rs`) which has already
+/// resolved prior dependencies. Their class module indexes are merged so that
+/// cross-dependency class references resolve during compilation.
+///
+/// Output goes to `{project_root}/_build/deps/{name}/ebin/`.
+pub(crate) fn compile_dependency_at(
+    project_root: &Utf8Path,
+    dep_root: &Utf8Path,
+    dep_name: &str,
+    options: &beamtalk_core::CompilerOptions,
+    prior_deps: &[ResolvedDependency],
+) -> Result<ResolvedDependency> {
+    let (ebin_path, class_module_index) =
+        compile_dependency_with_context(project_root, dep_root, dep_name, options, prior_deps)?;
+
+    Ok(ResolvedDependency {
+        name: dep_name.to_string(),
+        root: dep_root.to_path_buf(),
+        ebin_path,
+        class_module_index,
+    })
+}
+
 /// Compile a path dependency and return the ebin path and class module index.
 ///
 /// Output goes to `{project_root}/_build/deps/{name}/ebin/`.
 /// The dependency is compiled using the same build pipeline as `beamtalk build`.
+#[allow(dead_code)] // Convenience wrapper; superseded by compile_dependency_with_context
 fn compile_dependency(
     project_root: &Utf8Path,
     dep_root: &Utf8Path,
     dep_name: &str,
     options: &beamtalk_core::CompilerOptions,
+) -> Result<(Utf8PathBuf, HashMap<String, String>)> {
+    compile_dependency_with_context(project_root, dep_root, dep_name, options, &[])
+}
+
+/// Compile a dependency with context from already-compiled dependencies.
+///
+/// The `prior_deps` parameter provides class module indexes from dependencies
+/// that have already been compiled (in topological order), allowing this
+/// dependency's source to reference classes from its own dependencies.
+fn compile_dependency_with_context(
+    project_root: &Utf8Path,
+    dep_root: &Utf8Path,
+    dep_name: &str,
+    options: &beamtalk_core::CompilerOptions,
+    prior_deps: &[ResolvedDependency],
 ) -> Result<(Utf8PathBuf, HashMap<String, String>)> {
     let ebin_path = project_root
         .join("_build")
@@ -299,7 +346,7 @@ fn compile_dependency(
         dep_root.to_path_buf()
     };
 
-    let source_files = super::build::collect_source_files_from_dir(&search_dir)?;
+    let source_files = crate::commands::build::collect_source_files_from_dir(&search_dir)?;
 
     if source_files.is_empty() {
         debug!(dep = %dep_name, "No source files found in dependency, skipping compilation");
@@ -319,8 +366,22 @@ fn compile_dependency(
         None
     };
 
-    let (class_module_index, class_superclass_index, all_class_infos, cached_asts) =
-        super::build::build_class_module_index(&source_files, source_root.as_deref(), dep_name)?;
+    let (mut class_module_index, class_superclass_index, all_class_infos, cached_asts) =
+        crate::commands::build::build_class_module_index(
+            &source_files,
+            source_root.as_deref(),
+            dep_name,
+        )?;
+
+    // Merge class indexes from already-compiled dependencies so that
+    // cross-dependency class references resolve during compilation.
+    for prior in prior_deps {
+        for (class_name, module_name) in &prior.class_module_index {
+            class_module_index
+                .entry(class_name.clone())
+                .or_insert_with(|| module_name.clone());
+        }
+    }
 
     // Compile each source file
     let mut core_files = Vec::new();
@@ -341,7 +402,8 @@ fn compile_dependency(
             );
         }
 
-        let relative_module = super::build::compute_relative_module(file, source_root.as_deref())?;
+        let relative_module =
+            crate::commands::build::compute_relative_module(file, source_root.as_deref())?;
         let module_name = format!("bt@{dep_name}@{relative_module}");
         let core_file = ebin_path.join(format!("{module_name}.core"));
 
@@ -370,8 +432,8 @@ fn compile_dependency(
 
     // Generate .app file for the dependency
     let dep_manifest = manifest::parse_manifest(&dep_root.join("beamtalk.toml"))?;
-    let class_metadata: Vec<super::app_file::ClassMetadata> = Vec::new();
-    super::app_file::generate_app_file(
+    let class_metadata: Vec<crate::commands::app_file::ClassMetadata> = Vec::new();
+    crate::commands::app_file::generate_app_file(
         &ebin_path,
         &dep_manifest,
         &module_names,
@@ -382,6 +444,41 @@ fn compile_dependency(
     info!(dep = %dep_name, "Dependency compiled successfully");
 
     Ok((ebin_path, class_module_index))
+}
+
+/// Build a class module index for a dependency without compiling.
+///
+/// Scans the dependency's source files and extracts class-to-module mappings.
+/// This is the fast path used when deps are fresh and don't need recompilation.
+pub(crate) fn build_dep_class_index(
+    dep_root: &Utf8Path,
+    dep_name: &str,
+) -> Result<HashMap<String, String>> {
+    let src_dir = dep_root.join("src");
+    let search_dir = if src_dir.exists() {
+        src_dir.clone()
+    } else {
+        dep_root.to_path_buf()
+    };
+
+    let source_files = crate::commands::build::collect_source_files_from_dir(&search_dir)?;
+    if source_files.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let source_root = if src_dir.exists() {
+        Some(src_dir)
+    } else {
+        None
+    };
+
+    let (class_module_index, _, _, _) = crate::commands::build::build_class_module_index(
+        &source_files,
+        source_root.as_deref(),
+        dep_name,
+    )?;
+
+    Ok(class_module_index)
 }
 
 #[cfg(test)]

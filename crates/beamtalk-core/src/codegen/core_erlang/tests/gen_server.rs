@@ -1413,6 +1413,7 @@ fn test_class_method_call_generation() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Beamtalk", Span::new(0, 8)),
             span: Span::new(0, 8),
+            package: None,
         }),
         selector: MessageSelector::Unary("allClasses".into()),
         arguments: vec![],
@@ -1437,6 +1438,7 @@ fn test_class_method_call_generation() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Point", Span::new(0, 5)),
             span: Span::new(0, 5),
+            package: None,
         }),
         selector: MessageSelector::Unary("new".into()),
         arguments: vec![],
@@ -1462,6 +1464,7 @@ fn test_class_method_call_generation() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("InitCounter", Span::new(0, 11)),
             span: Span::new(0, 11),
+            package: None,
         }),
         selector: MessageSelector::Unary("spawn".into()),
         arguments: vec![],
@@ -2251,6 +2254,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
                 receiver: Box::new(Expression::ClassReference {
                     name: Identifier::new("SchemeSymbol", Span::new(0, 0)),
                     span: Span::new(0, 0),
+                    package: None,
                 }),
                 selector: MessageSelector::Keyword(vec![KeywordPart::new(
                     "symName:",

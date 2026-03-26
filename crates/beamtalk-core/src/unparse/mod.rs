@@ -778,7 +778,13 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
     match expr {
         Expression::Literal(lit, _) => unparse_literal(lit),
         Expression::Identifier(id) => unparse_identifier(id),
-        Expression::ClassReference { name, .. } => Document::String(name.name.to_string()),
+        Expression::ClassReference { name, package, .. } => {
+            if let Some(pkg) = package {
+                Document::String(format!("{}@{}", pkg.name, name.name))
+            } else {
+                Document::String(name.name.to_string())
+            }
+        }
         Expression::Super(_) => Document::Str("super"),
         Expression::FieldAccess {
             receiver, field, ..

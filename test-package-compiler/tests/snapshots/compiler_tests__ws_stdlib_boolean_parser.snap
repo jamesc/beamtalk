@@ -97,6 +97,7 @@ Module {
                                                     end: 178,
                                                 },
                                             },
+                                            package: None,
                                             span: Span {
                                                 start: 168,
                                                 end: 178,
@@ -157,6 +158,7 @@ Module {
                                                     end: 212,
                                                 },
                                             },
+                                            package: None,
                                             span: Span {
                                                 start: 202,
                                                 end: 212,
@@ -270,6 +272,7 @@ Module {
                                                     end: 286,
                                                 },
                                             },
+                                            package: None,
                                             span: Span {
                                                 start: 276,
                                                 end: 286,
@@ -330,6 +333,7 @@ Module {
                                                     end: 320,
                                                 },
                                             },
+                                            package: None,
                                             span: Span {
                                                 start: 310,
                                                 end: 320,

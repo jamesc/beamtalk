@@ -16,6 +16,9 @@ use super::manifest::PackageManifest;
 use crate::beam_compiler::escape_erlang_string;
 
 /// Metadata for a class discovered during compilation.
+///
+/// ADR 0070 Phase 4: Extended with `package`, `kind`, and `type_params`
+/// for cross-package compiler resolution.
 #[derive(Debug, Clone)]
 pub struct ClassMetadata {
     /// The BEAM module name (e.g., `bt@my_counter@counter`).
@@ -24,6 +27,12 @@ pub struct ClassMetadata {
     pub class_name: String,
     /// The parent class name (e.g., `Actor`, `Object`).
     pub parent_class: String,
+    /// The package that owns this class (from `beamtalk.toml`).
+    pub package: String,
+    /// The class kind: `"object"`, `"value"`, or `"actor"` (ADR 0067).
+    pub kind: String,
+    /// Generic type parameter names (ADR 0068), e.g., `["T", "E"]`.
+    pub type_params: Vec<String>,
 }
 
 /// Generate an OTP `.app` file for a compiled package.
@@ -112,7 +121,12 @@ fn format_modules_list(module_names: &[String]) -> String {
 
 /// Format the class metadata list for the `.app` file.
 ///
-/// Each entry is `{'module', 'ClassName', 'ParentClass'}`.
+/// ADR 0070 Phase 4: Each entry is a map with module, class, parent, package,
+/// kind, and `type_params` fields:
+/// ```erlang
+/// #{name => 'Counter', module => 'bt@app@counter', parent => 'Actor',
+///   package => 'my_app', kind => actor, type_params => []}
+/// ```
 fn format_classes_list(class_metadata: &[ClassMetadata]) -> String {
     if class_metadata.is_empty() {
         return String::new();
@@ -122,11 +136,27 @@ fn format_classes_list(class_metadata: &[ClassMetadata]) -> String {
     sorted
         .iter()
         .map(|c| {
+            let type_params = if c.type_params.is_empty() {
+                "[]".to_string()
+            } else {
+                format!(
+                    "[{}]",
+                    c.type_params
+                        .iter()
+                        .map(|tp| format!("'{tp}'"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
             format!(
-                "{{'{module}', '{class}', '{parent}'}}",
+                "#{{name => '{class}', module => '{module}', parent => '{parent}', \
+                 package => '{package}', kind => {kind}, type_params => {type_params}}}",
                 module = c.module,
                 class = c.class_name,
-                parent = c.parent_class
+                parent = c.parent_class,
+                package = c.package,
+                kind = c.kind,
+                type_params = type_params
             )
         })
         .collect::<Vec<_>>()
@@ -185,11 +215,29 @@ mod tests {
             module: "bt@my_counter@counter".to_string(),
             class_name: "Counter".to_string(),
             parent_class: "Actor".to_string(),
+            package: "my_counter".to_string(),
+            kind: "actor".to_string(),
+            type_params: vec![],
         }];
 
         let result = format_app_file(&manifest, &modules, &classes, None);
 
-        assert!(result.contains("{'bt@my_counter@counter', 'Counter', 'Actor'}"));
+        assert!(
+            result.contains("name => 'Counter'"),
+            "should contain class name in map. Got: {result}"
+        );
+        assert!(
+            result.contains("package => 'my_counter'"),
+            "should contain package. Got: {result}"
+        );
+        assert!(
+            result.contains("kind => actor"),
+            "should contain kind. Got: {result}"
+        );
+        assert!(
+            result.contains("type_params => []"),
+            "should contain empty type_params. Got: {result}"
+        );
     }
 
     #[test]
@@ -229,17 +277,42 @@ mod tests {
                 module: "bt@app@b".to_string(),
                 class_name: "Bravo".to_string(),
                 parent_class: "Object".to_string(),
+                package: "app".to_string(),
+                kind: "object".to_string(),
+                type_params: vec![],
             },
             ClassMetadata {
                 module: "bt@app@a".to_string(),
                 class_name: "Alpha".to_string(),
                 parent_class: "Actor".to_string(),
+                package: "app".to_string(),
+                kind: "actor".to_string(),
+                type_params: vec![],
             },
         ];
         let result = format_classes_list(&classes);
-        // Should be sorted by module name
-        assert!(result.starts_with("{'bt@app@a'"));
-        assert!(result.contains("{'bt@app@b'"));
+        // Should be sorted by module name — Alpha (bt@app@a) before Bravo (bt@app@b)
+        assert!(
+            result.find("'Alpha'").unwrap() < result.find("'Bravo'").unwrap(),
+            "classes should be sorted by module name. Got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_classes_list_with_type_params() {
+        let classes = vec![ClassMetadata {
+            module: "bt@app@container".to_string(),
+            class_name: "Container".to_string(),
+            parent_class: "Object".to_string(),
+            package: "app".to_string(),
+            kind: "object".to_string(),
+            type_params: vec!["T".to_string(), "E".to_string()],
+        }];
+        let result = format_classes_list(&classes);
+        assert!(
+            result.contains("type_params => ['T', 'E']"),
+            "should contain type_params. Got: {result}"
+        );
     }
 
     #[test]

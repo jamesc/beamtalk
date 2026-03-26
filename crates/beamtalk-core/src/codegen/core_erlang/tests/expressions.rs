@@ -752,6 +752,7 @@ fn test_as_type_erasure() {
     let arguments = vec![Expression::ClassReference {
         name: Identifier::new("Integer", Span::new(10, 17)),
         span: Span::new(10, 17),
+        package: None,
     }];
 
     let doc = generator

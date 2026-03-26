@@ -253,6 +253,8 @@ module 'typed_class_warnings' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'TypedCounter',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => ['value'],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -279,6 +281,8 @@ module 'typed_class_warnings' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'TypedCounter',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => ['value'],
       'is_sealed' => 'false',
       'is_abstract' => 'false',

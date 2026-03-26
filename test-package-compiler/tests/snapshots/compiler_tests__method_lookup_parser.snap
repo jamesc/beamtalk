@@ -49,6 +49,7 @@ Module {
                                             end: 403,
                                         },
                                     },
+                                    package: None,
                                     span: Span {
                                         start: 396,
                                         end: 403,

@@ -305,6 +305,20 @@ impl ClassKind {
             _ => ClassKind::Object,
         }
     }
+
+    /// Returns the string representation used in `.app` metadata (ADR 0070 Phase 4).
+    ///
+    /// - `Object` → `"object"`
+    /// - `Actor` → `"actor"`
+    /// - `Value` → `"value"`
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ClassKind::Object => "object",
+            ClassKind::Actor => "actor",
+            ClassKind::Value => "value",
+        }
+    }
 }
 
 /// A class definition (Aggregate Root).
@@ -1067,14 +1081,17 @@ pub enum Expression {
     /// An identifier (variable name).
     Identifier(Identifier),
 
-    /// A class reference (uppercase identifier).
+    /// A class reference (uppercase identifier), optionally package-qualified.
     ///
     /// Class references are global and resolve to module names.
-    /// Example: `Counter`, `Array`, `MyCustomClass`
+    /// Example: `Counter`, `Array`, `MyCustomClass`, `json@Parser`
     /// Compiles to module calls: `Counter spawn` → `call 'counter':'spawn'()`
     ClassReference {
         /// The class name (as written in source).
         name: Identifier,
+        /// Optional package qualifier (e.g., `json` in `json@Parser`).
+        /// See ADR 0070, Section 4.
+        package: Option<Identifier>,
         /// Source location.
         span: Span,
     },

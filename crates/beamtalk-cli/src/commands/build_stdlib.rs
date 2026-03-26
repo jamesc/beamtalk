@@ -327,6 +327,8 @@ struct ClassMeta {
     is_typed: bool,
     /// Whether this class delegates to a native Erlang backing module (ADR 0056).
     is_native: bool,
+    /// Class kind: object, value, or actor (ADR 0067/0070).
+    class_kind: beamtalk_core::ast::ClassKind,
     /// Instance state (field) names declared in the class.
     state: Vec<String>,
     /// Declared type annotations for state fields (field name → type name).
@@ -659,6 +661,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         is_abstract: class.is_abstract,
         is_typed: class.is_typed,
         is_native: class.backing_module.is_some(),
+        class_kind: class.class_kind,
         state,
         state_types,
         methods,
@@ -666,6 +669,40 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         class_variables,
         type_params,
     })
+}
+
+/// Format a single stdlib class metadata entry in ADR 0070 Phase 4 map format.
+fn format_stdlib_class_entry(m: &ClassMeta) -> String {
+    let type_params = if m.type_params.is_empty() {
+        "[]".to_string()
+    } else {
+        format!(
+            "[{}]",
+            m.type_params
+                .iter()
+                .map(|tp| format!("'{tp}'"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    format!(
+        "#{{name => '{class}', module => '{module}', parent => '{super}', \
+         package => 'stdlib', kind => {kind}, type_params => {type_params}}}",
+        module = m.module_name,
+        class = m.class_name,
+        super = m.superclass_name,
+        kind = m.class_kind.as_str(),
+        type_params = type_params,
+    )
+}
+
+/// Format stdlib class metadata entries joined with the given separator.
+fn format_stdlib_classes_list(class_metadata: &[ClassMeta], separator: &str) -> String {
+    class_metadata
+        .iter()
+        .map(format_stdlib_class_entry)
+        .collect::<Vec<_>>()
+        .join(separator)
 }
 
 /// Generate the `beamtalk_stdlib.app` file in the ebin directory.
@@ -688,19 +725,8 @@ fn generate_app_file(
         .collect::<Vec<_>>()
         .join(", ");
 
-    // Generate class hierarchy entries for env
-    let classes_list = class_metadata
-        .iter()
-        .map(|m| {
-            format!(
-                "{{'{module}', '{class}', '{super}'}}",
-                module = m.module_name,
-                class = m.class_name,
-                super = m.superclass_name
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",\n                    ");
+    // ADR 0070 Phase 4: Generate extended class hierarchy entries for env
+    let classes_list = format_stdlib_classes_list(class_metadata, ",\n                    ");
 
     let version = env!("BEAMTALK_VERSION");
     let app_content = format!(
@@ -730,18 +756,8 @@ fn generate_app_file(
 /// The `.app.src` uses `{modules, []}` (rebar3 auto-fills modules) but embeds
 /// the `{classes, [...]}` env for the runtime to read via `application:get_env`.
 fn generate_app_src_file(src_dir: &Utf8Path, class_metadata: &[ClassMeta]) -> Result<()> {
-    let classes_list = class_metadata
-        .iter()
-        .map(|m| {
-            format!(
-                "{{'{module}', '{class}', '{super}'}}",
-                module = m.module_name,
-                class = m.class_name,
-                super = m.superclass_name
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",\n            ");
+    // ADR 0070 Phase 4: Generate extended class hierarchy entries for env
+    let classes_list = format_stdlib_classes_list(class_metadata, ",\n            ");
 
     let app_src_content = format!(
         "{{application, beamtalk_stdlib, [\n\
@@ -1172,6 +1188,7 @@ mod tests {
             is_abstract: false,
             is_typed: false,
             is_native: false,
+            class_kind: beamtalk_core::ast::ClassKind::Actor,
             state: vec!["count".to_string()],
             state_types: vec![],
             methods: vec![
@@ -1248,6 +1265,7 @@ mod tests {
             is_abstract: true,
             is_typed: false,
             is_native: false,
+            class_kind: beamtalk_core::ast::ClassKind::Object,
             state: vec![],
             state_types: vec![],
             methods: vec![],
@@ -1281,6 +1299,7 @@ mod tests {
                 is_abstract: false,
                 is_typed: false,
                 is_native: false,
+                class_kind: beamtalk_core::ast::ClassKind::Object,
                 state: vec![],
                 state_types: vec![],
                 methods: vec![],
@@ -1296,6 +1315,7 @@ mod tests {
                 is_abstract: false,
                 is_typed: false,
                 is_native: false,
+                class_kind: beamtalk_core::ast::ClassKind::Object,
                 state: vec![],
                 state_types: vec![],
                 methods: vec![],
