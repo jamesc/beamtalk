@@ -588,15 +588,14 @@ class_name_atoms(Classes) ->
 safe_atom_result({ok, Atom}) -> {true, Atom};
 safe_atom_result({error, badarg}) -> false.
 
-%% Compute a module name for a file (BT-775 / BT-1670).
+%% Compute a package-qualified module name for a file (BT-775 / BT-1670).
 %%
-%% BT-1670: Always derives a module name from the file path so that all
-%% file-based load paths produce names matching the CLI build system:
-%%   - With package context: `bt@{package}@{relative_path_segments}`
-%%   - Without package context: `bt@{file_stem_snake_case}`
-%% Previously, the non-package case returned `undefined`, causing the
-%% compiler port to derive the name from the class name instead of the
-%% file stem — a divergence from `beamtalk build`.
+%% With package context: derives `bt@{package}@{relative_path_segments}`.
+%% Without package context: returns `undefined` so the compiler port
+%% derives the name from the class name instead.  This is intentional —
+%% class-name-based naming in the REPL enables hot reload across file
+%% renames (e.g., hot_counter.bt and hot_counter_v2.bt both define
+%% HotCounter → same module bt@hot_counter).
 -spec compute_package_module_name(string()) -> binary() | undefined.
 compute_package_module_name(Path) ->
     case beamtalk_workspace_meta:get_metadata() of
@@ -605,25 +604,12 @@ compute_package_module_name(Path) ->
         ->
             AbsPath = filename:absname(Path),
             ProjectRoot = binary_to_list(ProjectPath),
-            case resolve_package_module(AbsPath, ProjectRoot, PackageName) of
-                undefined ->
-                    %% File is outside both src/ and test/ — fall back to stem
-                    derive_module_name_from_stem(Path);
-                Result ->
-                    Result
-            end;
+            resolve_package_module(AbsPath, ProjectRoot, PackageName);
         _ ->
-            derive_module_name_from_stem(Path)
+            undefined
     end.
 
-%% Derive module name from file stem: bt@{snake_case_stem}.
-%% BT-1670: Matches the CLI build behavior for non-package files.
--spec derive_module_name_from_stem(string()) -> binary() | undefined.
-derive_module_name_from_stem(Path) ->
-    case filename:rootname(filename:basename(Path)) of
-        [] -> undefined;
-        Stem -> iolist_to_binary(["bt@", to_snake_case(Stem)])
-    end.
+
 
 %% Try src/ then test/ to resolve the package module name.
 -spec resolve_package_module(string(), string(), binary()) -> binary() | undefined.
