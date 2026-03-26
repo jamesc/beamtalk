@@ -911,7 +911,7 @@ do_export_traces(Opts) ->
         },
         <<"traces">> => Limited
     },
-    JsonBin = iolist_to_binary(json:format(Export)),
+    JsonBin = beamtalk_json:prettify_term(Export),
     case file:write_file(Path, JsonBin) of
         ok ->
             {ok, #{path => Path, count => Count}};

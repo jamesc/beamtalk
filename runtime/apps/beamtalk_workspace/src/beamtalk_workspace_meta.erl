@@ -607,7 +607,7 @@ persist_metadata_to_disk(State) ->
     },
 
     %% Write to disk
-    Json = iolist_to_binary(json:format(Metadata)),
+    Json = beamtalk_json:prettify_term(Metadata),
     case file:write_file(Path, Json) of
         ok ->
             ok;

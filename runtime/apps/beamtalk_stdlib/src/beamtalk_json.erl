@@ -32,6 +32,7 @@
 
 -export(['parse:'/1, 'generate:'/1, 'prettyPrint:'/1]).
 -export([parse/1, generate/1, prettyPrint/1]).
+-export([prettify_term/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -105,7 +106,8 @@
 'prettyPrint:'(Value) ->
     try
         Prepared = prepare_for_encode(Value),
-        iolist_to_binary(json:format(Prepared))
+        Compact = iolist_to_binary(json:encode(Prepared)),
+        prettify(Compact)
     catch
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
@@ -137,6 +139,13 @@ generate(X) -> 'generate:'(X).
 %% @doc FFI alias for prettyPrint:/1 — called via (Erlang beamtalk_json) prettyPrint: val.
 -spec prettyPrint(term()) -> binary().
 prettyPrint(X) -> 'prettyPrint:'(X).
+
+%% @doc Encode a term to pretty-printed JSON binary.
+%% Used by runtime internals (trace_store, workspace_meta) for human-readable output.
+-spec prettify_term(term()) -> binary().
+prettify_term(Term) ->
+    Compact = iolist_to_binary(json:encode(Term)),
+    prettify(Compact).
 
 %%% ============================================================================
 %%% Internal Functions
@@ -189,3 +198,54 @@ prepare_for_encode(Other) ->
         <<"Only Dictionary, List, String, Integer, Float, Boolean, and nil can be converted to JSON">>
     ),
     beamtalk_error:raise(Error2).
+
+%% @private
+%% @doc Pretty-print a compact JSON binary with 2-space indentation.
+%% Replaces jsx:prettify/1 without requiring json:format/1 (OTP 27.1+).
+-spec prettify(binary()) -> binary().
+prettify(Bin) ->
+    prettify(Bin, 0, false, []).
+
+-spec prettify(binary(), non_neg_integer(), boolean(), iolist()) -> binary().
+prettify(<<>>, _Depth, _InStr, Acc) ->
+    iolist_to_binary(lists:reverse(Acc));
+prettify(<<$\\, C, Rest/binary>>, Depth, true, Acc) ->
+    prettify(Rest, Depth, true, [C, $\\ | Acc]);
+prettify(<<$", Rest/binary>>, Depth, InStr, Acc) ->
+    prettify(Rest, Depth, not InStr, [$" | Acc]);
+prettify(<<C, Rest/binary>>, Depth, true, Acc) ->
+    prettify(Rest, Depth, true, [C | Acc]);
+prettify(<<${, Rest/binary>>, Depth, false, Acc) ->
+    NewDepth = Depth + 1,
+    case Rest of
+        <<$}, _/binary>> ->
+            prettify(Rest, NewDepth, false, [${ | Acc]);
+        _ ->
+            prettify(Rest, NewDepth, false, [indent(NewDepth), $\n, ${ | Acc])
+    end;
+prettify(<<$[, Rest/binary>>, Depth, false, Acc) ->
+    NewDepth = Depth + 1,
+    case Rest of
+        <<$], _/binary>> ->
+            prettify(Rest, NewDepth, false, [$[ | Acc]);
+        _ ->
+            prettify(Rest, NewDepth, false, [indent(NewDepth), $\n, $[ | Acc])
+    end;
+prettify(<<$}, Rest/binary>>, Depth, false, Acc) ->
+    NewDepth = max(0, Depth - 1),
+    prettify(Rest, NewDepth, false, [$}, indent(NewDepth), $\n | Acc]);
+prettify(<<$], Rest/binary>>, Depth, false, Acc) ->
+    NewDepth = max(0, Depth - 1),
+    prettify(Rest, NewDepth, false, [$], indent(NewDepth), $\n | Acc]);
+prettify(<<$,, Rest/binary>>, Depth, false, Acc) ->
+    prettify(Rest, Depth, false, [indent(Depth), $\n, $, | Acc]);
+prettify(<<$:, Rest/binary>>, Depth, false, Acc) ->
+    prettify(Rest, Depth, false, [$\s, $: | Acc]);
+prettify(<<$\s, Rest/binary>>, Depth, false, Acc) ->
+    prettify(Rest, Depth, false, Acc);
+prettify(<<C, Rest/binary>>, Depth, false, Acc) ->
+    prettify(Rest, Depth, false, [C | Acc]).
+
+-spec indent(non_neg_integer()) -> binary().
+indent(0) -> <<>>;
+indent(N) -> binary:copy(<<"  ">>, N).
