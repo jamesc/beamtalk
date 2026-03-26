@@ -14,6 +14,7 @@
 //! - **Cycle detection:** clear error when circular dependencies are found
 //! - **Single-version policy:** error when same package appears at different versions
 
+pub mod cli;
 pub mod git;
 pub mod graph;
 pub mod lockfile;
