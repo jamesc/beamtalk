@@ -771,6 +771,10 @@ fn handle_compile_expression(request: &Map) -> Term {
         return diagnostic_error_response(&error_diags, &source);
     }
 
+    // BT-1670: Extract optional module_name override for inline class definitions
+    // so they produce the same module name as file-based compilation in package mode.
+    let module_name_override = map_get(request, "module_name").and_then(term_to_string);
+
     // BT-571: If the parsed module contains class definitions, use compile path
     if !module.classes.is_empty() {
         return handle_inline_class_definition(
@@ -781,6 +785,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             &class_superclass_index,
             class_module_index,
             pre_class_hierarchy,
+            module_name_override.as_deref(),
         );
     }
 
@@ -814,6 +819,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             &class_superclass_index,
             class_module_index,
             pre_class_hierarchy,
+            module_name_override.as_deref(),
         );
     }
 
@@ -926,6 +932,26 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
     }
 }
 
+/// BT-1670: Derive a BEAM module name for a class, using either an explicit
+/// override (from package-mode callers) or the default `bt@{snake_case}`
+/// convention.  All code paths that produce module names for `.bt` classes
+/// should call this function so the derivation logic is unified.
+fn derive_class_module_name(
+    class_name: &str,
+    module_name_override: Option<&str>,
+    stdlib_mode: bool,
+) -> String {
+    if let Some(name) = module_name_override {
+        return name.to_string();
+    }
+    let base_name = beamtalk_core::erlang::to_module_name(class_name);
+    if stdlib_mode {
+        format!("bt@stdlib@{base_name}")
+    } else {
+        format!("bt@{base_name}")
+    }
+}
+
 /// BT-571: Handle inline class definition in REPL expression context.
 /// Merges any standalone method definitions into the class, generates code,
 /// and returns a `class_definition` response.
@@ -933,6 +959,9 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
 /// BT-907: Accepts `class_superclass_index` to resolve cross-file inheritance chains.
 /// Accepts `class_module_index` for package-qualified class references in trailing
 /// expressions and the class body itself.
+/// BT-1670: Accepts optional `module_name_override` so package-qualified names
+/// are used consistently across all load paths.
+#[allow(clippy::too_many_arguments)]
 fn handle_inline_class_definition(
     module: beamtalk_core::ast::Module,
     source: &str,
@@ -941,6 +970,7 @@ fn handle_inline_class_definition(
     class_superclass_index: &std::collections::HashMap<String, String>,
     class_module_index: std::collections::HashMap<String, String>,
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    module_name_override: Option<&str>,
 ) -> Term {
     let mut module = module;
     let mut warnings = warnings.to_vec();
@@ -967,8 +997,10 @@ fn handle_inline_class_definition(
         }
     }
 
-    let base_name = beamtalk_core::erlang::to_module_name(&module.classes[0].name.name);
-    let class_module_name = format!("bt@{base_name}");
+    // BT-1670: Use unified module name derivation so inline class definitions
+    // in package mode produce the same module name as file-based compilation.
+    let class_module_name =
+        derive_class_module_name(&module.classes[0].name.name, module_name_override, false);
 
     let classes: Vec<(String, String)> = module
         .classes
@@ -1023,6 +1055,7 @@ fn handle_inline_class_definition(
 /// Compiles protocol-only modules to Core Erlang (which generates `register_class/0`
 /// with protocol registration via BT-1610), then returns a `protocol_definition`
 /// response so the Erlang side can load and execute the module.
+/// BT-1670: Accepts optional `module_name_override` for package-mode consistency.
 fn handle_inline_protocol_definition(
     module: &beamtalk_core::ast::Module,
     source: &str,
@@ -1030,10 +1063,11 @@ fn handle_inline_protocol_definition(
     class_superclass_index: &std::collections::HashMap<String, String>,
     class_module_index: std::collections::HashMap<String, String>,
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    module_name_override: Option<&str>,
 ) -> Term {
     let first_protocol_name = &module.protocols[0].name.name;
-    let base_name = beamtalk_core::erlang::to_module_name(first_protocol_name);
-    let protocol_module_name = format!("bt@{base_name}");
+    let protocol_module_name =
+        derive_class_module_name(first_protocol_name, module_name_override, false);
 
     let protocol_names: Vec<String> = module
         .protocols
@@ -1148,28 +1182,21 @@ fn handle_compile(request: &Map) -> Term {
         }
     }
 
-    // BT-775: Accept optional module_name override from caller.
+    // BT-775 / BT-1670: Accept optional module_name override from caller.
     // When provided, use it directly instead of deriving from the class name.
     // This allows the REPL/MCP load path to produce package-qualified names
     // matching the build system (e.g., bt@my_app@scheme@symbol).
+    // Uses the unified derive_class_module_name function.
     let module_name_override = map_get(request, "module_name").and_then(term_to_string);
 
-    let module_name = if let Some(override_name) = module_name_override {
-        override_name
+    let module_name = if let Some(first_class) = module.classes.first() {
+        derive_class_module_name(
+            &first_class.name.name,
+            module_name_override.as_deref(),
+            stdlib_mode,
+        )
     } else {
-        // Derive module name from first class in AST (ADR 0016)
-        let base_name = if let Some(first_class) = module.classes.first() {
-            beamtalk_core::erlang::to_module_name(&first_class.name.name)
-        } else {
-            // No class definition — use a fallback
-            return error_response(&["No class definition found in source".to_string()]);
-        };
-
-        if stdlib_mode {
-            format!("bt@stdlib@{base_name}")
-        } else {
-            format!("bt@{base_name}")
-        }
+        return error_response(&["No class definition found in source".to_string()]);
     };
 
     // Extract class info
@@ -1793,6 +1820,93 @@ mod tests {
             classes.is_empty(),
             "Integer is a builtin — should be skipped"
         );
+    }
+
+    /// BT-1670: `derive_class_module_name` uses override when provided.
+    #[test]
+    fn derive_class_module_name_with_override() {
+        let result = derive_class_module_name("Counter", Some("bt@my_app@counter"), false);
+        assert_eq!(result, "bt@my_app@counter");
+    }
+
+    /// BT-1670: `derive_class_module_name` falls back to `bt@{snake}` without override.
+    #[test]
+    fn derive_class_module_name_no_override() {
+        let result = derive_class_module_name("MyCounter", None, false);
+        assert_eq!(result, "bt@my_counter");
+    }
+
+    /// BT-1670: `derive_class_module_name` uses stdlib prefix in stdlib mode.
+    #[test]
+    fn derive_class_module_name_stdlib_mode() {
+        let result = derive_class_module_name("Integer", None, true);
+        assert_eq!(result, "bt@stdlib@integer");
+    }
+
+    /// BT-1670: `derive_class_module_name` override takes precedence over stdlib mode.
+    #[test]
+    fn derive_class_module_name_override_over_stdlib() {
+        let result = derive_class_module_name("Integer", Some("bt@custom@integer"), true);
+        assert_eq!(result, "bt@custom@integer");
+    }
+
+    /// BT-1670: Inline class definition uses `module_name` override when provided,
+    /// ensuring package-mode REPL class definitions get the same module name as
+    /// file-based compilation.
+    #[test]
+    fn inline_class_definition_with_module_name_override() {
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary("Object subclass: MyThing\n  greet => \"hello\""),
+            ),
+            (atom("module"), binary("bt@repl_eval_1")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+            (atom("module_name"), binary("bt@my_app@my_thing")),
+        ]);
+
+        let response = handle_compile_expression(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected a map response, got: {response:?}");
+        };
+
+        // Should be a class_definition response
+        let status = map_get(m, "status").and_then(term_to_atom);
+        assert_eq!(status.as_deref(), Some("ok"));
+
+        let resp_kind = map_get(m, "kind").and_then(term_to_atom);
+        assert_eq!(resp_kind.as_deref(), Some("class_definition"));
+
+        // The module name should use the override, not bt@my_thing
+        let module_name = map_get(m, "module_name").and_then(term_to_string);
+        assert_eq!(module_name.as_deref(), Some("bt@my_app@my_thing"));
+    }
+
+    /// BT-1670: Inline class definition without override uses default `bt@` prefix.
+    #[test]
+    fn inline_class_definition_without_module_name_override() {
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary("Object subclass: MyThing\n  greet => \"hello\""),
+            ),
+            (atom("module"), binary("bt@repl_eval_1")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+        ]);
+
+        let response = handle_compile_expression(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected a map response, got: {response:?}");
+        };
+
+        let resp_kind = map_get(m, "kind").and_then(term_to_atom);
+        assert_eq!(resp_kind.as_deref(), Some("class_definition"));
+
+        // Without override, should derive from class name: bt@my_thing
+        let module_name = map_get(m, "module_name").and_then(term_to_string);
+        assert_eq!(module_name.as_deref(), Some("bt@my_thing"));
     }
 }
 
