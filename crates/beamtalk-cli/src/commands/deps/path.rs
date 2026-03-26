@@ -446,6 +446,41 @@ fn compile_dependency_with_context(
     Ok((ebin_path, class_module_index))
 }
 
+/// Build a class module index for a dependency without compiling.
+///
+/// Scans the dependency's source files and extracts class-to-module mappings.
+/// This is the fast path used when deps are fresh and don't need recompilation.
+pub(crate) fn build_dep_class_index(
+    dep_root: &Utf8Path,
+    dep_name: &str,
+) -> Result<HashMap<String, String>> {
+    let src_dir = dep_root.join("src");
+    let search_dir = if src_dir.exists() {
+        src_dir.clone()
+    } else {
+        dep_root.to_path_buf()
+    };
+
+    let source_files = crate::commands::build::collect_source_files_from_dir(&search_dir)?;
+    if source_files.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let source_root = if src_dir.exists() {
+        Some(src_dir)
+    } else {
+        None
+    };
+
+    let (class_module_index, _, _, _) = crate::commands::build::build_class_module_index(
+        &source_files,
+        source_root.as_deref(),
+        dep_name,
+    )?;
+
+    Ok(class_module_index)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
