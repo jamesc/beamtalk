@@ -238,6 +238,8 @@ module 'workspace_binding_send' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'Greeter',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -264,6 +266,8 @@ module 'workspace_binding_send' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'Greeter',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',

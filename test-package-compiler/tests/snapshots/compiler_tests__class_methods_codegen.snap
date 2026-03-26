@@ -249,6 +249,8 @@ module 'class_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'ClassVarCounter',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => ['count'],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -275,6 +277,8 @@ module 'class_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'ClassVarCounter',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => ['count'],
       'is_sealed' => 'false',
       'is_abstract' => 'false',

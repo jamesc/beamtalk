@@ -145,6 +145,8 @@ call 'bt@stdlib@dictionary':'dispatch'('keysAndValuesDo:', [_block9], Self)
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'Dictionary',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'true',
       'is_abstract' => 'false',
@@ -170,6 +172,8 @@ call 'bt@stdlib@dictionary':'dispatch'('keysAndValuesDo:', [_block9], Self)
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'Dictionary',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'true',
       'is_abstract' => 'false',

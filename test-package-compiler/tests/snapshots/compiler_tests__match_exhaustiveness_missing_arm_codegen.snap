@@ -93,6 +93,8 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'ExhaustivenessTest',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -118,6 +120,8 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'ExhaustivenessTest',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',

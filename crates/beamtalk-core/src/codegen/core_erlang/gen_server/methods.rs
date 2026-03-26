@@ -17,6 +17,25 @@ use crate::ast::{
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
 
+/// Extracts the package name from a BEAM module name following the
+/// `bt@{package}@{class}` convention (ADR 0016/0070).
+///
+/// Returns `None` for module names that don't follow this convention
+/// (e.g., stdlib modules like `beamtalk_integer` or REPL workspace modules).
+///
+/// # Examples
+/// - `"bt@my_counter@counter"` → `Some("my_counter")`
+/// - `"bt@stdlib@integer"` → `Some("stdlib")`
+/// - `"beamtalk_integer"` → `None`
+pub(crate) fn extract_package_from_module_name(module_name: &str) -> Option<String> {
+    let parts: Vec<&str> = module_name.splitn(3, '@').collect();
+    if parts.len() >= 3 && parts[0] == "bt" {
+        Some(parts[1].to_string())
+    } else {
+        None
+    }
+}
+
 /// Classification of how a method body expression should be handled for
 /// state threading.  Produced by [`CoreErlangGenerator::classify_body_expr`]
 /// and consumed by the unified [`CoreErlangGenerator::generate_body_exprs_with_reply`]
@@ -1332,8 +1351,15 @@ impl CoreErlangGenerator {
             // ADR 0050 Phase 5: BuilderState carries only module/source/signature/doc metadata.
             // Static fields (flags, fields, method signatures) are read from __beamtalk_meta/0
             // by beamtalk_object_class:init/1.
-            let meta_doc =
-                Self::build_meta_map_doc(class, module, true, synthesize_supervision_spec);
+            // ADR 0070 Phase 4: Extract package name from module name
+            let package_name = extract_package_from_module_name(&self.module_name);
+            let meta_doc = Self::build_meta_map_doc(
+                class,
+                module,
+                true,
+                synthesize_supervision_spec,
+                package_name.as_deref(),
+            );
             let class_doc = Self::build_builder_state_doc(
                 i,
                 &class.name.name,
@@ -2393,11 +2419,20 @@ impl CoreErlangGenerator {
             return Ok(Document::Nil);
         };
 
+        // ADR 0070 Phase 4: Extract package name from BEAM module name (bt@{package}@{class})
+        let package_name = extract_package_from_module_name(&self.module_name);
+
         Ok(docvec![
             "'__beamtalk_meta'/0 = fun () ->\n",
             "    ",
             // include_standalone: false — standalone methods are runtime-patched, not static
-            Self::build_meta_map_doc(class, module, false, synthesize_supervision_spec),
+            Self::build_meta_map_doc(
+                class,
+                module,
+                false,
+                synthesize_supervision_spec,
+                package_name.as_deref(),
+            ),
             "\n\n",
         ])
     }
@@ -2421,6 +2456,7 @@ impl CoreErlangGenerator {
         module: &Module,
         include_standalone: bool,
         synthesize_supervision_spec: bool,
+        package_name: Option<&str>,
     ) -> Document<'static> {
         Self::build_meta_map_doc_with_extra(
             class,
@@ -2428,6 +2464,7 @@ impl CoreErlangGenerator {
             include_standalone,
             synthesize_supervision_spec,
             Document::Nil,
+            package_name,
         )
     }
 
@@ -2441,6 +2478,7 @@ impl CoreErlangGenerator {
         include_standalone: bool,
         synthesize_supervision_spec: bool,
         extra_entries: Document<'static>,
+        package_name: Option<&str>,
     ) -> Document<'static> {
         let class_name = class.name.name.to_string();
         let superclass_name = class
@@ -2492,12 +2530,29 @@ impl CoreErlangGenerator {
                 .collect::<Vec<_>>(),
         );
 
+        // ADR 0070 Phase 4: Emit package name as compile-time constant
+        let package_doc: Document<'static> = match package_name {
+            Some(pkg) => docvec!["'", Document::String(pkg.to_string()), "'"],
+            None => Document::Str("'none'"),
+        };
+
+        // ADR 0070 Phase 4: Emit ClassKind as atom (object | value | actor)
+        let kind_doc: Document<'static> = match class.class_kind {
+            ClassKind::Object => Document::Str("'object'"),
+            ClassKind::Value => Document::Str("'value'"),
+            ClassKind::Actor => Document::Str("'actor'"),
+        };
+
         docvec![
             "~{'class' => '",
             Document::String(class_name),
             "',\n      'superclass' => '",
             Document::String(superclass_name),
-            "',\n      'fields' => ",
+            "',\n      'package' => ",
+            package_doc,
+            ",\n      'kind' => ",
+            kind_doc,
+            ",\n      'fields' => ",
             fields_doc,
             ",\n      'is_sealed' => ",
             is_sealed_doc,
@@ -2867,9 +2922,10 @@ impl CoreErlangGenerator {
 
 #[cfg(test)]
 mod tests {
+    use super::{MetaTypeRepr, extract_package_from_module_name};
     use crate::ast::{
-        ClassDefinition, Expression, ExpressionStatement, Identifier, Literal, MessageSelector,
-        MethodDefinition, Module, TypeParamDecl,
+        ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, Literal,
+        MessageSelector, MethodDefinition, Module, TypeParamDecl,
     };
     use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::source_analysis::Span;
@@ -2985,7 +3041,6 @@ mod tests {
 
     // ── ADR 0068: MetaTypeRepr tests ──
 
-    use super::MetaTypeRepr;
     use crate::ast::TypeAnnotation;
 
     #[test]
@@ -3156,6 +3211,7 @@ mod tests {
             &module,
             false,
             false,
+            None,
         );
         let output = doc.to_pretty_string();
         assert!(
@@ -3181,11 +3237,135 @@ mod tests {
             &module,
             false,
             false,
+            None,
         );
         let output = doc.to_pretty_string();
         assert!(
             output.contains("'type_params' => []"),
             "non-generic class should have empty type_params. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_meta_map_includes_package_name() {
+        let class = empty_actor_class("Counter");
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            protocols: vec![],
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let doc = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+            Some("my_counter"),
+        );
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'package' => 'my_counter'"),
+            "meta map should include package name. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_meta_map_package_none_without_package() {
+        let class = empty_actor_class("Counter");
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            protocols: vec![],
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let doc = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+            None,
+        );
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'package' => 'none'"),
+            "meta map should have 'none' package when no package. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_meta_map_includes_kind_actor() {
+        let class = empty_actor_class("Counter");
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            protocols: vec![],
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let doc = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+            None,
+        );
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'kind' => 'actor'"),
+            "actor class meta should have kind 'actor'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_meta_map_includes_kind_value() {
+        let mut class = empty_actor_class("Point");
+        class.class_kind = ClassKind::Value;
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            protocols: vec![],
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let doc = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+            None,
+        );
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'kind' => 'value'"),
+            "value class meta should have kind 'value'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_extract_package_from_module_name() {
+        assert_eq!(
+            extract_package_from_module_name("bt@my_counter@counter"),
+            Some("my_counter".to_string())
+        );
+        assert_eq!(
+            extract_package_from_module_name("bt@stdlib@integer"),
+            Some("stdlib".to_string())
+        );
+        assert_eq!(extract_package_from_module_name("beamtalk_integer"), None);
+        assert_eq!(extract_package_from_module_name("bt@"), None);
+        assert_eq!(
+            extract_package_from_module_name("bt@pkg@sub@dir@class"),
+            Some("pkg".to_string())
         );
     }
 }

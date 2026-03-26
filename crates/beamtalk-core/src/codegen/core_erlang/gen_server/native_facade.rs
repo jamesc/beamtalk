@@ -430,10 +430,18 @@ impl CoreErlangGenerator {
 
         // Reuse the standard meta map and append native-specific keys
         // include_standalone: false — standalone methods are runtime-patched, not static
+        // ADR 0070 Phase 4: Extract package name from module name
+        let package_name = super::methods::extract_package_from_module_name(&self.module_name);
         Ok(docvec![
             "'__beamtalk_meta'/0 = fun () ->\n",
             "    ",
-            Self::build_native_meta_map_doc(class, module, backing_module, false),
+            Self::build_native_meta_map_doc(
+                class,
+                module,
+                backing_module,
+                false,
+                package_name.as_deref(),
+            ),
             "\n\n",
         ])
     }
@@ -448,6 +456,7 @@ impl CoreErlangGenerator {
         module: &Module,
         backing_module: &str,
         include_standalone: bool,
+        package_name: Option<&str>,
     ) -> Document<'static> {
         let native_entries = docvec![
             ",\n      'native' => 'true'",
@@ -462,6 +471,7 @@ impl CoreErlangGenerator {
             include_standalone,
             false, // native actors don't synthesize supervision specs
             native_entries,
+            package_name,
         )
     }
 
@@ -476,6 +486,9 @@ impl CoreErlangGenerator {
         }
 
         let mut class_docs = Vec::new();
+
+        // ADR 0070 Phase 4: Extract package name from module name
+        let package_name = super::methods::extract_package_from_module_name(&self.module_name);
 
         for (i, class) in module.classes.iter().enumerate() {
             let Some(backing_module) = class.backing_module.as_ref().map(|id| id.name.as_str())
@@ -648,7 +661,14 @@ impl CoreErlangGenerator {
                         "'meta' => ",
                         // include_standalone: true — standalone methods included in BuilderState.meta
                         // so that init/1 can register their return types during on_load.
-                        Self::build_native_meta_map_doc(class, module, backing_module, true),
+                        // ADR 0070 Phase 4: Extract package name from module name
+                        Self::build_native_meta_map_doc(
+                            class,
+                            module,
+                            backing_module,
+                            true,
+                            package_name.as_deref(),
+                        ),
                         ",",
                         line(),
                         "'isConstructible' => 'false'",

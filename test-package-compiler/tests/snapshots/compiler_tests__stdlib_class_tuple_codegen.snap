@@ -132,6 +132,8 @@ call 'beamtalk_tuple':'as_string'(Self)
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'Tuple',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'true',
       'is_abstract' => 'false',
@@ -157,6 +159,8 @@ call 'beamtalk_tuple':'as_string'(Self)
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'Tuple',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'true',
       'is_abstract' => 'false',

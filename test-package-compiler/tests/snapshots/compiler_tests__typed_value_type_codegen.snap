@@ -145,6 +145,8 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'TypedPoint',
       'superclass' => 'Value',
+      'package' => 'none',
+      'kind' => 'value',
       'fields' => ['x', 'y'],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -170,6 +172,8 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'TypedPoint',
       'superclass' => 'Value',
+      'package' => 'none',
+      'kind' => 'value',
       'fields' => ['x', 'y'],
       'is_sealed' => 'false',
       'is_abstract' => 'false',

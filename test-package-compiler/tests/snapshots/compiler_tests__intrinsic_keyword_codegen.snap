@@ -97,6 +97,8 @@ call 'bt@stdlib@foo':'dispatch'('size', [], Self)
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'Foo',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -122,6 +124,8 @@ call 'bt@stdlib@foo':'dispatch'('size', [], Self)
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'Foo',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
