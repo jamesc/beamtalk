@@ -586,7 +586,7 @@ nonempty_or_undefined(Bin) when is_binary(Bin) -> Bin.
 -spec run_test_op(binary() | undefined, beamtalk_repl_protocol:protocol_msg()) -> binary().
 run_test_op(undefined, Msg) ->
     try
-        TestResult = beamtalk_test_runner:run_all(),
+        TestResult = beamtalk_test_runner:run_all(0),
         beamtalk_repl_protocol:encode_test_results(TestResult, Msg)
     catch
         error:#{error := #beamtalk_error{} = Err} ->

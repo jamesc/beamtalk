@@ -98,7 +98,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace test
   /// ```
-  test -> TestResult => TestRunner runAll
+  test -> TestResult => TestRunner runAll: 0
 
   /// Run a specific test class and return a TestResult.
   ///
