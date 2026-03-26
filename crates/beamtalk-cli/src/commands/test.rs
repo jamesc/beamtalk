@@ -1252,6 +1252,11 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         debug!(count = modules.len(), "Discovered package modules");
         pipeline.package_modules.extend(modules);
         pipeline.package_ebin_dirs.push(ebin_dir);
+
+        // ADR 0070: Add dependency ebin directories to code path
+        for dep_ebin in super::deps::collect_dep_ebin_paths(pkg_root) {
+            pipeline.package_ebin_dirs.push(dep_ebin);
+        }
     }
 
     Ok(())

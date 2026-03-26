@@ -29,7 +29,6 @@ pub struct Manifest {
     ///
     /// Use [`parse_manifest_full`] to get validated [`DependencySpec`] values.
     #[serde(default)]
-    #[allow(dead_code)] // Read by parse_manifest_full (ADR 0070 Phase 2+)
     dependencies: Option<toml::Value>,
 }
 
@@ -89,7 +88,6 @@ pub struct PackageManifest {
 /// Validate and convert a single TOML dependency entry into a [`DependencySpec`].
 ///
 /// Returns a helpful error message if the entry is malformed.
-#[allow(dead_code)] // Used by tests; called by parse_manifest_full (ADR 0070 Phase 2+)
 fn validate_dependency(name: &str, dep: &TomlDependency) -> Result<DependencySpec> {
     // Validate the dependency name uses package naming rules
     if let Err(e) = validate_package_name(name) {
@@ -160,7 +158,6 @@ fn validate_dependency(name: &str, dep: &TomlDependency) -> Result<DependencySpe
 /// Parse and validate the `[dependencies]` section of a manifest.
 ///
 /// Returns an empty map if the section is missing or empty.
-#[allow(dead_code)] // Used by tests; called by parse_manifest_full (ADR 0070 Phase 2+)
 fn parse_dependencies(deps: Option<&toml::Value>) -> Result<DependencyMap> {
     let Some(raw_value) = deps else {
         return Ok(BTreeMap::new());
@@ -194,7 +191,6 @@ fn parse_dependencies(deps: Option<&toml::Value>) -> Result<DependencyMap> {
 }
 
 /// Return a human-readable TOML type name for error messages.
-#[allow(dead_code)] // Called by parse_dependencies (ADR 0070 Phase 2+)
 fn value_type_name(value: &toml::Value) -> &'static str {
     match value {
         toml::Value::String(_) => "string",
@@ -222,11 +218,11 @@ fn parse_manifest_raw(path: &Utf8Path) -> Result<Manifest> {
 
 /// A fully parsed and validated manifest with package metadata and dependencies.
 #[derive(Debug)]
-#[allow(dead_code)] // Used by tests; will be used by build system (ADR 0070 Phase 2+)
 pub struct ParsedManifest {
     /// The package metadata.
     pub package: PackageManifest,
     /// The optional application configuration.
+    #[allow(dead_code)] // Used by tests; will be used for dep application support
     pub application: Option<ApplicationConfig>,
     /// The parsed and validated dependencies (empty if `[dependencies]` is absent).
     pub dependencies: DependencyMap,
@@ -251,7 +247,6 @@ pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
 /// Returns the fully parsed manifest with validated package metadata and
 /// dependency specifications. Returns an error if the file cannot be read,
 /// contains invalid TOML, or has malformed dependency entries.
-#[allow(dead_code)] // Used by tests; will be used by build system (ADR 0070 Phase 2+)
 pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
     let manifest = parse_manifest_raw(path)?;
 
