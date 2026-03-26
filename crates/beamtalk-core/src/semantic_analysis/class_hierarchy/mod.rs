@@ -2130,6 +2130,7 @@ mod tests {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
             superclass: Some(Identifier::new(superclass, test_span())),
+            superclass_package: None,
             class_kind: ClassKind::from_superclass_name(superclass),
             is_abstract: false,
             is_sealed: false,
@@ -2428,6 +2429,7 @@ mod tests {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
             superclass: Some(Identifier::new(superclass, test_span())),
+            superclass_package: None,
             class_kind: ClassKind::from_superclass_name(superclass),
             is_abstract: false,
             is_sealed: false,
@@ -2465,6 +2467,7 @@ mod tests {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
             superclass: Some(Identifier::new(superclass, test_span())),
+            superclass_package: None,
             class_kind: ClassKind::from_superclass_name(superclass),
             is_abstract: false,
             is_sealed: false,
@@ -2707,6 +2710,7 @@ mod tests {
         let base = ClassDefinition {
             name: Identifier::new("Base", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2736,6 +2740,7 @@ mod tests {
         let derived = ClassDefinition {
             name: Identifier::new("Derived", test_span()),
             superclass: Some(Identifier::new("Base", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -2821,6 +2826,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2885,6 +2891,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -2946,6 +2953,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -3131,6 +3139,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             state: vec![],
             methods: vec![MethodDefinition {
@@ -3179,6 +3188,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             state: vec![],
             methods: vec![MethodDefinition {
@@ -3235,6 +3245,7 @@ mod tests {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
             superclass: Some(Identifier::new(superclass, test_span())),
+            superclass_package: None,
             class_kind: ClassKind::from_superclass_name(superclass),
             is_abstract: false,
             is_sealed: false,
@@ -3322,6 +3333,7 @@ mod tests {
         let child = ClassDefinition {
             name: Identifier::new("Child", test_span()),
             superclass: Some(Identifier::new("TypedParent", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3386,6 +3398,7 @@ mod tests {
         let child = ClassDefinition {
             name: Identifier::new("Child", test_span()),
             superclass: Some(Identifier::new("TypedParent", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3564,6 +3577,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Point", test_span()),
             superclass: Some(Identifier::new("Value", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Value,
             is_abstract: false,
             is_sealed: false,
@@ -3596,6 +3610,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Point", test_span()),
             superclass: Some(Identifier::new("Value", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Value,
             is_abstract: false,
             is_sealed: false,
@@ -3671,6 +3686,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Point", test_span()),
             superclass: Some(Identifier::new("Value", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Value,
             is_abstract: false,
             is_sealed: false,
@@ -3754,6 +3770,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Point", test_span()),
             superclass: Some(Identifier::new("Value", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Value,
             is_abstract: false,
             is_sealed: false,
@@ -3834,6 +3851,7 @@ mod tests {
         let sealed_base = ClassDefinition {
             name: Identifier::new("ClassB", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3866,6 +3884,7 @@ mod tests {
         let override_class = ClassDefinition {
             name: Identifier::new("ClassC", test_span()),
             superclass: Some(Identifier::new("UnknownClass", test_span())),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,

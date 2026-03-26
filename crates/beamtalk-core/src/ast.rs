@@ -355,6 +355,9 @@ pub struct ClassDefinition {
     pub name: Identifier,
     /// The superclass name (e.g., `Actor`). `None` for root classes (`ProtoObject`).
     pub superclass: Option<Identifier>,
+    /// Optional package qualifier on the superclass (ADR 0070).
+    /// E.g., `json` in `json@Parser subclass: LenientParser`.
+    pub superclass_package: Option<Identifier>,
     /// The class kind derived from the declaration form (Actor/Value/Object).
     pub class_kind: ClassKind,
     /// Whether this is an abstract class (cannot be instantiated).
@@ -416,6 +419,7 @@ impl ClassDefinition {
         Self {
             name,
             superclass: Some(superclass),
+            superclass_package: None,
             class_kind,
             is_abstract: false,
             is_sealed: false,
@@ -451,6 +455,7 @@ impl ClassDefinition {
         Self {
             name,
             superclass,
+            superclass_package: None,
             class_kind,
             is_abstract,
             is_sealed,
@@ -483,10 +488,14 @@ impl ClassDefinition {
 ///
 /// Example: `Counter >> increment => self.value := self.value + 1`
 /// Example: `Counter class >> withInitial: n => self spawnWith: #{value => n}`
+/// Example: `json@Parser >> lenientParse: input => ...` (cross-package extension, ADR 0070)
 #[derive(Debug, Clone, PartialEq)]
 pub struct StandaloneMethodDefinition {
     /// The class this method belongs to.
     pub class_name: Identifier,
+    /// Optional package qualifier for cross-package extensions (ADR 0070).
+    /// E.g., `json` in `json@Parser >> lenientParse: input => ...`
+    pub package: Option<Identifier>,
     /// Whether this is a class-side method (`Counter class >> ...`).
     pub is_class_method: bool,
     /// The method definition.
@@ -1960,6 +1969,32 @@ pub fn to_module_name(class_name: &str) -> String {
     result
 }
 
+/// Resolves a package-qualified class reference to a BEAM module atom (ADR 0016 + 0070).
+///
+/// Given a class name and an optional package qualifier, produces the fully qualified
+/// BEAM module name:
+/// - `resolve_qualified_module_name("Parser", Some("json"))` → `"bt@json@parser"`
+/// - `resolve_qualified_module_name("Counter", None)` → `"counter"` (unqualified, no prefix)
+///
+/// The caller is responsible for adding the `bt@` or `bt@stdlib@` prefix for unqualified
+/// names based on compilation context. This function only handles the package-qualified case.
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::ast::resolve_qualified_module_name;
+/// assert_eq!(resolve_qualified_module_name("Parser", Some("json")), "bt@json@parser");
+/// assert_eq!(resolve_qualified_module_name("MyClass", Some("utils")), "bt@utils@my_class");
+/// assert_eq!(resolve_qualified_module_name("Counter", None), "counter");
+/// ```
+pub fn resolve_qualified_module_name(class_name: &str, package: Option<&str>) -> String {
+    let snake = to_module_name(class_name);
+    match package {
+        Some(pkg) => format!("bt@{pkg}@{snake}"),
+        None => snake,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2628,6 +2663,38 @@ mod tests {
         assert_eq!(
             class.backing_module.as_ref().map(|id| id.name.as_str()),
             Some("my_erlang_module")
+        );
+    }
+
+    // --- resolve_qualified_module_name tests (ADR 0070 Phase 2) ---
+
+    #[test]
+    fn resolve_qualified_module_name_with_package() {
+        assert_eq!(
+            resolve_qualified_module_name("Parser", Some("json")),
+            "bt@json@parser"
+        );
+    }
+
+    #[test]
+    fn resolve_qualified_module_name_multi_word_class() {
+        assert_eq!(
+            resolve_qualified_module_name("MyClass", Some("utils")),
+            "bt@utils@my_class"
+        );
+    }
+
+    #[test]
+    fn resolve_qualified_module_name_without_package() {
+        assert_eq!(resolve_qualified_module_name("Counter", None), "counter");
+    }
+
+    #[test]
+    fn resolve_qualified_module_name_stdlib_like_class() {
+        // Even well-known classes get the package prefix when explicitly qualified
+        assert_eq!(
+            resolve_qualified_module_name("Integer", Some("math")),
+            "bt@math@integer"
         );
     }
 }

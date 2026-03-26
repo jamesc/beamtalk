@@ -329,6 +329,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
     let class = ClassDefinition {
         name: Identifier::new("EventBus", Span::new(0, 8)),
         superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+        superclass_package: None,
         class_kind: ClassKind::Actor,
         is_abstract: false,
         is_sealed: false,

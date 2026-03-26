@@ -1182,11 +1182,20 @@ impl Parser {
             }
         }
 
-        // Expect superclass name (identifier)
+        // Expect superclass name (identifier), possibly package-qualified (ADR 0070).
+        // Handles: `Object subclass:`, `json@Parser subclass:`
         if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
             return false;
         }
         offset += 1;
+
+        // Check for optional package qualifier: `identifier @ Identifier`
+        if matches!(self.peek_at(offset), Some(TokenKind::At)) {
+            // Skip `@` and the class name identifier
+            if matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
+                offset += 2;
+            }
+        }
 
         // Skip optional superclass type arguments: `Collection(E)`, `Mapping(K, V)`
         if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
@@ -1220,13 +1229,26 @@ impl Parser {
     pub(super) fn is_at_standalone_method_definition(&self) -> bool {
         let mut offset = 0;
 
-        // Must start with an uppercase identifier (class name)
+        // Must start with an uppercase identifier (class name) or a lowercase
+        // identifier followed by `@` and an uppercase identifier (package-qualified,
+        // ADR 0070). Examples: `Counter >>`, `json@Parser >>`.
         match self.peek_at(offset) {
             Some(TokenKind::Identifier(name)) => {
-                if !name.starts_with(|c: char| c.is_uppercase()) {
+                if name.starts_with(|c: char| c.is_uppercase()) {
+                    // Unqualified: `Counter >>` or `Counter class >>`
+                    offset += 1;
+                } else if matches!(self.peek_at(offset + 1), Some(TokenKind::At)) {
+                    // Potential package qualifier: `json @ Parser >>`.
+                    // Check that what follows `@` is an uppercase identifier.
+                    if matches!(self.peek_at(offset + 2), Some(TokenKind::Identifier(cls)) if cls.starts_with(|c: char| c.is_uppercase()))
+                    {
+                        offset += 3; // skip `json`, `@`, `Parser`
+                    } else {
+                        return false;
+                    }
+                } else {
                     return false;
                 }
-                offset += 1;
             }
             _ => return false,
         }

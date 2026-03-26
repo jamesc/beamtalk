@@ -10,6 +10,7 @@ fn make_static_supervisor_module() -> Module {
     let class = ClassDefinition {
         name: Identifier::new("WebApp", Span::new(0, 0)),
         superclass: Some(Identifier::new("Supervisor", Span::new(0, 0))),
+        superclass_package: None,
         class_kind: ClassKind::Object,
         is_abstract: false,
         is_sealed: false,
@@ -42,6 +43,7 @@ fn make_dynamic_supervisor_module() -> Module {
     let class = ClassDefinition {
         name: Identifier::new("WorkerPool", Span::new(0, 0)),
         superclass: Some(Identifier::new("DynamicSupervisor", Span::new(0, 0))),
+        superclass_package: None,
         class_kind: ClassKind::Object,
         is_abstract: false,
         is_sealed: false,
@@ -292,6 +294,7 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
     let class = ClassDefinition {
         name: Identifier::new("WebApp", Span::new(0, 0)),
         superclass: Some(Identifier::new("Supervisor", Span::new(0, 0))),
+        superclass_package: None,
         class_kind: ClassKind::Object,
         is_abstract: false,
         is_sealed: false,

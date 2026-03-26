@@ -23,6 +23,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
     let class = ClassDefinition {
         name: Identifier::new("Point", Span::new(0, 0)),
         superclass: Some(Identifier::new("Value", Span::new(0, 0))),
+        superclass_package: None,
         class_kind: ClassKind::Value,
         is_abstract: false,
         is_sealed: false,

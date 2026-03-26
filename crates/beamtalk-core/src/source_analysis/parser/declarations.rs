@@ -61,10 +61,14 @@ impl Parser {
     ///   sealed methodName => body
     /// ```
     ///
+    /// Also supports package-qualified superclass (ADR 0070):
+    /// - `json@Parser subclass: LenientParser`
+    ///
     /// The superclass name determines the class kind:
     /// - `Actor subclass:` → `ClassKind::Actor`
     /// - `Value subclass:` → `ClassKind::Value` (ADR 0042)
     /// - Anything else → `ClassKind::Object`
+    #[allow(clippy::too_many_lines)] // class parsing has many orthogonal concerns
     pub(super) fn parse_class_definition(&mut self) -> ClassDefinition {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
@@ -89,12 +93,19 @@ impl Parser {
             }
         }
 
-        // Parse superclass name — `nil` means root class (no superclass)
+        // Parse superclass name — `nil` means root class (no superclass).
+        // Supports package-qualified superclasses (ADR 0070): `json@Parser subclass: ...`
         let superclass_id = self.parse_identifier("Expected superclass name");
-        let superclass = if superclass_id.name == "nil" {
-            None
+        let (superclass, superclass_package) = if superclass_id.name == "nil" {
+            (None, None)
+        } else if matches!(self.current_kind(), TokenKind::At) {
+            // Package-qualified superclass: `json @ Parser`
+            let pkg = superclass_id;
+            self.advance(); // consume `@`
+            let cls = self.parse_identifier("Expected class name after '@'");
+            (Some(cls), Some(pkg))
         } else {
-            Some(superclass_id)
+            (Some(superclass_id), None)
         };
 
         // Parse optional superclass type arguments: `Collection(E) subclass: ...`
@@ -175,6 +186,7 @@ impl Parser {
             span,
         );
         class_def.is_typed = is_typed;
+        class_def.superclass_package = superclass_package;
         class_def.type_params = type_params;
         class_def.superclass_type_args = superclass_type_args;
         class_def.class_methods = class_methods;
@@ -1181,6 +1193,8 @@ impl Parser {
     /// Syntax:
     /// - `ClassName >> selector => body` (instance method)
     /// - `ClassName class >> selector => body` (class method)
+    /// - `package@ClassName >> selector => body` (cross-package extension, ADR 0070)
+    /// - `package@ClassName class >> selector => body`
     pub(super) fn parse_standalone_method_definition(&mut self) -> StandaloneMethodDefinition {
         let start = self.current_token().span();
 
@@ -1189,8 +1203,21 @@ impl Parser {
         // so we must collect here before the token is consumed.
         let mut class_leading_comments = self.collect_comment_attachment().leading;
 
-        // Parse class name
-        let class_name = self.parse_identifier("Expected class name");
+        // Parse class name, with optional package qualifier (ADR 0070).
+        // Pattern: `identifier @ Identifier` or just `Identifier`.
+        let (class_name, package) = if matches!(self.current_kind(), TokenKind::Identifier(name) if !name.starts_with(|c: char| c.is_uppercase()))
+            && matches!(self.peek_at(1), Some(TokenKind::At))
+        {
+            // Package-qualified: `json@Parser`
+            let pkg_ident = self.parse_identifier("Expected package name");
+            self.advance(); // consume `@`
+            let cls_ident = self.parse_identifier("Expected class name after '@'");
+            (cls_ident, Some(pkg_ident))
+        } else {
+            // Unqualified: `Counter`
+            let cls_ident = self.parse_identifier("Expected class name");
+            (cls_ident, None)
+        };
 
         // Check for optional `class` modifier
         let is_class_method = if matches!(self.current_kind(), TokenKind::Identifier(name) if name == "class")
@@ -1235,6 +1262,7 @@ impl Parser {
 
         StandaloneMethodDefinition {
             class_name,
+            package,
             is_class_method,
             method,
             span,

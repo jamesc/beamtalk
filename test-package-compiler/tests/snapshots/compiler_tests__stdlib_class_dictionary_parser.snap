@@ -22,6 +22,7 @@ Module {
                     },
                 },
             ),
+            superclass_package: None,
             class_kind: Object,
             is_abstract: false,
             is_sealed: true,
