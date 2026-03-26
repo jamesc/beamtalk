@@ -763,3 +763,75 @@ walk_mixed_chain_binary_plus_returns_integer() ->
 walk_mixed_chain_binary_lt_returns_boolean() ->
     Result = beamtalk_repl_ops_dev:walk_mixed_chain('TestChainInteger', [{binary, '<'}]),
     ?assertEqual({ok, 'TestChainBoolean', instance}, Result).
+
+%%====================================================================
+%% resolve_qualified_class_name/1 (BT-1659)
+%%====================================================================
+
+resolve_plain_class_name_test() ->
+    %% Plain class name that exists as an atom — should resolve normally.
+    ?assertEqual(
+        {ok, 'Integer'}, beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"Integer">>)
+    ).
+
+resolve_plain_class_name_nonexistent_test() ->
+    %% Plain class name that does not exist as an atom.
+    ?assertEqual(
+        {error, badarg},
+        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"XyzzyNonexistent99991">>)
+    ).
+
+resolve_qualified_class_nonexistent_package_test() ->
+    %% Qualified class from a non-existent package.
+    ?assertEqual(
+        {error, badarg},
+        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"xyzzy@Parser">>)
+    ).
+
+resolve_qualified_class_stdlib_test() ->
+    %% A stdlib class via package-qualified name: stdlib@Integer.
+    %% The module atom `bt@stdlib@integer` should exist after stdlib is loaded.
+    ?assertEqual(
+        {ok, 'Integer'},
+        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"stdlib@Integer">>)
+    ).
+
+resolve_qualified_class_empty_class_test() ->
+    %% "json@" — empty class name after @
+    ?assertEqual(
+        {error, badarg},
+        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"json@">>)
+    ).
+
+resolve_qualified_class_empty_package_test() ->
+    %% "@Parser" — empty package before @
+    ?assertEqual(
+        {error, badarg},
+        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"@Parser">>)
+    ).
+
+%%====================================================================
+%% parse_receiver_and_prefix with @ (BT-1659)
+%%====================================================================
+
+parse_qualified_name_as_receiver_test() ->
+    %% "json@Parser " should parse as receiver="json@Parser", prefix=<<>>
+    %% (the @ is now an identifier char so it stays as one token)
+    ?assertEqual(
+        {<<"json@Parser">>, <<>>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"json@Parser ">>)
+    ).
+
+parse_qualified_name_with_prefix_test() ->
+    %% "json@Parser pa" should parse as receiver="json@Parser", prefix="pa"
+    ?assertEqual(
+        {<<"json@Parser">>, <<"pa">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"json@Parser pa">>)
+    ).
+
+parse_bare_qualified_name_test() ->
+    %% "json@Parser" with no trailing space is a bare prefix (no receiver)
+    ?assertEqual(
+        {undefined, <<"json@Parser">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"json@Parser">>)
+    ).

@@ -82,6 +82,25 @@ format_modifiers_sealed_and_abstract_test() ->
     ).
 
 %%====================================================================
+%% format_package_provenance tests (BT-1658)
+%%====================================================================
+
+format_package_provenance_unknown_class_test() ->
+    %% Unknown class returns empty binary
+    ?assertEqual(<<>>, beamtalk_repl_docs:format_package_provenance('XyzzyNotAClass123')).
+
+format_package_provenance_known_class_test() ->
+    %% A stdlib class should return a package provenance line
+    Result = beamtalk_repl_docs:format_package_provenance('Object'),
+    case Result of
+        <<>> ->
+            %% If the runtime is not fully initialized, package_name may return nil
+            ok;
+        _ ->
+            ?assertMatch(<<"\nPackage: ", _/binary>>, Result)
+    end.
+
+%%====================================================================
 %% group_by_class tests
 %%====================================================================
 

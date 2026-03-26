@@ -116,6 +116,8 @@ fn collect_fresh_deps(
             root: dep_root,
             ebin_path,
             class_module_index,
+            is_direct: true, // collect_fresh_deps only processes direct deps
+            via_chain: Vec::new(),
         });
     }
 

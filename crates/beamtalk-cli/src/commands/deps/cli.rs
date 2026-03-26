@@ -508,6 +508,7 @@ mod tests {
         run_git_cmd(path, &["init"]);
         run_git_cmd(path, &["config", "user.email", "test@test.com"]);
         run_git_cmd(path, &["config", "user.name", "Test"]);
+        run_git_cmd(path, &["config", "commit.gpgsign", "false"]);
 
         let content = format!("[package]\nname = \"{pkg_name}\"\nversion = \"{version}\"\n");
         std::fs::write(path.join("beamtalk.toml"), content).unwrap();

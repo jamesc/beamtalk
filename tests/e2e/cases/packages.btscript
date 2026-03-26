@@ -1,0 +1,175 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for the package system (ADR 0070 Phase 6, BT-1660)
+//
+// These tests exercise package reflection, qualified class references,
+// and package provenance from the REPL. Tests run against the stdlib
+// package, which is always loaded.
+
+// ===========================================================================
+// PACKAGE ALL — ENUMERATE LOADED PACKAGES
+// ===========================================================================
+
+// Package all returns a list that includes "stdlib"
+pkgs := Package all
+// => _
+
+pkgs includes: "stdlib"
+// => true
+
+// ===========================================================================
+// PACKAGE NAMED: — INTROSPECT A SPECIFIC PACKAGE
+// ===========================================================================
+
+// Package named: returns a Dictionary for a known package
+info := Package named: "stdlib"
+// => _
+
+info class =:= Dictionary
+// => true
+
+// The info dictionary has the expected #name key
+info at: #name
+// => stdlib
+
+// The info dictionary has a version string
+(info at: #version) class =:= String
+// => true
+
+(info at: #version) size > 0
+// => true
+
+// The info dictionary has a classes list with core classes
+stdlibClasses := info at: #classes
+// => _
+
+stdlibClasses includes: #Object
+// => true
+
+stdlibClasses includes: #Integer
+// => true
+
+stdlibClasses includes: #String
+// => true
+
+// ===========================================================================
+// PACKAGE NAMED: — ERROR FOR UNKNOWN PACKAGE
+// ===========================================================================
+
+// Package named: raises an error for a nonexistent package
+[Package named: "nonexistent_package_xyz_99"] on: Error do: [:e | "caught error"]
+// => caught error
+
+// ===========================================================================
+// PACKAGE CLASSES: — LIST CLASSES IN A PACKAGE
+// ===========================================================================
+
+// Package classes: returns class names for the stdlib package
+classes := Package classes: "stdlib"
+// => _
+
+classes includes: #Object
+// => true
+
+classes includes: #Array
+// => true
+
+// Package classes: returns empty list for unknown package
+(Package classes: "nonexistent_package_xyz_99") isEmpty
+// => true
+
+// ===========================================================================
+// PACKAGE DEPENDENCIES: — LIST PACKAGE DEPS
+// ===========================================================================
+
+// Package dependencies: returns a collection (may be empty for stdlib)
+deps := Package dependencies: "stdlib"
+// => _
+
+deps isNil
+// => false
+
+// ===========================================================================
+// PACKAGE PACKAGENAMEFOR: — REVERSE LOOKUP
+// ===========================================================================
+
+// Package packageNameFor: returns the package name for a known class
+Package packageNameFor: #Object
+// => stdlib
+
+Package packageNameFor: #Integer
+// => stdlib
+
+Package packageNameFor: #String
+// => stdlib
+
+// Package packageNameFor: returns nil for an unknown class
+Package packageNameFor: #NonexistentClassXYZ99
+// => nil
+
+// ===========================================================================
+// METACLASS PACKAGENAME — CLASS-SIDE PACKAGE REFLECTION
+// ===========================================================================
+
+// Integer class packageName returns "stdlib"
+Integer class packageName
+// => stdlib
+
+// String class packageName returns "stdlib"
+String class packageName
+// => stdlib
+
+// Object class packageName returns "stdlib"
+Object class packageName
+// => stdlib
+
+// ===========================================================================
+// METACLASS PACKAGE — FULL PACKAGE INFO FROM CLASS SIDE
+// ===========================================================================
+
+// Integer class package returns a Dictionary with package info
+intPkg := Integer class package
+// => _
+
+intPkg class =:= Dictionary
+// => true
+
+intPkg at: #name
+// => stdlib
+
+// ===========================================================================
+// QUALIFIED CLASS REFERENCES — stdlib@ClassName SYNTAX
+// ===========================================================================
+
+// stdlib@Integer used as receiver in a message send
+stdlib@Integer isKindOf: Number
+// => true
+
+// stdlib@Array is a class reference
+(stdlib@Array new) class
+// => Array
+
+// ===========================================================================
+// :help SHOWS PACKAGE PROVENANCE
+// ===========================================================================
+
+// :help for Integer shows package provenance
+:help Integer
+// => == Integer < Number ==_Package: stdlib_
+
+// :help for String shows package provenance
+:help String
+// => == String < Binary ==_Package: stdlib_
+
+// ===========================================================================
+// :help WITH QUALIFIED CLASS NAME
+// ===========================================================================
+
+// :help with package-qualified class name works
+:help stdlib@Integer
+// => == Integer < Number ==_
+
+// :help with unknown package-qualified class shows error
+:help nonexistent@FakeClass
+// => ERROR: Unknown class: nonexistent@FakeClass

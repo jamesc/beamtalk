@@ -352,8 +352,9 @@ impl CoreErlangGenerator {
         if let MessageSelector::Unary(name) = selector {
             // BT-246: Only match ClassReference, not Identifier.
             if name == "spawn" && arguments.is_empty() {
-                if let Expression::ClassReference { name, .. } = receiver {
-                    let doc = self.generate_actor_spawn(&name.name, None)?;
+                if let Expression::ClassReference { name, package, .. } = receiver {
+                    let pkg = package.as_ref().map(|p| p.name.as_str());
+                    let doc = self.generate_actor_spawn_qualified(&name.name, pkg, None)?;
                     return Ok(Some(doc));
                 }
             }
@@ -375,8 +376,10 @@ impl CoreErlangGenerator {
             }
             // BT-246: Only match ClassReference, not Identifier.
             if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
-                if let Expression::ClassReference { name, .. } = receiver {
-                    let doc = self.generate_actor_spawn(&name.name, Some(&arguments[0]))?;
+                if let Expression::ClassReference { name, package, .. } = receiver {
+                    let pkg = package.as_ref().map(|p| p.name.as_str());
+                    let doc =
+                        self.generate_actor_spawn_qualified(&name.name, pkg, Some(&arguments[0]))?;
                     return Ok(Some(doc));
                 }
             }
@@ -601,12 +604,13 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        if let Expression::ClassReference { name, .. } = receiver {
+        if let Expression::ClassReference { name, package, .. } = receiver {
+            let pkg = package.as_ref().map(|p| p.name.as_str());
             // BT-773: When inside a class method and the explicit class name matches
             // the current class, use direct dispatch (same as `self` sends) to avoid
             // deadlock. The class actor is already processing the outer call, so
             // routing through class_send would deadlock on gen_server:call.
-            if self.in_class_method() && name.name == self.class_name() {
+            if self.in_class_method() && name.name == self.class_name() && pkg.is_none() {
                 let doc = self.generate_class_method_self_send(selector, arguments)?;
                 return Ok(Some(doc));
             }
@@ -622,6 +626,10 @@ impl CoreErlangGenerator {
                 let doc = self.generate_workspace_class_send(&name.name, selector, arguments)?;
                 return Ok(Some(doc));
             }
+            // ADR 0070 Phase 2: Class method calls always go through the class
+            // registry using the short class name. The package qualifier doesn't
+            // affect dispatch — it's used for module name resolution in spawns and
+            // standalone references, not for class method calls.
             let doc = self.generate_class_method_call(&name.name, selector, arguments)?;
             return Ok(Some(doc));
         }
@@ -1452,12 +1460,21 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// call 'bt@my_pkg@counter':'spawn'()
     /// ```
-    pub(super) fn generate_actor_spawn(
+    /// Generates actor spawn with optional package qualifier (ADR 0070 Phase 2).
+    ///
+    /// When `package` is `Some`, uses `resolve_qualified_module_name` to compute
+    /// the BEAM module name directly (e.g., `json@Parser` → `bt@json@parser`).
+    /// When `None`, falls back to `compiled_module_name` for standard resolution.
+    ///
+    /// In REPL context, registers the spawned actor with the REPL actor registry.
+    /// In non-REPL contexts, calls the module's `spawn/0` or `spawn/1` directly.
+    pub(super) fn generate_actor_spawn_qualified(
         &mut self,
         class_name: &str,
+        package: Option<&str>,
         init_args: Option<&Expression>,
     ) -> Result<Document<'static>> {
-        let module_name = self.compiled_module_name(class_name);
+        let module_name = self.compiled_module_name_qualified(class_name, package);
         let in_repl_context = self.lookup_var("__bindings__").is_some();
 
         let args_doc = match init_args {
@@ -2309,7 +2326,9 @@ mod tests {
     #[test]
     fn test_generate_actor_spawn_non_repl() {
         let mut generator = CoreErlangGenerator::new("test");
-        let doc = generator.generate_actor_spawn("Counter", None).unwrap();
+        let doc = generator
+            .generate_actor_spawn_qualified("Counter", None, None)
+            .unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("'spawn'()"),

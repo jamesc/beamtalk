@@ -405,6 +405,16 @@ pub struct ExportTracesParams {
     pub limit: Option<u32>,
 }
 
+/// Parameters for the `package_classes` MCP tool (ADR 0070 Phase 5).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct PackageClassesParams {
+    /// Name of the package to list classes for (e.g. "stdlib").
+    #[schemars(
+        description = "Name of the package to list classes for (e.g. \"stdlib\", \"json\")"
+    )]
+    pub package: String,
+}
+
 // --- MCP Tool implementations ---
 
 #[tool_router]
@@ -1428,6 +1438,103 @@ impl BeamtalkMcp {
         timer.mark_ok();
         Ok(CallToolResult::success(parts))
     }
+
+    /// List all loaded Beamtalk packages with metadata.
+    #[tool(
+        description = "List all loaded Beamtalk packages with their versions, class counts, and dependencies. Returns package metadata from the runtime."
+    )]
+    async fn list_packages(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("list_packages");
+        tracing::debug!(tool = "list_packages", "tool invoked");
+
+        // Get list of package names via Package all
+        let names_response = self
+            .client
+            .evaluate_with_options("Package all", false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(names_response, "Failed to list packages");
+
+        let value = names_response.value_string();
+        if value.is_empty() || value == "nil" {
+            timer.mark_ok();
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No packages loaded",
+            )]));
+        }
+
+        // For each package, get detailed info via a single Beamtalk expression
+        let detail_response = self
+            .client
+            .evaluate_with_options(
+                "Package all collect: [:name | \
+                    pkg := Package named: name. \
+                    name ++ \" v\" ++ (pkg at: #version) ++ \
+                    \" (\" ++ (pkg at: #classes) size printString ++ \" classes)\"\
+                ]",
+                false,
+            )
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        let text = if detail_response.is_error() {
+            // Fall back to just listing names
+            value
+        } else {
+            detail_response.value_string()
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// List all classes belonging to a named package.
+    #[tool(
+        description = "List all classes belonging to a named Beamtalk package (e.g. 'stdlib'). Returns the class names as a list."
+    )]
+    async fn package_classes(
+        &self,
+        Parameters(params): Parameters<PackageClassesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("package_classes");
+        let pkg = &params.package;
+        tracing::debug!(tool = "package_classes", package = %pkg, "tool invoked");
+
+        // Validate package name — no code injection
+        if pkg.is_empty()
+            || !pkg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(rmcp::ErrorData::invalid_params(
+                format!(
+                    "Invalid package name: '{pkg}'. Must contain only alphanumeric characters, hyphens, or underscores."
+                ),
+                None,
+            ));
+        }
+
+        let expr = format!("Package classes: \"{pkg}\"");
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to get package classes");
+
+        let text = response.value_string();
+        if text.is_empty() || text == "#()" || text == "nil" {
+            timer.mark_ok();
+            return Ok(CallToolResult::success(vec![Content::text(format!(
+                "No classes found in package '{pkg}' (package may not be loaded)"
+            ))]));
+        }
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
 }
 
 // --- Lint helpers ---
@@ -1642,6 +1749,8 @@ impl ServerHandler for BeamtalkMcp {
                  'search_classes' to discover Beamtalk classes by keyword or concept (works offline, no REPL needed), \
                  'search_examples' to find Beamtalk code examples by keyword (works offline, no REPL needed), \
                  'show_codegen' to inspect generated Core Erlang (use class+selector for loaded classes), 'info' for symbol details, \
+                 'list_packages' to see loaded packages with metadata, \
+                 'package_classes' to list classes in a package, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
                  'unload' to remove a class, and 'interrupt' to cancel evaluations.",
             )
@@ -2053,6 +2162,30 @@ mod tests {
         assert!(
             !tool_names.contains(&"list_modules"),
             "list_modules should not be in tool list (removed in this PR)"
+        );
+    }
+
+    // --- tool registration: package tools (BT-1658, ADR 0070 Phase 5) ---
+
+    #[test]
+    fn list_packages_tool_registered() {
+        let router = BeamtalkMcp::tool_router();
+        let tools = router.list_all();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        assert!(
+            tool_names.contains(&"list_packages"),
+            "list_packages should be in tool list, found: {tool_names:?}"
+        );
+    }
+
+    #[test]
+    fn package_classes_tool_registered() {
+        let router = BeamtalkMcp::tool_router();
+        let tools = router.list_all();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        assert!(
+            tool_names.contains(&"package_classes"),
+            "package_classes should be in tool list, found: {tool_names:?}"
         );
     }
 }

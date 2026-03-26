@@ -52,3 +52,11 @@
 // :help with an inherited class method should show signature, inheritance, and doc (BT-1634)
 :help HelpTestSubWidget create:
 // => == HelpTestSubWidget >> create: ==_(inherited from HelpTestWidget)_  create: name :: String -> HelpTestWidget__Create a new widget with the given name.
+
+// BT-1659: :help with a package-qualified class name
+:help stdlib@Integer
+// => == Integer < Number ==_
+
+// BT-1659: :help with unknown package-qualified class — should show error
+:help xyzzy@FakeClass
+// => ERROR: Unknown class: xyzzy@FakeClass

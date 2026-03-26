@@ -183,3 +183,16 @@ sealed Object subclass: WorkspaceInterface
   /// ```
   supervisors -> List =>
     (Erlang beamtalk_workspace_interface_primitives) supervisors
+
+  /// Return a Dictionary of direct dependency packages for the current workspace.
+  ///
+  /// Keys are package name Strings, values are package info Dictionaries.
+  /// Returns an empty Dictionary if the workspace has no declared dependencies.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace dependencies
+  /// // => _
+  /// ```
+  dependencies -> Dictionary =>
+    (Erlang beamtalk_workspace_interface_primitives) dependencies

@@ -315,6 +315,8 @@ fn generate_core_file(
         class_superclass_index,
         pre_loaded_classes,
         None,
+        None,  // TODO: pass dep_registry for test compilation with deps
+        false, // Test compilation doesn't use strict-deps
     )
     .wrap_err_with(|| format!("Failed to compile '{source_path}'"))?;
 

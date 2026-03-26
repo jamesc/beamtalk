@@ -93,21 +93,82 @@ pub fn resolve_dependency_graph(
         "Resolved dependency compilation order"
     );
 
+    // Collect direct dependency names from the root manifest
+    let direct_dep_names: std::collections::HashSet<&str> = root_manifest
+        .dependencies
+        .keys()
+        .map(String::as_str)
+        .collect();
+
     // Phase 3: Compile each dependency in topological order
     let mut resolved = Vec::new();
     for dep_name in &compilation_order {
         let node = &graph[dep_name];
-        let compiled = super::path::compile_dependency_at(
+        let mut compiled = super::path::compile_dependency_at(
             project_root,
             &node.root,
             dep_name,
             options,
             &resolved,
         )?;
+
+        // BT-1654: Set transitivity metadata
+        compiled.is_direct = direct_dep_names.contains(dep_name.as_str());
+        if !compiled.is_direct {
+            compiled.via_chain = compute_via_chain(dep_name, &direct_dep_names, &graph);
+        }
+
         resolved.push(compiled);
     }
 
     Ok(resolved)
+}
+
+/// Compute the "via" chain from the root package to a transitive dependency.
+///
+/// Uses BFS over the dependency graph starting from the root's direct
+/// dependencies. Returns the intermediate package names that form the
+/// shortest path from a direct dependency to the target.
+///
+/// For example, if `my_app -> json -> utils`, returns `["json"]` for target `utils`.
+fn compute_via_chain(
+    target: &str,
+    direct_dep_names: &std::collections::HashSet<&str>,
+    graph: &BTreeMap<String, DepNode>,
+) -> Vec<String> {
+    use std::collections::{HashSet, VecDeque};
+
+    // BFS starting from the root's direct dependencies
+    let mut queue: VecDeque<(&str, Vec<String>)> = VecDeque::new();
+    let mut visited: HashSet<&str> = HashSet::new();
+
+    for direct_name in direct_dep_names {
+        if let Some(node) = graph.get(*direct_name) {
+            // Check if this direct dep itself depends on the target
+            if node.deps.iter().any(|d| d == target) {
+                return vec![direct_name.to_string()];
+            }
+            queue.push_back((*direct_name, vec![direct_name.to_string()]));
+            visited.insert(*direct_name);
+        }
+    }
+
+    while let Some((current, path)) = queue.pop_front() {
+        if let Some(node) = graph.get(current) {
+            for dep in &node.deps {
+                if dep == target {
+                    return path;
+                }
+                if visited.insert(dep) {
+                    let mut new_path = path.clone();
+                    new_path.push(dep.clone());
+                    queue.push_back((dep, new_path));
+                }
+            }
+        }
+    }
+
+    Vec::new()
 }
 
 /// Recursively discover dependencies by walking manifests.

@@ -1357,6 +1357,7 @@ mod tests {
             vec![ClassDefinition {
                 name: ident("Counter"),
                 superclass: Some(ident("Actor")),
+                superclass_package: None,
                 class_kind: ClassKind::Actor,
                 is_abstract: false,
                 is_sealed: false,
@@ -1596,6 +1597,7 @@ mod tests {
             vec![ClassDefinition {
                 name: ident("Greeter"),
                 superclass: Some(ident("Object")),
+                superclass_package: None,
                 class_kind: ClassKind::Object,
                 is_abstract: false,
                 is_sealed: false,
@@ -1756,6 +1758,7 @@ mod tests {
         ClassDefinition {
             name: ident(name),
             superclass: Some(ident("Actor")),
+            superclass_package: None,
             class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
@@ -1928,6 +1931,7 @@ mod tests {
         let parent = ClassDefinition {
             name: ident("Parent"),
             superclass: Some(ident("Object")),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -1960,6 +1964,7 @@ mod tests {
         let child = ClassDefinition {
             name: ident("Child"),
             superclass: Some(ident("Parent")),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -2013,6 +2018,7 @@ mod tests {
         let parent = ClassDefinition {
             name: ident("Parent"),
             superclass: Some(ident("Object")),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -2043,6 +2049,7 @@ mod tests {
         let child = ClassDefinition {
             name: ident("Child"),
             superclass: Some(ident("Parent")),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3089,6 +3096,7 @@ mod tests {
         ClassDefinition {
             name: ident("Counter"),
             superclass: Some(ident("Object")),
+            superclass_package: None,
             class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
@@ -3856,6 +3864,7 @@ Value subclass: Foo
         ClassDefinition {
             name: ident(name),
             superclass: Some(ident("Object")),
+            superclass_package: None,
             class_kind: ClassKind::Value,
             is_abstract: false,
             is_sealed: false,
@@ -3954,6 +3963,7 @@ Value subclass: Foo
         let mut module = make_module(vec![]);
         module.method_definitions = vec![StandaloneMethodDefinition {
             class_name: ident("Widget"),
+            package: None,
             is_class_method: false,
             method: method_unannotated("label", vec![str_lit("ok")]),
             span: span(),
@@ -4788,6 +4798,7 @@ Base subclass: Child
         let class = ClassDefinition {
             name: ident("MyClass"),
             superclass: Some(ident("Object")),
+            superclass_package: None,
             class_kind: ClassKind::Value,
             is_abstract: false,
             is_sealed: false,

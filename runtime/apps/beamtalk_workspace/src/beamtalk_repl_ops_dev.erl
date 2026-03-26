@@ -26,7 +26,8 @@
     walk_mixed_chain_class/2,
     make_class_not_found_error/1,
     base_protocol_response/1,
-    list_class_methods_for_ws/1
+    list_class_methods_for_ws/1,
+    resolve_qualified_class_name/1
 ]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -103,7 +104,8 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
 handle(<<"docs">>, Params, Msg, _SessionPid) ->
     ClassBin = maps:get(<<"class">>, Params, <<>>),
     ClassSide = maps:get(<<"class_side">>, Params, false),
-    case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
+    %% BT-1659: Support package-qualified class names (e.g. "json@Parser")
+    case resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             beamtalk_repl_protocol:encode_error(
                 make_class_not_found_error(ClassBin),
@@ -419,7 +421,8 @@ encode_codegen_response(CoreErlang, Warnings, Msg) ->
     binary(), binary() | undefined, beamtalk_repl_protocol:protocol_msg()
 ) -> binary().
 show_codegen_class_method(ClassBin, SelectorBin, Msg) ->
-    case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
+    %% BT-1659: Support package-qualified class names (e.g. "json@Parser")
+    case resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             beamtalk_repl_protocol:encode_error(
                 make_class_not_found_error(ClassBin),
@@ -846,7 +849,10 @@ is_identifier_char(C) ->
         %% Colons are identifier chars so keyword selectors like `ifTrue:` and
         %% `ifTrue:ifFalse:` complete as a unit.  Must stay in sync with
         %% word_start in crates/beamtalk-cli/src/commands/repl/helper.rs.
-        C =:= $:.
+        C =:= $: orelse
+        %% BT-1659: @ is an identifier char so `json@Parser` is treated as a
+        %% single token for completions and receiver parsing.
+        C =:= $@.
 
 %%% Chain resolution (BT-1006)
 
@@ -1317,10 +1323,30 @@ classify_receiver(<<$", _/binary>>, _Bindings) ->
         ClassName -> {instance, ClassName}
     end;
 classify_receiver(Receiver, Bindings) ->
-    %% Lowercase identifier — look up in bindings to find the class
-    case beamtalk_repl_errors:safe_to_existing_atom(Receiver) of
-        {ok, VarAtom} -> classify_by_binding(VarAtom, Bindings);
-        {error, _} -> undefined
+    %% BT-1659: Check for package-qualified class name (e.g. "json@Parser")
+    case binary:match(Receiver, <<"@">>) of
+        nomatch ->
+            %% Lowercase identifier — look up in bindings to find the class
+            case beamtalk_repl_errors:safe_to_existing_atom(Receiver) of
+                {ok, VarAtom} -> classify_by_binding(VarAtom, Bindings);
+                {error, _} -> undefined
+            end;
+        _ ->
+            case resolve_qualified_class_name(Receiver) of
+                {ok, ClassName} ->
+                    case
+                        try
+                            beamtalk_runtime_api:whereis_class(ClassName)
+                        catch
+                            _:_ -> undefined
+                        end
+                    of
+                        undefined -> undefined;
+                        _Pid -> {class, ClassName}
+                    end;
+                {error, _} ->
+                    undefined
+            end
     end.
 
 %% @private
@@ -1532,7 +1558,8 @@ base_ops() ->
 %% Each entry is a map with <<"name">>, <<"selector">>, and <<"side">> keys.
 -spec list_class_methods_for_ws(binary()) -> [map()].
 list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
-    case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
+    %% BT-1659: Support package-qualified class names (e.g. "json@Parser")
+    case resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             [];
         {ok, ClassName} ->
@@ -1579,6 +1606,54 @@ list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
                     lists:sort([atom_to_binary(V, utf8) || V <- IVars])
             end
     end.
+
+%% @doc Resolve a class name that may be package-qualified (ADR 0070 Phase 6, BT-1659).
+%%
+%% Parses `<<"json@Parser">>` into `{ok, 'Parser'}` by looking up the
+%% package-qualified BEAM module name (`bt@json@parser`) in the class registry.
+%% Plain class names (`<<"Counter">>`) are resolved directly via `safe_to_existing_atom`.
+%%
+%% Returns `{ok, ClassAtom}` on success, or `{error, badarg}` if the class
+%% is not found (whether qualified or unqualified).
+-spec resolve_qualified_class_name(binary()) -> {ok, atom()} | {error, badarg}.
+resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
+    case binary:match(ClassBin, <<"@">>) of
+        nomatch ->
+            %% Plain class name — existing behavior
+            beamtalk_repl_errors:safe_to_existing_atom(ClassBin);
+        {Pos, _Len} ->
+            %% Package-qualified: "json@Parser" → package=json, class=Parser
+            PkgBin = binary:part(ClassBin, 0, Pos),
+            ClassNameBin = binary:part(ClassBin, Pos + 1, byte_size(ClassBin) - Pos - 1),
+            %% Convert class name to snake_case module name: bt@{pkg}@{snake_case}
+            SnakeCase = camel_to_snake(binary_to_list(ClassNameBin)),
+            ModNameStr = "bt@" ++ binary_to_list(PkgBin) ++ "@" ++ SnakeCase,
+            try list_to_existing_atom(ModNameStr) of
+                _ModAtom ->
+                    %% Module name atom exists — now resolve the class name atom
+                    beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin)
+            catch
+                error:badarg ->
+                    {error, badarg}
+            end
+    end.
+
+%% @private CamelCase string to snake_case string conversion.
+%% Mirrors beamtalk_primitive:camel_to_snake/1 for use in REPL ops.
+-spec camel_to_snake(string()) -> string().
+camel_to_snake(Str) ->
+    camel_to_snake(Str, false, []).
+
+camel_to_snake([], _PrevWasLower, Acc) ->
+    lists:reverse(Acc);
+camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
+    Lower = H + 32,
+    case PrevWasLower of
+        true -> camel_to_snake(T, false, [Lower, $_ | Acc]);
+        false -> camel_to_snake(T, false, [Lower | Acc])
+    end;
+camel_to_snake([H | T], _PrevWasLower, Acc) ->
+    camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
 
 %% @private
 -spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.

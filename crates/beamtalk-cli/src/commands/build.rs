@@ -43,9 +43,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
             .map_or_else(|| Utf8PathBuf::from("."), Utf8Path::to_path_buf)
     };
 
-    // Look for package manifest
-    let pkg_manifest = manifest::find_manifest(&project_root)?;
-    if let Some(ref pkg) = pkg_manifest {
+    // Look for package manifest (full parse includes dependencies for
+    // transitive dep tracking — ADR 0070 Phase 3)
+    let full_manifest = manifest::find_manifest_full(&project_root)?;
+    let pkg_manifest = full_manifest.as_ref().map(|m| &m.package);
+    if let Some(pkg) = pkg_manifest {
         info!(name = %pkg.name, version = %pkg.version, "Found package manifest");
         debug!(?pkg, "Package manifest details");
     } else {
@@ -87,7 +89,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     // classes in package subdirectories) during code generation.
     let mut file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
     let (mut class_module_index, class_superclass_index, all_class_infos, cached_asts) =
-        if let Some(ref pkg) = pkg_manifest {
+        if let Some(pkg) = pkg_manifest {
             build_class_module_index(&source_files, source_root.as_deref(), &pkg.name)?
         } else {
             (HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
@@ -95,6 +97,20 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
 
     // ADR 0070: Merge dependency class indexes into the main package's indexes
     // so cross-package class references resolve during compilation.
+    // Also build a DependencyRegistry for collision detection (Phase 3).
+    // BT-1654: Track direct vs transitive dependencies for W0302 warnings.
+    let dep_infos: Vec<beamtalk_core::semantic_analysis::DepInfo> = resolved_deps
+        .iter()
+        .map(|dep| beamtalk_core::semantic_analysis::DepInfo {
+            name: dep.name.clone(),
+            class_module_index: dep.class_module_index.clone(),
+            is_direct: dep.is_direct,
+            via_chain: dep.via_chain.clone(),
+        })
+        .collect();
+    let dep_registry =
+        beamtalk_core::semantic_analysis::build_dependency_registry_with_graph(&dep_infos);
+
     for dep in &resolved_deps {
         for (class_name, module_name) in &dep.class_module_index {
             debug!(
@@ -104,6 +120,36 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
                 "Adding dependency class to index"
             );
             class_module_index.insert(class_name.clone(), module_name.clone());
+        }
+    }
+
+    // BT-1653 / ADR 0070 Phase 3: Eagerly check stdlib reservation violations.
+    // Dependencies must not export classes with stdlib-reserved names.
+    if !dep_registry.is_empty() && !options.stdlib_mode {
+        let mut reservation_diags = Vec::new();
+        beamtalk_core::semantic_analysis::check_stdlib_reservation(
+            &dep_registry,
+            &mut reservation_diags,
+        );
+        if !reservation_diags.is_empty() {
+            let has_errors = reservation_diags
+                .iter()
+                .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+            if has_errors {
+                // Collect all error messages for reporting
+                let messages: Vec<String> = reservation_diags
+                    .iter()
+                    .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+                    .map(|d| {
+                        if let Some(ref hint) = d.hint {
+                            format!("{}\n  help: {}", d.message, hint)
+                        } else {
+                            d.message.to_string()
+                        }
+                    })
+                    .collect();
+                miette::bail!("{}", messages.join("\n"));
+            }
         }
     }
 
@@ -122,7 +168,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
 
         // ADR 0026: Package mode uses bt@{package}@{relative_path} naming
         // ADR 0016: Single-file mode uses bt@{module} naming
-        let module_name = if let Some(ref pkg) = pkg_manifest {
+        let module_name = if let Some(pkg) = pkg_manifest {
             let relative_module = compute_relative_module(file, source_root.as_deref())?;
             format!("bt@{}@{}", pkg.name, relative_module)
         } else {
@@ -140,6 +186,14 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     let mut cached_asts = cached_asts;
     let mut core_files = Vec::new();
     let mut module_names = Vec::new();
+    let registry_ref = if dep_registry.is_empty() {
+        None
+    } else {
+        Some(&dep_registry)
+    };
+    let strict_deps = full_manifest
+        .as_ref()
+        .is_some_and(|m| m.package.strict_deps);
     for (file, module_name, core_file) in &file_module_pairs {
         let cached = cached_asts.remove(file);
         compile_file(
@@ -151,6 +205,8 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
             &class_superclass_index,
             &all_class_infos,
             cached,
+            registry_ref,
+            strict_deps,
         )?;
         core_files.push(core_file.clone());
         module_names.push(module_name.clone());
@@ -169,7 +225,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     );
 
     // ADR 0026 §3: Package mode post-processing — clean stale artifacts and generate .app
-    if let Some(ref pkg) = pkg_manifest {
+    if let Some(pkg) = pkg_manifest {
         clean_stale_artifacts(&build_dir, &beam_files, &pkg.name)?;
         generate_package_outputs(
             &build_dir,
@@ -503,6 +559,8 @@ fn compile_file(
     class_superclass_index: &HashMap<String, String>,
     pre_loaded_classes: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     cached_ast: Option<CachedAst>,
+    dep_registry: Option<&beamtalk_core::semantic_analysis::DependencyRegistry>,
+    strict_deps: bool,
 ) -> Result<()> {
     debug!("Compiling {path}");
 
@@ -516,6 +574,8 @@ fn compile_file(
         class_superclass_index,
         pre_loaded_classes,
         cached_ast,
+        dep_registry,
+        strict_deps,
     )?;
 
     debug!("Generated Core Erlang: {core_file}");
@@ -722,6 +782,8 @@ mod tests {
             &HashMap::new(),
             &[],
             None,
+            None,
+            false,
         );
         assert!(result.is_ok());
         assert!(core_file.exists());
@@ -744,6 +806,8 @@ mod tests {
             &HashMap::new(),
             &[],
             None,
+            None,
+            false,
         );
         assert!(result.is_err());
     }
@@ -1207,6 +1271,8 @@ mod tests {
             &class_superclass_index,
             &all_class_infos,
             None,
+            None,
+            false,
         )
         .unwrap();
 
@@ -1287,6 +1353,8 @@ mod tests {
             &class_superclass_index,
             &all_class_infos,
             None,
+            None,
+            false,
         )
         .expect("Cross-file inheritance should compile without errors");
 

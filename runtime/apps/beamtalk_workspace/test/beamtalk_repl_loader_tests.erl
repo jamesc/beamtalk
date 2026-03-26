@@ -316,18 +316,20 @@ reload_class_file_compile_error_test() ->
 %%====================================================================
 
 compute_package_module_name_no_metadata_test() ->
-    %% BT-1670: Without workspace_meta, falls back to bt@{stem_snake_case}
-    %% instead of undefined, matching CLI build behavior.
+    %% Without workspace_meta, returns undefined so the compiler port
+    %% derives the module name from the class name.  This preserves hot
+    %% reload semantics: hot_counter.bt and hot_counter_v2.bt both define
+    %% HotCounter → same module bt@hot_counter.
     Result = beamtalk_repl_loader:compute_package_module_name("/some/path/src/Foo.bt"),
-    ?assertEqual(<<"bt@foo">>, Result).
+    ?assertEqual(undefined, Result).
 
 compute_package_module_name_no_metadata_camel_case_test() ->
-    %% BT-1670: CamelCase file stems are converted to snake_case.
+    %% Same: no metadata → undefined (class-name-based naming).
     Result = beamtalk_repl_loader:compute_package_module_name("/some/path/MyCounter.bt"),
-    ?assertEqual(<<"bt@my_counter">>, Result).
+    ?assertEqual(undefined, Result).
 
 %%====================================================================
-%% resolve_package_module/3
+%% resolve_package_module/4
 %%====================================================================
 
 resolve_package_module_src_match_test() ->
@@ -336,22 +338,34 @@ resolve_package_module_src_match_test() ->
     {ok, Cwd} = file:get_cwd(),
     ProjectRoot = filename:join(Cwd, "myproject"),
     AbsPath = filename:join([ProjectRoot, "src", "Counter.bt"]),
-    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"mypkg">>),
+    OrigPath = filename:join([ProjectRoot, "src", "Counter.bt"]),
+    Result = beamtalk_repl_loader:resolve_package_module(
+        AbsPath, ProjectRoot, <<"mypkg">>, OrigPath
+    ),
     ?assertEqual(<<"bt@mypkg@counter">>, Result).
 
 resolve_package_module_test_match_test() ->
     {ok, Cwd} = file:get_cwd(),
     ProjectRoot = filename:join(Cwd, "myproject"),
     AbsPath = filename:join([ProjectRoot, "test", "CounterTest.bt"]),
-    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"mypkg">>),
+    OrigPath = AbsPath,
+    Result = beamtalk_repl_loader:resolve_package_module(
+        AbsPath, ProjectRoot, <<"mypkg">>, OrigPath
+    ),
     ?assertEqual(<<"bt@mypkg@test@counter_test">>, Result).
 
 resolve_package_module_no_match_test() ->
+    %% File outside src/ and test/ falls back to bt@{stem_snake_case}
+    %% Use different basenames for AbsPath and OrigPath to prove the
+    %% fallback derives from OrigPath, not AbsPath.
     {ok, Cwd} = file:get_cwd(),
     ProjectRoot = filename:join(Cwd, "myproject"),
     AbsPath = filename:join([Cwd, "other", "project", "Foo.bt"]),
-    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"pkg">>),
-    ?assertEqual(undefined, Result).
+    OrigPath = filename:join([Cwd, "examples", "MyCounter.bt"]),
+    Result = beamtalk_repl_loader:resolve_package_module(
+        AbsPath, ProjectRoot, <<"pkg">>, OrigPath
+    ),
+    ?assertEqual(<<"bt@my_counter">>, Result).
 
 %%====================================================================
 %% try_package_relative/3

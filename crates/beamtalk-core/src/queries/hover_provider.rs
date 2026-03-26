@@ -181,7 +181,7 @@ fn find_hover_in_declarations(
     for class in &module.classes {
         if offset >= class.name.span.start() && offset < class.name.span.end() {
             let mut hover =
-                class_reference_hover_info(&class.name.name, class.name.span, hierarchy);
+                class_reference_hover_info(&class.name.name, None, class.name.span, hierarchy);
             if let Some(doc) = &class.doc_comment {
                 hover = hover.with_documentation(doc.clone());
             }
@@ -191,6 +191,7 @@ fn find_hover_in_declarations(
             if offset >= superclass.span.start() && offset < superclass.span.end() {
                 return Some(class_reference_hover_info(
                     &superclass.name,
+                    class.superclass_package.as_ref().map(|p| &p.name),
                     superclass.span,
                     hierarchy,
                 ));
@@ -219,6 +220,7 @@ fn find_hover_in_declarations(
         if offset >= smd.class_name.span.start() && offset < smd.class_name.span.end() {
             return Some(class_reference_hover_info(
                 &smd.class_name.name,
+                smd.package.as_ref().map(|p| &p.name),
                 smd.class_name.span,
                 hierarchy,
             ));
@@ -634,9 +636,18 @@ fn find_hover_in_expr(
                 None
             }
         }
-        Expression::ClassReference { name, span, .. } => {
+        Expression::ClassReference {
+            name,
+            package,
+            span,
+        } => {
             if offset >= span.start() && offset < span.end() {
-                Some(class_reference_hover_info(&name.name, *span, hierarchy))
+                Some(class_reference_hover_info(
+                    &name.name,
+                    package.as_ref().map(|p| &p.name),
+                    *span,
+                    hierarchy,
+                ))
             } else {
                 None
             }
@@ -1120,16 +1131,25 @@ fn self_hover_info(span: Span, context: &HoverClassContext<'_>) -> HoverInfo {
 }
 
 /// Creates hover info for a class reference with hierarchy information.
+///
+/// When `package` is `Some`, the class is from a dependency package and the
+/// hover shows "from package {name}" provenance (ADR 0070 Phase 5, BT-1658).
 fn class_reference_hover_info(
     class_name: &ecow::EcoString,
+    package: Option<&ecow::EcoString>,
     span: Span,
     hierarchy: &ClassHierarchy,
 ) -> HoverInfo {
+    use std::fmt::Write;
+
     let mut info = format!("Class: `{class_name}`");
 
-    if let Some(class_info) = hierarchy.get_class(class_name.as_str()) {
-        use std::fmt::Write;
+    // Show package provenance for dependency classes (ADR 0070 Phase 5)
+    if let Some(pkg) = package {
+        let _ = write!(info, " (from package `{pkg}`)");
+    }
 
+    if let Some(class_info) = hierarchy.get_class(class_name.as_str()) {
         // Add superclass info
         if let Some(ref superclass) = class_info.superclass {
             let _ = write!(info, "\n\nExtends: `{superclass}`");
@@ -1322,6 +1342,44 @@ mod tests {
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(hover.contents.contains("Class: `MyCounterActor`"));
+    }
+
+    #[test]
+    fn hover_on_package_qualified_class_reference() {
+        // BT-1658: package-qualified class references show provenance
+        let source = "json@Parser new";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Position at "Parser" (after "json@")
+        let pos = Position::new(0, 5);
+        let hover = compute_hover(&module, source, pos, &hierarchy);
+        assert!(hover.is_some(), "Should hover on package-qualified class");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Class: `Parser`"),
+            "Should contain class name: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("from package `json`"),
+            "Should show package provenance: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_unqualified_class_reference_no_package() {
+        // BT-1658: unqualified class references should NOT show package provenance
+        let hover = hover_at("Counter spawn", Position::new(0, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(
+            !hover.contents.contains("from package"),
+            "Unqualified class should not show package: {}",
+            hover.contents
+        );
     }
 
     #[test]

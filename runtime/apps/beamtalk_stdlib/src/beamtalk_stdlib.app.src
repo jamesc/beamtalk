@@ -51,6 +51,7 @@
             #{name => 'Number', module => 'bt@stdlib@number', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'OS', module => 'bt@stdlib@os', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Object', module => 'bt@stdlib@object', parent => 'ProtoObject', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'Package', module => 'bt@stdlib@package', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Pid', module => 'bt@stdlib@pid', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Port', module => 'bt@stdlib@port', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ProtoObject', module => 'bt@stdlib@proto_object', parent => 'none', package => 'stdlib', kind => object, type_params => []},

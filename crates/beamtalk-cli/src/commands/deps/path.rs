@@ -33,6 +33,13 @@ pub struct ResolvedDependency {
     /// Maps class names to compiled BEAM module names for this dependency.
     /// E.g., `"Helper"` -> `"bt@utils@helper"`.
     pub class_module_index: HashMap<String, String>,
+    /// Whether this is a direct dependency of the root package (ADR 0070 Phase 3).
+    /// `false` means it is a transitive dependency.
+    pub is_direct: bool,
+    /// For transitive dependencies, the chain of packages through which this
+    /// dep is reached. E.g., `["json"]` if the root depends on `json` which
+    /// depends on this package. Empty for direct dependencies.
+    pub via_chain: Vec<String>,
 }
 
 /// Resolve and compile all path dependencies for a package.
@@ -214,6 +221,8 @@ fn resolve_single_path_dep(
         root: dep_root,
         ebin_path,
         class_module_index: dep_class_module_index,
+        is_direct: true, // Legacy path — all treated as direct
+        via_chain: Vec::new(),
     });
 
     Ok(())
@@ -296,6 +305,8 @@ pub(crate) fn compile_dependency_at(
         root: dep_root.to_path_buf(),
         ebin_path,
         class_module_index,
+        is_direct: false, // Caller sets this based on graph knowledge
+        via_chain: Vec::new(),
     })
 }
 
@@ -418,6 +429,8 @@ fn compile_dependency_with_context(
             &class_superclass_index,
             &all_class_infos,
             cached,
+            None,  // No collision detection within dependency compilation
+            false, // Dependencies use their own strict-deps setting, not root's
         )?;
 
         core_files.push(core_file);
