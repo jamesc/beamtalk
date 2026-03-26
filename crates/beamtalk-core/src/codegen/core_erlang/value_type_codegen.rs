@@ -2036,6 +2036,26 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// Computes the compiled module name for a package-qualified class reference
+    /// (ADR 0070 Phase 2).
+    ///
+    /// When a class reference has an explicit package qualifier (e.g., `json@Parser`),
+    /// the module name is deterministic: `bt@{package}@{snake_case}`. This bypasses
+    /// the `class_module_index` and heuristic resolution used by `compiled_module_name`.
+    ///
+    /// When no package qualifier is present (`package` is `None`), falls back to
+    /// `compiled_module_name` for backward-compatible resolution.
+    pub fn compiled_module_name_qualified(
+        &self,
+        class_name: &str,
+        package: Option<&str>,
+    ) -> String {
+        match package {
+            Some(pkg) => crate::ast::resolve_qualified_module_name(class_name, Some(pkg)),
+            None => self.compiled_module_name(class_name),
+        }
+    }
+
     /// Computes the module name for a superclass in the dispatch chain.
     ///
     /// Returns `None` for `ProtoObject` (root of the hierarchy — no module to
