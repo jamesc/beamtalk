@@ -609,8 +609,6 @@ compute_package_module_name(Path) ->
             undefined
     end.
 
-
-
 %% Try src/ then test/ to resolve the package module name.
 -spec resolve_package_module(string(), string(), binary()) -> binary() | undefined.
 resolve_package_module(AbsPath, ProjectRoot, PackageName) ->
