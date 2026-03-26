@@ -63,6 +63,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Number"
             | "OS"
             | "Object"
+            | "Package"
             | "Pid"
             | "Port"
             | "ProtoObject"
@@ -1561,6 +1562,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "classMethods".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return all class-side selectors of the described class (includes inherited).\n\n## Examples\n```beamtalk\nCounter class class classMethods   // => [...]\n```".into()) },
                 MethodInfo { selector: "localClassMethods".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return class-side selectors defined locally in the described class.\n\n## Examples\n```beamtalk\nCounter class class localClassMethods   // => [...]\n```".into()) },
                 MethodInfo { selector: "classIncludesSelector:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test whether the described class defines the given class-side selector.\n\n## Examples\n```beamtalk\nInteger class class classIncludesSelector: #new   // => true\n```".into()) },
+                MethodInfo { selector: "packageName".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, spawns_block: false, return_type: Some("String | Nil".into()), param_types: vec![], doc: Some("Return the name of the package that owns the described class.\n\nExtracts the package name from the class registry or .app metadata.\nReturns nil if the class has no package association.\n\n## Examples\n```beamtalk\nInteger class packageName   // => \"stdlib\"\n```".into()) },
+                MethodInfo { selector: "package".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, spawns_block: false, return_type: Some("Dictionary | Nil".into()), param_types: vec![], doc: Some("Return a Dictionary of package info for the package that owns the described class.\n\nReturns a Dictionary with keys: #name, #version, #classes, #dependencies, #source.\nReturns nil if the class has no package association.\n\n## Examples\n```beamtalk\nInteger class package   // => _\n```".into()) },
             ],
             class_methods: vec![
                 MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Raises an error — metaclasses cannot be constructed directly.\n\nUse `x class class` to obtain a metaclass for a class `x`.\n\n## Examples\n```beamtalk\nMetaclass new   // => Error: 'Use x class class to obtain a metaclass'\n```".into()) },
@@ -1670,6 +1673,33 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "error:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![Some("String".into())], doc: Some("Raise an error with the given message.\n\n## Examples\n```beamtalk\nself error: \"something went wrong\"\n```".into()) },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Package".into(),
+        ClassInfo {
+            name: "Package".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "all".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return a List of all loaded package names (Strings).\n\nA \"package\" is any OTP application whose env includes `{classes, [...]}`.\nThe stdlib package is always present.\n\n## Examples\n```beamtalk\nPackage all includes: \"stdlib\"\n// => true\n```".into()) },
+                MethodInfo { selector: "named:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: true, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![Some("String".into())], doc: Some("Return a Dictionary of package info for the given package name.\n\nThe dictionary contains keys: #name, #version, #classes, #dependencies, #source.\nRaises a #package_not_found error if no such package is loaded.\n\n## Examples\n```beamtalk\n(Package named: \"stdlib\") at: #name\n// => \"stdlib\"\n```".into()) },
+                MethodInfo { selector: "classes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("String".into())], doc: Some("Return a List of class names (Symbols) belonging to the given package.\n\nReturns an empty List if the package is not found.\n\n## Examples\n```beamtalk\nPackage classes: \"stdlib\"\n// => _\n```".into()) },
+                MethodInfo { selector: "dependencies:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: true, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("String".into())], doc: Some("Return a List of dependency package names (Strings) for the given package.\n\nReturns an empty List if the package is not found.\n\n## Examples\n```beamtalk\nPackage dependencies: \"stdlib\"\n// => _\n```".into()) },
+                MethodInfo { selector: "packageNameFor:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: true, spawns_block: false, return_type: Some("String | Nil".into()), param_types: vec![Some("Symbol".into())], doc: Some("Return the package name (String) that owns the given class name (Symbol).\n\nReturns nil if the class is not found or has no package.\n\n## Examples\n```beamtalk\nPackage packageNameFor: #Object\n// => _\n```".into()) },
+            ],
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],
@@ -2834,6 +2864,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "startSupervisor:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Object".into())], doc: Some("Start and attach a supervisor to the workspace supervision tree.\n\nThe class must be a Supervisor or DynamicSupervisor subclass.\nIdempotent: returns the existing instance if already attached.\nSupports iterative development — stop and re-attach after reloading.\n\n## Examples\n```beamtalk\nWorkspace startSupervisor: MySup      // => #Supervisor<MySup, <0.200.0>>\nWorkspace startSupervisor: MySup      // => #Supervisor<MySup, <0.200.0>>  (idempotent)\n```".into()) },
                 MethodInfo { selector: "stopSupervisor:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Object".into())], doc: Some("Stop and remove a supervisor from the workspace.\n\nWorks for both workspace-attached supervisors and the root application\nsupervisor. Cleanly shuts down the supervisor and all its children.\nRaises an error if the supervisor is not running or not visible.\n\n## Examples\n```beamtalk\nWorkspace stopSupervisor: MySup       // => nil\n```".into()) },
                 MethodInfo { selector: "supervisors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("List all supervisors visible from the workspace.\n\nReturns the root application supervisor (if registered) and all\nsupervisors attached via `startSupervisor:`. The root supervisor\nis not part of the workspace supervision tree but is included\nfor discoverability.\n\n## Examples\n```beamtalk\nWorkspace supervisors                 // => #(#Supervisor<MySup, <0.200.0>>)\n```".into()) },
+                MethodInfo { selector: "dependencies".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![], doc: Some("Return a Dictionary of direct dependency packages for the current workspace.\n\nKeys are package name Strings, values are package info Dictionaries.\nReturns an empty Dictionary if the workspace has no declared dependencies.\n\n## Examples\n```beamtalk\nWorkspace dependencies\n// => _\n```".into()) },
             ],
             class_methods: vec![
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Return the current singleton instance (nil before workspace bootstrap).".into()) },

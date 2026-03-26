@@ -56,6 +56,8 @@
 -export([actors/0, actorAt/1, classes/0, load/1, globals/0, bind/2, unbind/1, rootSupervisor/0]).
 %% Supervisor lifecycle management (BT-1341)
 -export([startSupervisor/1, stopSupervisor/1, supervisors/0]).
+%% Package reflection (ADR 0070 Phase 5)
+-export([dependencies/0]).
 
 %% ETS table name for user workspace bindings
 -define(WI_BINDINGS_TABLE, beamtalk_wi_user_bindings).
@@ -407,6 +409,34 @@ supervisors() ->
         Children
     ),
     Root ++ UserSups.
+
+%% @doc Return the direct dependencies of the current workspace package.
+%%
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) dependencies`.
+%% Returns a map of `#{PackageName => PackageInfoMap}` for each direct dependency
+%% of the current workspace package. Returns an empty map if the workspace
+%% has no package name or no dependencies.
+-spec dependencies() -> #{binary() => map()}.
+dependencies() ->
+    case beamtalk_workspace_meta:get_package_name() of
+        undefined ->
+            #{};
+        PkgName ->
+            DepNames = beamtalk_package:dependencies(PkgName),
+            maps:from_list(
+                lists:filtermap(
+                    fun(DepName) ->
+                        try
+                            Info = beamtalk_package:named(DepName),
+                            {true, {DepName, Info}}
+                        catch
+                            error:_ -> false
+                        end
+                    end,
+                    DepNames
+                )
+            )
+    end.
 
 %%% ============================================================================
 %%% Stable external API
