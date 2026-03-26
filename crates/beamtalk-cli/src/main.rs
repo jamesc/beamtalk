@@ -259,6 +259,12 @@ enum Command {
         dev: bool,
     },
 
+    /// Manage package dependencies (add, list, update)
+    Deps {
+        #[command(subcommand)]
+        action: commands::deps::cli::DepsCommand,
+    },
+
     /// Generate HTML API documentation from source files
     Doc {
         /// Source file or directory containing .bt files
@@ -471,6 +477,7 @@ fn run() -> Result<()> {
             warnings_as_errors,
             jobs,
         } => commands::test::run_tests(&path, warnings_as_errors, jobs),
+        Command::Deps { action } => commands::deps::cli::run(action),
         Command::Doctor { dev } => commands::doctor::run(dev),
         Command::Doc {
             path,
