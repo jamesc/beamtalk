@@ -11,7 +11,7 @@ beamtalk repl
 You should see:
 
 ```
-Beamtalk v0.3.0
+Beamtalk v0.3.1
 Type :help for available commands, :exit to quit.
 
 >
@@ -395,7 +395,7 @@ Here's a complete example session exploring basic expressions:
 
 ```beamtalk
 $ beamtalk repl
-Beamtalk v0.3.0
+Beamtalk v0.3.1
 Type :help for available commands, :exit to quit.
 
 > x := 42
