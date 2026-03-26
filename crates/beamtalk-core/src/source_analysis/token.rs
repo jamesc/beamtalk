@@ -160,6 +160,14 @@ pub enum TokenKind {
     /// The `@expect` directive for suppressing specific diagnostic categories
     AtExpect,
 
+    /// Package qualifier `@` in infix position (between two identifiers).
+    ///
+    /// Used for qualified class references: `json@Parser` — "Parser from json".
+    /// Distinguished from directive `@` by context: infix `@` immediately follows
+    /// an identifier with no whitespace, while directive `@` starts a token.
+    /// See ADR 0070, Section 4.
+    At,
+
     // === Special ===
     /// End of file
     Eof,
@@ -272,6 +280,7 @@ impl TokenKind {
             | Self::AtPrimitive
             | Self::AtIntrinsic
             | Self::AtExpect
+            | Self::At
             | Self::LtLt
             | Self::GtGt
             | Self::Eof => None,
@@ -321,6 +330,7 @@ impl std::fmt::Display for TokenKind {
             Self::AtPrimitive => write!(f, "@primitive"),
             Self::AtIntrinsic => write!(f, "@intrinsic"),
             Self::AtExpect => write!(f, "@expect"),
+            Self::At => write!(f, "@"),
             Self::LtLt => write!(f, "<<"),
             Self::GtGt => write!(f, ">>"),
             Self::Eof => write!(f, "<eof>"),

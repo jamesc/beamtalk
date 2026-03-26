@@ -78,6 +78,7 @@ Module {
                                 end: 226,
                             },
                         },
+                        package: None,
                         span: Span {
                             start: 219,
                             end: 226,

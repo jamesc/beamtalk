@@ -288,7 +288,7 @@ fn find_erlang_class_ref(module: &Module, offset: u32) -> bool {
 /// just before the cursor offset.
 fn has_erlang_class_ref_at(expr: &Expression, offset: u32) -> bool {
     match expr {
-        Expression::ClassReference { name, span } => {
+        Expression::ClassReference { name, span, .. } => {
             name.name == "Erlang" && offset >= span.end() && offset <= span.end() + 2
         }
         Expression::MessageSend {
@@ -624,7 +624,7 @@ fn find_receiver_in_expr(
             }
         }
         // If cursor is right after a class reference, use class-side methods
-        Expression::ClassReference { name, span } => {
+        Expression::ClassReference { name, span, .. } => {
             if offset >= span.end() && offset <= span.end() + 1 {
                 Some(ReceiverSide::Class(name.name.clone()))
             } else {

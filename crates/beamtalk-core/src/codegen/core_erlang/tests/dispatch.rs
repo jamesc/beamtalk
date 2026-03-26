@@ -204,6 +204,7 @@ fn test_generate_spawn_message_send() {
     let receiver = Expression::ClassReference {
         name: Identifier::new("Counter", Span::new(0, 7)),
         span: Span::new(0, 7),
+        package: None,
     };
     let selector = MessageSelector::Unary("spawn".into());
     let arguments = vec![];
@@ -229,6 +230,7 @@ fn test_generate_spawn_with_message_send() {
     let receiver = Expression::ClassReference {
         name: Identifier::new("Counter", Span::new(0, 7)),
         span: Span::new(0, 7),
+        package: None,
     };
     let selector = MessageSelector::Keyword(vec![KeywordPart::new("spawnWith:", Span::new(8, 18))]);
     let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(19, 21))];
@@ -434,6 +436,7 @@ fn test_bt906_class_module_index_overrides_heuristic_for_spawn() {
     let receiver = Expression::ClassReference {
         name: Identifier::new("EventBus", Span::new(0, 8)),
         span: Span::new(0, 8),
+        package: None,
     };
     let selector = MessageSelector::Unary("spawn".into());
     let arguments = vec![];
@@ -607,6 +610,7 @@ fn test_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Erlang", Span::new(0, 6)),
             span: Span::new(0, 6),
+            package: None,
         }),
         selector: MessageSelector::Unary("maps".into()),
         arguments: vec![],
@@ -718,6 +722,7 @@ fn test_value_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Erlang", Span::new(0, 6)),
             span: Span::new(0, 6),
+            package: None,
         }),
         selector: MessageSelector::Unary("maps".into()),
         arguments: vec![],
@@ -799,6 +804,7 @@ fn test_value_keyword_class_protocol_receiver_uses_is_function_guard() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Erlang", Span::new(0, 6)),
             span: Span::new(0, 6),
+            package: None,
         }),
         selector: MessageSelector::Unary("class".into()),
         arguments: vec![],
@@ -1217,6 +1223,7 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
     let expr = Expression::ClassReference {
         name: Identifier::new("Point", Span::new(0, 5)),
         span: Span::new(0, 5),
+        package: None,
     };
 
     let module = Module {
@@ -1267,6 +1274,7 @@ fn test_standalone_class_reference_validates_undefined_classes() {
     let expr = Expression::ClassReference {
         name: Identifier::new("NonExistentClass", Span::new(0, 16)),
         span: Span::new(0, 16),
+        package: None,
     };
 
     let module = Module {
@@ -1320,6 +1328,7 @@ fn test_erlang_interop_direct_call_keyword_single_arg() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Erlang", Span::new(0, 6)),
             span: Span::new(0, 6),
+            package: None,
         }),
         selector: MessageSelector::Unary("lists".into()),
         arguments: vec![],
@@ -1362,6 +1371,7 @@ fn test_erlang_interop_direct_call_keyword_multi_arg() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Erlang", Span::new(0, 6)),
             span: Span::new(0, 6),
+            package: None,
         }),
         selector: MessageSelector::Unary("lists".into()),
         arguments: vec![],
@@ -1402,6 +1412,7 @@ fn test_erlang_interop_direct_call_zero_arg() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Erlang", Span::new(0, 6)),
             span: Span::new(0, 6),
+            package: None,
         }),
         selector: MessageSelector::Unary("erlang".into()),
         arguments: vec![],
@@ -1431,6 +1442,7 @@ fn test_erlang_interop_proxy_still_works_for_standalone() {
     let receiver = Expression::ClassReference {
         name: Identifier::new("Erlang", Span::new(0, 6)),
         span: Span::new(0, 6),
+        package: None,
     };
     let selector = MessageSelector::Unary("lists".into());
 
@@ -1487,6 +1499,7 @@ fn test_erlang_interop_protocol_selectors_not_optimized() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Erlang", Span::new(0, 6)),
             span: Span::new(0, 6),
+            package: None,
         }),
         selector: MessageSelector::Unary("lists".into()),
         arguments: vec![],
@@ -1586,6 +1599,7 @@ fn test_bt855_erlang_interop_wrapper_pure_block_no_warning() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Erlang", Span::new(0, 6)),
             span: Span::new(0, 6),
+            package: None,
         }),
         selector: MessageSelector::Unary("lists".into()),
         arguments: vec![],
@@ -1657,6 +1671,7 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
         receiver: Box::new(Expression::ClassReference {
             name: Identifier::new("Erlang", Span::new(0, 6)),
             span: Span::new(0, 6),
+            package: None,
         }),
         selector: MessageSelector::Unary("lists".into()),
         arguments: vec![],

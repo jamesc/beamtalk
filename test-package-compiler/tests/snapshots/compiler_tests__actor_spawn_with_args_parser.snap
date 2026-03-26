@@ -285,6 +285,7 @@ Module {
                                 end: 483,
                             },
                         },
+                        package: None,
                         span: Span {
                             start: 476,
                             end: 483,

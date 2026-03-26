@@ -1735,6 +1735,7 @@ mod tests {
             receiver: Box::new(Expression::ClassReference {
                 name: Identifier::new("Beamtalk", test_span()),
                 span: test_span(),
+                package: None,
             }),
             selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
                 "classNamed:",
@@ -1743,6 +1744,7 @@ mod tests {
             arguments: vec![Expression::ClassReference {
                 name: Identifier::new("Counter", Span::new(22, 29)),
                 span: Span::new(22, 29),
+                package: None,
             }],
             is_cast: false,
             span: test_span(),
@@ -1926,6 +1928,7 @@ mod tests {
             receiver: Box::new(Expression::ClassReference {
                 name: Identifier::new("Shape", test_span()),
                 span: test_span(),
+                package: None,
             }),
             selector: MessageSelector::Unary("spawn".into()),
             arguments: vec![],
@@ -3592,6 +3595,7 @@ mod tests {
             receiver: Box::new(Expression::ClassReference {
                 name: Identifier::new(class_name, test_span()),
                 span: test_span(),
+                package: None,
             }),
             selector: MessageSelector::Unary("spawn".into()),
             arguments: vec![],
@@ -3763,6 +3767,7 @@ mod tests {
             receiver: Box::new(Expression::ClassReference {
                 name: Identifier::new("Counter", test_span()),
                 span: test_span(),
+                package: None,
             }),
             selector: MessageSelector::Unary("new".into()),
             arguments: vec![],

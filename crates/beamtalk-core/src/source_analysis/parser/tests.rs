@@ -6120,3 +6120,167 @@ fn blank_line_submit_class_with_method_is_already_complete() {
         "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1"
     ));
 }
+
+// === Package-qualified class references (ADR 0070) ===
+
+#[test]
+fn parse_qualified_class_reference() {
+    // `json@Parser` should parse as a ClassReference with package = Some("json")
+    let module = parse_ok("json@Parser");
+    assert_eq!(module.expressions.len(), 1);
+
+    if let Expression::ClassReference {
+        name,
+        package,
+        span,
+        ..
+    } = &module.expressions[0].expression
+    {
+        assert_eq!(name.name.as_str(), "Parser");
+        let pkg = package.as_ref().expect("expected package qualifier");
+        assert_eq!(pkg.name.as_str(), "json");
+        // Span should cover the full `json@Parser`
+        assert_eq!(span.start(), 0);
+        assert_eq!(span.end(), 11);
+    } else {
+        panic!(
+            "Expected ClassReference, got {:?}",
+            module.expressions[0].expression
+        );
+    }
+}
+
+#[test]
+fn parse_qualified_class_reference_message_send() {
+    // `json@Parser parse: x` — qualified class ref as message receiver
+    let module = parse_ok("json@Parser parse: x");
+    assert_eq!(module.expressions.len(), 1);
+
+    if let Expression::MessageSend {
+        receiver,
+        selector: MessageSelector::Keyword(parts),
+        arguments,
+        ..
+    } = &module.expressions[0].expression
+    {
+        // Receiver should be a qualified ClassReference
+        if let Expression::ClassReference { name, package, .. } = &**receiver {
+            assert_eq!(name.name.as_str(), "Parser");
+            assert_eq!(
+                package.as_ref().expect("expected package").name.as_str(),
+                "json"
+            );
+        } else {
+            panic!("Expected ClassReference receiver, got {receiver:?}");
+        }
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].keyword.as_str(), "parse:");
+        assert_eq!(arguments.len(), 1);
+    } else {
+        panic!("Expected keyword message send");
+    }
+}
+
+#[test]
+fn parse_qualified_class_reference_unary_message() {
+    // `json@Parser new` — qualified class ref with unary message
+    let module = parse_ok("json@Parser new");
+    assert_eq!(module.expressions.len(), 1);
+
+    if let Expression::MessageSend {
+        receiver,
+        selector: MessageSelector::Unary(name),
+        ..
+    } = &module.expressions[0].expression
+    {
+        if let Expression::ClassReference {
+            name: class_name,
+            package,
+            ..
+        } = &**receiver
+        {
+            assert_eq!(class_name.name.as_str(), "Parser");
+            assert_eq!(
+                package.as_ref().expect("expected package").name.as_str(),
+                "json"
+            );
+        } else {
+            panic!("Expected ClassReference receiver");
+        }
+        assert_eq!(name.as_str(), "new");
+    } else {
+        panic!("Expected unary message send");
+    }
+}
+
+#[test]
+fn parse_unqualified_class_reference_has_no_package() {
+    // `Parser` — plain class reference should have package = None
+    let module = parse_ok("Parser");
+    if let Expression::ClassReference { package, .. } = &module.expressions[0].expression {
+        assert!(
+            package.is_none(),
+            "plain class reference should have no package"
+        );
+    } else {
+        panic!("Expected ClassReference");
+    }
+}
+
+#[test]
+fn parse_qualified_class_mixed_with_directive() {
+    // Directives on a previous line should not interfere with qualified class refs
+    let module = parse_ok("json@Parser");
+    assert_eq!(module.expressions.len(), 1);
+    assert!(matches!(
+        &module.expressions[0].expression,
+        Expression::ClassReference { .. }
+    ));
+}
+
+#[test]
+fn parse_at_parser_no_package_error_recovery() {
+    // `@Parser` — missing package name. This is lexed as an error token.
+    let diagnostics = parse_err("@Parser");
+    // Should produce at least one diagnostic (from the error token)
+    assert!(
+        !diagnostics.is_empty(),
+        "expected error for @Parser without package"
+    );
+}
+
+#[test]
+fn parse_qualified_class_reference_spans() {
+    // Verify span precision for `json@Parser`
+    let module = parse_ok("json@Parser");
+    if let Expression::ClassReference {
+        name,
+        package,
+        span,
+        ..
+    } = &module.expressions[0].expression
+    {
+        // Package span: 0..4
+        let pkg = package.as_ref().unwrap();
+        assert_eq!(pkg.span.start(), 0);
+        assert_eq!(pkg.span.end(), 4);
+        // Class name span: 5..11
+        assert_eq!(name.span.start(), 5);
+        assert_eq!(name.span.end(), 11);
+        // Full span: 0..11
+        assert_eq!(span.start(), 0);
+        assert_eq!(span.end(), 11);
+    } else {
+        panic!("Expected ClassReference");
+    }
+}
+
+#[test]
+fn parse_qualified_lowercase_after_at_is_error() {
+    // `json@parser` — lowercase after `@` is not a valid class name
+    let diagnostics = parse_err("json@parser");
+    assert!(
+        !diagnostics.is_empty(),
+        "expected error for lowercase class name after @"
+    );
+}

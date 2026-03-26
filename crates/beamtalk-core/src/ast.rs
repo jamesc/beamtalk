@@ -1067,14 +1067,17 @@ pub enum Expression {
     /// An identifier (variable name).
     Identifier(Identifier),
 
-    /// A class reference (uppercase identifier).
+    /// A class reference (uppercase identifier), optionally package-qualified.
     ///
     /// Class references are global and resolve to module names.
-    /// Example: `Counter`, `Array`, `MyCustomClass`
+    /// Example: `Counter`, `Array`, `MyCustomClass`, `json@Parser`
     /// Compiles to module calls: `Counter spawn` → `call 'counter':'spawn'()`
     ClassReference {
         /// The class name (as written in source).
         name: Identifier,
+        /// Optional package qualifier (e.g., `json` in `json@Parser`).
+        /// See ADR 0070, Section 4.
+        package: Option<Identifier>,
         /// Source location.
         span: Span,
     },

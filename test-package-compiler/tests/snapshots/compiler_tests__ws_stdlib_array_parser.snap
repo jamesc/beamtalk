@@ -557,6 +557,7 @@ Module {
                                                     end: 415,
                                                 },
                                             },
+                                            package: None,
                                             span: Span {
                                                 start: 405,
                                                 end: 415,

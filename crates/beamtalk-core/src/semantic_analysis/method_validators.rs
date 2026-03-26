@@ -734,6 +734,7 @@ mod tests {
         let args = vec![Expression::ClassReference {
             name: Identifier::new("Counter", Span::new(12, 19)),
             span: Span::new(12, 19),
+            package: None,
         }];
 
         let diagnostics = validator.validate(&class_named_selector(), &args, None, test_span());
@@ -916,6 +917,7 @@ mod tests {
         let receiver = Expression::ClassReference {
             name: Identifier::new("Integer", test_span()),
             span: test_span(),
+            package: None,
         };
         let diag = validate_primitive_instantiation(&receiver, "new", test_span());
         assert!(diag.is_some());
@@ -932,6 +934,7 @@ mod tests {
         let receiver = Expression::ClassReference {
             name: Identifier::new("String", test_span()),
             span: test_span(),
+            package: None,
         };
         let diag = validate_primitive_instantiation(&receiver, "new", test_span());
         assert!(diag.is_some());
@@ -943,6 +946,7 @@ mod tests {
         let receiver = Expression::ClassReference {
             name: Identifier::new("True", test_span()),
             span: test_span(),
+            package: None,
         };
         let diag = validate_primitive_instantiation(&receiver, "new", test_span());
         assert!(diag.is_some());
@@ -954,6 +958,7 @@ mod tests {
         let receiver = Expression::ClassReference {
             name: Identifier::new("Symbol", test_span()),
             span: test_span(),
+            package: None,
         };
         let diag = validate_primitive_instantiation(&receiver, "new:", test_span());
         assert!(diag.is_some());
@@ -965,6 +970,7 @@ mod tests {
         let receiver = Expression::ClassReference {
             name: Identifier::new("Actor", test_span()),
             span: test_span(),
+            package: None,
         };
         let diag = validate_primitive_instantiation(&receiver, "new", test_span());
         assert!(diag.is_none());
@@ -982,6 +988,7 @@ mod tests {
         let receiver = Expression::ClassReference {
             name: Identifier::new("Integer", test_span()),
             span: test_span(),
+            package: None,
         };
         let diag = validate_primitive_instantiation(&receiver, "spawn", test_span());
         assert!(diag.is_none());
@@ -1097,6 +1104,7 @@ mod tests {
         let receiver = Expression::ClassReference {
             name: Identifier::new("Block", test_span()),
             span: test_span(),
+            package: None,
         };
         let diag = validate_primitive_instantiation(&receiver, "new", test_span());
         assert!(diag.is_some());
@@ -1114,6 +1122,7 @@ mod tests {
         let receiver = Expression::ClassReference {
             name: Identifier::new("CompiledMethod", test_span()),
             span: test_span(),
+            package: None,
         };
         let diag = validate_primitive_instantiation(&receiver, "new", test_span());
         assert!(diag.is_some());
@@ -1125,6 +1134,7 @@ mod tests {
         let receiver = Expression::ClassReference {
             name: Identifier::new("UndefinedObject", test_span()),
             span: test_span(),
+            package: None,
         };
         let diag = validate_primitive_instantiation(&receiver, "new", test_span());
         assert!(diag.is_some());

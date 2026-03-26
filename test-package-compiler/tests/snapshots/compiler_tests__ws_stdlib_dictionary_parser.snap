@@ -998,6 +998,7 @@ Module {
                                                     end: 796,
                                                 },
                                             },
+                                            package: None,
                                             span: Span {
                                                 start: 786,
                                                 end: 796,
@@ -1047,6 +1048,7 @@ Module {
                                                     end: 819,
                                                 },
                                             },
+                                            package: None,
                                             span: Span {
                                                 start: 809,
                                                 end: 819,
