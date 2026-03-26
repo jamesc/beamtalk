@@ -220,13 +220,14 @@ fn append_dependency_to_manifest(manifest_path: &Utf8Path, toml_fragment: &str) 
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{manifest_path}'"))?;
 
-    let new_content = if content.contains("[dependencies]") {
-        // Find the [dependencies] section and append after it
+    let new_content = if let Some(deps_idx) = content
+        .lines()
+        .collect::<Vec<&str>>()
+        .iter()
+        .position(|l| l.trim() == "[dependencies]")
+    {
+        // Found the [dependencies] section — append after it
         let mut lines: Vec<&str> = content.lines().collect();
-        let deps_idx = lines
-            .iter()
-            .position(|l| l.trim() == "[dependencies]")
-            .unwrap();
 
         // Find the end of the dependencies section (next section header or end of file)
         let insert_idx = lines
@@ -517,7 +518,9 @@ mod tests {
         run_git_cmd(path, &["branch", "develop"]);
 
         let sha = get_git_sha(path);
-        let url = format!("file://{}", path.display());
+        // Use forward slashes for file:// URLs (Windows paths with backslashes
+        // break TOML parsing when embedded in string values)
+        let url = format!("file://{}", path.display().to_string().replace('\\', "/"));
         (dir, url, sha)
     }
 
