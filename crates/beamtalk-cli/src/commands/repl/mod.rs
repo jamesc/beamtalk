@@ -243,7 +243,16 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
                 beam_count,
                 if beam_count == 1 { "class" } else { "classes" }
             );
-            vec![ebin_path.into_std_path_buf()]
+
+            let mut code_paths = vec![ebin_path.into_std_path_buf()];
+
+            // ADR 0070: Add dependency ebin directories to BEAM code path.
+            // build() already resolved and compiled deps; collect their ebin paths.
+            for dep_ebin in crate::commands::deps::collect_dep_ebin_paths(project_root_utf8) {
+                code_paths.push(dep_ebin.into_std_path_buf());
+            }
+
+            code_paths
         }
         Err(e) => {
             eprintln!("Warning: package compilation failed: {e}");
