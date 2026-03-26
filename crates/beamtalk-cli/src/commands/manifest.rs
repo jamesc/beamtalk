@@ -8,11 +8,14 @@
 //! Parses `beamtalk.toml` manifests that define a package's identity and metadata.
 //! See ADR 0026 for the package definition and manifest format.
 
+use beamtalk_core::compilation::{DependencyMap, DependencySource, DependencySpec, GitReference};
 use camino::Utf8Path;
 use miette::{Context, IntoDiagnostic, Result};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
+use std::path::PathBuf;
 
 /// The top-level manifest structure parsed from `beamtalk.toml`.
 #[derive(Debug, Deserialize)]
@@ -22,6 +25,33 @@ pub struct Manifest {
     /// The optional `[application]` section of the manifest.
     #[serde(default)]
     pub application: Option<ApplicationConfig>,
+    /// The optional `[dependencies]` section — stored as raw TOML for lazy parsing.
+    ///
+    /// Use [`parse_manifest_full`] to get validated [`DependencySpec`] values.
+    #[serde(default)]
+    #[allow(dead_code)] // Read by parse_manifest_full (ADR 0070 Phase 2+)
+    dependencies: Option<toml::Value>,
+}
+
+/// A dependency entry as it appears in `beamtalk.toml`.
+///
+/// Supports two forms:
+/// - `name = { path = "..." }` — local path dependency
+/// - `name = { git = "...", tag/branch/rev = "..." }` — git dependency
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)] // Constructed by serde deserialization
+pub struct TomlDependency {
+    /// Local filesystem path to the dependency.
+    pub path: Option<String>,
+    /// Git repository URL.
+    pub git: Option<String>,
+    /// Git tag to check out.
+    pub tag: Option<String>,
+    /// Git branch to check out.
+    pub branch: Option<String>,
+    /// Git commit SHA to check out.
+    pub rev: Option<String>,
 }
 
 /// OTP application configuration from the `[application]` section of `beamtalk.toml`.
@@ -56,6 +86,127 @@ pub struct PackageManifest {
     pub licenses: Option<Vec<String>>,
 }
 
+/// Validate and convert a single TOML dependency entry into a [`DependencySpec`].
+///
+/// Returns a helpful error message if the entry is malformed.
+#[allow(dead_code)] // Used by tests; called by parse_manifest_full (ADR 0070 Phase 2+)
+fn validate_dependency(name: &str, dep: &TomlDependency) -> Result<DependencySpec> {
+    // Validate the dependency name uses package naming rules
+    if let Err(e) = validate_package_name(name) {
+        miette::bail!(
+            "Invalid dependency name '{name}': {}",
+            format_name_error(name, &e)
+        );
+    }
+
+    let has_path = dep.path.is_some();
+    let has_git = dep.git.is_some();
+    let has_git_ref = dep.tag.is_some() || dep.branch.is_some() || dep.rev.is_some();
+
+    // Must have exactly one source type
+    if has_path && has_git {
+        miette::bail!("Dependency '{name}' specifies both 'path' and 'git' — use one or the other");
+    }
+
+    if !has_path && !has_git {
+        miette::bail!("Dependency '{name}' must specify either 'path' or 'git' as a source");
+    }
+
+    // Path deps must not have git ref fields
+    if has_path && has_git_ref {
+        miette::bail!(
+            "Dependency '{name}' is a path dependency — 'tag', 'branch', and 'rev' are only valid for git dependencies"
+        );
+    }
+
+    let source = if let Some(path) = &dep.path {
+        DependencySource::Path {
+            path: PathBuf::from(path),
+        }
+    } else {
+        let url = dep.git.as_ref().unwrap().clone();
+
+        // Count git ref specifiers — at most one allowed
+        let ref_count = u8::from(dep.tag.is_some())
+            + u8::from(dep.branch.is_some())
+            + u8::from(dep.rev.is_some());
+        if ref_count > 1 {
+            miette::bail!(
+                "Dependency '{name}' specifies multiple git references — use exactly one of 'tag', 'branch', or 'rev'"
+            );
+        }
+
+        let reference = if let Some(tag) = &dep.tag {
+            GitReference::Tag(tag.clone())
+        } else if let Some(branch) = &dep.branch {
+            GitReference::Branch(branch.clone())
+        } else if let Some(rev) = &dep.rev {
+            GitReference::Rev(rev.clone())
+        } else {
+            miette::bail!(
+                "Dependency '{name}' is a git dependency but has no ref — specify 'tag', 'branch', or 'rev'"
+            );
+        };
+
+        DependencySource::Git { url, reference }
+    };
+
+    Ok(DependencySpec {
+        name: name.to_string(),
+        source,
+    })
+}
+
+/// Parse and validate the `[dependencies]` section of a manifest.
+///
+/// Returns an empty map if the section is missing or empty.
+#[allow(dead_code)] // Used by tests; called by parse_manifest_full (ADR 0070 Phase 2+)
+fn parse_dependencies(deps: Option<&toml::Value>) -> Result<DependencyMap> {
+    let Some(raw_value) = deps else {
+        return Ok(BTreeMap::new());
+    };
+
+    // The [dependencies] section must be a TOML table
+    let table = raw_value.as_table().ok_or_else(|| {
+        miette::miette!(
+            "[dependencies] must be a table, not a {}",
+            value_type_name(raw_value)
+        )
+    })?;
+
+    if table.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut result = DependencyMap::new();
+    for (name, value) in table {
+        // Each dependency entry must be an inline table like { path = "..." }
+        let dep: TomlDependency = value
+            .clone()
+            .try_into()
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Dependency '{name}' has an invalid format — expected a table with 'path' or 'git' keys"))?;
+
+        let spec = validate_dependency(name, &dep)?;
+        result.insert(name.clone(), spec);
+    }
+    Ok(result)
+}
+
+/// Return a human-readable TOML type name for error messages.
+#[allow(dead_code)] // Called by parse_dependencies (ADR 0070 Phase 2+)
+fn value_type_name(value: &toml::Value) -> &'static str {
+    match value {
+        toml::Value::String(_) => "string",
+        toml::Value::Integer(_) => "integer",
+        toml::Value::Float(_) => "float",
+        toml::Value::Boolean(_) => "boolean",
+        toml::Value::Datetime(_) => "datetime",
+        toml::Value::Array(_) => "array",
+        toml::Value::Table(_) => "table",
+    }
+}
+
 /// Read and deserialize a `beamtalk.toml` file into a raw [`Manifest`].
 ///
 /// Does **not** validate the package name — use [`parse_manifest`] for that.
@@ -67,6 +218,18 @@ fn parse_manifest_raw(path: &Utf8Path) -> Result<Manifest> {
     toml::from_str(&content)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to parse manifest '{path}'"))
+}
+
+/// A fully parsed and validated manifest with package metadata and dependencies.
+#[derive(Debug)]
+#[allow(dead_code)] // Used by tests; will be used by build system (ADR 0070 Phase 2+)
+pub struct ParsedManifest {
+    /// The package metadata.
+    pub package: PackageManifest,
+    /// The optional application configuration.
+    pub application: Option<ApplicationConfig>,
+    /// The parsed and validated dependencies (empty if `[dependencies]` is absent).
+    pub dependencies: DependencyMap,
 }
 
 /// Parse a `beamtalk.toml` manifest file.
@@ -81,6 +244,29 @@ pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
     }
 
     Ok(manifest.package)
+}
+
+/// Parse a `beamtalk.toml` manifest file including dependencies.
+///
+/// Returns the fully parsed manifest with validated package metadata and
+/// dependency specifications. Returns an error if the file cannot be read,
+/// contains invalid TOML, or has malformed dependency entries.
+#[allow(dead_code)] // Used by tests; will be used by build system (ADR 0070 Phase 2+)
+pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
+    let manifest = parse_manifest_raw(path)?;
+
+    if let Err(e) = validate_package_name(&manifest.package.name) {
+        miette::bail!("{}", format_name_error(&manifest.package.name, &e));
+    }
+
+    let dependencies = parse_dependencies(manifest.dependencies.as_ref())
+        .wrap_err_with(|| format!("Failed to parse [dependencies] in '{path}'"))?;
+
+    Ok(ParsedManifest {
+        package: manifest.package,
+        application: manifest.application,
+        dependencies,
+    })
 }
 
 /// Look for `beamtalk.toml` in the given directory and parse it if found.
@@ -792,5 +978,407 @@ supervisor = "RootSup"
         let manifest = parse_manifest_raw(&path.join("beamtalk.toml")).unwrap();
         assert!(manifest.application.is_some());
         assert_eq!(manifest.application.unwrap().supervisor, "RootSup");
+    }
+
+    // --- Dependency parsing tests ---
+
+    #[test]
+    fn test_parse_path_dependency() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+utils = { path = "../my-utils" }
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.dependencies.len(), 1);
+        let dep = &manifest.dependencies["utils"];
+        assert_eq!(dep.name, "utils");
+        assert_eq!(
+            dep.source,
+            DependencySource::Path {
+                path: PathBuf::from("../my-utils")
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_git_dependency_with_tag() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+json = { git = "https://github.com/jamesc/beamtalk-json", tag = "v1.0.0" }
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.dependencies.len(), 1);
+        let dep = &manifest.dependencies["json"];
+        assert_eq!(dep.name, "json");
+        assert_eq!(
+            dep.source,
+            DependencySource::Git {
+                url: "https://github.com/jamesc/beamtalk-json".to_string(),
+                reference: GitReference::Tag("v1.0.0".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_git_dependency_with_branch() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+http = { git = "https://github.com/someone/beamtalk-http", branch = "main" }
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        let dep = &manifest.dependencies["http"];
+        assert_eq!(
+            dep.source,
+            DependencySource::Git {
+                url: "https://github.com/someone/beamtalk-http".to_string(),
+                reference: GitReference::Branch("main".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_git_dependency_with_rev() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+my_tools = { git = "https://github.com/someone/beamtalk-tools", rev = "abc1234def" }
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        let dep = &manifest.dependencies["my_tools"];
+        assert_eq!(
+            dep.source,
+            DependencySource::Git {
+                url: "https://github.com/someone/beamtalk-tools".to_string(),
+                reference: GitReference::Rev("abc1234def".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_multiple_dependencies() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+utils = { path = "../utils" }
+json = { git = "https://github.com/jamesc/beamtalk-json", tag = "v1.0.0" }
+http = { git = "https://github.com/someone/beamtalk-http", branch = "main" }
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.dependencies.len(), 3);
+        assert!(manifest.dependencies.contains_key("utils"));
+        assert!(manifest.dependencies.contains_key("json"));
+        assert!(manifest.dependencies.contains_key("http"));
+    }
+
+    #[test]
+    fn test_parse_empty_dependencies_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_parse_no_dependencies_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_reject_dep_with_both_path_and_git() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+bad = { path = "../bad", git = "https://example.com/bad" }
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("both"), "should mention both sources: {err}");
+    }
+
+    #[test]
+    fn test_reject_dep_with_no_source() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+empty = {}
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("must specify"),
+            "should mention missing source: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_git_dep_without_ref() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+no_ref = { git = "https://example.com/repo" }
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("no ref"), "should mention missing ref: {err}");
+    }
+
+    #[test]
+    fn test_reject_git_dep_with_multiple_refs() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+multi = { git = "https://example.com/repo", tag = "v1", branch = "main" }
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("multiple"),
+            "should mention multiple refs: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_path_dep_with_git_ref() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+confused = { path = "../lib", tag = "v1.0" }
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("path dependency"),
+            "should mention path dep conflict: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_invalid_dependency_name() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+MyLib = { path = "../my-lib" }
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Invalid dependency name"),
+            "should mention invalid name: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_reserved_dependency_name() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+stdlib = { path = "../stdlib" }
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("reserved"),
+            "should mention reserved name: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_unknown_dependency_fields() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+oops = { path = "../lib", version = "1.0" }
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(
+            result.is_err(),
+            "should reject unknown fields in dependency entries"
+        );
+    }
+
+    #[test]
+    fn test_dependency_display() {
+        let path_dep = DependencySpec {
+            name: "utils".to_string(),
+            source: DependencySource::Path {
+                path: PathBuf::from("../utils"),
+            },
+        };
+        assert_eq!(format!("{path_dep}"), "utils (path: ../utils)");
+
+        let git_dep = DependencySpec {
+            name: "json".to_string(),
+            source: DependencySource::Git {
+                url: "https://github.com/jamesc/beamtalk-json".to_string(),
+                reference: GitReference::Tag("v1.0.0".to_string()),
+            },
+        };
+        assert_eq!(
+            format!("{git_dep}"),
+            "json (git: https://github.com/jamesc/beamtalk-json (tag: v1.0.0))"
+        );
+    }
+
+    #[test]
+    fn test_parse_manifest_full_preserves_package_and_application() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+description = "Test app"
+
+[application]
+supervisor = "AppSup"
+
+[dependencies]
+utils = { path = "../utils" }
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.package.name, "my_app");
+        assert_eq!(manifest.package.version, "0.1.0");
+        assert_eq!(manifest.package.description.as_deref(), Some("Test app"));
+        assert!(manifest.application.is_some());
+        assert_eq!(manifest.application.unwrap().supervisor, "AppSup");
+        assert_eq!(manifest.dependencies.len(), 1);
     }
 }
