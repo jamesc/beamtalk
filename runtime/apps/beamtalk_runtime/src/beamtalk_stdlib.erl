@@ -112,11 +112,16 @@ load_compiled_stdlib_modules() ->
     _ = application:load(beamtalk_stdlib),
     case application:get_env(beamtalk_stdlib, classes) of
         {ok, ClassList} when is_list(ClassList) ->
-            %% ClassList = [{Module, ClassName, SuperclassName}, ...]
+            %% ADR 0070 Phase 4: ClassList is now a list of maps:
+            %% #{name => 'ClassName', module => 'bt@stdlib@mod',
+            %%   parent => 'SuperClass', package => 'stdlib',
+            %%   kind => object|value|actor, type_params => []}
             %% BT-446: Load ALL classes — bootstrap no longer registers any
             Sorted = topo_sort(ClassList),
             lists:foreach(
-                fun({Mod, Class, _Super}) ->
+                fun(Entry) ->
+                    Mod = class_entry_module(Entry),
+                    Class = class_entry_name(Entry),
                     case code:ensure_loaded(Mod) of
                         {module, Mod} ->
                             %% Module loaded. If on_load already ran but the class
@@ -200,27 +205,44 @@ ensure_class_registered(Mod, ClassName) ->
     end.
 
 %% @private
+%% @doc Extract class name from a class entry (map or legacy tuple).
+class_entry_name(#{name := Name}) -> Name;
+class_entry_name({_Mod, Name, _Super}) -> Name.
+
+%% @private
+%% @doc Extract module name from a class entry (map or legacy tuple).
+class_entry_module(#{module := Mod}) -> Mod;
+class_entry_module({Mod, _Name, _Super}) -> Mod.
+
+%% @private
+%% @doc Extract parent class name from a class entry (map or legacy tuple).
+class_entry_parent(#{parent := Parent}) -> Parent;
+class_entry_parent({_Mod, _Name, Parent}) -> Parent.
+
+%% @private
 %% @doc Topological sort by superclass dependency.
 %%
+%% ADR 0070 Phase 4: Accepts both map entries and legacy tuple entries.
 %% Returns entries ordered so that each class's superclass appears before it.
--spec topo_sort([{module(), atom(), atom()}]) -> [{module(), atom(), atom()}].
+-spec topo_sort([map() | {module(), atom(), atom()}]) -> [map() | {module(), atom(), atom()}].
 topo_sort(Entries) ->
-    ClassSet = sets:from_list([Class || {_, Class, _} <- Entries]),
+    ClassSet = sets:from_list([class_entry_name(E) || E <- Entries]),
     topo_sort_waves(Entries, ClassSet, sets:new(), []).
 
 %% @private
 %% @doc Iteratively emit classes whose superclass dependencies are satisfied.
 -spec topo_sort_waves(
-    [{module(), atom(), atom()}],
+    [map() | {module(), atom(), atom()}],
     sets:set(atom()),
     sets:set(atom()),
-    [{module(), atom(), atom()}]
-) -> [{module(), atom(), atom()}].
+    [map() | {module(), atom(), atom()}]
+) -> [map() | {module(), atom(), atom()}].
 topo_sort_waves([], _ClassSet, _Emitted, Acc) ->
     lists:reverse(Acc);
 topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
     {Ready, Deferred} = lists:partition(
-        fun({_Mod, _Class, Super}) ->
+        fun(Entry) ->
+            Super = class_entry_parent(Entry),
             %% Ready if superclass is external (bootstrap) or already emitted
             (not sets:is_element(Super, ClassSet)) orelse sets:is_element(Super, Emitted)
         end,
@@ -232,15 +254,15 @@ topo_sort_waves(Remaining, ClassSet, Emitted, Acc) ->
             ?LOG_WARNING(
                 "Stdlib topo_sort: unresolvable dependencies",
                 #{
-                    remaining => [C || {_, C, _} <- Deferred],
+                    remaining => [class_entry_name(E) || E <- Deferred],
                     domain => [beamtalk, stdlib]
                 }
             ),
             lists:reverse(Acc) ++ Deferred;
         _ ->
             NewEmitted = lists:foldl(
-                fun({_, Class, _}, S) ->
-                    sets:add_element(Class, S)
+                fun(Entry, S) ->
+                    sets:add_element(class_entry_name(Entry), S)
                 end,
                 Emitted,
                 Ready

@@ -305,6 +305,20 @@ impl ClassKind {
             _ => ClassKind::Object,
         }
     }
+
+    /// Returns the string representation used in `.app` metadata (ADR 0070 Phase 4).
+    ///
+    /// - `Object` → `"object"`
+    /// - `Actor` → `"actor"`
+    /// - `Value` → `"value"`
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ClassKind::Object => "object",
+            ClassKind::Actor => "actor",
+            ClassKind::Value => "value",
+        }
+    }
 }
 
 /// A class definition (Aggregate Root).

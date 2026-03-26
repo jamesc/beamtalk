@@ -238,11 +238,13 @@ beamtalk_has_method_test() ->
 
 topo_sort_test_() ->
     [
-        {"linear chain sorts correctly", fun topo_sort_linear_chain_test/0},
+        {"linear chain sorts correctly (tuples)", fun topo_sort_linear_chain_test/0},
         {"diamond dependency sorts correctly", fun topo_sort_diamond_test/0},
         {"single entry sorts correctly", fun topo_sort_single_test/0},
         {"empty list sorts correctly", fun topo_sort_empty_test/0},
-        {"external superclass treated as ready", fun topo_sort_external_super_test/0}
+        {"external superclass treated as ready", fun topo_sort_external_super_test/0},
+        {"map entries sort correctly (ADR 0070)", fun topo_sort_map_entries_test/0},
+        {"mixed tuple and map entries sort correctly", fun topo_sort_mixed_test/0}
     ].
 
 topo_sort_linear_chain_test() ->
@@ -278,6 +280,58 @@ topo_sort_empty_test() ->
 topo_sort_external_super_test() ->
     %% Both depend on external 'Object' — both should be ready in first wave
     Entries = [{mod_a, 'A', 'Object'}, {mod_b, 'B', 'Object'}],
+    Result = beamtalk_stdlib:topo_sort(Entries),
+    ?assertEqual(2, length(Result)).
+
+topo_sort_map_entries_test() ->
+    %% ADR 0070 Phase 4: Map format class entries sort correctly
+    Entries = [
+        #{
+            name => 'C',
+            module => mod_c,
+            parent => 'B',
+            package => stdlib,
+            kind => object,
+            type_params => []
+        },
+        #{
+            name => 'A',
+            module => mod_a,
+            parent => 'External',
+            package => stdlib,
+            kind => object,
+            type_params => []
+        },
+        #{
+            name => 'B',
+            module => mod_b,
+            parent => 'A',
+            package => stdlib,
+            kind => value,
+            type_params => []
+        }
+    ],
+    Result = beamtalk_stdlib:topo_sort(Entries),
+    Names = [maps:get(name, E) || E <- Result],
+    PosA = pos(Names, 'A'),
+    PosB = pos(Names, 'B'),
+    PosC = pos(Names, 'C'),
+    ?assert(PosA < PosB),
+    ?assert(PosB < PosC).
+
+topo_sort_mixed_test() ->
+    %% Backward compatibility: mixed tuple and map entries
+    Entries = [
+        #{
+            name => 'B',
+            module => mod_b,
+            parent => 'A',
+            package => stdlib,
+            kind => actor,
+            type_params => []
+        },
+        {mod_a, 'A', 'External'}
+    ],
     Result = beamtalk_stdlib:topo_sort(Entries),
     ?assertEqual(2, length(Result)).
 

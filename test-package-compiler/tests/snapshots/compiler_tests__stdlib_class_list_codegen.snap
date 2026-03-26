@@ -316,6 +316,8 @@ call 'erlang':'++'(Self, [_item53|[]])
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'List',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'true',
       'is_abstract' => 'false',
@@ -341,6 +343,8 @@ call 'erlang':'++'(Self, [_item53|[]])
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'List',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'true',
       'is_abstract' => 'false',

@@ -93,6 +93,8 @@ call 'erlang':'*'(Self, 2)
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'MyInt',
       'superclass' => 'Integer',
+      'package' => 'none',
+      'kind' => 'value',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -118,6 +120,8 @@ call 'erlang':'*'(Self, 2)
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'MyInt',
       'superclass' => 'Integer',
+      'package' => 'none',
+      'kind' => 'value',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',

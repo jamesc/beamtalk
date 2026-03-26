@@ -98,6 +98,8 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'MethodLookupTest',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -123,6 +125,8 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'MethodLookupTest',
       'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
       'fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',

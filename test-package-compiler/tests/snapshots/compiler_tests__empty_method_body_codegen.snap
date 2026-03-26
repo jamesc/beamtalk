@@ -244,6 +244,8 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'EmptyActor',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => ['value'],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
@@ -270,6 +272,8 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
             'classMethodDocs' => ~{}~,
             'meta' => ~{'class' => 'EmptyActor',
       'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
       'fields' => ['value'],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
