@@ -305,6 +305,7 @@ fn compile_stdlib_file(
         &std::collections::HashMap::new(),
         &[],
         None,
+        None, // No collision detection for stdlib compilation
     )
 }
 

@@ -418,6 +418,7 @@ fn compile_dependency_with_context(
             &class_superclass_index,
             &all_class_infos,
             cached,
+            None, // No collision detection within dependency compilation
         )?;
 
         core_files.push(core_file);
