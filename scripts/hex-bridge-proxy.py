@@ -35,19 +35,21 @@ import os
 import socket
 import ssl
 import sys
+from urllib.parse import urlsplit, unquote
 
 LISTEN_PORT = int(os.environ.get("HEX_BRIDGE_PORT", "18081"))
 TARGET_HOST = os.environ.get("HEX_BRIDGE_TARGET", "repo.hex.pm")
 
-# Parse upstream proxy from HTTP_PROXY env var
+# Parse upstream proxy from HTTP_PROXY env var using a proper URL parser
+# to handle percent-encoded credentials and IPv6 addresses correctly.
 _http_proxy = os.environ.get("HTTP_PROXY", os.environ.get("http_proxy", ""))
-if "@" in _http_proxy:
-    _prefix = _http_proxy.split("://", 1)[1] if "://" in _http_proxy else _http_proxy
-    _userinfo, _hostport = _prefix.rsplit("@", 1)
-    PROXY_AUTH = base64.b64encode(_userinfo.encode()).decode()
-    _host_port = _hostport.split(":")
-    UPSTREAM_HOST = _host_port[0]
-    UPSTREAM_PORT = int(_host_port[1]) if len(_host_port) > 1 else 3128
+_parsed_proxy = urlsplit(_http_proxy)
+if _parsed_proxy.username:
+    _user = unquote(_parsed_proxy.username)
+    _pass = unquote(_parsed_proxy.password or "")
+    PROXY_AUTH = base64.b64encode(f"{_user}:{_pass}".encode()).decode()
+    UPSTREAM_HOST = _parsed_proxy.hostname or ""
+    UPSTREAM_PORT = _parsed_proxy.port or 3128
 else:
     PROXY_AUTH = ""
     UPSTREAM_HOST = ""
@@ -106,6 +108,23 @@ def https_get(path):
     return data
 
 
+def _dechunk(data):
+    """Decode an HTTP chunked transfer-encoded body."""
+    result = b""
+    while data:
+        # Each chunk: hex-size\r\n<data>\r\n
+        crlf = data.find(b"\r\n")
+        if crlf < 0:
+            break
+        size = int(data[:crlf], 16)
+        if size == 0:
+            break
+        start = crlf + 2
+        result += data[start : start + size]
+        data = data[start + size + 2 :]  # skip chunk data + trailing \r\n
+    return result
+
+
 class HexBridgeHandler(http.server.BaseHTTPRequestHandler):
     """Handle incoming HTTP requests and proxy them to hex.pm over HTTPS."""
 
@@ -130,8 +149,20 @@ class HexBridgeHandler(http.server.BaseHTTPRequestHandler):
             status_line = header_block.split(b"\r\n", 1)[0]
             code = int(status_line.split(b" ", 2)[1])
 
+            # Check if response is chunked and dechunk if so
+            is_chunked = False
+            for line in header_block.split(b"\r\n")[1:]:
+                if b":" in line:
+                    k, v = line.split(b":", 1)
+                    if k.strip().decode().lower() == "transfer-encoding":
+                        if b"chunked" in v.lower():
+                            is_chunked = True
+
+            if is_chunked:
+                body = _dechunk(body)
+
             self.send_response(code)
-            # Forward headers (skip hop-by-hop headers)
+            # Forward headers (skip hop-by-hop and length headers we recompute)
             for line in header_block.split(b"\r\n")[1:]:
                 if b":" in line:
                     k, v = line.split(b":", 1)

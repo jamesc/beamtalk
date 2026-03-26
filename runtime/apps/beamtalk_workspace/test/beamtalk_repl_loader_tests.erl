@@ -354,12 +354,16 @@ resolve_package_module_test_match_test() ->
 
 resolve_package_module_no_match_test() ->
     %% File outside src/ and test/ falls back to bt@{stem_snake_case}
+    %% Use different basenames for AbsPath and OrigPath to prove the
+    %% fallback derives from OrigPath, not AbsPath.
     {ok, Cwd} = file:get_cwd(),
     ProjectRoot = filename:join(Cwd, "myproject"),
     AbsPath = filename:join([Cwd, "other", "project", "Foo.bt"]),
-    OrigPath = AbsPath,
-    Result = beamtalk_repl_loader:resolve_package_module(AbsPath, ProjectRoot, <<"pkg">>, OrigPath),
-    ?assertEqual(<<"bt@foo">>, Result).
+    OrigPath = filename:join([Cwd, "examples", "MyCounter.bt"]),
+    Result = beamtalk_repl_loader:resolve_package_module(
+        AbsPath, ProjectRoot, <<"pkg">>, OrigPath
+    ),
+    ?assertEqual(<<"bt@my_counter">>, Result).
 
 %%====================================================================
 %% try_package_relative/3
