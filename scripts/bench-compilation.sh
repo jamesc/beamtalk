@@ -5,8 +5,8 @@
 # Benchmark compilation latency for the Beamtalk compiler.
 #
 # Measures end-to-end compilation latency for file builds and REPL expressions,
-# broken down by phase where possible. This establishes the baseline before
-# migrating from daemon IPC to OTP Port (ADR 0022).
+# broken down by phase where possible. Connects to the REPL workspace via
+# WebSocket (RFC 6455) using a minimal zero-dependency Python client.
 #
 # Usage:
 #   scripts/bench-compilation.sh              # Run all benchmarks (100 iterations)
@@ -30,7 +30,7 @@ RUN_FILE=true
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BEAMTALK="$PROJECT_ROOT/target/debug/beamtalk"
 RESULTS_DIR="$(mktemp -d)"
-REPL_PID=""
+BENCH_WS_NAME=""
 REPL_PORT=""
 
 # Parse arguments
@@ -49,9 +49,8 @@ done
 # ═══════════════════════════════════════════════════════════════════════════════
 
 cleanup() {
-    if [ -n "$REPL_PID" ]; then
-        kill "$REPL_PID" 2>/dev/null || true
-        wait "$REPL_PID" 2>/dev/null || true
+    if [ -n "$BENCH_WS_NAME" ]; then
+        "$BEAMTALK" workspace stop "$BENCH_WS_NAME" 2>/dev/null || true
     fi
     rm -rf "$RESULTS_DIR"
 }
@@ -185,9 +184,9 @@ if [ "$RUN_FILE" = true ]; then
 
     # Benchmark files
     BENCH_FILES=(
-        "examples/counter.bt:Counter (26 lines, minimal)"
-        "examples/chat_member.bt:ChatMember (55 lines, typical)"
-        "examples/chat_room.bt:ChatRoom (69 lines, multi-actor)"
+        "examples/getting-started/src/counter.bt:Counter (minimal)"
+        "examples/chat-room/src/chat_member.bt:ChatMember (typical)"
+        "examples/chat-room/src/chat_room.bt:ChatRoom (multi-actor)"
     )
 
     for entry in "${BENCH_FILES[@]}"; do
@@ -307,163 +306,263 @@ if [ "$RUN_REPL" = true ]; then
     echo "═══════════════════════════════════════════════════════════════════"
     echo ""
 
-    # Start REPL workspace on ephemeral port
-    echo "🚀 Starting REPL workspace..."
-    OUTFILE=$(mktemp)
-    "$BEAMTALK" repl --port 0 > "$OUTFILE" 2>&1 &
-    REPL_PID=$!
-
-    # Wait for REPL to be ready
-    REPL_PORT=""
-    for i in $(seq 1 30); do
-        REPL_PORT=$(sed -n 's/.*Connected to REPL backend on port \([0-9][0-9]*\).*/\1/p' "$OUTFILE" 2>/dev/null || true)
-        if [ -n "$REPL_PORT" ]; then break; fi
-        sleep 1
-    done
-    rm -f "$OUTFILE"
+    # Start a dedicated benchmark workspace in the background.
+    # Using `workspace create --background` avoids the TTY requirement of
+    # `beamtalk repl` and gives us a clean port number on stdout.
+    BENCH_WS_NAME="bench-$$"
+    echo "🚀 Starting benchmark workspace ($BENCH_WS_NAME)..."
+    WS_OUTPUT=$("$BEAMTALK" workspace create "$BENCH_WS_NAME" --background --port 0 2>&1)
+    REPL_PORT=$(echo "$WS_OUTPUT" | sed -n 's/.*Port:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
 
     if [ -z "$REPL_PORT" ]; then
-        echo "❌ REPL failed to start (no port detected)"
-        REPL_PID=""
+        echo "❌ Workspace failed to start"
+        echo "$WS_OUTPUT"
         exit 1
     fi
 
-    echo "   REPL running on port $REPL_PORT (pid $REPL_PID)"
+    # Extract the Erlang node cookie for WebSocket authentication.
+    # The cookie is set on the beam.smp command line via -setcookie.
+    REPL_COOKIE=$(ps aux | grep "beam.smp.*beamtalk_workspace_${BENCH_WS_NAME}" | grep -v grep \
+        | grep -oP '(?<=-setcookie )\S+' | head -1)
+
+    echo "   Workspace running on port $REPL_PORT"
     echo ""
 
-    # Helper: Send eval request via TCP and measure round-trip time
-    # Uses a small Python script for reliable TCP communication
-    repl_eval() {
-        local code=$1
-        local msg_id=$2
-        BENCH_CODE="$code" BENCH_MSG_ID="$msg_id" BENCH_PORT="$REPL_PORT" python3 -c "
-import socket, json, os
+    # Generate a Python helper script that opens a persistent WebSocket
+    # connection and runs all REPL benchmarks. A single long-lived connection
+    # avoids per-request connection overhead and matches how real REPL
+    # sessions work. The script communicates results back via a JSON-lines
+    # output file.
+    WS_BENCH_SCRIPT="$RESULTS_DIR/ws_bench.py"
+    cat > "$WS_BENCH_SCRIPT" << 'PYEOF'
+#!/usr/bin/env python3
+"""WebSocket-based REPL benchmark runner.
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.settimeout(30)
-sock.connect(('127.0.0.1', int(os.environ['BENCH_PORT'])))
+Connects once, authenticates, warms up, then runs each benchmark
+expression for the requested number of iterations, writing per-iteration
+latency (in ms) to separate output files.
+"""
+import json, os, socket, struct, sys, time, base64
 
-request = json.dumps({'op': 'eval', 'id': os.environ['BENCH_MSG_ID'], 'code': os.environ['BENCH_CODE']})
-sock.sendall((request + '\n').encode())
+# ── Configuration from environment ──────────────────────────────────────
+PORT       = int(os.environ["BENCH_PORT"])
+COOKIE     = os.environ.get("BENCH_COOKIE", "")
+ITERATIONS = int(os.environ["BENCH_ITERATIONS"])
+RESULTS    = os.environ["BENCH_RESULTS_DIR"]
+WARMUP     = int(os.environ.get("BENCH_WARMUP", "10"))
 
-data = b''
+# ── Minimal WebSocket client (RFC 6455) ─────────────────────────────────
+# We avoid external dependencies (websocket-client) so the script works
+# on any system with Python 3.
+class SimpleWebSocket:
+    """Blocking WebSocket client — just enough for JSON text frames."""
+
+    def __init__(self, host, port, path="/ws"):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.settimeout(30)
+        self.sock.connect((host, port))
+        # Perform HTTP upgrade handshake
+        key = base64.b64encode(os.urandom(16)).decode()
+        req = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host}:{port}\r\n"
+            f"Upgrade: websocket\r\n"
+            f"Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            f"Sec-WebSocket-Version: 13\r\n"
+            f"\r\n"
+        )
+        self.sock.sendall(req.encode())
+        # Read HTTP response headers (ends with \r\n\r\n)
+        hdr = b""
+        while b"\r\n\r\n" not in hdr:
+            hdr += self.sock.recv(4096)
+        if b"101" not in hdr.split(b"\r\n")[0]:
+            raise RuntimeError(f"WebSocket upgrade failed: {hdr.decode()}")
+        self._buf = hdr.split(b"\r\n\r\n", 1)[1]  # leftover after headers
+
+    def _recv_exact(self, n):
+        while len(self._buf) < n:
+            self._buf += self.sock.recv(max(4096, n - len(self._buf)))
+        data, self._buf = self._buf[:n], self._buf[n:]
+        return data
+
+    def recv(self):
+        """Receive one text frame and return the payload string."""
+        while True:
+            b0, b1 = struct.unpack("!BB", self._recv_exact(2))
+            masked = b1 & 0x80
+            length = b1 & 0x7F
+            if length == 126:
+                length = struct.unpack("!H", self._recv_exact(2))[0]
+            elif length == 127:
+                length = struct.unpack("!Q", self._recv_exact(8))[0]
+            if masked:
+                mask = self._recv_exact(4)
+            payload = self._recv_exact(length)
+            if masked:
+                payload = bytes(payload[i] ^ mask[i % 4] for i in range(length))
+            opcode = b0 & 0x0F
+            if opcode == 0x1:  # text
+                return payload.decode()
+            if opcode == 0x8:  # close
+                raise RuntimeError("Server closed WebSocket")
+            if opcode == 0x9:  # ping → pong
+                self.send(payload.decode(), opcode=0xA)
+            # Skip other frames (continuation, binary, pong)
+
+    def send(self, text, opcode=0x1):
+        """Send a masked text frame (clients MUST mask)."""
+        payload = text.encode()
+        mask = os.urandom(4)
+        masked = bytes(payload[i] ^ mask[i % 4] for i in range(len(payload)))
+        header = bytes([0x80 | opcode])
+        plen = len(payload)
+        if plen < 126:
+            header += bytes([0x80 | plen])
+        elif plen < 65536:
+            header += bytes([0x80 | 126]) + struct.pack("!H", plen)
+        else:
+            header += bytes([0x80 | 127]) + struct.pack("!Q", plen)
+        self.sock.sendall(header + mask + masked)
+
+    def close(self):
+        try:
+            self.send("", opcode=0x8)
+        except Exception:
+            pass
+        self.sock.close()
+
+# ── Connect and authenticate ────────────────────────────────────────────
+ws = SimpleWebSocket("127.0.0.1", PORT)
+
+if COOKIE:
+    ws.send(json.dumps({"type": "auth", "cookie": COOKIE}))
+    # The server sends: auth-required → auth_ok → session-started.
+    # Read until we see session-started (or auth_error).
+    for _ in range(5):
+        resp = json.loads(ws.recv())
+        if resp.get("type") == "auth_error":
+            print(f"Auth failed: {resp}", file=sys.stderr)
+            sys.exit(1)
+        if resp.get("op") == "session-started":
+            break
+
+def is_result(msg):
+    """Return True if this message is the final eval/load result.
+
+    Eval results look like: {"id":"t1","status":["done"],"value":3}
+    Load results: {"id":"load-1","status":["done"],...}
+    Errors: {"id":"load-1","status":["done","error"],"error":"..."}
+    We match on status containing "done" to catch all terminal messages.
+    """
+    status = msg.get("status", [])
+    return isinstance(status, list) and "done" in status
+
+# ── Warmup ──────────────────────────────────────────────────────────────
+for i in range(WARMUP):
+    ws.send(json.dumps({"op": "eval", "id": f"warmup-{i}", "code": "1 + 1"}))
+    while True:
+        msg = json.loads(ws.recv())
+        if is_result(msg):
+            break
+
+print("warmup_done", flush=True)
+
+# ── Benchmarks ──────────────────────────────────────────────────────────
+benchmarks = [
+    ("1 + 2",          "Minimal expression (1 + 2)",  "repl_Minimal_expression__1___2_"),
+    ("100 factorial",  "Factorial computation",        "repl_Factorial_computation"),
+]
+
+for code, label, filename in benchmarks:
+    times_path = os.path.join(RESULTS, filename + ".txt")
+    with open(times_path, "w") as f:
+        for i in range(ITERATIONS):
+            req = json.dumps({"op": "eval", "id": f"bench-{i}", "code": code})
+            t0 = time.monotonic()
+            ws.send(req)
+            while True:
+                msg = json.loads(ws.recv())
+                if is_result(msg):
+                    break
+            t1 = time.monotonic()
+            f.write(f"{(t1 - t0) * 1000:.3f}\n")
+    print(f"done:{filename}:{label}", flush=True)
+
+# ── Counter spawn benchmark (load fixture first) ───────────────────────
+PROJECT = os.environ.get("BENCH_PROJECT_ROOT", ".")
+ws.send(json.dumps({"op": "load-file", "id": "load-1",
+                     "path": os.path.join(PROJECT, "examples/getting-started/src/counter.bt")}))
 while True:
-    chunk = sock.recv(4096)
-    if not chunk:
+    msg = json.loads(ws.recv())
+    if is_result(msg):
         break
-    data += chunk
-    if b'\n' in data:
-        break
+print("fixture_loaded", flush=True)
 
-sock.close()
-resp = json.loads(data.decode().strip())
-print(json.dumps(resp))
-" 2>/dev/null
-    }
+filename = "repl_counter_spawn"
+times_path = os.path.join(RESULTS, filename + ".txt")
+with open(times_path, "w") as f:
+    for i in range(ITERATIONS):
+        req = json.dumps({"op": "eval", "id": f"spawn-{i}",
+                           "code": "Counter spawn"})
+        t0 = time.monotonic()
+        ws.send(req)
+        while True:
+            msg = json.loads(ws.recv())
+            if is_result(msg):
+                break
+        t1 = time.monotonic()
+        f.write(f"{(t1 - t0) * 1000:.3f}\n")
+print(f"done:{filename}:Counter spawn (fixture loaded)", flush=True)
 
-    # Warmup: send a few eval requests to warm up the JIT and caches
-    echo "🔥 Warming up REPL (5 iterations)..."
-    for i in $(seq 1 5); do
-        repl_eval "1 + 1" "warmup-$i" >/dev/null 2>&1 || true
+ws.close()
+PYEOF
+
+    # Run the WebSocket benchmark script, printing progress as it goes
+    BENCH_PORT="$REPL_PORT" \
+    BENCH_COOKIE="$REPL_COOKIE" \
+    BENCH_ITERATIONS="$ITERATIONS" \
+    BENCH_RESULTS_DIR="$RESULTS_DIR" \
+    BENCH_PROJECT_ROOT="$PROJECT_ROOT" \
+    BENCH_WARMUP=10 \
+    python3 "$WS_BENCH_SCRIPT" | while IFS= read -r line; do
+        case "$line" in
+            warmup_done)
+                echo "🔥 Warmup complete (10 iterations)" ;;
+            fixture_loaded)
+                echo "   Loaded Counter fixture" ;;
+            done:*)
+                label="${line##*:}"
+                echo "   ✅ $label ($ITERATIONS iterations)" ;;
+            *)
+                echo "   $line" ;;
+        esac
     done
 
-    # REPL Benchmark expressions
-    REPL_BENCHMARKS=(
-        "1 + 2:Minimal expression (1 + 2)"
-        "100 factorial:Factorial computation"
-    )
-
-    for entry in "${REPL_BENCHMARKS[@]}"; do
-        CODE="${entry%%:*}"
-        LABEL="${entry##*:}"
-
-        echo "📊 Benchmarking: $LABEL"
-        echo "   Expression: $CODE"
-
-        TIMES="$RESULTS_DIR/repl_$(echo "$LABEL" | tr ' ()' '___').txt"
-        : > "$TIMES"
-
-        for i in $(seq 1 "$ITERATIONS"); do
-            start=$(time_ns)
-            repl_eval "$CODE" "bench-$i" >/dev/null 2>&1
-            end=$(time_ns)
-
-            elapsed_ms "$start" "$end" >> "$TIMES"
-
-            if (( i % 10 == 0 )); then
-                printf "   Progress: %d/%d\r" "$i" "$ITERATIONS"
-            fi
-        done
-
-        echo "   ✅ Complete ($ITERATIONS iterations)                    "
-    done
-
-    # REPL with fixture load: Counter spawn
-    echo "📊 Benchmarking: Counter spawn (with fixture load)"
-    echo "   Loading fixture first..."
-
-    # Load the counter fixture once
-    BENCH_PORT="$REPL_PORT" python3 -c "
-import socket, json, os
-
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.settimeout(30)
-sock.connect(('127.0.0.1', int(os.environ['BENCH_PORT'])))
-
-request = json.dumps({'op': 'load-file', 'id': 'load-1', 'path': 'examples/counter.bt'})
-sock.sendall((request + '\n').encode())
-
-data = b''
-while True:
-    chunk = sock.recv(4096)
-    if not chunk:
-        break
-    data += chunk
-    if b'\n' in data:
-        break
-
-sock.close()
-print(json.loads(data.decode().strip()).get('value', 'loaded'))
-" 2>/dev/null || echo "   ⚠️  Failed to load counter fixture"
-
-    TIMES="$RESULTS_DIR/repl_counter_spawn.txt"
-    : > "$TIMES"
-
-    for i in $(seq 1 "$ITERATIONS"); do
-        start=$(time_ns)
-        repl_eval "Counter spawn" "spawn-$i" >/dev/null 2>&1
-        end=$(time_ns)
-
-        elapsed_ms "$start" "$end" >> "$TIMES"
-
-        if (( i % 10 == 0 )); then
-            printf "   Progress: %d/%d\r" "$i" "$ITERATIONS"
-        fi
-    done
-    echo "   ✅ Complete ($ITERATIONS iterations)                    "
-
-    # Stop REPL
+    # Stop workspace
     echo ""
-    echo "🛑 Stopping REPL..."
-    kill "$REPL_PID" 2>/dev/null || true
-    wait "$REPL_PID" 2>/dev/null || true
-    REPL_PID=""
+    echo "🛑 Stopping workspace..."
+    "$BEAMTALK" workspace stop "$BENCH_WS_NAME" 2>/dev/null || true
+    BENCH_WS_NAME=""
 
     echo ""
     echo "### REPL Expression Results"
     echo ""
     print_header
+    REPL_BENCHMARKS=(
+        "Minimal expression (1 + 2):repl_Minimal_expression__1___2_"
+        "Factorial computation:repl_Factorial_computation"
+        "Counter spawn (fixture loaded):repl_counter_spawn"
+    )
     for entry in "${REPL_BENCHMARKS[@]}"; do
-        LABEL="${entry##*:}"
-        TIMES="$RESULTS_DIR/repl_$(echo "$LABEL" | tr ' ()' '___').txt"
+        LABEL="${entry%%:*}"
+        FNAME="${entry##*:}"
+        TIMES="$RESULTS_DIR/${FNAME}.txt"
         if [ -f "$TIMES" ] && [ -s "$TIMES" ]; then
             print_result "$LABEL" "$TIMES"
         fi
     done
-    TIMES="$RESULTS_DIR/repl_counter_spawn.txt"
-    if [ -f "$TIMES" ] && [ -s "$TIMES" ]; then
-        print_result "Counter spawn (fixture loaded)" "$TIMES"
-    fi
     echo ""
 fi
 
