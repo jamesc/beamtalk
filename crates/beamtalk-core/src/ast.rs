@@ -696,6 +696,7 @@ impl StateDeclaration {
 /// Currently only Primary methods exist. Additional kinds (e.g., AOP-style
 /// before/after/around) may be added in the future if needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MethodKind {
     /// A normal/primary method.
     #[default]

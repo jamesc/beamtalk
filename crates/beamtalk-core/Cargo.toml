@@ -21,6 +21,7 @@ thiserror.workspace = true
 miette.workspace = true
 stacker.workspace = true
 dirs.workspace = true
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 insta.workspace = true
@@ -37,6 +38,9 @@ default = []
 ## Add `beamtalk-core = { features = ["test"] }` to the dependent crate's
 ## `[dev-dependencies]` section to enable this.
 test = []
+## Enable serde Serialize/Deserialize derives on ClassInfo and related types.
+## Used by beamtalk-cli to persist Pass 1 metadata cache for incremental builds.
+serde = ["dep:serde", "ecow/serde"]
 
 [lints]
 workspace = true

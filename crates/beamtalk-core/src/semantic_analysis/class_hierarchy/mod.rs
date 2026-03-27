@@ -29,6 +29,7 @@ mod builtins;
 ///
 /// **DDD Context:** Semantic Analysis — Value Object
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MethodInfo {
     /// Full selector name (e.g., "at:put:", "+", "size").
     pub selector: EcoString,
@@ -80,6 +81,7 @@ impl MethodInfo {
 ///
 /// **References:** ADR 0068 Challenge 4
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SuperclassTypeArg {
     /// The subclass forwards one of its own type params to the superclass.
     ///
@@ -102,6 +104,7 @@ pub enum SuperclassTypeArg {
 ///
 /// **DDD Context:** Semantic Analysis — Value Object
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ClassInfo {
     /// Class name.
