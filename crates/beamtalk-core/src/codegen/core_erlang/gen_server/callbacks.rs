@@ -99,7 +99,7 @@ impl CoreErlangGenerator {
         // (e.g., "bt@exdura@event_store"). This matches how dispatch traces
         // report class names via lookup_class/1.
         let class_name =
-            current_class.map_or_else(|| module_name.clone().into(), |c| c.name.name.clone());
+            current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
 
         // BT-1417: Generate the init return — either plain {ok, State} or
         // dispatch initialize first, then return {ok, NewState} / {stop, Error}.
@@ -764,7 +764,7 @@ impl CoreErlangGenerator {
             module_matches_class(&self.module_name, &c.name.name)
         });
         let class_name =
-            current_class.map_or_else(|| module_name.clone().into(), |c| c.name.name.clone());
+            current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
 
         let doc = docvec![
             "'terminate'/2 = fun (Reason, State) ->",
