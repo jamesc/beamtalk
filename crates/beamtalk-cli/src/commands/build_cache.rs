@@ -527,7 +527,10 @@ mod tests {
         let data = serde_json::to_string(&cache).unwrap();
         fs::write(build_dir.join(CACHE_FILENAME), data).unwrap();
 
-        assert!(matches!(load_cache(&build_dir, None), CacheLoadResult::Miss));
+        assert!(matches!(
+            load_cache(&build_dir, None),
+            CacheLoadResult::Miss
+        ));
     }
 
     #[test]
@@ -623,7 +626,10 @@ mod tests {
     fn test_no_cache_file_returns_miss() {
         let temp = TempDir::new().unwrap();
         let build_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        assert!(matches!(load_cache(&build_dir, None), CacheLoadResult::Miss));
+        assert!(matches!(
+            load_cache(&build_dir, None),
+            CacheLoadResult::Miss
+        ));
     }
 
     #[test]
@@ -632,6 +638,9 @@ mod tests {
         let build_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         fs::write(build_dir.join(CACHE_FILENAME), "not valid json!!!").unwrap();
 
-        assert!(matches!(load_cache(&build_dir, None), CacheLoadResult::Miss));
+        assert!(matches!(
+            load_cache(&build_dir, None),
+            CacheLoadResult::Miss
+        ));
     }
 }
