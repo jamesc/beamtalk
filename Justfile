@@ -247,6 +247,16 @@ search-eval logfile:
     grep 'search_examples' "{{logfile}}" | sed -n 's/.*duration_us=\([0-9]*\).*/\1/p' | awk '{sum+=$1; count++; if($1>max)max=$1; if(min==""||$1<min)min=$1} END {if(count==0){print "min=n/a avg=n/a max=n/a count=0"; exit 0} printf "min=%d avg=%d max=%d count=%d\n", min, sum/count, max, count}'
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Benchmarks
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Run criterion benchmarks for the compiler pipeline
+bench:
+    @echo "📊 Running criterion benchmarks..."
+    @cargo bench -p beamtalk-core
+    @echo "✅ Benchmarks complete (see target/criterion for HTML reports)"
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════
 
