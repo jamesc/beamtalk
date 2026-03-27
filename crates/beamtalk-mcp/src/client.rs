@@ -746,12 +746,14 @@ impl ReplClient {
         &self,
         path: &str,
         include_tests: bool,
+        force: bool,
     ) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "load-project",
             "id": next_msg_id(),
             "path": path,
-            "include_tests": include_tests
+            "include_tests": include_tests,
+            "force": force
         });
         self.send_once(&request).await
     }
@@ -978,6 +980,9 @@ pub struct ReplResponse {
     pub ops: Option<serde_json::Value>,
     /// Protocol and language versions (describe op).
     pub versions: Option<serde_json::Value>,
+    /// Incremental load summary (load-project op, BT-1685).
+    /// E.g. "Reloaded 2 of 7 files (5 unchanged)"
+    pub summary: Option<String>,
 }
 
 impl ReplResponse {

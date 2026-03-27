@@ -24,6 +24,8 @@
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
 -export([set_class_source/2, get_class_source/1]).
+%% BT-1685: File mtime tracking for incremental load-project.
+-export([set_file_mtime/2, get_file_mtimes/0, clear_file_mtimes/0, remove_file_mtime/1]).
 -export([get_package_name/0]).
 % Alias for get_metadata/0
 -export([get/0]).
@@ -54,6 +56,9 @@
     supervised_actors :: [pid()],
     loaded_modules :: #{atom() => string() | undefined},
     class_sources :: #{binary() => string()},
+    %% BT-1685: Map from absolute file path (string) to mtime (erlang:universaltime()).
+    %% Used by incremental load-project to detect changed files.
+    file_mtimes :: #{string() => calendar:datetime()},
     metadata_path :: string() | undefined,
     persist_timer :: reference() | undefined,
     monitor_refs :: #{pid() => reference()}
@@ -228,6 +233,50 @@ get_class_source(ClassName) when is_binary(ClassName) ->
             undefined
     end.
 
+%% @doc Store the mtime for a loaded .bt file (BT-1685).
+%% Called after each successful file load during load-project.
+-spec set_file_mtime(string(), calendar:datetime()) -> ok.
+set_file_mtime(FilePath, Mtime) when is_list(FilePath) ->
+    try
+        gen_server:cast(?MODULE, {set_file_mtime, FilePath, Mtime})
+    catch
+        exit:{noproc, _} ->
+            ok
+    end.
+
+%% @doc Get all tracked file mtimes (BT-1685).
+%% Returns a map from absolute file path to its mtime at last load.
+-spec get_file_mtimes() -> {ok, #{string() => calendar:datetime()}} | {error, not_started}.
+get_file_mtimes() ->
+    try
+        gen_server:call(?MODULE, get_file_mtimes)
+    catch
+        exit:{noproc, _} ->
+            {error, not_started}
+    end.
+
+%% @doc Clear all tracked file mtimes (BT-1685).
+%% Used when force-reloading a project.
+-spec clear_file_mtimes() -> ok.
+clear_file_mtimes() ->
+    try
+        gen_server:cast(?MODULE, clear_file_mtimes)
+    catch
+        exit:{noproc, _} ->
+            ok
+    end.
+
+%% @doc Remove mtime tracking for a single file (BT-1685).
+%% Used when a file is detected as deleted during incremental reload.
+-spec remove_file_mtime(string()) -> ok.
+remove_file_mtime(FilePath) when is_list(FilePath) ->
+    try
+        gen_server:cast(?MODULE, {remove_file_mtime, FilePath})
+    catch
+        exit:{noproc, _} ->
+            ok
+    end.
+
 %%% gen_server callbacks
 
 %% @private
@@ -290,6 +339,7 @@ init(InitialMetadata) ->
         supervised_actors = [],
         loaded_modules = #{},
         class_sources = #{},
+        file_mtimes = #{},
         metadata_path = MetadataPath,
         persist_timer = undefined,
         monitor_refs = #{}
@@ -333,6 +383,8 @@ handle_call({set_class_source, ClassName, Source}, _From, State) ->
     State2 = State#state{class_sources = maps:put(ClassName, Source, Sources)},
     store_state_in_ets(State2),
     {reply, ok, schedule_persist(State2)};
+handle_call(get_file_mtimes, _From, State) ->
+    {reply, {ok, State#state.file_mtimes}, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -379,6 +431,20 @@ handle_cast({unregister_module, Module}, State) ->
     State2 = State#state{loaded_modules = maps:remove(Module, Modules)},
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
+handle_cast({set_file_mtime, FilePath, Mtime}, State) ->
+    Mtimes = State#state.file_mtimes,
+    State2 = State#state{file_mtimes = maps:put(FilePath, Mtime, Mtimes)},
+    store_state_in_ets(State2),
+    {noreply, State2};
+handle_cast(clear_file_mtimes, State) ->
+    State2 = State#state{file_mtimes = #{}},
+    store_state_in_ets(State2),
+    {noreply, State2};
+handle_cast({remove_file_mtime, FilePath}, State) ->
+    Mtimes = State#state.file_mtimes,
+    State2 = State#state{file_mtimes = maps:remove(FilePath, Mtimes)},
+    store_state_in_ets(State2),
+    {noreply, State2};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -528,7 +594,11 @@ load_metadata_from_disk(State) ->
                         % Always start fresh
                         supervised_actors = [],
                         loaded_modules = maps:from_list(ModuleAtoms),
-                        class_sources = ClassSources
+                        class_sources = ClassSources,
+                        %% BT-1685: File mtimes always start fresh — files may
+                        %% have changed between sessions, so first load-project
+                        %% after restart always does a full load.
+                        file_mtimes = #{}
                     }
             catch
                 % Failed to parse, use default

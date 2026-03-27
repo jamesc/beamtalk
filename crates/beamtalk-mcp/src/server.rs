@@ -277,6 +277,11 @@ pub struct LoadProjectParams {
         description = "Whether to also load test files from the test/ directory. Defaults to false."
     )]
     pub include_tests: Option<bool>,
+    /// If true, bypass incremental detection and force recompilation of all files.
+    #[schemars(
+        description = "Force full recompilation of all files, bypassing incremental change detection. Defaults to false."
+    )]
+    pub force: Option<bool>,
 }
 
 /// Parameters for the `lint` MCP tool.
@@ -547,10 +552,11 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("load_project");
         let include_tests = params.include_tests.unwrap_or(false);
-        tracing::debug!(tool = "load_project", path = %params.path, include_tests, "tool invoked");
+        let force = params.force.unwrap_or(false);
+        tracing::debug!(tool = "load_project", path = %params.path, include_tests, force, "tool invoked");
         let response = self
             .client
-            .load_project(&params.path, include_tests)
+            .load_project(&params.path, include_tests, force)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
@@ -613,6 +619,11 @@ impl BeamtalkMcp {
                 "Loaded classes: {}",
                 classes.join(", ")
             )));
+        }
+
+        // BT-1685: Include incremental summary if available.
+        if let Some(summary) = response.summary {
+            parts.push(Content::text(summary));
         }
 
         timer.mark_ok();

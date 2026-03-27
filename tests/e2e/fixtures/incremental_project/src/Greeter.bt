@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Greeter value class for incremental load-project testing (BT-1685)
+
+Value subclass: Greeter
+  field: name = "World"
+
+  greet => "Hello, " ++ self.name
