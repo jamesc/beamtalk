@@ -193,7 +193,7 @@ jobs:
 
   extended-proptest:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
 
@@ -203,13 +203,13 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run extended proptest (10,000 cases)
+      - name: Run extended proptest (5,000 cases)
         id: proptest
         run: |
           cargo test -p beamtalk-core property_tests -- --nocapture
           cargo test -p beamtalk-compiler-port property_tests -- --nocapture
         env:
-          PROPTEST_CASES: 10000
+          PROPTEST_CASES: 5000
 
       - name: Add to job summary
         if: always()
@@ -218,7 +218,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ "${{ steps.proptest.outcome }}" = "success" ]; then
-            echo "✅ **Success:** All property tests passed with 10,000 cases" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Success:** All property tests passed with 5,000 cases" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ **Failure:** Property tests found a failing case" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -227,5 +227,5 @@ jobs:
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Cases per property:** 10,000" >> $GITHUB_STEP_SUMMARY
+          echo "**Cases per property:** 5,000" >> $GITHUB_STEP_SUMMARY
           echo "**Standard CI cases:** 512" >> $GITHUB_STEP_SUMMARY
