@@ -1256,9 +1256,10 @@ impl TypeChecker {
                 provenance,
             } => {
                 // Fast path: if no member is UndefinedObject, return unchanged.
-                let has_nil = members
-                    .iter()
-                    .any(|m| m.as_known().is_some_and(|n| n.as_str() == "UndefinedObject"));
+                let has_nil = members.iter().any(|m| {
+                    m.as_known()
+                        .is_some_and(|n| n.as_str() == "UndefinedObject")
+                });
                 if !has_nil {
                     return ty.clone();
                 }

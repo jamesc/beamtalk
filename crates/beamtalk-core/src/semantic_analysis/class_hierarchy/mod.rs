@@ -328,10 +328,7 @@ impl ClassHierarchy {
     /// Build selector indexes for all classes in the map.
     fn build_all_indexes(
         classes: &HashMap<EcoString, ClassInfo>,
-    ) -> (
-        SelectorIndexMap,
-        SelectorIndexMap,
-    ) {
+    ) -> (SelectorIndexMap, SelectorIndexMap) {
         let mut mi = HashMap::with_capacity(classes.len());
         let mut cmi = HashMap::with_capacity(classes.len());
         for (name, info) in classes {
@@ -1214,7 +1211,11 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 traversed_known = true;
-                if self.method_indexes.get(name.as_str()).is_some_and(|idx| idx.contains_key(selector)) {
+                if self
+                    .method_indexes
+                    .get(name.as_str())
+                    .is_some_and(|idx| idx.contains_key(selector))
+                {
                     return true;
                 }
                 current = info
@@ -1265,7 +1266,11 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 traversed_known = true;
-                if let Some(&idx) = self.method_indexes.get(name.as_str()).and_then(|mi| mi.get(selector)) {
+                if let Some(&idx) = self
+                    .method_indexes
+                    .get(name.as_str())
+                    .and_then(|mi| mi.get(selector))
+                {
                     let method = &info.methods[idx];
                     if method.kind == MethodKind::Primary {
                         return Some(method.clone());
@@ -1303,7 +1308,11 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 traversed_known = true;
-                if let Some(&idx) = self.class_method_indexes.get(name.as_str()).and_then(|mi| mi.get(selector)) {
+                if let Some(&idx) = self
+                    .class_method_indexes
+                    .get(name.as_str())
+                    .and_then(|mi| mi.get(selector))
+                {
                     let method = &info.class_methods[idx];
                     if method.kind == MethodKind::Primary {
                         return Some(method.clone());
@@ -1467,6 +1476,9 @@ impl ClassHierarchy {
     /// Returns a mutable reference to the underlying class map.
     ///
     /// Used by `ProjectIndex` for conflict resolution when re-merging.
+    ///
+    /// **Important:** After mutating the map, call [`rebuild_all_indexes()`](Self::rebuild_all_indexes)
+    /// to keep selector indexes consistent with the class data.
     pub fn classes_mut(&mut self) -> &mut HashMap<EcoString, ClassInfo> {
         &mut self.classes
     }
