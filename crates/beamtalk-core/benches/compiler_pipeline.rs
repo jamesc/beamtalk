@@ -144,8 +144,8 @@ fn bench_codegen(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("codegen", input.name), &module, |b, m| {
             b.iter(|| {
-                let opts = CodegenOptions::new(input.module_name);
-                black_box(generate_module(m, opts))
+                let opts = CodegenOptions::new(input.module_name).with_source(&source);
+                black_box(generate_module(m, opts).expect("codegen must succeed"))
             });
         });
     }
@@ -168,7 +168,7 @@ fn bench_end_to_end(c: &mut Criterion) {
                     let (module, _diags) = parse(tokens);
                     let _analysis = analyse(&module);
                     let opts = CodegenOptions::new(input.module_name).with_source(src);
-                    black_box(generate_module(&module, opts))
+                    black_box(generate_module(&module, opts).expect("compile must succeed"))
                 });
             },
         );
@@ -177,8 +177,9 @@ fn bench_end_to_end(c: &mut Criterion) {
     group.finish();
 }
 
-/// Project benchmark: compile the full SICP Scheme interpreter (7 files, ≈611 lines)
-/// sequentially, simulating a real project build.
+/// Sequential multi-file benchmark: compile the SICP Scheme interpreter files
+/// (7 files, ≈611 lines) independently in sequence. Does not exercise
+/// cross-file resolution — measures per-file compilation cost at project scale.
 fn bench_project(c: &mut Criterion) {
     let fixtures = [
         ("bench_main", "examples/sicp/src/main.bt"),
@@ -198,7 +199,7 @@ fn bench_project(c: &mut Criterion) {
         })
         .collect();
 
-    c.bench_function("project/sicp_7_files", |b| {
+    c.bench_function("sequential/sicp_7_files", |b| {
         b.iter(|| {
             for (module_name, source) in &sources {
                 let tokens = lex_with_eof(source);
@@ -211,8 +212,9 @@ fn bench_project(c: &mut Criterion) {
     });
 }
 
-/// Project benchmark: compile the OTP supervision tree example (4 Actor files, ≈71 lines)
-/// to measure Actor-heavy compilation.
+/// Sequential multi-file benchmark: compile the OTP supervision tree files
+/// (4 Actor files, ≈71 lines) independently in sequence. Measures Actor-heavy
+/// per-file compilation cost without cross-file resolution.
 fn bench_project_otp(c: &mut Criterion) {
     let fixtures = [
         (
@@ -235,7 +237,7 @@ fn bench_project_otp(c: &mut Criterion) {
         })
         .collect();
 
-    c.bench_function("project/otp_tree_4_files", |b| {
+    c.bench_function("sequential/otp_tree_4_files", |b| {
         b.iter(|| {
             for (module_name, source) in &sources {
                 let tokens = lex_with_eof(source);
