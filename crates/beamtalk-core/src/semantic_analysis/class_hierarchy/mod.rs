@@ -21,6 +21,7 @@ use crate::semantic_analysis::SemanticError;
 use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 mod builtins;
 
@@ -336,10 +337,16 @@ impl ClassHierarchy {
     }
 
     /// Create a hierarchy with only built-in classes.
+    ///
+    /// The built-in class map is computed once and cached in a `OnceLock`.
+    /// Each call clones the cached map so callers can add user-defined
+    /// classes without mutating the shared original. (BT-1677)
     #[must_use]
     pub fn with_builtins() -> Self {
+        static BUILTIN_CLASSES: OnceLock<HashMap<EcoString, ClassInfo>> = OnceLock::new();
+        let cached = BUILTIN_CLASSES.get_or_init(builtins::builtin_classes);
         Self {
-            classes: builtins::builtin_classes(),
+            classes: cached.clone(),
         }
     }
 

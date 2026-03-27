@@ -738,11 +738,24 @@ impl Parser {
     }
 
     /// Advances to the next token and returns the previous one.
+    ///
+    /// Uses [`Token::take_kind`] to move the kind out without cloning trivia
+    /// vecs. The token remaining in the vec retains its span and trivia for
+    /// post-advance lookups (e.g., `collect_trailing_comment`) but its kind
+    /// becomes `Eof` (BT-1680).
     pub(super) fn advance(&mut self) -> Token {
-        if !self.is_at_end() {
+        if self.is_at_end() {
+            // At end of input — return the current Eof token.
+            // We cannot look back at tokens[current-1] because take_kind()
+            // already replaced its kind with Eof on the prior advance.
+            let idx = self.current.min(self.tokens.len() - 1);
+            Token::new(TokenKind::Eof, self.tokens[idx].span())
+        } else {
+            let idx = self.current;
             self.current += 1;
+            let kind = self.tokens[idx].take_kind();
+            Token::new(kind, self.tokens[idx].span())
         }
-        self.tokens[self.current - 1].clone()
     }
 
     /// Checks if the current token matches the given kind.

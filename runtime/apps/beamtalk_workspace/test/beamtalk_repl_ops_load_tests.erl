@@ -211,3 +211,106 @@ extract_package_from_module_qualified_test() ->
 
 extract_package_from_module_unqualified_test() ->
     ?assertEqual(undefined, beamtalk_repl_ops_load:extract_package_from_module('bt@counter')).
+
+%%====================================================================
+%% classify_files_by_change/2 (BT-1685)
+%%====================================================================
+
+classify_files_all_new_test() ->
+    %% No previous mtimes — all files should be classified as changed.
+    Files = ["/src/a.bt", "/src/b.bt"],
+    {Changed, Unchanged, Deleted} =
+        beamtalk_repl_ops_load:classify_files_by_change(Files, #{}),
+    ?assertEqual(2, length(Changed)),
+    ?assertEqual(0, length(Unchanged)),
+    ?assertEqual(0, length(Deleted)).
+
+classify_files_unchanged_test() ->
+    %% When mtimes match, files are unchanged.
+    Dir = make_temp_dir(),
+    try
+        PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
+        PathB = write_temp_file(Dir, "b.bt", <<"Object subclass: B">>),
+        MtimeA = beamtalk_repl_ops_load:get_file_mtime(PathA),
+        MtimeB = beamtalk_repl_ops_load:get_file_mtime(PathB),
+        PrevMtimes = #{PathA => MtimeA, PathB => MtimeB},
+        {Changed, Unchanged, Deleted} =
+            beamtalk_repl_ops_load:classify_files_by_change([PathA, PathB], PrevMtimes),
+        ?assertEqual(0, length(Changed)),
+        ?assertEqual(2, length(Unchanged)),
+        ?assertEqual(0, length(Deleted))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+classify_files_deleted_test() ->
+    %% Files in PreviousMtimes but not in current list are deleted.
+    Dir = make_temp_dir(),
+    try
+        PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
+        MtimeA = beamtalk_repl_ops_load:get_file_mtime(PathA),
+        PrevMtimes = #{
+            PathA => MtimeA,
+            "/src/deleted.bt" => {{2025, 1, 1}, {0, 0, 0}}
+        },
+        {Changed, Unchanged, Deleted} =
+            beamtalk_repl_ops_load:classify_files_by_change([PathA], PrevMtimes),
+        ?assertEqual(0, length(Changed)),
+        ?assertEqual(1, length(Unchanged)),
+        ?assertEqual(1, length(Deleted)),
+        ?assertEqual(["/src/deleted.bt"], Deleted)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+classify_files_mixed_test() ->
+    %% Mix of new, changed, unchanged, and deleted files.
+    Dir = make_temp_dir(),
+    try
+        PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
+        PathB = write_temp_file(Dir, "b.bt", <<"Object subclass: B">>),
+        PathC = write_temp_file(Dir, "c.bt", <<"Object subclass: C">>),
+        MtimeA = beamtalk_repl_ops_load:get_file_mtime(PathA),
+        PrevMtimes = #{
+            PathA => MtimeA,
+            %% b.bt has a stale mtime — will be detected as changed
+            PathB => {{2020, 1, 1}, {0, 0, 0}},
+            %% deleted.bt is not in current files
+            "/src/deleted.bt" => {{2025, 1, 1}, {0, 0, 0}}
+        },
+        %% c.bt is new (not in PrevMtimes)
+        {Changed, Unchanged, Deleted} =
+            beamtalk_repl_ops_load:classify_files_by_change(
+                [PathA, PathB, PathC], PrevMtimes
+            ),
+        ?assertEqual(1, length(Unchanged)),
+        ?assert(lists:member(PathA, Unchanged)),
+        ?assertEqual(2, length(Changed)),
+        ?assert(lists:member(PathB, Changed)),
+        ?assert(lists:member(PathC, Changed)),
+        ?assertEqual(1, length(Deleted)),
+        ?assertEqual(["/src/deleted.bt"], Deleted)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%%====================================================================
+%% get_file_mtime/1 (BT-1685)
+%%====================================================================
+
+get_file_mtime_existing_file_test() ->
+    Dir = make_temp_dir(),
+    try
+        Path = write_temp_file(Dir, "test.bt", <<"hello">>),
+        Mtime = beamtalk_repl_ops_load:get_file_mtime(Path),
+        %% Mtime should be a valid datetime tuple
+        ?assertMatch({{_, _, _}, {_, _, _}}, Mtime),
+        %% Should not be the zero tuple
+        ?assertNotEqual({{0, 0, 0}, {0, 0, 0}}, Mtime)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+get_file_mtime_missing_file_test() ->
+    Mtime = beamtalk_repl_ops_load:get_file_mtime("/no/such/file.bt"),
+    ?assertEqual({{0, 0, 0}, {0, 0, 0}}, Mtime).

@@ -24,6 +24,7 @@
 //! Inner scopes shadow outer scopes.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 
 /// Variable binding and scope management for code generation.
 ///
@@ -101,7 +102,18 @@ impl VariableContext {
     /// The leading underscore prevents conflicts with user-defined identifiers.
     pub(super) fn fresh_var(&mut self, base: &str) -> String {
         self.var_counter += 1;
-        format!("_{}{}", base.replace('_', ""), self.var_counter)
+        let counter = self.var_counter;
+        // Pre-allocate: underscore + base (minus underscores) + counter digits.
+        let mut result = String::with_capacity(1 + base.len() + 4);
+        result.push('_');
+        for ch in base.chars() {
+            if ch != '_' {
+                result.push(ch);
+            }
+        }
+        // Write the counter directly instead of using format!.
+        let _ = write!(result, "{counter}");
+        result
     }
 
     /// Converts a Beamtalk identifier to a Core Erlang variable name.
@@ -134,7 +146,7 @@ impl VariableContext {
             name.to_string()
         } else {
             // Capitalize first letter
-            let mut result = String::new();
+            let mut result = String::with_capacity(name.len());
             result.push(first.to_uppercase().next().unwrap());
             result.push_str(chars.as_str());
             result

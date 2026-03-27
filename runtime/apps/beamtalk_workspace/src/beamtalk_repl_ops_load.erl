@@ -22,7 +22,9 @@
     sort_bt_files_by_deps/1,
     structured_file_errors/2,
     format_collision_warning/3,
-    extract_package_from_module/1
+    extract_package_from_module/1,
+    classify_files_by_change/2,
+    get_file_mtime/1
 ]).
 -endif.
 
@@ -32,6 +34,7 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
     PathBin = maps:get(<<"path">>, Params, <<".">>),
     Path = binary_to_list(PathBin),
     IncludeTests = maps:get(<<"include_tests">>, Params, false),
+    Force = maps:get(<<"force">>, Params, false),
     AbsPath = filename:absname(Path),
     ManifestPath = filename:join(AbsPath, "beamtalk.toml"),
     case filelib:is_file(ManifestPath) of
@@ -56,8 +59,32 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
                     false -> []
                 end,
             AllFiles = SrcFiles ++ TestFiles,
-            SortedFiles = sort_bt_files_by_deps(AllFiles),
-            {AllClasses, Errors} = load_files_sequential(SortedFiles, SessionPid),
+            %% BT-1685: Incremental reload — classify files by change status.
+            PreviousMtimes =
+                case Force of
+                    true ->
+                        beamtalk_workspace_meta:clear_file_mtimes(),
+                        #{};
+                    false ->
+                        case beamtalk_workspace_meta:get_file_mtimes() of
+                            {ok, Mtimes} -> Mtimes;
+                            {error, _} -> #{}
+                        end
+                end,
+            {Changed, Unchanged, Deleted} = classify_files_by_change(AllFiles, PreviousMtimes),
+            %% Handle deleted files: unregister their classes and modules.
+            DeletedCount = handle_deleted_files(Deleted, SessionPid),
+            %% Only compile changed/new files, but sort them for dependency order.
+            SortedChanged = sort_bt_files_by_deps(Changed),
+            %% BT-1685: Snapshot mtimes *before* compiling so that if a file
+            %% is modified during compilation we don't record the stale mtime.
+            %% We record these mtimes below after successful load.
+            PreLoadMtimes = snapshot_file_mtimes(SortedChanged),
+            {AllClasses, Errors} = load_files_sequential(SortedChanged, SessionPid),
+            %% BT-1685: Record the pre-load mtimes for all files we attempted.
+            %% activate_module (called within load_files_sequential) already
+            %% triggers hot reload for actors, so no separate hot reload needed.
+            record_file_mtimes_from_snapshot(PreLoadMtimes),
             ClassNames =
                 [
                     case maps:get(name, C, "") of
@@ -66,11 +93,17 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
                     end
                  || C <- AllClasses
                 ],
+            TotalFiles = length(AllFiles) + DeletedCount,
+            ChangedCount = length(Changed),
+            UnchangedCount = length(Unchanged),
             Base = beamtalk_repl_protocol:base_response(Msg),
             Response = Base#{
                 <<"status">> => [<<"done">>],
                 <<"classes">> => ClassNames,
-                <<"errors">> => Errors
+                <<"errors">> => Errors,
+                <<"summary">> => build_incremental_summary(
+                    ChangedCount, TotalFiles, UnchangedCount, DeletedCount
+                )
             },
             iolist_to_binary(json:encode(Response))
     end;
@@ -676,3 +709,160 @@ module_to_class_name_map() ->
         #{},
         Pids
     ).
+
+%%% ===================================================================
+%%% BT-1685: Incremental load-project helpers
+%%% ===================================================================
+
+%% @private
+%% @doc Classify files into changed, unchanged, and deleted lists.
+%%
+%% A file is "changed" if:
+%%   - It is new (not in PreviousMtimes)
+%%   - Its current mtime differs from the stored mtime
+%%
+%% A file is "unchanged" if its mtime matches the stored value.
+%%
+%% "Deleted" files are those present in PreviousMtimes but not in
+%% the current file list.
+-spec classify_files_by_change([string()], #{string() => calendar:datetime()}) ->
+    {Changed :: [string()], Unchanged :: [string()], Deleted :: [string()]}.
+classify_files_by_change(CurrentFiles, PreviousMtimes) ->
+    CurrentSet = sets:from_list(CurrentFiles),
+    {Changed, Unchanged} = lists:partition(
+        fun(Path) ->
+            case maps:find(Path, PreviousMtimes) of
+                {ok, OldMtime} ->
+                    CurrentMtime = get_file_mtime(Path),
+                    CurrentMtime =/= OldMtime;
+                error ->
+                    %% New file — always changed
+                    true
+            end
+        end,
+        CurrentFiles
+    ),
+    %% Find deleted files: were in PreviousMtimes but not in current file list.
+    Deleted = [
+        P
+     || P <- maps:keys(PreviousMtimes),
+        not sets:is_element(P, CurrentSet)
+    ],
+    {Changed, Unchanged, Deleted}.
+
+%% @private
+%% @doc Get the mtime of a file.
+%% Returns {{0,0,0},{0,0,0}} if the file doesn't exist or can't be read.
+-spec get_file_mtime(string()) -> calendar:datetime().
+get_file_mtime(Path) ->
+    case filelib:last_modified(Path) of
+        0 -> {{0, 0, 0}, {0, 0, 0}};
+        Mtime -> Mtime
+    end.
+
+%% @private
+%% @doc Snapshot mtimes for a list of files before loading.
+%% Returns a list of {Path, Mtime} tuples.
+-spec snapshot_file_mtimes([string()]) -> [{string(), calendar:datetime()}].
+snapshot_file_mtimes(Files) ->
+    [{Path, get_file_mtime(Path)} || Path <- Files].
+
+%% @private
+%% @doc Record file mtimes from a pre-load snapshot.
+-spec record_file_mtimes_from_snapshot([{string(), calendar:datetime()}]) -> ok.
+record_file_mtimes_from_snapshot(Snapshot) ->
+    lists:foreach(
+        fun({Path, Mtime}) ->
+            beamtalk_workspace_meta:set_file_mtime(Path, Mtime)
+        end,
+        Snapshot
+    ).
+
+%% @private
+%% @doc Handle files that were previously loaded but have been deleted.
+%% Unregisters their classes from the class registry and unloads their BEAM modules.
+%% Returns the count of deleted files processed.
+-spec handle_deleted_files([string()], pid()) -> non_neg_integer().
+handle_deleted_files([], _SessionPid) ->
+    0;
+handle_deleted_files(DeletedFiles, SessionPid) ->
+    %% Build the module-to-class map once for all deleted files.
+    ModToClass = module_to_class_name_map(),
+    LoadedModules =
+        case beamtalk_workspace_meta:loaded_modules() of
+            {ok, Mods} -> Mods;
+            {error, _} -> []
+        end,
+    lists:foreach(
+        fun(Path) ->
+            ?LOG_INFO(
+                "load-project: file deleted, unloading: ~s",
+                [Path],
+                #{domain => [beamtalk, runtime]}
+            ),
+            %% Find modules loaded from this path and unregister them.
+            unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules),
+            beamtalk_workspace_meta:remove_file_mtime(Path)
+        end,
+        DeletedFiles
+    ),
+    length(DeletedFiles).
+
+%% @private
+%% @doc Find and unload all modules that were loaded from a given source path.
+-spec unload_modules_for_path(string(), pid(), #{atom() => binary()}, [{atom(), string() | undefined}]) -> ok.
+unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules) ->
+    lists:foreach(
+        fun({ModuleName, SourcePath}) ->
+            case SourcePath =:= Path of
+                true ->
+                    %% Try to find class name for this module and remove it.
+                    case maps:find(ModuleName, ModToClass) of
+                        {ok, ClassNameBin} ->
+                            case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
+                                {ok, ClassName} ->
+                                    case beamtalk_runtime_api:remove_class_from_system(ClassName) of
+                                        {ok, _} -> ok;
+                                        {error, _} -> ok
+                                    end;
+                                {error, badarg} ->
+                                    ok
+                            end;
+                        error ->
+                            ok
+                    end,
+                    beamtalk_workspace_meta:unregister_module(ModuleName),
+                    beamtalk_repl_shell:remove_from_tracker(SessionPid, ModuleName);
+                false ->
+                    ok
+            end
+        end,
+        LoadedModules
+    ).
+
+%% @private
+%% @doc Build the incremental summary message.
+%% Format: "Reloaded 2 of 7 files (5 unchanged)" or "Reloaded 2 of 7 files (3 unchanged, 2 deleted)"
+-spec build_incremental_summary(
+    non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()
+) -> binary().
+build_incremental_summary(ChangedCount, TotalFiles, UnchangedCount, DeletedCount) ->
+    BaseParts = [
+        "Reloaded ",
+        integer_to_list(ChangedCount),
+        " of ",
+        integer_to_list(TotalFiles),
+        " files"
+    ],
+    DetailParts =
+        case {UnchangedCount, DeletedCount} of
+            {0, 0} ->
+                [];
+            {U, 0} ->
+                [" (", integer_to_list(U), " unchanged)"];
+            {0, D} ->
+                [" (", integer_to_list(D), " deleted)"];
+            {U, D} ->
+                [" (", integer_to_list(U), " unchanged, ", integer_to_list(D), " deleted)"]
+        end,
+    iolist_to_binary(BaseParts ++ DetailParts).

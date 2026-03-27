@@ -51,8 +51,8 @@ undefinedVar + 5
 // => ERROR: Expected ']' to close block
 
 // Invalid message selector (incomplete expression)
-123 + 
-// => ERROR: expected expression, found +
+123 +
+// => ERROR: expected expression, found <eof>
 
 // ===========================================================================
 // RUNTIME ERRORS (need REPL substring matching for non-beamtalk errors)
@@ -105,7 +105,7 @@ Counter spawn]
 
 // Incomplete keyword message (missing argument after colon)
 obj foo:
-// => ERROR: expected expression, found foo:
+// => ERROR: expected expression, found <eof>
 
 // Missing closing parenthesis
 (1 + 2

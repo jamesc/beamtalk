@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Adder value class for incremental load-project testing (BT-1685)
+
+Value subclass: Adder
+  field: x = 0
+  field: y = 0
+
+  sum => self.x + self.y
