@@ -23,7 +23,7 @@ name = "beamtalk"
 path = "src/main.rs"
 
 [dependencies]
-beamtalk-core.workspace = true
+beamtalk-core = { workspace = true, features = ["serde"] }
 beamtalk-workspace.workspace = true
 clap.workspace = true
 camino.workspace = true

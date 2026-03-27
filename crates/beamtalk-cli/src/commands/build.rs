@@ -233,10 +233,30 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     // Pass 1: compute module names and build the class → module index.
     // This allows later files to resolve cross-file class references (including
     // classes in package subdirectories) during code generation.
+    // BT-1683: Use incremental cache to skip unchanged files in Pass 1.
     let mut file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
+    let manifest_path = if pkg_manifest.is_some() {
+        let p = project_root.join("beamtalk.toml");
+        if p.exists() { Some(p) } else { None }
+    } else {
+        None
+    };
     let (mut class_module_index, class_superclass_index, all_class_infos, cached_asts) =
         if let Some(pkg) = pkg_manifest {
-            build_class_module_index(&source_files, source_root.as_deref(), &pkg.name)?
+            let result = super::build_cache::incremental_build_class_module_index(
+                &source_files,
+                source_root.as_deref(),
+                &pkg.name,
+                &build_dir,
+                manifest_path.as_deref(),
+                force,
+            )?;
+            (
+                result.class_module_index,
+                result.class_superclass_index,
+                result.all_class_infos,
+                result.cached_asts,
+            )
         } else {
             (HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
         };
