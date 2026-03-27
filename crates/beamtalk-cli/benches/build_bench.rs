@@ -36,13 +36,19 @@ fn workspace_root() -> PathBuf {
 fn beamtalk_binary() -> PathBuf {
     let root = workspace_root();
 
+    let bin_name = if cfg!(windows) {
+        "beamtalk.exe"
+    } else {
+        "beamtalk"
+    };
+
     // cargo bench builds in release mode by default
-    let release_bin = root.join("target/release/beamtalk");
+    let release_bin = root.join("target/release").join(bin_name);
     if release_bin.exists() {
         return release_bin;
     }
 
-    let debug_bin = root.join("target/debug/beamtalk");
+    let debug_bin = root.join("target/debug").join(bin_name);
     if debug_bin.exists() {
         return debug_bin;
     }
