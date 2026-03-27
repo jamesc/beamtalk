@@ -865,3 +865,24 @@ encode_test_results_skip_without_class_test() ->
     ?assertEqual(<<"skipped">>, maps:get(<<"reason">>, Entry)),
     %% No class field when not provided
     ?assertEqual(error, maps:find(<<"class">>, Entry)).
+
+encode_test_results_skip_without_reason_test() ->
+    Msg = make_msg(<<"test">>, <<"t-004">>, undefined, false),
+    TestResult = #{
+        '$beamtalk_class' => 'TestResult',
+        total => 1,
+        passed => 0,
+        failed => 0,
+        skipped => 1,
+        duration => 0.0,
+        tests => [
+            #{name => testNoReason, class => 'MyTest', status => skip}
+        ]
+    },
+    Result = beamtalk_repl_protocol:encode_test_results(TestResult, Msg),
+    Decoded = json:decode(Result),
+    Results = maps:get(<<"results">>, Decoded),
+    [Entry] = maps:get(<<"tests">>, Results),
+    ?assertEqual(<<"skip">>, maps:get(<<"status">>, Entry)),
+    %% No reason field when not provided
+    ?assertEqual(error, maps:find(<<"reason">>, Entry)).
