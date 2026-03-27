@@ -281,6 +281,9 @@ impl ClassInfo {
     }
 }
 
+/// Per-class selector index: maps class name → (selector → method vec position).
+type SelectorIndexMap = HashMap<EcoString, HashMap<EcoString, usize>>;
+
 /// Static class hierarchy built during semantic analysis.
 ///
 /// Provides compile-time knowledge of the full class hierarchy,
@@ -288,6 +291,11 @@ impl ClassInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassHierarchy {
     classes: HashMap<EcoString, ClassInfo>,
+    /// Per-class selector → method-vec index for instance methods.
+    /// Enables O(1) selector lookups instead of linear scans.
+    method_indexes: SelectorIndexMap,
+    /// Per-class selector → method-vec index for class methods.
+    class_method_indexes: SelectorIndexMap,
 }
 
 impl ClassHierarchy {
@@ -306,6 +314,44 @@ impl ClassHierarchy {
     #[must_use]
     pub fn is_runtime_protected_class(name: &str) -> bool {
         builtins::is_runtime_protected_class(name)
+    }
+
+    /// Build a selector-to-index map from a method vec.
+    fn build_selector_index(methods: &[MethodInfo]) -> HashMap<EcoString, usize> {
+        let mut index = HashMap::with_capacity(methods.len());
+        for (i, m) in methods.iter().enumerate() {
+            index.entry(m.selector.clone()).or_insert(i);
+        }
+        index
+    }
+
+    /// Build selector indexes for all classes in the map.
+    fn build_all_indexes(
+        classes: &HashMap<EcoString, ClassInfo>,
+    ) -> (
+        SelectorIndexMap,
+        SelectorIndexMap,
+    ) {
+        let mut mi = HashMap::with_capacity(classes.len());
+        let mut cmi = HashMap::with_capacity(classes.len());
+        for (name, info) in classes {
+            mi.insert(name.clone(), Self::build_selector_index(&info.methods));
+            cmi.insert(
+                name.clone(),
+                Self::build_selector_index(&info.class_methods),
+            );
+        }
+        (mi, cmi)
+    }
+
+    /// Rebuild selector indexes for all classes.
+    ///
+    /// Call after bulk mutations (e.g. `add_module_classes`, `merge`, `add_from_beam_meta`)
+    /// so that `resolves_selector` / `find_method` use O(1) lookups.
+    pub fn rebuild_all_indexes(&mut self) {
+        let (mi, cmi) = Self::build_all_indexes(&self.classes);
+        self.method_indexes = mi;
+        self.class_method_indexes = cmi;
     }
 
     /// Build a class hierarchy from built-in definitions and a parsed module.
@@ -333,6 +379,7 @@ impl ClassHierarchy {
     ) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
         let mut hierarchy = Self::with_builtins();
         let diagnostics = hierarchy.add_module_classes(module, stdlib_mode);
+        hierarchy.rebuild_all_indexes();
         (Ok(hierarchy), diagnostics)
     }
 
@@ -343,11 +390,18 @@ impl ClassHierarchy {
     /// classes without mutating the shared original. (BT-1677)
     #[must_use]
     pub fn with_builtins() -> Self {
-        static BUILTIN_CLASSES: OnceLock<HashMap<EcoString, ClassInfo>> = OnceLock::new();
-        let cached = BUILTIN_CLASSES.get_or_init(builtins::builtin_classes);
-        Self {
-            classes: cached.clone(),
-        }
+        static BUILTIN_HIERARCHY: OnceLock<ClassHierarchy> = OnceLock::new();
+        BUILTIN_HIERARCHY
+            .get_or_init(|| {
+                let classes = builtins::builtin_classes();
+                let (method_indexes, class_method_indexes) = Self::build_all_indexes(&classes);
+                Self {
+                    classes,
+                    method_indexes,
+                    class_method_indexes,
+                }
+            })
+            .clone()
     }
 
     /// Look up a class by name.
@@ -478,10 +532,19 @@ impl ClassHierarchy {
     /// in the hierarchy (AST-derived entries from `build()` are authoritative
     /// over cached BEAM metadata, which may be stale during redefinition).
     pub fn add_from_beam_meta(&mut self, classes: Vec<ClassInfo>) {
+        let mut changed = false;
         for info in classes {
             if !Self::is_builtin_class(&info.name) {
-                self.classes.entry(info.name.clone()).or_insert(info);
+                if let std::collections::hash_map::Entry::Vacant(e) =
+                    self.classes.entry(info.name.clone())
+                {
+                    e.insert(info);
+                    changed = true;
+                }
             }
+        }
+        if changed {
+            self.rebuild_all_indexes();
         }
     }
 
@@ -548,6 +611,7 @@ impl ClassHierarchy {
                 }
             }
         }
+        self.rebuild_all_indexes();
     }
 
     /// Returns the ordered superclass chain for a class (excluding the class itself).
@@ -751,11 +815,9 @@ impl ClassHierarchy {
     /// define their own factory constructors (e.g. `class new:` on `AtomicCounter`).
     #[must_use]
     pub fn has_own_class_method(&self, class_name: &str, selector: &str) -> bool {
-        self.classes.get(class_name).is_some_and(|info| {
-            info.class_methods
-                .iter()
-                .any(|m| m.selector.as_str() == selector)
-        })
+        self.class_method_indexes
+            .get(class_name)
+            .is_some_and(|idx| idx.contains_key(selector))
     }
 
     /// BT-1528: After all classes in a module are registered, propagate `is_value`
@@ -789,6 +851,9 @@ impl ClassHierarchy {
                     Self::add_value_auto_methods(class, &mut info.methods, &mut info.class_methods);
                 }
             }
+        }
+        if !classes_to_fix.is_empty() {
+            self.rebuild_all_indexes();
         }
     }
 
@@ -860,6 +925,7 @@ impl ClassHierarchy {
                 );
             }
         }
+        self.rebuild_all_indexes();
     }
 
     /// Check if the superclass chain includes Value.
@@ -1148,7 +1214,7 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 traversed_known = true;
-                if info.methods.iter().any(|m| m.selector.as_str() == selector) {
+                if self.method_indexes.get(name.as_str()).is_some_and(|idx| idx.contains_key(selector)) {
                     return true;
                 }
                 current = info
@@ -1199,12 +1265,11 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 traversed_known = true;
-                if let Some(method) = info
-                    .methods
-                    .iter()
-                    .find(|m| m.selector.as_str() == selector && m.kind == MethodKind::Primary)
-                {
-                    return Some(method.clone());
+                if let Some(&idx) = self.method_indexes.get(name.as_str()).and_then(|mi| mi.get(selector)) {
+                    let method = &info.methods[idx];
+                    if method.kind == MethodKind::Primary {
+                        return Some(method.clone());
+                    }
                 }
                 current = info
                     .superclass
@@ -1238,12 +1303,11 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 traversed_known = true;
-                if let Some(method) = info
-                    .class_methods
-                    .iter()
-                    .find(|m| m.selector.as_str() == selector && m.kind == MethodKind::Primary)
-                {
-                    return Some(method.clone());
+                if let Some(&idx) = self.class_method_indexes.get(name.as_str()).and_then(|mi| mi.get(selector)) {
+                    let method = &info.class_methods[idx];
+                    if method.kind == MethodKind::Primary {
+                        return Some(method.clone());
+                    }
                 }
                 current = info
                     .superclass
@@ -1451,11 +1515,16 @@ impl ClassHierarchy {
     /// User-defined classes from `other` overwrite any existing entry with the
     /// same name, allowing incremental file updates.
     pub fn merge(&mut self, other: &ClassHierarchy) {
+        let mut changed = false;
         for (name, info) in &other.classes {
             if builtins::is_builtin_class(name) {
                 continue;
             }
             self.classes.insert(name.clone(), info.clone());
+            changed = true;
+        }
+        if changed {
+            self.rebuild_all_indexes();
         }
     }
 
@@ -1466,6 +1535,8 @@ impl ClassHierarchy {
         for name in names {
             if !builtins::is_builtin_class(name) {
                 self.classes.remove(name);
+                self.method_indexes.remove(name);
+                self.class_method_indexes.remove(name);
             }
         }
     }
