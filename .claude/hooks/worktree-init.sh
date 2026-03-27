@@ -39,8 +39,11 @@ git config core.hooksPath .githooks 2>/dev/null || true
 
 # --- Hex bridge proxy for cloud environments ---
 # Erlang's httpc can't negotiate TLS through egress proxies that do MITM
-# interception. Start a local HTTP-to-HTTPS bridge so rebar3/hex can fetch
-# packages. Only starts when HTTP_PROXY is set and the proxy uses auth.
+# interception, AND doesn't respect no_proxy for localhost. Start a local
+# HTTP-to-HTTPS bridge so rebar3/hex can fetch packages, then:
+#   1. Set HEX_CDN (rebar3's built-in repo URL override) to point at the bridge
+#   2. Install a rebar3 wrapper that strips proxy env vars so httpc connects
+#      directly to the bridge on localhost instead of routing through the proxy
 if [[ -n "${HTTP_PROXY:-}" ]] && [[ "${HTTP_PROXY}" == *"@"* ]]; then
   HEX_BRIDGE_PORT="${HEX_BRIDGE_PORT:-18081}"
   HEX_BRIDGE_SCRIPT="${CLAUDE_PROJECT_DIR:-${PWD}}/scripts/hex-bridge-proxy.py"
@@ -51,16 +54,24 @@ if [[ -n "${HTTP_PROXY:-}" ]] && [[ "${HTTP_PROXY}" == *"@"* ]]; then
     sleep 1
     echo "Started hex-bridge proxy on localhost:${HEX_BRIDGE_PORT}"
   fi
-  # Always configure rebar3 to use the bridge (project-local, not global)
-  HEX_BRIDGE_REBAR="${CLAUDE_PROJECT_DIR:-${PWD}}/runtime/hex_bridge_rebar.config"
-  cat > "${HEX_BRIDGE_REBAR}" << REBAR_CONF
-{hex, [{repos, [
-    #{name => <<"hexpm">>,
-      repo_url => <<"http://127.0.0.1:${HEX_BRIDGE_PORT}">>,
-      repo_verify_origin => false}
-]}]}.
-REBAR_CONF
-  export REBAR_GLOBAL_CONFIG_DIR="${CLAUDE_PROJECT_DIR:-${PWD}}/runtime"
+
+  # Tell rebar3 to fetch packages from the local bridge (not hex.pm directly)
+  export HEX_CDN="http://127.0.0.1:${HEX_BRIDGE_PORT}"
+
+  # Install a rebar3 wrapper that strips proxy env vars before calling the real
+  # rebar3. Erlang's httpc ignores no_proxy, so without this it routes even
+  # localhost requests through the egress proxy (which returns 407).
+  REAL_REBAR3="$(command -v rebar3)"
+  WRAPPER_DIR="${CLAUDE_PROJECT_DIR:-${PWD}}/.claude/bin"
+  mkdir -p "${WRAPPER_DIR}"
+  cat > "${WRAPPER_DIR}/rebar3" << WRAPPER
+#!/usr/bin/env bash
+export HEX_CDN="http://127.0.0.1:${HEX_BRIDGE_PORT}"
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+exec "${REAL_REBAR3}" "\$@"
+WRAPPER
+  chmod +x "${WRAPPER_DIR}/rebar3"
+  export PATH="${WRAPPER_DIR}:${PATH}"
 fi
 
 GIT_DIR_FILE="${PWD}/.git"

@@ -135,3 +135,7 @@ _site/
 .claude/commands/
 # Session-start hook is copied from skills-repo at runtime
 .claude/hooks/session-start.sh
+# Generated rebar3 wrapper (created by worktree-init.sh hex-bridge setup)
+.claude/bin/
+# Generated hex-bridge rebar config (created by worktree-init.sh)
+runtime/hex_bridge_rebar.config
