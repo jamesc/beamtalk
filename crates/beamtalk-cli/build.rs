@@ -3,7 +3,7 @@
 
 //! Build script for beamtalk-cli.
 //!
-//! Injects the BEAMTALK_VERSION compile-time env var from VERSION + git state.
+//! Injects the `BEAMTALK_VERSION` compile-time env var from VERSION + git state.
 //! The Erlang runtime is built by `just build-erlang`, not here.
 
 use std::env;
