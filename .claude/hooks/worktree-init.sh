@@ -61,8 +61,10 @@ if [[ -n "${HTTP_PROXY:-}" ]] && [[ "${HTTP_PROXY}" == *"@"* ]]; then
   # Install a rebar3 wrapper that strips proxy env vars before calling the real
   # rebar3. Erlang's httpc ignores no_proxy, so without this it routes even
   # localhost requests through the egress proxy (which returns 407).
-  REAL_REBAR3="$(command -v rebar3)"
   WRAPPER_DIR="${CLAUDE_PROJECT_DIR:-${PWD}}/.claude/bin"
+  # Resolve the real rebar3 with the wrapper dir stripped from PATH to avoid
+  # an infinite exec loop if the hook runs twice in the same session.
+  REAL_REBAR3="$(PATH="${PATH//${WRAPPER_DIR}:/}" command -v rebar3)"
   mkdir -p "${WRAPPER_DIR}"
   cat > "${WRAPPER_DIR}/rebar3" << WRAPPER
 #!/usr/bin/env bash
