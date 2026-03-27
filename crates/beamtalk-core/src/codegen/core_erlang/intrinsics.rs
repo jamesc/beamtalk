@@ -745,11 +745,7 @@ impl CoreErlangGenerator {
             .collect();
         let apply_args = join(arg_var_docs.clone(), &Document::Str(", "));
 
-        let send_list = docvec![
-            "[",
-            join(arg_var_docs, &Document::Str(", ")),
-            "]"
-        ];
+        let send_list = docvec!["[", join(arg_var_docs, &Document::Str(", ")), "]"];
 
         parts.push(docvec![
             "case call 'erlang':'is_function'(",
@@ -862,7 +858,8 @@ impl CoreErlangGenerator {
         if self.context == CodeGenContext::ValueType && !self.in_loop_body {
             let body = super::util::collect_body_exprs(&block.body);
 
-            let mut parts: Vec<Document<'static>> = Vec::with_capacity(arg_bindings.len() + body.len());
+            let mut parts: Vec<Document<'static>> =
+                Vec::with_capacity(arg_bindings.len() + body.len());
             parts.extend(arg_bindings);
 
             for (i, expr) in body.iter().enumerate() {
