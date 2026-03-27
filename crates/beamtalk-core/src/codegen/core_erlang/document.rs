@@ -214,6 +214,19 @@ enum Mode {
     Break,
 }
 
+/// Pre-allocated indentation buffer. Lines are indented at most this many spaces;
+/// deeper indentation falls back to a per-call allocation (rare in practice).
+const INDENT_BUF: &str = "                                                                                                                                ";
+
+/// Convert `usize` to `isize`, saturating at `isize::MAX`.
+///
+/// Used for column tracking in the renderer. String lengths never exceed
+/// `isize::MAX` in practice, but we handle it gracefully.
+#[inline]
+fn len_as_isize(len: usize) -> isize {
+    isize::try_from(len).unwrap_or(isize::MAX)
+}
+
 impl Document<'_> {
     /// Renders the document to a string using the default line width.
     ///
@@ -239,6 +252,12 @@ impl Document<'_> {
         let mut output = String::new();
         let mut col = 0_isize;
 
+        // Lazy indentation: instead of writing spaces immediately after a
+        // newline, we record the pending indent and only emit it when actual
+        // text content follows. This avoids generating trailing whitespace
+        // on blank lines, eliminating the need for a post-processing pass.
+        let mut pending_indent: Option<isize> = None;
+
         // Work list: (indent, mode, document_ref).
         // Elements are processed front-to-back; items pushed with push_front
         // are processed next, allowing us to expand composite documents in order.
@@ -249,16 +268,24 @@ impl Document<'_> {
             match doc {
                 Document::Nil => {}
                 Document::Str(s) => {
+                    if let Some(ind) = pending_indent.take() {
+                        write_indent(&mut output, ind);
+                    }
                     output.push_str(s);
-                    col += isize::try_from(s.len()).unwrap_or(isize::MAX);
+                    col += len_as_isize(s.len());
                 }
                 Document::String(s) => {
+                    if let Some(ind) = pending_indent.take() {
+                        write_indent(&mut output, ind);
+                    }
                     output.push_str(s.as_str());
-                    col += isize::try_from(s.len()).unwrap_or(isize::MAX);
+                    col += len_as_isize(s.len());
                 }
                 Document::Line => {
+                    // Trim any trailing whitespace before emitting newline.
+                    trim_trailing_spaces(&mut output);
                     output.push('\n');
-                    write_indent(&mut output, indent);
+                    pending_indent = Some(indent);
                     col = indent;
                 }
                 Document::Nest(extra, inner) => {
@@ -275,79 +302,122 @@ impl Document<'_> {
                     // their current modes, to correctly account for trailing
                     // siblings that share the same line.
                     let remaining = width - col;
-                    let fits_flat = {
-                        let mut check: VecDeque<(Mode, &Document<'_>)> = VecDeque::new();
-                        check.push_back((Mode::Flat, inner.as_ref()));
-                        for (_, cont_mode, cont_doc) in &work {
-                            check.push_back((*cont_mode, cont_doc));
-                        }
-                        fits(remaining, check)
-                    };
+                    let fits_flat = fits_deque(remaining, inner.as_ref(), Mode::Flat, &work);
                     let child_mode = if fits_flat { Mode::Flat } else { Mode::Break };
                     work.push_front((indent, child_mode, inner));
                 }
                 Document::Break { broken, unbroken } => match mode {
                     Mode::Break => {
+                        if let Some(ind) = pending_indent.take() {
+                            write_indent(&mut output, ind);
+                        }
                         output.push_str(broken);
+                        // Trim any trailing whitespace before emitting newline,
+                        // matching the original post-processing behavior.
+                        trim_trailing_spaces(&mut output);
                         output.push('\n');
-                        write_indent(&mut output, indent);
+                        pending_indent = Some(indent);
                         col = indent;
                     }
                     Mode::Flat => {
+                        if let Some(ind) = pending_indent.take() {
+                            write_indent(&mut output, ind);
+                        }
                         output.push_str(unbroken);
-                        col += isize::try_from(unbroken.len()).unwrap_or(isize::MAX);
+                        col += len_as_isize(unbroken.len());
                     }
                 },
             }
         }
 
-        // Strip trailing whitespace from every line.
-        let trimmed: String = output
-            .split('\n')
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n");
-        trimmed
+        output
     }
 }
 
-/// Returns `true` if the work-list (rendered with each item in its given mode)
-/// fits within `remaining` columns before the next mandatory line break.
+/// Returns `true` if rendering `doc` in `doc_mode` followed by the continuation
+/// items in `continuation` fits within `remaining` columns before the next
+/// mandatory line break.
 ///
-/// Uses an iterative work-list to avoid recursion overflow on deeply nested docs.
-fn fits(mut remaining: isize, mut work: std::collections::VecDeque<(Mode, &Document<'_>)>) -> bool {
-    while let Some((mode, current)) = work.pop_front() {
+/// This avoids copying the entire work deque into a new collection. Instead it
+/// walks the document using a small local stack, then lazily iterates the
+/// continuation deque only if the primary document didn't already determine
+/// the result (which it almost always does — groups typically contain a Line
+/// or Break within a few nodes).
+fn fits_deque(
+    remaining: isize,
+    doc: &Document<'_>,
+    doc_mode: Mode,
+    continuation: &std::collections::VecDeque<(isize, Mode, &Document<'_>)>,
+) -> bool {
+    // Small local stack for expanding documents without cloning the deque.
+    let mut local: Vec<(Mode, &Document<'_>)> = Vec::new();
+    local.push((doc_mode, doc));
+
+    // Index into continuation (front-to-back iteration order).
+    let mut cont_idx = 0;
+    let mut remaining = remaining;
+
+    loop {
+        // Try to get the next item from the local stack, or from continuation.
+        let (mode, current) = if let Some(item) = local.pop() {
+            item
+        } else {
+            // Local stack exhausted — pull next continuation item.
+            if cont_idx >= continuation.len() {
+                return remaining >= 0;
+            }
+            let (_, cont_mode, cont_doc) = continuation[cont_idx];
+            cont_idx += 1;
+            (cont_mode, cont_doc)
+        };
+
         if remaining < 0 {
             return false;
         }
+
         match current {
             Document::Nil => {}
-            Document::Str(s) => remaining -= isize::try_from(s.len()).unwrap_or(isize::MAX),
-            Document::String(s) => remaining -= isize::try_from(s.len()).unwrap_or(isize::MAX),
-            // A mandatory Line always resets the column — content after it is fine.
+            Document::Str(s) => remaining -= len_as_isize(s.len()),
+            Document::String(s) => remaining -= len_as_isize(s.len()),
             Document::Line => return true,
             Document::Break { unbroken, .. } => match mode {
-                Mode::Flat => remaining -= isize::try_from(unbroken.len()).unwrap_or(isize::MAX),
-                // A break in break mode is a newline — remaining space resets.
+                Mode::Flat => remaining -= len_as_isize(unbroken.len()),
                 Mode::Break => return true,
             },
-            Document::Nest(_, inner) => work.push_front((mode, inner)),
+            Document::Nest(_, inner) => local.push((mode, inner)),
             Document::Vec(docs) => {
                 for d in docs.iter().rev() {
-                    work.push_front((mode, d));
+                    local.push((mode, d));
                 }
             }
-            // Nested groups are also tried flat when checking fits.
-            Document::Group(inner) => work.push_front((Mode::Flat, inner)),
+            Document::Group(inner) => local.push((Mode::Flat, inner)),
         }
     }
-    remaining >= 0
 }
 
-/// Writes `indent` spaces to the output string.
+/// Removes trailing ASCII spaces and tabs from the end of the output string.
+///
+/// Called just before emitting a newline to ensure no line has trailing
+/// whitespace, matching the original post-processing behavior.
+#[inline]
+fn trim_trailing_spaces(output: &mut String) {
+    let trimmed_len = output.trim_end_matches([' ', '\t']).len();
+    output.truncate(trimmed_len);
+}
+
+/// Writes `indent` spaces to the output string using a pre-allocated buffer.
 fn write_indent(output: &mut String, indent: isize) {
-    for _ in 0..indent {
-        output.push(' ');
+    // SAFETY: `indent.max(0)` is non-negative, so the cast to `usize` cannot lose sign.
+    #[allow(clippy::cast_sign_loss)]
+    let n = indent.max(0) as usize;
+    if n <= INDENT_BUF.len() {
+        output.push_str(&INDENT_BUF[..n]);
+    } else {
+        // Rare: extremely deep nesting beyond the buffer.
+        output.push_str(INDENT_BUF);
+        for _ in INDENT_BUF.len()..n {
+            output.push(' ');
+        }
     }
 }
 
