@@ -25,6 +25,11 @@ dirs.workspace = true
 [dev-dependencies]
 insta.workspace = true
 proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "compiler_pipeline"
+harness = false
 
 [features]
 default = []
