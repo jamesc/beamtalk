@@ -163,7 +163,7 @@ impl CoreErlangGenerator {
                                                 line(),
                                                 docvec![
                                                     "'__class_mod__' => '",
-                                                    Document::String(module_name.clone()),
+                                                    Document::String(module_name.to_string()),
                                                     "'"
                                                 ],
                                                 Document::Vec(own_state_fields),
@@ -219,7 +219,7 @@ impl CoreErlangGenerator {
                                 line(),
                                 docvec![
                                     "'__class_mod__' => '",
-                                    Document::String(module_name.clone()),
+                                    Document::String(module_name.to_string()),
                                     "'"
                                 ],
                                 Document::Vec(initial_state_fields),
@@ -406,7 +406,7 @@ impl CoreErlangGenerator {
                                     line(),
                                     docvec![
                                         "case call '",
-                                        Document::String(module_name),
+                                        Document::Eco(module_name),
                                         "':'safe_dispatch'('initialize', [], State) of",
                                     ],
                                     nest(
@@ -459,7 +459,7 @@ impl CoreErlangGenerator {
             // Use safe_dispatch for error isolation; discard result on error
             docvec![
                 "case call '",
-                Document::String(module_name.to_owned()),
+                Document::String(module_name.to_string()),
                 "':'safe_dispatch'(CastSelector, CastArgs, State) of"
             ],
             nest(
@@ -593,7 +593,7 @@ impl CoreErlangGenerator {
             // Use safe_dispatch for error isolation per BT-29
             docvec![
                 "case call '",
-                Document::String(module_name.to_owned()),
+                Document::String(module_name.to_string()),
                 "':'safe_dispatch'(Selector, Args, State) of"
             ],
             nest(
@@ -662,7 +662,7 @@ impl CoreErlangGenerator {
                         line(),
                         docvec![
                             "case call '",
-                            Document::String(module_name),
+                            Document::Eco(module_name),
                             "':'safe_dispatch'('handleInfo:', [Msg], State) of",
                         ],
                         nest(
@@ -788,7 +788,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "let _TermDisp = try call '",
-                        Document::String(module_name.clone()),
+                        Document::String(module_name.to_string()),
                         "':'dispatch'('terminate:', [Reason], Self, State)"
                     ],
                     nest(

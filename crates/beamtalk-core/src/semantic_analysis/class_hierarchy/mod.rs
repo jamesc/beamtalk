@@ -576,6 +576,7 @@ impl ClassHierarchy {
     /// definition is registered. The conflict detector handles reporting errors
     /// for duplicates.
     pub fn register_extensions(&mut self, index: &ExtensionIndex) {
+        let mut changed = false;
         for (key, locations) in index.entries() {
             // Only register the first definition; conflicts are handled separately.
             let Some(first) = locations.first() else {
@@ -605,10 +606,13 @@ impl ClassHierarchy {
                 let already_exists = methods.iter().any(|m| m.selector == key.selector);
                 if !already_exists {
                     methods.push(method_info);
+                    changed = true;
                 }
             }
         }
-        self.rebuild_all_indexes();
+        if changed {
+            self.rebuild_all_indexes();
+        }
     }
 
     /// Returns the ordered superclass chain for a class (excluding the class itself).

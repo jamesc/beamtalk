@@ -61,7 +61,7 @@ impl CoreErlangGenerator {
         // fieldAt:, fieldAt:put:, perform:, perform:withArguments:) are now
         // inherited from Object via hierarchy walking.
 
-        let mut entry_docs: Vec<Document<'static>> = Vec::new();
+        let mut entry_docs: Vec<Document<'static>> = Vec::with_capacity(methods.len());
         for (i, (name, arity)) in methods.iter().enumerate() {
             if i > 0 {
                 entry_docs.push(Document::Str(", "));
@@ -130,7 +130,7 @@ impl CoreErlangGenerator {
 
         // ADR 0006 Phase 1b: Reflection methods are inherited from Object.
 
-        let mut method_list_docs: Vec<Document<'static>> = Vec::new();
+        let mut method_list_docs: Vec<Document<'static>> = Vec::with_capacity(methods.len());
         for (i, name) in methods.iter().enumerate() {
             if i > 0 {
                 method_list_docs.push(Document::Str(", "));
@@ -217,7 +217,7 @@ impl CoreErlangGenerator {
                     // Core Erlang try uses simple variable patterns in of/catch, not case-style
                     docvec![
                         "try call '",
-                        Document::String(module_name.clone()),
+                        Document::Eco(module_name.clone()),
                         "':'dispatch'(Selector, Args, Self, State)"
                     ],
                     line(),
@@ -524,7 +524,7 @@ impl CoreErlangGenerator {
 
         let dnu_dispatch = docvec![
             "call '",
-            Document::String(module_name.clone()),
+            Document::Eco(module_name.clone()),
             "':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)"
         ];
 
@@ -554,7 +554,7 @@ impl CoreErlangGenerator {
             "let DnuSelector = 'doesNotUnderstand:args:' in",
             line(),
             "let Methods = call '",
-            Document::String(module_name.clone()),
+            Document::Eco(module_name.clone()),
             "':'method_table'() in",
             line(),
             "case call 'maps':'is_key'(DnuSelector, Methods) of",

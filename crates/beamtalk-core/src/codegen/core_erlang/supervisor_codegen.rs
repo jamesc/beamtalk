@@ -72,7 +72,7 @@ impl CoreErlangGenerator {
             class_method_exports = docvec![
                 class_method_exports,
                 ", 'class_",
-                Document::String(m.selector.name().to_string()),
+                Document::Eco(m.selector.name()),
                 "'/",
                 Document::String(arity.to_string()),
             ];
@@ -91,7 +91,7 @@ impl CoreErlangGenerator {
         // Module header
         docs.push(docvec![
             "module '",
-            Document::String(module_name.clone()),
+            Document::Eco(module_name.clone()),
             "' ['start_link'/0, 'init'/1",
             class_method_exports,
             ", 'superclass'/0, '__beamtalk_meta'/0, 'register_class'/0]\n",
@@ -147,7 +147,7 @@ impl CoreErlangGenerator {
             class_method_exports = docvec![
                 class_method_exports,
                 ", 'class_",
-                Document::String(m.selector.name().to_string()),
+                Document::Eco(m.selector.name()),
                 "'/",
                 Document::String(arity.to_string()),
             ];
@@ -168,7 +168,7 @@ impl CoreErlangGenerator {
         // (SupMod:'childClass'() at `beamtalk_supervisor.erl (startChild/1,2)`)
         docs.push(docvec![
             "module '",
-            Document::String(module_name.clone()),
+            Document::Eco(module_name.clone()),
             "' ['start_link'/0, 'init'/1, 'childClass'/0",
             class_method_exports,
             ", 'superclass'/0, '__beamtalk_meta'/0, 'register_class'/0]\n",

@@ -602,7 +602,7 @@ impl CoreErlangGenerator {
             Ok(docvec![
                 "'new'/0 = fun () ->\n",
                 "    call '",
-                Document::String(module_name),
+                Document::Eco(module_name),
                 "':'class_new'('undefined', 'undefined')\n",
                 "\n",
             ])
@@ -969,7 +969,7 @@ impl CoreErlangGenerator {
         body: &[&Expression],
         has_nlr: bool,
     ) -> Result<Vec<Document<'static>>> {
-        let mut body_parts: Vec<Document<'static>> = Vec::new();
+        let mut body_parts: Vec<Document<'static>> = Vec::with_capacity(body.len());
         let body_len = body.len();
 
         for (i, expr) in body.iter().enumerate() {
