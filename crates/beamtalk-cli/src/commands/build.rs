@@ -7,19 +7,159 @@ use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
 use crate::commands::util;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::time::SystemTime;
 use tracing::{debug, error, info, instrument, warn};
 
 use super::app_file;
 use super::manifest;
 
+/// Result of per-file change detection.
+///
+/// Compares each `.bt` source file's modification time against its corresponding
+/// `.beam` output to determine which files need recompilation.
+#[derive(Debug)]
+#[allow(clippy::struct_field_names)] // `_files` postfix is clearer for this domain struct
+pub(crate) struct ChangeDetectionResult {
+    /// Source files that need (re)compilation — either modified since last build,
+    /// newly added (no `.beam` exists), or included because of `--force`.
+    pub changed_files: Vec<Utf8PathBuf>,
+    /// Source files whose `.beam` output is up-to-date.
+    pub unchanged_files: Vec<Utf8PathBuf>,
+    /// `.beam` files in the build directory with no corresponding `.bt` source.
+    /// These are reported as warnings but not deleted (users may have manually
+    /// placed files or renamed sources intentionally).
+    pub orphaned_beam_files: Vec<Utf8PathBuf>,
+}
+
+/// Detect which source files have changed relative to their compiled `.beam` output.
+///
+/// For each `.bt` source file, computes the expected `.beam` filename in `build_dir`
+/// using the same module naming scheme as the build pipeline. A file is considered
+/// changed if:
+/// - Its `.beam` does not exist (new file or first build)
+/// - Its mtime is newer than the `.beam` mtime
+///
+/// Also detects orphaned `.beam` files (no corresponding `.bt` source) and reports
+/// them as warnings.
+///
+/// When `force` is true, all source files are treated as changed regardless of mtime.
+pub(crate) fn detect_changes(
+    source_files: &[Utf8PathBuf],
+    build_dir: &Utf8Path,
+    file_module_pairs: &[(Utf8PathBuf, String, Utf8PathBuf)],
+    force: bool,
+) -> ChangeDetectionResult {
+    if force {
+        info!("Force build requested — all files will be recompiled");
+        return ChangeDetectionResult {
+            changed_files: source_files.to_vec(),
+            unchanged_files: Vec::new(),
+            orphaned_beam_files: Vec::new(),
+        };
+    }
+
+    let mut changed_files = Vec::new();
+    let mut unchanged_files = Vec::new();
+
+    // Build a set of expected .beam filenames from source files
+    let mut expected_beam_stems: HashSet<String> = HashSet::new();
+
+    for (source_file, module_name, _core_file) in file_module_pairs {
+        let beam_file = build_dir.join(format!("{module_name}.beam"));
+        expected_beam_stems.insert(format!("{module_name}.beam"));
+
+        if !beam_file.exists() {
+            debug!(file = %source_file, "No .beam output — needs compilation");
+            changed_files.push(source_file.clone());
+            continue;
+        }
+
+        // Compare mtimes: source newer than beam → needs recompilation
+        let source_mtime = mtime_of(source_file);
+        let beam_mtime = mtime_of(&beam_file);
+
+        match (source_mtime, beam_mtime) {
+            (Some(src_t), Some(beam_t)) if src_t > beam_t => {
+                debug!(file = %source_file, "Source newer than .beam — needs recompilation");
+                changed_files.push(source_file.clone());
+            }
+            (Some(_), Some(_)) => {
+                debug!(file = %source_file, "Up-to-date");
+                unchanged_files.push(source_file.clone());
+            }
+            _ => {
+                // If we can't read mtimes, err on the side of recompilation
+                debug!(file = %source_file, "Cannot read mtime — needs recompilation");
+                changed_files.push(source_file.clone());
+            }
+        }
+    }
+
+    // Detect orphaned .beam files (exist in build dir but no corresponding source)
+    let orphaned_beam_files = detect_orphaned_beams(build_dir, &expected_beam_stems);
+
+    let total = changed_files.len() + unchanged_files.len();
+    info!(
+        changed = changed_files.len(),
+        unchanged = unchanged_files.len(),
+        orphaned = orphaned_beam_files.len(),
+        total,
+        "Change detection complete"
+    );
+
+    ChangeDetectionResult {
+        changed_files,
+        unchanged_files,
+        orphaned_beam_files,
+    }
+}
+
+/// Read the modification time of a file, returning `None` on any error.
+fn mtime_of(path: &Utf8Path) -> Option<SystemTime> {
+    fs::metadata(path).ok()?.modified().ok()
+}
+
+/// Find `bt@*` `.beam` files in the build directory that are not in the expected set.
+fn detect_orphaned_beams(
+    build_dir: &Utf8Path,
+    expected_beam_filenames: &HashSet<String>,
+) -> Vec<Utf8PathBuf> {
+    let Ok(entries) = fs::read_dir(build_dir) else {
+        return Vec::new();
+    };
+
+    let mut orphaned = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        // Only consider bt@* beam files (user/package modules)
+        if name.starts_with("bt@")
+            && path.extension().is_some_and(|ext| ext == "beam")
+            && !expected_beam_filenames.contains(name)
+        {
+            if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
+                orphaned.push(utf8);
+            }
+        }
+    }
+
+    orphaned
+}
+
 /// Build beamtalk source files.
 ///
 /// This command compiles .bt files to .beam bytecode via Core Erlang.
+///
+/// When `force` is false, per-file change detection compares `.bt` source mtimes
+/// against `.beam` output mtimes and only recompiles changed files.
 #[allow(clippy::too_many_lines)]
 #[instrument(skip_all, fields(path = %path))]
-pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()> {
+pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) -> Result<()> {
     info!("Starting build");
     let source_path = Utf8PathBuf::from(path);
 
@@ -181,8 +321,29 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
         file_module_pairs.push((file.clone(), module_name, core_file));
     }
 
+    // BT-1682: Per-file change detection — only recompile files whose source
+    // is newer than the corresponding .beam output.
+    let changes = detect_changes(&source_files, &build_dir, &file_module_pairs, force);
+
+    // Warn about orphaned .beam files (source deleted but .beam remains)
+    for orphan in &changes.orphaned_beam_files {
+        warn!(
+            file = %orphan,
+            "Orphaned .beam file has no corresponding .bt source (source may have been deleted)"
+        );
+    }
+
+    // Collect ALL module names for .app generation (both changed and unchanged),
+    // but only compile changed files.
+    let changed_set: HashSet<&Utf8Path> = changes
+        .changed_files
+        .iter()
+        .map(Utf8PathBuf::as_path)
+        .collect();
+
     // Pass 2: compile each file with the full class → module index.
     // BT-1544: Reuse cached ASTs from Pass 1 to avoid re-reading and re-parsing.
+    // BT-1682: Only compile files that have changed since last build.
     let mut cached_asts = cached_asts;
     let mut core_files = Vec::new();
     let mut module_names = Vec::new();
@@ -195,6 +356,14 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
         .as_ref()
         .is_some_and(|m| m.package.strict_deps);
     for (file, module_name, core_file) in &file_module_pairs {
+        // Always track module names for .app generation
+        module_names.push(module_name.clone());
+
+        if !changed_set.contains(file.as_path()) {
+            debug!(file = %file, "Skipping unchanged file");
+            continue;
+        }
+
         let cached = cached_asts.remove(file);
         compile_file(
             file,
@@ -209,24 +378,39 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
             strict_deps,
         )?;
         core_files.push(core_file.clone());
-        module_names.push(module_name.clone());
     }
 
-    // Batch compile Core Erlang to BEAM
-    info!("Compiling Core Erlang to BEAM");
-    let compiler = BeamCompiler::new(build_dir.clone());
-    let beam_files = compiler
-        .compile_batch(&core_files)
-        .wrap_err("Failed to compile Core Erlang to BEAM")?;
+    if core_files.is_empty() {
+        info!("All files up-to-date — nothing to compile");
+    } else {
+        // Batch compile Core Erlang to BEAM
+        info!(count = core_files.len(), "Compiling changed files to BEAM");
+    }
+
+    let beam_files = if core_files.is_empty() {
+        Vec::new()
+    } else {
+        let compiler = BeamCompiler::new(build_dir.clone());
+        compiler
+            .compile_batch(&core_files)
+            .wrap_err("Failed to compile Core Erlang to BEAM")?
+    };
 
     info!(
         beam_count = beam_files.len(),
+        skipped = changes.unchanged_files.len(),
         "Build completed successfully"
     );
 
     // ADR 0026 §3: Package mode post-processing — clean stale artifacts and generate .app
     if let Some(pkg) = pkg_manifest {
-        clean_stale_artifacts(&build_dir, &beam_files, &pkg.name)?;
+        // BT-1682: For stale artifact cleanup, we need ALL expected .beam files
+        // (both newly compiled and unchanged), not just the ones from this build.
+        let all_expected_beams: Vec<Utf8PathBuf> = file_module_pairs
+            .iter()
+            .map(|(_, module_name, _)| build_dir.join(format!("{module_name}.beam")))
+            .collect();
+        clean_stale_artifacts(&build_dir, &all_expected_beams, &pkg.name)?;
         generate_package_outputs(
             &build_dir,
             &project_root,
@@ -817,7 +1001,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let project_path = create_test_project(&temp);
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
         assert!(result.is_err());
     }
 
@@ -828,7 +1012,7 @@ mod tests {
         let src_path = project_path.join("src");
         write_test_file(&src_path.join("main.bt"), "main := [42].");
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
 
         // If escript is not available, the test should fail at the BEAM compilation stage
         // We allow this in CI environments
@@ -851,7 +1035,7 @@ mod tests {
         write_test_file(&src_path.join("file1.bt"), "test1 := [1].");
         write_test_file(&src_path.join("file2.bt"), "test2 := [2].");
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
 
         // If escript is not available, the test should fail at the BEAM compilation stage
         // We allow this in CI environments
@@ -876,7 +1060,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
 
         if let Err(e) = result {
             let error_msg = format!("{e:?}");
@@ -899,7 +1083,7 @@ mod tests {
             "this is not valid toml {{{{",
         );
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
         let err = result.expect_err("Expected build to fail due to malformed manifest");
         let error_msg = format!("{err:?}");
         assert!(
@@ -1002,7 +1186,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
 
         if let Err(e) = result {
             let error_msg = format!("{e:?}");
@@ -1027,7 +1211,7 @@ mod tests {
         write_test_file(&src_path.join("counter.bt"), "counter := [42].");
         // No beamtalk.toml
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
 
         if let Err(e) = result {
             let error_msg = format!("{e:?}");
@@ -1056,7 +1240,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
 
         if let Err(e) = result {
             let error_msg = format!("{e:?}");
@@ -1083,7 +1267,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
 
         // Verify _build/dev/ebin/ directory structure exists
         let ebin_dir = project_path.join("_build/dev/ebin");
@@ -1106,7 +1290,7 @@ mod tests {
         write_test_file(&src_path.join("main.bt"), "main := [42].");
         // No beamtalk.toml
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
 
         // Verify build/ directory is used (not _build/)
         let build_dir = project_path.join("build");
@@ -1140,7 +1324,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\ndescription = \"Test app\"\n",
         );
 
-        let result = build(project_path.as_str(), &default_options());
+        let result = build(project_path.as_str(), &default_options(), false);
 
         if let Err(e) = result {
             let error_msg = format!("{e:?}");
@@ -1415,5 +1599,241 @@ mod tests {
 
         assert!(build_dir.join("beamtalk_myapp_app.beam").exists());
         assert!(build_dir.join("beamtalk_myapp_app.erl").exists());
+    }
+
+    // ── BT-1682: Change detection tests ──────────────────────────────
+
+    /// Helper: create `file_module_pairs` matching the format used by the build pipeline.
+    fn make_pairs(
+        source_files: &[Utf8PathBuf],
+        build_dir: &Utf8Path,
+    ) -> Vec<(Utf8PathBuf, String, Utf8PathBuf)> {
+        source_files
+            .iter()
+            .map(|f| {
+                let stem = f.file_stem().unwrap_or("unknown");
+                let module_name = format!("bt@{stem}");
+                let core_file = build_dir.join(format!("{module_name}.core"));
+                (f.clone(), module_name, core_file)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_detect_changes_new_files_no_build_dir() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = project.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        write_test_file(&src_dir.join("counter.bt"), "counter := [0].");
+
+        // Build dir doesn't exist yet — all files should be changed
+        let build_dir = project.join("build");
+        let source_files = vec![src_dir.join("counter.bt")];
+        let pairs = make_pairs(&source_files, &build_dir);
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        assert_eq!(result.changed_files.len(), 1);
+        assert!(result.unchanged_files.is_empty());
+        assert!(result.orphaned_beam_files.is_empty());
+    }
+
+    #[test]
+    fn test_detect_changes_no_beam_exists() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = project.join("src");
+        let build_dir = project.join("build");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&build_dir).unwrap();
+
+        write_test_file(&src_dir.join("counter.bt"), "counter := [0].");
+
+        let source_files = vec![src_dir.join("counter.bt")];
+        let pairs = make_pairs(&source_files, &build_dir);
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        assert_eq!(
+            result.changed_files.len(),
+            1,
+            "New file with no .beam should be changed"
+        );
+        assert!(result.unchanged_files.is_empty());
+    }
+
+    #[test]
+    fn test_detect_changes_up_to_date() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = project.join("src");
+        let build_dir = project.join("build");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&build_dir).unwrap();
+
+        // Create source FIRST (older mtime)
+        write_test_file(&src_dir.join("counter.bt"), "counter := [0].");
+        // Small delay to ensure mtime differs
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Then create beam (newer mtime)
+        write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
+
+        let source_files = vec![src_dir.join("counter.bt")];
+        let pairs = make_pairs(&source_files, &build_dir);
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        assert!(
+            result.changed_files.is_empty(),
+            "Up-to-date file should not be changed"
+        );
+        assert_eq!(result.unchanged_files.len(), 1);
+    }
+
+    #[test]
+    fn test_detect_changes_source_modified() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = project.join("src");
+        let build_dir = project.join("build");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&build_dir).unwrap();
+
+        // Create beam FIRST (older mtime)
+        write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Then modify source (newer mtime)
+        write_test_file(&src_dir.join("counter.bt"), "counter := [1].");
+
+        let source_files = vec![src_dir.join("counter.bt")];
+        let pairs = make_pairs(&source_files, &build_dir);
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        assert_eq!(
+            result.changed_files.len(),
+            1,
+            "Modified source should be changed"
+        );
+        assert!(result.unchanged_files.is_empty());
+    }
+
+    #[test]
+    fn test_detect_changes_force_flag() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = project.join("src");
+        let build_dir = project.join("build");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&build_dir).unwrap();
+
+        // Source older than beam — normally unchanged
+        write_test_file(&src_dir.join("counter.bt"), "counter := [0].");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
+
+        let source_files = vec![src_dir.join("counter.bt")];
+        let pairs = make_pairs(&source_files, &build_dir);
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, true);
+        assert_eq!(
+            result.changed_files.len(),
+            1,
+            "--force should mark all files as changed"
+        );
+        assert!(result.unchanged_files.is_empty());
+    }
+
+    #[test]
+    fn test_detect_changes_orphaned_beam() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = project.join("src");
+        let build_dir = project.join("build");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&build_dir).unwrap();
+
+        // Source file exists for counter but not for deleted_module
+        write_test_file(&src_dir.join("counter.bt"), "counter := [0].");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        write_test_file(&build_dir.join("bt@counter.beam"), "BEAM");
+        // Orphaned beam — no corresponding .bt
+        write_test_file(&build_dir.join("bt@deleted_module.beam"), "BEAM");
+
+        let source_files = vec![src_dir.join("counter.bt")];
+        let pairs = make_pairs(&source_files, &build_dir);
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        assert_eq!(
+            result.orphaned_beam_files.len(),
+            1,
+            "Should detect orphaned .beam"
+        );
+        assert!(
+            result.orphaned_beam_files[0]
+                .as_str()
+                .contains("deleted_module"),
+            "Orphaned file should be the deleted_module beam"
+        );
+    }
+
+    #[test]
+    fn test_detect_changes_mixed_states() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = project.join("src");
+        let build_dir = project.join("build");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&build_dir).unwrap();
+
+        // File 1: up-to-date (source older than beam)
+        write_test_file(&src_dir.join("stable.bt"), "stable := [1].");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        write_test_file(&build_dir.join("bt@stable.beam"), "BEAM");
+
+        // File 2: modified (beam older than source)
+        write_test_file(&build_dir.join("bt@changed.beam"), "BEAM");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        write_test_file(&src_dir.join("changed.bt"), "changed := [2].");
+
+        // File 3: new (no beam exists)
+        write_test_file(&src_dir.join("new_file.bt"), "new_file := [3].");
+
+        let source_files = vec![
+            src_dir.join("changed.bt"),
+            src_dir.join("new_file.bt"),
+            src_dir.join("stable.bt"),
+        ];
+        let pairs = make_pairs(&source_files, &build_dir);
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        assert_eq!(
+            result.changed_files.len(),
+            2,
+            "changed + new_file should need compilation"
+        );
+        assert_eq!(
+            result.unchanged_files.len(),
+            1,
+            "stable should be unchanged"
+        );
+    }
+
+    #[test]
+    fn test_detect_changes_non_bt_beams_ignored() {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let build_dir = project.join("build");
+        fs::create_dir_all(&build_dir).unwrap();
+
+        // Non-bt@ beam files should NOT appear as orphaned
+        write_test_file(&build_dir.join("beamtalk_app.beam"), "callback");
+        write_test_file(&build_dir.join("some_otp_module.beam"), "otp");
+
+        let source_files: Vec<Utf8PathBuf> = Vec::new();
+        let pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
+
+        let result = detect_changes(&source_files, &build_dir, &pairs, false);
+        assert!(
+            result.orphaned_beam_files.is_empty(),
+            "Non-bt@ beam files should not be flagged as orphaned"
+        );
     }
 }

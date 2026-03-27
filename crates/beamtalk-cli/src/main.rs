@@ -55,6 +55,10 @@ enum Command {
         /// Suppress warning diagnostics
         #[arg(long)]
         no_warnings: bool,
+
+        /// Force recompilation of all files, bypassing change detection
+        #[arg(long)]
+        force: bool,
     },
 
     /// Compile the standard library (`lib/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
@@ -387,6 +391,7 @@ fn run() -> Result<()> {
             allow_primitives,
             stdlib_mode,
             no_warnings,
+            force,
         } => {
             let options = beamtalk_core::CompilerOptions {
                 stdlib_mode,
@@ -395,7 +400,7 @@ fn run() -> Result<()> {
                 suppress_warnings: no_warnings,
                 ..Default::default()
             };
-            commands::build::build(&path, &options)
+            commands::build::build(&path, &options, force)
         }
         Command::BuildStdlib { quiet } => commands::build_stdlib::build_stdlib(quiet),
         Command::Run {

@@ -224,7 +224,7 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
     };
 
     let options = beamtalk_core::CompilerOptions::default();
-    match crate::commands::build::build(project_root_utf8.as_str(), &options) {
+    match crate::commands::build::build(project_root_utf8.as_str(), &options, false) {
         Ok(()) => {
             let ebin_path = project_root_utf8.join("_build").join("dev").join("ebin");
             // Count .beam files for summary
