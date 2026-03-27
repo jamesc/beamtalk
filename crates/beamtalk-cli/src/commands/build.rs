@@ -53,10 +53,16 @@ pub(crate) fn detect_changes(
 ) -> ChangeDetectionResult {
     if force {
         info!("Force build requested — all files will be recompiled");
+        // Still detect orphaned .beam files so users get consistent warnings
+        let expected_beam_filenames: HashSet<String> = file_module_pairs
+            .iter()
+            .map(|(_, module_name, _)| format!("{module_name}.beam"))
+            .collect();
+        let orphaned_beam_files = detect_orphaned_beams(build_dir, &expected_beam_filenames);
         return ChangeDetectionResult {
             changed_files: source_files.to_vec(),
             unchanged_files: Vec::new(),
-            orphaned_beam_files: Vec::new(),
+            orphaned_beam_files,
         };
     }
 
@@ -327,9 +333,8 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
 
     // Warn about orphaned .beam files (source deleted but .beam remains)
     for orphan in &changes.orphaned_beam_files {
-        warn!(
-            file = %orphan,
-            "Orphaned .beam file has no corresponding .bt source (source may have been deleted)"
+        eprintln!(
+            "warning: orphaned .beam file {orphan} has no corresponding .bt source (source may have been deleted)"
         );
     }
 
