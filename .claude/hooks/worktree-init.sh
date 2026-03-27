@@ -64,16 +64,22 @@ if [[ -n "${HTTP_PROXY:-}" ]] && [[ "${HTTP_PROXY}" == *"@"* ]]; then
   WRAPPER_DIR="${CLAUDE_PROJECT_DIR:-${PWD}}/.claude/bin"
   # Resolve the real rebar3 with the wrapper dir stripped from PATH to avoid
   # an infinite exec loop if the hook runs twice in the same session.
-  REAL_REBAR3="$(PATH="${PATH//${WRAPPER_DIR}:/}" command -v rebar3)"
-  mkdir -p "${WRAPPER_DIR}"
-  cat > "${WRAPPER_DIR}/rebar3" << WRAPPER
+  CLEAN_PATH="${PATH//${WRAPPER_DIR}:/}"    # Remove from start/middle
+  CLEAN_PATH="${CLEAN_PATH%:${WRAPPER_DIR}}" # Remove from end
+  REAL_REBAR3="$(PATH="${CLEAN_PATH}" command -v rebar3 || true)"
+  if [[ -z "${REAL_REBAR3:-}" ]] || [[ ! -x "${REAL_REBAR3}" ]]; then
+    echo "Warning: rebar3 not found on PATH; skipping hex bridge wrapper setup."
+  else
+    mkdir -p "${WRAPPER_DIR}"
+    cat > "${WRAPPER_DIR}/rebar3" << WRAPPER
 #!/usr/bin/env bash
 export HEX_CDN="http://127.0.0.1:${HEX_BRIDGE_PORT}"
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 exec "${REAL_REBAR3}" "\$@"
 WRAPPER
-  chmod +x "${WRAPPER_DIR}/rebar3"
-  export PATH="${WRAPPER_DIR}:${PATH}"
+    chmod +x "${WRAPPER_DIR}/rebar3"
+    export PATH="${WRAPPER_DIR}:${PATH}"
+  fi
 fi
 
 GIT_DIR_FILE="${PWD}/.git"
