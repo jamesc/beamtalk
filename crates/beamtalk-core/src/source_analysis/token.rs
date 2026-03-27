@@ -463,6 +463,14 @@ impl Token {
         self.kind
     }
 
+    /// Takes the kind out of this token, replacing it with `TokenKind::Eof`.
+    ///
+    /// This allows moving the kind without cloning when the token's span and
+    /// trivia still need to remain accessible in the token vec (BT-1680).
+    pub fn take_kind(&mut self) -> TokenKind {
+        std::mem::replace(&mut self.kind, TokenKind::Eof)
+    }
+
     /// Returns the source span of this token (excluding trivia).
     #[must_use]
     pub fn span(&self) -> Span {
