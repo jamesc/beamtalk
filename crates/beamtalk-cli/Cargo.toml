@@ -58,6 +58,11 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 serial_test = "3"
+criterion.workspace = true
+
+[[bench]]
+name = "build_bench"
+harness = false
 
 [lints]
 workspace = true
