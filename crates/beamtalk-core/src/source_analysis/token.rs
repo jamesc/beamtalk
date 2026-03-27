@@ -467,7 +467,7 @@ impl Token {
     ///
     /// This allows moving the kind without cloning when the token's span and
     /// trivia still need to remain accessible in the token vec (BT-1680).
-    pub fn take_kind(&mut self) -> TokenKind {
+    pub(crate) fn take_kind(&mut self) -> TokenKind {
         std::mem::replace(&mut self.kind, TokenKind::Eof)
     }
 
