@@ -153,6 +153,7 @@ fn run_script(
     super::build::build(
         project_root.as_str(),
         &beamtalk_core::CompilerOptions::default(),
+        false,
     )?;
 
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
@@ -307,6 +308,7 @@ fn run_package_as_otp_application(
     super::build::build(
         project_root.as_str(),
         &beamtalk_core::CompilerOptions::default(),
+        false,
     )?;
 
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;

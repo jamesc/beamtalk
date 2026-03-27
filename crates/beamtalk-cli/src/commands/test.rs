@@ -1244,7 +1244,7 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
             warnings_as_errors: pipeline.warnings_as_errors,
             ..Default::default()
         };
-        super::build::build(pkg_root.as_str(), &build_options).wrap_err_with(|| {
+        super::build::build(pkg_root.as_str(), &build_options, false).wrap_err_with(|| {
             format!(
                 "Failed to build package '{}' before running tests",
                 pkg.name
