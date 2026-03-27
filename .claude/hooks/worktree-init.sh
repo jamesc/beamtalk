@@ -79,6 +79,43 @@ exec "${REAL_REBAR3}" "\$@"
 WRAPPER
     chmod +x "${WRAPPER_DIR}/rebar3"
     export PATH="${WRAPPER_DIR}:${PATH}"
+
+    # Persist PATH and HEX_CDN so all shell invocations pick up the wrapper.
+    # Use /etc/profile.d/ (sourced by login shells and many non-interactive
+    # shells via /etc/profile) and also prepend to ~/.bashrc BEFORE the
+    # non-interactive guard, and ~/.zshenv (always sourced by zsh).
+    _MARKER="# hex-bridge-proxy PATH (auto-added by worktree-init.sh)"
+    _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\"
+export PATH=\"${WRAPPER_DIR}:\${PATH}\""
+
+    # Method 1: /etc/profile.d/ (works for login shells, and `just`/`make`)
+    _PROFILED="/etc/profile.d/hex-bridge.sh"
+    if [[ ! -f "${_PROFILED}" ]] 2>/dev/null; then
+      cat > "${_PROFILED}" 2>/dev/null << PROFBLOCK
+${_MARKER}
+${_EXPORT_BLOCK}
+PROFBLOCK
+    fi
+
+    # Method 2: ~/.bashrc — insert BEFORE the non-interactive guard
+    if ! grep -qF "${_MARKER}" "${HOME}/.bashrc" 2>/dev/null; then
+      _TMPRC="$(mktemp)"
+      { echo "${_MARKER}"; echo "${_EXPORT_BLOCK}"; echo ""; cat "${HOME}/.bashrc"; } > "${_TMPRC}"
+      mv "${_TMPRC}" "${HOME}/.bashrc"
+      echo "Added hex-bridge PATH to ~/.bashrc (before non-interactive guard)"
+    fi
+
+    # Method 3: ~/.zshenv (always sourced by zsh, even non-interactive)
+    if [[ "$(basename "${SHELL:-bash}")" == "zsh" ]]; then
+      if ! grep -qF "${_MARKER}" "${HOME}/.zshenv" 2>/dev/null; then
+        cat >> "${HOME}/.zshenv" << ZBLOCK
+
+${_MARKER}
+${_EXPORT_BLOCK}
+ZBLOCK
+        echo "Added hex-bridge PATH to ~/.zshenv"
+      fi
+    fi
   fi
 fi
 
