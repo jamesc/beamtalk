@@ -320,10 +320,18 @@ if [ "$RUN_REPL" = true ]; then
         exit 1
     fi
 
-    # Extract the Erlang node cookie for WebSocket authentication.
-    # The cookie is set on the beam.smp command line via -setcookie.
-    REPL_COOKIE=$(ps aux | grep "beam.smp.*beamtalk_workspace_${BENCH_WS_NAME}" | grep -v grep \
-        | grep -oP '(?<=-setcookie )\S+' | head -1)
+    # Read the workspace cookie for WebSocket authentication.
+    # Prefer the cookie file over parsing process listings (portable, reliable).
+    COOKIE_FILE="${HOME}/.beamtalk/workspaces/${BENCH_WS_NAME}/cookie"
+    if [ ! -f "$COOKIE_FILE" ]; then
+        echo "❌ Failed to find workspace cookie file: $COOKIE_FILE"
+        exit 1
+    fi
+    REPL_COOKIE="$(tr -d '[:space:]' < "$COOKIE_FILE")"
+    if [ -z "$REPL_COOKIE" ]; then
+        echo "❌ Workspace cookie file is empty: $COOKIE_FILE"
+        exit 1
+    fi
 
     echo "   Workspace running on port $REPL_PORT"
     echo ""
@@ -407,13 +415,13 @@ class SimpleWebSocket:
                 return payload.decode()
             if opcode == 0x8:  # close
                 raise RuntimeError("Server closed WebSocket")
-            if opcode == 0x9:  # ping → pong
-                self.send(payload.decode(), opcode=0xA)
+            if opcode == 0x9:  # ping → pong (echo raw payload per RFC 6455)
+                self.send(payload, opcode=0xA)
             # Skip other frames (continuation, binary, pong)
 
-    def send(self, text, opcode=0x1):
-        """Send a masked text frame (clients MUST mask)."""
-        payload = text.encode()
+    def send(self, data, opcode=0x1):
+        """Send a masked frame (clients MUST mask)."""
+        payload = data if isinstance(data, bytes) else data.encode()
         mask = os.urandom(4)
         masked = bytes(payload[i] ^ mask[i % 4] for i in range(len(payload)))
         header = bytes([0x80 | opcode])
@@ -436,17 +444,32 @@ class SimpleWebSocket:
 # ── Connect and authenticate ────────────────────────────────────────────
 ws = SimpleWebSocket("127.0.0.1", PORT)
 
-if COOKIE:
-    ws.send(json.dumps({"type": "auth", "cookie": COOKIE}))
-    # The server sends: auth-required → auth_ok → session-started.
-    # Read until we see session-started (or auth_error).
-    for _ in range(5):
-        resp = json.loads(ws.recv())
-        if resp.get("type") == "auth_error":
-            print(f"Auth failed: {resp}", file=sys.stderr)
-            sys.exit(1)
-        if resp.get("op") == "session-started":
-            break
+if not COOKIE:
+    print("Missing REPL auth cookie; cannot run benchmarks. "
+          "Ensure the workspace is running and BENCH_COOKIE is set.",
+          file=sys.stderr)
+    sys.exit(1)
+
+# Protocol handshake: read auth-required → send auth → read auth_ok → read session-started
+resp = json.loads(ws.recv())
+if resp.get("op") != "auth-required":
+    print(f"Expected auth-required, got: {resp}", file=sys.stderr)
+    sys.exit(1)
+
+ws.send(json.dumps({"type": "auth", "cookie": COOKIE}))
+
+resp = json.loads(ws.recv())
+if resp.get("type") == "auth_error":
+    print(f"Auth failed: {resp}", file=sys.stderr)
+    sys.exit(1)
+if resp.get("type") != "auth_ok":
+    print(f"Expected auth_ok, got: {resp}", file=sys.stderr)
+    sys.exit(1)
+
+resp = json.loads(ws.recv())
+if resp.get("op") != "session-started":
+    print(f"Expected session-started, got: {resp}", file=sys.stderr)
+    sys.exit(1)
 
 def is_result(msg):
     """Return True if this message is the final eval/load result.
@@ -497,6 +520,10 @@ ws.send(json.dumps({"op": "load-file", "id": "load-1",
 while True:
     msg = json.loads(ws.recv())
     if is_result(msg):
+        if "error" in msg.get("status", []):
+            print(f"Fixture load failed: {msg.get('error', 'unknown')}",
+                  file=sys.stderr)
+            sys.exit(1)
         break
 print("fixture_loaded", flush=True)
 

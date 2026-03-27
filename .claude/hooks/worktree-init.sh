@@ -89,9 +89,10 @@ WRAPPER
 export PATH=\"${WRAPPER_DIR}:\${PATH}\""
 
     # Method 1: /etc/profile.d/ (works for login shells, and `just`/`make`)
+    # Best-effort — may fail without root, so use || true.
     _PROFILED="/etc/profile.d/hex-bridge.sh"
     if [[ ! -f "${_PROFILED}" ]] 2>/dev/null; then
-      cat > "${_PROFILED}" 2>/dev/null << PROFBLOCK
+      cat > "${_PROFILED}" 2>/dev/null << PROFBLOCK || true
 ${_MARKER}
 ${_EXPORT_BLOCK}
 PROFBLOCK
@@ -99,6 +100,8 @@ PROFBLOCK
 
     # Method 2: ~/.bashrc — insert BEFORE the non-interactive guard
     if ! grep -qF "${_MARKER}" "${HOME}/.bashrc" 2>/dev/null; then
+      # Ensure ~/.bashrc exists (may be absent in minimal images)
+      [[ -f "${HOME}/.bashrc" ]] || : > "${HOME}/.bashrc"
       _TMPRC="$(mktemp)"
       { echo "${_MARKER}"; echo "${_EXPORT_BLOCK}"; echo ""; cat "${HOME}/.bashrc"; } > "${_TMPRC}"
       mv "${_TMPRC}" "${HOME}/.bashrc"
