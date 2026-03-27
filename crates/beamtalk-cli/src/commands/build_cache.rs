@@ -75,22 +75,35 @@ pub(crate) struct IncrementalPass1Result {
     pub all_class_infos: Vec<ClassInfo>,
     /// Cached ASTs for files that were re-scanned in this build.
     pub cached_asts: HashMap<Utf8PathBuf, super::build::CachedAst>,
+    /// Whether the manifest changed and forced a full cache invalidation.
+    /// When true, Pass 2 should also force-recompile all files.
+    pub manifest_invalidated: bool,
+}
+
+/// Result of loading the cache — distinguishes "no cache" from "manifest invalidated".
+enum CacheLoadResult {
+    /// Cache loaded successfully.
+    Hit(Pass1Cache),
+    /// No cache found, or cache was corrupt/version-mismatched.
+    Miss,
+    /// Cache existed but manifest changed — all files must be recompiled.
+    ManifestInvalidated,
 }
 
 /// Load the Pass 1 cache from `build_dir`, if it exists and is valid.
 ///
-/// Returns `None` if the cache doesn't exist, has a version mismatch,
-/// or if the manifest has changed since the cache was written.
-fn load_cache(build_dir: &Utf8Path, manifest_path: Option<&Utf8Path>) -> Option<Pass1Cache> {
+/// Returns `Miss` if the cache doesn't exist, has a version mismatch,
+/// or is corrupt. Returns `ManifestInvalidated` if the manifest has changed.
+fn load_cache(build_dir: &Utf8Path, manifest_path: Option<&Utf8Path>) -> CacheLoadResult {
     let cache_path = build_dir.join(CACHE_FILENAME);
     let Ok(data) = fs::read_to_string(&cache_path) else {
         debug!("No Pass 1 cache found at {cache_path}");
-        return None;
+        return CacheLoadResult::Miss;
     };
 
     let Ok(cache) = serde_json::from_str::<Pass1Cache>(&data) else {
         warn!("Pass 1 cache is corrupt or unreadable — rebuilding");
-        return None;
+        return CacheLoadResult::Miss;
     };
 
     // Version check
@@ -100,7 +113,7 @@ fn load_cache(build_dir: &Utf8Path, manifest_path: Option<&Utf8Path>) -> Option<
             current = CACHE_VERSION,
             "Pass 1 cache version mismatch — rebuilding"
         );
-        return None;
+        return CacheLoadResult::Miss;
     }
 
     // Manifest mtime check: if beamtalk.toml has changed, invalidate everything
@@ -108,19 +121,19 @@ fn load_cache(build_dir: &Utf8Path, manifest_path: Option<&Utf8Path>) -> Option<
         let current_mtime = mtime_of(mp);
         if current_mtime != cache.manifest_mtime {
             info!("beamtalk.toml has changed — invalidating Pass 1 cache");
-            return None;
+            return CacheLoadResult::ManifestInvalidated;
         }
     } else if cache.manifest_mtime.is_some() {
         // Cache was written with a manifest that no longer exists
         info!("beamtalk.toml removed — invalidating Pass 1 cache");
-        return None;
+        return CacheLoadResult::ManifestInvalidated;
     }
 
     debug!(
         entries = cache.entries.len(),
         "Loaded Pass 1 cache from {cache_path}"
     );
-    Some(cache)
+    CacheLoadResult::Hit(cache)
 }
 
 /// Save the Pass 1 cache to `build_dir`.
@@ -197,10 +210,18 @@ pub(crate) fn incremental_build_class_module_index(
             class_superclass_index,
             all_class_infos,
             cached_asts,
+            manifest_invalidated: false,
         });
     }
 
-    let cache = load_cache(build_dir, manifest_path);
+    let cache_result = load_cache(build_dir, manifest_path);
+    let manifest_invalidated = matches!(cache_result, CacheLoadResult::ManifestInvalidated);
+
+    // Extract cache if we got a hit
+    let cache = match cache_result {
+        CacheLoadResult::Hit(c) => Some(c),
+        _ => None,
+    };
 
     // Determine which files need re-scanning
     let (stale_files, fresh_files) = match &cache {
@@ -271,6 +292,7 @@ pub(crate) fn incremental_build_class_module_index(
         class_superclass_index,
         all_class_infos,
         cached_asts,
+        manifest_invalidated,
     })
 }
 
@@ -484,8 +506,9 @@ mod tests {
         save_cache(&build_dir, None, entries);
 
         let loaded = load_cache(&build_dir, None);
-        assert!(loaded.is_some());
-        let loaded = loaded.unwrap();
+        let CacheLoadResult::Hit(loaded) = loaded else {
+            panic!("expected cache hit");
+        };
         assert_eq!(loaded.version, CACHE_VERSION);
         assert_eq!(loaded.entries.len(), 1);
         assert!(loaded.entries.contains_key("/src/counter.bt"));
@@ -504,8 +527,7 @@ mod tests {
         let data = serde_json::to_string(&cache).unwrap();
         fs::write(build_dir.join(CACHE_FILENAME), data).unwrap();
 
-        let loaded = load_cache(&build_dir, None);
-        assert!(loaded.is_none());
+        assert!(matches!(load_cache(&build_dir, None), CacheLoadResult::Miss));
     }
 
     #[test]
@@ -519,16 +541,32 @@ mod tests {
         save_cache(&build_dir, Some(&manifest_path), HashMap::new());
 
         // Verify cache loads OK with same manifest
-        let loaded = load_cache(&build_dir, Some(&manifest_path));
-        assert!(loaded.is_some());
+        assert!(matches!(
+            load_cache(&build_dir, Some(&manifest_path)),
+            CacheLoadResult::Hit(_)
+        ));
 
-        // Touch the manifest to change mtime
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        fs::write(&manifest_path, "changed").unwrap();
+        // Touch the manifest until the filesystem reports a different mtime.
+        // Some filesystems have 1-second mtime granularity, so we retry.
+        let original_mtime = mtime_of(&manifest_path);
+        for attempt in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            fs::write(&manifest_path, format!("changed-{attempt}")).unwrap();
+            if mtime_of(&manifest_path) != original_mtime {
+                break;
+            }
+        }
+        assert_ne!(
+            mtime_of(&manifest_path),
+            original_mtime,
+            "filesystem mtime did not change after retries"
+        );
 
-        // Cache should now be invalidated
-        let loaded = load_cache(&build_dir, Some(&manifest_path));
-        assert!(loaded.is_none());
+        // Cache should now be invalidated due to manifest change
+        assert!(matches!(
+            load_cache(&build_dir, Some(&manifest_path)),
+            CacheLoadResult::ManifestInvalidated
+        ));
     }
 
     #[test]
@@ -582,20 +620,18 @@ mod tests {
     }
 
     #[test]
-    fn test_no_cache_file_returns_none() {
+    fn test_no_cache_file_returns_miss() {
         let temp = TempDir::new().unwrap();
         let build_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let loaded = load_cache(&build_dir, None);
-        assert!(loaded.is_none());
+        assert!(matches!(load_cache(&build_dir, None), CacheLoadResult::Miss));
     }
 
     #[test]
-    fn test_corrupt_cache_file_returns_none() {
+    fn test_corrupt_cache_file_returns_miss() {
         let temp = TempDir::new().unwrap();
         let build_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         fs::write(build_dir.join(CACHE_FILENAME), "not valid json!!!").unwrap();
 
-        let loaded = load_cache(&build_dir, None);
-        assert!(loaded.is_none());
+        assert!(matches!(load_cache(&build_dir, None), CacheLoadResult::Miss));
     }
 }

@@ -165,7 +165,7 @@ fn detect_orphaned_beams(
 /// against `.beam` output mtimes and only recompiles changed files.
 #[allow(clippy::too_many_lines)]
 #[instrument(skip_all, fields(path = %path))]
-pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) -> Result<()> {
+pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bool) -> Result<()> {
     info!("Starting build");
     let source_path = Utf8PathBuf::from(path);
 
@@ -251,6 +251,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
                 manifest_path.as_deref(),
                 force,
             )?;
+            // If the manifest changed, force Pass 2 recompilation too —
+            // .bt files may be unchanged but semantics depend on the manifest.
+            if result.manifest_invalidated {
+                force = true;
+            }
             (
                 result.class_module_index,
                 result.class_superclass_index,
