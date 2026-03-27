@@ -532,6 +532,7 @@ encode_test_results(
         total := Total,
         passed := Passed,
         failed := Failed,
+        skipped := Skipped,
         duration := Duration,
         tests := Tests
     },
@@ -545,6 +546,7 @@ encode_test_results(
     ResultMap = #{
         <<"passed">> => Passed,
         <<"failed">> => Failed,
+        <<"skipped">> => Skipped,
         <<"total">> => Total,
         <<"duration">> => Duration,
         <<"tests">> => [encode_test_entry(T) || T <- Tests]
@@ -570,6 +572,20 @@ encode_test_entry(#{name := Name, status := fail, error := Error} = Entry) ->
             <<"name">> => atom_to_binary(Name, utf8),
             <<"status">> => <<"fail">>,
             <<"error">> => ErrorBin
+        },
+        Entry
+    );
+encode_test_entry(#{name := Name, status := skip, reason := Reason} = Entry) ->
+    ReasonBin =
+        case is_binary(Reason) of
+            true -> Reason;
+            false -> iolist_to_binary(io_lib:format("~p", [Reason]))
+        end,
+    maybe_add_class(
+        #{
+            <<"name">> => atom_to_binary(Name, utf8),
+            <<"status">> => <<"skip">>,
+            <<"reason">> => ReasonBin
         },
         Entry
     );
