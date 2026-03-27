@@ -244,7 +244,7 @@ format_result(V) when is_list(V) ->
             <<"[]">>;
         _ ->
             try
-                jsx:encode([beamtalk_repl_json:term_to_json(E) || E <- V])
+                iolist_to_binary(json:encode([beamtalk_repl_json:term_to_json(E) || E <- V]))
             catch
                 _:_ -> iolist_to_binary(io_lib:format("~p", [V]))
             end

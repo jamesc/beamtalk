@@ -870,7 +870,7 @@ export_traces_no_filters_test_() ->
                     ?assertMatch({ok, #{path := TmpFile, count := 0}}, Result),
                     %% Verify file exists and contains valid JSON
                     {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Decoded = json:decode(Bin),
                     ?assertEqual(
                         0, maps:get(<<"total_events">>, maps:get(<<"metadata">>, Decoded))
                     ),
@@ -891,7 +891,7 @@ export_traces_no_filters_test_() ->
                     Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
                     ?assertMatch({ok, #{count := 2}}, Result),
                     {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Decoded = json:decode(Bin),
                     Meta = maps:get(<<"metadata">>, Decoded),
                     ?assertEqual(2, maps:get(<<"total_events">>, Meta)),
                     Traces = maps:get(<<"traces">>, Decoded),
@@ -922,7 +922,7 @@ export_traces_with_filters_test_() ->
                     }),
                     ?assertMatch({ok, #{count := 1}}, Result),
                     {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Decoded = json:decode(Bin),
                     Traces = maps:get(<<"traces">>, Decoded),
                     ?assertEqual(1, length(Traces)),
                     [Trace] = Traces,
@@ -949,7 +949,7 @@ export_traces_with_filters_test_() ->
                     }),
                     ?assertMatch({ok, #{count := 3}}, Result),
                     {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Decoded = json:decode(Bin),
                     ?assertEqual(3, length(maps:get(<<"traces">>, Decoded))),
                     file:delete(TmpFile)
                 end)}
@@ -1187,7 +1187,7 @@ export_traces_atom_metadata_test_() ->
                     Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
                     ?assertMatch({ok, #{count := 1}}, Result),
                     {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Decoded = json:decode(Bin),
                     [Trace] = maps:get(<<"traces">>, Decoded),
                     %% Atom reason should be converted to binary string
                     ?assertEqual(<<"normal">>, maps:get(<<"reason">>, Trace)),
@@ -1212,7 +1212,7 @@ export_traces_atom_metadata_test_() ->
                     Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
                     ?assertMatch({ok, #{count := 1}}, Result),
                     {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Decoded = json:decode(Bin),
                     [Trace] = maps:get(<<"traces">>, Decoded),
                     %% Pid should be converted to string
                     CallerBin = maps:get(<<"caller">>, Trace),
@@ -1238,7 +1238,7 @@ export_traces_atom_metadata_test_() ->
                     Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
                     ?assertMatch({ok, #{count := 1}}, Result),
                     {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Decoded = json:decode(Bin),
                     [Trace] = maps:get(<<"traces">>, Decoded),
                     %% Tuple should be converted to string representation
                     ReasonBin = maps:get(<<"reason">>, Trace),
@@ -1269,7 +1269,7 @@ export_traces_atom_metadata_test_() ->
                     Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
                     ?assertMatch({ok, #{count := 1}}, Result),
                     {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = jsx:decode(Bin, [return_maps]),
+                    Decoded = json:decode(Bin),
                     [Trace] = maps:get(<<"traces">>, Decoded),
                     ?assertEqual(<<"normal">>, maps:get(<<"reason">>, Trace)),
                     ?assertEqual(42, maps:get(<<"count">>, Trace)),

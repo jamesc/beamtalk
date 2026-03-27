@@ -8,6 +8,7 @@
 %%% Pure formatting logic extracted from beamtalk_repl_server.
 %%% Converts Erlang terms to JSON-encodable values and builds
 %%% JSON response/error binaries for the REPL protocol.
+%%% Uses OTP `json` module (OTP 27+) for encoding/decoding.
 
 -module(beamtalk_repl_json).
 
@@ -32,11 +33,11 @@
 
 %%% JSON Parsing
 
-%% @doc Parse JSON binary into a map using jsx.
--spec parse_json(binary()) -> {ok, map()} | {error, term()}.
+%% @doc Parse JSON binary into an Erlang term (maps, lists, binaries, etc.).
+-spec parse_json(binary()) -> {ok, term()} | {error, term()}.
 parse_json(Data) ->
     try
-        Decoded = jsx:decode(Data, [return_maps]),
+        Decoded = json:decode(Data),
         {ok, Decoded}
     catch
         Class:Reason:Stack ->
@@ -57,14 +58,16 @@ parse_json(Data) ->
 format_response(Value) ->
     try
         JsonValue = term_to_json(Value),
-        jsx:encode(#{<<"type">> => <<"result">>, <<"value">> => JsonValue})
+        iolist_to_binary(json:encode(#{<<"type">> => <<"result">>, <<"value">> => JsonValue}))
     catch
         Class:Reason:_Stack ->
             ErrorMsg = io_lib:format("Internal error formatting ~p: ~p:~p", [Value, Class, Reason]),
-            jsx:encode(#{
-                <<"type">> => <<"error">>,
-                <<"message">> => iolist_to_binary(ErrorMsg)
-            })
+            iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"error">>,
+                    <<"message">> => iolist_to_binary(ErrorMsg)
+                })
+            )
     end.
 
 %% @doc Format an error response as JSON.
@@ -72,7 +75,7 @@ format_response(Value) ->
 format_error(Reason) ->
     try
         Message = format_error_message(Reason),
-        jsx:encode(#{<<"type">> => <<"error">>, <<"message">> => Message})
+        iolist_to_binary(json:encode(#{<<"type">> => <<"error">>, <<"message">> => Message}))
     catch
         Class:FormatError:Stack ->
             ?LOG_DEBUG("Failed to format error", #{
@@ -82,10 +85,12 @@ format_error(Reason) ->
                 original_reason => Reason,
                 domain => [beamtalk, runtime]
             }),
-            jsx:encode(#{
-                <<"type">> => <<"error">>,
-                <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))
-            })
+            iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"error">>,
+                    <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))
+                })
+            )
     end.
 
 %% @doc Format a successful response with warnings as JSON.
@@ -95,16 +100,18 @@ format_response_with_warnings(Value, Warnings) ->
         JsonValue = term_to_json(Value),
         Response = #{<<"type">> => <<"result">>, <<"value">> => JsonValue},
         case Warnings of
-            [] -> jsx:encode(Response);
-            _ -> jsx:encode(maps:put(<<"warnings">>, Warnings, Response))
+            [] -> iolist_to_binary(json:encode(Response));
+            _ -> iolist_to_binary(json:encode(maps:put(<<"warnings">>, Warnings, Response)))
         end
     catch
         Class:Reason:_Stack ->
             ErrorMsg = io_lib:format("Internal error formatting ~p: ~p:~p", [Value, Class, Reason]),
-            jsx:encode(#{
-                <<"type">> => <<"error">>,
-                <<"message">> => iolist_to_binary(ErrorMsg)
-            })
+            iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"error">>,
+                    <<"message">> => iolist_to_binary(ErrorMsg)
+                })
+            )
     end.
 
 %% @doc Format an error response with warnings as JSON.
@@ -114,8 +121,8 @@ format_error_with_warnings(Reason, Warnings) ->
         Message = format_error_message(Reason),
         Response = #{<<"type">> => <<"error">>, <<"message">> => Message},
         case Warnings of
-            [] -> jsx:encode(Response);
-            _ -> jsx:encode(maps:put(<<"warnings">>, Warnings, Response))
+            [] -> iolist_to_binary(json:encode(Response));
+            _ -> iolist_to_binary(json:encode(maps:put(<<"warnings">>, Warnings, Response)))
         end
     catch
         Class:FormatError:Stack ->
@@ -126,10 +133,12 @@ format_error_with_warnings(Reason, Warnings) ->
                 original_reason => Reason,
                 domain => [beamtalk, runtime]
             }),
-            jsx:encode(#{
-                <<"type">> => <<"error">>,
-                <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))
-            })
+            iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"error">>,
+                    <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))
+                })
+            )
     end.
 
 %% @doc Format bindings response as JSON.
@@ -149,19 +158,19 @@ format_bindings(Bindings) ->
         #{},
         Bindings
     ),
-    jsx:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings}).
+    iolist_to_binary(json:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings})).
 
 %% @doc Format a documentation response as JSON.
 -spec format_docs(binary()) -> binary().
 format_docs(DocText) ->
-    jsx:encode(#{<<"type">> => <<"docs">>, <<"docs">> => DocText}).
+    iolist_to_binary(json:encode(#{<<"type">> => <<"docs">>, <<"docs">> => DocText})).
 
 %% @doc Format a loaded file response as JSON.
 %% Classes is a list of #{name => string(), superclass => string()} maps.
 -spec format_loaded([map()]) -> binary().
 format_loaded(Classes) ->
     ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
-    jsx:encode(#{<<"type">> => <<"loaded">>, <<"classes">> => ClassNames}).
+    iolist_to_binary(json:encode(#{<<"type">> => <<"loaded">>, <<"classes">> => ClassNames})).
 
 %% @doc Format an actors list response as JSON.
 -spec format_actors([beamtalk_repl_actors:actor_metadata()]) -> binary().
@@ -177,7 +186,7 @@ format_actors(Actors) ->
         end,
         Actors
     ),
-    jsx:encode(#{<<"type">> => <<"actors">>, <<"actors">> => JsonActors}).
+    iolist_to_binary(json:encode(#{<<"type">> => <<"actors">>, <<"actors">> => JsonActors})).
 
 %% @doc Format a modules list response as JSON.
 -spec format_modules([{atom(), map()}]) -> binary().
@@ -194,7 +203,7 @@ format_modules(ModulesWithInfo) ->
         end,
         ModulesWithInfo
     ),
-    jsx:encode(#{<<"type">> => <<"modules">>, <<"modules">> => JsonModules}).
+    iolist_to_binary(json:encode(#{<<"type">> => <<"modules">>, <<"modules">> => JsonModules})).
 
 %% @doc Encode reload response with classes, affected actor count, and migration results.
 -spec encode_reloaded(
@@ -225,7 +234,7 @@ encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, Warnings) ->
         <<"migration_failures">> => FailureCount,
         <<"status">> => [<<"done">>]
     },
-    jsx:encode(maybe_add_warnings_reloaded(Full, Warnings)).
+    iolist_to_binary(json:encode(maybe_add_warnings_reloaded(Full, Warnings))).
 
 %% @private
 -spec maybe_add_warnings_reloaded(map(), [binary()]) -> map().
@@ -234,7 +243,7 @@ maybe_add_warnings_reloaded(Map, Warnings) -> Map#{<<"warnings">> => Warnings}.
 
 %%% Term-to-JSON Conversion
 
-%% @doc Convert an Erlang term to a JSON-encodable value for jsx.
+%% @doc Convert an Erlang term to a JSON-encodable value.
 -spec term_to_json(term()) -> term().
 term_to_json(Value) when is_integer(Value); is_boolean(Value) ->
     Value;

@@ -1,12 +1,12 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc JSON class implementation — JSON encoding/decoding via jsx.
+%%% @doc JSON class implementation — JSON encoding/decoding via OTP json module.
 %%%
 %%% **DDD Context:** Object System Context
 %%%
 %%% JSON provides class-side methods for parsing and generating JSON strings.
-%%% Wraps the `jsx` library with proper type mapping and structured error handling.
+%%% Wraps the OTP `json` module (OTP 27+) with proper type mapping and structured error handling.
 %%%
 %%% ## Type Mapping
 %%%
@@ -32,6 +32,7 @@
 
 -export(['parse:'/1, 'generate:'/1, 'prettyPrint:'/1]).
 -export([parse/1, generate/1, prettyPrint/1]).
+-export([prettify_term/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -51,12 +52,12 @@
 -spec 'parse:'(binary()) -> map().
 'parse:'(JsonStr) when is_binary(JsonStr) ->
     try
-        Value = jsx:decode(JsonStr, [return_maps]),
+        Value = json:decode(JsonStr),
         beamtalk_result:from_tagged_tuple({ok, normalize_decoded(Value)})
     catch
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
-        error:badarg ->
+        error:Reason when is_tuple(Reason); Reason =:= unexpected_end ->
             Error0 = beamtalk_error:new(parse_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Check that the string is valid JSON">>),
@@ -83,11 +84,11 @@
 'generate:'(Value) ->
     try
         Prepared = prepare_for_encode(Value),
-        jsx:encode(Prepared)
+        iolist_to_binary(json:encode(Prepared))
     catch
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
-        error:badarg ->
+        error:{unsupported_type, _} ->
             Error0 = beamtalk_error:new(type_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'generate:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Value cannot be converted to JSON">>),
@@ -105,12 +106,12 @@
 'prettyPrint:'(Value) ->
     try
         Prepared = prepare_for_encode(Value),
-        Compact = jsx:encode(Prepared),
-        jsx:prettify(Compact)
+        Compact = iolist_to_binary(json:encode(Prepared)),
+        prettify(Compact)
     catch
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
-        error:badarg ->
+        error:{unsupported_type, _} ->
             Error0 = beamtalk_error:new(type_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'prettyPrint:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Value cannot be converted to JSON">>),
@@ -139,14 +140,21 @@ generate(X) -> 'generate:'(X).
 -spec prettyPrint(term()) -> binary().
 prettyPrint(X) -> 'prettyPrint:'(X).
 
+%% @doc Encode a term to pretty-printed JSON binary.
+%% Used by runtime internals (trace_store, workspace_meta) for human-readable output.
+-spec prettify_term(term()) -> binary().
+prettify_term(Term) ->
+    Compact = iolist_to_binary(json:encode(Term)),
+    prettify(Compact).
+
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
 
 %% @private
-%% @doc Normalize jsx decoded values to Beamtalk conventions.
+%% @doc Normalize JSON decoded values to Beamtalk conventions.
 %%
-%% jsx returns `null` as the atom `null`; Beamtalk uses `nil`.
+%% json:decode returns `null` as the atom `null`; Beamtalk uses `nil`.
 -spec normalize_decoded(term()) -> term().
 normalize_decoded(null) ->
     nil;
@@ -158,9 +166,9 @@ normalize_decoded(Other) ->
     Other.
 
 %% @private
-%% @doc Prepare a Beamtalk value for jsx encoding.
+%% @doc Prepare a Beamtalk value for JSON encoding.
 %%
-%% Beamtalk uses `nil` for null; jsx expects `null`.
+%% Beamtalk uses `nil` for null; json:encode expects `null`.
 %% Maps with `$beamtalk_class` tags are stripped of metadata.
 -spec prepare_for_encode(term()) -> term().
 prepare_for_encode(nil) ->
@@ -190,3 +198,54 @@ prepare_for_encode(Other) ->
         <<"Only Dictionary, List, String, Integer, Float, Boolean, and nil can be converted to JSON">>
     ),
     beamtalk_error:raise(Error2).
+
+%% @private
+%% @doc Pretty-print a compact JSON binary with 2-space indentation.
+%% Replaces jsx:prettify/1 without requiring json:format/1 (OTP 27.1+).
+-spec prettify(binary()) -> binary().
+prettify(Bin) ->
+    prettify(Bin, 0, false, []).
+
+-spec prettify(binary(), non_neg_integer(), boolean(), iolist()) -> binary().
+prettify(<<>>, _Depth, _InStr, Acc) ->
+    iolist_to_binary(lists:reverse(Acc));
+prettify(<<$\\, C, Rest/binary>>, Depth, true, Acc) ->
+    prettify(Rest, Depth, true, [C, $\\ | Acc]);
+prettify(<<$", Rest/binary>>, Depth, InStr, Acc) ->
+    prettify(Rest, Depth, not InStr, [$" | Acc]);
+prettify(<<C, Rest/binary>>, Depth, true, Acc) ->
+    prettify(Rest, Depth, true, [C | Acc]);
+prettify(<<${, Rest/binary>>, Depth, false, Acc) ->
+    NewDepth = Depth + 1,
+    case Rest of
+        <<$}, _/binary>> ->
+            prettify(Rest, NewDepth, false, [${ | Acc]);
+        _ ->
+            prettify(Rest, NewDepth, false, [indent(NewDepth), $\n, ${ | Acc])
+    end;
+prettify(<<$[, Rest/binary>>, Depth, false, Acc) ->
+    NewDepth = Depth + 1,
+    case Rest of
+        <<$], _/binary>> ->
+            prettify(Rest, NewDepth, false, [$[ | Acc]);
+        _ ->
+            prettify(Rest, NewDepth, false, [indent(NewDepth), $\n, $[ | Acc])
+    end;
+prettify(<<$}, Rest/binary>>, Depth, false, Acc) ->
+    NewDepth = max(0, Depth - 1),
+    prettify(Rest, NewDepth, false, [$}, indent(NewDepth), $\n | Acc]);
+prettify(<<$], Rest/binary>>, Depth, false, Acc) ->
+    NewDepth = max(0, Depth - 1),
+    prettify(Rest, NewDepth, false, [$], indent(NewDepth), $\n | Acc]);
+prettify(<<$,, Rest/binary>>, Depth, false, Acc) ->
+    prettify(Rest, Depth, false, [indent(Depth), $\n, $, | Acc]);
+prettify(<<$:, Rest/binary>>, Depth, false, Acc) ->
+    prettify(Rest, Depth, false, [$\s, $: | Acc]);
+prettify(<<$\s, Rest/binary>>, Depth, false, Acc) ->
+    prettify(Rest, Depth, false, Acc);
+prettify(<<C, Rest/binary>>, Depth, false, Acc) ->
+    prettify(Rest, Depth, false, [C | Acc]).
+
+-spec indent(non_neg_integer()) -> binary().
+indent(0) -> <<>>;
+indent(N) -> binary:copy(<<"  ">>, N).

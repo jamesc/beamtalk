@@ -296,16 +296,18 @@ methods_op_protocol_json_shape_test() ->
     {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
     try
         %% Build a protocol message via decode, then call handle/4
-        Json = jsx:encode(#{
-            <<"op">> => <<"methods">>,
-            <<"id">> => <<"test-1">>,
-            <<"class">> => <<"BT1026ProtoTestClass">>
-        }),
+        Json = iolist_to_binary(
+            json:encode(#{
+                <<"op">> => <<"methods">>,
+                <<"id">> => <<"test-1">>,
+                <<"class">> => <<"BT1026ProtoTestClass">>
+            })
+        ),
         {ok, Msg} = beamtalk_repl_protocol:decode(Json),
         Params = beamtalk_repl_protocol:get_params(Msg),
         %% SessionPid unused for methods op, pass self()
         Reply = beamtalk_repl_ops_dev:handle(<<"methods">>, Params, Msg, self()),
-        Decoded = jsx:decode(Reply, [return_maps]),
+        Decoded = json:decode(Reply),
         %% Must have status, methods, and id fields
         ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
         ?assert(maps:is_key(<<"methods">>, Decoded)),
@@ -352,13 +354,15 @@ class_loaded_push_json_format_test() ->
     %% Verify the expected push message JSON format for the classes channel.
     %% This mirrors what beamtalk_ws_handler:websocket_info/2 produces.
     ClassName = 'Counter',
-    Push = jsx:encode(#{
-        <<"type">> => <<"push">>,
-        <<"channel">> => <<"classes">>,
-        <<"event">> => <<"loaded">>,
-        <<"data">> => #{<<"class">> => atom_to_binary(ClassName, utf8)}
-    }),
-    Decoded = jsx:decode(Push, [return_maps]),
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"classes">>,
+            <<"event">> => <<"loaded">>,
+            <<"data">> => #{<<"class">> => atom_to_binary(ClassName, utf8)}
+        })
+    ),
+    Decoded = json:decode(Push),
     ?assertEqual(<<"push">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"classes">>, maps:get(<<"channel">>, Decoded)),
     ?assertEqual(<<"loaded">>, maps:get(<<"event">>, Decoded)),

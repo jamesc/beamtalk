@@ -230,21 +230,21 @@ get_context_completions_with_bindings_empty_test() ->
 handle_describe_returns_ops_map_test() ->
     Msg = make_msg(<<"describe">>, <<"d-1">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"ops">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 handle_describe_contains_eval_op_test() ->
     Msg = make_msg(<<"describe">>, <<"d-2">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"eval">>, Ops)).
 
 handle_describe_contains_versions_test() ->
     Msg = make_msg(<<"describe">>, <<"d-3">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     Versions = maps:get(<<"versions">>, Decoded),
     ?assert(maps:is_key(<<"protocol">>, Versions)),
     ?assert(maps:is_key(<<"beamtalk">>, Versions)).
@@ -252,7 +252,7 @@ handle_describe_contains_versions_test() ->
 handle_describe_legacy_format_test() ->
     Msg = make_msg(<<"describe">>, undefined, undefined, true),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"describe">>, maps:get(<<"type">>, Decoded)),
     ?assert(maps:is_key(<<"ops">>, Decoded)).
 
@@ -265,14 +265,14 @@ handle_show_codegen_empty_code_error_test() ->
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>, #{<<"code">> => <<>>}, Msg, self()
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)),
     ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
 
 handle_show_codegen_missing_code_error_test() ->
     Msg = make_msg(<<"show-codegen">>, <<"sc-2">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(<<"show-codegen">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
 %%====================================================================
@@ -288,7 +288,7 @@ handle_show_codegen_class_not_found_error_test() ->
         Msg,
         self()
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
 handle_show_codegen_class_with_selector_no_class_found_test() ->
@@ -300,7 +300,7 @@ handle_show_codegen_class_with_selector_no_class_found_test() ->
         Msg,
         self()
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
 handle_show_codegen_class_takes_priority_over_code_test() ->
@@ -312,7 +312,7 @@ handle_show_codegen_class_takes_priority_over_code_test() ->
         Msg,
         self()
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     %% class path taken, returns error for non-existent class
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
@@ -326,7 +326,7 @@ handle_show_codegen_empty_class_falls_back_to_code_test() ->
         Msg,
         self()
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     %% Code path taken: error must say "Empty expression", not "class not found".
     ?assert(maps:is_key(<<"error">>, Decoded)),
     ErrorMsg = maps:get(<<"error">>, Decoded),
@@ -342,7 +342,7 @@ handle_show_codegen_selector_without_class_test() ->
         Msg,
         self()
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)),
     %% The error message must mention "selector" (not a generic missing-parameter message).
     ErrorMsg = maps:get(<<"error">>, Decoded),
@@ -389,7 +389,7 @@ handle_complete_legacy_empty_prefix_test() ->
     Result = beamtalk_repl_ops_dev:handle(
         <<"complete">>, #{<<"code">> => <<>>}, Msg, self()
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual(<<"completions">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual([], maps:get(<<"completions">>, Decoded)).
 
@@ -402,7 +402,7 @@ handle_methods_unknown_class_test() ->
     Result = beamtalk_repl_ops_dev:handle(
         <<"methods">>, #{<<"class">> => <<"NonExistentXyz9999">>}, Msg, self()
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual([], maps:get(<<"methods">>, Decoded)),
     ?assertEqual([], maps:get(<<"state_vars">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
@@ -590,7 +590,7 @@ handle_docs_unknown_class_returns_error_test() ->
     Result = beamtalk_repl_ops_dev:handle(
         <<"docs">>, #{<<"class">> => <<"NonExistentDocClass999">>}, Msg, self()
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)),
     ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
 
@@ -654,7 +654,7 @@ parse_keyword_send_inject_into_returns_expression_test() ->
 handle_describe_deprecated_ops_have_migrate_to_test() ->
     Msg = make_msg(<<"describe">>, <<"d-dep">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
     DocsOp = maps:get(<<"docs">>, Ops),
     ?assertEqual(true, maps:get(<<"deprecated">>, DocsOp)),
@@ -663,7 +663,7 @@ handle_describe_deprecated_ops_have_migrate_to_test() ->
 handle_describe_contains_actors_op_test() ->
     Msg = make_msg(<<"describe">>, <<"d-actors">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"actors">>, Ops)),
     ?assertEqual([], maps:get(<<"params">>, maps:get(<<"actors">>, Ops))).
@@ -671,7 +671,7 @@ handle_describe_contains_actors_op_test() ->
 handle_describe_contains_inspect_op_test() ->
     Msg = make_msg(<<"describe">>, <<"d-inspect">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"inspect">>, Ops)),
     ?assertEqual([<<"actor">>], maps:get(<<"params">>, maps:get(<<"inspect">>, Ops))).
@@ -679,7 +679,7 @@ handle_describe_contains_inspect_op_test() ->
 handle_describe_contains_kill_op_test() ->
     Msg = make_msg(<<"describe">>, <<"d-kill">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"kill">>, Ops)),
     ?assertEqual([<<"actor">>], maps:get(<<"params">>, maps:get(<<"kill">>, Ops))).
@@ -694,7 +694,7 @@ handle_complete_new_format_empty_prefix_test() ->
     Result = beamtalk_repl_ops_dev:handle(
         <<"complete">>, #{<<"code">> => <<>>}, Msg, self()
     ),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertEqual([], maps:get(<<"completions">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 

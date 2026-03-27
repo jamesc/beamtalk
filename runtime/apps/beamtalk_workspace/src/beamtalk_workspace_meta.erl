@@ -443,7 +443,7 @@ load_metadata_from_disk(State) ->
     Path = State#state.metadata_path,
     case file:read_file(Path) of
         {ok, Binary} ->
-            try jsx:decode(Binary, [return_maps]) of
+            try json:decode(Binary) of
                 Map ->
                     %% Do NOT restore supervised_actors from disk - PIDs are
                     %% not valid across node restarts. The monitor-based cleanup
@@ -607,7 +607,7 @@ persist_metadata_to_disk(State) ->
     },
 
     %% Write to disk
-    Json = jsx:encode(Metadata, [{space, 2}, {indent, 2}]),
+    Json = beamtalk_json:prettify_term(Metadata),
     case file:write_file(Path, Json) of
         ok ->
             ok;

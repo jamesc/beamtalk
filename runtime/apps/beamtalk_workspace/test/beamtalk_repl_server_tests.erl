@@ -272,7 +272,9 @@ parse_request_nested_json_expression_test() ->
 
 parse_request_very_long_expression_test() ->
     LongExpr = list_to_binary(lists:duplicate(1000, $a)),
-    Request = jsx:encode(#{<<"type">> => <<"eval">>, <<"expression">> => LongExpr}),
+    Request = iolist_to_binary(
+        json:encode(#{<<"type">> => <<"eval">>, <<"expression">> => LongExpr})
+    ),
     ?assertMatch({eval, _}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_op_with_id_and_session_test() ->
@@ -445,7 +447,7 @@ tcp_send_op(Port, OpJson) ->
     ws_send(Ws, OpJson),
     {ok, Data} = ws_recv(Ws),
     ws_close(Ws),
-    jsx:decode(Data, [return_maps]).
+    json:decode(Data).
 
 %% Minimal WebSocket client for tests.
 %% Performs HTTP upgrade, cookie auth, then supports text frame send/recv.
@@ -479,7 +481,7 @@ ws_connect(Port) ->
     {ok, _AuthRequired} = ws_recv_with_buf(Sock, Rest),
     %% Send cookie auth
     Cookie = atom_to_binary(erlang:get_cookie(), utf8),
-    AuthMsg = jsx:encode(#{<<"type">> => <<"auth">>, <<"cookie">> => Cookie}),
+    AuthMsg = iolist_to_binary(json:encode(#{<<"type">> => <<"auth">>, <<"cookie">> => Cookie})),
     ws_send(Sock, AuthMsg),
     %% Read auth_ok response
     {ok, _AuthOk} = ws_recv(Sock),
@@ -578,9 +580,9 @@ ws_recv_with_buf(Sock, Buf) ->
 %% Use when you want the response to a specific request and push events may interleave.
 ws_recv_response(Sock) ->
     {ok, Data} = ws_recv(Sock),
-    case jsx:decode(Data, [return_maps]) of
+    case json:decode(Data) of
         #{<<"type">> := <<"push">>} -> ws_recv_response(Sock);
-        Msg -> {ok, jsx:encode(Msg)}
+        Msg -> {ok, iolist_to_binary(json:encode(Msg))}
     end.
 
 %% Read exactly N bytes: first from Buf, then from socket if needed.
@@ -618,49 +620,53 @@ ws_mask(<<B, Rest/binary>>, Key = <<K1, K2, K3, K4>>, I, Acc) ->
 
 %% Test: clear op returns ok status
 tcp_clear_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"t1">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"t1">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t1">>}, Resp),
     ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
 
 %% Test: bindings op returns bindings list
 tcp_bindings_empty_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"t2">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"t2">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t2">>}, Resp),
     ?assert(maps:is_key(<<"bindings">>, Resp)).
 
 %% Test: actors op returns empty actor list
 tcp_actors_empty_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"t3">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"t3">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t3">>}, Resp),
     ?assertEqual([], maps:get(<<"actors">>, Resp)).
 
 %% Test: sessions op returns sessions list
 tcp_sessions_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"sessions">>, <<"id">> => <<"t4">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"sessions">>, <<"id">> => <<"t4">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t4">>}, Resp),
     ?assert(maps:is_key(<<"sessions">>, Resp)).
 
 %% Test: close op returns ok status
 tcp_close_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"close">>, <<"id">> => <<"t5">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"close">>, <<"id">> => <<"t5">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t5">>}, Resp),
     ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
 
 %% Test: complete with empty prefix returns empty
 tcp_complete_empty_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"complete">>, <<"id">> => <<"t6">>, <<"code">> => <<>>}),
+    Msg = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"complete">>, <<"id">> => <<"t6">>, <<"code">> => <<>>})
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t6">>}, Resp),
     ?assertEqual([], maps:get(<<"completions">>, Resp)).
 
 %% Test: complete with a non-empty prefix
 tcp_complete_prefix_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"complete">>, <<"id">> => <<"t6b">>, <<"code">> => <<"sel">>}),
+    Msg = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"complete">>, <<"id">> => <<"t6b">>, <<"code">> => <<"sel">>})
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t6b">>}, Resp),
     Completions = maps:get(<<"completions">>, Resp),
@@ -669,21 +675,27 @@ tcp_complete_prefix_test(Port) ->
 
 %% Test: unknown op returns error
 tcp_unknown_op_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"foobar_nonexistent">>, <<"id">> => <<"t8">>}),
+    Msg = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"foobar_nonexistent">>, <<"id">> => <<"t8">>})
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t8">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: eval with empty code returns error
 tcp_eval_empty_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"t9">>, <<"code">> => <<>>}),
+    Msg = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"t9">>, <<"code">> => <<>>})
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t9">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: eval with simple expression
 tcp_eval_simple_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"t10">>, <<"code">> => <<"1 + 2">>}),
+    Msg = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"t10">>, <<"code">> => <<"1 + 2">>})
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t10">>}, Resp),
     %% Result could be error (compiler not running) or success
@@ -691,16 +703,20 @@ tcp_eval_simple_test(Port) ->
 
 %% Test: unload nonexistent module
 tcp_unload_nonexistent_test(Port) ->
-    Msg = jsx:encode(#{
-        <<"op">> => <<"unload">>, <<"id">> => <<"t11">>, <<"module">> => <<"XyzzyNotLoaded">>
-    }),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"unload">>, <<"id">> => <<"t11">>, <<"module">> => <<"XyzzyNotLoaded">>
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t11">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: unload with empty module name
 tcp_unload_empty_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"unload">>, <<"id">> => <<"t12">>, <<"module">> => <<>>}),
+    Msg = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"unload">>, <<"id">> => <<"t12">>, <<"module">> => <<>>})
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t12">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
@@ -724,11 +740,13 @@ tcp_unload_in_use_test(Port) ->
     %% Load new version so running process uses "old" code
     {module, DummyMod} = code:load_binary(DummyMod, "test.erl", Binary),
     try
-        Msg = jsx:encode(#{
-            <<"op">> => <<"unload">>,
-            <<"id">> => <<"t12b">>,
-            <<"module">> => atom_to_binary(DummyMod, utf8)
-        }),
+        Msg = iolist_to_binary(
+            json:encode(#{
+                <<"op">> => <<"unload">>,
+                <<"id">> => <<"t12b">>,
+                <<"module">> => atom_to_binary(DummyMod, utf8)
+            })
+        ),
         Resp = tcp_send_op(Port, Msg),
         ?assertMatch(#{<<"id">> := <<"t12b">>}, Resp),
         %% Raw BEAM modules are not Beamtalk classes → error (class not found).
@@ -743,27 +761,33 @@ tcp_unload_in_use_test(Port) ->
 
 %% Test: inspect with invalid PID string
 tcp_inspect_invalid_pid_test(Port) ->
-    Msg = jsx:encode(#{
-        <<"op">> => <<"inspect">>, <<"id">> => <<"t13">>, <<"actor">> => <<"not-a-pid">>
-    }),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"inspect">>, <<"id">> => <<"t13">>, <<"actor">> => <<"not-a-pid">>
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t13">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: kill with invalid PID string
 tcp_kill_invalid_pid_test(Port) ->
-    Msg = jsx:encode(#{
-        <<"op">> => <<"kill">>, <<"id">> => <<"t14">>, <<"actor">> => <<"not-a-pid">>
-    }),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"kill">>, <<"id">> => <<"t14">>, <<"actor">> => <<"not-a-pid">>
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t14">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: reload module that hasn't been loaded returns error
 tcp_reload_module_not_loaded_test(Port) ->
-    Msg = jsx:encode(#{
-        <<"op">> => <<"reload">>, <<"id">> => <<"t15">>, <<"module">> => <<"Counter">>
-    }),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"reload">>, <<"id">> => <<"t15">>, <<"module">> => <<"Counter">>
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t15">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)),
@@ -772,23 +796,25 @@ tcp_reload_module_not_loaded_test(Port) ->
 
 %% Test: docs for unknown class
 tcp_docs_unknown_class_test(Port) ->
-    Msg = jsx:encode(#{
-        <<"op">> => <<"docs">>, <<"id">> => <<"t16">>, <<"class">> => <<"XyzzyUnknown">>
-    }),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"docs">>, <<"id">> => <<"t16">>, <<"class">> => <<"XyzzyUnknown">>
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t16">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: modules op returns modules list
 tcp_modules_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"modules">>, <<"id">> => <<"t17">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"modules">>, <<"id">> => <<"t17">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t17">>}, Resp),
     ?assert(maps:is_key(<<"modules">>, Resp)).
 
 %% Test: clone op creates a new session
 tcp_clone_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"t18">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"t18">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t18">>}, Resp),
     %% Clone should return a session ID as value, or error if sup not ready
@@ -804,7 +830,9 @@ tcp_inspect_dead_actor_test(Port) ->
     after 1000 -> error(timeout)
     end,
     PidStr = list_to_binary(pid_to_list(Pid)),
-    Msg = jsx:encode(#{<<"op">> => <<"inspect">>, <<"id">> => <<"t19">>, <<"actor">> => PidStr}),
+    Msg = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"inspect">>, <<"id">> => <<"t19">>, <<"actor">> => PidStr})
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t19">>}, Resp),
     %% Should return error (not alive or not known)
@@ -816,7 +844,7 @@ tcp_malformed_json_test(Port) ->
     ws_send(Ws, <<"not valid json">>),
     {ok, Data} = ws_recv(Ws),
     ws_close(Ws),
-    Resp = jsx:decode(Data, [return_maps]),
+    Resp = json:decode(Data),
     %% The server should try to eval "not valid json" or return error
     ?assert(
         maps:is_key(<<"value">>, Resp) orelse maps:is_key(<<"error">>, Resp) orelse
@@ -829,7 +857,7 @@ tcp_raw_expression_test(Port) ->
     ws_send(Ws, <<"42">>),
     {ok, Data} = ws_recv(Ws),
     ws_close(Ws),
-    Resp = jsx:decode(Data, [return_maps]),
+    Resp = json:decode(Data),
     %% Raw expressions go through protocol decode
     ?assert(is_map(Resp)).
 
@@ -838,22 +866,22 @@ tcp_raw_expression_test(Port) ->
 %% Test: multiple sequential connections to the same port
 tcp_multiple_connects_test(Port) ->
     %% First connection
-    Msg1 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc1">>}),
+    Msg1 = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc1">>})),
     Resp1 = tcp_send_op(Port, Msg1),
     ?assertMatch(#{<<"id">> := <<"mc1">>}, Resp1),
     %% Second connection after first is closed
-    Msg2 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc2">>}),
+    Msg2 = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc2">>})),
     Resp2 = tcp_send_op(Port, Msg2),
     ?assertMatch(#{<<"id">> := <<"mc2">>}, Resp2),
     %% Third connection
-    Msg3 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc3">>}),
+    Msg3 = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc3">>})),
     Resp3 = tcp_send_op(Port, Msg3),
     ?assertMatch(#{<<"id">> := <<"mc3">>}, Resp3).
 
 %% Test: multiple concurrent WebSocket connections
 tcp_concurrent_clients_test(Port) ->
-    Msg1 = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"cc1">>}),
-    Msg2 = jsx:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"cc2">>}),
+    Msg1 = iolist_to_binary(json:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"cc1">>})),
+    Msg2 = iolist_to_binary(json:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"cc2">>})),
     {Ws1, _W1} = ws_connect(Port),
     {Ws2, _W2} = ws_connect(Port),
     ws_send(Ws1, Msg1),
@@ -862,8 +890,8 @@ tcp_concurrent_clients_test(Port) ->
     {ok, Data2} = ws_recv(Ws2),
     ws_close(Ws1),
     ws_close(Ws2),
-    Resp1 = jsx:decode(Data1, [return_maps]),
-    Resp2 = jsx:decode(Data2, [return_maps]),
+    Resp1 = json:decode(Data1),
+    Resp2 = json:decode(Data2),
     ?assertMatch(#{<<"id">> := <<"cc1">>}, Resp1),
     ?assertMatch(#{<<"id">> := <<"cc2">>}, Resp2).
 
@@ -874,7 +902,7 @@ tcp_client_disconnect_test(Port) ->
     gen_tcp:close(Sock),
     timer:sleep(100),
     %% Server should still be responsive
-    Msg = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"dc1">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"dc1">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"dc1">>}, Resp).
 
@@ -882,16 +910,16 @@ tcp_client_disconnect_test(Port) ->
 tcp_multi_request_same_conn_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
     %% Send first request
-    Msg1 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mr1">>}),
+    Msg1 = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mr1">>})),
     ws_send(Ws, Msg1),
     {ok, Data1} = ws_recv_response(Ws),
-    Resp1 = jsx:decode(Data1, [return_maps]),
+    Resp1 = json:decode(Data1),
     ?assertMatch(#{<<"id">> := <<"mr1">>}, Resp1),
     %% Send second request on same connection
-    Msg2 = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"mr2">>}),
+    Msg2 = iolist_to_binary(json:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"mr2">>})),
     ws_send(Ws, Msg2),
     {ok, Data2} = ws_recv_response(Ws),
-    Resp2 = jsx:decode(Data2, [return_maps]),
+    Resp2 = json:decode(Data2),
     ?assertMatch(#{<<"id">> := <<"mr2">>}, Resp2),
     ws_close(Ws).
 
@@ -901,26 +929,30 @@ tcp_multi_request_same_conn_test(Port) ->
 %% Regression test: before the fix, the binding only appeared after reconnect.
 tcp_bind_as_updates_bindings_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
-    EvalMsg = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"bau1">>,
-        <<"code">> => <<"Workspace bind: 42 as: #btBindUpdate">>
-    }),
+    EvalMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"bau1">>,
+            <<"code">> => <<"Workspace bind: 42 as: #btBindUpdate">>
+        })
+    ),
     ws_send(Ws, EvalMsg),
     {ok, _} = ws_recv_response(Ws),
     %% bindings op on the same connection — btBindUpdate must appear without reconnect
-    BindMsg = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"bau2">>}),
+    BindMsg = iolist_to_binary(json:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"bau2">>})),
     ws_send(Ws, BindMsg),
     {ok, BindData} = ws_recv_response(Ws),
-    BindResp = jsx:decode(BindData, [return_maps]),
+    BindResp = json:decode(BindData),
     Bindings = maps:get(<<"bindings">>, BindResp, #{}),
     ?assert(maps:is_key(<<"btBindUpdate">>, Bindings)),
     %% Cleanup
-    CleanMsg = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"bau3">>,
-        <<"code">> => <<"Workspace unbind: #btBindUpdate">>
-    }),
+    CleanMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"bau3">>,
+            <<"code">> => <<"Workspace unbind: #btBindUpdate">>
+        })
+    ),
     ws_send(Ws, CleanMsg),
     {ok, _} = ws_recv_response(Ws),
     ws_close(Ws).
@@ -929,25 +961,29 @@ tcp_bind_as_updates_bindings_test(Port) ->
 %% Regression test: before the fix, the binding persisted in :bindings until reconnect.
 tcp_unbind_removes_from_bindings_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
-    BindMsg = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"urb1">>,
-        <<"code">> => <<"Workspace bind: 99 as: #btUnbindRemove">>
-    }),
+    BindMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"urb1">>,
+            <<"code">> => <<"Workspace bind: 99 as: #btUnbindRemove">>
+        })
+    ),
     ws_send(Ws, BindMsg),
     {ok, _} = ws_recv_response(Ws),
-    UnbindMsg = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"urb2">>,
-        <<"code">> => <<"Workspace unbind: #btUnbindRemove">>
-    }),
+    UnbindMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"urb2">>,
+            <<"code">> => <<"Workspace unbind: #btUnbindRemove">>
+        })
+    ),
     ws_send(Ws, UnbindMsg),
     {ok, _} = ws_recv_response(Ws),
     %% bindings op — btUnbindRemove must be gone without reconnect
-    QueryMsg = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"urb3">>}),
+    QueryMsg = iolist_to_binary(json:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"urb3">>})),
     ws_send(Ws, QueryMsg),
     {ok, QueryData} = ws_recv_response(Ws),
-    QueryResp = jsx:decode(QueryData, [return_maps]),
+    QueryResp = json:decode(QueryData),
     Bindings = maps:get(<<"bindings">>, QueryResp, #{}),
     ?assertNot(maps:is_key(<<"btUnbindRemove">>, Bindings)),
     ws_close(Ws).
@@ -955,30 +991,36 @@ tcp_unbind_removes_from_bindings_test(Port) ->
 %% Test: value registered via bind:as: is usable in the next eval on the same session.
 tcp_bind_as_available_in_next_eval_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
-    BindMsg = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"bae1">>,
-        <<"code">> => <<"Workspace bind: 42 as: #btBindNextEval">>
-    }),
+    BindMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"bae1">>,
+            <<"code">> => <<"Workspace bind: 42 as: #btBindNextEval">>
+        })
+    ),
     ws_send(Ws, BindMsg),
     {ok, _} = ws_recv_response(Ws),
     %% Next eval references the bound name — must succeed (not DNU)
-    EvalMsg = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"bae2">>,
-        <<"code">> => <<"btBindNextEval">>
-    }),
+    EvalMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"bae2">>,
+            <<"code">> => <<"btBindNextEval">>
+        })
+    ),
     ws_send(Ws, EvalMsg),
     {ok, EvalData} = ws_recv_response(Ws),
-    EvalResp = jsx:decode(EvalData, [return_maps]),
+    EvalResp = json:decode(EvalData),
     ?assert(maps:is_key(<<"value">>, EvalResp)),
     ?assertNot(maps:is_key(<<"error">>, EvalResp)),
     %% Cleanup
-    CleanMsg = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"bae3">>,
-        <<"code">> => <<"Workspace unbind: #btBindNextEval">>
-    }),
+    CleanMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"bae3">>,
+            <<"code">> => <<"Workspace unbind: #btBindNextEval">>
+        })
+    ),
     ws_send(Ws, CleanMsg),
     {ok, _} = ws_recv_response(Ws),
     ws_close(Ws).
@@ -988,29 +1030,35 @@ tcp_bind_as_available_in_next_eval_test(Port) ->
 %% in-memory state still had the old value, so the binding kept working.
 tcp_unbind_unavailable_in_next_eval_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
-    BindMsg = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"une1">>,
-        <<"code">> => <<"Workspace bind: 99 as: #btUnbindNextEval">>
-    }),
+    BindMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"une1">>,
+            <<"code">> => <<"Workspace bind: 99 as: #btUnbindNextEval">>
+        })
+    ),
     ws_send(Ws, BindMsg),
     {ok, _} = ws_recv_response(Ws),
-    UnbindMsg = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"une2">>,
-        <<"code">> => <<"Workspace unbind: #btUnbindNextEval">>
-    }),
+    UnbindMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"une2">>,
+            <<"code">> => <<"Workspace unbind: #btUnbindNextEval">>
+        })
+    ),
     ws_send(Ws, UnbindMsg),
     {ok, _} = ws_recv_response(Ws),
     %% Next eval referencing the now-unbound name must fail
-    EvalMsg = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"une3">>,
-        <<"code">> => <<"btUnbindNextEval">>
-    }),
+    EvalMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"une3">>,
+            <<"code">> => <<"btUnbindNextEval">>
+        })
+    ),
     ws_send(Ws, EvalMsg),
     {ok, EvalData} = ws_recv_response(Ws),
-    EvalResp = jsx:decode(EvalData, [return_maps]),
+    EvalResp = json:decode(EvalData),
     ?assert(maps:is_key(<<"error">>, EvalResp)),
     ws_close(Ws).
 
@@ -1022,7 +1070,7 @@ tcp_empty_line_test(Port) ->
     ws_send(Ws, <<>>),
     {ok, Data} = ws_recv(Ws),
     ws_close(Ws),
-    Resp = jsx:decode(Data, [return_maps]),
+    Resp = json:decode(Data),
     %% Empty message results in error
     ?assert(
         maps:is_key(<<"error">>, Resp) orelse
@@ -1039,24 +1087,28 @@ tcp_binary_garbage_test(Port) ->
     %% Should get some response without crashing the server
     ?assert(is_binary(Data)),
     %% Server still works after garbage
-    Msg = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"bg1">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"bg1">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"bg1">>}, Resp).
 
 %% Test: reload with empty module name
 tcp_reload_empty_module_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"reload">>, <<"id">> => <<"re1">>, <<"module">> => <<>>}),
+    Msg = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"reload">>, <<"id">> => <<"re1">>, <<"module">> => <<>>})
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"re1">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %% Test: reload with path but no module
 tcp_reload_with_path_test(Port) ->
-    Msg = jsx:encode(#{
-        <<"op">> => <<"reload">>,
-        <<"id">> => <<"re2">>,
-        <<"path">> => <<"/nonexistent/path.bt">>
-    }),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"reload">>,
+            <<"id">> => <<"re2">>,
+            <<"path">> => <<"/nonexistent/path.bt">>
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"re2">>}, Resp),
     %% Should error because file doesn't exist
@@ -1064,12 +1116,14 @@ tcp_reload_with_path_test(Port) ->
 
 %% Test: docs with selector for unknown class
 tcp_docs_with_selector_unknown_test(Port) ->
-    Msg = jsx:encode(#{
-        <<"op">> => <<"docs">>,
-        <<"id">> => <<"d1">>,
-        <<"class">> => <<"XyzzyUnknown523">>,
-        <<"selector">> => <<"+">>
-    }),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"docs">>,
+            <<"id">> => <<"d1">>,
+            <<"class">> => <<"XyzzyUnknown523">>,
+            <<"selector">> => <<"+">>
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"d1">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
@@ -1084,11 +1138,13 @@ tcp_inspect_unknown_actor_test(Port) ->
     PidStr = list_to_binary(pid_to_list(Pid)),
     exit(Pid, kill),
     timer:sleep(50),
-    Msg = jsx:encode(#{
-        <<"op">> => <<"inspect">>,
-        <<"id">> => <<"iu1">>,
-        <<"actor">> => PidStr
-    }),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"inspect">>,
+            <<"id">> => <<"iu1">>,
+            <<"actor">> => PidStr
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"iu1">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
@@ -1103,11 +1159,13 @@ tcp_kill_unknown_actor_test(Port) ->
     PidStr = list_to_binary(pid_to_list(Pid)),
     exit(Pid, kill),
     timer:sleep(50),
-    Msg = jsx:encode(#{
-        <<"op">> => <<"kill">>,
-        <<"id">> => <<"ku1">>,
-        <<"actor">> => PidStr
-    }),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"kill">>,
+            <<"id">> => <<"ku1">>,
+            <<"actor">> => PidStr
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"ku1">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
@@ -1146,7 +1204,7 @@ tcp_info_unknown_check2() ->
 
 tcp_health_op_test(Port) ->
     %% Covers handle_op(<<"health">>, ...) which exercises get_nonce/0 (lines 714-725)
-    Msg = jsx:encode(#{<<"op">> => <<"health">>, <<"id">> => <<"h1">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"health">>, <<"id">> => <<"h1">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"h1">>}, Resp),
     ?assert(maps:is_key(<<"nonce">>, Resp)).
@@ -1189,8 +1247,8 @@ start_link_integer_port_test() ->
 
 %% Test: two clone ops produce different session IDs
 tcp_clone_uniqueness_test(Port) ->
-    Msg1 = jsx:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu1">>}),
-    Msg2 = jsx:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu2">>}),
+    Msg1 = iolist_to_binary(json:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu1">>})),
+    Msg2 = iolist_to_binary(json:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu2">>})),
     Resp1 = tcp_send_op(Port, Msg1),
     Resp2 = tcp_send_op(Port, Msg2),
     %% Both clones must succeed — if the session sup isn't ready, fail loudly
@@ -1695,18 +1753,20 @@ handle_op_bindings_with_session_returns_target_bindings_test() ->
     try
         %% Construct a bindings request with session field at the top level.
         %% The protocol decoder puts it in Msg, not Params.
-        Json = jsx:encode(#{
-            <<"op">> => <<"bindings">>,
-            <<"id">> => <<"b1">>,
-            <<"session">> => SessionId
-        }),
+        Json = iolist_to_binary(
+            json:encode(#{
+                <<"op">> => <<"bindings">>,
+                <<"id">> => <<"b1">>,
+                <<"session">> => SessionId
+            })
+        ),
         {ok, Msg} = beamtalk_repl_protocol:decode(Json),
         Params = beamtalk_repl_protocol:get_params(Msg),
         %% Use a dummy WS session pid (no bindings) as the default
         WsPid = spawn(fun() -> timer:sleep(10000) end),
         Result = beamtalk_repl_server:handle_op(<<"bindings">>, Params, Msg, WsPid),
         exit(WsPid, kill),
-        Decoded = jsx:decode(Result, [return_maps]),
+        Decoded = json:decode(Result),
         ?assertMatch(#{<<"id">> := <<"b1">>}, Decoded),
         %% Must return bindings from ShellPid (the target session), not the empty WS session
         Bindings = maps:get(<<"bindings">>, Decoded),
@@ -2341,33 +2401,33 @@ make_proto_msg(Op, Id) ->
     make_proto_msg(Op, Id, #{}).
 
 make_proto_msg(Op, Id, Params) ->
-    Json = jsx:encode(#{<<"op">> => Op, <<"id">> => Id, <<"params">> => Params}),
+    Json = iolist_to_binary(json:encode(#{<<"op">> => Op, <<"id">> => Id, <<"params">> => Params})),
     {ok, Msg} = beamtalk_repl_protocol:decode(Json),
     Msg.
 
 handle_op_actors_no_registry_test() ->
     Msg = make_proto_msg(<<"actors">>, <<"a1">>),
     Result = beamtalk_repl_server:handle_op(<<"actors">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"a1">>}, Decoded).
 
 handle_op_close_test() ->
     Msg = make_proto_msg(<<"close">>, <<"c1">>),
     Result = beamtalk_repl_server:handle_op(<<"close">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"c1">>}, Decoded).
 
 handle_op_unknown_test() ->
     Msg = make_proto_msg(<<"foobar">>, <<"u1">>),
     Result = beamtalk_repl_server:handle_op(<<"foobar">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"u1">>}, Decoded).
 
 handle_op_inspect_invalid_pid_test() ->
     Msg = make_proto_msg(<<"inspect">>, <<"i1">>, #{<<"actor">> => <<"notapid">>}),
     Params = #{<<"actor">> => <<"notapid">>},
     Result = beamtalk_repl_server:handle_op(<<"inspect">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"i1">>}, Decoded).
 
 handle_op_inspect_dead_actor_test() ->
@@ -2377,7 +2437,7 @@ handle_op_inspect_dead_actor_test() ->
     Msg = make_proto_msg(<<"inspect">>, <<"i2">>, #{<<"actor">> => PidStr}),
     Params = #{<<"actor">> => PidStr},
     Result = beamtalk_repl_server:handle_op(<<"inspect">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"i2">>}, Decoded).
 
 handle_op_inspect_live_non_actor_test() ->
@@ -2391,7 +2451,7 @@ handle_op_inspect_live_non_actor_test() ->
     Msg = make_proto_msg(<<"inspect">>, <<"i3">>, #{<<"actor">> => PidStr}),
     Params = #{<<"actor">> => PidStr},
     Result = beamtalk_repl_server:handle_op(<<"inspect">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"i3">>}, Decoded),
     Pid ! stop.
 
@@ -2422,7 +2482,7 @@ handle_op_inspect_live_tagged_actor_test() ->
     Params = #{<<"actor">> => PidStr},
     try
         Result = beamtalk_repl_server:handle_op(<<"inspect">>, Params, Msg, self()),
-        Decoded = jsx:decode(Result, [return_maps]),
+        Decoded = json:decode(Result),
         ?assertMatch(#{<<"id">> := <<"i4">>}, Decoded),
         %% state must be a JSON object (map), not a string
         State = maps:get(<<"state">>, Decoded),
@@ -2440,7 +2500,7 @@ handle_op_kill_invalid_pid_test() ->
     Msg = make_proto_msg(<<"kill">>, <<"k1">>, #{<<"actor">> => <<"notapid">>}),
     Params = #{<<"actor">> => <<"notapid">>},
     Result = beamtalk_repl_server:handle_op(<<"kill">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"k1">>}, Decoded).
 
 handle_op_kill_valid_pid_test() ->
@@ -2454,35 +2514,35 @@ handle_op_kill_valid_pid_test() ->
     Msg = make_proto_msg(<<"kill">>, <<"k2">>, #{<<"actor">> => PidStr}),
     Params = #{<<"actor">> => PidStr},
     Result = beamtalk_repl_server:handle_op(<<"kill">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"k2">>}, Decoded).
 
 handle_op_complete_empty_test() ->
     Msg = make_proto_msg(<<"complete">>, <<"cp1">>, #{<<"code">> => <<>>}),
     Params = #{<<"code">> => <<>>},
     Result = beamtalk_repl_server:handle_op(<<"complete">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"cp1">>}, Decoded).
 
 handle_op_complete_with_prefix_test() ->
     Msg = make_proto_msg(<<"complete">>, <<"cp2">>, #{<<"code">> => <<"sel">>}),
     Params = #{<<"code">> => <<"sel">>},
     Result = beamtalk_repl_server:handle_op(<<"complete">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"completions">> := _}, Decoded).
 
 handle_op_docs_unknown_class_test() ->
     Msg = make_proto_msg(<<"docs">>, <<"d1">>, #{<<"class">> => <<"NonexistentClassXyz">>}),
     Params = #{<<"class">> => <<"NonexistentClassXyz">>},
     Result = beamtalk_repl_server:handle_op(<<"docs">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"d1">>}, Decoded).
 
 handle_op_unload_empty_test() ->
     Msg = make_proto_msg(<<"unload">>, <<"ul1">>, #{<<"module">> => <<>>}),
     Params = #{<<"module">> => <<>>},
     Result = beamtalk_repl_server:handle_op(<<"unload">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"ul1">>}, Decoded).
 
 handle_op_unload_nonexistent_test() ->
@@ -2491,34 +2551,34 @@ handle_op_unload_nonexistent_test() ->
     }),
     Params = #{<<"module">> => <<"definitely_never_loaded_xyz">>},
     Result = beamtalk_repl_server:handle_op(<<"unload">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"ul2">>}, Decoded).
 
 handle_op_reload_empty_test() ->
     Msg = make_proto_msg(<<"reload">>, <<"r1">>, #{<<"module">> => <<>>}),
     Params = #{<<"module">> => <<>>},
     Result = beamtalk_repl_server:handle_op(<<"reload">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"r1">>}, Decoded).
 
 handle_op_reload_nonexistent_module_test() ->
     Msg = make_proto_msg(<<"reload">>, <<"r2">>, #{<<"module">> => <<"never_existed_xyz_99">>}),
     Params = #{<<"module">> => <<"never_existed_xyz_99">>},
     Result = beamtalk_repl_server:handle_op(<<"reload">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"r2">>}, Decoded).
 
 handle_op_eval_empty_test() ->
     Msg = make_proto_msg(<<"eval">>, <<"e1">>, #{<<"code">> => <<>>}),
     Params = #{<<"code">> => <<>>},
     Result = beamtalk_repl_server:handle_op(<<"eval">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"e1">>}, Decoded).
 
 handle_op_sessions_no_sup_test() ->
     Msg = make_proto_msg(<<"sessions">>, <<"s1">>),
     Result = beamtalk_repl_server:handle_op(<<"sessions">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"s1">>}, Decoded).
 
 %% ===================================================================
@@ -2530,7 +2590,7 @@ handle_op_show_codegen_empty_test() ->
     Msg = make_proto_msg(<<"show-codegen">>, <<"sc1">>, #{<<"code">> => <<>>}),
     Params = #{<<"code">> => <<>>},
     Result = beamtalk_repl_server:handle_op(<<"show-codegen">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"sc1">>}, Decoded),
     ?assert(maps:is_key(<<"error">>, Decoded)),
     Status = maps:get(<<"status">>, Decoded),
@@ -2542,7 +2602,7 @@ handle_op_show_codegen_no_code_param_test() ->
     Msg = make_proto_msg(<<"show-codegen">>, <<"sc2">>),
     Params = #{},
     Result = beamtalk_repl_server:handle_op(<<"show-codegen">>, Params, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"sc2">>}, Decoded),
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
@@ -2550,14 +2610,16 @@ handle_op_show_codegen_dead_session_test() ->
     %% Using a dead session PID should be caught by handle_protocol_request
     DeadPid = spawn(fun() -> ok end),
     timer:sleep(50),
-    Json = jsx:encode(#{
-        <<"op">> => <<"show-codegen">>,
-        <<"id">> => <<"sc3">>,
-        <<"params">> => #{<<"code">> => <<"1 + 2">>}
-    }),
+    Json = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"show-codegen">>,
+            <<"id">> => <<"sc3">>,
+            <<"params">> => #{<<"code">> => <<"1 + 2">>}
+        })
+    ),
     {ok, Msg} = beamtalk_repl_protocol:decode(Json),
     Result = beamtalk_repl_server:handle_protocol_request(Msg, DeadPid),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"sc3">>}, Decoded),
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
@@ -2565,7 +2627,7 @@ handle_op_show_codegen_in_describe_test() ->
     %% Verify show-codegen appears in describe ops
     Msg = make_proto_msg(<<"describe">>, <<"d1">>),
     Result = beamtalk_repl_server:handle_op(<<"describe">>, #{}, Msg, self()),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"show-codegen">>, Ops)),
     ShowCodegenOp = maps:get(<<"show-codegen">>, Ops),
@@ -2587,14 +2649,16 @@ handle_protocol_request_crash_test() ->
     %% Use eval op with a SessionPid that's dead
     DeadPid = spawn(fun() -> ok end),
     timer:sleep(50),
-    Json = jsx:encode(#{
-        <<"op">> => <<"eval">>,
-        <<"id">> => <<"crash1">>,
-        <<"params">> => #{<<"code">> => <<"test">>}
-    }),
+    Json = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"crash1">>,
+            <<"params">> => #{<<"code">> => <<"test">>}
+        })
+    ),
     {ok, Msg} = beamtalk_repl_protocol:decode(Json),
     Result = beamtalk_repl_server:handle_protocol_request(Msg, DeadPid),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     ?assertMatch(#{<<"id">> := <<"crash1">>}, Decoded).
 
 %% ===================================================================
@@ -2641,18 +2705,20 @@ code_change_test() ->
 
 %% Test: interrupt op when no evaluation is running returns ok
 tcp_interrupt_no_eval_test(Port) ->
-    Msg = jsx:encode(#{<<"op">> => <<"interrupt">>, <<"id">> => <<"int1">>}),
+    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"interrupt">>, <<"id">> => <<"int1">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"int1">>}, Resp),
     ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
 
 %% Test: interrupt op with an unknown session ID falls back to current session
 tcp_interrupt_unknown_session_test(Port) ->
-    Msg = jsx:encode(#{
-        <<"op">> => <<"interrupt">>,
-        <<"id">> => <<"int2">>,
-        <<"session">> => <<"nonexistent_session">>
-    }),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"interrupt">>,
+            <<"id">> => <<"int2">>,
+            <<"session">> => <<"nonexistent_session">>
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"int2">>}, Resp),
     ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).

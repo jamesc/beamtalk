@@ -242,11 +242,15 @@ encode_result(Value, Msg, TermToJson, Output, Warnings) ->
     case Msg#protocol_msg.legacy of
         true ->
             Base = #{<<"type">> => <<"result">>, <<"value">> => JsonValue},
-            jsx:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings));
+            iolist_to_binary(
+                json:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings))
+            );
         false ->
             Base = base_response(Msg),
             Full = Base#{<<"value">> => JsonValue, <<"status">> => [<<"done">>]},
-            jsx:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
+            iolist_to_binary(
+                json:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
+            )
     end.
 
 %% @doc Encode an error response.
@@ -276,12 +280,16 @@ encode_error(Reason, Msg, FormatError, Output, Warnings, Metadata) ->
         true ->
             %% Legacy protocol does not support extra metadata (line/hint)
             Base = #{<<"type">> => <<"error">>, <<"message">> => Message},
-            jsx:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings));
+            iolist_to_binary(
+                json:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings))
+            );
         false ->
             Base = base_response(Msg),
             Full0 = Base#{<<"error">> => Message, <<"status">> => [<<"done">>, <<"error">>]},
             Full = maps:merge(Full0, Metadata),
-            jsx:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
+            iolist_to_binary(
+                json:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
+            )
     end.
 
 %% @doc Encode a status-only response (e.g., for clear, close).
@@ -289,10 +297,14 @@ encode_error(Reason, Msg, FormatError, Output, Warnings, Metadata) ->
 encode_status(Status, Msg, TermToJson) ->
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"result">>, <<"value">> => TermToJson(Status)});
+            iolist_to_binary(
+                json:encode(#{<<"type">> => <<"result">>, <<"value">> => TermToJson(Status)})
+            );
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"value">> => TermToJson(Status), <<"status">> => [<<"done">>]})
+            iolist_to_binary(
+                json:encode(Base#{<<"value">> => TermToJson(Status), <<"status">> => [<<"done">>]})
+            )
     end.
 
 %% @doc Encode a streaming stdout chunk (BT-696).
@@ -304,14 +316,16 @@ encode_out(_Chunk, #protocol_msg{legacy = true}, _Stream) ->
     <<>>;
 encode_out(Chunk, Msg, Stream) ->
     Base = base_response(Msg),
-    jsx:encode(Base#{Stream => Chunk}).
+    iolist_to_binary(json:encode(Base#{Stream => Chunk})).
 
 %% @doc Encode a need-input status message (BT-698).
 %% Sent when eval code requests stdin input (e.g. io:get_line).
 -spec encode_need_input(binary(), protocol_msg()) -> binary().
 encode_need_input(Prompt, Msg) ->
     Base = base_response(Msg),
-    jsx:encode(Base#{<<"status">> => [<<"need-input">>], <<"prompt">> => Prompt}).
+    iolist_to_binary(
+        json:encode(Base#{<<"status">> => [<<"need-input">>], <<"prompt">> => Prompt})
+    ).
 
 %% @doc Encode a bindings response.
 -spec encode_bindings(map(), protocol_msg(), fun((term()) -> term())) -> binary().
@@ -326,10 +340,14 @@ encode_bindings(Bindings, Msg, TermToJson) ->
     ),
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings});
+            iolist_to_binary(
+                json:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings})
+            );
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"bindings">> => JsonBindings, <<"status">> => [<<"done">>]})
+            iolist_to_binary(
+                json:encode(Base#{<<"bindings">> => JsonBindings, <<"status">> => [<<"done">>]})
+            )
     end.
 
 %% @doc Encode a loaded file response.
@@ -346,11 +364,11 @@ encode_loaded(Classes, Msg, _TermToJson, Warnings) ->
     case Msg#protocol_msg.legacy of
         true ->
             Base = #{<<"type">> => <<"loaded">>, <<"classes">> => ClassNames},
-            jsx:encode(maybe_add_warnings(Base, Warnings));
+            iolist_to_binary(json:encode(maybe_add_warnings(Base, Warnings)));
         false ->
             Base = base_response(Msg),
             Full = Base#{<<"classes">> => ClassNames, <<"status">> => [<<"done">>]},
-            jsx:encode(maybe_add_warnings(Full, Warnings))
+            iolist_to_binary(json:encode(maybe_add_warnings(Full, Warnings)))
     end.
 
 %% @doc Encode an actors list response.
@@ -369,10 +387,14 @@ encode_actors(Actors, Msg, _TermToJson) ->
     ),
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"actors">>, <<"actors">> => JsonActors});
+            iolist_to_binary(
+                json:encode(#{<<"type">> => <<"actors">>, <<"actors">> => JsonActors})
+            );
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"actors">> => JsonActors, <<"status">> => [<<"done">>]})
+            iolist_to_binary(
+                json:encode(Base#{<<"actors">> => JsonActors, <<"status">> => [<<"done">>]})
+            )
     end.
 
 %% @doc Encode a modules list response.
@@ -392,10 +414,14 @@ encode_modules(ModulesWithInfo, Msg, _TermToJson) ->
     ),
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"modules">>, <<"modules">> => JsonModules});
+            iolist_to_binary(
+                json:encode(#{<<"type">> => <<"modules">>, <<"modules">> => JsonModules})
+            );
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"modules">> => JsonModules, <<"status">> => [<<"done">>]})
+            iolist_to_binary(
+                json:encode(Base#{<<"modules">> => JsonModules, <<"status">> => [<<"done">>]})
+            )
     end.
 
 %% @doc Encode a sessions list response.
@@ -413,10 +439,14 @@ encode_sessions(Sessions, Msg, _TermToJson) ->
     ),
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"sessions">>, <<"sessions">> => JsonSessions});
+            iolist_to_binary(
+                json:encode(#{<<"type">> => <<"sessions">>, <<"sessions">> => JsonSessions})
+            );
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"sessions">> => JsonSessions, <<"status">> => [<<"done">>]})
+            iolist_to_binary(
+                json:encode(Base#{<<"sessions">> => JsonSessions, <<"status">> => [<<"done">>]})
+            )
     end.
 
 %% @doc Encode an actor inspect response with a pre-formatted string.
@@ -424,10 +454,14 @@ encode_sessions(Sessions, Msg, _TermToJson) ->
 encode_inspect(InspectStr, Msg) ->
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"inspect">>, <<"state">> => InspectStr});
+            iolist_to_binary(
+                json:encode(#{<<"type">> => <<"inspect">>, <<"state">> => InspectStr})
+            );
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"state">> => InspectStr, <<"status">> => [<<"done">>]})
+            iolist_to_binary(
+                json:encode(Base#{<<"state">> => InspectStr, <<"status">> => [<<"done">>]})
+            )
     end.
 
 %% @doc Encode an actor inspect response.
@@ -442,10 +476,12 @@ encode_inspect(ActorState, Msg, TermToJson) ->
     ),
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"inspect">>, <<"state">> => JsonState});
+            iolist_to_binary(json:encode(#{<<"type">> => <<"inspect">>, <<"state">> => JsonState}));
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"state">> => JsonState, <<"status">> => [<<"done">>]})
+            iolist_to_binary(
+                json:encode(Base#{<<"state">> => JsonState, <<"status">> => [<<"done">>]})
+            )
     end.
 
 %% @doc Encode a documentation response.
@@ -453,10 +489,12 @@ encode_inspect(ActorState, Msg, TermToJson) ->
 encode_docs(DocText, Msg) ->
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"docs">>, <<"docs">> => DocText});
+            iolist_to_binary(json:encode(#{<<"type">> => <<"docs">>, <<"docs">> => DocText}));
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"docs">> => DocText, <<"status">> => [<<"done">>]})
+            iolist_to_binary(
+                json:encode(Base#{<<"docs">> => DocText, <<"status">> => [<<"done">>]})
+            )
     end.
 
 %% @doc Encode a describe response with ops, versions, and capabilities.
@@ -464,18 +502,22 @@ encode_docs(DocText, Msg) ->
 encode_describe(Ops, Versions, Msg) ->
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{
-                <<"type">> => <<"describe">>,
-                <<"ops">> => Ops,
-                <<"versions">> => Versions
-            });
+            iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"describe">>,
+                    <<"ops">> => Ops,
+                    <<"versions">> => Versions
+                })
+            );
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{
-                <<"ops">> => Ops,
-                <<"versions">> => Versions,
-                <<"status">> => [<<"done">>]
-            })
+            iolist_to_binary(
+                json:encode(Base#{
+                    <<"ops">> => Ops,
+                    <<"versions">> => Versions,
+                    <<"status">> => [<<"done">>]
+                })
+            )
     end.
 
 %% @doc Encode a test results response.
@@ -508,7 +550,7 @@ encode_test_results(
         <<"tests">> => [encode_test_entry(T) || T <- Tests]
     },
     Base = base_response(Msg),
-    jsx:encode(Base#{<<"status">> => Status, <<"results">> => ResultMap}).
+    iolist_to_binary(json:encode(Base#{<<"status">> => Status, <<"results">> => ResultMap})).
 
 %% @private
 -spec encode_test_entry(map()) -> map().
@@ -561,11 +603,15 @@ encode_trace_result(Steps, Msg, TermToJson, Output, Warnings) ->
     case Msg#protocol_msg.legacy of
         true ->
             Base = #{<<"type">> => <<"result">>, <<"steps">> => JsonSteps},
-            jsx:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings));
+            iolist_to_binary(
+                json:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings))
+            );
         false ->
             Base = base_response(Msg),
             Full = Base#{<<"steps">> => JsonSteps, <<"status">> => [<<"done">>]},
-            jsx:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
+            iolist_to_binary(
+                json:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
+            )
     end.
 
 %%% Internal functions
@@ -640,7 +686,7 @@ base_response(#protocol_msg{id = Id, session = Session}) ->
 -spec parse_json(binary()) -> {ok, term()} | {error, term()}.
 parse_json(Data) ->
     try
-        Decoded = jsx:decode(Data, [return_maps]),
+        Decoded = json:decode(Data),
         {ok, Decoded}
     catch
         _:_ -> {error, not_json}

@@ -89,13 +89,17 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
         end,
     case beamtalk_repl_protocol:is_legacy(Msg) of
         true ->
-            jsx:encode(#{
-                <<"type">> => <<"completions">>,
-                <<"completions">> => Completions
-            });
+            iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"completions">>,
+                    <<"completions">> => Completions
+                })
+            );
         false ->
             Base = base_protocol_response(Msg),
-            jsx:encode(Base#{<<"completions">> => Completions, <<"status">> => [<<"done">>]})
+            iolist_to_binary(
+                json:encode(Base#{<<"completions">> => Completions, <<"status">> => [<<"done">>]})
+            )
     end;
 handle(<<"docs">>, Params, Msg, _SessionPid) ->
     ClassBin = maps:get(<<"class">>, Params, <<>>),
@@ -240,9 +244,11 @@ handle(<<"methods">>, Params, Msg, _SessionPid) ->
     Methods = list_class_methods_for_ws(ClassBin),
     StateVars = list_state_vars_for_ws(ClassBin),
     Base = base_protocol_response(Msg),
-    jsx:encode(Base#{
-        <<"methods">> => Methods, <<"state_vars">> => StateVars, <<"status">> => [<<"done">>]
-    });
+    iolist_to_binary(
+        json:encode(Base#{
+            <<"methods">> => Methods, <<"state_vars">> => StateVars, <<"status">> => [<<"done">>]
+        })
+    );
 handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
     %% BT-1404: List all available classes with one-line descriptions.
     RawFilter = maps:get(<<"filter">>, Params, undefined),
@@ -339,7 +345,9 @@ handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
                         ClassInfos
                     ),
                     Base = base_protocol_response(Msg),
-                    jsx:encode(Base#{<<"class_list">> => Sorted, <<"status">> => [<<"done">>]})
+                    iolist_to_binary(
+                        json:encode(Base#{<<"class_list">> => Sorted, <<"status">> => [<<"done">>]})
+                    )
             end
     end;
 handle(<<"test">>, Params, Msg, _SessionPid) ->
@@ -397,7 +405,7 @@ encode_codegen_response(CoreErlang, Warnings, Msg) ->
             [] -> Result;
             _ -> Result#{<<"warnings">> => Warnings}
         end,
-    jsx:encode(Result1).
+    iolist_to_binary(json:encode(Result1)).
 
 %% @private
 %% @doc Handle show-codegen for a loaded class method (BT-1236).

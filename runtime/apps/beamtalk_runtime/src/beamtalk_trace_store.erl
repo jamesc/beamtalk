@@ -911,7 +911,7 @@ do_export_traces(Opts) ->
         },
         <<"traces">> => Limited
     },
-    JsonBin = jsx:encode(Export, [{space, 2}, {indent, 2}]),
+    JsonBin = beamtalk_json:prettify_term(Export),
     case file:write_file(Path, JsonBin) of
         ok ->
             {ok, #{path => Path, count => Count}};
@@ -996,7 +996,7 @@ sanitize_metadata(Meta) ->
     ).
 
 %% @private Convert a single value to a JSON-safe representation.
--spec sanitize_value(term()) -> jsx:json_term().
+-spec sanitize_value(term()) -> term().
 sanitize_value(V) when is_binary(V) -> V;
 sanitize_value(V) when is_integer(V) -> V;
 sanitize_value(V) when is_float(V) -> V;

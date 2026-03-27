@@ -471,12 +471,12 @@ encode_reloaded_with_failures_test() ->
 
 format_response_string_test() ->
     Response = beamtalk_repl_json:format_response("hello"),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"hello">>, maps:get(<<"value">>, Decoded)).
 
 format_response_map_test() ->
     Response = beamtalk_repl_json:format_response(#{x => 1, y => 2}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
     %% BT-535: Maps are now pre-formatted as Beamtalk syntax strings
     ?assert(is_binary(Value)),
@@ -486,7 +486,7 @@ format_response_map_test() ->
 format_response_pid_test() ->
     Pid = self(),
     Response = beamtalk_repl_json:format_response(Pid),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
     %% Should be formatted as #Actor<...>
     ?assert(binary:match(Value, <<"#Actor<">>) =/= nomatch).
@@ -494,26 +494,26 @@ format_response_pid_test() ->
 format_response_function_test() ->
     Fun = fun(X) -> X + 1 end,
     Response = beamtalk_repl_json:format_response(Fun),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
     %% Should be formatted as "a Block/N"
     ?assert(binary:match(Value, <<"a Block/">>) =/= nomatch).
 
 format_response_tuple_test() ->
     Response = beamtalk_repl_json:format_response({ok, value}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
     %% BT-536: Tuples are formatted as {el1, el2, ...} with symbol notation
     ?assertEqual(<<"{#ok, #value}">>, Value).
 
 format_response_nil_test() ->
     Response = beamtalk_repl_json:format_response(nil),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"nil">>, maps:get(<<"value">>, Decoded)).
 
 format_response_large_number_test() ->
     Response = beamtalk_repl_json:format_response(999999999999999),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(999999999999999, maps:get(<<"value">>, Decoded)).
 
 format_response_complex_pid_test() ->
@@ -526,7 +526,7 @@ format_response_complex_pid_test() ->
         end
     end),
     Response = beamtalk_repl_json:format_response(Pid),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
     ?assert(binary:match(Value, <<"#Actor<">>) =/= nomatch),
     ?assert(binary:match(Value, <<">">>) =/= nomatch),
@@ -545,8 +545,8 @@ format_response_multi_arity_function_test() ->
     Response0 = beamtalk_repl_json:format_response(Fun0),
     Response3 = beamtalk_repl_json:format_response(Fun3),
 
-    Decoded0 = jsx:decode(Response0, [return_maps]),
-    Decoded3 = jsx:decode(Response3, [return_maps]),
+    Decoded0 = json:decode(Response0),
+    Decoded3 = json:decode(Response3),
 
     Value0 = maps:get(<<"value">>, Decoded0),
     Value3 = maps:get(<<"value">>, Decoded3),
@@ -558,37 +558,37 @@ format_response_multi_arity_function_test() ->
 
 format_error_compile_error_test() ->
     Response = beamtalk_repl_json:format_error({compile_error, <<"Syntax error">>}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"Syntax error">>, maps:get(<<"message">>, Decoded)).
 
 format_error_eval_error_test() ->
     Response = beamtalk_repl_json:format_error({eval_error, error, badarg}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Evaluation error">>) =/= nomatch).
 
 format_error_load_error_test() ->
     Response = beamtalk_repl_json:format_error({load_error, badfile}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Failed to load bytecode">>) =/= nomatch).
 
 format_error_read_error_test() ->
     Response = beamtalk_repl_json:format_error({read_error, eacces}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Failed to read file">>) =/= nomatch).
 
 format_error_generic_tuple_test() ->
     Response = beamtalk_repl_json:format_error({unknown_error_type, "details"}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(is_binary(Message)).
 
 format_error_generic_atom_test() ->
     Response = beamtalk_repl_json:format_error(some_unknown_error),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Message = maps:get(<<"message">>, Decoded),
     %% Generic errors are formatted with ~p, so should contain the atom name
     ?assert(is_binary(Message)),
@@ -599,7 +599,7 @@ format_error_beamtalk_error_with_selector_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Counter'),
     ErrorWithSelector = beamtalk_error:with_selector(Error, super),
     Response = beamtalk_repl_json:format_error(ErrorWithSelector),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Counter">>) =/= nomatch),
@@ -611,7 +611,7 @@ format_error_beamtalk_error_with_hint_test() ->
     Error1 = beamtalk_error:with_selector(Error0, foo),
     Error = beamtalk_error:with_hint(Error1, <<"Check spelling">>),
     Response = beamtalk_repl_json:format_error(Error),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Integer">>) =/= nomatch),
     ?assert(binary:match(Message, <<"Hint:">>) =/= nomatch),
@@ -623,7 +623,7 @@ format_response_beamtalk_error_test() ->
     Error0 = beamtalk_error:new(does_not_understand, 'String'),
     Error = beamtalk_error:with_selector(Error0, typo),
     Response = beamtalk_repl_json:format_response(Error),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
     ?assert(binary:match(Value, <<"String">>) =/= nomatch),
     ?assert(binary:match(Value, <<"does not understand">>) =/= nomatch),
@@ -633,7 +633,7 @@ format_response_future_rejected_beamtalk_error_test() ->
     Error0 = beamtalk_error:new(does_not_understand, 'Actor'),
     Error = beamtalk_error:with_selector(Error0, badMethod),
     Response = beamtalk_repl_json:format_response({future_rejected, Error}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
     ?assert(binary:match(Value, <<"#Future<rejected:">>) =/= nomatch),
     ?assert(binary:match(Value, <<"Actor">>) =/= nomatch),
@@ -643,7 +643,7 @@ format_response_future_rejected_beamtalk_error_test() ->
 format_rejection_reason_fallback_test() ->
     %% Test that the fallback can handle arbitrary terms without crashing
     Result = beamtalk_repl_json:format_response({future_rejected, {custom_error, some, data}}),
-    Decoded = jsx:decode(Result, [return_maps]),
+    Decoded = json:decode(Result),
     Value = maps:get(<<"value">>, Decoded),
     %% Should format the tuple with ~p
     ?assert(binary:match(Value, <<"#Future<rejected:">>) =/= nomatch),
@@ -653,13 +653,13 @@ format_rejection_reason_fallback_test() ->
 
 format_bindings_single_test() ->
     Response = beamtalk_repl_json:format_bindings(#{x => 42}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(42, maps:get(<<"x">>, Bindings)).
 
 format_bindings_multiple_test() ->
     Response = beamtalk_repl_json:format_bindings(#{x => 1, y => 2, z => 3}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(1, maps:get(<<"x">>, Bindings)),
     ?assertEqual(2, maps:get(<<"y">>, Bindings)),
@@ -671,7 +671,7 @@ format_bindings_complex_values_test() ->
         str => "hello",
         list => [1, 2, 3]
     }),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(<<"ok">>, maps:get(<<"atom">>, Bindings)),
     ?assertEqual(<<"hello">>, maps:get(<<"str">>, Bindings)),
@@ -680,7 +680,7 @@ format_bindings_complex_values_test() ->
 format_bindings_with_special_characters_test() ->
     %% Test bindings with special characters in keys
     Response = beamtalk_repl_json:format_bindings(#{'_privateVar' => 42, 'CamelCase' => "test"}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(42, maps:get(<<"_privateVar">>, Bindings)),
     ?assertEqual(<<"test">>, maps:get(<<"CamelCase">>, Bindings)).
@@ -689,7 +689,7 @@ format_bindings_with_special_characters_test() ->
 
 format_loaded_single_test() ->
     Response = beamtalk_repl_json:format_loaded([#{name => "Counter", superclass => "Actor"}]),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual([<<"Counter">>], maps:get(<<"classes">>, Decoded)).
 
 format_loaded_multiple_test() ->
@@ -698,7 +698,7 @@ format_loaded_multiple_test() ->
         #{name => "Point", superclass => "Object"},
         #{name => "Actor", superclass => "Object"}
     ]),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Classes = maps:get(<<"classes">>, Decoded),
     ?assertEqual(3, length(Classes)),
     ?assert(lists:member(<<"Counter">>, Classes)),
@@ -713,7 +713,7 @@ format_loaded_preserves_order_test() ->
         #{name => "Middle", superclass => "Object"}
     ],
     Response = beamtalk_repl_json:format_loaded(Classes),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Result = maps:get(<<"classes">>, Decoded),
     ?assertEqual([<<"Zebra">>, <<"Alpha">>, <<"Middle">>], Result).
 
@@ -948,7 +948,7 @@ format_actors_single_test() ->
     Pid = self(),
     Actors = [#{pid => Pid, class => 'Counter', module => counter, spawned_at => 1234567890}],
     Response = beamtalk_repl_json:format_actors(Actors),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ActorList = maps:get(<<"actors">>, Decoded),
     ?assertEqual(1, length(ActorList)),
     [Actor] = ActorList,
@@ -963,7 +963,7 @@ format_actors_multiple_test() ->
         #{pid => Pid, class => 'Timer', module => timer_actor, spawned_at => 200}
     ],
     Response = beamtalk_repl_json:format_actors(Actors),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ActorList = maps:get(<<"actors">>, Decoded),
     ?assertEqual(2, length(ActorList)).
 
@@ -971,7 +971,7 @@ format_actors_multiple_test() ->
 
 format_modules_empty_test() ->
     Response = beamtalk_repl_json:format_modules([]),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual([], maps:get(<<"modules">>, Decoded)).
 
@@ -985,7 +985,7 @@ format_modules_single_test() ->
             time_ago => "2 minutes ago"
         }},
     Response = beamtalk_repl_json:format_modules([Info]),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Modules = maps:get(<<"modules">>, Decoded),
     ?assertEqual(1, length(Modules)),
     [Mod] = Modules,
@@ -997,13 +997,13 @@ format_modules_single_test() ->
 
 format_response_empty_map_test() ->
     Response = beamtalk_repl_json:format_response(#{}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     %% BT-535: Empty map is pre-formatted as "#{}"
     ?assertEqual(<<"#{}">>, maps:get(<<"value">>, Decoded)).
 
 format_response_nested_map_test() ->
     Response = beamtalk_repl_json:format_response(#{a => #{b => 1}}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
     %% BT-535: Nested maps are pre-formatted as Beamtalk syntax
     ?assert(is_binary(Value)),
@@ -1011,24 +1011,24 @@ format_response_nested_map_test() ->
 
 format_response_true_false_test() ->
     ResponseT = beamtalk_repl_json:format_response(true),
-    DecodedT = jsx:decode(ResponseT, [return_maps]),
+    DecodedT = json:decode(ResponseT),
     ?assertEqual(true, maps:get(<<"value">>, DecodedT)),
     ResponseF = beamtalk_repl_json:format_response(false),
-    DecodedF = jsx:decode(ResponseF, [return_maps]),
+    DecodedF = json:decode(ResponseF),
     ?assertEqual(false, maps:get(<<"value">>, DecodedF)).
 
 %%% format_response_with_warnings additional tests
 
 format_response_with_warnings_no_warnings_test() ->
     Response = beamtalk_repl_json:format_response_with_warnings(42, []),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
 format_response_with_warnings_single_warning_test() ->
     Response = beamtalk_repl_json:format_response_with_warnings(42, [<<"watch out">>]),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     ?assertEqual([<<"watch out">>], maps:get(<<"warnings">>, Decoded)).
@@ -1036,7 +1036,7 @@ format_response_with_warnings_single_warning_test() ->
 format_response_with_warnings_multiple_warnings_test() ->
     Warnings = [<<"warn1">>, <<"warn2">>, <<"warn3">>],
     Response = beamtalk_repl_json:format_response_with_warnings("hello", Warnings),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"hello">>, maps:get(<<"value">>, Decoded)),
     ?assertEqual(Warnings, maps:get(<<"warnings">>, Decoded)).
@@ -1045,7 +1045,7 @@ format_response_with_warnings_complex_value_test() ->
     Response = beamtalk_repl_json:format_response_with_warnings(
         #{x => 1, y => 2}, [<<"shadow">>]
     ),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
     %% BT-535: Maps are pre-formatted as Beamtalk syntax strings
     ?assert(is_binary(Value)),
@@ -1056,7 +1056,7 @@ format_response_with_warnings_complex_value_test() ->
 
 format_error_with_warnings_no_warnings_test() ->
     Response = beamtalk_repl_json:format_error_with_warnings(timeout, []),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Request timed out">>, maps:get(<<"message">>, Decoded)),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
@@ -1065,7 +1065,7 @@ format_error_with_warnings_single_warning_test() ->
     Response = beamtalk_repl_json:format_error_with_warnings(
         empty_expression, [<<"deprecated syntax">>]
     ),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Empty expression">>, maps:get(<<"message">>, Decoded)),
     ?assertEqual([<<"deprecated syntax">>], maps:get(<<"warnings">>, Decoded)).
@@ -1073,7 +1073,7 @@ format_error_with_warnings_single_warning_test() ->
 format_error_with_warnings_multiple_warnings_test() ->
     Warnings = [<<"w1">>, <<"w2">>],
     Response = beamtalk_repl_json:format_error_with_warnings(empty_expression, Warnings),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Empty expression">>, maps:get(<<"message">>, Decoded)),
     ?assertEqual(Warnings, maps:get(<<"warnings">>, Decoded)).
@@ -1082,7 +1082,7 @@ format_error_with_warnings_beamtalk_error_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Integer'),
     ErrorWithSel = beamtalk_error:with_selector(Error, foo),
     Response = beamtalk_repl_json:format_error_with_warnings(ErrorWithSel, [<<"hint">>]),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     Message = maps:get(<<"message">>, Decoded),
     ?assert(binary:match(Message, <<"Integer">>) =/= nomatch),
@@ -1092,33 +1092,33 @@ format_error_with_warnings_beamtalk_error_test() ->
 
 format_docs_simple_test() ->
     Response = beamtalk_repl_json:format_docs(<<"Counter is a class">>),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"docs">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Counter is a class">>, maps:get(<<"docs">>, Decoded)).
 
 format_docs_empty_test() ->
     Response = beamtalk_repl_json:format_docs(<<>>),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"docs">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<>>, maps:get(<<"docs">>, Decoded)).
 
 format_docs_multiline_test() ->
     Doc = <<"Counter\n\nA simple counter class.\nMethods: increment, decrement">>,
     Response = beamtalk_repl_json:format_docs(Doc),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(Doc, maps:get(<<"docs">>, Decoded)).
 
 %%% format_bindings with non-atom key types
 
 format_bindings_list_key_test() ->
     Response = beamtalk_repl_json:format_bindings(#{"myVar" => 42}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(42, maps:get(<<"myVar">>, Bindings)).
 
 format_bindings_integer_key_test() ->
     Response = beamtalk_repl_json:format_bindings(#{99 => true}),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     Bindings = maps:get(<<"bindings">>, Decoded),
     ?assertEqual(true, maps:get(<<"99">>, Bindings)).
 
@@ -1161,13 +1161,13 @@ format_error_message_with_complex_reason_test() ->
 
 format_response_deeply_nested_test() ->
     Response = beamtalk_repl_json:format_response([1, [2, [3, [4]]]]),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)).
 
 format_response_with_warnings_error_fallback_test() ->
     %% Even bad values should produce valid JSON via fallback
     Response = beamtalk_repl_json:format_response_with_warnings(42, []),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)).
 
 %%% format_error fallback tests
@@ -1177,7 +1177,7 @@ format_error_with_warnings_fallback_test() ->
     Response = beamtalk_repl_json:format_error_with_warnings(
         some_bizarre_error, [<<"w1">>]
     ),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assert(is_binary(maps:get(<<"message">>, Decoded))),
     ?assertEqual([<<"w1">>], maps:get(<<"warnings">>, Decoded)).
@@ -1202,7 +1202,7 @@ format_modules_multiple_test() ->
         }}
     ],
     Response = beamtalk_repl_json:format_modules(Modules),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
     ModList = maps:get(<<"modules">>, Decoded),
     ?assertEqual(2, length(ModList)),
@@ -1356,7 +1356,7 @@ format_response_with_unserializable_test() ->
         end,
     Port = open_port({spawn, Command}, []),
     Response = beamtalk_repl_json:format_response(Port),
-    Decoded = jsx:decode(Response, [return_maps]),
+    Decoded = json:decode(Response),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     catch port_close(Port).
 
