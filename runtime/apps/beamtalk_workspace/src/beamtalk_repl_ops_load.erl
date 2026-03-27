@@ -810,7 +810,9 @@ handle_deleted_files(DeletedFiles, SessionPid) ->
 
 %% @private
 %% @doc Find and unload all modules that were loaded from a given source path.
--spec unload_modules_for_path(string(), pid(), #{atom() => binary()}, [{atom(), string() | undefined}]) -> ok.
+-spec unload_modules_for_path(string(), pid(), #{atom() => binary()}, [
+    {atom(), string() | undefined}
+]) -> ok.
 unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules) ->
     lists:foreach(
         fun({ModuleName, SourcePath}) ->
