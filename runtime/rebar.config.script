@@ -27,18 +27,23 @@ SetKey = fun(Key, Value, Proplist) ->
     [{Key, Value} | lists:keydelete(Key, 1, Proplist)]
 end,
 
-%% Merge cover_excl_mods into CONFIG.
+%% Merge cover_excl_mods into CONFIG, preserving any manual excludes.
 Config1 = case BtModules of
     [] -> CONFIG;  % No modules found yet (pre-build); leave config as-is
-    _  -> SetKey(cover_excl_mods, BtModules, CONFIG)
+    _  ->
+        ExistingCover = proplists:get_value(cover_excl_mods, CONFIG, []),
+        MergedCover = lists:usort(ExistingCover ++ BtModules),
+        SetKey(cover_excl_mods, MergedCover, CONFIG)
 end,
 
-%% Merge dialyzer exclude_mods into CONFIG.
+%% Merge dialyzer exclude_mods into CONFIG, preserving any manual excludes.
 Config2 = case BtModules of
     [] -> Config1;
     _  ->
         OldDialyzer = proplists:get_value(dialyzer, Config1, []),
-        NewDialyzer = SetKey(exclude_mods, BtModules, OldDialyzer),
+        ExistingExclude = proplists:get_value(exclude_mods, OldDialyzer, []),
+        MergedExclude = lists:usort(ExistingExclude ++ BtModules),
+        NewDialyzer = SetKey(exclude_mods, MergedExclude, OldDialyzer),
         SetKey(dialyzer, NewDialyzer, Config1)
 end,
 
