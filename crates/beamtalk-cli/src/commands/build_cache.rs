@@ -399,6 +399,7 @@ mod system_time_required_serde {
         nanos: u32,
     }
 
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde serialize_with requires &T
     pub fn serialize<S: Serializer>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error> {
         let dur = time.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO);
         let epoch = Epoch {
