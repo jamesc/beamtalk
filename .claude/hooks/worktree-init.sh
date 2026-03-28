@@ -59,9 +59,18 @@ if [[ -n "${HTTP_PROXY:-}" ]] && [[ "${HTTP_PROXY}" == *"@"* ]]; then
   export HEX_CDN="http://127.0.0.1:${HEX_BRIDGE_PORT}"
 
   # Node.js built-in fetch (undici) doesn't respect HTTP_PROXY/HTTPS_PROXY by
-  # default. --use-env-proxy (Node 22+) enables proxy-aware fetch, which fixes
-  # tools like streamlinear-cli that use bare fetch() for API calls.
-  export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--use-env-proxy"
+  # default. --use-env-proxy (Node 22.21+) enables proxy-aware fetch, which
+  # fixes tools like streamlinear-cli that use bare fetch() for API calls.
+  # Guard: only set when Node supports the flag, and skip if already present.
+  if command -v node >/dev/null 2>&1; then
+    _NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo "")"
+    if [[ "${_NODE_MAJOR}" =~ ^[0-9]+$ ]] && (( _NODE_MAJOR >= 22 )); then
+      case " ${NODE_OPTIONS:-} " in
+        *" --use-env-proxy "*) ;;
+        *) export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--use-env-proxy" ;;
+      esac
+    fi
+  fi
 
   # Install a rebar3 wrapper that strips proxy env vars before calling the real
   # rebar3. Erlang's httpc ignores no_proxy, so without this it routes even
@@ -92,17 +101,15 @@ WRAPPER
     _MARKER="# hex-bridge-proxy PATH (auto-added by worktree-init.sh)"
     _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\"
 export PATH=\"${WRAPPER_DIR}:\${PATH}\"
-export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\""
+case \" \${NODE_OPTIONS:-} \" in *\" --use-env-proxy \"*) ;; *) export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\" ;; esac"
 
     # Method 1: /etc/profile.d/ (works for login shells, and `just`/`make`)
-    # Best-effort — may fail without root, so use || true.
+    # Always overwrite — this file is entirely ours. Best-effort (|| true).
     _PROFILED="/etc/profile.d/hex-bridge.sh"
-    if [[ ! -f "${_PROFILED}" ]] 2>/dev/null; then
-      cat > "${_PROFILED}" 2>/dev/null << PROFBLOCK || true
+    cat > "${_PROFILED}" 2>/dev/null << PROFBLOCK || true
 ${_MARKER}
 ${_EXPORT_BLOCK}
 PROFBLOCK
-    fi
 
     # Method 2: ~/.bashrc — insert BEFORE the non-interactive guard
     if ! grep -qF "${_MARKER}" "${HOME}/.bashrc" 2>/dev/null; then
@@ -112,6 +119,10 @@ PROFBLOCK
       { echo "${_MARKER}"; echo "${_EXPORT_BLOCK}"; echo ""; cat "${HOME}/.bashrc"; } > "${_TMPRC}"
       mv "${_TMPRC}" "${HOME}/.bashrc"
       echo "Added hex-bridge PATH to ~/.bashrc (before non-interactive guard)"
+    elif ! grep -qF "use-env-proxy" "${HOME}/.bashrc" 2>/dev/null; then
+      # Backfill: marker exists from a previous run but NODE_OPTIONS line is missing
+      sed -i "/${_MARKER//\//\\/}/a case \" \${NODE_OPTIONS:-} \" in *\" --use-env-proxy \"*) ;; *) export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\" ;; esac" "${HOME}/.bashrc" 2>/dev/null || true
+      echo "Backfilled NODE_OPTIONS into ~/.bashrc"
     fi
 
     # Method 3: ~/.zshenv (always sourced by zsh, even non-interactive)
@@ -123,6 +134,9 @@ ${_MARKER}
 ${_EXPORT_BLOCK}
 ZBLOCK
         echo "Added hex-bridge PATH to ~/.zshenv"
+      elif ! grep -qF "use-env-proxy" "${HOME}/.zshenv" 2>/dev/null; then
+        sed -i "/${_MARKER//\//\\/}/a case \" \${NODE_OPTIONS:-} \" in *\" --use-env-proxy \"*) ;; *) export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\" ;; esac" "${HOME}/.zshenv" 2>/dev/null || true
+        echo "Backfilled NODE_OPTIONS into ~/.zshenv"
       fi
     fi
   fi
