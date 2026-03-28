@@ -476,11 +476,31 @@ Emit visibility in `__beamtalk_meta/0` and `.app` metadata for both classes and 
 
 ### Phase 5: Tooling
 
-Filter internal classes and methods in LSP and REPL completions.
+Update all developer-facing surfaces to be visibility-aware. Per the "visibility controls dependency, not knowledge" principle, internal items are **annotated, not hidden** — except in completions where they are filtered for cross-package contexts.
 
-**Files:**
-- `crates/beamtalk-lsp/` — filter cross-package completions for both internal classes and internal methods
-- REPL — filter tab completion for cross-package classes; show internal methods in `:browse`/`:doc` but filter from completions
+**LSP:**
+- `crates/beamtalk-lsp/` — filter internal classes and methods from cross-package completion lists
+- Hover: show visibility status (e.g., "internal class", "internal method") in hover info
+- VS Code sidebar / workspace explorer: annotate internal classes from dependencies (dimmed/tagged), not hidden
+- Document symbols / outline: no filtering (own-package files show everything normally)
+- Go to definition: no filtering (dependency not knowledge)
+
+**REPL:**
+- Filter tab completion for cross-package internal classes and methods
+- `:browse` output: show internal classes/methods with `(internal)` annotation
+- `:doc` and `:source`: work on internal items with visibility noted
+
+**MCP tools:**
+- `list_classes` / class listing tools: include `visibility: "public" | "internal"` in responses
+- `get_class_info` / class detail tools: include visibility in class metadata
+- Method description tools: include per-method visibility
+- No filtering — annotate only (consistent with `:browse` and `:doc`)
+
+## Implementation Tracking
+
+**Epic:** BT-1688
+**Issues:** BT-1689, BT-1690, BT-1691, BT-1692, BT-1693, BT-1694, BT-1695, BT-1696, BT-1697
+**Status:** Planned
 
 ## References
 
