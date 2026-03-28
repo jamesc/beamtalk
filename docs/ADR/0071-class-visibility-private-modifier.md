@@ -102,15 +102,24 @@ error[E0402]: Private class 'TokenBuffer' appears in public signature of 'Parser
 
 This follows Rust's model, where `pub fn` returning a private type is a compile error.
 
-### REPL Behavior
+### Visibility Controls Dependency, Not Knowledge
 
-The REPL is largely unaffected by visibility enforcement. Most REPL workflows operate on values, not class names:
+**Core principle:** `private` restricts what you can *depend on*, not what you can *know about*. Private classes are fully visible to browsing, reflection, and documentation tools — you just can't compile code that references them from outside the package. This preserves Smalltalk-style explorability while maintaining API boundaries.
 
-- **Inspecting objects** — `obj class`, `obj printString`, `obj respondsTo: #foo` — runtime reflection on values, not compiled class references. Unaffected.
-- **Reading source/docs** — `:doc SomeClass`, `:source SomeClass >> method` — REPL commands are metadata lookups, not compiled expressions. Unaffected.
-- **Sending messages** — if you have a reference to an object, you can send it any message regardless of its class's visibility.
+Concretely, from outside a package you **can**:
+- **Browse** — `:browse json` lists all classes, including private ones (marked as private)
+- **Read docs** — `:doc json@ParserState` shows its documentation
+- **Read source** — `:source json@ParserState >> reset` shows the method source
+- **Inspect objects** — `obj class`, `obj methods`, `obj respondsTo: #foo` — runtime reflection on values works regardless of visibility
+- **Send messages** — if you have a reference to an object, you can send it any message
 
-The only thing `private` blocks in the REPL is **naming another package's private class in a compiled expression**: `json@ParserState new`. This is exactly what `private` should prevent — instantiating implementation details from outside the package.
+You **cannot**:
+- **Name the class in compiled code** — `json@ParserState new` is a compile error from outside the package
+- **Use it in type annotations** — `param :: json@ParserState` is a compile error
+- **Subclass it** — `json@ParserState subclass: MyState` is a compile error
+- **Extend it** — `json@ParserState >> helper => ...` is a compile error
+
+This is the Smalltalk-native model: the system browser shows everything, but the compiler enforces boundaries. The filesystem analogy is: you can `ls` and `cat` any file, but the build system won't let you import private types.
 
 ### Metadata
 
@@ -233,7 +242,7 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 
 **Strongest argument:** Smalltalk's "all objects are inspectable" philosophy is core to the live-programming experience. Enforcing visibility in the REPL limits exploration of library internals.
 
-**Counter:** This concern is largely a phantom. Most REPL workflows are unaffected — inspecting objects (`obj class`, `respondsTo:`, `printString`), reading docs (`:doc`), and sending messages all work on values, not class names. The only thing blocked is naming a private class in a compiled expression (`json@ParserState new`), which is exactly the intended restriction. Smalltalk-style explorability is preserved because reflection operates on runtime values, not source-level class references.
+**Counter:** This is a non-issue. Visibility controls dependency, not knowledge (see REPL Behavior above). Browsing, docs, source reading, reflection, and message sends all work on private classes — the only thing blocked is naming a private class in a compiled expression. The Smalltalk system browser shows everything; the compiler enforces boundaries. Beamtalk works the same way.
 
 ### Rejected: Runtime Enforcement
 
