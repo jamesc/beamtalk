@@ -282,6 +282,21 @@ Object subclass: Parser
 
 **Rejected because:** Adds complexity to dispatch (method resolution must check caller's package), FFI generation, and the conceptual model. Class-level `private` addresses the primary use case. Defer to v2 based on real ecosystem feedback. The keyword `private` works at both levels, so this extension is straightforward when needed.
 
+### Package-Level Export List
+
+Declare public classes in `beamtalk.toml` rather than marking private classes individually:
+
+```toml
+[package]
+name = "json"
+public_classes = ["Parser", "ParseResult", "JsonError"]
+# Everything else is private by omission
+```
+
+This is the Erlang-native approach — `-export()` declares what's public in one place. The API surface is visible at a glance without reading every source file.
+
+**Rejected because:** Beamtalk's one-class-per-file model means the modifier is always on the class declaration itself — there's no ambiguity about which file it's in. A separate export list creates a synchronization problem: add a class, forget to add it to the list, and it's silently private. The per-class modifier is self-documenting — you see `private` on the declaration. Erlang needs `-export()` because a single file contains many functions; Beamtalk doesn't have that problem.
+
 ### No Visibility Controls (Status Quo)
 
 Keep everything public, following Smalltalk tradition.
