@@ -93,51 +93,51 @@ exec "${REAL_REBAR3}" "\$@"
 WRAPPER
     chmod +x "${WRAPPER_DIR}/rebar3"
     export PATH="${WRAPPER_DIR}:${PATH}"
+  fi
 
-    # Persist PATH and HEX_CDN so all shell invocations pick up the wrapper.
-    # Use /etc/profile.d/ (sourced by login shells and many non-interactive
-    # shells via /etc/profile) and also prepend to ~/.bashrc BEFORE the
-    # non-interactive guard, and ~/.zshenv (always sourced by zsh).
-    _MARKER="# hex-bridge-proxy PATH (auto-added by worktree-init.sh)"
-    _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\"
+  # --- Persist proxy env vars to shell configs ---
+  # NODE_OPTIONS persistence doesn't depend on rebar3, so always run this.
+  # PATH/HEX_CDN are included unconditionally (harmless no-op if wrapper absent).
+  _MARKER="# hex-bridge-proxy PATH (auto-added by worktree-init.sh)"
+  _NODE_OPTS_LINE="case \" \${NODE_OPTIONS:-} \" in *\" --use-env-proxy \"*) ;; *) export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\" ;; esac"
+  _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\"
 export PATH=\"${WRAPPER_DIR}:\${PATH}\"
-case \" \${NODE_OPTIONS:-} \" in *\" --use-env-proxy \"*) ;; *) export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\" ;; esac"
+${_NODE_OPTS_LINE}"
 
-    # Method 1: /etc/profile.d/ (works for login shells, and `just`/`make`)
-    # Always overwrite — this file is entirely ours. Best-effort (|| true).
-    _PROFILED="/etc/profile.d/hex-bridge.sh"
-    cat > "${_PROFILED}" 2>/dev/null << PROFBLOCK || true
+  # Method 1: /etc/profile.d/ (works for login shells, and `just`/`make`)
+  # Always overwrite — this file is entirely ours. Best-effort (|| true).
+  _PROFILED="/etc/profile.d/hex-bridge.sh"
+  cat > "${_PROFILED}" 2>/dev/null << PROFBLOCK || true
 ${_MARKER}
 ${_EXPORT_BLOCK}
 PROFBLOCK
 
-    # Method 2: ~/.bashrc — insert BEFORE the non-interactive guard
-    if ! grep -qF "${_MARKER}" "${HOME}/.bashrc" 2>/dev/null; then
-      # Ensure ~/.bashrc exists (may be absent in minimal images)
-      [[ -f "${HOME}/.bashrc" ]] || : > "${HOME}/.bashrc"
-      _TMPRC="$(mktemp)"
-      { echo "${_MARKER}"; echo "${_EXPORT_BLOCK}"; echo ""; cat "${HOME}/.bashrc"; } > "${_TMPRC}"
-      mv "${_TMPRC}" "${HOME}/.bashrc"
-      echo "Added hex-bridge PATH to ~/.bashrc (before non-interactive guard)"
-    elif ! grep -qF "use-env-proxy" "${HOME}/.bashrc" 2>/dev/null; then
-      # Backfill: marker exists from a previous run but NODE_OPTIONS line is missing
-      sed -i "/${_MARKER//\//\\/}/a case \" \${NODE_OPTIONS:-} \" in *\" --use-env-proxy \"*) ;; *) export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\" ;; esac" "${HOME}/.bashrc" 2>/dev/null || true
-      echo "Backfilled NODE_OPTIONS into ~/.bashrc"
-    fi
+  # Method 2: ~/.bashrc — insert BEFORE the non-interactive guard
+  if ! grep -qF "${_MARKER}" "${HOME}/.bashrc" 2>/dev/null; then
+    # Ensure ~/.bashrc exists (may be absent in minimal images)
+    [[ -f "${HOME}/.bashrc" ]] || : > "${HOME}/.bashrc"
+    _TMPRC="$(mktemp)"
+    { echo "${_MARKER}"; echo "${_EXPORT_BLOCK}"; echo ""; cat "${HOME}/.bashrc"; } > "${_TMPRC}"
+    mv "${_TMPRC}" "${HOME}/.bashrc"
+    echo "Added hex-bridge PATH to ~/.bashrc (before non-interactive guard)"
+  elif ! grep -qF "use-env-proxy" "${HOME}/.bashrc" 2>/dev/null; then
+    # Backfill: marker exists from a previous run but NODE_OPTIONS line is missing
+    sed -i "/${_MARKER//\//\\/}/a ${_NODE_OPTS_LINE}" "${HOME}/.bashrc" 2>/dev/null || true
+    echo "Backfilled NODE_OPTIONS into ~/.bashrc"
+  fi
 
-    # Method 3: ~/.zshenv (always sourced by zsh, even non-interactive)
-    if [[ "$(basename "${SHELL:-bash}")" == "zsh" ]]; then
-      if ! grep -qF "${_MARKER}" "${HOME}/.zshenv" 2>/dev/null; then
-        cat >> "${HOME}/.zshenv" << ZBLOCK
+  # Method 3: ~/.zshenv (always sourced by zsh, even non-interactive)
+  if [[ "$(basename "${SHELL:-bash}")" == "zsh" ]]; then
+    if ! grep -qF "${_MARKER}" "${HOME}/.zshenv" 2>/dev/null; then
+      cat >> "${HOME}/.zshenv" << ZBLOCK
 
 ${_MARKER}
 ${_EXPORT_BLOCK}
 ZBLOCK
-        echo "Added hex-bridge PATH to ~/.zshenv"
-      elif ! grep -qF "use-env-proxy" "${HOME}/.zshenv" 2>/dev/null; then
-        sed -i "/${_MARKER//\//\\/}/a case \" \${NODE_OPTIONS:-} \" in *\" --use-env-proxy \"*) ;; *) export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\" ;; esac" "${HOME}/.zshenv" 2>/dev/null || true
-        echo "Backfilled NODE_OPTIONS into ~/.zshenv"
-      fi
+      echo "Added hex-bridge PATH to ~/.zshenv"
+    elif ! grep -qF "use-env-proxy" "${HOME}/.zshenv" 2>/dev/null; then
+      sed -i "/${_MARKER//\//\\/}/a ${_NODE_OPTS_LINE}" "${HOME}/.zshenv" 2>/dev/null || true
+      echo "Backfilled NODE_OPTIONS into ~/.zshenv"
     fi
   fi
 fi
