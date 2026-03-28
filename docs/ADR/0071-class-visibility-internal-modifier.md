@@ -72,11 +72,49 @@ abstract internal Object subclass: AlsoFine
 
 ### Scope
 
-Class-level only in v1. Method-level visibility is a natural future extension — `internal` for package-scoped methods, potentially `private` for self-only access. Using `internal` at the class level keeps the keyword space clean for this. Deferred until real usage patterns emerge from the package ecosystem.
+Class-level and method-level. `internal` means "package-scoped" at both levels — the same keyword, the same semantics, the same enforcement model.
+
+### Method-Level `internal`
+
+Library authors need to hide helper methods on public classes, not just whole classes. A public `HttpClient` with `buildHeaders:`, `retryWithBackoff:`, `parseChunkedResponse:` helper methods exposes its entire implementation surface. Method-level `internal` solves this directly.
+
+```beamtalk
+Object subclass: HttpClient
+  // Public — part of the package API
+  get: url => ...
+  post: url body: body => ...
+
+  // Internal — implementation details, not callable from outside the package
+  internal buildHeaders: request => ...
+  internal retryWithBackoff: block maxAttempts: n => ...
+  internal parseChunkedResponse: stream => ...
+```
+
+**Enforcement:** Compile-time only, same as class-level. When the compiler can determine the receiver type (via type annotations, literal class references, or type inference) and the target method is `internal` to another package, it emits a hard error:
+
+```text
+error[E0403]: Method 'buildHeaders:' is internal to package 'http' and cannot be called from 'my_app'
+  --> src/app.bt:10:5
+   |
+10 |     client buildHeaders: req
+   |            ^^^^^^^^^^^^^^
+   |
+   = note: 'buildHeaders:' is declared 'internal' in 'HttpClient'
+```
+
+For untyped dynamic sends where the compiler cannot determine the receiver type, no enforcement — the message send succeeds at runtime. This is consistent with the "visibility controls dependency, not knowledge" principle: if you work around the compiler's checks, you're on your own if it breaks.
+
+**Dispatch behavior:** No runtime enforcement. Internal methods exist on the object and respond normally to `respondsTo:`, `:methods`, and `:browse`. The distinction is purely compile-time. This avoids dispatch overhead and is consistent with class-level `internal`.
+
+**Interaction with `doesNotUnderstand:`:** An internal method is a real method — it exists in the method dictionary. `doesNotUnderstand:` is never triggered by visibility. There is no visibility-specific runtime error.
+
+**Metadata:** Method visibility is recorded in `__beamtalk_meta/0` alongside existing method metadata. Tooling (LSP, REPL completions) can filter internal methods from cross-package suggestions while still showing them in `:browse` and `:doc` output.
+
+**All methods on an internal class are effectively internal.** If the class itself is internal, its methods are unreachable from outside the package regardless of whether individual methods are marked `internal`. The method-level modifier is only meaningful on public classes.
 
 ### Default Visibility
 
-**Public by default**, `internal` to opt out. Consistent with Smalltalk heritage and the principle of least surprise for newcomers.
+**Public by default**, `internal` to opt out. Consistent with Smalltalk heritage and the principle of least surprise for newcomers. Applies to both classes and methods.
 
 ### Enforcement
 
@@ -106,9 +144,13 @@ error[E0402]: Internal class 'TokenBuffer' appears in public signature of 'Parse
 
 This follows Rust's model, where `pub fn` returning a non-public type is a compile error.
 
+**Method-level** — see Method-Level `internal` section above for `E0403`.
+
 ### Visibility Controls Dependency, Not Knowledge
 
-**Core principle:** `internal` restricts what you can *depend on*, not what you can *know about*. Internal classes are fully visible to browsing, reflection, and documentation tools — you just can't compile code that references them from outside the package. This preserves Smalltalk-style explorability while maintaining API boundaries. The keyword itself conveys this: "internal" means "part of this package's internals" — it doesn't imply hidden or inaccessible.
+**Core principle:** `internal` restricts what you can *depend on*, not what you can *know about*. Internal classes and methods are fully visible to browsing, reflection, and documentation tools — you just can't compile code that references them from outside the package. This preserves Smalltalk-style explorability while maintaining API boundaries. The keyword itself conveys this: "internal" means "part of this package's internals" — it doesn't imply hidden or inaccessible.
+
+**`internal` is a signal of intent for good ecosystem participants, not a security boundary.** In a dynamic language on BEAM, you can always work around visibility — drop to Erlang FFI, use `perform:`, call `apply/3`. That's fine. The purpose of `internal` is to communicate the author's intent: "this is an implementation detail; depend on it at your own risk." The compiler enforces this intent where it can, catching accidental cross-package dependencies in normal code. If you deliberately circumvent the checks, you're on your own if it breaks. This is the same model as Erlang's `-export()` — convention enforced by the compiler, bypassable at runtime.
 
 Concretely, from outside a package you **can**:
 - **Browse** — `:browse json` lists all classes, including internal ones (marked as internal)
@@ -155,6 +197,12 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 **Extension methods (ADR 0066):** Extension methods (`>>` syntax) on an internal class are only visible within the defining package. Cross-package extensions targeting an internal class are a compile error (the class name cannot be resolved). The `>>` codegen patches a runtime ETS table — the compile-time check prevents the cross-package extension from ever being compiled.
 
 **Generic type arguments (ADR 0068):** Internal class names may appear in type metadata (`__beamtalk_meta/0`) for generic instantiations. Tooling (LSP, FFI generators) should filter internal names from cross-package surfaces.
+
+**Subclass overriding internal methods:** A subclass in the same package can override an internal method freely. A subclass in another package cannot override an internal method — the method name cannot be resolved from outside the package, so the override declaration is a compile error. If the subclass defines a method with the same name independently (not as an override), it shadows the superclass method within its own dispatch — this is standard method resolution, not a visibility concern.
+
+**Internal methods and protocols:** An internal method can satisfy a protocol requirement within the same package. If a public protocol requires a method that is declared `internal` on a class, the class still conforms — protocol conformance is structural (ADR 0025) and checked within the package where both are visible. External callers interact via the protocol type, not the concrete class's method name.
+
+**`perform:` and dynamic sends:** `obj perform: #buildHeaders:` bypasses compile-time visibility checks — the method name is a runtime symbol, not a compile-time reference. This is consistent with the class-level model: `perform:` is the method-level equivalent of `apply/3`. Voided warranty.
 
 ### Erlang FFI
 
@@ -242,11 +290,11 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 
 **Counter:** The word is wrong for what it describes. A class you can `:doc`, `:source`, `:browse`, and inspect isn't private — it's internal. `private` means "you can't see it"; `internal` means "it's part of this package's internals." Beamtalk's core principle — visibility controls *dependency*, not *knowledge* — is exactly the `internal` concept. Every modern language that has both package-boundary and object-level visibility uses different words (Swift: `internal`/`private`, Kotlin: `internal`/`private`, Rust: `pub(crate)`/private, Scala 3: `private[pkg]`/`private`). Using `private` now forces an awkward rename if method-level encapsulation is ever needed. Using the right word from the start costs minor familiarity but buys semantic honesty and design space.
 
-### Rejected: Method-Level Visibility in v1
+### Rejected: Defer Method-Level `internal` to v2
 
-**Strongest argument:** Library authors need to hide helper methods on public classes, not just whole classes. A public `HttpClient` with `buildHeaders:`, `retryWithBackoff:`, `parseChunkedResponse:` helper methods exposes its entire implementation surface. Without method-level visibility, the only option is to extract helpers into an internal class — forcing an architectural pattern to work around a missing language feature.
+**Strongest argument:** Class-level `internal` addresses the primary use case — hide entire implementation-detail classes. Method-level adds complexity to the compiler (type-aware visibility checking for message sends), metadata, and the conceptual model. There is no ecosystem data to quantify how common method-level hiding is needed. Beamtalk's one-class-per-file model naturally encourages extracting helpers into dedicated classes. Deferring lets real usage patterns reveal whether the complexity is justified.
 
-**Counter:** In Beamtalk's one-class-per-file model, the natural pattern is to extract implementation details into dedicated helper classes — making class-level `internal` the primary tool for hiding them. Method-level visibility adds complexity to dispatch (what happens when you send a message to an object whose class has internal methods — `doesNotUnderstand:` or a visibility error?) and FFI generation. There is no ecosystem data yet to quantify the split. Deferring lets real usage patterns from published packages reveal whether method-level visibility justifies the dispatch complexity. Using `internal` at the class level keeps keyword space clean — `internal` for package-scoped methods and `private` for self-only access are natural future extensions.
+**Counter:** Designing both levels together ensures coherent semantics — the dispatch question (DNU vs visibility error vs compile-time only) must be *answered* regardless, because it shapes the class-level design. Answering it now and choosing compile-time only at both levels gives a clean, uniform model. The implementation is naturally phased (class-level first, method-level second) even though the ADR covers both. And the `HttpClient` example is not hypothetical — every non-trivial library has helper methods that shouldn't be part of the public API. Forcing extraction into separate classes is an architectural workaround for a missing language feature.
 
 ### Rejected: REPL Always Exempt from Visibility
 
@@ -265,7 +313,7 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 - Smalltalk purists prefer no visibility at all; every other cohort wants it
 - `internal` is less universally recognized than `private` — but it's the *right* word for the semantics, and developers from Swift/Kotlin/C# will recognize it immediately
 - BEAM veterans and operators align on compile-time enforcement being sufficient
-- Method-level visibility is the strongest deferred request — choosing `internal` keeps the keyword space clean for future `internal` (package-scoped) and `private` (self-only) method modifiers
+- Method-level enforcement is best-effort (dynamic sends bypass it) — but this is inherent to any dynamic language; `internal` is a signal of intent, not a security boundary
 - The leaked-visibility error (`E0402`) is strict — some developers may want to return "opaque" internal types from public methods, but this is better served by protocols
 
 ## Alternatives Considered
@@ -280,17 +328,11 @@ private Object subclass: ParserState
 
 **Rejected because:** `private` means "you can't see it" — but in Beamtalk, you *can* see internal classes (browse, doc, source, inspect). The word is wrong for the semantics. Every modern language that has both package-boundary and object-level visibility uses different words: Swift (`internal`/`private`), Kotlin (`internal`/`private`), Rust (`pub(crate)`/private), Scala 3 (`private[pkg]`/`private`). Using `private` for the package boundary closes off the keyword for future self-only method-level encapsulation. `internal` accurately describes the relationship ("part of this package's internals") rather than implying inaccessibility.
 
-### Include Method-Level Visibility in v1
+### Defer Method-Level `internal` to v2
 
-Allow `internal` (or `private`) as a method modifier to hide individual methods:
+Ship class-level `internal` only, deferring method-level to a future ADR based on ecosystem feedback.
 
-```beamtalk
-Object subclass: Parser
-  internal reset => ...  // only callable within this package
-  parse: input => ...    // public
-```
-
-**Rejected because:** Adds complexity to dispatch (method resolution must check caller's package), FFI generation, and the conceptual model. Class-level `internal` addresses the primary use case. Defer to v2 based on real ecosystem feedback. Choosing `internal` at the class level keeps the keyword space clean for future method-level modifiers (`internal` for package-scoped, `private` for self-only).
+**Rejected because:** The dispatch question (DNU vs visibility error vs compile-time only) must be answered regardless — it shapes the overall design. Answering it now (compile-time only, consistent at both levels) gives a clean, uniform model. The implementation is naturally phased even though the ADR covers both. And the need is not hypothetical — every non-trivial library has helper methods that shouldn't be public API.
 
 ### Package-Level Export List
 
@@ -333,7 +375,8 @@ check_visibility(CallerModule, TargetModule, Visibility)
 - Compile-time enforcement, zero runtime cost
 - Composes cleanly with existing modifiers (`sealed`, `abstract`, `typed`)
 - `internal` accurately describes the semantics — "part of this package's internals," not "hidden"
-- Keyword space stays clean — `private` remains available for future self-only method-level encapsulation
+- Keyword space stays clean — `private` remains available for future self-only encapsulation
+- Works at both class and method level with uniform semantics
 - Aligns with Swift/Kotlin/C# terminology for the same concept
 - `__beamtalk_meta/0` visibility field enables tooling and future FFI enforcement
 
@@ -342,7 +385,7 @@ check_visibility(CallerModule, TargetModule, Visibility)
 - Departure from Smalltalk "everything is public" tradition
 - Compile-time only — Erlang code can bypass via raw BEAM module calls
 - `internal` is less universally recognized than `private` — developers from Go/Python/Ruby may not guess it first
-- No method-level visibility in v1 — helper methods on public classes remain exposed
+- Method-level enforcement is best-effort — untyped dynamic sends bypass compile-time checks
 
 ### Neutral
 
@@ -355,15 +398,16 @@ check_visibility(CallerModule, TargetModule, Visibility)
 
 ### Phase 1: Parser
 
-Add `internal` to the modifier parsing loop.
+Add `internal` to the class modifier parsing loop and method definition parsing.
 
 **Files:**
-- `crates/beamtalk-core/src/source_analysis/parser/declarations.rs` — add `internal` branch to modifier loop (alongside `abstract`, `sealed`, `typed`)
-- `crates/beamtalk-core/src/ast.rs` — add `is_internal: bool` to `ClassDefinition`
+- `crates/beamtalk-core/src/source_analysis/parser/declarations.rs` — add `internal` branch to class modifier loop (alongside `abstract`, `sealed`, `typed`)
+- `crates/beamtalk-core/src/source_analysis/parser/` — add `internal` modifier parsing for method definitions
+- `crates/beamtalk-core/src/ast.rs` — add `is_internal: bool` to `ClassDefinition` and `MethodDefinition`
 
-### Phase 2: Semantic Analysis (largest phase)
+### Phase 2: Semantic Analysis — Class-Level (largest phase)
 
-Enforce cross-package `internal` access. This is the core of the implementation and requires infrastructure that does not yet exist.
+Enforce cross-package `internal` class access. This is the core of the implementation and requires infrastructure that does not yet exist.
 
 **Infrastructure prerequisite:** `ClassInfo` currently has no `package` field. `analyse_with_packages()` exists in `semantic_analysis/mod.rs` but has no non-test callers — it is not wired into the build pipeline. Phase 2 must:
 
@@ -378,24 +422,37 @@ Enforce cross-package `internal` access. This is the core of the implementation 
 - `crates/beamtalk-core/src/semantic_analysis/mod.rs` — wire `analyse_with_packages` into the build pipeline
 - `add_from_beam_meta()` — propagate visibility and package from BEAM metadata
 
-### Phase 3: Metadata and Codegen
+### Phase 3: Semantic Analysis — Method-Level
 
-Emit visibility in `__beamtalk_meta/0` and `.app` metadata.
+Enforce cross-package `internal` method access on typed message sends.
+
+1. Add `is_internal: bool` to method metadata in `ClassInfo`
+2. When resolving a message send where the receiver type is known (via type annotation or inference), check whether the target method is `internal` to another package
+3. Emit `E0403` diagnostic for cross-package sends to internal methods
+4. Handle leaked-visibility for methods: an internal method's type signature can reference internal classes from the same package without triggering `E0402`
 
 **Files:**
-- `crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs` — add `visibility => public | internal` to meta map
+- `crates/beamtalk-core/src/semantic_analysis/` — method visibility checking on typed message sends
+- `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs` — method-level visibility in `ClassInfo`
+
+### Phase 4: Metadata and Codegen
+
+Emit visibility in `__beamtalk_meta/0` and `.app` metadata for both classes and methods.
+
+**Files:**
+- `crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs` — add `visibility => public | internal` to class meta map; add per-method visibility to method metadata
 - `.app.src` class registry — add visibility field
 - `ClassBuilder` modifier handling — accept `#internal` symbol (ADR 0038)
 
 **Coordination:** Must align with ADR 0050's `meta_version` scheme. If `__beamtalk_meta/0` is already stable, bump `meta_version` when adding the `visibility` field.
 
-### Phase 4: Tooling
+### Phase 5: Tooling
 
-Filter internal classes in LSP and REPL completions.
+Filter internal classes and methods in LSP and REPL completions.
 
 **Files:**
-- `crates/beamtalk-lsp/` — filter cross-package completions, show internal classes only for same-package files
-- REPL — filter tab completion for cross-package classes
+- `crates/beamtalk-lsp/` — filter cross-package completions for both internal classes and internal methods
+- REPL — filter tab completion for cross-package classes; show internal methods in `:browse`/`:doc` but filter from completions
 
 ## References
 
