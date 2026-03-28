@@ -100,9 +100,10 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
       'is_abstract' => 'false',
       'is_value' => 'false',
       'is_typed' => 'false',
+      'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
-      'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
+      'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
         }~
@@ -127,9 +128,10 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
       'is_abstract' => 'false',
       'is_value' => 'false',
       'is_typed' => 'false',
+      'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
-      'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
+      'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
 
