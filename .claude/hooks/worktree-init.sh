@@ -58,6 +58,11 @@ if [[ -n "${HTTP_PROXY:-}" ]] && [[ "${HTTP_PROXY}" == *"@"* ]]; then
   # Tell rebar3 to fetch packages from the local bridge (not hex.pm directly)
   export HEX_CDN="http://127.0.0.1:${HEX_BRIDGE_PORT}"
 
+  # Node.js built-in fetch (undici) doesn't respect HTTP_PROXY/HTTPS_PROXY by
+  # default. --use-env-proxy (Node 22+) enables proxy-aware fetch, which fixes
+  # tools like streamlinear-cli that use bare fetch() for API calls.
+  export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--use-env-proxy"
+
   # Install a rebar3 wrapper that strips proxy env vars before calling the real
   # rebar3. Erlang's httpc ignores no_proxy, so without this it routes even
   # localhost requests through the egress proxy (which returns 407).
@@ -86,7 +91,8 @@ WRAPPER
     # non-interactive guard, and ~/.zshenv (always sourced by zsh).
     _MARKER="# hex-bridge-proxy PATH (auto-added by worktree-init.sh)"
     _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\"
-export PATH=\"${WRAPPER_DIR}:\${PATH}\""
+export PATH=\"${WRAPPER_DIR}:\${PATH}\"
+export NODE_OPTIONS=\"\${NODE_OPTIONS:+\${NODE_OPTIONS} }--use-env-proxy\""
 
     # Method 1: /etc/profile.d/ (works for login shells, and `just`/`make`)
     # Best-effort — may fail without root, so use || true.
