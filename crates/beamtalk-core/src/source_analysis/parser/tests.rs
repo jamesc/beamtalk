@@ -6572,6 +6572,16 @@ fn parse_internal_standalone_method() {
 }
 
 #[test]
+fn parse_standalone_method_named_internal() {
+    // `Foo >> internal => 42` — standalone method named `internal`, not a modifier
+    let module = parse_ok("Foo >> internal => 42");
+    assert_eq!(module.method_definitions.len(), 1);
+    let standalone = &module.method_definitions[0];
+    assert_eq!(standalone.method.selector.name(), "internal");
+    assert!(!standalone.method.is_internal);
+}
+
+#[test]
 fn parse_internal_binary_method() {
     // `internal + other => ...` — internal binary method
     let module = parse_ok(
