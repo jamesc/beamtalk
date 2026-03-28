@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1325: CycleActorB — part of 3-actor cycle test (A -> B -> C -> A).
+
+Actor subclass: CycleActorB
+  state: peer = nil
+
+  setPeer: p => self.peer := p
+
+  // Called by A, forwards to C with originalCaller
+  forwardTo: originalCaller => self.peer callBack: originalCaller

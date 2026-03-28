@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1325: CycleActorC — part of 3-actor cycle test (A -> B -> C -> A).
+
+Actor subclass: CycleActorC
+
+  // Called by B, calls back to the original caller A — completing the cycle
+  callBack: originalCaller => originalCaller callback

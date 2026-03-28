@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1325: Fixture actor for testing aliased self-send (Layer 1).
+
+Actor subclass: AliasedSelfSendActor
+  state: x = 0
+  state: y = 0
+
+  // Alias self and read fieldNames via the alias
+  aliasedFieldNames =>
+    other := self
+    other fieldNames
+
+  // Alias self and read a field via the alias
+  aliasedFieldAt =>
+    other := self
+    other fieldAt: #x
+
+  // Alias self and mutate a field via the alias, then read back via alias
+  aliasedFieldAtPut =>
+    other := self
+    other fieldAt: #x put: 42
+    other fieldAt: #x
+
+  // Alias self and call a user-defined method via the alias
+  aliasedUserMethod =>
+    other := self
+    other getValue
+
+  // Read the current x value
+  getValue => self.x

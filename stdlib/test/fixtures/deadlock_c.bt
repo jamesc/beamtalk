@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1325: DeadlockC fixture for 3-actor cycle test (A -> B -> C -> A).
+// When respondToB: is called, it calls back to the original actor A,
+// completing the cycle: A -> B -> C -> A.
+
+Actor subclass: DeadlockC
+
+  respondToB: originalCaller =>
+    // This call back to originalCaller (DeadlockA) creates the cycle:
+    // A called B, B called C, C now calls A — deadlock detected
+    originalCaller callPeer
