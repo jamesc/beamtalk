@@ -98,8 +98,7 @@ impl CoreErlangGenerator {
         // lifecycle telemetry metadata instead of the compiled Erlang module name
         // (e.g., "bt@exdura@event_store"). This matches how dispatch traces
         // report class names via lookup_class/1.
-        let class_name =
-            current_class.map_or_else(|| module_name.clone().into(), |c| c.name.name.clone());
+        let class_name = current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
 
         // BT-1417: Generate the init return — either plain {ok, State} or
         // dispatch initialize first, then return {ok, NewState} / {stop, Error}.
@@ -163,7 +162,7 @@ impl CoreErlangGenerator {
                                                 line(),
                                                 docvec![
                                                     "'__class_mod__' => '",
-                                                    Document::String(module_name.clone()),
+                                                    Document::String(module_name.to_string()),
                                                     "'"
                                                 ],
                                                 Document::Vec(own_state_fields),
@@ -219,7 +218,7 @@ impl CoreErlangGenerator {
                                 line(),
                                 docvec![
                                     "'__class_mod__' => '",
-                                    Document::String(module_name.clone()),
+                                    Document::String(module_name.to_string()),
                                     "'"
                                 ],
                                 Document::Vec(initial_state_fields),
@@ -406,7 +405,7 @@ impl CoreErlangGenerator {
                                     line(),
                                     docvec![
                                         "case call '",
-                                        Document::String(module_name),
+                                        Document::Eco(module_name),
                                         "':'safe_dispatch'('initialize', [], State) of",
                                     ],
                                     nest(
@@ -453,13 +452,13 @@ impl CoreErlangGenerator {
     /// `beamtalk_actor:cast_send/3`. Dispatches the message and updates state;
     /// errors are logged via `logger:warning` and discarded (BT-943).
     // BT-920: helper — generates the inner `case safe_dispatch ... end` for fire-and-forget casts.
-    fn cast_dispatch_case(module_name: &str) -> Document<'static> {
+    fn cast_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
             line(),
             // Use safe_dispatch for error isolation; discard result on error
             docvec![
                 "case call '",
-                Document::String(module_name.to_owned()),
+                Document::Eco(module_name.clone()),
                 "':'safe_dispatch'(CastSelector, CastArgs, State) of"
             ],
             nest(
@@ -587,13 +586,13 @@ impl CoreErlangGenerator {
 
     /// BT-1604: Generates the inner `case safe_dispatch ... end` block for `handle_call`.
     /// Shared between 3-tuple (with `PropCtx`) and 2-tuple (backward compat) patterns.
-    fn handle_call_dispatch_case(module_name: &str) -> Document<'static> {
+    fn handle_call_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
             line(),
             // Use safe_dispatch for error isolation per BT-29
             docvec![
                 "case call '",
-                Document::String(module_name.to_owned()),
+                Document::Eco(module_name.clone()),
                 "':'safe_dispatch'(Selector, Args, State) of"
             ],
             nest(
@@ -662,7 +661,7 @@ impl CoreErlangGenerator {
                         line(),
                         docvec![
                             "case call '",
-                            Document::String(module_name),
+                            Document::Eco(module_name),
                             "':'safe_dispatch'('handleInfo:', [Msg], State) of",
                         ],
                         nest(
@@ -763,8 +762,7 @@ impl CoreErlangGenerator {
             use super::super::util::module_matches_class;
             module_matches_class(&self.module_name, &c.name.name)
         });
-        let class_name =
-            current_class.map_or_else(|| module_name.clone().into(), |c| c.name.name.clone());
+        let class_name = current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
 
         let doc = docvec![
             "'terminate'/2 = fun (Reason, State) ->",
@@ -788,7 +786,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "let _TermDisp = try call '",
-                        Document::String(module_name.clone()),
+                        Document::String(module_name.to_string()),
                         "':'dispatch'('terminate:', [Reason], Self, State)"
                     ],
                     nest(

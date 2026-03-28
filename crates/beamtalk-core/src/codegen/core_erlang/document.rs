@@ -42,6 +42,8 @@ pub enum Document<'a> {
     Str(&'a str),
     /// An owned string.
     String(String),
+    /// A ref-counted string (O(1) clone via `EcoString`).
+    Eco(ecow::EcoString),
     /// A newline followed by current indentation.
     Line,
     /// Increase indentation for nested content.
@@ -76,6 +78,12 @@ impl<'a> Documentable<'a> for &'a str {
 impl<'a> Documentable<'a> for String {
     fn to_doc(self) -> Document<'a> {
         Document::String(self)
+    }
+}
+
+impl<'a> Documentable<'a> for ecow::EcoString {
+    fn to_doc(self) -> Document<'a> {
+        Document::Eco(self)
     }
 }
 
@@ -281,6 +289,13 @@ impl Document<'_> {
                     output.push_str(s.as_str());
                     col += len_as_isize(s.len());
                 }
+                Document::Eco(s) => {
+                    if let Some(ind) = pending_indent.take() {
+                        write_indent(&mut output, ind);
+                    }
+                    output.push_str(s.as_str());
+                    col += len_as_isize(s.len());
+                }
                 Document::Line => {
                     // Trim any trailing whitespace before emitting newline.
                     trim_trailing_spaces(&mut output);
@@ -379,6 +394,7 @@ fn fits_deque(
             Document::Nil => {}
             Document::Str(s) => remaining -= len_as_isize(s.len()),
             Document::String(s) => remaining -= len_as_isize(s.len()),
+            Document::Eco(s) => remaining -= len_as_isize(s.len()),
             Document::Line => return true,
             Document::Break { unbroken, .. } => match mode {
                 Mode::Flat => remaining -= len_as_isize(unbroken.len()),

@@ -115,8 +115,8 @@ impl CoreErlangGenerator {
         segments: &[StringSegment],
     ) -> Result<Document<'static>> {
         // Collect let-bindings for expression segments and binary segments
-        let mut let_bindings: Vec<Document<'static>> = Vec::new();
-        let mut binary_parts: Vec<Document<'static>> = Vec::new();
+        let mut let_bindings: Vec<Document<'static>> = Vec::with_capacity(segments.len());
+        let mut binary_parts: Vec<Document<'static>> = Vec::with_capacity(segments.len());
 
         for segment in segments {
             match segment {
@@ -1276,7 +1276,7 @@ impl CoreErlangGenerator {
             return Ok(Document::Str("'nil'"));
         }
 
-        let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut docs: Vec<Document<'static>> = Vec::with_capacity(body.len());
 
         for (i, expr) in body.iter().enumerate() {
             let is_last = i == body.len() - 1;
@@ -1936,7 +1936,7 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         docs: &mut Vec<Document<'static>>,
     ) -> Result<Vec<Document<'static>>> {
-        let mut arg_docs: Vec<Document<'static>> = Vec::new();
+        let mut arg_docs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         for arg in arguments {
             if Self::is_field_assignment(arg) {
                 // Push hoisted binding directly to docs (preserves source order).

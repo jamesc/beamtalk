@@ -168,15 +168,20 @@ impl ProjectIndex {
         let mut sorted_paths: Vec<&Utf8PathBuf> = self.file_hierarchies.keys().collect();
         sorted_paths.sort();
 
+        let mut changed = false;
         for name in names {
             for path in &sorted_paths {
                 if let Some(info) = self.file_hierarchies[*path].classes().get(name) {
                     self.merged_hierarchy
                         .classes_mut()
                         .insert(name.clone(), info.clone());
+                    changed = true;
                     break;
                 }
             }
+        }
+        if changed {
+            self.merged_hierarchy.rebuild_all_indexes();
         }
     }
 

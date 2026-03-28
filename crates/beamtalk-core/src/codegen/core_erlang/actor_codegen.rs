@@ -140,7 +140,7 @@ impl CoreErlangGenerator {
         let module_header = if needs_register_class {
             docvec![
                 "module '",
-                Document::String(self.module_name.clone()),
+                Document::Eco(self.module_name.clone()),
                 "' [",
                 base_exports,
                 sealed_export_doc,
@@ -159,7 +159,7 @@ impl CoreErlangGenerator {
         } else {
             docvec![
                 "module '",
-                Document::String(self.module_name.clone()),
+                Document::Eco(self.module_name.clone()),
                 "' [",
                 base_exports,
                 sealed_export_doc,
@@ -348,7 +348,7 @@ impl CoreErlangGenerator {
         let Some(class) = module.classes.first() else {
             return Document::Nil;
         };
-        let mut parts: Vec<Document<'static>> = Vec::new();
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(class.class_methods.len());
         for m in class
             .class_methods
             .iter()
@@ -357,7 +357,7 @@ impl CoreErlangGenerator {
             // BT-412: Class method takes ClassSelf + ClassVars + user params
             parts.push(docvec![
                 ", 'class_",
-                Document::String(m.selector.name().to_string()),
+                Document::Eco(m.selector.name()),
                 "'/",
                 Document::String((m.selector.arity() + 2).to_string()),
             ]);
@@ -400,7 +400,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "call '",
-                        Document::String(module_name.clone()),
+                        Document::Eco(module_name.clone()),
                         "':'dispatch'(Selector, Args, Self, State)",
                     ],
                 ]
@@ -422,7 +422,7 @@ impl CoreErlangGenerator {
             return Ok(Document::Nil);
         };
 
-        let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut docs: Vec<Document<'static>> = Vec::with_capacity(class.methods.len());
 
         for method in &class.methods {
             if method.kind != MethodKind::Primary {
@@ -589,7 +589,7 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let spec_mod = self.compiled_module_name("SupervisionSpec");
         let policy_mod: Document<'static> = if has_local_policy_override {
-            Document::String(self.module_name.clone())
+            Document::Eco(self.module_name.clone())
         } else {
             Document::String(self.compiled_module_name("Actor"))
         };
