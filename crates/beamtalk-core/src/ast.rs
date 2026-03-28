@@ -350,6 +350,7 @@ impl ClassKind {
 /// 4. **Span containment**: All child spans must be within the class span
 /// 5. **Arity consistency**: Method parameter count must match selector arity
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::struct_excessive_bools)] // Class modifiers are genuinely independent flags (ADR 0071)
 pub struct ClassDefinition {
     /// The class name (e.g., `Counter`).
     pub name: Identifier,
@@ -366,6 +367,8 @@ pub struct ClassDefinition {
     pub is_sealed: bool,
     /// Whether this is a typed class (requires type annotations on methods).
     pub is_typed: bool,
+    /// Whether this class is internal (package-scoped visibility, ADR 0071).
+    pub is_internal: bool,
     /// Supervisor kind, set by semantic analysis (BT-1218, ADR 0059 Phase 1).
     ///
     /// `Some(Static)` if this class inherits from `Supervisor`,
@@ -424,6 +427,7 @@ impl ClassDefinition {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            is_internal: false,
             supervisor_kind: None,
             state,
             methods,
@@ -460,6 +464,7 @@ impl ClassDefinition {
             is_abstract,
             is_sealed,
             is_typed: false,
+            is_internal: false,
             supervisor_kind: None,
             state,
             methods,
@@ -755,6 +760,8 @@ pub struct MethodDefinition {
     pub return_type: Option<TypeAnnotation>,
     /// Whether this method is sealed (cannot be overridden).
     pub is_sealed: bool,
+    /// Whether this method is internal (package-scoped visibility, ADR 0071).
+    pub is_internal: bool,
     /// The kind of method.
     pub kind: MethodKind,
     /// Non-doc comments (`//` and `/* */`) appearing before this method.
@@ -802,6 +809,7 @@ impl MethodDefinition {
             body,
             return_type: None,
             is_sealed: false,
+            is_internal: false,
             kind: MethodKind::Primary,
             comments: CommentAttachment::default(),
             doc_comment: None,
@@ -824,6 +832,7 @@ impl MethodDefinition {
             body,
             return_type: Some(return_type),
             is_sealed: false,
+            is_internal: false,
             kind: MethodKind::Primary,
             comments: CommentAttachment::default(),
             doc_comment: None,
@@ -848,6 +857,7 @@ impl MethodDefinition {
             body,
             return_type,
             is_sealed,
+            is_internal: false,
             kind,
             comments: CommentAttachment::default(),
             doc_comment: None,

@@ -6364,3 +6364,222 @@ fn parse_unqualified_superclass_has_no_package() {
         "unqualified superclass should have superclass_package = None"
     );
 }
+
+// ========================================================================
+// BT-1698: `internal` modifier for classes and methods (ADR 0071)
+// ========================================================================
+
+#[test]
+fn parse_internal_class() {
+    let module = parse_ok(
+        "internal Object subclass: Foo
+  bar => 42",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert!(class.is_internal);
+    assert!(!class.is_abstract);
+    assert!(!class.is_sealed);
+    assert_eq!(class.name.name, "Foo");
+    assert_eq!(class.superclass.as_ref().unwrap().name, "Object");
+}
+
+#[test]
+fn parse_internal_abstract_class() {
+    let module = parse_ok(
+        "internal abstract Object subclass: Bar
+  baz => self subclassResponsibility",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert!(class.is_internal);
+    assert!(class.is_abstract);
+    assert_eq!(class.name.name, "Bar");
+}
+
+#[test]
+fn parse_abstract_internal_class() {
+    // Modifiers can appear in any order
+    let module = parse_ok(
+        "abstract internal Object subclass: Baz
+  qux => self subclassResponsibility",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert!(class.is_internal);
+    assert!(class.is_abstract);
+    assert_eq!(class.name.name, "Baz");
+}
+
+#[test]
+fn parse_internal_sealed_class() {
+    let module = parse_ok(
+        "internal sealed Object subclass: Impl
+  state: x = 0",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert!(class.is_internal);
+    assert!(class.is_sealed);
+    assert_eq!(class.name.name, "Impl");
+}
+
+#[test]
+fn parse_internal_typed_class() {
+    let module = parse_ok(
+        "internal typed Object subclass: TypedImpl
+  state: x :: Integer = 0",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert!(class.is_internal);
+    assert!(class.is_typed);
+    assert_eq!(class.name.name, "TypedImpl");
+}
+
+#[test]
+fn parse_non_internal_class_defaults_false() {
+    let module = parse_ok(
+        "Object subclass: Pub
+  foo => 1",
+    );
+    assert_eq!(module.classes.len(), 1);
+    assert!(!module.classes[0].is_internal);
+}
+
+#[test]
+fn parse_internal_method_unary() {
+    // `internal foo => ...` — `internal` is a modifier, `foo` is the method name
+    let module = parse_ok(
+        "Object subclass: Svc
+  internal foo => 42",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 1);
+    let method = &class.methods[0];
+    assert_eq!(method.selector.name(), "foo");
+    assert!(method.is_internal);
+}
+
+#[test]
+fn parse_internal_method_keyword() {
+    // `internal foo: x => ...`
+    let module = parse_ok(
+        "Object subclass: Svc
+  internal buildHeaders: req => req",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let method = &module.classes[0].methods[0];
+    assert_eq!(method.selector.name(), "buildHeaders:");
+    assert!(method.is_internal);
+}
+
+#[test]
+fn parse_method_named_internal() {
+    // A bare `internal => ...` defines a unary method named `internal`, NOT a modifier.
+    let module = parse_ok(
+        "Object subclass: Svc
+  internal => 42",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 1);
+    let method = &class.methods[0];
+    assert_eq!(method.selector.name(), "internal");
+    assert!(
+        !method.is_internal,
+        "bare `internal =>` should not set is_internal"
+    );
+}
+
+#[test]
+fn parse_method_named_internal_with_return_type() {
+    // `internal -> Type =>` is a method named `internal` with a return type, not a modifier.
+    let module = parse_ok(
+        "Object subclass: Svc
+  internal -> Boolean => true",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let method = &module.classes[0].methods[0];
+    assert_eq!(method.selector.name(), "internal");
+    assert!(!method.is_internal);
+    assert!(method.return_type.is_some());
+}
+
+#[test]
+fn parse_sealed_internal_method() {
+    // Modifiers can combine: `sealed internal foo => ...`
+    let module = parse_ok(
+        "Object subclass: Svc
+  sealed internal foo => 42",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let method = &module.classes[0].methods[0];
+    assert_eq!(method.selector.name(), "foo");
+    assert!(method.is_sealed);
+    assert!(method.is_internal);
+}
+
+#[test]
+fn parse_internal_sealed_method() {
+    // Reverse order: `internal sealed foo => ...`
+    let module = parse_ok(
+        "Object subclass: Svc
+  internal sealed foo => 42",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let method = &module.classes[0].methods[0];
+    assert_eq!(method.selector.name(), "foo");
+    assert!(method.is_sealed);
+    assert!(method.is_internal);
+}
+
+#[test]
+fn parse_non_internal_method_defaults_false() {
+    let module = parse_ok(
+        "Object subclass: Svc
+  foo => 42",
+    );
+    assert_eq!(module.classes.len(), 1);
+    assert!(!module.classes[0].methods[0].is_internal);
+}
+
+#[test]
+fn parse_internal_class_method() {
+    // `internal class foo => ...` — internal class-side method
+    let module = parse_ok(
+        "Object subclass: Svc
+  internal class create => self new",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.class_methods.len(), 1);
+    let method = &class.class_methods[0];
+    assert_eq!(method.selector.name(), "create");
+    assert!(method.is_internal);
+}
+
+#[test]
+fn parse_internal_standalone_method() {
+    // `Foo >> internal bar => ...` — standalone method with internal modifier
+    let module = parse_ok("Foo >> internal bar => 42");
+    assert_eq!(module.method_definitions.len(), 1);
+    let standalone = &module.method_definitions[0];
+    assert_eq!(standalone.class_name.name, "Foo");
+    assert_eq!(standalone.method.selector.name(), "bar");
+    assert!(standalone.method.is_internal);
+}
+
+#[test]
+fn parse_internal_binary_method() {
+    // `internal + other => ...` — internal binary method
+    let module = parse_ok(
+        "Object subclass: Svc
+  internal + other => 42",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let method = &module.classes[0].methods[0];
+    assert_eq!(method.selector.name(), "+");
+    assert!(method.is_internal);
+}

@@ -28,6 +28,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
+        is_internal: false,
         supervisor_kind: None,
         state: vec![
             StateDeclaration {

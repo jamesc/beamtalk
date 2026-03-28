@@ -1183,11 +1183,14 @@ impl Parser {
     pub(super) fn is_at_class_definition(&self) -> bool {
         let mut offset = 0;
 
-        // Skip optional `abstract`, `sealed`, or `typed` modifiers
+        // Skip optional `abstract`, `sealed`, `typed`, or `internal` modifiers (ADR 0071)
         while let Some(kind) = self.peek_at(offset) {
             match kind {
                 TokenKind::Identifier(name)
-                    if name == "abstract" || name == "sealed" || name == "typed" =>
+                    if name == "abstract"
+                        || name == "sealed"
+                        || name == "typed"
+                        || name == "internal" =>
                 {
                     offset += 1;
                 }
@@ -1282,7 +1285,29 @@ impl Parser {
     }
 
     /// Checks if there is a method selector followed by `=>` (or `-> Type =>`) at the given offset.
+    ///
+    /// Skips method modifiers (`sealed`, `internal`) before the selector, using
+    /// the same disambiguation as [`is_at_method_definition`]: `internal` and
+    /// other modifier-like identifiers are only treated as modifiers when NOT
+    /// directly followed by `=>` or `-> Type =>`.
     fn is_method_selector_at(&self, offset: usize) -> bool {
+        let mut offset = offset;
+
+        // Skip optional method modifiers: sealed, internal
+        while let Some(TokenKind::Identifier(name)) = self.peek_at(offset) {
+            if matches!(name.as_str(), "sealed") {
+                offset += 1;
+            } else if name == "internal" {
+                // Only treat as modifier if next token is not `=>` or `-> Type =>`
+                if self.is_fat_arrow_or_return_type(offset + 1) {
+                    break;
+                }
+                offset += 1;
+            } else {
+                break;
+            }
+        }
+
         match self.peek_at(offset) {
             // Unary: `identifier =>` or `identifier -> Type =>`
             Some(TokenKind::Identifier(_)) => self.is_fat_arrow_or_return_type(offset + 1),

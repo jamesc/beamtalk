@@ -4,9 +4,9 @@
 //! Declaration parsing for Beamtalk.
 //!
 //! This module handles parsing of top-level declarations including:
-//! - Class definitions with modifiers (`abstract`, `sealed`, `typed`)
+//! - Class definitions with modifiers (`abstract`, `sealed`, `typed`, `internal`)
 //! - State (field) declarations with types and default values
-//! - Method definitions with optional `sealed` modifier
+//! - Method definitions with optional `sealed` or `internal` modifiers
 
 use crate::ast::{
     ClassDefinition, CommentAttachment, DeclaredKeyword, Expression, ExpressionStatement,
@@ -53,7 +53,7 @@ impl Parser {
     ///
     /// Syntax:
     /// ```text
-    /// abstract? sealed? typed? <Superclass> subclass: <ClassName>
+    /// internal? abstract? sealed? typed? <Superclass> subclass: <ClassName>
     ///   state: fieldName = defaultValue
     ///   state: fieldName :: TypeName = defaultValue
     ///
@@ -76,8 +76,9 @@ impl Parser {
         let mut is_abstract = false;
         let mut is_sealed = false;
         let mut is_typed = false;
+        let mut is_internal = false;
 
-        // Parse optional modifiers: abstract, sealed, typed
+        // Parse optional modifiers: abstract, sealed, typed, internal (ADR 0071)
         while let TokenKind::Identifier(name) = self.current_kind() {
             if name == "abstract" {
                 is_abstract = true;
@@ -87,6 +88,9 @@ impl Parser {
                 self.advance();
             } else if name == "typed" {
                 is_typed = true;
+                self.advance();
+            } else if name == "internal" {
+                is_internal = true;
                 self.advance();
             } else {
                 break;
@@ -186,6 +190,7 @@ impl Parser {
             span,
         );
         class_def.is_typed = is_typed;
+        class_def.is_internal = is_internal;
         class_def.superclass_package = superclass_package;
         class_def.type_params = type_params;
         class_def.superclass_type_args = superclass_type_args;
@@ -336,7 +341,7 @@ impl Parser {
                     loop {
                         match self.peek_at(offset) {
                             Some(TokenKind::Identifier(name))
-                                if matches!(name.as_str(), "sealed") =>
+                                if matches!(name.as_str(), "sealed" | "internal") =>
                             {
                                 offset += 1;
                             }
@@ -381,19 +386,20 @@ impl Parser {
     /// - An identifier followed directly by `=>` (unary method)
     /// - A binary selector followed by identifier and `=>` (binary method)
     /// - Keywords followed by identifiers and eventually `=>` (keyword method)
-    /// - `sealed` followed by one of the above
+    /// - `sealed` or `internal` followed by one of the above
     pub(super) fn is_at_method_definition(&self) -> bool {
         let mut offset = 0;
 
-        // Skip optional modifiers: sealed, class
-        // Note: `class` is only a modifier when followed by a method selector,
-        // not when followed by `=>` (which makes it a method named `class`).
+        // Skip optional modifiers: sealed, internal, class
+        // Note: `class` and `internal` are only modifiers when followed by a
+        // method selector, not when followed by `=>` (which makes them method
+        // names). ADR 0071 for `internal` disambiguation.
         while let Some(TokenKind::Identifier(name)) = self.peek_at(offset) {
             if matches!(name.as_str(), "sealed") {
                 offset += 1;
-            } else if name == "class" {
+            } else if name == "class" || name == "internal" {
                 // Only treat as modifier if next token is not `=>` or `-> Type =>`
-                // (i.e., not a method named "class", possibly with a return type)
+                // (i.e., not a method named "class"/"internal", possibly with a return type)
                 if self.is_fat_arrow_or_return_type(offset + 1) {
                     break;
                 }
@@ -886,24 +892,31 @@ impl Parser {
     /// - `+ other => body`
     /// - `at: index put: value => body`
     /// - `sealed methodName => body`
+    /// - `internal methodName => body` (ADR 0071)
     fn parse_method_definition(&mut self) -> Option<MethodDefinition> {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
         let comments = self.collect_comment_attachment();
         let method_kind = MethodKind::Primary;
         let mut method_is_sealed = false;
+        let mut method_is_internal = false;
         let mut _is_class_method = false;
 
         // Parse optional modifiers
         while let TokenKind::Identifier(name) = self.current_kind() {
             match name.as_str() {
-                "class" => {
+                "class" | "internal" => {
                     // Only treat as modifier if next token is not `=>` or `-> Type =>`
-                    // (otherwise it's a method named `class`, possibly with a return type)
+                    // (otherwise it's a method named `class`/`internal`, possibly with
+                    // a return type). ADR 0071 for `internal` disambiguation.
                     if self.is_fat_arrow_or_return_type(1) {
                         break;
                     }
-                    _is_class_method = true;
+                    if name == "class" {
+                        _is_class_method = true;
+                    } else {
+                        method_is_internal = true;
+                    }
                     self.advance();
                 }
                 "sealed" => {
@@ -943,6 +956,7 @@ impl Parser {
             method_kind,
             span,
         );
+        method.is_internal = method_is_internal;
         method.doc_comment = doc_comment;
         method.comments = comments;
         Some(method)
