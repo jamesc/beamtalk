@@ -110,6 +110,22 @@ Add a `visibility` field to `__beamtalk_meta/0` (value: `public` or `internal`).
 | `internal typed` | Yes | Internal class with type annotation requirements |
 | Stacking order | Any | `internal` can appear anywhere in the modifier list before the superclass name, like existing modifiers |
 
+### ClassBuilder Protocol
+
+The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier:` method currently accepts `#abstract`, `#sealed`, `#typed`. This ADR extends it to also accept `#internal`. The `classBuilderRegister` intrinsic must propagate the visibility flag to `__beamtalk_meta/0`.
+
+### Semantic Edge Cases
+
+**Subclassing across packages:** A public class may have an internal superclass within the same package. External packages see the public class but cannot name the internal superclass directly. This is valid — the internal class is an implementation detail of the inheritance chain. The compiler does not require the entire superclass chain to be public.
+
+**Internal classes as return types:** An internal Value class can be returned from a public method. The caller receives an opaque value — they can send messages to it (structural typing) but cannot name the class for instantiation or type annotations. This is intentional: visibility controls naming, not data flow.
+
+**Protocol conformance:** An internal class can conform to a public protocol structurally (ADR 0025). Instances may escape the package boundary via protocol-typed parameters. This is by design — the visibility boundary controls class naming, not object identity.
+
+**Extension methods (ADR 0066):** Extension methods (`>>` syntax) on an internal class are only visible within the defining package. Cross-package extensions targeting an internal class are a compile error (the class name cannot be resolved).
+
+**Generic type arguments (ADR 0068):** Internal class names may appear in type metadata (`__beamtalk_meta/0`) for generic instantiations. Tooling (LSP, FFI generators) should filter internal names from cross-package surfaces.
+
 ### Erlang FFI
 
 | Direction | Enforcement |
@@ -279,6 +295,7 @@ check_visibility(CallerModule, TargetModule, Visibility)
 - REPL expressions go through compiler, so enforcement is automatic
 - No runtime cost — metadata is a compile-time constant
 - Existing single-package code requires no changes
+- Hot code reloading unaffected — visibility is a compile-time property, not a runtime check; reloading an internal class works identically to reloading a public one
 
 ## Implementation
 
@@ -295,28 +312,41 @@ Add `internal` to the modifier parsing loop.
 Enforce cross-package `internal` access.
 
 **Files:**
-- `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs` — add `check_internal_visibility()`
-- `ClassInfo` — add `is_internal: bool`
+- `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs` — add `check_internal_visibility()`, extend `ClassInfo` with `is_internal: bool`
+- `add_from_beam_meta()` — propagate visibility from BEAM metadata into `ClassInfo` (ADR 0050)
+- Cross-package reference resolution — emit `E0401` diagnostic when an internal class is referenced from another package
 
-**Note:** Requires package context in compilation — the compiler must know which package owns each class.
+**Note:** Requires package context in compilation — the compiler must know which package owns each class. The package name is already extractable from BEAM module names (`bt@{package}@{class}`, ADR 0016).
 
-### Phase 3: Metadata
+### Phase 3: Metadata and Codegen
 
 Emit visibility in `__beamtalk_meta/0` and `.app` metadata.
 
 **Files:**
-- `crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs` — add `visibility` to meta map
+- `crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs` — add `visibility => public | internal` to meta map
 - `.app.src` class registry — add visibility field
+- `ClassBuilder` modifier handling — accept `#internal` symbol (ADR 0038)
+
+**Coordination:** Must align with ADR 0050's `meta_version` scheme. If `__beamtalk_meta/0` is already stable, bump `meta_version` when adding the `visibility` field.
 
 ### Phase 4: Tooling
 
 Filter internal classes in LSP and REPL completions.
 
 **Files:**
-- `crates/beamtalk-lsp/` — filter cross-package completions
+- `crates/beamtalk-lsp/` — filter cross-package completions, show internal classes only for same-package files
 - REPL — filter tab completion for cross-package classes
 
 ## References
 
 - Related issues: BT-714, BT-716
-- Related ADRs: [ADR 0070](0070-package-namespaces-and-dependencies.md) Section 9 (calls for this ADR), [ADR 0049](0049-remove-method-level-sealed.md) (sealed method removal), [ADR 0016](0016-unified-stdlib-module-naming.md) (BEAM module naming), [ADR 0031](0031-flat-namespace-for-v01.md) (flat namespace)
+- Related ADRs:
+  - [ADR 0070](0070-package-namespaces-and-dependencies.md) Section 9 (calls for this ADR)
+  - [ADR 0049](0049-remove-method-level-sealed.md) (sealed method removal — modifier precedent)
+  - [ADR 0050](0050-incremental-compiler-class-hierarchy.md) (`__beamtalk_meta/0` structure — must coordinate `visibility` field)
+  - [ADR 0038](0038-subclass-classbuilder-protocol.md) (ClassBuilder protocol — must accept `#internal` modifier)
+  - [ADR 0066](0066-open-class-extension-methods.md) (extension methods — internal class extensions scoped to package)
+  - [ADR 0068](0068-parametric-types-and-protocols.md) (parametric types — internal names in type metadata)
+  - [ADR 0025](0025-gradual-typing-and-protocols.md) (protocols — internal classes can conform to public protocols)
+  - [ADR 0016](0016-unified-stdlib-module-naming.md) (BEAM module naming — package extraction)
+  - [ADR 0031](0031-flat-namespace-for-v01.md) (flat namespace)
