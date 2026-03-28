@@ -1,0 +1,50 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+%% rebar.config.script — dynamic config overlay for Beamtalk runtime.
+%%
+%% BT-1672: Auto-discover bt@* stdlib modules and exclude them from cover and
+%% dialyzer. Core Erlang-compiled BEAM files have no Erlang abstract code, so
+%% cover cannot instrument them and dialyzer cannot analyse them. This replaces
+%% the previous hand-maintained exclusion lists that broke whenever a new stdlib
+%% class was added.
+
+%% Scan the stdlib ebin directory for bt@* BEAM files.
+StdlibEbin = "apps/beamtalk_stdlib/ebin",
+BtModules =
+    case filelib:wildcard(filename:join(StdlibEbin, "bt@*.beam")) of
+        [] ->
+            %% Fallback: check _build directories (rebar3 copies beams there)
+            lists:usort(
+                [list_to_atom(filename:basename(F, ".beam"))
+                 || F <- filelib:wildcard("_build/*/lib/beamtalk_stdlib/ebin/bt@*.beam")]);
+        Files ->
+            [list_to_atom(filename:basename(F, ".beam")) || F <- lists:sort(Files)]
+    end,
+
+%% Helper: deep-merge a key into a proplist, preserving other keys.
+SetKey = fun(Key, Value, Proplist) ->
+    [{Key, Value} | lists:keydelete(Key, 1, Proplist)]
+end,
+
+%% Merge cover_excl_mods into CONFIG, preserving any manual excludes.
+Config1 = case BtModules of
+    [] -> CONFIG;  % No modules found yet (pre-build); leave config as-is
+    _  ->
+        ExistingCover = proplists:get_value(cover_excl_mods, CONFIG, []),
+        MergedCover = lists:usort(ExistingCover ++ BtModules),
+        SetKey(cover_excl_mods, MergedCover, CONFIG)
+end,
+
+%% Merge dialyzer exclude_mods into CONFIG, preserving any manual excludes.
+Config2 = case BtModules of
+    [] -> Config1;
+    _  ->
+        OldDialyzer = proplists:get_value(dialyzer, Config1, []),
+        ExistingExclude = proplists:get_value(exclude_mods, OldDialyzer, []),
+        MergedExclude = lists:usort(ExistingExclude ++ BtModules),
+        NewDialyzer = SetKey(exclude_mods, MergedExclude, OldDialyzer),
+        SetKey(dialyzer, NewDialyzer, Config1)
+end,
+
+Config2.
