@@ -88,11 +88,29 @@ error[E0401]: Class 'ParserState' is private to package 'json' and cannot be ref
    = note: 'ParserState' is declared 'private' in package 'json'
 ```
 
+**Leaked visibility** — hard error when a private class appears in the public signature of a public class (parameter type, return type, state type annotation). This is always a bug: either the class should be public, or the signature is wrong.
+
+```text
+error[E0402]: Private class 'TokenBuffer' appears in public signature of 'Parser >> tokenize:'
+  --> src/parser.bt:12:3
+   |
+12 |   tokenize: input :: String -> TokenBuffer =>
+   |                                ^^^^^^^^^^^
+   |
+   = note: 'TokenBuffer' is declared 'private' — make it public, or change the return type
+```
+
+This follows Rust's model, where `pub fn` returning a private type is a compile error.
+
 ### REPL Behavior
 
-REPL expressions go through the compiler pipeline, so visibility enforcement is automatic — no special exemption in v1.
+The REPL is largely unaffected by visibility enforcement. Most REPL workflows operate on values, not class names:
 
-**Future direction** (deferred to when remote REPL attach lands): a `--privileged` flag could exempt the REPL from visibility enforcement for debugging. Design details deferred.
+- **Inspecting objects** — `obj class`, `obj printString`, `obj respondsTo: #foo` — runtime reflection on values, not compiled class references. Unaffected.
+- **Reading source/docs** — `:doc SomeClass`, `:source SomeClass >> method` — REPL commands are metadata lookups, not compiled expressions. Unaffected.
+- **Sending messages** — if you have a reference to an object, you can send it any message regardless of its class's visibility.
+
+The only thing `private` blocks in the REPL is **naming another package's private class in a compiled expression**: `json@ParserState new`. This is exactly what `private` should prevent — instantiating implementation details from outside the package.
 
 ### Metadata
 
@@ -115,7 +133,7 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 
 **Subclassing across packages:** A public class may have a private superclass within the same package. External packages see the public class but cannot name the private superclass directly. This is valid — the private class is an implementation detail of the inheritance chain. The compiler does not require the entire superclass chain to be public.
 
-**Private classes as return types:** A private Value class can be returned from a public method. The caller receives an opaque value — they can send messages to it (structural typing) but cannot name the class for instantiation or type annotations. This is intentional: visibility controls naming, not data flow.
+**Private classes in public signatures:** If a public method's type annotation references a private class (parameter type, return type), it is a hard error (`E0402` — see Enforcement above). A private class that appears in a public signature is always a bug. However, a public method *without* a type annotation may return a private class's instance at runtime — visibility controls naming in source, not data flow. Callers interact with such values via structural typing (protocol conformance) or message sends.
 
 **Protocol conformance:** A private class can conform to a public protocol structurally (ADR 0025). Instances may escape the package boundary via protocol-typed parameters. This is by design — the visibility boundary controls class naming, not object identity.
 
@@ -213,9 +231,9 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 
 ### Rejected: REPL Always Exempt from Visibility
 
-**Strongest argument:** Smalltalk's "all objects are inspectable" philosophy is core to the live-programming experience. If I can't poke at internals in the REPL, I've lost half of what makes Smalltalk-style development productive. The `--privileged` escape hatch is deferred, meaning at launch there is no way to inspect private classes interactively — a real cost to the core value proposition.
+**Strongest argument:** Smalltalk's "all objects are inspectable" philosophy is core to the live-programming experience. Enforcing visibility in the REPL limits exploration of library internals.
 
-**Counter:** REPL expressions go through the compiler anyway, so enforcement is free and consistent. A production REPL connecting to live systems *should* respect boundaries by default. The future `--privileged` flag provides the escape hatch when you genuinely need to inspect internals — opt-in, not opt-out.
+**Counter:** This concern is largely a phantom. Most REPL workflows are unaffected — inspecting objects (`obj class`, `respondsTo:`, `printString`), reading docs (`:doc`), and sending messages all work on values, not class names. The only thing blocked is naming a private class in a compiled expression (`json@ParserState new`), which is exactly the intended restriction. Smalltalk-style explorability is preserved because reflection operates on runtime values, not source-level class references.
 
 ### Rejected: Runtime Enforcement
 
@@ -229,6 +247,7 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 - If Beamtalk later needs object-level encapsulation, `private` is already taken for package scope — but this is deemed unlikely for a BEAM message-passing language
 - BEAM veterans and operators align on compile-time enforcement being sufficient
 - Method-level `private` is the strongest deferred request — the keyword choice makes this a natural future extension
+- The leaked-visibility error (`E0402`) is strict — some developers may want to return "opaque" private types from public methods, but this is better served by protocols
 
 ## Alternatives Considered
 
