@@ -554,6 +554,7 @@ mod tests {
                         return_type: None,
                         kind: MethodKind::Primary,
                         is_sealed: false,
+                        is_internal: false,
                         comments: CommentAttachment::default(),
                         doc_comment: None,
                         span: span(),

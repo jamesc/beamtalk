@@ -27,6 +27,7 @@ Module {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            is_internal: false,
             supervisor_kind: None,
             state: [],
             methods: [
@@ -135,6 +136,7 @@ Module {
                     ],
                     return_type: None,
                     is_sealed: false,
+                    is_internal: false,
                     kind: Primary,
                     comments: CommentAttachment {
                         leading: [],
