@@ -452,13 +452,13 @@ impl CoreErlangGenerator {
     /// `beamtalk_actor:cast_send/3`. Dispatches the message and updates state;
     /// errors are logged via `logger:warning` and discarded (BT-943).
     // BT-920: helper — generates the inner `case safe_dispatch ... end` for fire-and-forget casts.
-    fn cast_dispatch_case(module_name: &str) -> Document<'static> {
+    fn cast_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
             line(),
             // Use safe_dispatch for error isolation; discard result on error
             docvec![
                 "case call '",
-                Document::String(module_name.to_string()),
+                Document::Eco(module_name.clone()),
                 "':'safe_dispatch'(CastSelector, CastArgs, State) of"
             ],
             nest(
@@ -586,13 +586,13 @@ impl CoreErlangGenerator {
 
     /// BT-1604: Generates the inner `case safe_dispatch ... end` block for `handle_call`.
     /// Shared between 3-tuple (with `PropCtx`) and 2-tuple (backward compat) patterns.
-    fn handle_call_dispatch_case(module_name: &str) -> Document<'static> {
+    fn handle_call_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
             line(),
             // Use safe_dispatch for error isolation per BT-29
             docvec![
                 "case call '",
-                Document::String(module_name.to_string()),
+                Document::Eco(module_name.clone()),
                 "':'safe_dispatch'(Selector, Args, State) of"
             ],
             nest(
