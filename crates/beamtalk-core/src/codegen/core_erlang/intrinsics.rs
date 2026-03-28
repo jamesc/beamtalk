@@ -22,7 +22,7 @@
 //! at runtime), these intrinsics generate efficient inline code because they are
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
-use super::document::Document;
+use super::document::{Document, join};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression, MessageSelector};
 use crate::docvec;
@@ -618,25 +618,17 @@ impl CoreErlangGenerator {
         // BT-1270: Evaluate receiver first, then hoist field-assignment arguments.
         // This preserves evaluation order: `let _Fun = recv in [hoisted args] apply _Fun (args)`.
         let recv_code = self.expression_doc(receiver)?;
-        let mut parts: Vec<Document<'static>> = vec![docvec![
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() + 2);
+        parts.push(docvec![
             "let ",
             Document::String(fun_var.clone()),
             " = ",
             recv_code,
             " in ",
-        ]];
+        ]);
         let arg_docs = self.generate_cascade_args(arguments, &mut parts)?;
 
-        let args_doc = {
-            let mut a: Vec<Document<'static>> = Vec::new();
-            for (i, d) in arg_docs.into_iter().enumerate() {
-                if i > 0 {
-                    a.push(Document::Str(", "));
-                }
-                a.push(d);
-            }
-            Document::Vec(a)
-        };
+        let args_doc = join(arg_docs, &Document::Str(", "));
 
         parts.push(docvec![
             "apply ",
@@ -709,8 +701,8 @@ impl CoreErlangGenerator {
         let recv_var = self.fresh_temp_var("ValRecv");
         let recv_code = self.expression_doc(receiver)?;
 
-        let mut arg_vars: Vec<String> = Vec::new();
-        let mut parts: Vec<Document<'static>> = Vec::new();
+        let mut arg_vars: Vec<String> = Vec::with_capacity(arguments.len());
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() + 2);
 
         parts.push(docvec![
             "let ",
@@ -747,28 +739,13 @@ impl CoreErlangGenerator {
             arg_vars.push(arg_var);
         }
 
-        let apply_args = {
-            let mut a: Vec<Document<'static>> = Vec::new();
-            for (i, v) in arg_vars.iter().enumerate() {
-                if i > 0 {
-                    a.push(Document::Str(", "));
-                }
-                a.push(Document::String(v.clone()));
-            }
-            Document::Vec(a)
-        };
+        let arg_var_docs: Vec<Document<'static>> = arg_vars
+            .iter()
+            .map(|v| Document::String(v.clone()))
+            .collect();
+        let apply_args = join(arg_var_docs.clone(), &Document::Str(", "));
 
-        let send_list = {
-            let mut a: Vec<Document<'static>> = vec![Document::Str("[")];
-            for (i, v) in arg_vars.iter().enumerate() {
-                if i > 0 {
-                    a.push(Document::Str(", "));
-                }
-                a.push(Document::String(v.clone()));
-            }
-            a.push(Document::Str("]"));
-            Document::Vec(a)
-        };
+        let send_list = docvec!["[", join(arg_var_docs, &Document::Str(", ")), "]"];
 
         parts.push(docvec![
             "case call 'erlang':'is_function'(",
@@ -814,19 +791,13 @@ impl CoreErlangGenerator {
         let recv_code = self.expression_doc(receiver)?;
         let current_state = self.current_state_var();
 
-        let mut arg_parts: Vec<Document<'static>> = Vec::new();
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                arg_parts.push(Document::Str(", "));
-            }
-            arg_parts.push(self.expression_doc(arg)?);
+        let mut arg_docs: Vec<Document<'static>> = Vec::with_capacity(arguments.len() + 1);
+        for arg in arguments {
+            arg_docs.push(self.expression_doc(arg)?);
         }
         // Append State as last argument
-        if !arguments.is_empty() {
-            arg_parts.push(Document::Str(", "));
-        }
-        arg_parts.push(Document::String(current_state));
-        let args_doc = Document::Vec(arg_parts);
+        arg_docs.push(Document::String(current_state));
+        let args_doc = join(arg_docs, &Document::Str(", "));
 
         let doc = docvec![
             "let ",
@@ -861,7 +832,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // For value: variants, bind block parameters to argument values.
         // Use a scope for parameter bindings so they don't leak.
-        let mut arg_bindings: Vec<Document<'static>> = Vec::new();
+        let mut arg_bindings: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         if !arguments.is_empty() {
             self.push_scope();
         }
@@ -887,7 +858,8 @@ impl CoreErlangGenerator {
         if self.context == CodeGenContext::ValueType && !self.in_loop_body {
             let body = super::util::collect_body_exprs(&block.body);
 
-            let mut parts: Vec<Document<'static>> = Vec::new();
+            let mut parts: Vec<Document<'static>> =
+                Vec::with_capacity(arg_bindings.len() + body.len());
             parts.extend(arg_bindings);
 
             for (i, expr) in body.iter().enumerate() {
@@ -952,7 +924,7 @@ impl CoreErlangGenerator {
             this.generate_conditional_branch_inline(block)
         })?;
 
-        let mut parts: Vec<Document<'static>> = Vec::new();
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(arg_bindings.len() + 2);
         parts.extend(arg_bindings);
         // Seed StateAcc from outer state
         parts.push(docvec![

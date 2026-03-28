@@ -414,7 +414,7 @@ impl CoreErlangGenerator {
             .collect();
 
         // Phase 2: emit code for each (expression, kind) pair.
-        let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut docs: Vec<Document<'static>> = Vec::with_capacity(body.len());
         let body_len = body.len();
 
         for (i, (expr, kind)) in body.iter().zip(plan.into_iter()).enumerate() {
@@ -1136,7 +1136,7 @@ impl CoreErlangGenerator {
         } = expr
         {
             let selector_atom = selector.to_erlang_atom();
-            let mut arg_docs: Vec<Document<'static>> = Vec::new();
+            let mut arg_docs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
             for (j, arg) in arguments.iter().enumerate() {
                 if j > 0 {
                     arg_docs.push(Document::Str(", "));
@@ -1447,14 +1447,14 @@ impl CoreErlangGenerator {
         methods: &[&MethodDefinition],
         mut value_fn: impl FnMut(&MethodDefinition) -> Document<'static>,
     ) -> Document<'static> {
-        let mut parts: Vec<Document<'static>> = Vec::new();
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(methods.len());
         for (idx, method) in methods.iter().enumerate() {
             if idx > 0 {
                 parts.push(Document::Str(", "));
             }
             parts.push(docvec![
                 "'",
-                Document::String(method.selector.name().to_string()),
+                Document::Eco(method.selector.name()),
                 "' => ",
                 value_fn(method),
             ]);
@@ -1477,7 +1477,7 @@ impl CoreErlangGenerator {
                 }
                 parts.push(docvec![
                     "'",
-                    Document::String(method.selector.name().to_string()),
+                    Document::Eco(method.selector.name()),
                     "' => ",
                     val,
                 ]);

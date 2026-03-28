@@ -73,7 +73,7 @@ impl CoreErlangGenerator {
             "{'beamtalk_object', '",
             Document::String(class_name.clone()),
             "', '",
-            Document::String(module_name.clone()),
+            Document::Eco(module_name.clone()),
             "', Pid}",
         ];
 
@@ -86,7 +86,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "case call 'beamtalk_actor':'safe_spawn'('",
-                        Document::String(module_name.clone()),
+                        Document::Eco(module_name.clone()),
                         "', ~{}~) of",
                     ],
                     nest(
@@ -177,7 +177,7 @@ impl CoreErlangGenerator {
             "{'beamtalk_object', '",
             Document::String(class_name.clone()),
             "', '",
-            Document::String(module_name.clone()),
+            Document::Eco(module_name.clone()),
             "', Pid}",
         ];
 
@@ -228,7 +228,7 @@ impl CoreErlangGenerator {
                                     line(),
                                     docvec![
                                         "case call 'beamtalk_actor':'safe_spawn'('",
-                                        Document::String(module_name.clone()),
+                                        Document::Eco(module_name.clone()),
                                         "', InitArgs) of",
                                     ],
                                     nest(

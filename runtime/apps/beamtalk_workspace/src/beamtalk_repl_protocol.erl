@@ -532,6 +532,7 @@ encode_test_results(
         total := Total,
         passed := Passed,
         failed := Failed,
+        skipped := Skipped,
         duration := Duration,
         tests := Tests
     },
@@ -545,6 +546,7 @@ encode_test_results(
     ResultMap = #{
         <<"passed">> => Passed,
         <<"failed">> => Failed,
+        <<"skipped">> => Skipped,
         <<"total">> => Total,
         <<"duration">> => Duration,
         <<"tests">> => [encode_test_entry(T) || T <- Tests]
@@ -573,6 +575,21 @@ encode_test_entry(#{name := Name, status := fail, error := Error} = Entry) ->
         },
         Entry
     );
+encode_test_entry(#{name := Name, status := skip} = Entry) ->
+    Base0 = #{
+        <<"name">> => atom_to_binary(Name, utf8),
+        <<"status">> => <<"skip">>
+    },
+    Base =
+        case maps:find(reason, Entry) of
+            {ok, Reason} when is_binary(Reason) ->
+                Base0#{<<"reason">> => Reason};
+            {ok, Reason} ->
+                Base0#{<<"reason">> => iolist_to_binary(io_lib:format("~p", [Reason]))};
+            error ->
+                Base0
+        end,
+    maybe_add_class(Base, Entry);
 encode_test_entry(Entry) ->
     %% Fallback for unexpected shapes
     Name = maps:get(name, Entry, unknown),

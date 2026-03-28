@@ -410,10 +410,19 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         core_files.push(core_file.clone());
     }
 
+    // Report incremental build status to the user.
+    let total_files = file_module_pairs.len();
+    let changed_count = changes.changed_files.len();
+    let unchanged_count = changes.unchanged_files.len();
+
     if core_files.is_empty() {
+        eprintln!("All {total_files} files unchanged — nothing to compile");
         info!("All files up-to-date — nothing to compile");
+    } else if unchanged_count > 0 {
+        eprintln!("Compiling {changed_count} of {total_files} files ({unchanged_count} unchanged)");
+        info!(count = core_files.len(), "Compiling changed files to BEAM");
     } else {
-        // Batch compile Core Erlang to BEAM
+        eprintln!("Compiling {total_files} files");
         info!(count = core_files.len(), "Compiling changed files to BEAM");
     }
 

@@ -113,6 +113,7 @@ use crate::ast::{Block, Expression, MessageSelector, Module};
 use crate::docvec;
 use crate::source_analysis::{Diagnostic, Span};
 use document::{Document, INDENT, line, nest};
+use ecow::EcoString;
 use primitive_bindings::PrimitiveBindingTable;
 use state_codegen::StateThreading;
 use std::collections::HashSet;
@@ -269,8 +270,8 @@ pub type Result<T> = std::result::Result<T, CodeGenError>;
 /// ```
 #[derive(Debug, Clone)]
 pub struct CodegenOptions {
-    /// The Erlang module name to generate.
-    module_name: String,
+    /// The Erlang module name to generate (ref-counted for O(1) clone).
+    module_name: EcoString,
     /// Original source text for `CompiledMethod` introspection (BT-101).
     source_text: Option<String>,
     /// Primitive binding table from compiled stdlib (ADR 0007).
@@ -321,7 +322,7 @@ impl CodegenOptions {
     /// Creates default options with the given module name.
     pub fn new(module_name: &str) -> Self {
         Self {
-            module_name: module_name.to_string(),
+            module_name: EcoString::from(module_name),
             source_text: None,
             bindings: None,
             workspace_mode: false,
@@ -856,7 +857,7 @@ impl ReplContext {
 #[derive(Debug, Clone)]
 pub(super) struct DirectCallClassInfo {
     /// The compiled Erlang module name (e.g., `bt@stdlib@tracing`).
-    pub module_name: String,
+    pub module_name: EcoString,
     /// Set of selector names eligible for direct call (e.g., `{"setContext:", "context", ...}`).
     /// Excludes `startLink`-family selectors and non-sealed class methods.
     pub selectors: std::collections::HashSet<String>,
@@ -987,8 +988,8 @@ impl ValueTypeContext {
     reason = "Generator flags are context switches, not configuration"
 )]
 pub(crate) struct CoreErlangGenerator {
-    /// The module name being generated.
-    pub(crate) module_name: String,
+    /// The module name being generated (ref-counted for O(1) clone).
+    pub(crate) module_name: EcoString,
     /// Variable binding and scope management.
     var_context: VariableContext,
     /// State threading for field assignments.
@@ -1112,7 +1113,7 @@ impl CoreErlangGenerator {
     /// Creates a new code generator for the given module name.
     pub(crate) fn new(module_name: &str) -> Self {
         Self {
-            module_name: module_name.to_string(),
+            module_name: EcoString::from(module_name),
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
             in_loop_body: false,
@@ -2001,7 +2002,7 @@ impl CoreErlangGenerator {
             }
 
             if !selectors.is_empty() {
-                let module_name = generator.compiled_module_name(class_name);
+                let module_name = EcoString::from(generator.compiled_module_name(class_name));
                 result.insert(
                     class_name.to_string(),
                     DirectCallClassInfo {
@@ -2137,7 +2138,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "call 'gen_server':'start_link'(ServerName, '",
-                        Document::String(self.module_name.clone()),
+                        Document::Eco(self.module_name.clone()),
                         "', InitArgs, [])",
                     ],
                 ]

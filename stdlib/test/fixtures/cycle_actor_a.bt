@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1325: CycleActorA — part of 3-actor cycle test (A -> B -> C -> A).
+
+Actor subclass: CycleActorA
+  state: peer = nil
+
+  setPeer: p => self.peer := p
+
+  // Start the chain: A -> B (passing self as the original caller)
+  startCycle => self.peer forwardTo: self
+
+  // Called by C to complete the cycle — this should trigger deadlock_detected
+  callback => #reached_a

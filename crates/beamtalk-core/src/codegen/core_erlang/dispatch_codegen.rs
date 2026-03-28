@@ -50,7 +50,7 @@ impl CoreErlangGenerator {
     ///
     /// Uses `expression_doc` for each argument, joining with commas.
     fn capture_argument_list_doc(&mut self, arguments: &[Expression]) -> Result<Document<'static>> {
-        let mut parts: Vec<Document<'static>> = Vec::new();
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
@@ -250,7 +250,7 @@ impl CoreErlangGenerator {
             "let ",
             Document::String(discard_var),
             " = call '",
-            Document::String(module),
+            Document::Eco(module),
             "':'safe_dispatch'('",
             Document::String(selector_atom),
             "', [",
@@ -529,7 +529,7 @@ impl CoreErlangGenerator {
                 // wrapped via generate_erlang_interop_wrapper before crossing the
                 // Erlang boundary. Non-block arguments pass through unchanged.
                 let mut preamble_docs: Vec<Document<'static>> = Vec::new();
-                let mut arg_parts: Vec<Document<'static>> = Vec::new();
+                let mut arg_parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
 
                 for (i, arg) in arguments.iter().enumerate() {
                     if i > 0 {
@@ -751,7 +751,7 @@ impl CoreErlangGenerator {
             let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
             let doc = docvec![
                 "call '",
-                Document::String(module),
+                Document::Eco(module),
                 "':'",
                 Document::String(safe_fn),
                 "'(ClassSelf, ",
@@ -1613,7 +1613,7 @@ impl CoreErlangGenerator {
                     let comma = if arguments.is_empty() { "" } else { ", " };
                     docvec![
                         "call '",
-                        Document::String(info.module_name.clone()),
+                        Document::Eco(info.module_name.clone()),
                         "':'",
                         Document::String(safe_fn),
                         "'('nil', ~{}~",
@@ -2161,7 +2161,7 @@ impl CoreErlangGenerator {
         let tier2_vars_by_pos: std::collections::HashMap<usize, &Vec<String>> =
             tier2_args.iter().map(|(pos, vars)| (*pos, vars)).collect();
 
-        let mut arg_parts: Vec<Document<'static>> = Vec::new();
+        let mut arg_parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
                 arg_parts.push(Document::Str(", "));

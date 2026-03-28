@@ -106,7 +106,7 @@ impl CoreErlangGenerator {
         let module_header = if has_classes {
             docvec![
                 "module '",
-                Document::String(self.module_name.clone()),
+                Document::Eco(self.module_name.clone()),
                 "' [",
                 base_exports,
                 class_method_export_doc,
@@ -122,7 +122,7 @@ impl CoreErlangGenerator {
         } else {
             docvec![
                 "module '",
-                Document::String(self.module_name.clone()),
+                Document::Eco(self.module_name.clone()),
                 "' [",
                 base_exports,
                 class_method_export_doc,
@@ -213,7 +213,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "call '",
-                        Document::String(self.module_name.clone()),
+                        Document::Eco(self.module_name.clone()),
                         "':'spawn'(~{}~)",
                     ],
                 ]
@@ -356,7 +356,7 @@ impl CoreErlangGenerator {
                                                         "{'beamtalk_object', '",
                                                         Document::String(class_name.clone()),
                                                         "', '",
-                                                        Document::String(module_name.clone()),
+                                                        Document::Eco(module_name.clone()),
                                                         "', Pid}",
                                                     ],
                                                 ]
@@ -515,7 +515,7 @@ impl CoreErlangGenerator {
                 let binary = Self::binary_string_literal(&source_str);
                 method_source_docs.push(docvec![
                     "'",
-                    Document::String(method.selector.name().to_string()),
+                    Document::Eco(method.selector.name()),
                     "' => ",
                     Document::String(binary),
                 ]);
@@ -532,7 +532,7 @@ impl CoreErlangGenerator {
                 let binary = Self::binary_string_literal(&sig_str);
                 method_sig_docs.push(docvec![
                     "'",
-                    Document::String(method.selector.name().to_string()),
+                    Document::Eco(method.selector.name()),
                     "' => ",
                     Document::String(binary),
                 ]);
@@ -554,7 +554,7 @@ impl CoreErlangGenerator {
                 let binary = Self::binary_string_literal(&sig_str);
                 class_method_sig_docs.push(docvec![
                     "'",
-                    Document::String(method.selector.name().to_string()),
+                    Document::Eco(method.selector.name()),
                     "' => ",
                     Document::String(binary),
                 ]);
@@ -598,7 +598,7 @@ impl CoreErlangGenerator {
                     let binary = Self::binary_string_literal(doc);
                     method_docs_parts.push(docvec![
                         "'",
-                        Document::String(method.selector.name().to_string()),
+                        Document::Eco(method.selector.name()),
                         "' => ",
                         Document::String(binary),
                     ]);
@@ -630,7 +630,7 @@ impl CoreErlangGenerator {
                         line(),
                         docvec![
                             "'moduleName' => '",
-                            Document::String(self.module_name.clone()),
+                            Document::Eco(self.module_name.clone()),
                             "',"
                         ],
                         line(),

@@ -98,8 +98,7 @@ impl CoreErlangGenerator {
         // lifecycle telemetry metadata instead of the compiled Erlang module name
         // (e.g., "bt@exdura@event_store"). This matches how dispatch traces
         // report class names via lookup_class/1.
-        let class_name =
-            current_class.map_or_else(|| module_name.clone().into(), |c| c.name.name.clone());
+        let class_name = current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
 
         // BT-1417: Generate the init return — either plain {ok, State} or
         // dispatch initialize first, then return {ok, NewState} / {stop, Error}.
@@ -163,7 +162,7 @@ impl CoreErlangGenerator {
                                                 line(),
                                                 docvec![
                                                     "'__class_mod__' => '",
-                                                    Document::String(module_name.clone()),
+                                                    Document::String(module_name.to_string()),
                                                     "'"
                                                 ],
                                                 Document::Vec(own_state_fields),
@@ -219,7 +218,7 @@ impl CoreErlangGenerator {
                                 line(),
                                 docvec![
                                     "'__class_mod__' => '",
-                                    Document::String(module_name.clone()),
+                                    Document::String(module_name.to_string()),
                                     "'"
                                 ],
                                 Document::Vec(initial_state_fields),
@@ -403,12 +402,17 @@ impl CoreErlangGenerator {
                             nest(
                                 INDENT,
                                 docvec![
+                                    // BT-1325: Stash State for re-entrant self-sends
+                                    Self::pdict_stash_preamble(),
                                     line(),
                                     docvec![
-                                        "case call '",
-                                        Document::String(module_name),
-                                        "':'safe_dispatch'('initialize', [], State) of",
+                                        "let _InitDispatchResult = call '",
+                                        Document::Eco(module_name),
+                                        "':'safe_dispatch'('initialize', [], State) in",
                                     ],
+                                    Self::pdict_restore_epilogue(),
+                                    line(),
+                                    "case _InitDispatchResult of",
                                     nest(
                                         INDENT,
                                         docvec![
@@ -452,16 +456,64 @@ impl CoreErlangGenerator {
     /// Handles the fire-and-forget cast format: `{cast, Selector, Args}` — sent by
     /// `beamtalk_actor:cast_send/3`. Dispatches the message and updates state;
     /// errors are logged via `logger:warning` and discarded (BT-943).
-    // BT-920: helper — generates the inner `case safe_dispatch ... end` for fire-and-forget casts.
-    fn cast_dispatch_case(module_name: &str) -> Document<'static> {
+    /// BT-1325: Generates the pdict stash preamble for re-entrant self-sends.
+    /// Returns `let _OldState = ... in let _PutOk = ... in` — caller appends
+    /// the dispatch body and must call `pdict_restore_epilogue()` after.
+    fn pdict_stash_preamble() -> Document<'static> {
         docvec![
+            line(),
+            "let _OldState = call 'erlang':'get'('$bt_actor_state') in",
+            line(),
+            "let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in",
+        ]
+    }
+
+    /// BT-1325: Generates the pdict restore epilogue. Must follow the dispatch
+    /// result binding (e.g., `let _DispatchResult = ... in`).
+    fn pdict_restore_epilogue() -> Document<'static> {
+        docvec![
+            line(),
+            "let _RestoreOk = case _OldState of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'undefined'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![line(), "call 'erlang':'erase'('$bt_actor_state')"]
+                    ),
+                    line(),
+                    "<_Prev> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![line(), "call 'erlang':'put'('$bt_actor_state', _Prev)"]
+                    ),
+                ]
+            ),
+            line(),
+            "end in",
+            line(),
+            "let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in",
+        ]
+    }
+
+    // BT-920: helper — generates the inner `case safe_dispatch ... end` for fire-and-forget casts.
+    fn cast_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
+        docvec![
+            // BT-1325: Stash State for re-entrant self-sends
+            Self::pdict_stash_preamble(),
             line(),
             // Use safe_dispatch for error isolation; discard result on error
             docvec![
-                "case call '",
-                Document::String(module_name.to_owned()),
-                "':'safe_dispatch'(CastSelector, CastArgs, State) of"
+                "let _CastDispatchResult = call '",
+                Document::Eco(module_name.clone()),
+                "':'safe_dispatch'(CastSelector, CastArgs, State) in"
             ],
+            // BT-1325: Restore pdict
+            Self::pdict_restore_epilogue(),
+            line(),
+            "case _CastDispatchResult of",
             nest(
                 INDENT,
                 docvec![
@@ -587,15 +639,21 @@ impl CoreErlangGenerator {
 
     /// BT-1604: Generates the inner `case safe_dispatch ... end` block for `handle_call`.
     /// Shared between 3-tuple (with `PropCtx`) and 2-tuple (backward compat) patterns.
-    fn handle_call_dispatch_case(module_name: &str) -> Document<'static> {
+    fn handle_call_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
+            // BT-1325: Stash State for re-entrant self-sends
+            Self::pdict_stash_preamble(),
             line(),
             // Use safe_dispatch for error isolation per BT-29
             docvec![
-                "case call '",
-                Document::String(module_name.to_owned()),
-                "':'safe_dispatch'(Selector, Args, State) of"
+                "let _DispatchResult = call '",
+                Document::Eco(module_name.clone()),
+                "':'safe_dispatch'(Selector, Args, State) in"
             ],
+            // BT-1325: Restore pdict
+            Self::pdict_restore_epilogue(),
+            line(),
+            "case _DispatchResult of",
             nest(
                 INDENT,
                 docvec![
@@ -659,12 +717,17 @@ impl CoreErlangGenerator {
                 nest(
                     INDENT,
                     docvec![
+                        // BT-1325: Stash State for re-entrant self-sends
+                        Self::pdict_stash_preamble(),
                         line(),
                         docvec![
-                            "case call '",
-                            Document::String(module_name),
-                            "':'safe_dispatch'('handleInfo:', [Msg], State) of",
+                            "let _InfoDispatchResult = call '",
+                            Document::Eco(module_name),
+                            "':'safe_dispatch'('handleInfo:', [Msg], State) in",
                         ],
+                        Self::pdict_restore_epilogue(),
+                        line(),
+                        "case _InfoDispatchResult of",
                         nest(
                             INDENT,
                             docvec![
@@ -763,8 +826,7 @@ impl CoreErlangGenerator {
             use super::super::util::module_matches_class;
             module_matches_class(&self.module_name, &c.name.name)
         });
-        let class_name =
-            current_class.map_or_else(|| module_name.clone().into(), |c| c.name.name.clone());
+        let class_name = current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
 
         let doc = docvec![
             "'terminate'/2 = fun (Reason, State) ->",
@@ -788,7 +850,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "let _TermDisp = try call '",
-                        Document::String(module_name.clone()),
+                        Document::String(module_name.to_string()),
                         "':'dispatch'('terminate:', [Reason], Self, State)"
                     ],
                     nest(

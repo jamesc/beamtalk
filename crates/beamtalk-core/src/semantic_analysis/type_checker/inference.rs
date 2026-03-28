@@ -591,8 +591,13 @@ impl TypeChecker {
             }
         };
 
-        // Record inferred type for the expression's full span for LSP queries
-        self.type_map.insert(expr.span(), ty.clone());
+        // Record inferred type for the expression's full span for LSP queries.
+        // Skip Dynamic — it carries no useful info and all callers treat
+        // `None` and `Some(Dynamic)` equivalently. Avoiding the insert saves
+        // both a clone and a HashMap insertion for every unresolved expression.
+        if !matches!(ty, InferredType::Dynamic) {
+            self.type_map.insert(expr.span(), ty.clone());
+        }
         ty
     }
 
@@ -1250,6 +1255,14 @@ impl TypeChecker {
                 members,
                 provenance,
             } => {
+                // Fast path: if no member is UndefinedObject, return unchanged.
+                let has_nil = members.iter().any(|m| {
+                    m.as_known()
+                        .is_some_and(|n| n.as_str() == "UndefinedObject")
+                });
+                if !has_nil {
+                    return ty.clone();
+                }
                 let non_nil: Vec<InferredType> = members
                     .iter()
                     .filter(|m| {
