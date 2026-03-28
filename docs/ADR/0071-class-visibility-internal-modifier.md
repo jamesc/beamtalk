@@ -169,7 +169,33 @@ This is the Smalltalk-native model: the system browser shows everything, but the
 
 ### Metadata
 
-Add a `visibility` field to `__beamtalk_meta/0` (value: `public` or `internal`). Zero runtime cost — compile-time constant. Enables tooling and future Erlang→Beamtalk FFI enforcement.
+Add a `visibility` field to `__beamtalk_meta/0`. Zero runtime cost — compile-time constant. Enables tooling and future Erlang→Beamtalk FFI enforcement.
+
+**Class-level format** — atom value on the top-level meta map:
+
+```erlang
+#{
+  class => 'HttpClient',
+  visibility => public,  % or 'internal'
+  meta_version => 1,
+  % ... other fields
+}
+```
+
+**Method-level format** — atom value within each method entry:
+
+```erlang
+#{
+  selector => 'buildHeaders:',
+  arity => 1,
+  param_types => [none],
+  return_type => none,
+  visibility => internal,  % added field; default 'public' if absent
+  % ... other method metadata
+}
+```
+
+Values are atoms (`public` or `internal`). Default is `public` — existing consumers using `maps:get(visibility, MethodInfo, public)` will see public for methods compiled before this ADR.
 
 ### Modifier Interactions
 
@@ -444,7 +470,7 @@ Emit visibility in `__beamtalk_meta/0` and `.app` metadata for both classes and 
 - `.app.src` class registry — add visibility field
 - `ClassBuilder` modifier handling — accept `#internal` symbol (ADR 0038)
 
-**Coordination:** Must align with ADR 0050's `meta_version` scheme. If `__beamtalk_meta/0` is already stable, bump `meta_version` when adding the `visibility` field.
+**Coordination with ADR 0050:** The `visibility` field is additive and defensively read (`maps:get(visibility, Meta, public)`), so it is backward-compatible with existing consumers that use `maps:get/3` with defaults. No `meta_version` bump is required unless any consumer pattern-matches exhaustively on the meta map structure. Review existing consumers (`beamtalk_compiler_server.erl`, LSP, `ClassHierarchy` deserializer) during implementation to confirm.
 
 ### Phase 5: Tooling
 
