@@ -53,12 +53,13 @@ impl Parser {
     ///
     /// Syntax:
     /// ```text
-    /// internal? abstract? sealed? typed? <Superclass> subclass: <ClassName>
+    /// (internal|abstract|sealed|typed)* <Superclass> subclass: <ClassName>
     ///   state: fieldName = defaultValue
     ///   state: fieldName :: TypeName = defaultValue
     ///
     ///   methodName => body
     ///   sealed methodName => body
+    ///   internal methodName => body
     /// ```
     ///
     /// Also supports package-qualified superclass (ADR 0070):

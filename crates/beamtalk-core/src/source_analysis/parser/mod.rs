@@ -1177,7 +1177,7 @@ impl Parser {
     /// Checks if the current position looks like the start of a class definition.
     ///
     /// Class definitions follow the pattern:
-    /// - `abstract? sealed? <Superclass> subclass: <ClassName>`
+    /// - `(internal|abstract|sealed|typed)* <Superclass> subclass: <ClassName>`
     ///
     /// We look ahead to detect the `subclass:` keyword.
     pub(super) fn is_at_class_definition(&self) -> bool {
