@@ -302,10 +302,11 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
       'is_value' => 'false',
       'is_typed' => 'false',
       'is_internal' => 'false',
+      'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{'value' => 'none'}~,
-      'method_info' => ~{'doNothing' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
-      'class_method_info' => ~{'classEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false'}~}~
+      'method_info' => ~{'doNothing' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_method_info' => ~{'classEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~
 
 'register_class'/0 = fun () ->
@@ -331,10 +332,11 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
       'is_value' => 'false',
       'is_typed' => 'false',
       'is_internal' => 'false',
+      'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{'value' => 'none'}~,
-      'method_info' => ~{'doNothing' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
-      'class_method_info' => ~{'classEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false'}~}~
+      'method_info' => ~{'doNothing' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_method_info' => ~{'classEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~,
             'isConstructible' => 'false'
         }~

@@ -103,8 +103,8 @@ pub(super) enum MetaTypeRepr {
 
 /// Tuple representing a method entry for `method_info` / `class_method_info` meta maps.
 ///
-/// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`, `is_sealed`)
-pub(super) type MethodInfoEntry = (String, usize, MetaTypeRepr, Vec<MetaTypeRepr>, bool);
+/// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`, `is_sealed`, `is_internal`)
+pub(super) type MethodInfoEntry = (String, usize, MetaTypeRepr, Vec<MetaTypeRepr>, bool, bool);
 
 impl CoreErlangGenerator {
     /// Generates dispatch case clauses for all methods in a class definition.
@@ -2502,6 +2502,13 @@ impl CoreErlangGenerator {
         let is_typed_doc = Self::meta_bool(class.is_typed);
         let is_internal_doc = Self::meta_bool(class.is_internal);
 
+        // ADR 0071 Phase 4: Emit class-level visibility
+        let visibility_doc: Document<'static> = if class.is_internal {
+            Document::Str("'internal'")
+        } else {
+            Document::Str("'public'")
+        };
+
         // field_types: map of field name → declared type atom or 'none'
         let field_types_doc = Self::meta_field_types_map(&class.state);
 
@@ -2565,6 +2572,8 @@ impl CoreErlangGenerator {
             is_typed_doc,
             ",\n      'is_internal' => ",
             is_internal_doc,
+            ",\n      'visibility' => ",
+            visibility_doc,
             ",\n      'type_params' => ",
             type_params_doc,
             ",\n      'field_types' => ",
@@ -2668,7 +2677,7 @@ impl CoreErlangGenerator {
         if let Some(auto) = auto {
             use crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods;
             for field in &auto.getters {
-                entries.push((field.clone(), 0, MetaTypeRepr::None, vec![], sealed));
+                entries.push((field.clone(), 0, MetaTypeRepr::None, vec![], sealed, false));
             }
             for field in &auto.setters {
                 entries.push((
@@ -2677,6 +2686,7 @@ impl CoreErlangGenerator {
                     MetaTypeRepr::None,
                     vec![MetaTypeRepr::None],
                     sealed,
+                    false,
                 ));
             }
         }
@@ -2731,6 +2741,7 @@ impl CoreErlangGenerator {
                     MetaTypeRepr::None,
                     vec![MetaTypeRepr::None; arity],
                     sealed,
+                    false,
                 ));
             }
         }
@@ -2743,6 +2754,7 @@ impl CoreErlangGenerator {
                 MetaTypeRepr::Atom("SupervisionSpec".to_string()),
                 vec![],
                 sealed,
+                false,
             ));
         }
         entries
@@ -2775,6 +2787,7 @@ impl CoreErlangGenerator {
             return_type,
             param_types,
             m.is_sealed || class_is_sealed,
+            m.is_internal,
         )
     }
 
@@ -2884,7 +2897,9 @@ impl CoreErlangGenerator {
         }
         let mut parts: Vec<Document<'static>> = Vec::new();
         parts.push(Document::Str("~{"));
-        for (i, (sel, arity, return_type, param_types, is_sealed)) in methods.iter().enumerate() {
+        for (i, (sel, arity, return_type, param_types, is_sealed, is_internal)) in
+            methods.iter().enumerate()
+        {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
@@ -2903,7 +2918,12 @@ impl CoreErlangGenerator {
                 Document::Vec(pts)
             };
             let return_type_doc = Self::meta_type_repr_doc(return_type);
-            let is_sealed_doc = if *is_sealed { "'true'" } else { "'false'" };
+            let is_sealed_doc: Document<'static> = Self::meta_bool(*is_sealed);
+            let visibility_doc: Document<'static> = if *is_internal {
+                Document::Str("'internal'")
+            } else {
+                Document::Str("'public'")
+            };
             parts.push(docvec![
                 "'",
                 Document::String(sel.clone()),
@@ -2914,7 +2934,9 @@ impl CoreErlangGenerator {
                 ", 'return_type' => ",
                 return_type_doc,
                 ", 'is_sealed' => ",
-                Document::String(is_sealed_doc.to_string()),
+                is_sealed_doc,
+                ", 'visibility' => ",
+                visibility_doc,
                 "}~",
             ]);
         }
@@ -3183,6 +3205,7 @@ mod tests {
             },
             vec![],
             true,
+            false,
         )];
         let doc = CoreErlangGenerator::meta_method_info_map(&entries);
         let output = doc.to_pretty_string();
@@ -3369,6 +3392,95 @@ mod tests {
         assert_eq!(
             extract_package_from_module_name("bt@pkg@sub@dir@class"),
             Some("pkg".to_string())
+        );
+    }
+
+    #[test]
+    fn test_meta_map_visibility_public_by_default() {
+        let class = empty_actor_class("Counter");
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            protocols: vec![],
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let doc = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+            None,
+        );
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'visibility' => 'public'"),
+            "non-internal class should have visibility 'public'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_meta_map_visibility_internal() {
+        let mut class = empty_actor_class("Helper");
+        class.is_internal = true;
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            protocols: vec![],
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let doc = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+            None,
+        );
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'visibility' => 'internal'"),
+            "internal class should have visibility 'internal'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_method_info_visibility_public_by_default() {
+        let entries: Vec<super::MethodInfoEntry> = vec![(
+            "getValue".to_string(),
+            0,
+            MetaTypeRepr::None,
+            vec![],
+            false,
+            false,
+        )];
+        let doc = CoreErlangGenerator::meta_method_info_map(&entries);
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'visibility' => 'public'"),
+            "non-internal method should have visibility 'public'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_method_info_visibility_internal() {
+        let entries: Vec<super::MethodInfoEntry> = vec![(
+            "helperMethod".to_string(),
+            0,
+            MetaTypeRepr::None,
+            vec![],
+            false,
+            true,
+        )];
+        let doc = CoreErlangGenerator::meta_method_info_map(&entries);
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'visibility' => 'internal'"),
+            "internal method should have visibility 'internal'. Got: {output}"
         );
     }
 }

@@ -70,7 +70,7 @@ Actor subclass: ClassBuilder
   addField: aName default: aValue =>
     self.fieldSpecs := self.fieldSpecs at: aName put: aValue
 
-  /// Apply a class modifier (#abstract, #sealed, #typed).
+  /// Apply a class modifier (#abstract, #sealed, #typed, #internal).
   ///
   /// ## Examples
   /// ```beamtalk

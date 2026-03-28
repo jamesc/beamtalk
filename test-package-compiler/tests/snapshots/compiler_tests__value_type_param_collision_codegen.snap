@@ -102,9 +102,10 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
       'is_value' => 'false',
       'is_typed' => 'false',
       'is_internal' => 'false',
+      'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
-      'method_info' => ~{'compute:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
+      'method_info' => ~{'compute:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
         }~
@@ -130,9 +131,10 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
       'is_value' => 'false',
       'is_typed' => 'false',
       'is_internal' => 'false',
+      'visibility' => 'public',
       'type_params' => [],
       'field_types' => ~{}~,
-      'method_info' => ~{'compute:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
+      'method_info' => ~{'compute:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
 

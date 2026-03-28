@@ -2365,7 +2365,7 @@ Actor subclass: Counter
     // BT-1078: return types now live in meta.method_info, not methodReturnTypes.
     assert!(
         code.contains(
-            "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~"
+            "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~"
         ),
         "meta.method_info should contain inferred return type for unannotated getValue. Got:\n{code}"
     );
@@ -2388,7 +2388,7 @@ Actor subclass: Counter
     // Explicit annotation takes precedence — still appears correctly in meta.method_info.
     assert!(
         code.contains(
-            "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~"
+            "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~"
         ),
         "Explicitly annotated method should appear in meta.method_info. Got:\n{code}"
     );
@@ -2410,7 +2410,7 @@ Actor subclass: Greeter
 
     assert!(
         code.contains(
-            "'answer' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~"
+            "'answer' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~"
         ),
         "meta.method_info should contain inferred Integer for literal-returning method. Got:\n{code}"
     );
@@ -2435,7 +2435,7 @@ Counter >> getValue => value
 
     assert!(
         code.contains(
-            "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~"
+            "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~"
         ),
         "meta.method_info should contain inferred Integer for standalone getValue. Got:\n{code}"
     );

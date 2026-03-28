@@ -230,8 +230,12 @@ fn parse_method_infos_from_map(
                 arity,
                 kind: MethodKind::Primary,
                 defined_in: ecow::EcoString::from(class_name),
-                is_sealed: false,
-                is_internal: false, // TODO: populate from BEAM metadata when available
+                is_sealed: map_get(info_map, "is_sealed")
+                    .and_then(term_to_bool)
+                    .unwrap_or(false),
+                is_internal: map_get(info_map, "visibility")
+                    .and_then(term_to_atom)
+                    .map_or(false, |v| v == "internal"),
                 spawns_block: false,
                 return_type,
                 param_types,
