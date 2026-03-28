@@ -2483,6 +2483,8 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
         is_sealed: false,
         is_abstract: false,
         is_typed: false,
+        is_internal: false,
+        package: None,
         is_value: false,
         is_native: false,
         state: vec![],

@@ -403,6 +403,7 @@ fn compile_fixture(
         // false positives on intentional assertion expressions.
         skip_module_expression_lint: true,
         warnings_as_errors,
+        current_package: None,
     };
 
     crate::beam_compiler::compile_source(fixture_path, &module_name, &core_file, &options)

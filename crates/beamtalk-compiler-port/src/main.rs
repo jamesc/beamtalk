@@ -231,6 +231,7 @@ fn parse_method_infos_from_map(
                 kind: MethodKind::Primary,
                 defined_in: ecow::EcoString::from(class_name),
                 is_sealed: false,
+                is_internal: false, // TODO: populate from BEAM metadata when available
                 spawns_block: false,
                 return_type,
                 param_types,
@@ -274,6 +275,9 @@ fn parse_class_info_from_meta_term(
     let is_typed = map_get(m, "is_typed")
         .and_then(term_to_bool)
         .unwrap_or(false);
+    let is_internal = map_get(m, "is_internal")
+        .and_then(term_to_bool)
+        .unwrap_or(false);
 
     let state = map_get(m, "fields")
         .map(term_to_atom_list)
@@ -288,11 +292,22 @@ fn parse_class_info_from_meta_term(
     let methods = parse_method_infos_from_map(m, "method_info", class_name);
     let class_methods = parse_method_infos_from_map(m, "class_method_info", class_name);
 
+    // ADR 0071: Extract package from BEAM metadata (populated by codegen)
+    let package = map_get(m, "package").and_then(term_to_atom).and_then(|s| {
+        if s == "none" {
+            None
+        } else {
+            Some(ecow::EcoString::from(s.as_str()))
+        }
+    });
+
     Some(ClassInfo {
         name: ecow::EcoString::from(class_name),
         superclass,
         is_sealed,
         is_abstract,
+        is_internal,
+        package,
         is_value,
         is_native: false, // BEAM cache doesn't carry native flag; re-derived at parse time
         is_typed,

@@ -208,7 +208,7 @@ pub enum MutationKind {
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
 pub fn analyse(module: &Module) -> AnalysisResult {
-    analyse_full(module, &[], false, false, vec![], None)
+    analyse_full(module, &[], false, false, vec![], None, None)
 }
 
 /// Analyse a module with pre-defined variables (for REPL context).
@@ -222,7 +222,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// services. Pre-defining known variables is essential for REPL contexts where
 /// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
-    analyse_full(module, known_vars, false, false, vec![], None)
+    analyse_full(module, known_vars, false, false, vec![], None, None)
 }
 
 /// Analyse a module with compiler options controlling stdlib-specific behaviour.
@@ -237,6 +237,7 @@ pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -
         options.skip_module_expression_lint,
         vec![],
         None,
+        options.current_package.as_deref(),
     )
 }
 
@@ -257,6 +258,7 @@ pub fn analyse_with_options_and_classes(
         options.skip_module_expression_lint,
         pre_loaded_classes,
         None,
+        options.current_package.as_deref(),
     )
 }
 
@@ -270,7 +272,15 @@ pub fn analyse_with_known_vars_and_classes(
     known_vars: &[&str],
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
 ) -> AnalysisResult {
-    analyse_full(module, known_vars, false, false, pre_loaded_classes, None)
+    analyse_full(
+        module,
+        known_vars,
+        false,
+        false,
+        pre_loaded_classes,
+        None,
+        None,
+    )
 }
 
 /// Analyse a module with known package dependencies (ADR 0070 Phase 2).
@@ -292,6 +302,7 @@ pub fn analyse_with_packages(
         options.skip_module_expression_lint,
         pre_loaded_classes,
         Some(known_packages),
+        options.current_package.as_deref(),
     )
 }
 
@@ -303,6 +314,7 @@ fn analyse_full(
     skip_module_expression_lint: bool,
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
     known_packages: Option<std::collections::HashSet<String>>,
+    current_package: Option<&str>,
 ) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
@@ -312,6 +324,11 @@ fn analyse_full(
     // build_with_options is infallible; propagate any diagnostics it produced
     result.class_hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
     result.diagnostics.extend(hierarchy_diags);
+
+    // ADR 0071 BT-1700: Stamp current package on AST-derived classes
+    if let Some(pkg) = current_package {
+        result.class_hierarchy.stamp_package(pkg);
+    }
 
     // ADR 0050 Phase 4: inject REPL-session class metadata before TypeChecking
     if !pre_loaded_classes.is_empty() {
@@ -4011,6 +4028,8 @@ Value subclass: Caller
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_internal: false,
+            package: None,
             is_value: false,
             is_native: false,
             state: vec![],

@@ -2500,6 +2500,7 @@ impl CoreErlangGenerator {
         let is_abstract_doc = Self::meta_bool(class.is_abstract);
         let is_value_doc = Self::meta_bool(class.class_kind == ClassKind::Value);
         let is_typed_doc = Self::meta_bool(class.is_typed);
+        let is_internal_doc = Self::meta_bool(class.is_internal);
 
         // field_types: map of field name → declared type atom or 'none'
         let field_types_doc = Self::meta_field_types_map(&class.state);
@@ -2562,6 +2563,8 @@ impl CoreErlangGenerator {
             is_value_doc,
             ",\n      'is_typed' => ",
             is_typed_doc,
+            ",\n      'is_internal' => ",
+            is_internal_doc,
             ",\n      'type_params' => ",
             type_params_doc,
             ",\n      'field_types' => ",

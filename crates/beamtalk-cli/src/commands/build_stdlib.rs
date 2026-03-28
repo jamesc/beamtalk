@@ -889,6 +889,8 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           is_sealed: {sealed},\n\
          \x20           is_abstract: {abstract_},\n\
          \x20           is_typed: {typed},\n\
+         \x20           is_internal: false,\n\
+         \x20           package: Some(\"stdlib\".into()),\n\
          \x20           is_value: {is_value},\n\
          \x20           is_native: {is_native},\n",
         name = meta.class_name,
@@ -1033,7 +1035,7 @@ fn generate_method_list(
             code,
             "                MethodInfo {{ selector: \"{selector}\".into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
-             spawns_block: {spawns_block}, \
+             is_internal: false, spawns_block: {spawns_block}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr} }},",
             arity = m.arity,
             class = class_name,
