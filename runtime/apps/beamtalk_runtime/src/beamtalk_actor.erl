@@ -1373,14 +1373,7 @@ handle_call({Selector, Args}, From, State) ->
                 {reply, {error, Reason}, NewState}
         end
     after
-        %% Restore previous stashed state (supports nested dispatches)
-        case OldState of
-            undefined -> erase('$bt_actor_state');
-            _ -> put('$bt_actor_state', OldState)
-        end,
-        %% BT-1325: Clear call stack so it doesn't leak to later messages
-        %% (e.g. handle_info, timers, legacy 2-tuple calls without PropCtx)
-        erase('$bt_call_stack')
+        restore_dispatch_pdict(OldState)
     end;
 handle_call(Msg, _From, State) ->
     %% Unknown call message format
