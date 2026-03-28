@@ -49,7 +49,7 @@ Adding `internal` follows the same pattern — one more branch in the modifier l
 
 Introduce an `internal` class modifier that restricts a class to package-scoped visibility. Classes without this modifier remain public (the default).
 
-**Why `internal` and not `private`:** Reserves `private` and `protected` for potential future object-level encapsulation (self-only, hierarchy-visible). `internal` honestly describes what it is: visible within this package, not exported. Matches C#/Kotlin terminology.
+**Why `internal` and not `private`:** ADR 0070 Section 9 anticipated `private` as the likely keyword. This ADR diverges from that direction for two reasons: (1) `private` is the most natural keyword for future object-level encapsulation (self-only access) and `protected` for hierarchy-visible access — using `private` for package scope burns the most valuable design space; (2) `internal` honestly describes the semantics — visible within this package, not exported — and matches established C#/Kotlin terminology for assembly/module-scoped visibility. If Beamtalk never adds object-level `private`, the cost is a less familiar keyword; if it does, the benefit is a clean three-level model (`internal` = package, `protected` = hierarchy, `private` = self).
 
 ### Syntax
 
@@ -92,10 +92,7 @@ error[E0401]: Class 'ParserState' is internal to package 'json' and cannot be re
 
 REPL expressions go through the compiler pipeline, so visibility enforcement is automatic — no special exemption in v1.
 
-**Future direction** (deferred to when remote REPL attach lands):
-- **Development REPL:** Could exempt visibility via a `--privileged` flag
-- **Production REPL:** Enforces visibility by default
-- **Lockout option:** `beamtalk.toml` → `[repl] allow-privileged = false`
+**Future direction** (deferred to when remote REPL attach lands): a `--privileged` flag could exempt the REPL from visibility enforcement for debugging. Design details deferred.
 
 ### Metadata
 
@@ -122,7 +119,9 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 
 **Protocol conformance:** An internal class can conform to a public protocol structurally (ADR 0025). Instances may escape the package boundary via protocol-typed parameters. This is by design — the visibility boundary controls class naming, not object identity.
 
-**Extension methods (ADR 0066):** Extension methods (`>>` syntax) on an internal class are only visible within the defining package. Cross-package extensions targeting an internal class are a compile error (the class name cannot be resolved).
+**Runtime type checks (`isKindOf:`, `class`):** `isKindOf:` takes a class reference at the source level. Writing `obj isKindOf: json@ParserState` in another package is a cross-package reference to an internal class — this is a compile error, same as any other cross-package reference. However, `obj class` returns the class at runtime without naming it in source — this works fine and is not restricted. Runtime reflection (`class`, `respondsTo:`, `printString`) operates on values, not names, so it is unaffected by visibility.
+
+**Extension methods (ADR 0066):** Extension methods (`>>` syntax) on an internal class are only visible within the defining package. Cross-package extensions targeting an internal class are a compile error (the class name cannot be resolved). The `>>` codegen patches a runtime ETS table — the compile-time check prevents the cross-package extension from ever being compiled.
 
 **Generic type arguments (ADR 0068):** Internal class names may appear in type metadata (`__beamtalk_meta/0`) for generic instantiations. Tooling (LSP, FFI generators) should filter internal names from cross-package surfaces.
 
@@ -202,15 +201,15 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 
 ### Rejected: Use `private` Instead of `internal`
 
-**Strongest argument:** Every mainstream language uses `private`. Newcomers would guess `private` before `internal`. Less cognitive load for the most common case.
+**Strongest argument:** Every mainstream language uses `private`. Newcomers would guess `private` before `internal`. Less cognitive load for the most common case. ADR 0070 Section 9 explicitly anticipated `private` — changing the keyword overrides the predecessor's stated direction and creates a terminology debt unless the future `private`/`protected` plan materializes.
 
-**Counter:** Burns the most natural keyword for future object-level encapsulation (self-only access). C# proved `internal` works for package/assembly scope — developers learn the distinction quickly. Reserving `private` preserves design space for `private`/`protected` at the method level if the language evolves toward finer-grained encapsulation.
+**Counter:** `private` in Go, Rust, Java, and Kotlin means "most restrictive" — self-only or file-only. Using it for package scope creates a semantics mismatch with every major language. If Beamtalk later adds object-level encapsulation, `private` at both package and object level would be incoherent. `internal` is less familiar but more honest: it says "visible within this package," which is exactly what it means. The risk is that object-level `private` never ships and the less familiar keyword was chosen for nothing — an acceptable bet given the language is pre-1.0.
 
 ### Rejected: Method-Level `internal` in v1
 
 **Strongest argument:** Library authors need to hide helper methods on public classes, not just whole classes. Without method-level `internal`, you expose every method on every public class.
 
-**Counter:** Class-level `internal` covers ~80% of the need — most implementation details live in dedicated helper classes, not as stray methods on public classes. Method-level `internal` adds complexity to dispatch (what happens when you send a message to an object whose class has internal methods?) and FFI generation. Defer until real usage patterns from the package ecosystem reveal whether the remaining 20% justifies the complexity.
+**Counter:** In Beamtalk's one-class-per-file model, the natural pattern is to extract implementation details into dedicated helper classes — making class-level `internal` the primary tool for hiding them. Method-level `internal` adds complexity to dispatch (what happens when you send a message to an object whose class has internal methods — `doesNotUnderstand:` or a visibility error?) and FFI generation. There is no ecosystem data yet to quantify the split. Deferring lets real usage patterns from published packages reveal whether method-level visibility justifies the dispatch complexity.
 
 ### Rejected: REPL Always Exempt from Visibility
 
@@ -295,7 +294,7 @@ check_visibility(CallerModule, TargetModule, Visibility)
 - REPL expressions go through compiler, so enforcement is automatic
 - No runtime cost — metadata is a compile-time constant
 - Existing single-package code requires no changes
-- Hot code reloading unaffected — visibility is a compile-time property, not a runtime check; reloading an internal class works identically to reloading a public one
+- Hot code reloading unaffected — visibility is a compile-time property, not a runtime check; reloading an internal class works identically to reloading a public one. If a dependency changes a class from public to internal, already-compiled downstream code continues to work at runtime (BEAM does not re-check); the error surfaces on next recompilation of the downstream package
 
 ## Implementation
 
@@ -307,16 +306,22 @@ Add `internal` to the modifier parsing loop.
 - `crates/beamtalk-core/src/source_analysis/parser/declarations.rs` — add `internal` branch to modifier loop (alongside `abstract`, `sealed`, `typed`)
 - `crates/beamtalk-core/src/ast.rs` — add `is_internal: bool` to `ClassDefinition`
 
-### Phase 2: Semantic Analysis
+### Phase 2: Semantic Analysis (largest phase)
 
-Enforce cross-package `internal` access.
+Enforce cross-package `internal` access. This is the core of the implementation and requires infrastructure that does not yet exist.
+
+**Infrastructure prerequisite:** `ClassInfo` currently has no `package` field. `analyse_with_packages()` exists in `semantic_analysis/mod.rs` but has no non-test callers — it is not wired into the build pipeline. Phase 2 must:
+
+1. Add `package: Option<String>` and `is_internal: bool` to `ClassInfo`
+2. Populate `package` during `add_from_beam_meta()` by extracting it from the BEAM module name (`bt@{package}@{class}`, ADR 0016)
+3. Thread the current package name into the analysis pipeline (wire `analyse_with_packages` into the build)
+4. Add `check_internal_visibility()` — emit `E0401` diagnostic when an internal class is referenced from another package
+5. Cover all reference positions: superclass, type annotations, `isKindOf:` argument, extension method target
 
 **Files:**
-- `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs` — add `check_internal_visibility()`, extend `ClassInfo` with `is_internal: bool`
-- `add_from_beam_meta()` — propagate visibility from BEAM metadata into `ClassInfo` (ADR 0050)
-- Cross-package reference resolution — emit `E0401` diagnostic when an internal class is referenced from another package
-
-**Note:** Requires package context in compilation — the compiler must know which package owns each class. The package name is already extractable from BEAM module names (`bt@{package}@{class}`, ADR 0016).
+- `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs` — `ClassInfo` fields, `check_internal_visibility()`
+- `crates/beamtalk-core/src/semantic_analysis/mod.rs` — wire `analyse_with_packages` into the build pipeline
+- `add_from_beam_meta()` — propagate visibility and package from BEAM metadata
 
 ### Phase 3: Metadata and Codegen
 
