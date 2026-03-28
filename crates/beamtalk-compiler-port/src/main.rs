@@ -235,7 +235,7 @@ fn parse_method_infos_from_map(
                     .unwrap_or(false),
                 is_internal: map_get(info_map, "visibility")
                     .and_then(term_to_atom)
-                    .map_or(false, |v| v == "internal"),
+                    .is_some_and(|v| v == "internal"),
                 spawns_block: false,
                 return_type,
                 param_types,
