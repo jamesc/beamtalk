@@ -104,6 +104,8 @@ error[E0403]: Method 'buildHeaders:' is internal to package 'http' and cannot be
 
 For untyped dynamic sends where the compiler cannot determine the receiver type, no enforcement — the message send succeeds at runtime. This is consistent with the "visibility controls dependency, not knowledge" principle: if you work around the compiler's checks, you're on your own if it breaks.
 
+**Parser disambiguation:** `internal` is treated as a method modifier only when followed by a method selector pattern (identifier + `=>`, identifier + `:`, or operator). A bare `internal => ...` defines a unary method named `internal`, not a modifier — same parsing rule used for `sealed` (ADR 0049). This ensures existing code defining unary methods named `internal` is not broken.
+
 **Dispatch behavior:** No runtime enforcement. Internal methods exist on the object and respond normally to `respondsTo:`, `:methods`, and `:browse`. The distinction is purely compile-time. This avoids dispatch overhead and is consistent with class-level `internal`.
 
 **Interaction with `doesNotUnderstand:`:** An internal method is a real method — it exists in the method dictionary. `doesNotUnderstand:` is never triggered by visibility. There is no visibility-specific runtime error.
@@ -224,9 +226,9 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 
 **Generic type arguments (ADR 0068):** Internal class names may appear in type metadata (`__beamtalk_meta/0`) for generic instantiations. Tooling (LSP, FFI generators) should filter internal names from cross-package surfaces.
 
-**Subclass overriding internal methods:** A subclass in the same package can override an internal method freely. A subclass in another package cannot override an internal method — the method name cannot be resolved from outside the package, so the override declaration is a compile error. If the subclass defines a method with the same name independently (not as an override), it shadows the superclass method within its own dispatch — this is standard method resolution, not a visibility concern.
+**Subclass overriding internal methods:** A subclass in the same package can override an internal method freely. A subclass in another package can define a method with the same selector — Beamtalk overrides by selector name, not by explicit reference to the superclass method, so this is standard method resolution. However, the compiler emits a warning (`W0401`) when an external subclass defines a selector that shadows an internal method, since the author likely doesn't know the internal method exists. At runtime, the subclass method takes precedence in dispatch as usual. The internal method on the superclass is not "protected" — it's simply an implementation detail that external subclasses should not need to know about.
 
-**Internal methods and protocols:** An internal method can satisfy a protocol requirement within the same package. If a public protocol requires a method that is declared `internal` on a class, the class still conforms — protocol conformance is structural (ADR 0025) and checked within the package where both are visible. External callers interact via the protocol type, not the concrete class's method name.
+**Internal methods and public protocols:** If a public protocol requires a selector (e.g., `serialize:`) and a class implements that selector as `internal`, this is a **leaked-visibility error** (`E0402`) — analogous to an internal class appearing in a public signature. The method must be public if it satisfies a public protocol requirement, because external callers sending the protocol message would invoke the method at runtime. Making the method `internal` while exposing it via a public protocol is contradictory. Within the same package, an internal method can satisfy an internal protocol requirement freely.
 
 **`perform:` and dynamic sends:** `obj perform: #buildHeaders:` bypasses compile-time visibility checks — the method name is a runtime symbol, not a compile-time reference. This is consistent with the class-level model: `perform:` is the method-level equivalent of `apply/3`. Voided warranty.
 
@@ -237,7 +239,7 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 | **Beamtalk → Erlang** | Internal classes can call Erlang freely via existing FFI |
 | **Erlang → Beamtalk (current)** | No clean FFI exists — no enforcement needed yet |
 | **Erlang → Beamtalk (future)** | Generated API wrappers will exclude internal classes — you can't call what doesn't exist |
-| **Raw `apply/3`** | Always possible, always "voided warranty" territory |
+| **Raw `apply/3`** | Beamtalk modules export their dispatch functions at the BEAM level, so `apply/3` works — voided warranty |
 
 ### Enforcement Stack
 
@@ -287,9 +289,9 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 
 ### Erlang
 
-**Mechanism:** `-export()` controls what other modules can call.
-**Bypass:** `apply(Mod, Fun, Args)` works on anything.
-**Lesson:** BEAM's own visibility is compile-time convention, not runtime enforcement.
+**Mechanism:** `-export()` controls what other modules can call. Remote calls (`Mod:Fun(Args)`) and `apply(Mod, Fun, Args)` both respect `-export()` — calling an unexported function fails with `undef`.
+**Escape hatches:** `-compile(export_all).` during development; or modules that intentionally export a generic dispatch function routing into internal logic.
+**Lesson:** BEAM exports are a naming/entrypoint mechanism, not a hard security boundary. Beamtalk's `internal` is similar — it shapes the public surface of a package. The analogy holds at the Beamtalk level: `internal` classes still compile to BEAM modules that export their dispatch functions (since Beamtalk's own dispatch goes through exported entrypoints), so the enforcement is in the Beamtalk compiler, not in BEAM's export mechanism.
 
 ### Smalltalk
 
@@ -302,7 +304,7 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 
 **Smalltalk developer:** Departure from Smalltalk purity (everything is public). Justified by package ecosystem needs — Pharo's lack of visibility is a known pain point for library authors. The word `internal` is less jarring than `private` in a Smalltalk context — it says "this is an implementation detail" rather than "you can't see this."
 
-**Erlang/BEAM developer:** Maps naturally to `-export()` concept. Understands compile-time enforcement. Comfortable with BEAM's escape hatches via `apply/3`.
+**Erlang/BEAM developer:** Maps naturally to `-export()` concept. Understands compile-time enforcement. Comfortable with the fact that Beamtalk's `internal` is enforced by the Beamtalk compiler, not by BEAM's export mechanism.
 
 **Production operator:** Reduces API surface. Cleaner dependency boundaries. Would want future `--privileged` lockout for production REPLs.
 
@@ -332,7 +334,7 @@ The `subclass:` declaration desugars to `ClassBuilder` (ADR 0038). The `modifier
 
 **Strongest argument:** Compile-time only means Erlang code can bypass visibility via raw BEAM module calls. Real security needs runtime checks.
 
-**Counter:** BEAM fundamentally can't prevent `apply/3` calls — that's the VM's architecture. Runtime checks would add cost to every dispatch and still be bypassable. Java, Rust, Go, and Erlang itself all use compile-time enforcement as their primary visibility mechanism. The future Erlang→Beamtalk FFI provides Erlang-compile-time enforcement — the right level for cross-language calls.
+**Counter:** Beamtalk compiles classes to BEAM modules that export their dispatch functions, so raw `apply/3` calls from Erlang will always work. Runtime visibility checks would add cost to every dispatch and still be bypassable. Java, Rust, Go, and Erlang itself all use compile-time enforcement as their primary visibility mechanism. The future Erlang→Beamtalk FFI provides Erlang-compile-time enforcement — the right level for cross-language calls.
 
 ### Tension Points
 
@@ -390,7 +392,7 @@ Check visibility at message dispatch time, preventing cross-package calls even f
 check_visibility(CallerModule, TargetModule, Visibility)
 ```
 
-**Rejected because:** BEAM can't prevent `apply/3` calls at the VM level, so runtime checks are always bypassable. They add measurable cost to every dispatch. Compile-time enforcement is the established pattern across BEAM languages (Erlang's `-export()`) and systems languages (Rust, Go).
+**Rejected because:** Beamtalk modules export their dispatch functions at the BEAM level, so runtime checks are always bypassable via `apply/3`. They add measurable cost to every dispatch. Compile-time enforcement is the established pattern across BEAM languages (Erlang's `-export()`) and systems languages (Rust, Go).
 
 ## Consequences
 
@@ -409,7 +411,7 @@ check_visibility(CallerModule, TargetModule, Visibility)
 ### Negative
 
 - Departure from Smalltalk "everything is public" tradition
-- Compile-time only — Erlang code can bypass via raw BEAM module calls
+- Compile-time only — Erlang code can call Beamtalk's exported dispatch functions directly via `apply/3`
 - `internal` is less universally recognized than `private` — developers from Go/Python/Ruby may not guess it first
 - Method-level enforcement is best-effort — untyped dynamic sends bypass compile-time checks
 
@@ -438,7 +440,7 @@ Enforce cross-package `internal` class access. This is the core of the implement
 **Infrastructure prerequisite:** `ClassInfo` currently has no `package` field. `analyse_with_packages()` exists in `semantic_analysis/mod.rs` but has no non-test callers — it is not wired into the build pipeline. Phase 2 must:
 
 1. Add `package: Option<String>` and `is_internal: bool` to `ClassInfo`
-2. Populate `package` during `add_from_beam_meta()` by extracting it from the BEAM module name (`bt@{package}@{class}`, ADR 0016)
+2. Populate `package` during `add_from_beam_meta()` by extracting it from the BEAM module name (`bt@{package}@{snake_case_module}`, e.g. `bt@json@parser`, per ADR 0016)
 3. Thread the current package name into the analysis pipeline (wire `analyse_with_packages` into the build)
 4. Add `check_internal_visibility()` — emit `E0401` diagnostic when an internal class is referenced from another package
 5. Cover all reference positions: superclass, type annotations, `isKindOf:` argument, extension method target
