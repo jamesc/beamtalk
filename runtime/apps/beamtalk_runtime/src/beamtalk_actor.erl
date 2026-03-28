@@ -691,7 +691,7 @@ sync_send_remote(ActorPid, Selector, Args) ->
                     %%   1. Error = #beamtalk_error{} — returned by dispatch_user_method try/catch
                     %%   2. Error = {ErlType, Value} — raw Erlang exception caught by safe_dispatch
                     %% We re-raise both forms as Erlang exceptions so the caller sees them correctly.
-                    PropCtx = get_propagated_ctx(),
+                    PropCtx = get_sync_propagated_ctx(),
                     %% BT-1325 Layer 2: Check for transitive cycles before gen_server:call.
                     %% If ActorPid is already in the call stack, this send would deadlock.
                     check_call_stack(ActorPid, Selector),
@@ -760,7 +760,7 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                 maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
                     case is_process_alive(ActorPid) of
                         true ->
-                            PropCtx = get_propagated_ctx(),
+                            PropCtx = get_sync_propagated_ctx(),
                             %% BT-1325 Layer 2: Check for transitive cycles.
                             check_call_stack(ActorPid, Selector),
                             case gen_server:call(ActorPid, {Selector, Args, PropCtx}, Timeout) of
@@ -816,32 +816,44 @@ self_dispatch(Selector, Args) ->
     %% module. Use __class_mod__ from State to call the right dispatch function.
     %% If __class_mod__ is missing (runtime-only actors), fall back to
     %% beamtalk_actor:dispatch/4.
-    case maps:get('__class_mod__', State, undefined) of
-        undefined ->
-            %% Runtime-only actor (no compiled module) — use runtime dispatch
-            Self = make_self(State),
-            case dispatch(Selector, Args, Self, State) of
-                {reply, Result, NewState} ->
-                    put('$bt_actor_state', NewState),
-                    Result;
-                {noreply, NewState} ->
-                    put('$bt_actor_state', NewState),
-                    nil;
-                {error, Reason, NewState} ->
-                    put('$bt_actor_state', NewState),
-                    error(beamtalk_exception_handler:ensure_wrapped(Reason))
-            end;
-        ClassMod ->
-            %% Compiled actor — call the module's safe_dispatch/3
-            case ClassMod:safe_dispatch(Selector, Args, State) of
-                {reply, Result, NewState} ->
-                    put('$bt_actor_state', NewState),
-                    Result;
-                {error, Reason, NewState} ->
-                    put('$bt_actor_state', NewState),
-                    error(beamtalk_exception_handler:ensure_wrapped(Reason))
-            end
-    end.
+    DispatchResult =
+        case maps:get('__class_mod__', State, undefined) of
+            undefined ->
+                Self = make_self(State),
+                dispatch(Selector, Args, Self, State);
+            ClassMod ->
+                ClassMod:safe_dispatch(Selector, Args, State)
+        end,
+    unwrap_dispatch_result(DispatchResult).
+
+%% @private
+%% @doc Unwrap a dispatch result, update pdict state, and return the value.
+%% Used by self_dispatch/2 to avoid repeating the put/error pattern.
+-spec unwrap_dispatch_result(
+    {reply, term(), map()} | {noreply, map()} | {error, term(), map()}
+) -> term().
+unwrap_dispatch_result({reply, Result, NewState}) ->
+    put('$bt_actor_state', NewState),
+    Result;
+unwrap_dispatch_result({noreply, NewState}) ->
+    put('$bt_actor_state', NewState),
+    nil;
+unwrap_dispatch_result({error, Reason, NewState}) ->
+    put('$bt_actor_state', NewState),
+    error(beamtalk_exception_handler:ensure_wrapped(Reason)).
+
+%% @private
+%% @doc Restore pdict entries after a dispatch completes (BT-1325).
+%% Called in the `after` block of handle_call/handle_cast to clean up
+%% both the stashed actor state and the call stack.
+-spec restore_dispatch_pdict(term()) -> ok.
+restore_dispatch_pdict(OldState) ->
+    case OldState of
+        undefined -> erase('$bt_actor_state');
+        _ -> put('$bt_actor_state', OldState)
+    end,
+    erase('$bt_call_stack'),
+    ok.
 
 %% @private
 %% @doc Check call stack for transitive cycles (BT-1325 Layer 2).
@@ -1061,21 +1073,27 @@ get_propagated_ctx() ->
     Base = #{otel => get_otel_ctx(), trace_ctx => get_trace_context()},
     %% BT-1633: Include causal trace IDs for cross-actor linking.
     %% Only present when tracing is enabled and maybe_span has run.
-    WithCausal = case get('$beamtalk_trace_id') of
-        undefined ->
-            Base;
-        TraceId ->
-            SpanId = get('$beamtalk_span_id'),
-            Base#{causal => #{trace_id => TraceId, span_id => SpanId}}
-    end,
-    %% BT-1325 Layer 2: Thread call stack for transitive cycle detection.
-    %% Add self() to the existing call stack so the receiving actor can detect
-    %% that we're already in the call chain. Cost: ~10ns (pdict get + list cons).
-    ExistingStack = case get('$bt_call_stack') of
-        undefined -> [];
-        CS -> CS
-    end,
-    WithCausal#{call_stack => [self() | ExistingStack]}.
+    WithCausal =
+        case get('$beamtalk_trace_id') of
+            undefined ->
+                Base;
+            TraceId ->
+                SpanId = get('$beamtalk_span_id'),
+                Base#{causal => #{trace_id => TraceId, span_id => SpanId}}
+        end,
+    WithCausal.
+
+%% @doc Like get_propagated_ctx/0 but includes call_stack for cycle detection.
+%% Only used by sync_send/3,4 — async/cast sends must NOT carry call_stack
+%% because the sender is not blocked, so B calling A back is not a deadlock.
+-spec get_sync_propagated_ctx() -> map().
+get_sync_propagated_ctx() ->
+    ExistingStack =
+        case get('$bt_call_stack') of
+            undefined -> [];
+            CS -> CS
+        end,
+    (get_propagated_ctx())#{call_stack => [self() | ExistingStack]}.
 
 %% @private
 %% @doc Get current OTel trace context if otel_ctx module is available.
@@ -1143,8 +1161,13 @@ restore_propagated_ctx(PropCtx) when is_map(PropCtx) ->
     %% The incoming call_stack lists all actors already in the sync call chain.
     %% sync_send checks this before gen_server:call to detect A->B->C->A cycles.
     case maps:get(call_stack, PropCtx, undefined) of
-        undefined -> erase('$bt_call_stack');
-        CallStack when is_list(CallStack) -> put('$bt_call_stack', CallStack)
+        undefined ->
+            erase('$bt_call_stack');
+        CallStack when is_list(CallStack) ->
+            put('$bt_call_stack', CallStack);
+        _ ->
+            %% Ignore invalid values from untrusted/forward-compatible payloads
+            erase('$bt_call_stack')
     end,
     ok;
 restore_propagated_ctx(_) ->
@@ -1268,10 +1291,7 @@ handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args)
                 {noreply, NewState}
         end
     after
-        case OldState of
-            undefined -> erase('$bt_actor_state');
-            _ -> put('$bt_actor_state', OldState)
-        end
+        restore_dispatch_pdict(OldState)
     end;
 %% BT-1604: Async send with propagated context (ADR 0069 Phase 2b)
 handle_cast({Selector, Args, FuturePid, PropCtx}, State) when is_map(PropCtx) ->
@@ -1309,10 +1329,7 @@ handle_cast({Selector, Args, FuturePid}, State) ->
                 {noreply, NewState}
         end
     after
-        case OldState of
-            undefined -> erase('$bt_actor_state');
-            _ -> put('$bt_actor_state', OldState)
-        end
+        restore_dispatch_pdict(OldState)
     end;
 handle_cast(Msg, State) ->
     %% Unknown cast message format - log and ignore
@@ -1360,7 +1377,10 @@ handle_call({Selector, Args}, From, State) ->
         case OldState of
             undefined -> erase('$bt_actor_state');
             _ -> put('$bt_actor_state', OldState)
-        end
+        end,
+        %% BT-1325: Clear call stack so it doesn't leak to later messages
+        %% (e.g. handle_info, timers, legacy 2-tuple calls without PropCtx)
+        erase('$bt_call_stack')
     end;
 handle_call(Msg, _From, State) ->
     %% Unknown call message format

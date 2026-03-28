@@ -402,12 +402,17 @@ impl CoreErlangGenerator {
                             nest(
                                 INDENT,
                                 docvec![
+                                    // BT-1325: Stash State for re-entrant self-sends
+                                    Self::pdict_stash_preamble(),
                                     line(),
                                     docvec![
-                                        "case call '",
+                                        "let _InitDispatchResult = call '",
                                         Document::Eco(module_name),
-                                        "':'safe_dispatch'('initialize', [], State) of",
+                                        "':'safe_dispatch'('initialize', [], State) in",
                                     ],
+                                    Self::pdict_restore_epilogue(),
+                                    line(),
+                                    "case _InitDispatchResult of",
                                     nest(
                                         INDENT,
                                         docvec![
@@ -451,16 +456,64 @@ impl CoreErlangGenerator {
     /// Handles the fire-and-forget cast format: `{cast, Selector, Args}` — sent by
     /// `beamtalk_actor:cast_send/3`. Dispatches the message and updates state;
     /// errors are logged via `logger:warning` and discarded (BT-943).
+    /// BT-1325: Generates the pdict stash preamble for re-entrant self-sends.
+    /// Returns `let _OldState = ... in let _PutOk = ... in` — caller appends
+    /// the dispatch body and must call `pdict_restore_epilogue()` after.
+    fn pdict_stash_preamble() -> Document<'static> {
+        docvec![
+            line(),
+            "let _OldState = call 'erlang':'get'('$bt_actor_state') in",
+            line(),
+            "let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in",
+        ]
+    }
+
+    /// BT-1325: Generates the pdict restore epilogue. Must follow the dispatch
+    /// result binding (e.g., `let _DispatchResult = ... in`).
+    fn pdict_restore_epilogue() -> Document<'static> {
+        docvec![
+            line(),
+            "let _RestoreOk = case _OldState of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'undefined'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![line(), "call 'erlang':'erase'('$bt_actor_state')"]
+                    ),
+                    line(),
+                    "<_Prev> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![line(), "call 'erlang':'put'('$bt_actor_state', _Prev)"]
+                    ),
+                ]
+            ),
+            line(),
+            "end in",
+            line(),
+            "let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in",
+        ]
+    }
+
     // BT-920: helper — generates the inner `case safe_dispatch ... end` for fire-and-forget casts.
     fn cast_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
+            // BT-1325: Stash State for re-entrant self-sends
+            Self::pdict_stash_preamble(),
             line(),
             // Use safe_dispatch for error isolation; discard result on error
             docvec![
-                "case call '",
+                "let _CastDispatchResult = call '",
                 Document::Eco(module_name.clone()),
-                "':'safe_dispatch'(CastSelector, CastArgs, State) of"
+                "':'safe_dispatch'(CastSelector, CastArgs, State) in"
             ],
+            // BT-1325: Restore pdict
+            Self::pdict_restore_epilogue(),
+            line(),
+            "case _CastDispatchResult of",
             nest(
                 INDENT,
                 docvec![
@@ -588,13 +641,8 @@ impl CoreErlangGenerator {
     /// Shared between 3-tuple (with `PropCtx`) and 2-tuple (backward compat) patterns.
     fn handle_call_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
-            line(),
-            // BT-1325 Layer 1: Stash State in process dictionary so re-entrant
-            // self-sends (aliased self like `other := self; other msg`) can
-            // dispatch directly without deadlocking via gen_server:call.
-            "let _OldState = call 'erlang':'get'('$bt_actor_state') in",
-            line(),
-            "let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in",
+            // BT-1325: Stash State for re-entrant self-sends
+            Self::pdict_stash_preamble(),
             line(),
             // Use safe_dispatch for error isolation per BT-29
             docvec![
@@ -602,28 +650,8 @@ impl CoreErlangGenerator {
                 Document::Eco(module_name.clone()),
                 "':'safe_dispatch'(Selector, Args, State) in"
             ],
-            line(),
-            // BT-1325: Restore previous stashed state after dispatch
-            "let _RestoreOk = case _OldState of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<'undefined'> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![line(), "call 'erlang':'erase'('$bt_actor_state')"]
-                    ),
-                    line(),
-                    "<_Prev> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![line(), "call 'erlang':'put'('$bt_actor_state', _Prev)"]
-                    ),
-                ]
-            ),
-            line(),
-            "end in",
+            // BT-1325: Restore pdict
+            Self::pdict_restore_epilogue(),
             line(),
             "case _DispatchResult of",
             nest(
@@ -689,12 +717,17 @@ impl CoreErlangGenerator {
                 nest(
                     INDENT,
                     docvec![
+                        // BT-1325: Stash State for re-entrant self-sends
+                        Self::pdict_stash_preamble(),
                         line(),
                         docvec![
-                            "case call '",
+                            "let _InfoDispatchResult = call '",
                             Document::Eco(module_name),
-                            "':'safe_dispatch'('handleInfo:', [Msg], State) of",
+                            "':'safe_dispatch'('handleInfo:', [Msg], State) in",
                         ],
+                        Self::pdict_restore_epilogue(),
+                        line(),
+                        "case _InfoDispatchResult of",
                         nest(
                             INDENT,
                             docvec![
