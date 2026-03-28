@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1325 Layer 1: Tests that aliased self-sends (other := self; other msg)
+// dispatch directly without deadlocking via gen_server:call.
+
+TestCase subclass: ActorAliasedSelfSendTest
+
+  testAliasedFieldNames =>
+    a := AliasedSelfSendActor spawn
+    names := a aliasedFieldNames
+    self assert: names size equals: 2
+    self assert: (names includes: #x)
+    self assert: (names includes: #y)
+
+  testAliasedFieldAt =>
+    a := AliasedSelfSendActor spawn
+    self assert: a aliasedFieldAt equals: 0
+
+  testAliasedFieldAtPut =>
+    a := AliasedSelfSendActor spawn
+    self assert: a aliasedFieldAtPut equals: 42
+
+  testAliasedUserMethod =>
+    a := AliasedSelfSendActor spawn
+    self assert: a aliasedUserMethod equals: 0

@@ -655,6 +655,23 @@ sync_send(ActorPid, 'onExit:', [Block]) ->
         timeout -> raise_timeout('onExit:')
     end;
 sync_send(ActorPid, Selector, Args) ->
+    %% BT-1325 Layer 1: Fast-path for self-sends.
+    %% If ActorPid is our own process AND we have stashed state (meaning we're
+    %% inside a handle_call/handle_cast dispatch), dispatch directly to avoid
+    %% gen_server:call deadlock. This catches aliased self-sends like:
+    %%   other := self. other fieldNames
+    case ActorPid =:= self() andalso get('$bt_actor_state') =/= undefined of
+        true ->
+            self_dispatch(Selector, Args);
+        false ->
+            sync_send_remote(ActorPid, Selector, Args)
+    end.
+
+%% @private
+%% @doc Remote sync-send via gen_server:call (the normal path).
+%% Factored out of sync_send/3 for BT-1325 Layer 1 self-send fast-path.
+-spec sync_send_remote(pid(), atom(), list()) -> term().
+sync_send_remote(ActorPid, Selector, Args) ->
     %% BT-1603: Instrument with telemetry:span/3 (ADR 0069 Phase 2a).
     %% Measures caller-perspective round-trip time for sync sends.
     %% telemetry:span/3 emits start/stop/exception events automatically.
@@ -675,6 +692,9 @@ sync_send(ActorPid, Selector, Args) ->
                     %%   2. Error = {ErlType, Value} — raw Erlang exception caught by safe_dispatch
                     %% We re-raise both forms as Erlang exceptions so the caller sees them correctly.
                     PropCtx = get_propagated_ctx(),
+                    %% BT-1325 Layer 2: Check for transitive cycles before gen_server:call.
+                    %% If ActorPid is already in the call stack, this send would deadlock.
+                    check_call_stack(ActorPid, Selector),
                     %% BT-1190: TimeoutProxy manages its own timeout on the inner
                     %% (proxy→target) hop. The outer (caller→proxy) hop must use
                     %% infinity so it doesn't time out before the proxy's configured
@@ -729,38 +749,46 @@ sync_send(ActorPid, Selector, Args, Timeout) when
     is_integer(Timeout), Timeout >= 0;
     Timeout =:= infinity
 ->
-    Class = lookup_class(ActorPid),
-    Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
-    try
-        maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
-            case is_process_alive(ActorPid) of
-                true ->
-                    PropCtx = get_propagated_ctx(),
-                    case gen_server:call(ActorPid, {Selector, Args, PropCtx}, Timeout) of
-                        {ok, Result} ->
-                            {Result, Metadata#{outcome => ok}};
-                        {error, {_ErlType, ErrorValue}} ->
-                            error(beamtalk_exception_handler:ensure_wrapped(ErrorValue));
-                        {error, Error} ->
-                            error(beamtalk_exception_handler:ensure_wrapped(Error));
-                        DirectValue ->
-                            {DirectValue, Metadata#{outcome => ok}}
-                    end;
-                false ->
+    %% BT-1325 Layer 1: Fast-path for self-sends (same as sync_send/3).
+    case ActorPid =:= self() andalso get('$bt_actor_state') =/= undefined of
+        true ->
+            self_dispatch(Selector, Args);
+        false ->
+            Class = lookup_class(ActorPid),
+            Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
+            try
+                maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
+                    case is_process_alive(ActorPid) of
+                        true ->
+                            PropCtx = get_propagated_ctx(),
+                            %% BT-1325 Layer 2: Check for transitive cycles.
+                            check_call_stack(ActorPid, Selector),
+                            case gen_server:call(ActorPid, {Selector, Args, PropCtx}, Timeout) of
+                                {ok, Result} ->
+                                    {Result, Metadata#{outcome => ok}};
+                                {error, {_ErlType, ErrorValue}} ->
+                                    error(beamtalk_exception_handler:ensure_wrapped(ErrorValue));
+                                {error, Error} ->
+                                    error(beamtalk_exception_handler:ensure_wrapped(Error));
+                                DirectValue ->
+                                    {DirectValue, Metadata#{outcome => ok}}
+                            end;
+                        false ->
+                            raise_actor_dead(Selector)
+                    end
+                end)
+            catch
+                exit:{noproc, _} ->
+                    raise_actor_dead(Selector);
+                exit:{normal, _} ->
+                    raise_actor_dead(Selector);
+                exit:{shutdown, _} ->
+                    raise_actor_dead(Selector);
+                exit:{timeout, _} ->
+                    raise_timeout(Selector);
+                exit:{_Reason, _} ->
                     raise_actor_dead(Selector)
             end
-        end)
-    catch
-        exit:{noproc, _} ->
-            raise_actor_dead(Selector);
-        exit:{normal, _} ->
-            raise_actor_dead(Selector);
-        exit:{shutdown, _} ->
-            raise_actor_dead(Selector);
-        exit:{timeout, _} ->
-            raise_timeout(Selector);
-        exit:{_Reason, _} ->
-            raise_actor_dead(Selector)
     end;
 sync_send(_ActorPid, Selector, _Args, _InvalidTimeout) ->
     Error = beamtalk_error:new(
@@ -770,6 +798,81 @@ sync_send(_ActorPid, Selector, _Args, _InvalidTimeout) ->
         <<"Timeout must be a non-negative integer (milliseconds) or #infinity">>
     ),
     error(beamtalk_exception_handler:ensure_wrapped(Error)).
+
+%% @private
+%% @doc Direct self-dispatch for re-entrant self-sends (BT-1325 Layer 1).
+%%
+%% When sync_send detects ActorPid == self(), we dispatch directly using
+%% the State stashed in the process dictionary by handle_call/handle_cast.
+%% This avoids the gen_server:call deadlock for aliased self-sends like
+%% `other := self. other fieldNames`.
+%%
+%% Returns the unwrapped result (same as sync_send would return), or
+%% raises an error exception on dispatch failure.
+-spec self_dispatch(atom(), list()) -> term().
+self_dispatch(Selector, Args) ->
+    State = get('$bt_actor_state'),
+    %% BT-1325: Compiled actors have their own safe_dispatch/3 in the generated
+    %% module. Use __class_mod__ from State to call the right dispatch function.
+    %% If __class_mod__ is missing (runtime-only actors), fall back to
+    %% beamtalk_actor:dispatch/4.
+    case maps:get('__class_mod__', State, undefined) of
+        undefined ->
+            %% Runtime-only actor (no compiled module) — use runtime dispatch
+            Self = make_self(State),
+            case dispatch(Selector, Args, Self, State) of
+                {reply, Result, NewState} ->
+                    put('$bt_actor_state', NewState),
+                    Result;
+                {noreply, NewState} ->
+                    put('$bt_actor_state', NewState),
+                    nil;
+                {error, Reason, NewState} ->
+                    put('$bt_actor_state', NewState),
+                    error(beamtalk_exception_handler:ensure_wrapped(Reason))
+            end;
+        ClassMod ->
+            %% Compiled actor — call the module's safe_dispatch/3
+            case ClassMod:safe_dispatch(Selector, Args, State) of
+                {reply, Result, NewState} ->
+                    put('$bt_actor_state', NewState),
+                    Result;
+                {error, Reason, NewState} ->
+                    put('$bt_actor_state', NewState),
+                    error(beamtalk_exception_handler:ensure_wrapped(Reason))
+            end
+    end.
+
+%% @private
+%% @doc Check call stack for transitive cycles (BT-1325 Layer 2).
+%%
+%% Before gen_server:call, verify that the target ActorPid is not already
+%% in the call chain. If it is, a sync send would deadlock (A->B->C->A).
+%% Raises a structured deadlock_detected error with the cycle path.
+-spec check_call_stack(pid(), atom()) -> ok.
+check_call_stack(ActorPid, Selector) ->
+    case get('$bt_call_stack') of
+        undefined ->
+            ok;
+        CallStack ->
+            case lists:member(ActorPid, CallStack) of
+                false ->
+                    ok;
+                true ->
+                    Class = lookup_class(ActorPid),
+                    Error = beamtalk_error:new(
+                        deadlock_detected,
+                        Class,
+                        Selector,
+                        <<"Sync send would deadlock: target actor is already in the call chain">>
+                    ),
+                    Error1 = beamtalk_error:with_details(Error, #{
+                        call_stack => CallStack,
+                        target_pid => ActorPid
+                    }),
+                    error(beamtalk_exception_handler:ensure_wrapped(Error1))
+            end
+    end.
 
 %% @private
 %% @doc Raise a structured actor_dead error as an Erlang exception.
@@ -958,13 +1061,21 @@ get_propagated_ctx() ->
     Base = #{otel => get_otel_ctx(), trace_ctx => get_trace_context()},
     %% BT-1633: Include causal trace IDs for cross-actor linking.
     %% Only present when tracing is enabled and maybe_span has run.
-    case get('$beamtalk_trace_id') of
+    WithCausal = case get('$beamtalk_trace_id') of
         undefined ->
             Base;
         TraceId ->
             SpanId = get('$beamtalk_span_id'),
             Base#{causal => #{trace_id => TraceId, span_id => SpanId}}
-    end.
+    end,
+    %% BT-1325 Layer 2: Thread call stack for transitive cycle detection.
+    %% Add self() to the existing call stack so the receiving actor can detect
+    %% that we're already in the call chain. Cost: ~10ns (pdict get + list cons).
+    ExistingStack = case get('$bt_call_stack') of
+        undefined -> [];
+        CS -> CS
+    end,
+    WithCausal#{call_stack => [self() | ExistingStack]}.
 
 %% @private
 %% @doc Get current OTel trace context if otel_ctx module is available.
@@ -1027,6 +1138,13 @@ restore_propagated_ctx(PropCtx) when is_map(PropCtx) ->
             erase('$beamtalk_trace_id'),
             erase('$beamtalk_span_id'),
             erase('$beamtalk_parent_span_id')
+    end,
+    %% BT-1325 Layer 2: Restore call stack for transitive cycle detection.
+    %% The incoming call_stack lists all actors already in the sync call chain.
+    %% sync_send checks this before gen_server:call to detect A->B->C->A cycles.
+    case maps:get(call_stack, PropCtx, undefined) of
+        undefined -> erase('$bt_call_stack');
+        CallStack when is_list(CallStack) -> put('$bt_call_stack', CallStack)
     end,
     ok;
 restore_propagated_ctx(_) ->
@@ -1126,24 +1244,34 @@ handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args)
         domain => [beamtalk, runtime]
     }),
     T0 = erlang:monotonic_time(microsecond),
-    case dispatch(Selector, Args, Self, State) of
-        {reply, _Result, NewState} ->
-            %% Fire-and-forget: result is discarded
-            log_dispatch_complete(State, NewState, Selector, cast, T0),
-            {noreply, NewState};
-        {noreply, NewState} ->
-            log_dispatch_complete(State, NewState, Selector, cast, T0),
-            {noreply, NewState};
-        {error, Reason, NewState} ->
-            %% Log error but don't crash — caller expects no reply
-            T1 = erlang:monotonic_time(microsecond),
-            ?LOG_WARNING("Fire-and-forget dispatch error", #{
-                selector => Selector,
-                reason => Reason,
-                duration_us => T1 - T0,
-                domain => [beamtalk, runtime]
-            }),
-            {noreply, NewState}
+    %% BT-1325: Stash State for re-entrant self-sends (Layer 1)
+    OldState = get('$bt_actor_state'),
+    put('$bt_actor_state', State),
+    try
+        case dispatch(Selector, Args, Self, State) of
+            {reply, _Result, NewState} ->
+                %% Fire-and-forget: result is discarded
+                log_dispatch_complete(State, NewState, Selector, cast, T0),
+                {noreply, NewState};
+            {noreply, NewState} ->
+                log_dispatch_complete(State, NewState, Selector, cast, T0),
+                {noreply, NewState};
+            {error, Reason, NewState} ->
+                %% Log error but don't crash — caller expects no reply
+                T1 = erlang:monotonic_time(microsecond),
+                ?LOG_WARNING("Fire-and-forget dispatch error", #{
+                    selector => Selector,
+                    reason => Reason,
+                    duration_us => T1 - T0,
+                    domain => [beamtalk, runtime]
+                }),
+                {noreply, NewState}
+        end
+    after
+        case OldState of
+            undefined -> erase('$bt_actor_state');
+            _ -> put('$bt_actor_state', OldState)
+        end
     end;
 %% BT-1604: Async send with propagated context (ADR 0069 Phase 2b)
 handle_cast({Selector, Args, FuturePid, PropCtx}, State) when is_map(PropCtx) ->
@@ -1159,22 +1287,32 @@ handle_cast({Selector, Args, FuturePid}, State) ->
         domain => [beamtalk, runtime]
     }),
     T0 = erlang:monotonic_time(microsecond),
-    case dispatch(Selector, Args, Self, State) of
-        {reply, Result, NewState} ->
-            %% Resolve the future with the result
-            log_dispatch_complete(State, NewState, Selector, async, T0),
-            beamtalk_future:resolve(FuturePid, Result),
-            {noreply, NewState};
-        {noreply, NewState} ->
-            %% Method didn't return a value, resolve with nil
-            log_dispatch_complete(State, NewState, Selector, async, T0),
-            beamtalk_future:resolve(FuturePid, nil),
-            {noreply, NewState};
-        {error, Reason, NewState} ->
-            %% Method failed, reject the future
-            log_dispatch_complete(State, NewState, Selector, async, T0),
-            beamtalk_future:reject(FuturePid, Reason),
-            {noreply, NewState}
+    %% BT-1325: Stash State for re-entrant self-sends (Layer 1)
+    OldState = get('$bt_actor_state'),
+    put('$bt_actor_state', State),
+    try
+        case dispatch(Selector, Args, Self, State) of
+            {reply, Result, NewState} ->
+                %% Resolve the future with the result
+                log_dispatch_complete(State, NewState, Selector, async, T0),
+                beamtalk_future:resolve(FuturePid, Result),
+                {noreply, NewState};
+            {noreply, NewState} ->
+                %% Method didn't return a value, resolve with nil
+                log_dispatch_complete(State, NewState, Selector, async, T0),
+                beamtalk_future:resolve(FuturePid, nil),
+                {noreply, NewState};
+            {error, Reason, NewState} ->
+                %% Method failed, reject the future
+                log_dispatch_complete(State, NewState, Selector, async, T0),
+                beamtalk_future:reject(FuturePid, Reason),
+                {noreply, NewState}
+        end
+    after
+        case OldState of
+            undefined -> erase('$bt_actor_state');
+            _ -> put('$bt_actor_state', OldState)
+        end
     end;
 handle_cast(Msg, State) ->
     %% Unknown cast message format - log and ignore
@@ -1199,18 +1337,30 @@ handle_call({Selector, Args}, From, State) ->
         domain => [beamtalk, runtime]
     }),
     T0 = erlang:monotonic_time(microsecond),
-    case dispatch(Selector, Args, Self, State) of
-        {reply, Result, NewState} ->
-            log_dispatch_complete(State, NewState, Selector, sync, T0),
-            {reply, Result, NewState};
-        {noreply, NewState} ->
-            %% Method didn't return a value, return nil
-            log_dispatch_complete(State, NewState, Selector, sync, T0),
-            {reply, nil, NewState};
-        {error, Reason, NewState} ->
-            %% Method failed, return error tuple
-            log_dispatch_complete(State, NewState, Selector, sync, T0),
-            {reply, {error, Reason}, NewState}
+    %% BT-1325: Stash State in pdict so re-entrant self-sends (Layer 1)
+    %% can dispatch directly without going through gen_server:call.
+    OldState = get('$bt_actor_state'),
+    put('$bt_actor_state', State),
+    try
+        case dispatch(Selector, Args, Self, State) of
+            {reply, Result, NewState} ->
+                log_dispatch_complete(State, NewState, Selector, sync, T0),
+                {reply, Result, NewState};
+            {noreply, NewState} ->
+                %% Method didn't return a value, return nil
+                log_dispatch_complete(State, NewState, Selector, sync, T0),
+                {reply, nil, NewState};
+            {error, Reason, NewState} ->
+                %% Method failed, return error tuple
+                log_dispatch_complete(State, NewState, Selector, sync, T0),
+                {reply, {error, Reason}, NewState}
+        end
+    after
+        %% Restore previous stashed state (supports nested dispatches)
+        case OldState of
+            undefined -> erase('$bt_actor_state');
+            _ -> put('$bt_actor_state', OldState)
+        end
     end;
 handle_call(Msg, _From, State) ->
     %% Unknown call message format

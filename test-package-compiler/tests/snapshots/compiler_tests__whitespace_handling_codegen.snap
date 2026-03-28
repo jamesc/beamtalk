@@ -129,14 +129,32 @@ module 'whitespace_handling' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_
     case Msg of
         <{Selector, Args, PropCtx}> when 'true' ->
             let _CtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(PropCtx) in
-            case call 'whitespace_handling':'safe_dispatch'(Selector, Args, State) of
+            let _OldState = call 'erlang':'get'('$bt_actor_state') in
+            let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+            let _DispatchResult = call 'whitespace_handling':'safe_dispatch'(Selector, Args, State) in
+            let _RestoreOk = case _OldState of
+                <'undefined'> when 'true' ->
+                    call 'erlang':'erase'('$bt_actor_state')
+                <_Prev> when 'true' ->
+                    call 'erlang':'put'('$bt_actor_state', _Prev)
+            end in
+            case _DispatchResult of
                 <{'reply', Result, NewState}> when 'true' ->
                     {'reply', {'ok', Result}, NewState}
                 <{'error', Error, NewState}> when 'true' ->
                     {'reply', {'error', Error}, NewState}
             end
         <{Selector, Args}> when 'true' ->
-            case call 'whitespace_handling':'safe_dispatch'(Selector, Args, State) of
+            let _OldState = call 'erlang':'get'('$bt_actor_state') in
+            let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+            let _DispatchResult = call 'whitespace_handling':'safe_dispatch'(Selector, Args, State) in
+            let _RestoreOk = case _OldState of
+                <'undefined'> when 'true' ->
+                    call 'erlang':'erase'('$bt_actor_state')
+                <_Prev> when 'true' ->
+                    call 'erlang':'put'('$bt_actor_state', _Prev)
+            end in
+            case _DispatchResult of
                 <{'reply', Result, NewState}> when 'true' ->
                     {'reply', {'ok', Result}, NewState}
                 <{'error', Error, NewState}> when 'true' ->

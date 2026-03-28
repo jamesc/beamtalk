@@ -1,18 +1,26 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests that mutual actor calls (A calls B, B calls back A) produce a
-// clear #timeout error after the default 5000ms gen_server:call timeout
-//
-// NOTE: This test intentionally triggers a 5000ms deadlock timeout
-// It verifies deadlock detection behavior per ADR 0043
+// BT-1325 Layer 2: Tests that mutual actor calls (A calls B, B calls back A)
+// are detected immediately via call-stack cycle detection in PropCtx,
+// raising a #deadlock_detected error instead of waiting for a 5s timeout.
 
 TestCase subclass: ActorDeadlockTest
 
   // Two actors calling each other synchronously creates a deadlock
-  // The gen_server:call timeout (5000ms) raises a #timeout error
-  testMutualCallDeadlockRaisesTimeout =>
+  // BT-1325: Now detected immediately via call_stack in PropCtx
+  testMutualCallDeadlockRaisesDeadlockDetected =>
     a := DeadlockA spawn
     b := DeadlockB spawn
     a setPeer: b
-    self should: [a callPeer] raise: #timeout
+    self should: [a callPeer] raise: #deadlock_detected
+
+  // Three actors in a cycle: A -> B -> C -> A
+  // BT-1325: Detected immediately via call_stack threading in PropCtx
+  testThreeActorCycleRaisesDeadlockDetected =>
+    a := CycleActorA spawn
+    b := CycleActorB spawn
+    c := CycleActorC spawn
+    a setPeer: b
+    b setPeer: c
+    self should: [a startCycle] raise: #deadlock_detected

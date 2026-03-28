@@ -589,12 +589,43 @@ impl CoreErlangGenerator {
     fn handle_call_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
             line(),
+            // BT-1325 Layer 1: Stash State in process dictionary so re-entrant
+            // self-sends (aliased self like `other := self; other msg`) can
+            // dispatch directly without deadlocking via gen_server:call.
+            "let _OldState = call 'erlang':'get'('$bt_actor_state') in",
+            line(),
+            "let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in",
+            line(),
             // Use safe_dispatch for error isolation per BT-29
             docvec![
-                "case call '",
+                "let _DispatchResult = call '",
                 Document::Eco(module_name.clone()),
-                "':'safe_dispatch'(Selector, Args, State) of"
+                "':'safe_dispatch'(Selector, Args, State) in"
             ],
+            line(),
+            // BT-1325: Restore previous stashed state after dispatch
+            "let _RestoreOk = case _OldState of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'undefined'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![line(), "call 'erlang':'erase'('$bt_actor_state')"]
+                    ),
+                    line(),
+                    "<_Prev> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![line(), "call 'erlang':'put'('$bt_actor_state', _Prev)"]
+                    ),
+                ]
+            ),
+            line(),
+            "end in",
+            line(),
+            "case _DispatchResult of",
             nest(
                 INDENT,
                 docvec![
