@@ -1608,19 +1608,6 @@ extract_package_from_module_name(ModuleName) when is_atom(ModuleName) ->
     end.
 
 %% @private
-%% @doc Check if a method selector is marked internal in the method info map.
--spec is_method_internal(atom(), map()) -> boolean().
-is_method_internal(Selector, MethodInfo) ->
-    case maps:get(Selector, MethodInfo, undefined) of
-        undefined ->
-            false;
-        Info when is_map(Info) ->
-            maps:get(visibility, Info, public) =:= internal;
-        _ ->
-            false
-    end.
-
-%% @private
 %% @doc Read __beamtalk_meta/0 from a compiled module.
 %% Returns the meta map or #{} if unavailable.
 -spec read_class_meta(atom()) -> map().
