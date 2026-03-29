@@ -98,28 +98,23 @@ pub fn check_class_visibility(
 
     // E0401: extension method targets
     for method_def in &module.method_definitions {
-        // Extension methods targeting a class from another package —
-        // check if that class is internal.
-        if let Some(ref pkg) = method_def.package {
-            // The target class is explicitly from another package
-            let class_name = &method_def.class_name.name;
-            if let Some(info) = hierarchy.get_class(class_name) {
-                if info.is_internal {
-                    let target_pkg = info.package.as_deref().unwrap_or_else(|| pkg.name.as_str());
-                    diagnostics.push(
-                        Diagnostic::error(
-                            format!(
-                                "error[E0401]: Class '{class_name}' is internal to package '{target_pkg}' \
-                                 and cannot be referenced from '{current_pkg}'"
-                            ),
-                            method_def.class_name.span,
-                        )
-                        .with_hint(format!(
-                            "'{class_name}' is declared 'internal' in package '{target_pkg}'"
-                        )),
-                    );
-                }
+        // Check if the target class is internal and from another package
+        check_cross_package_ref(
+            &method_def.class_name.name,
+            method_def.class_name.span,
+            current_pkg,
+            hierarchy,
+            diagnostics,
+        );
+
+        // E0401: type annotations in extension method signatures
+        for param in &method_def.method.parameters {
+            if let Some(ref ty) = param.type_annotation {
+                check_type_annotation_cross_package(ty, current_pkg, hierarchy, diagnostics);
             }
+        }
+        if let Some(ref ty) = method_def.method.return_type {
+            check_type_annotation_cross_package(ty, current_pkg, hierarchy, diagnostics);
         }
 
         // Also check expressions in extension method bodies
