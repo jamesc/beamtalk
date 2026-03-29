@@ -44,6 +44,9 @@ impl TypeChecker {
             return InferredType::Dynamic;
         }
 
+        // ADR 0071 Phase 3 (BT-1702): E0403 — cross-package send to internal class method
+        self.check_internal_method_access(class_name, selector, span, hierarchy, true);
+
         // Check if class-side method exists (skip warning for DNU override classes)
         let has_class_method = hierarchy.find_class_method(class_name, selector).is_some();
 
@@ -159,6 +162,9 @@ impl TypeChecker {
         // not on unknown/external receivers that may define their own trace: methods.
         self.check_deprecated_selector(selector, span);
 
+        // ADR 0071 Phase 3 (BT-1702): E0403 — cross-package send to internal method
+        self.check_internal_method_access(class_name, selector, span, hierarchy, false);
+
         // Classes with instance-side doesNotUnderstand: override accept any message
         if hierarchy.has_instance_dnu_override(class_name) {
             return;
@@ -186,6 +192,67 @@ impl TypeChecker {
             format!("'{selector}' is deprecated, use '{replacement}' instead").into();
         self.diagnostics.push(
             Diagnostic::warning(message, span).with_category(DiagnosticCategory::Deprecation),
+        );
+    }
+
+    /// ADR 0071 Phase 3 (BT-1702): E0403 — cross-package send to internal method.
+    ///
+    /// When the receiver type is known and the target method is `internal` to
+    /// another package, emit a hard error. Skipped when no current package is
+    /// set (REPL, single-file scripts) or when sending to a method in the
+    /// same package.
+    pub(super) fn check_internal_method_access(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        is_class_side: bool,
+    ) {
+        let Some(ref caller_package) = self.current_package else {
+            return;
+        };
+
+        let method = if is_class_side {
+            hierarchy.find_class_method(class_name, selector)
+        } else {
+            hierarchy.find_method(class_name, selector)
+        };
+
+        let Some(method) = method else {
+            return;
+        };
+
+        if !method.is_internal {
+            return;
+        }
+
+        // Determine the package of the class that defines the method
+        let method_package = hierarchy
+            .get_class(&method.defined_in)
+            .and_then(|c| c.package.as_ref());
+
+        let Some(method_package) = method_package else {
+            // No package info — cannot enforce, skip
+            return;
+        };
+
+        // Same package — access is allowed
+        if caller_package == method_package {
+            return;
+        }
+
+        let message: EcoString = format!(
+            "Method '{selector}' is internal to package '{method_package}' and cannot be called from '{caller_package}'"
+        )
+        .into();
+        let defined_in = &method.defined_in;
+        self.diagnostics.push(
+            Diagnostic::error(message, span)
+                .with_hint(format!(
+                    "'{selector}' is declared 'internal' in '{defined_in}'"
+                ))
+                .with_category(DiagnosticCategory::Visibility),
         );
     }
 

@@ -383,6 +383,12 @@ pub struct TypeChecker {
     pub(super) diagnostics: Vec<Diagnostic>,
     pub(super) type_map: TypeMap,
     pub(super) method_return_types: HashMap<MethodReturnKey, EcoString>,
+    /// The package being compiled (ADR 0071 Phase 3).
+    ///
+    /// When set, enables cross-package `internal` method visibility enforcement
+    /// (E0403). `None` means no package context (REPL, single-file scripts) —
+    /// visibility checks are skipped.
+    pub(super) current_package: Option<EcoString>,
 }
 
 impl TypeChecker {
@@ -393,6 +399,21 @@ impl TypeChecker {
             diagnostics: Vec::new(),
             type_map: TypeMap::new(),
             method_return_types: HashMap::new(),
+            current_package: None,
+        }
+    }
+
+    /// Creates a new type checker with a package context for visibility enforcement.
+    ///
+    /// When `current_package` is set, the type checker emits E0403 diagnostics
+    /// for cross-package sends to `internal` methods (ADR 0071 Phase 3).
+    #[must_use]
+    pub fn with_package(package: &str) -> Self {
+        Self {
+            diagnostics: Vec::new(),
+            type_map: TypeMap::new(),
+            method_return_types: HashMap::new(),
+            current_package: Some(EcoString::from(package)),
         }
     }
 
@@ -7380,6 +7401,216 @@ Base subclass: Child
         assert!(
             diags[0].notes[0].message.contains("Dictionary"),
             "Note should reference Dictionary origin"
+        );
+    }
+
+    // ── ADR 0071 Phase 3 (BT-1702): E0403 — internal method visibility ──
+
+    /// Build a hierarchy with a class that has an internal method, in a specific package.
+    fn make_hierarchy_with_internal_method() -> ClassHierarchy {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+        let mut h = ClassHierarchy::with_builtins();
+        h.add_from_beam_meta(vec![ClassInfo {
+            name: "HttpClient".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: Some("http".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![
+                MethodInfo {
+                    selector: "get:".into(),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: "HttpClient".into(),
+                    is_sealed: false,
+                    is_internal: false,
+                    spawns_block: false,
+                    return_type: Some("String".into()),
+                    param_types: vec![Some("String".into())],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: "buildHeaders:".into(),
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: "HttpClient".into(),
+                    is_sealed: false,
+                    is_internal: true,
+                    spawns_block: false,
+                    return_type: Some("Dictionary".into()),
+                    param_types: vec![None],
+                    doc: None,
+                },
+            ],
+            class_methods: vec![MethodInfo {
+                selector: "internalFactory".into(),
+                arity: 0,
+                kind: MethodKind::Primary,
+                defined_in: "HttpClient".into(),
+                is_sealed: false,
+                is_internal: true,
+                spawns_block: false,
+                return_type: Some("HttpClient".into()),
+                param_types: vec![],
+                doc: None,
+            }],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        }]);
+        h
+    }
+
+    #[test]
+    fn e0403_cross_package_instance_send_to_internal_method() {
+        // Directly test check_internal_method_access: sending `buildHeaders:`
+        // from package `my_app` to `HttpClient` (package `http`) should emit E0403.
+        let hierarchy = make_hierarchy_with_internal_method();
+        let mut checker = TypeChecker::with_package("my_app");
+        let class_name: EcoString = "HttpClient".into();
+        checker.check_internal_method_access(
+            &class_name,
+            "buildHeaders:",
+            span(),
+            &hierarchy,
+            false,
+        );
+        let e0403_errors: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("is internal to package"))
+            .collect();
+        assert_eq!(
+            e0403_errors.len(),
+            1,
+            "Expected error for cross-package internal method send, got: {e0403_errors:?}"
+        );
+        assert!(e0403_errors[0].message.contains("buildHeaders:"));
+        assert!(e0403_errors[0].message.contains("http"));
+        assert!(e0403_errors[0].message.contains("my_app"));
+    }
+
+    #[test]
+    fn e0403_same_package_send_to_internal_method_allowed() {
+        // Same-package send to internal method should NOT emit E0403.
+        let hierarchy = make_hierarchy_with_internal_method();
+        let mut checker = TypeChecker::with_package("http");
+        let class_name: EcoString = "HttpClient".into();
+        checker.check_internal_method_access(
+            &class_name,
+            "buildHeaders:",
+            span(),
+            &hierarchy,
+            false,
+        );
+        let e0403_errors: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("is internal to package"))
+            .collect();
+        assert!(
+            e0403_errors.is_empty(),
+            "Same-package send to internal method should not emit internal method error, got: {e0403_errors:?}"
+        );
+    }
+
+    #[test]
+    fn e0403_public_method_not_flagged() {
+        // Sending `get:` (public method) from any package should NOT emit E0403.
+        let hierarchy = make_hierarchy_with_internal_method();
+        let mut checker = TypeChecker::with_package("my_app");
+        let class_name: EcoString = "HttpClient".into();
+        checker.check_internal_method_access(&class_name, "get:", span(), &hierarchy, false);
+        let e0403_errors: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("is internal to package"))
+            .collect();
+        assert!(
+            e0403_errors.is_empty(),
+            "Public method send should not emit internal method error, got: {e0403_errors:?}"
+        );
+    }
+
+    #[test]
+    fn e0403_no_package_context_skips_check() {
+        // When no current package is set (REPL), internal method access is not checked.
+        let hierarchy = make_hierarchy_with_internal_method();
+        let mut checker = TypeChecker::new(); // No package context
+        let class_name: EcoString = "HttpClient".into();
+        checker.check_internal_method_access(
+            &class_name,
+            "buildHeaders:",
+            span(),
+            &hierarchy,
+            false,
+        );
+        let e0403_errors: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("is internal to package"))
+            .collect();
+        assert!(
+            e0403_errors.is_empty(),
+            "No package context should skip internal method checks, got: {e0403_errors:?}"
+        );
+    }
+
+    #[test]
+    fn e0403_class_side_internal_method() {
+        // Sending `HttpClient internalFactory` from another package should emit E0403.
+        let module = make_module(vec![msg_send(
+            Expression::ClassReference {
+                name: ident("HttpClient"),
+                package: None,
+                span: span(),
+            },
+            MessageSelector::Unary("internalFactory".into()),
+            vec![],
+        )]);
+        let hierarchy = make_hierarchy_with_internal_method();
+        let mut checker = TypeChecker::with_package("my_app");
+        checker.check_module(&module, &hierarchy);
+        let e0403_errors: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("is internal to package"))
+            .collect();
+        assert_eq!(
+            e0403_errors.len(),
+            1,
+            "Expected error for cross-package internal class method, got: {e0403_errors:?}"
+        );
+        assert!(e0403_errors[0].message.contains("internalFactory"));
+    }
+
+    #[test]
+    fn e0403_untyped_send_not_checked() {
+        // Dynamic sends where receiver type is unknown should NOT emit E0403.
+        // Using an Identifier (untyped variable) as receiver — type is Dynamic.
+        let module = make_module(vec![msg_send(
+            Expression::Identifier(ident("client")),
+            MessageSelector::Keyword(vec![KeywordPart::new("buildHeaders:", span())]),
+            vec![int_lit(42)],
+        )]);
+        let hierarchy = make_hierarchy_with_internal_method();
+        let mut checker = TypeChecker::with_package("my_app");
+        checker.check_module(&module, &hierarchy);
+        let e0403_errors: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("is internal to package"))
+            .collect();
+        assert!(
+            e0403_errors.is_empty(),
+            "Untyped dynamic send should not emit internal method error, got: {e0403_errors:?}"
         );
     }
 }

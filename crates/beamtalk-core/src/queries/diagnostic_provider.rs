@@ -195,6 +195,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     Some(DiagnosticCategory::Deprecation)
                 )
                 | (ExpectCategory::ActorNew, Some(DiagnosticCategory::ActorNew))
+                | (
+                    ExpectCategory::Visibility,
+                    Some(DiagnosticCategory::Visibility)
+                )
         )
 }
 

@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Internal abstract class for testing modifier combinations (BT-1705, ADR 0071)
+
+internal abstract Actor subclass: InternalAbstractBase
+  state: label = "base"
+
+  getLabel => self.label
+
+  // Abstract method — subclasses must override
+  compute => self subclassResponsibility
