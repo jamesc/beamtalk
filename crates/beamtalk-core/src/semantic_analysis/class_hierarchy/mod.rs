@@ -41,6 +41,10 @@ pub struct MethodInfo {
     pub defined_in: EcoString,
     /// Whether this method is sealed (cannot be overridden).
     pub is_sealed: bool,
+    /// Whether this method is internal (package-scoped visibility, ADR 0071).
+    ///
+    /// Internal methods are only callable from within the same package.
+    pub is_internal: bool,
     /// Whether this method spawns its block argument in a separate BEAM process.
     ///
     /// When `true`, self-sends inside the block are safe for Actor classes
@@ -118,6 +122,16 @@ pub struct ClassInfo {
     /// Whether this class has the explicit `typed` modifier.
     /// Use `ClassHierarchy::is_typed()` to check inherited typed status.
     pub is_typed: bool,
+    /// Whether this class is internal (package-scoped visibility, ADR 0071).
+    ///
+    /// Internal classes are only visible within their declaring package.
+    pub is_internal: bool,
+    /// Package that declares this class (ADR 0070/0071).
+    ///
+    /// Extracted from the BEAM module name pattern `bt@{package}@{class}`
+    /// via [`add_from_beam_meta`], or set from the build pipeline's current
+    /// package context. `None` for REPL classes and bootstrap builtins.
+    pub package: Option<EcoString>,
     /// Whether this class is a Value subclass (ADR 0042, BT-1528).
     ///
     /// `true` for classes that directly or indirectly inherit from `Value`.
@@ -172,6 +186,7 @@ impl ClassInfo {
     ///
     /// Shared by `extract_class_infos` and `add_module_classes` to avoid
     /// duplicating the field-mapping logic.
+    #[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to struct fields
     fn from_class_definition(class: &ClassDefinition) -> Self {
         let mut instance_methods: Vec<MethodInfo> = class
             .methods
@@ -182,6 +197,7 @@ impl ClassInfo {
                 kind: m.kind,
                 defined_in: class.name.name.clone(),
                 is_sealed: m.is_sealed,
+                is_internal: m.is_internal,
                 spawns_block: false,
                 return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
                 param_types: m
@@ -202,6 +218,7 @@ impl ClassInfo {
                 kind: m.kind,
                 defined_in: class.name.name.clone(),
                 is_sealed: m.is_sealed,
+                is_internal: m.is_internal,
                 spawns_block: false,
                 return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
                 param_types: m
@@ -229,6 +246,8 @@ impl ClassInfo {
             is_sealed: class.is_sealed,
             is_abstract: class.is_abstract,
             is_typed: class.is_typed,
+            is_internal: class.is_internal,
+            package: None, // Populated later by the build pipeline or BEAM metadata
             is_value: class.class_kind == ClassKind::Value,
             is_native: class.backing_module.is_some(),
             state: class.state.iter().map(|s| s.name.name.clone()).collect(),
@@ -464,6 +483,8 @@ impl ClassHierarchy {
                         is_sealed: false,
                         is_abstract: false,
                         is_typed: false,
+                        is_internal: false,
+                        package: None,
                         // Temporarily set from direct superclass; fixed below.
                         is_value: superclass_name == "Value",
                         is_native: false,
@@ -545,6 +566,21 @@ impl ClassHierarchy {
         }
     }
 
+    /// Set the `package` field on all non-builtin classes that don't already
+    /// have a package assigned (ADR 0071, BT-1700).
+    ///
+    /// Called after `build_with_options` to stamp the current compilation unit's
+    /// package name onto AST-derived classes. Classes loaded from BEAM metadata
+    /// already carry their own package from the `__beamtalk_meta/0` map.
+    pub fn stamp_package(&mut self, package: &str) {
+        let pkg: EcoString = EcoString::from(package);
+        for (name, info) in &mut self.classes {
+            if info.package.is_none() && !Self::is_builtin_class(name) {
+                info.package = Some(pkg.clone());
+            }
+        }
+    }
+
     /// Extract `ClassInfo` entries from a parsed module without diagnostics.
     ///
     /// BT-1523: Same ClassInfo-building logic as `add_module_classes` Pass 1,
@@ -589,6 +625,7 @@ impl ClassHierarchy {
                 kind: MethodKind::Primary,
                 defined_in: key.class_name.clone(),
                 is_sealed: false,
+                is_internal: false,
                 spawns_block: false,
                 return_type: first.type_info.return_type.clone(),
                 param_types: first.type_info.param_types.clone(),
@@ -969,6 +1006,7 @@ impl ClassHierarchy {
                     kind: MethodKind::Primary,
                     defined_in: class_name.clone(),
                     is_sealed: false,
+                    is_internal: false,
                     spawns_block: false,
                     return_type: slot_type.clone(),
                     param_types: vec![],
@@ -994,6 +1032,7 @@ impl ClassHierarchy {
                     kind: MethodKind::Primary,
                     defined_in: class_name.clone(),
                     is_sealed: false,
+                    is_internal: false,
                     spawns_block: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None],
@@ -1019,6 +1058,7 @@ impl ClassHierarchy {
                     kind: MethodKind::Primary,
                     defined_in: class_name.clone(),
                     is_sealed: false,
+                    is_internal: false,
                     spawns_block: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None; slots.len()],
@@ -1664,6 +1704,7 @@ impl ClassHierarchy {
                     kind: MethodKind::Primary,
                     defined_in: class_name.clone(),
                     is_sealed: false,
+                    is_internal: false,
                     spawns_block: false,
                     return_type: slot.type_annotation.as_ref().map(TypeAnnotation::type_name),
                     param_types: vec![],
@@ -1692,6 +1733,7 @@ impl ClassHierarchy {
                     kind: MethodKind::Primary,
                     defined_in: class_name.clone(),
                     is_sealed: false,
+                    is_internal: false,
                     spawns_block: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None],
@@ -1734,6 +1776,7 @@ impl ClassHierarchy {
                     kind: MethodKind::Primary,
                     defined_in: class_name.clone(),
                     is_sealed: false,
+                    is_internal: false,
                     spawns_block: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None; arity],
@@ -2764,6 +2807,8 @@ mod tests {
                 is_sealed: false,
                 is_abstract: false,
                 is_typed: false,
+                is_internal: false,
+                package: None,
                 is_value: false,
                 is_native: false,
                 state: vec![],
@@ -2784,6 +2829,8 @@ mod tests {
                 is_sealed: false,
                 is_abstract: false,
                 is_typed: false,
+                is_internal: false,
+                package: None,
                 is_value: false,
                 is_native: false,
                 state: vec![],
@@ -4090,6 +4137,8 @@ mod tests {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_internal: false,
+            package: None,
             is_value: false,
             is_native: false,
             state: vec![EcoString::from("count")],
@@ -4100,6 +4149,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 defined_in: EcoString::from("Counter"),
                 is_sealed: false,
+                is_internal: false,
                 spawns_block: false,
                 return_type: Some(EcoString::from("Integer")),
                 param_types: vec![],
@@ -4129,6 +4179,8 @@ mod tests {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_internal: false,
+            package: None,
             is_value: false,
             is_native: false,
             state: vec![EcoString::from("count")],
@@ -4139,6 +4191,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 defined_in: EcoString::from("Counter"),
                 is_sealed: false,
+                is_internal: false,
                 spawns_block: false,
                 return_type: None,
                 param_types: vec![],
@@ -4159,6 +4212,8 @@ mod tests {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_internal: false,
+            package: None,
             is_value: false,
             is_native: false,
             state: vec![],
@@ -4169,6 +4224,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 defined_in: EcoString::from("Counter"),
                 is_sealed: false,
+                is_internal: false,
                 spawns_block: false,
                 return_type: None,
                 param_types: vec![],
@@ -4198,6 +4254,8 @@ mod tests {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_internal: false,
+            package: None,
             is_value: false,
             is_native: false,
             state: vec![],
@@ -4214,6 +4272,128 @@ mod tests {
         assert_eq!(
             h.get_class("Integer").unwrap().methods.len(),
             original_method_count
+        );
+    }
+
+    // --- BT-1700: ClassInfo package + is_internal infrastructure ---
+
+    #[test]
+    fn classinfo_from_ast_populates_is_internal() {
+        let source = "internal Actor subclass: InternalCounter\n  state: count = 0\n  increment => self.count := self.count + 1\n";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let infos = ClassHierarchy::extract_class_infos(&module);
+        assert_eq!(infos.len(), 1);
+        assert!(
+            infos[0].is_internal,
+            "is_internal should be true for internal classes"
+        );
+        assert!(
+            infos[0].package.is_none(),
+            "package should be None when built from AST (stamped later)"
+        );
+    }
+
+    #[test]
+    fn classinfo_from_ast_defaults_is_internal_false() {
+        let source = "Actor subclass: PublicCounter\n  state: count = 0\n  increment => self.count := self.count + 1\n";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let infos = ClassHierarchy::extract_class_infos(&module);
+        assert_eq!(infos.len(), 1);
+        assert!(
+            !infos[0].is_internal,
+            "is_internal should be false for non-internal classes"
+        );
+    }
+
+    #[test]
+    fn stamp_package_sets_package_on_non_builtin_classes() {
+        let source = "Actor subclass: Counter\n  state: count = 0\n";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+        h.stamp_package("myapp");
+        let counter = h.get_class("Counter").unwrap();
+        assert_eq!(
+            counter.package.as_deref(),
+            Some("myapp"),
+            "stamp_package should set package on AST-derived classes"
+        );
+        // Builtins should not be stamped
+        let integer = h.get_class("Integer").unwrap();
+        assert!(
+            integer.package.is_some(),
+            "stdlib builtins already have package=stdlib from generated_builtins"
+        );
+    }
+
+    #[test]
+    fn stamp_package_does_not_overwrite_existing_package() {
+        let mut h = ClassHierarchy::with_builtins();
+        let info = ClassInfo {
+            name: EcoString::from("RemoteClass"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: Some(EcoString::from("other_pkg")),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        };
+        h.add_from_beam_meta(vec![info]);
+        h.stamp_package("myapp");
+        let cls = h.get_class("RemoteClass").unwrap();
+        assert_eq!(
+            cls.package.as_deref(),
+            Some("other_pkg"),
+            "stamp_package should not overwrite existing package"
+        );
+    }
+
+    #[test]
+    fn add_from_beam_meta_preserves_is_internal_and_package() {
+        let mut h = ClassHierarchy::with_builtins();
+        let info = ClassInfo {
+            name: EcoString::from("InternalHelper"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: true,
+            package: Some(EcoString::from("mylib")),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        };
+        h.add_from_beam_meta(vec![info]);
+        let cls = h.get_class("InternalHelper").unwrap();
+        assert!(
+            cls.is_internal,
+            "is_internal should be preserved from BEAM metadata"
+        );
+        assert_eq!(
+            cls.package.as_deref(),
+            Some("mylib"),
+            "package should be preserved from BEAM metadata"
         );
     }
 
@@ -4757,6 +4937,8 @@ mod tests {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_internal: false,
+            package: None,
             is_value: true,
             is_native: false,
             state: vec![EcoString::from("x")],

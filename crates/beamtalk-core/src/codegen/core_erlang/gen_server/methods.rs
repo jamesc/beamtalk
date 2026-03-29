@@ -2500,6 +2500,7 @@ impl CoreErlangGenerator {
         let is_abstract_doc = Self::meta_bool(class.is_abstract);
         let is_value_doc = Self::meta_bool(class.class_kind == ClassKind::Value);
         let is_typed_doc = Self::meta_bool(class.is_typed);
+        let is_internal_doc = Self::meta_bool(class.is_internal);
 
         // ADR 0071 Phase 4: Emit class-level visibility
         let visibility_doc: Document<'static> = if class.is_internal {
@@ -2569,6 +2570,8 @@ impl CoreErlangGenerator {
             is_value_doc,
             ",\n      'is_typed' => ",
             is_typed_doc,
+            ",\n      'is_internal' => ",
+            is_internal_doc,
             ",\n      'visibility' => ",
             visibility_doc,
             ",\n      'type_params' => ",
