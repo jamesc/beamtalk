@@ -508,6 +508,138 @@ impl BeamCompiler {
     }
 }
 
+/// Result of compiling native Erlang (`.erl`) files from a `native/` directory.
+///
+/// ADR 0072 Phase 1 (Path A): Packages with `native/*.erl` files but no
+/// `[native.dependencies]` compile via `erlc` directly (no rebar3 needed).
+#[derive(Debug)]
+pub struct NativeCompilationResult {
+    /// BEAM files produced from native `.erl` sources.
+    pub beam_files: Vec<Utf8PathBuf>,
+    /// Erlang module names (stem of each `.erl` file).
+    pub module_names: Vec<String>,
+    /// Output ebin directory (added to the code path for `.bt` compilation).
+    pub ebin_dir: Utf8PathBuf,
+}
+
+/// Discover and compile native Erlang source files from a `native/` directory.
+///
+/// ADR 0072 Phase 1 (Path A): Compiles `native/*.erl` via `erlc` with
+/// `+debug_info`, outputting `.beam` files to `_build/dev/native/ebin/`.
+/// If `native/include/` exists, it is added to the include path (`-I`).
+///
+/// Returns `Ok(None)` if no `native/` directory exists (no-op for packages
+/// without native Erlang code).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - `erlc` is not found on PATH
+/// - Any `.erl` file fails to compile (error includes file/line info from erlc)
+/// - The output directory cannot be created
+#[instrument(skip_all, fields(project_root = %project_root))]
+pub fn compile_native_erlang(project_root: &Utf8Path) -> Result<Option<NativeCompilationResult>> {
+    let native_dir = project_root.join("native");
+
+    if !native_dir.exists() || !native_dir.is_dir() {
+        debug!("No native/ directory found — skipping native Erlang compilation");
+        return Ok(None);
+    }
+
+    // Discover .erl files (non-recursive, only direct children of native/)
+    let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
+    let entries = std::fs::read_dir(&native_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read native directory '{native_dir}'"))?;
+
+    for entry in entries {
+        let entry = entry.into_diagnostic()?;
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
+            let utf8 = Utf8PathBuf::from_path_buf(path)
+                .map_err(|p| miette::miette!("Non-UTF-8 path in native/: {}", p.display()))?;
+            erl_files.push(utf8);
+        }
+    }
+
+    if erl_files.is_empty() {
+        debug!("native/ directory exists but contains no .erl files");
+        return Ok(None);
+    }
+
+    erl_files.sort();
+    info!(
+        count = erl_files.len(),
+        "Found native .erl files to compile"
+    );
+
+    // Collect module names from file stems
+    let module_names: Vec<String> = erl_files
+        .iter()
+        .filter_map(|f| f.file_stem().map(String::from))
+        .collect();
+
+    // Create output directory: _build/dev/native/ebin/
+    let ebin_dir = project_root
+        .join("_build")
+        .join("dev")
+        .join("native")
+        .join("ebin");
+    std::fs::create_dir_all(&ebin_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create native ebin directory '{ebin_dir}'"))?;
+
+    // Build erlc command
+    let mut cmd = std::process::Command::new("erlc");
+    cmd.arg("+debug_info");
+    cmd.arg("-o").arg(ebin_dir.as_str());
+
+    // Add include path if native/include/ exists
+    let include_dir = native_dir.join("include");
+    if include_dir.exists() && include_dir.is_dir() {
+        debug!(include_dir = %include_dir, "Adding native include path");
+        cmd.arg("-I").arg(include_dir.as_str());
+    }
+
+    // Add all .erl files
+    for erl_file in &erl_files {
+        cmd.arg(erl_file.as_str());
+    }
+
+    debug!("Running erlc for native Erlang files");
+    let output = cmd
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run erlc for native Erlang compilation.\nIs Erlang/OTP installed?")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // erlc outputs file:line:column formatted errors — pass them through
+        // so users see standard Erlang error formatting.
+        let combined = format!("{stdout}{stderr}");
+        miette::bail!("Native Erlang compilation failed:\n{}", combined.trim_end());
+    }
+
+    // Collect produced .beam files
+    let beam_files: Vec<Utf8PathBuf> = module_names
+        .iter()
+        .map(|name| ebin_dir.join(format!("{name}.beam")))
+        .collect();
+
+    info!(
+        count = beam_files.len(),
+        ebin_dir = %ebin_dir,
+        "Native Erlang compilation complete"
+    );
+
+    Ok(Some(NativeCompilationResult {
+        beam_files,
+        module_names,
+        ebin_dir,
+    }))
+}
+
 /// Checks if escript is available in the system PATH.
 ///
 /// # Errors
@@ -1313,6 +1445,138 @@ end
         assert!(
             result.is_err(),
             "Object subclass with state: should be a compile error: {result:?}"
+        );
+    }
+
+    // ---- ADR 0072 Phase 1: compile_native_erlang tests ----
+
+    #[test]
+    fn test_compile_native_erlang_no_native_dir() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let result = compile_native_erlang(&project_root).unwrap();
+        assert!(
+            result.is_none(),
+            "Should return None when no native/ directory exists"
+        );
+    }
+
+    #[test]
+    fn test_compile_native_erlang_empty_native_dir() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        fs::create_dir(project_root.join("native")).unwrap();
+
+        let result = compile_native_erlang(&project_root).unwrap();
+        assert!(
+            result.is_none(),
+            "Should return None when native/ has no .erl files"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires erlc"]
+    fn test_compile_native_erlang_simple_module() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let native_dir = project_root.join("native");
+        fs::create_dir(&native_dir).unwrap();
+
+        // Write a minimal Erlang module
+        fs::write(
+            native_dir.join("hello_native.erl"),
+            "-module(hello_native).\n-export([greet/0]).\ngreet() -> <<\"hello from native\">>.\n",
+        )
+        .unwrap();
+
+        let result = compile_native_erlang(&project_root).unwrap();
+        assert!(result.is_some(), "Should compile native .erl files");
+
+        let result = result.unwrap();
+        assert_eq!(result.module_names, vec!["hello_native"]);
+        assert_eq!(result.beam_files.len(), 1);
+        assert!(result.beam_files[0].exists(), "BEAM file should exist");
+        assert!(
+            result.ebin_dir.ends_with("_build/dev/native/ebin"),
+            "ebin_dir should be _build/dev/native/ebin, got: {}",
+            result.ebin_dir
+        );
+    }
+
+    #[test]
+    #[ignore = "requires erlc"]
+    fn test_compile_native_erlang_with_include() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let native_dir = project_root.join("native");
+        let include_dir = native_dir.join("include");
+        fs::create_dir_all(&include_dir).unwrap();
+
+        // Write a header file
+        fs::write(include_dir.join("my_defs.hrl"), "-define(MY_CONST, 42).\n").unwrap();
+
+        // Write a module that uses the header
+        fs::write(
+            native_dir.join("with_include.erl"),
+            "-module(with_include).\n-include(\"my_defs.hrl\").\n-export([value/0]).\nvalue() -> ?MY_CONST.\n",
+        )
+        .unwrap();
+
+        let result = compile_native_erlang(&project_root).unwrap();
+        assert!(result.is_some(), "Should compile with includes");
+        let result = result.unwrap();
+        assert_eq!(result.module_names, vec!["with_include"]);
+        assert!(result.beam_files[0].exists());
+    }
+
+    #[test]
+    #[ignore = "requires erlc"]
+    fn test_compile_native_erlang_compile_error() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let native_dir = project_root.join("native");
+        fs::create_dir(&native_dir).unwrap();
+
+        // Write an invalid Erlang file
+        fs::write(
+            native_dir.join("bad.erl"),
+            "-module(bad).\n-export([oops/0]).\noops() -> undefined_func().\n",
+        )
+        .unwrap();
+
+        // This should still succeed (erlc doesn't error on undefined function calls
+        // by default, just warns). Write truly broken syntax instead.
+        fs::write(
+            native_dir.join("broken.erl"),
+            "-module(broken).\n-export([oops/0]).\noops( -> ok.\n",
+        )
+        .unwrap();
+
+        let result = compile_native_erlang(&project_root);
+        assert!(result.is_err(), "Should fail with syntax error");
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("Native Erlang compilation failed"),
+            "Error should mention native compilation: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_compile_native_erlang_ignores_non_erl_files() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let native_dir = project_root.join("native");
+        fs::create_dir(&native_dir).unwrap();
+
+        // Only non-.erl files
+        fs::write(native_dir.join("readme.md"), "# Native stuff").unwrap();
+        fs::write(native_dir.join("notes.txt"), "notes").unwrap();
+
+        let result = compile_native_erlang(&project_root).unwrap();
+        assert!(
+            result.is_none(),
+            "Should return None when no .erl files found"
         );
     }
 }

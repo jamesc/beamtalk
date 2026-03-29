@@ -1543,7 +1543,11 @@ collect_internal_selectors(ClassName, Side, Depth) ->
     Local = collect_internal_selectors_for_class(ClassName, Side),
     Super =
         case
-            try beamtalk_class_hierarchy_table:lookup(ClassName) catch _:_ -> not_found end
+            try
+                beamtalk_class_hierarchy_table:lookup(ClassName)
+            catch
+                _:_ -> not_found
+            end
         of
             not_found -> #{};
             {ok, none} -> #{};
@@ -1556,7 +1560,11 @@ collect_internal_selectors(ClassName, Side, Depth) ->
 -spec collect_internal_selectors_for_class(atom(), instance | class) -> map().
 collect_internal_selectors_for_class(ClassName, Side) ->
     case
-        try beamtalk_class_module_table:lookup(ClassName) catch _:_ -> not_found end
+        try
+            beamtalk_class_module_table:lookup(ClassName)
+        catch
+            _:_ -> not_found
+        end
     of
         not_found ->
             #{};
@@ -1566,16 +1574,18 @@ collect_internal_selectors_for_class(ClassName, Side) ->
                     #{};
                 _ ->
                     Meta = read_class_meta(Mod),
-                    InfoKey = case Side of
-                        instance -> method_info;
-                        class -> class_method_info
-                    end,
+                    InfoKey =
+                        case Side of
+                            instance -> method_info;
+                            class -> class_method_info
+                        end,
                     MethodInfo = maps:get(InfoKey, Meta, #{}),
                     maps:filter(
-                        fun(_Sel, Info) when is_map(Info) ->
-                            maps:get(visibility, Info, public) =:= internal;
-                           (_Sel, _Info) ->
-                            false
+                        fun
+                            (_Sel, Info) when is_map(Info) ->
+                                maps:get(visibility, Info, public) =:= internal;
+                            (_Sel, _Info) ->
+                                false
                         end,
                         MethodInfo
                     )
@@ -1595,19 +1605,6 @@ extract_package_from_module_name(ModuleName) when is_atom(ModuleName) ->
         %% Unqualified or non-standard names (bt@foo) have no explicit package.
         _ ->
             nil
-    end.
-
-%% @private
-%% @doc Check if a method selector is marked internal in the method info map.
--spec is_method_internal(atom(), map()) -> boolean().
-is_method_internal(Selector, MethodInfo) ->
-    case maps:get(Selector, MethodInfo, undefined) of
-        undefined ->
-            false;
-        Info when is_map(Info) ->
-            maps:get(visibility, Info, public) =:= internal;
-        _ ->
-            false
     end.
 
 %% @private
