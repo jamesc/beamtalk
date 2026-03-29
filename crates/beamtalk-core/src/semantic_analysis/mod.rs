@@ -307,6 +307,7 @@ pub fn analyse_with_packages(
 }
 
 /// Internal: full analysis with all knobs.
+#[allow(clippy::too_many_lines)] // orchestration function — one call per analysis phase
 fn analyse_full(
     module: &Module,
     known_vars: &[&str],
@@ -473,6 +474,16 @@ fn analyse_full(
     if let Some(packages) = known_packages {
         validators::check_package_qualifiers(module, &packages, &mut result.diagnostics);
     }
+
+    // Phase 8: Class visibility enforcement (ADR 0071, BT-1701)
+    // E0401: cross-package internal class references
+    // E0402: leaked visibility (internal class in public signature)
+    validators::check_class_visibility(
+        module,
+        &result.class_hierarchy,
+        current_package,
+        &mut result.diagnostics,
+    );
 
     result
 }
