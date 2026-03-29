@@ -67,12 +67,14 @@ packages/http/
     beamtalk_http_response.erl
   native/include/                   # Erlang headers (optional)
     beamtalk_http.hrl
-  test/
+  native/test/                      # Erlang tests (EUnit/Common Test)
+    beamtalk_http_router_tests.erl
+  test/                             # Beamtalk tests (BUnit)
     HTTPClientTest.bt
   _build/
     dev/
-      ebin/                         # .beam output (bt + erl)
-      native_deps/                  # hex dep artifacts
+      ebin/                         # .beam output (bt)
+      native/                       # rebar3 output (erl + hex deps)
 ```
 
 Rationale for `native/` over `src/` (Gleam's approach) or Elixir's overloaded `src/`:
@@ -305,7 +307,27 @@ Native Erlang modules participate in workspace hot-loading:
 - Changed `.erl` files are recompiled and hot-loaded via `code:load_file/1`
 - The REPL's file watcher includes `native/` alongside `src/`
 
-### 10. Implicit Runtime Dependency
+### 10. Testing Native Code
+
+Native Erlang tests live in `native/test/` and are run by rebar3 alongside Beamtalk tests:
+
+```text
+beamtalk test
+  → rebar3 eunit (native/test/*_tests.erl)
+  → rebar3 ct    (native/test/*_SUITE.erl, if present)
+  → BUnit        (test/*.bt)
+```
+
+Standard Erlang test conventions apply — EUnit modules named `*_tests.erl`, Common Test suites named `*_SUITE.erl`. The generated `rebar.config` includes:
+
+```erlang
+{eunit_dirs, ["native/test"]}.
+{ct_dirs, ["native/test"]}.
+```
+
+This gives package authors full Erlang testing tools for their native modules, while BUnit tests exercise the Beamtalk-facing API.
+
+### 11. Implicit Runtime Dependency
 
 All native Erlang modules in a Beamtalk package have an implicit dependency on `beamtalk_runtime`. They may call:
 - `beamtalk_error` — structured error creation
@@ -491,11 +513,10 @@ Rejected because:
 
 ### For stdlib HTTP extraction (Phase 3)
 
-1. Create `packages/http/` with manifest and sources
-2. Add `http = { path = "packages/http" }` to stdlib's dev dependencies for testing
-3. Remove HTTP classes from `stdlib/src/` and backing modules from `runtime/apps/beamtalk_stdlib/src/`
-4. Remove `gun` and `cowboy` from `runtime/rebar.config`
-5. Users who depend on HTTP classes add `http` to their `[dependencies]`
+1. Create `packages/http/` with manifest, `.bt` classes, `native/` Erlang modules, and `native/test/` tests
+2. Remove HTTP classes from `stdlib/src/` and backing modules from `runtime/apps/beamtalk_stdlib/src/`
+3. Remove `gun` and `cowboy` from `runtime/rebar.config`
+4. Users who depend on HTTP classes add `http` to their `[dependencies]`
 
 ### For existing projects
 
