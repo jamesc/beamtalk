@@ -233,7 +233,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     // ADR 0072 Phase 1 (Path A): Compile native Erlang sources before .bt files.
     // Native modules must be compiled first because .bt files may reference them
     // via `(Erlang module)` FFI or `native:` annotations.
-    let _native_result = if pkg_manifest.is_some() {
+    let native_result = if pkg_manifest.is_some() {
         use crate::beam_compiler::compile_native_erlang;
         match compile_native_erlang(&project_root)? {
             Some(result) => {
@@ -477,12 +477,17 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             .map(|(_, module_name, _)| build_dir.join(format!("{module_name}.beam")))
             .collect();
         clean_stale_artifacts(&build_dir, &all_expected_beams, &pkg.name)?;
+        let native_module_names: Vec<String> = native_result
+            .as_ref()
+            .map(|r| r.module_names.clone())
+            .unwrap_or_default();
         generate_package_outputs(
             &build_dir,
             &project_root,
             pkg,
             &module_names,
             &class_module_index,
+            &native_module_names,
         )?;
     }
 
@@ -503,6 +508,7 @@ fn generate_package_outputs(
     pkg: &manifest::PackageManifest,
     module_names: &[String],
     class_module_index: &HashMap<String, String>,
+    native_module_names: &[String],
 ) -> Result<()> {
     // TODO: Extract class metadata from compiled modules in a future issue.
     let class_metadata: Vec<app_file::ClassMetadata> = Vec::new();
@@ -554,6 +560,7 @@ fn generate_package_outputs(
         &all_modules,
         &class_metadata,
         app_callback_module.as_deref(),
+        native_module_names,
     )?;
     info!(name = %pkg.name, "Generated .app file");
     Ok(())
@@ -2144,6 +2151,19 @@ mod tests {
         assert!(
             bt_beam.exists(),
             "Beamtalk BEAM file should be produced at {bt_beam}"
+        );
+
+        // ADR 0072: .app file should include native_modules in env
+        let app_file = project_path
+            .join("_build")
+            .join("dev")
+            .join("ebin")
+            .join("with_native.app");
+        assert!(app_file.exists(), "Expected .app file at {app_file}");
+        let app_content = fs::read_to_string(&app_file).unwrap();
+        assert!(
+            app_content.contains("{native_modules, [hello_native]}"),
+            "Generated .app should contain native_modules. Got: {app_content}"
         );
     }
 

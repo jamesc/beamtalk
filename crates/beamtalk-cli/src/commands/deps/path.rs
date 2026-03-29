@@ -452,6 +452,8 @@ fn compile_dependency_with_context(
         &module_names,
         &class_metadata,
         None,
+        // TODO(ADR 0072): Wire up native module discovery for path dependencies
+        &[],
     )?;
 
     info!(dep = %dep_name, "Dependency compiled successfully");
