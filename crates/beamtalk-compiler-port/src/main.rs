@@ -1208,8 +1208,8 @@ fn handle_compile(request: &Map) -> Term {
     // Uses the unified derive_class_module_name function.
     let module_name_override = map_get(request, "module_name").and_then(term_to_string);
 
-    // Derive module name from the first class or protocol.  BT-1666 ensures
-    // a file contains at most one kind (class OR protocol, never both).
+    // Derive module name from the sole top-level definition. BT-1666 enforces
+    // a single top-level definition per file (one class OR one protocol).
     let primary_name = module
         .classes
         .first()
