@@ -39,5 +39,5 @@ pub(crate) use supervision_validators::{
     check_children_supervision_policy, check_supervision_policy_override,
 };
 pub(crate) use visibility_validators::{
-    check_internal_method_shadow, check_leaked_method_visibility,
+    check_class_visibility, check_internal_method_shadow, check_leaked_method_visibility,
 };

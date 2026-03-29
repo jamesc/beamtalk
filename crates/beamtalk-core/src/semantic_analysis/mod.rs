@@ -307,7 +307,7 @@ pub fn analyse_with_packages(
 }
 
 /// Internal: full analysis with all knobs.
-#[allow(clippy::too_many_lines)] // orchestration function — length is proportional to analysis phases
+#[allow(clippy::too_many_lines)] // orchestration function — one call per analysis phase
 fn analyse_full(
     module: &Module,
     known_vars: &[&str],
@@ -481,8 +481,16 @@ fn analyse_full(
         validators::check_package_qualifiers(module, &packages, &mut result.diagnostics);
     }
 
-    // Phase 8: Visibility validation (ADR 0071 Phase 3, BT-1702)
-    // E0402: Internal method satisfying a public protocol requirement
+    // Phase 8: Visibility enforcement (ADR 0071)
+    // E0401: cross-package internal class references (BT-1701)
+    // E0402: leaked visibility — internal class in public signature (BT-1701)
+    validators::check_class_visibility(
+        module,
+        &result.class_hierarchy,
+        current_package,
+        &mut result.diagnostics,
+    );
+    // E0402: internal method satisfying a public protocol requirement (BT-1702)
     validators::check_leaked_method_visibility(
         module,
         &result.class_hierarchy,
@@ -490,7 +498,7 @@ fn analyse_full(
         current_package,
         &mut result.diagnostics,
     );
-    // W0401: Subclass method shadowing an internal superclass method
+    // W0401: subclass method shadowing an internal superclass method (BT-1702)
     // Only meaningful in a package context — skip for REPL/scripts
     if current_package.is_some() {
         validators::check_internal_method_shadow(
