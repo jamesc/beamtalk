@@ -134,6 +134,8 @@ fn rebar3_path() -> PathBuf {
 
 Gleam takes the same approach — it embeds rebar3 in its compiler binary and extracts it to a cache directory on first use.
 
+**Update policy:** The bundled rebar3 is updated when a new rebar3 release adds needed features or fixes, when OTP compatibility requires it, or on security advisories. The pinned version and its minimum OTP requirement are documented in the release notes.
+
 ### 4. Build Pipeline
 
 Since rebar3 is always available (bundled), all `native/` compilation uses a single rebar3 path — no split between "simple" and "with hex deps" cases. `beamtalk build` extends to handle two compilation phases:
@@ -169,7 +171,7 @@ For packages without hex deps, `{deps, []}` is empty but rebar3 still compiles t
 
 Packages may also declare `[native.dependencies]` **without** a `native/` directory — for example, to call a hex package directly via `(Erlang module)` FFI without any hand-written Erlang glue. In this case the generated `rebar.config` has deps but no `{src_dirs, [...]}`. rebar3 fetches and compiles the hex dep; `beamtalk build` puts its ebin on the code path.
 
-Then runs `rebar3 compile` in `_build/dev/native/` (with `REBAR_BASE_DIR=.`). The generated `rebar.config` and `rebar.lock` live in `_build/dev/native/` — they are build artifacts, not source files.
+Then runs `rebar3 compile` from the **project root** with `REBAR_BASE_DIR=_build/dev/native/` to direct output there. The generated `rebar.config` and `rebar.lock` live in `_build/dev/native/` — they are build artifacts, not source files. The `{src_dirs, ["native"]}` directive resolves relative to the project root where rebar3 is invoked.
 
 rebar3 handles version resolution against hex.pm, transitive deps, include paths, code paths, compilation order, and incremental rebuilds automatically.
 
@@ -195,15 +197,15 @@ Libraries declare version **constraints** in `[native.dependencies]`. Beamtalk *
 ]}.
 ```
 
-When two packages declare the same hex dep, Beamtalk takes the **tighter constraint** (the one that is a subset of the other). If constraints don't overlap, Beamtalk emits an error before invoking rebar3.
+When two packages declare the same hex dep, Beamtalk computes the **intersection** of their constraints. If one is a subset of the other, the tighter constraint wins (e.g., `~> 2.1` ∩ `~> 2.0` = `~> 2.1`). For partially overlapping ranges, Beamtalk computes the actual intersection (e.g., `>= 2.0.0, < 2.2.0` ∩ `>= 2.1.5, < 3.0.0` = `>= 2.1.5, < 2.2.0`). If constraints don't overlap, Beamtalk emits an error before invoking rebar3.
 
 **Resolution flow:**
 
 1. `beamtalk build` collects `[native.dependencies]` from all packages in the dependency graph
 2. Merges constraints — for each shared hex dep, computes the tightest compatible constraint
 3. Detects **direct** constraint conflicts early (non-overlapping constraints) with helpful error messages
-4. On first build (no lockfile): passes merged constraints to rebar3, which resolves actual versions against hex.pm — including **transitive** hex deps that Beamtalk has no visibility into. Transitive conflicts are caught and reported by rebar3. Resolved versions are captured in `beamtalk.lock`
-5. On subsequent builds: generates `rebar.config` with exact pinned versions from `beamtalk.lock`
+4. On first build (no lockfile): passes merged constraints to rebar3, which resolves actual versions against hex.pm — including **transitive** hex deps that Beamtalk has no visibility into. Transitive conflicts are caught and reported by rebar3. All resolved versions (direct **and** transitive) are captured in `beamtalk.lock`
+5. On subsequent builds: generates `rebar.config` with exact pinned versions from `beamtalk.lock`, ensuring reproducible builds including transitive deps
 6. `beamtalk deps update` re-resolves constraints and updates the lock
 
 **Conflict detection** (Beamtalk, before invoking rebar3):
@@ -238,7 +240,14 @@ sha = "def456..."
 name = "cowboy"
 version = "2.12.0"
 sha = "ghi789..."
+
+[[native_package]]
+name = "ranch"       # transitive dep (via cowboy)
+version = "2.1.0"
+sha = "jkl012..."
 ```
+
+All resolved versions — direct and transitive — are pinned. This ensures `rebar.lock` in `_build/` can be regenerated deterministically from `beamtalk.lock`.
 
 ### 6. Native Module Naming
 
@@ -249,7 +258,7 @@ Rationale:
 - Hex deps expect to call modules by their real names
 - Adding prefixes would break interop with the broader BEAM ecosystem
 
-**Collision prevention:** Package authors are responsible for choosing non-colliding Erlang module names. Convention: prefix with the package name (e.g., `beamtalk_http_*` for the `http` package). The build tool emits a warning if two packages in the dependency graph define the same native module name.
+**Collision prevention:** Package authors are responsible for choosing non-colliding Erlang module names. Convention: prefix with the package name (e.g., `beamtalk_http_*` for the `http` package). The build tool emits an **error** (not a warning) if two packages in the dependency graph define the same native module name — BEAM's flat namespace means only one version would load, causing silent breakage.
 
 ### 7. Code Path Management
 
@@ -409,6 +418,14 @@ Native modules are standard BEAM modules — fully observable with `observer`, `
 | **Newcomer** | "Each package works in isolation — no surprising cross-package interactions" |
 | **Language designer** | "Simpler implementation — no need to merge constraints across the graph" |
 
+### Alternative: Embed hex_core directly (no rebar3 dependency)
+
+| Cohort | Strongest argument |
+|--------|-------------------|
+| **Language designer** | "Owning the dep resolution gives us full control over error messages and UX" |
+| **Operator** | "No vendored binary — one fewer thing to audit and update" |
+| **BEAM developer** | "hex_core is a small, focused library — it's the right tool for the job" |
+
 ### Tension Points
 - The split compilation path is marginally faster for simple cases but adds implementation complexity and a second code path to maintain
 - Gleam developers expect mixed `src/`; Elixir developers expect separate directories
@@ -466,9 +483,12 @@ Rejected because:
 
 ### Negative
 - Bundled rebar3 adds ~1.8MB to the Beamtalk distribution
-- Native module naming collisions are possible (mitigated by convention + warnings)
+- Native module naming collisions are possible (mitigated by convention + build error on collision)
 - Generated `rebar.config` is another artifact to manage in `_build/`
 - Cross-package native dep constraint merging adds complexity to the dependency resolver
+- Cold builds with hex deps are slow (30–120s for first rebar3 invocation with no hex cache) — significantly slower than pure Beamtalk packages
+- Hex deps with rebar plugins, C NIFs, or custom compile hooks may require additional host tooling (`gcc`, `make`, `cmake`) not covered by Beamtalk's install — these are passed through to rebar3 as-is
+- Third-party hex packages enter the workspace's trust boundary with full `erlang:apply/3` reachability — the same supply chain risk accepted by all BEAM ecosystems (see ADR 0058)
 
 ### Neutral
 - Does not affect packages without native Erlang code (majority of packages)
@@ -524,5 +544,5 @@ No migration needed — this is additive. Projects without `native/` or `[native
 
 ## References
 - Related issues: BT-1153
-- Related ADRs: ADR 0026 (Project Manifest), ADR 0031 (Flat Namespace), ADR 0055 (Erlang-Backed Class Authoring), ADR 0056 (Native Erlang-Backed Actors), ADR 0070 (Package Namespaces and Dependencies)
+- Related ADRs: ADR 0026 (Project Manifest), ADR 0031 (Flat Namespace), ADR 0055 (Erlang-Backed Class Authoring), ADR 0056 (Native Erlang-Backed Actors), ADR 0058 (Platform Security Model), ADR 0070 (Package Namespaces and Dependencies)
 - Prior art: [Gleam FFI](https://gleam.run/writing-gleam/gleam-toml/), [Mix.Tasks.Compile.Erlang](https://hexdocs.pm/mix/Mix.Tasks.Compile.Erlang.html), [rebar3 dependencies](https://rebar3.org/docs/configuration/dependencies/)
