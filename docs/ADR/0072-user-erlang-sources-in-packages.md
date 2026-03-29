@@ -169,6 +169,8 @@ Then runs `rebar3 compile` in `_build/dev/native/` (with `REBAR_BASE_DIR=.`). Th
 
 rebar3 handles version resolution against hex.pm, transitive deps, include paths, code paths, compilation order, and incremental rebuilds automatically.
 
+**Error handling:** rebar3 errors are surfaced through `beamtalk build`. Common error patterns (version conflicts, missing packages) are translated into Beamtalk-style diagnostics with context about which packages contributed the conflicting constraints. Unrecognized errors are passed through verbatim with a note indicating they originate from rebar3. Authors of native Erlang code should expect to debug Erlang build issues directly when they arise.
+
 **On rebuild from lockfile:** When `beamtalk.lock` already contains resolved versions from a previous build, `beamtalk build` generates `rebar.config` with exact pinned versions instead of constraints, ensuring reproducible builds without re-resolving against hex.pm.
 
 ### 5. Native Dependency Resolution
