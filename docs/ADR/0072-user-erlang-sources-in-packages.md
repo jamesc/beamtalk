@@ -73,8 +73,8 @@ packages/http/
     HTTPClientTest.bt
   _build/
     dev/
-      ebin/                         # .beam output (bt)
-      native/                       # rebar3 output (erl + hex deps)
+      ebin/                         # .beam output (bt + native .erl)
+      native/                       # rebar3 output (hex deps, or hex deps + .erl)
 ```
 
 Rationale for `native/` over `src/` (Gleam's approach) or Elixir's overloaded `src/`:
@@ -140,13 +140,22 @@ Gleam takes the same approach — it embeds rebar3 in its compiler binary and ex
 
 ### 4. Build Pipeline
 
-Since rebar3 is always available (bundled), all `native/` compilation uses a single rebar3 path — no split between "simple" and "with hex deps" cases. `beamtalk build` extends to handle two compilation phases:
+`beamtalk build` uses two compilation strategies for native Erlang, selected by the presence of `[native.dependencies]` in `beamtalk.toml`:
+
+**Path A: No hex deps** — packages with `native/` but no `[native.dependencies]` compile `.erl` files directly via `compile:file/2` in the build worker. This is fast (~200ms for typical packages) and requires no external tooling. Gleam uses the same approach — a long-lived escript calling `compile:file/2` for its own packages' FFI files.
+
+**Path B: With hex deps** — packages declaring `[native.dependencies]` use rebar3, which compiles both the hex deps and the package's own `.erl` files in a single invocation. rebar3 handles version resolution, transitive deps, include paths, and incremental rebuilds.
 
 ```text
 Phase 1: Native Erlang (if native/ directory exists)
-  → Generate _build/dev/native/rebar.config from beamtalk.toml
-  → Run bundled rebar3 compile in _build/dev/native/
-  → Output: _build/dev/native/default/lib/{app}/ebin/*.beam
+  Path A (no hex deps):
+    → compile:file/2 for each native/*.erl
+    → Output: _build/dev/native/ebin/*.beam
+
+  Path B (with hex deps):
+    → Generate _build/dev/native/rebar.config from beamtalk.toml
+    → Run bundled rebar3 compile in _build/dev/native/
+    → Output: _build/dev/native/default/lib/{app}/ebin/*.beam
 
 Phase 2: Beamtalk .bt files (existing pipeline)
   → Compile .bt → .core → .beam
@@ -154,7 +163,9 @@ Phase 2: Beamtalk .bt files (existing pipeline)
   → Output: _build/dev/ebin/bt@{package}@*.beam
 ```
 
-**Phase 1 detail — rebar3 integration:**
+The decision point is static — determined by `beamtalk.toml` contents, not by heuristics.
+
+**Path B detail — rebar3 integration:**
 
 `beamtalk build` generates a `rebar.config` that compiles both hex deps and the package's own `.erl` files in a single rebar3 invocation:
 
@@ -169,11 +180,9 @@ Phase 2: Beamtalk .bt files (existing pipeline)
 {erl_opts, [debug_info]}.
 ```
 
-For packages without hex deps, `{deps, []}` is empty but rebar3 still compiles the `.erl` files — one code path for all cases.
-
 Packages may also declare `[native.dependencies]` **without** a `native/` directory — for example, to call a hex package directly via `(Erlang module)` FFI without any hand-written Erlang glue. In this case the generated `rebar.config` has deps but no `{src_dirs, [...]}`. rebar3 fetches and compiles the hex dep; `beamtalk build` puts its ebin on the code path.
 
-Then runs `rebar3 compile` from the **project root** with `REBAR_BASE_DIR=_build/dev/native/` to direct output there. The generated `rebar.config` and `rebar.lock` live in `_build/dev/native/` — they are build artifacts, not source files. The `{src_dirs, ["native"]}` directive resolves relative to the project root where rebar3 is invoked.
+rebar3 runs from the **project root** with `REBAR_BASE_DIR=_build/dev/native/` to direct output there. The generated `rebar.config` and `rebar.lock` live in `_build/dev/native/` — they are build artifacts, not source files. The `{src_dirs, ["native"]}` directive resolves relative to the project root where rebar3 is invoked.
 
 rebar3 handles version resolution against hex.pm, transitive deps, include paths, code paths, compilation order, and incremental rebuilds automatically.
 
@@ -183,42 +192,38 @@ rebar3 handles version resolution against hex.pm, transitive deps, include paths
 
 ### 5. Native Dependency Resolution
 
-Libraries declare version **constraints** in `[native.dependencies]`. Beamtalk **collects and merges** constraints across the dependency graph; **rebar3 resolves** them against hex.pm. Only the root application triggers resolution — matching how hex.pm, rebar3, and Mix all work.
+Libraries declare version **constraints** in `[native.dependencies]`. **rebar3 resolves** them against hex.pm. Only the root application triggers resolution — matching how hex.pm, rebar3, and Mix all work.
 
 **Problem:** BEAM has a flat module namespace. If package `http` depends on `gun ~> 2.1` and package `websocket` depends on `gun ~> 2.0`, they must resolve to a single version at runtime. Per-package isolation would silently load conflicting versions.
 
-**Solution: Top-level constraint aggregation.**
+**Solution: Top-level constraint aggregation — let rebar3 solve it.**
 
-`beamtalk build` walks the entire Beamtalk dependency graph, collects all `[native.dependencies]` constraints from every transitive package, and merges them into a single `rebar.config`. The **constraints** (not resolved versions) are passed through to rebar3:
+`beamtalk build` walks the entire Beamtalk dependency graph, collects all `[native.dependencies]` constraints from every transitive package, and passes them all through to a single generated `rebar.config`. rebar3's resolver (backed by hex_core's constraint solver) handles the actual version resolution, including transitive hex deps:
 
 ```erlang
-%% Merged from: http (gun ~> 2.1, cowboy ~> 2.12), websocket (gun ~> 2.0, cowboy ~> 2.12)
+%% Aggregated from: http (gun ~> 2.1, cowboy ~> 2.12), websocket (gun ~> 2.0)
 {deps, [
-    {gun, "~> 2.1"},       %% tightest constraint that satisfies both packages
-    {cowboy, "~> 2.12"}    %% identical constraint from both packages
+    {gun, "~> 2.1"},       %% from package 'http'
+    {gun, "~> 2.0"},       %% from package 'websocket' — rebar3 resolves both
+    {cowboy, "~> 2.12"}    %% from package 'http'
 ]}.
 ```
 
-When two packages declare the same hex dep, Beamtalk computes the **intersection** of their constraints. If one is a subset of the other, the tighter constraint wins (e.g., `~> 2.1` ∩ `~> 2.0` = `~> 2.1`). For partially overlapping ranges, Beamtalk computes the actual intersection (e.g., `>= 2.0.0, < 2.2.0` ∩ `>= 2.1.5, < 3.0.0` = `>= 2.1.5, < 2.2.0`). If constraints don't overlap, Beamtalk emits an error before invoking rebar3.
+**Version constraint syntax** in `beamtalk.toml` follows hex.pm semantics (the `~>` operator uses the same interpretation as hex.pm and rebar3, which both delegate to hex_core):
+- `~> 2.1` — `>= 2.1.0 and < 3.0.0`
+- `~> 2.1.0` — `>= 2.1.0 and < 2.2.0`
+
+Constraints are passed through to the generated `rebar.config` verbatim — no translation needed.
 
 **Resolution flow:**
 
 1. `beamtalk build` collects `[native.dependencies]` from all packages in the dependency graph
-2. Merges constraints — for each shared hex dep, computes the tightest compatible constraint
-3. Detects **direct** constraint conflicts early (non-overlapping constraints) with helpful error messages
-4. On first build (no lockfile): passes merged constraints to rebar3, which resolves actual versions against hex.pm — including **transitive** hex deps that Beamtalk has no visibility into. Transitive conflicts are caught and reported by rebar3. All resolved versions (direct **and** transitive) are captured in `beamtalk.lock`
-5. On subsequent builds: generates `rebar.config` with exact pinned versions from `beamtalk.lock`, ensuring reproducible builds including transitive deps
-6. `beamtalk deps update` re-resolves constraints and updates the lock
+2. Aggregates all constraints into a single generated `rebar.config`
+3. On first build (no lockfile): rebar3 resolves actual versions against hex.pm, handling constraint intersection, transitive deps, and conflict detection. All resolved versions are captured in `beamtalk.lock`
+4. On subsequent builds: generates `rebar.config` with exact pinned versions from `beamtalk.lock`, ensuring reproducible builds including transitive deps
+5. `beamtalk deps update` re-resolves constraints and updates the lock
 
-**Conflict detection** (Beamtalk, before invoking rebar3):
-
-```text
-error: incompatible native dependency constraints
-  package 'http' requires gun ~> 2.1
-  package 'legacy_client' requires gun ~> 1.3
-  = help: these constraints have no overlap (>= 2.1.0 vs < 2.0.0)
-  = help: update 'legacy_client' to a version compatible with gun ~> 2.x
-```
+rebar3's error messages for version conflicts are passed through to the user. If rebar3's error output proves insufficient for common cases, Beamtalk-level pre-checking can be added as a follow-up — but rebar3's solver is battle-tested and handles the general case correctly.
 
 **Lock file integration:**
 
@@ -275,7 +280,7 @@ At runtime, `beamtalk` ensures all necessary ebin directories are on the code pa
 -pa {beamtalk_runtime_ebin}                              # core runtime
 ```
 
-The `.app` file for the package includes hex deps in its `applications` list:
+The `.app` file for the package lists **direct** hex deps in its `applications` list, following standard OTP convention. Transitive deps (e.g., `ranch` via `cowboy`) are covered by each dependency's own `.app` file and do not need to be repeated:
 
 ```erlang
 {application, http, [
@@ -312,11 +317,13 @@ Consumers compile everything locally via `beamtalk build`. If the package declar
 
 ### 9. REPL and Hot-Loading
 
-Native Erlang modules participate in workspace hot-loading:
+Native Erlang modules participate in workspace hot-loading via two mechanisms:
 
-- `beamtalk build` detects changes to `native/*.erl` files (mtime comparison)
-- Changed `.erl` files are recompiled and hot-loaded via `code:load_file/1`
-- The REPL's file watcher includes `native/` alongside `src/`
+**Project load** (`:load_project` / MCP `load-project`): scans `native/` alongside `src/`, compiles all changed `.erl` files via `compile:file/2` before compiling `.bt` files. Incremental — uses mtime comparison, same as `.bt` files.
+
+**Single file reload** (`:reload ClassName`): demand-driven — when the compiler encounters a `native:` annotation or `(Erlang module)` FFI reference, it checks whether the referenced `.erl` file in `native/` is newer than its `.beam` and recompiles it first via `compile:file/2`.
+
+Both paths use `compile:file/2` directly within the running VM — no rebar3 invocation. Hex deps are compiled once at `beamtalk build` time and are already on the code path.
 
 ### 10. Testing Native Code
 
@@ -354,10 +361,10 @@ This dependency does not need to be declared in `beamtalk.toml` — the build to
 - `.erl` FFI files live in `src/` alongside `.gleam` files (mixed directory)
 - `@external(erlang, "module_name", "function_name")` for FFI linkage
 - Hex deps declared in `gleam.toml` `[dependencies]` (mixed with Gleam deps)
-- `gleam build` compiles `.erl` via internal `erlc` invocation
-- **Bundles rebar3** in the compiler binary — extracts to cache on first use
+- **Split compilation path:** Gleam packages' own `.erl` files are compiled via a long-lived escript using `compile:file/2` with parallel workers — fast, no rebar3 overhead. Non-Gleam hex deps (rebar3 projects) use `rebar3 bare compile`
+- **Bundles rebar3** in the compiler binary — extracts to cache on first use, but only invoked for non-Gleam hex deps
 - Ships source (`.gleam` + `.erl`) on hex, consumers compile locally
-- **Adopted:** Ship source convention, build tool owns compilation, bundled rebar3
+- **Adopted:** Ship source convention, build tool owns compilation, bundled rebar3, split compilation (`compile:file/2` for own files, rebar3 for hex deps)
 - **Rejected:** Mixed directory (Beamtalk uses separate `native/`), mixed dep sections
 
 ### Elixir/Mix
@@ -397,53 +404,59 @@ Native modules are standard BEAM modules — fully observable with `observer`, `
 
 ## Steelman Analysis
 
-### Alternative: Split compilation path (build worker for simple .erl, rebar3 only for hex deps)
+### Against the chosen design (split path + `native/` + rebar3)
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Newcomer** | "Simple packages build faster without rebar3 overhead" |
-| **Language designer** | "The build worker already has `compile` loaded — adding `compile:file/2` is minimal work" |
-| **Operator** | "Fewer moving parts for packages that don't need hex deps" |
+| **BEAM developer** | "I already have rebar.config and mix.exs in my muscle memory. Now I have to learn a *third* manifest format (beamtalk.toml) that generates a rebar.config I can't edit? If something breaks, I'm debugging generated artifacts instead of my own config. Just let me write rebar.config." |
+| **Operator** | "You're bundling a 1.8MB binary I didn't ask for, pinned to a version I don't control. When CVE-2027-XXXX drops for rebar3, I'm waiting on a Beamtalk release to patch it. Every other Erlang tool on my system uses the system rebar3 — now I have two versions to track." |
+| **Language designer** | "Two compilation paths means two sets of include-path semantics, two incremental rebuild strategies, and two error message formats. The decision point (`[native.dependencies]` present or not) is static, but the *behavioural surface* isn't — users will hit differences when they add their first hex dep and their `.erl` compilation subtly changes." |
 
 ### Alternative: Mixed src/ directory (Gleam model)
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Newcomer** | "One directory is simpler — I don't have to learn where files go" |
-| **Gleam developer** | "This is how Gleam does it and it works fine" |
-| **Language designer** | "Fewer concepts — a file's extension tells you what it is" |
+| **Newcomer** | "One directory, one mental model. I put source files in `src/`. The extension tells me the language. I don't have to learn which directory gets which language — Python doesn't make me put C extensions in a separate folder." |
+| **BEAM developer** | "Gleam ships to hex with mixed `.gleam` and `.erl` in `src/` and it works. The collision risk is theoretical — who names an Erlang module `HTTPClient.erl`? Extensions are unambiguous." |
+| **Language designer** | "Separate directories create a conceptual wall between Beamtalk and Erlang code. But the whole point of FFI is that they're collaborating closely. A mixed directory signals that Erlang is a first-class citizen in your project, not a second-class afterthought filed away in `native/`." |
+| **Operator** | "One directory to include in CI linting rules, one directory to watch for changes, one directory in my Dockerfile COPY. Fewer moving parts." |
+| **Smalltalk developer** | "Smalltalk never separates primitives into a different browser. The image presents them inline. `native/` feels like the Java model of shoving JNI code somewhere else." |
 
 ### Alternative: Per-package native dep isolation (each package resolves independently)
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Newcomer** | "Each package works in isolation — no surprising cross-package interactions" |
-| **Language designer** | "Simpler implementation — no need to merge constraints across the graph" |
+| **Newcomer** | "My package works in `beamtalk build`. I publish it. Someone else's package uses a different version of the same dep. Top-level aggregation means *my* working package now fails in *their* project because of a constraint I can't control. Per-package isolation means my package always builds the same way." |
+| **Language designer** | "Constraint aggregation pushes resolution complexity into the Beamtalk build tool — it must understand hex version semantics, implement intersection logic, and produce useful error messages. Per-package isolation means each rebar3 invocation is self-contained. The BEAM flat namespace problem is real, but it's BEAM's problem — we could document it as a known limitation rather than engineering around it." |
+| **BEAM developer** | "Elixir umbrella apps have per-app `mix.exs` with their own deps and it works fine. The flat namespace collision is rare in real codebases — most apps don't pull in conflicting versions of the same package." |
 
 ### Alternative: Embed hex_core directly (no rebar3 dependency)
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Language designer** | "Owning the dep resolution gives us full control over error messages and UX" |
-| **Operator** | "No vendored binary — one fewer thing to audit and update" |
-| **BEAM developer** | "hex_core is a small, focused library — it's the right tool for the job" |
+| **Language designer** | "rebar3 is a 1.8MB escript with 15 years of accumulated complexity — plugins, profiles, hooks, overlays. We use maybe 5% of it. hex_core is ~500 lines and does exactly the one thing we need: resolve version constraints against hex.pm. By embedding hex_core and calling `erlc` directly, we own the entire compilation pipeline. Gleam already proved this works — their compiler only falls back to rebar3 for complex legacy packages." |
+| **Operator** | "A vendored rebar3 is an opaque binary. hex_core is auditable Erlang source. When something breaks, I can read the code. I can also point hex_core at a private hex mirror without wondering whether rebar3's plugin system will interfere." |
+| **BEAM developer** | "Every Erlang developer has `erlc` on their PATH. Using `compile:file/2` for `.erl` compilation and hex_core for package fetching gives us the thinnest possible dependency surface. If rebar3 ever makes a breaking change to its escript format or profile semantics, we're insulated." |
+| **Newcomer** | "I installed Beamtalk. I don't want to learn what rebar3 is. With hex_core, there's no 'rebar3 error' in my build output — it's all Beamtalk." |
 
 ### Tension Points
-- The split compilation path is marginally faster for simple cases but adds implementation complexity and a second code path to maintain
-- Gleam developers expect mixed `src/`; Elixir developers expect separate directories
-- Per-package isolation is simpler but fundamentally broken on BEAM due to the flat module namespace
+
+- **Mixed vs separate directories** is a genuine values disagreement: "Erlang is a first-class collaborator" (mixed) vs "Erlang is a clearly-bounded escape hatch" (separate). The ADR chose the latter — Beamtalk's identity is Smalltalk-on-BEAM, not multi-language-on-BEAM.
+- **rebar3 vs hex_core** is a build-vs-buy tradeoff. rebar3 handles NIF compilation, rebar plugins, and 15 years of edge cases. hex_core is clean but would require reimplementing those edge cases. The split compilation path mitigates this: `compile:file/2` for the common case, rebar3 only when hex deps bring in ecosystem complexity.
+- **Per-package isolation** is appealing in theory but BEAM's flat module namespace makes it fundamentally unsound. The Elixir umbrella counterexample is instructive — umbrella apps *appear* to have per-app deps but Mix actually resolves them into a single lockfile at the umbrella root. Per-package isolation on BEAM is an illusion; top-level aggregation is the only correct approach.
+- **The chosen design's operator cost** (bundled rebar3 updates, generated artifacts) is real but bounded — rebar3 is mature and releases infrequently. The split path limits rebar3 exposure to packages that opt into hex deps.
 
 ## Alternatives Considered
 
-### A: Split Compilation Path (build worker for simple .erl, rebar3 only for hex deps)
+### ~~A: Split Compilation Path~~ → Adopted (see Section 4)
 
-Use the build worker's `compile:file/2` for packages without hex deps, and rebar3 only when `[native.dependencies]` is present.
+Use the build worker's `compile:file/2` for packages without hex deps, and rebar3 only when `[native.dependencies]` is present. This is the same split Gleam uses in production — `compile:file/2` via escript for own packages, rebar3 only for non-Gleam hex deps.
 
-Rejected because:
-- Two code paths to implement, test, and maintain
-- Behavioural differences between the paths (include handling, incremental rebuilds) would surface as subtle bugs
-- Bundling rebar3 eliminates the external dependency concern that motivated the split
-- rebar3 handles include paths, code paths, and incremental rebuilds for free
+Initially considered rejected due to two-code-path maintenance concerns. Adopted after recognising that:
+- The build worker already has `compile:file/2` infrastructure
+- Gleam validates this exact split in production
+- The REPL benefits significantly — `compile:file/2` is near-instant vs ~3s rebar3 startup overhead
+- The decision point is static (`[native.dependencies]` present or not), not heuristic
 
 ### B: Mixed src/ Directory (Gleam Model)
 
@@ -468,9 +481,9 @@ Rejected because:
 Each package runs its own rebar3 resolution independently, with separate `_build` directories.
 
 Rejected because:
-- BEAM has a flat module namespace — two versions of `gun` cannot coexist at runtime
-- The last version loaded silently wins, causing hard-to-debug failures
-- Every other BEAM build tool (Mix, rebar3, Gleam) does top-level resolution for this reason
+- BEAM has a flat module namespace — only one version of any module can be loaded per VM. There is no classloader hierarchy (JVM/OSGi), no per-caller resolution (Node.js `node_modules`), and no link-time binding (Rust). Two versions of `gun` cannot coexist at runtime; the last loaded silently wins
+- The Elixir umbrella counterexample is misleading — while each umbrella app has its own `mix.exs` declaring deps, Mix resolves all deps across the entire umbrella into a single `mix.lock` at the root. Umbrella apps work *because* Mix does top-level aggregation, not because per-app isolation is viable
+- Every BEAM build tool (Mix, rebar3, Gleam) does top-level resolution for this reason — it's not a design preference, it's a platform constraint
 
 ## Consequences
 
@@ -478,7 +491,7 @@ Rejected because:
 - Enables extracting HTTP, WebSocket, and other stdlib classes into standalone packages
 - Package authors can use the entire hex.pm ecosystem
 - Clean separation: `src/` for Beamtalk, `native/` for Erlang
-- Single compilation path — bundled rebar3 handles all `.erl` compilation uniformly
+- Split compilation path — `compile:file/2` for simple packages (fast), rebar3 for hex deps (comprehensive). Same pattern Gleam uses in production
 - Bundled rebar3 means zero additional setup for users
 - Top-level native dep resolution prevents version conflicts at runtime
 - Follows universal BEAM convention of shipping source
@@ -487,7 +500,7 @@ Rejected because:
 - Bundled rebar3 adds ~1.8MB to the Beamtalk distribution
 - Native module naming collisions are possible (mitigated by convention + build error on collision)
 - Generated `rebar.config` is another artifact to manage in `_build/`
-- Cross-package native dep constraint merging adds complexity to the dependency resolver
+- Two compilation paths to maintain (`compile:file/2` and rebar3), though the decision point is static
 - Cold builds with hex deps are slow (30–120s for first rebar3 invocation with no hex cache) — significantly slower than pure Beamtalk packages
 - Hex deps with rebar plugins, C NIFs, or custom compile hooks may require additional host tooling (`gcc`, `make`, `cmake`) not covered by Beamtalk's install — these are passed through to rebar3 as-is
 - Third-party hex packages enter the workspace's trust boundary with full `erlang:apply/3` reachability — the same supply chain risk accepted by all BEAM ecosystems (see ADR 0058)
@@ -499,30 +512,30 @@ Rejected because:
 
 ## Implementation
 
-### Phase 1: Bundle rebar3 and Native Directory Support
-- Vendor rebar3 escript into `runtime/tools/rebar3`
+### Phase 1: Native Directory Support (compile:file/2 path)
 - Extend `build.rs` to discover `native/*.erl` files
-- Generate `rebar.config` from manifest and invoke bundled rebar3
+- Compile via `compile:file/2` in the build worker (existing infrastructure)
 - Add `native_modules` to `.app` file generation
-- Wire rebar3 output ebin paths into runtime code path
+- Wire output ebin paths into runtime code path
 
-### Phase 2: Native Dependency Resolution
+### Phase 2: Hex Dependencies (rebar3 path)
+- Vendor rebar3 escript into `runtime/tools/rebar3`
 - Extend `manifest.rs` to parse `[native.dependencies]`
-- Implement cross-package constraint collection and merging in `deps/`
+- Generate `rebar.config` from aggregated constraints and invoke bundled rebar3
 - Extend `beamtalk.lock` with `[[native_package]]` entries
-- Add conflict detection with helpful error messages
 - `beamtalk deps update` re-resolves native constraints
 
 ### Phase 3: HTTP Package Extraction
 - Create `packages/http/` with `beamtalk.toml`
 - Move 7 `.bt` classes from `stdlib/src/` to `packages/http/src/`
 - Move 5 `.erl` modules from `runtime/apps/beamtalk_stdlib/src/` to `packages/http/native/`
-- Remove `gun` from runtime `rebar.config` (`cowboy` stays — used by `beamtalk_workspace` for WebSocket REPL)
+- Remove `gun` from runtime `rebar.config` (`cowboy` stays in `runtime/rebar.config` — still needed by `beamtalk_workspace` for the WebSocket REPL server)
 - Update stdlib tests
 
 ### Phase 4: REPL Hot-Loading
-- Extend file watcher to include `native/` directory
-- Hot-load recompiled `.erl` modules via `code:load_file/1`
+- Extend `load-project` to scan `native/` and compile all `.erl` files upfront via `compile:file/2`
+- Extend single-file reload to demand-compile native `.erl` when `native:`/FFI annotation references it
+- Incremental mtime tracking for `native/*.erl` files alongside `.bt` files
 
 ### Affected Components
 - `runtime/tools/rebar3` — bundled rebar3 escript (new)
@@ -537,7 +550,7 @@ Rejected because:
 
 1. Create `packages/http/` with manifest, `.bt` classes, `native/` Erlang modules, and `native/test/` tests
 2. Remove HTTP classes from `stdlib/src/` and backing modules from `runtime/apps/beamtalk_stdlib/src/`
-3. Remove `gun` from `runtime/rebar.config` (`cowboy` stays — used by `beamtalk_workspace` for WebSocket REPL)
+3. Remove `gun` from `runtime/rebar.config` (`cowboy` stays in `runtime/rebar.config` — still needed by `beamtalk_workspace` for the WebSocket REPL server)
 4. Users who depend on HTTP classes add `http` to their `[dependencies]`
 
 ### For existing projects
@@ -546,5 +559,5 @@ No migration needed — this is additive. Projects without `native/` or `[native
 
 ## References
 - Related issues: BT-1153
-- Related ADRs: ADR 0026 (Project Manifest), ADR 0031 (Flat Namespace), ADR 0055 (Erlang-Backed Class Authoring), ADR 0056 (Native Erlang-Backed Actors), ADR 0058 (Platform Security Model), ADR 0070 (Package Namespaces and Dependencies)
+- Related ADRs: ADR 0026 (Project Manifest), ADR 0031 (Flat Namespace), ADR 0055 (Erlang-Backed Class Authoring), ADR 0056 (Native Erlang-Backed Actors), ADR 0058 (Platform Security Model), ADR 0070 (Package Namespaces and Dependencies), ADR 0071 (Class Visibility)
 - Prior art: [Gleam FFI](https://gleam.run/writing-gleam/gleam-toml/), [Mix.Tasks.Compile.Erlang](https://hexdocs.pm/mix/Mix.Tasks.Compile.Erlang.html), [rebar3 dependencies](https://rebar3.org/docs/configuration/dependencies/)
