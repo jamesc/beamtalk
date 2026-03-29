@@ -2506,10 +2506,9 @@ mod tests {
         let config_path = generate_rebar_config(&project_path, &deps).unwrap();
 
         // Config should be in _build/dev/native/
+        let expected_suffix = Utf8PathBuf::from("_build/dev/native/rebar.config");
         assert!(
-            config_path
-                .as_str()
-                .contains("_build/dev/native/rebar.config"),
+            config_path.ends_with(&expected_suffix),
             "Config should live in build tree, got: {config_path}"
         );
     }
