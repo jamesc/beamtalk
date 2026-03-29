@@ -81,6 +81,70 @@ format_modifiers_sealed_and_abstract_test() ->
         )
     ).
 
+%% ADR 0071 Phase 5: internal visibility annotation
+format_modifiers_internal_test() ->
+    ?assertEqual(
+        <<"\n[internal]">>,
+        beamtalk_repl_docs:format_modifiers(
+            #{is_sealed => false, is_abstract => false, is_internal => true}
+        )
+    ).
+
+format_modifiers_internal_and_sealed_test() ->
+    ?assertEqual(
+        <<"\n[internal] [sealed]">>,
+        beamtalk_repl_docs:format_modifiers(
+            #{is_sealed => true, is_abstract => false, is_internal => true}
+        )
+    ).
+
+format_modifiers_internal_and_abstract_test() ->
+    ?assertEqual(
+        <<"\n[internal] [abstract]">>,
+        beamtalk_repl_docs:format_modifiers(
+            #{is_sealed => false, is_abstract => true, is_internal => true}
+        )
+    ).
+
+%% ADR 0071 Phase 5: internal method in format_method_output
+format_method_output_internal_method_test() ->
+    Result = beamtalk_repl_docs:format_method_output(
+        'HttpClient',
+        <<"buildHeaders:">>,
+        'HttpClient',
+        {<<"buildHeaders: request">>, <<"Builds HTTP headers.">>, false, true}
+    ),
+    ?assert(binary:match(Result, <<"== HttpClient >> buildHeaders: ==">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"[internal]">>) =/= nomatch),
+    ?assertEqual(nomatch, binary:match(Result, <<"[sealed]">>)).
+
+format_method_output_internal_and_sealed_method_test() ->
+    Result = beamtalk_repl_docs:format_method_output(
+        'HttpClient',
+        <<"coreImpl:">>,
+        'HttpClient',
+        {<<"coreImpl: data">>, none, true, true}
+    ),
+    ?assert(binary:match(Result, <<"[internal]">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"[sealed]">>) =/= nomatch).
+
+%% ADR 0071 Phase 5: format_method_line tests
+format_method_line_plain_test() ->
+    Result = beamtalk_repl_docs:format_method_line({foo, <<"foo">>, none, false, false}),
+    ?assertEqual(<<"  foo">>, Result).
+
+format_method_line_sealed_test() ->
+    Result = beamtalk_repl_docs:format_method_line({foo, <<"foo">>, none, true, false}),
+    ?assertEqual(<<"  foo [sealed]">>, Result).
+
+format_method_line_internal_test() ->
+    Result = beamtalk_repl_docs:format_method_line({foo, <<"foo">>, none, false, true}),
+    ?assertEqual(<<"  foo [internal]">>, Result).
+
+format_method_line_internal_and_sealed_test() ->
+    Result = beamtalk_repl_docs:format_method_line({foo, <<"foo">>, none, true, true}),
+    ?assertEqual(<<"  foo [internal] [sealed]">>, Result).
+
 %%====================================================================
 %% format_package_provenance tests (BT-1658)
 %%====================================================================
@@ -245,8 +309,8 @@ format_class_output_with_module_doc_test() ->
 
 format_class_output_with_own_methods_test() ->
     OwnDocs = [
-        {'+', <<"+ other">>, <<"Add two numbers.">>, false},
-        {'-', <<"- other">>, none, false}
+        {'+', <<"+ other">>, <<"Add two numbers.">>, false, false},
+        {'-', <<"- other">>, none, false, false}
     ],
     Result = beamtalk_repl_docs:format_class_output(
         'Integer',
@@ -334,8 +398,8 @@ format_class_output_abstract_class_test() ->
 
 format_class_output_sealed_method_test() ->
     OwnDocs = [
-        {'+', <<"+ other">>, none, true},
-        {'-', <<"- other">>, none, false}
+        {'+', <<"+ other">>, none, true, false},
+        {'-', <<"- other">>, none, false, false}
     ],
     Result = beamtalk_repl_docs:format_class_output(
         'Integer',
@@ -387,7 +451,7 @@ format_method_output_own_method_test() ->
         'Integer',
         <<"+">>,
         'Integer',
-        {<<"+ other: Integer -> Integer">>, <<"Adds numbers.">>, false}
+        {<<"+ other: Integer -> Integer">>, <<"Adds numbers.">>, false, false}
     ),
     ?assert(binary:match(Result, <<"== Integer >> + ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"+ other: Integer -> Integer">>) =/= nomatch),
@@ -399,7 +463,7 @@ format_method_output_own_method_test() ->
 
 format_method_output_inherited_method_test() ->
     Result = beamtalk_repl_docs:format_method_output(
-        'Integer', <<"class">>, 'Object', {<<"class">>, <<"Returns the class.">>, false}
+        'Integer', <<"class">>, 'Object', {<<"class">>, <<"Returns the class.">>, false, false}
     ),
     ?assert(binary:match(Result, <<"== Integer >> class ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"(inherited from Object)">>) =/= nomatch),
@@ -407,7 +471,7 @@ format_method_output_inherited_method_test() ->
 
 format_method_output_no_doc_test() ->
     Result = beamtalk_repl_docs:format_method_output(
-        'Counter', <<"increment">>, 'Counter', {<<"increment">>, none, false}
+        'Counter', <<"increment">>, 'Counter', {<<"increment">>, none, false, false}
     ),
     ?assert(binary:match(Result, <<"== Counter >> increment ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"increment">>) =/= nomatch).
@@ -417,7 +481,7 @@ format_method_output_sealed_method_test() ->
         'Integer',
         <<"+">>,
         'Integer',
-        {<<"+ other: Integer -> Integer">>, <<"Adds numbers.">>, true}
+        {<<"+ other: Integer -> Integer">>, <<"Adds numbers.">>, true, false}
     ),
     ?assert(binary:match(Result, <<"== Integer >> + ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"[sealed]">>) =/= nomatch),
@@ -425,14 +489,14 @@ format_method_output_sealed_method_test() ->
 
 format_method_output_signature_with_types_test() ->
     Result = beamtalk_repl_docs:format_method_output(
-        'List', <<"collect:">>, 'List', {<<"collect: block: Block -> List">>, none, false}
+        'List', <<"collect:">>, 'List', {<<"collect: block: Block -> List">>, none, false, false}
     ),
     ?assert(binary:match(Result, <<"== List >> collect: ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"collect: block: Block -> List">>) =/= nomatch).
 
 format_method_output_unary_with_return_type_test() ->
     Result = beamtalk_repl_docs:format_method_output(
-        'List', <<"size">>, 'List', {<<"size -> Integer">>, none, false}
+        'List', <<"size">>, 'List', {<<"size -> Integer">>, none, false, false}
     ),
     ?assert(binary:match(Result, <<"== List >> size ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"size -> Integer">>) =/= nomatch).
@@ -447,7 +511,7 @@ format_method_output_class_method_with_signature_test() ->
         'MyWidget',
         <<"create:">>,
         'MyWidget',
-        {<<"create: name: String -> MyWidget">>, none, false}
+        {<<"create: name: String -> MyWidget">>, none, false, false}
     ),
     ?assert(binary:match(Result, <<"== MyWidget >> create: ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"create: name: String -> MyWidget">>) =/= nomatch).

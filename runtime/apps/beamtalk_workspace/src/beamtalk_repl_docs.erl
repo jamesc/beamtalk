@@ -33,11 +33,12 @@
     format_superclass/1,
     format_modifiers/1,
     format_method_output/4,
+    format_method_line/1,
     format_metaclass_docs/0,
     format_metaclass_method_doc/1,
     metaclass_method_doc/1,
     format_selector_summary/2,
-    format_class_side_output/4,
+    format_class_side_output/5,
     extract_see_also/1,
     alternative_classes/1,
     format_see_also/1,
@@ -60,6 +61,13 @@ format_class_docs(ClassName) ->
                 Superclass = beamtalk_runtime_api:superclass(ClassPid),
                 IsSealed = beamtalk_runtime_api:is_sealed(ClassPid),
                 IsAbstract = beamtalk_runtime_api:is_abstract(ClassPid),
+                %% ADR 0071 Phase 5: Read visibility
+                IsInternal =
+                    try
+                        beamtalk_runtime_api:is_internal(ClassPid)
+                    catch
+                        _:_ -> false
+                    end,
 
                 %% Get class doc from runtime (ADR 0033)
                 ModuleDoc =
@@ -71,13 +79,16 @@ format_class_docs(ClassName) ->
                 %% Walk class hierarchy to collect #{Sel => {DefiningClass, MethodInfo}}
                 Flattened = collect_flattened_methods(ClassName, ClassPid),
 
-                %% Build method listing grouped by defining class
+                %% Build method listing grouped by defining class.
+                %% ADR 0071 Phase 5: Also extract method visibility for annotation.
                 {Own, Inherited} = maps:fold(
                     fun(Selector, {DefiningClass, MethodInfo}, {OwnAcc, InhAcc}) ->
                         case DefiningClass of
                             ClassName ->
                                 MethodSealed = maps:get(is_sealed, MethodInfo, false),
-                                {[{Selector, MethodSealed} | OwnAcc], InhAcc};
+                                MethodInternal =
+                                    maps:get(visibility, MethodInfo, public) =:= internal,
+                                {[{Selector, MethodSealed, MethodInternal} | OwnAcc], InhAcc};
                             _ ->
                                 {OwnAcc, [{Selector, DefiningClass} | InhAcc]}
                         end
@@ -87,10 +98,11 @@ format_class_docs(ClassName) ->
                 ),
 
                 %% Get method signatures and docs from runtime for own methods
-                OwnSelectors = lists:sort([S || {S, _} <- Own]),
-                SealedMap = maps:from_list(Own),
-                OwnDocs = get_method_signatures_with_sealed(
-                    ClassPid, OwnSelectors, SealedMap
+                OwnSelectors = lists:sort([S || {S, _, _} <- Own]),
+                SealedMap = maps:from_list([{S, Sealed} || {S, Sealed, _} <- Own]),
+                InternalMap = maps:from_list([{S, Int} || {S, _, Int} <- Own]),
+                OwnDocs = get_method_signatures_with_modifiers(
+                    ClassPid, OwnSelectors, SealedMap, InternalMap
                 ),
 
                 %% Group inherited by defining class
@@ -100,7 +112,9 @@ format_class_docs(ClassName) ->
                 SeeAlso = build_see_also(ClassName, Superclass, ModuleDoc),
 
                 %% Format the output
-                Modifiers = #{is_sealed => IsSealed, is_abstract => IsAbstract},
+                Modifiers = #{
+                    is_sealed => IsSealed, is_abstract => IsAbstract, is_internal => IsInternal
+                },
                 Output = format_class_output(
                     ClassName,
                     Superclass,
@@ -199,6 +213,14 @@ format_class_docs_class_side(ClassName) ->
             {error, {class_not_found, ClassName}};
         ClassPid ->
             try
+                %% ADR 0071 Phase 5: Read class-level visibility
+                IsInternal =
+                    try
+                        beamtalk_runtime_api:is_internal(ClassPid)
+                    catch
+                        _:_ -> false
+                    end,
+
                 %% User-defined class methods walked up the superclass chain
                 FlatCM = collect_flattened_class_methods(ClassName, ClassPid),
                 {OwnCM, InhCM} = maps:fold(
@@ -226,7 +248,8 @@ format_class_docs_class_side(ClassName) ->
                             )
                     end,
 
-                {ok, format_class_side_output(ClassName, OwnCMSorted, InhCMGrouped, ProtoGrouped)}
+                Modifiers = #{is_internal => IsInternal},
+                {ok, format_class_side_output(ClassName, Modifiers, OwnCMSorted, InhCMGrouped, ProtoGrouped)}
             catch
                 exit:{timeout, _} -> {error, {class_not_found, ClassName}};
                 exit:{noproc, _} -> {error, {class_not_found, ClassName}}
@@ -336,8 +359,9 @@ safe_to_existing_atom(Bin) when is_binary(Bin) ->
     end.
 
 %% @doc Get method doc info from a CompiledMethod map.
-%% Returns {Signature, DocText | none, IsSealed}.
--spec method_doc_info(map(), atom()) -> {binary(), binary() | none, boolean()}.
+%% Returns {Signature, DocText | none, IsSealed, IsInternal}.
+%% ADR 0071 Phase 5: Now includes method-level visibility.
+-spec method_doc_info(map(), atom()) -> {binary(), binary() | none, boolean(), boolean()}.
 method_doc_info(MethodObj, SelectorAtom) ->
     %% Extract doc from __doc__ field
     Doc =
@@ -351,25 +375,30 @@ method_doc_info(MethodObj, SelectorAtom) ->
             nil -> atom_to_binary(SelectorAtom, utf8);
             SigBin when is_binary(SigBin) -> SigBin
         end,
-    %% Extract is_sealed from __method_info__
-    IsSealed =
+    %% Extract is_sealed and visibility from __method_info__
+    {IsSealed, IsInternal} =
         case maps:get('__method_info__', MethodObj, #{}) of
             MethodInfo when is_map(MethodInfo) ->
-                maps:get(is_sealed, MethodInfo, false);
+                {
+                    maps:get(is_sealed, MethodInfo, false),
+                    maps:get(visibility, MethodInfo, public) =:= internal
+                };
             _ ->
-                false
+                {false, false}
         end,
-    {Signature, Doc, IsSealed}.
+    {Signature, Doc, IsSealed, IsInternal}.
 
-%% @doc Get method signatures and docs from runtime for a list of selectors.
--spec get_method_signatures_with_sealed(pid(), [atom()], map()) ->
-    [{atom(), binary(), binary() | none, boolean()}].
-get_method_signatures_with_sealed(ClassPid, Selectors, SealedMap) ->
+%% @doc Get method signatures and docs with both sealed and internal flags.
+%% ADR 0071 Phase 5: Extended version that includes method visibility.
+-spec get_method_signatures_with_modifiers(pid(), [atom()], map(), map()) ->
+    [{atom(), binary(), binary() | none, boolean(), boolean()}].
+get_method_signatures_with_modifiers(ClassPid, Selectors, SealedMap, InternalMap) ->
     lists:map(
         fun(Selector) ->
             {Sig, Doc} = get_method_doc_from_class(ClassPid, Selector),
             IsSealed = maps:get(Selector, SealedMap, false),
-            {Selector, Sig, Doc, IsSealed}
+            IsInternal = maps:get(Selector, InternalMap, false),
+            {Selector, Sig, Doc, IsSealed, IsInternal}
         end,
         Selectors
     ).
@@ -381,7 +410,7 @@ get_method_doc_from_class(ClassPid, Selector) ->
         nil ->
             {atom_to_binary(Selector, utf8), none};
         MethodObj when is_map(MethodObj) ->
-            {Sig, Doc, _IsSealed} = method_doc_info(MethodObj, Selector),
+            {Sig, Doc, _IsSealed, _IsInternal} = method_doc_info(MethodObj, Selector),
             {Sig, Doc}
     end.
 
@@ -485,12 +514,13 @@ group_by_class(Methods) ->
     ).
 
 %% @doc Format the complete class documentation output.
+%% ADR 0071 Phase 5: OwnDocs may be 5-tuples with internal flag.
 -spec format_class_output(
     atom(),
     atom() | none,
     map(),
     binary() | none,
-    [{atom(), binary(), binary() | none, boolean()}],
+    [{atom(), binary(), binary() | none, boolean(), boolean()}],
     [{atom(), [atom()]}],
     [{atom(), binary()}]
 ) -> binary().
@@ -518,17 +548,14 @@ format_class_output(
             Text -> iolist_to_binary([<<"\n">>, Text])
         end,
 
-        %% Own methods
+        %% Own methods — ADR 0071 Phase 5: annotate [internal] and [sealed]
         case OwnDocs of
             [] ->
                 <<>>;
             _ ->
                 MethodLines = lists:map(
-                    fun
-                        ({_Sel, Sig, _Doc, true}) ->
-                            iolist_to_binary([<<"  ">>, Sig, <<" [sealed]">>]);
-                        ({_Sel, Sig, _Doc, false}) ->
-                            iolist_to_binary([<<"  ">>, Sig])
+                    fun(MethodEntry) ->
+                        format_method_line(MethodEntry)
                     end,
                     OwnDocs
                 ),
@@ -575,16 +602,47 @@ format_class_output(
 format_superclass(none) -> [];
 format_superclass(Superclass) -> [<<" < ">>, atom_to_binary(Superclass, utf8)].
 
-%% @doc Format class modifiers (sealed/abstract) for display.
+%% @doc Format class modifiers (sealed/abstract/internal) for display.
+%% ADR 0071 Phase 5: Include [internal] annotation when present.
 -spec format_modifiers(map()) -> binary().
-format_modifiers(#{is_sealed := true, is_abstract := true}) ->
-    <<"\n[sealed] [abstract]">>;
-format_modifiers(#{is_sealed := true}) ->
-    <<"\n[sealed]">>;
-format_modifiers(#{is_abstract := true}) ->
-    <<"\n[abstract]">>;
-format_modifiers(_) ->
-    <<>>.
+format_modifiers(Modifiers) ->
+    Tags = lists:filter(fun(T) -> T =/= <<>> end, [
+        case maps:get(is_internal, Modifiers, false) of
+            true -> <<"[internal]">>;
+            false -> <<>>
+        end,
+        case maps:get(is_sealed, Modifiers, false) of
+            true -> <<"[sealed]">>;
+            false -> <<>>
+        end,
+        case maps:get(is_abstract, Modifiers, false) of
+            true -> <<"[abstract]">>;
+            false -> <<>>
+        end
+    ]),
+    case Tags of
+        [] -> <<>>;
+        _ -> iolist_to_binary([<<"\n">>, lists:join(<<" ">>, Tags)])
+    end.
+
+%% @doc Format a single method line in the class doc method listing.
+%% ADR 0071 Phase 5: Handles 5-tuple with both sealed and internal flags.
+-spec format_method_line({atom(), binary(), binary() | none, boolean(), boolean()}) -> binary().
+format_method_line({_Sel, Sig, _Doc, IsSealed, IsInternal}) ->
+    Tags = lists:filter(fun(T) -> T =/= <<>> end, [
+        case IsInternal of
+            true -> <<"[internal]">>;
+            false -> <<>>
+        end,
+        case IsSealed of
+            true -> <<"[sealed]">>;
+            false -> <<>>
+        end
+    ]),
+    case Tags of
+        [] -> iolist_to_binary([<<"  ">>, Sig]);
+        _ -> iolist_to_binary([<<"  ">>, Sig, <<" ">>, lists:join(<<" ">>, Tags)])
+    end.
 
 %% @doc Format package provenance for a class (ADR 0070 Phase 5, BT-1658).
 %%
@@ -763,9 +821,11 @@ collect_chain_methods(SuperName, Depth) ->
     atom(),
     binary(),
     atom(),
-    {binary(), binary() | none, boolean()}
+    {binary(), binary() | none, boolean(), boolean()}
 ) -> binary().
-format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText, IsSealed}) ->
+format_method_output(
+    ClassName, SelectorBin, DefiningClass, {Signature, DocText, IsSealed, IsInternal}
+) ->
     Header = iolist_to_binary([
         <<"== ">>,
         atom_to_binary(ClassName, utf8),
@@ -773,10 +833,21 @@ format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText,
         SelectorBin,
         <<" ==">>
     ]),
-    SealedLine =
-        case IsSealed of
-            true -> <<"\n[sealed]">>;
+    %% ADR 0071 Phase 5: Show [internal] and [sealed] modifier tags
+    ModifierTags = lists:filter(fun(T) -> T =/= <<>> end, [
+        case IsInternal of
+            true -> <<"[internal]">>;
             false -> <<>>
+        end,
+        case IsSealed of
+            true -> <<"[sealed]">>;
+            false -> <<>>
+        end
+    ]),
+    SealedLine =
+        case ModifierTags of
+            [] -> <<>>;
+            _ -> iolist_to_binary([<<"\n">>, lists:join(<<" ">>, ModifierTags)])
         end,
     Inherited =
         case DefiningClass of
@@ -815,12 +886,18 @@ format_selector_summary(Count, Selectors) ->
     end.
 
 %% @doc Format the class-object side documentation output.
--spec format_class_side_output(atom(), [atom()], [{atom(), [atom()]}], [{atom(), [atom()]}]) ->
+-spec format_class_side_output(atom(), map(), [atom()], [{atom(), [atom()]}], [{atom(), [atom()]}]) ->
     binary().
-format_class_side_output(ClassName, OwnCM, InhCMGrouped, ProtoGrouped) ->
+format_class_side_output(ClassName, Modifiers, OwnCM, InhCMGrouped, ProtoGrouped) ->
     ClassNameBin = atom_to_binary(ClassName, utf8),
     Parts = [
         iolist_to_binary([<<"== ">>, ClassNameBin, <<" class ==">>]),
+
+        %% ADR 0071 Phase 5: Show [internal] modifier on class-side docs
+        case maps:get(is_internal, Modifiers, false) of
+            true -> <<"[internal]">>;
+            false -> <<>>
+        end,
 
         case OwnCM of
             [] ->
