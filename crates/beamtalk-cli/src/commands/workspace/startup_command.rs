@@ -220,7 +220,6 @@ mod tests {
             runtime_ebin: beam_dir.clone(),
             workspace_ebin: beam_dir.clone(),
             compiler_ebin: beam_dir.clone(),
-            jsx_ebin: beam_dir.clone(),
             yamerl_ebin: beam_dir.clone(),
             cowboy_ebin: beam_dir.clone(),
             cowlib_ebin: beam_dir.clone(),

@@ -201,7 +201,7 @@ prepare_for_encode(Other) ->
 
 %% @private
 %% @doc Pretty-print a compact JSON binary with 2-space indentation.
-%% Replaces jsx:prettify/1 without requiring json:format/1 (OTP 27.1+).
+%% Custom JSON pretty-printer (does not require json:format/1 from OTP 27.1+).
 -spec prettify(binary()) -> binary().
 prettify(Bin) ->
     prettify(Bin, 0, false, []).

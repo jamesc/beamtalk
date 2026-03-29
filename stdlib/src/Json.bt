@@ -4,8 +4,8 @@
 /// Json — JSON encoding and decoding.
 ///
 /// Provides class methods for parsing JSON strings into Beamtalk values
-/// and generating JSON strings from Beamtalk values. Uses `jsx` as the
-/// underlying JSON library.
+/// and generating JSON strings from Beamtalk values. Uses the OTP `json`
+/// module (OTP 27+) as the underlying JSON library.
 ///
 /// ## Type Mapping
 ///
