@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Concrete subclass of InternalAbstractBase for testing (BT-1705, ADR 0071)
+
+InternalAbstractBase subclass: InternalAbstractImpl
+  state: label = "impl"
+
+  compute => 99

@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Public class with internal methods for testing method-level visibility (BT-1705, ADR 0071)
+
+Actor subclass: InternalMethodService
+  state: count = 0
+
+  // Public methods (default visibility)
+  getCount => self.count
+
+  doWork =>
+    self.count := self.count + 1
+    self helper
+
+  // Internal methods — implementation details
+  internal helper => self.count * 10
+
+  internal buildKey: prefix => prefix ++ ":" ++ self.count asString
