@@ -238,6 +238,9 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         .map_or_else(|| "nil".to_string(), |s| s.name.to_string());
 
     let mut modifiers: Vec<Document<'static>> = Vec::new();
+    if class.is_internal {
+        modifiers.push(Document::Str("internal "));
+    }
     if class.is_abstract {
         modifiers.push(Document::Str("abstract "));
     }
@@ -681,7 +684,13 @@ fn unparse_method_signature(method: &MethodDefinition) -> Document<'static> {
         nil()
     };
 
-    docvec![sealed, sig, return_type, " =>"]
+    let internal = if method.is_internal {
+        Document::Str("internal ")
+    } else {
+        nil()
+    };
+
+    docvec![internal, sealed, sig, return_type, " =>"]
 }
 
 fn unparse_keyword_part(part: &KeywordPart) -> Document<'static> {

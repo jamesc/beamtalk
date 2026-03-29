@@ -1,0 +1,110 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1705: E2E tests for internal visibility modifier (ADR 0071 Phase 4 validation)
+//
+// Exercises all visibility scenarios:
+//  1. Internal class declaration parses and compiles
+//  2. Internal method declaration parses and compiles
+//  3. Modifier combinations: internal sealed, internal abstract, internal typed
+//  4. __beamtalk_meta/0 includes visibility => internal for internal classes
+//  5. __beamtalk_meta/0 includes per-method visibility
+//  6. Internal classes/methods work normally within the same package
+//  7. Method named 'internal' (disambiguation) still works
+
+TestCase subclass: InternalVisibilityTest
+
+  // --- Internal class works within the same package ---
+
+  testInternalClassSpawnAndOperate =>
+    h := InternalHelper spawn
+    self assert: h getValue equals: 0
+    self assert: h increment equals: 1
+    self assert: h getValue equals: 1
+
+  testInternalClassSecretMethod =>
+    h := InternalHelper spawn
+    self assert: h secret equals: 42
+
+  // --- Internal method on public class works within the same package ---
+
+  testInternalMethodCallable =>
+    svc := InternalMethodService spawn
+    self assert: svc getCount equals: 0
+    self assert: svc doWork equals: 10
+    self assert: svc getCount equals: 1
+
+  testInternalHelperMethodDirectly =>
+    svc := InternalMethodService spawn
+    // Increment count first so helper returns non-zero
+    svc doWork
+    self assert: svc helper equals: 10
+
+  testInternalKeywordMethodDirectly =>
+    svc := InternalMethodService spawn
+    self assert: (svc buildKey: "test") equals: "test:0"
+
+  // --- Modifier combinations ---
+
+  testInternalSealedClass =>
+    c := InternalSealedCache spawn
+    self assert: c retrieve equals: 0
+    c store: 99
+    self assert: c retrieve equals: 99
+
+  testInternalAbstractClassWithSubclass =>
+    impl := InternalAbstractImpl spawn
+    self assert: impl compute equals: 99
+    self assert: impl getLabel equals: "base"
+
+  testInternalTypedClass =>
+    cfg := InternalTypedConfig spawn
+    self assert: cfg getSetting equals: 0
+    self assert: (cfg setSetting: 42) equals: 42
+    self assert: cfg getSetting equals: 42
+
+  // --- Method named 'internal' (disambiguation) ---
+
+  testMethodNamedInternal =>
+    // A bare `internal => ...` defines a method NAMED 'internal', not a modifier
+    svc := InternalDisambigService spawn
+    self assert: svc internal equals: 7
+    self assert: svc getValue equals: 7
+
+  testMethodNamedInternalRespondsTo =>
+    self assert: (InternalDisambigService canUnderstand: #internal)
+
+  // --- Class-level __beamtalk_meta/0 visibility ---
+
+  testInternalClassMetaVisibility =>
+    // Access __beamtalk_meta/0 on the internal class's BEAM module
+    meta := Erlang erlang apply: #'bt@internal_helper' module: #'__beamtalk_meta' args: #()
+    self assert: (meta at: #visibility) equals: #internal
+
+  testPublicClassMetaVisibility =>
+    // Public class (InternalMethodService) should have visibility => public
+    meta := Erlang erlang apply: #'bt@internal_method_service' module: #'__beamtalk_meta' args: #()
+    self assert: (meta at: #visibility) equals: #public
+
+  testInternalSealedClassMetaVisibility =>
+    meta := Erlang erlang apply: #'bt@internal_sealed_cache' module: #'__beamtalk_meta' args: #()
+    self assert: (meta at: #visibility) equals: #internal
+
+  // --- Per-method visibility in __beamtalk_meta/0 ---
+
+  testInternalMethodMetaVisibility =>
+    meta := Erlang erlang apply: #'bt@internal_method_service' module: #'__beamtalk_meta' args: #()
+    methodInfo := meta at: #method_info
+    // The 'helper' method should be marked internal
+    helperInfo := methodInfo at: #helper
+    self assert: (helperInfo at: #visibility) equals: #internal
+    // The 'getCount' method should be public (default)
+    getCountInfo := methodInfo at: #getCount
+    self assert: (getCountInfo at: #visibility) equals: #public
+
+  testDisambiguationMethodNotMarkedInternal =>
+    meta := Erlang erlang apply: #'bt@internal_disambig_service' module: #'__beamtalk_meta' args: #()
+    methodInfo := meta at: #method_info
+    // The method NAMED 'internal' should have visibility => public (it is NOT an internal method)
+    internalInfo := methodInfo at: #internal
+    self assert: (internalInfo at: #visibility) equals: #public

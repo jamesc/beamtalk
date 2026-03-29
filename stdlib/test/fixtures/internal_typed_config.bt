@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Internal typed class for testing modifier combinations (BT-1705, ADR 0071)
+
+internal typed Actor subclass: InternalTypedConfig
+  state: setting :: Integer = 0
+
+  getSetting -> Integer => self.setting
+
+  setSetting: val :: Integer -> Integer =>
+    self.setting := val
