@@ -1259,6 +1259,16 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         for dep_ebin in super::deps::collect_dep_ebin_paths(pkg_root) {
             pipeline.package_ebin_dirs.push(dep_ebin);
         }
+
+        // ADR 0072: Add native Erlang ebin to code path if present
+        let native_ebin = pkg_root
+            .join("_build")
+            .join("dev")
+            .join("native")
+            .join("ebin");
+        if native_ebin.exists() {
+            pipeline.package_ebin_dirs.push(native_ebin);
+        }
     }
 
     Ok(())

@@ -252,6 +252,17 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
                 code_paths.push(dep_ebin.into_std_path_buf());
             }
 
+            // ADR 0072: Add native Erlang ebin to code path if present.
+            // build() already compiled native/*.erl; add their output dir.
+            let native_ebin = project_root_utf8
+                .join("_build")
+                .join("dev")
+                .join("native")
+                .join("ebin");
+            if native_ebin.exists() {
+                code_paths.push(native_ebin.into_std_path_buf());
+            }
+
             code_paths
         }
         Err(e) => {
