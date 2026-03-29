@@ -252,7 +252,7 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
                 code_paths.push(dep_ebin.into_std_path_buf());
             }
 
-            // ADR 0072: Add native Erlang ebin to code path if present.
+            // ADR 0072: Add native Erlang ebin to code path if present (Path A).
             // build() already compiled native/*.erl; add their output dir.
             let native_ebin = project_root_utf8
                 .join("_build")
@@ -261,6 +261,12 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
                 .join("ebin");
             if native_ebin.exists() {
                 code_paths.push(native_ebin.into_std_path_buf());
+            }
+
+            // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths (Path B).
+            let rebar_base_dir = project_root_utf8.join("_build").join("dev").join("native");
+            for ebin in crate::commands::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
+                code_paths.push(ebin.into_std_path_buf());
             }
 
             code_paths

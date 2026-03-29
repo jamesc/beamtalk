@@ -347,7 +347,7 @@ fn run_package_as_otp_application(
         extra_code_paths.push(dep_ebin.into_std_path_buf());
     }
 
-    // ADR 0072: Add native Erlang ebin to code path if present
+    // ADR 0072: Add native Erlang ebin to code path if present (Path A)
     let native_ebin_dir: PathBuf = project_root
         .join("_build")
         .join("dev")
@@ -356,6 +356,12 @@ fn run_package_as_otp_application(
         .into_std_path_buf();
     if native_ebin_dir.exists() {
         extra_code_paths.push(native_ebin_dir);
+    }
+
+    // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
+    let rebar_base_dir = project_root.join("_build").join("dev").join("native");
+    for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
+        extra_code_paths.push(ebin.into_std_path_buf());
     }
 
     let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
