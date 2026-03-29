@@ -1179,7 +1179,7 @@ mod tests {
         assert_eq!(
             w0401.len(),
             1,
-            "Expected shadow warning shadow warning, got: {w0401:?}"
+            "Expected shadow warning, got: {w0401:?}"
         );
         assert!(w0401[0].message.contains("helper"));
         assert!(w0401[0].message.contains("Parent"));
