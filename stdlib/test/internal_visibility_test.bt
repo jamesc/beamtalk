@@ -15,7 +15,6 @@
 TestCase subclass: InternalVisibilityTest
 
   // --- Internal class works within the same package ---
-
   testInternalClassSpawnAndOperate =>
     h := InternalHelper spawn
     self assert: h getValue equals: 0
@@ -27,7 +26,6 @@ TestCase subclass: InternalVisibilityTest
     self assert: h secret equals: 42
 
   // --- Internal method on public class works within the same package ---
-
   testInternalMethodCallable =>
     svc := InternalMethodService spawn
     self assert: svc getCount equals: 0
@@ -45,7 +43,6 @@ TestCase subclass: InternalVisibilityTest
     self assert: (svc buildKey: "test") equals: "test:0"
 
   // --- Modifier combinations ---
-
   testInternalSealedClass =>
     c := InternalSealedCache spawn
     self assert: c retrieve equals: 0
@@ -64,7 +61,6 @@ TestCase subclass: InternalVisibilityTest
     self assert: cfg getSetting equals: 42
 
   // --- Method named 'internal' (disambiguation) ---
-
   testMethodNamedInternal =>
     // A bare `internal => ...` defines a method NAMED 'internal', not a modifier
     svc := InternalDisambigService spawn
@@ -75,25 +71,35 @@ TestCase subclass: InternalVisibilityTest
     self assert: (InternalDisambigService canUnderstand: #internal)
 
   // --- Class-level __beamtalk_meta/0 visibility ---
-
   testInternalClassMetaVisibility =>
     // Access __beamtalk_meta/0 on the internal class's BEAM module
-    meta := Erlang erlang apply: #'bt@internal_helper' module: #'__beamtalk_meta' args: #()
+    meta := Erlang erlang
+      apply: #'bt@internal_helper'
+      module: #__beamtalk_meta
+      args: #()
     self assert: (meta at: #visibility) equals: #internal
 
   testPublicClassMetaVisibility =>
     // Public class (InternalMethodService) should have visibility => public
-    meta := Erlang erlang apply: #'bt@internal_method_service' module: #'__beamtalk_meta' args: #()
+    meta := Erlang erlang
+      apply: #'bt@internal_method_service'
+      module: #__beamtalk_meta
+      args: #()
     self assert: (meta at: #visibility) equals: #public
 
   testInternalSealedClassMetaVisibility =>
-    meta := Erlang erlang apply: #'bt@internal_sealed_cache' module: #'__beamtalk_meta' args: #()
+    meta := Erlang erlang
+      apply: #'bt@internal_sealed_cache'
+      module: #__beamtalk_meta
+      args: #()
     self assert: (meta at: #visibility) equals: #internal
 
   // --- Per-method visibility in __beamtalk_meta/0 ---
-
   testInternalMethodMetaVisibility =>
-    meta := Erlang erlang apply: #'bt@internal_method_service' module: #'__beamtalk_meta' args: #()
+    meta := Erlang erlang
+      apply: #'bt@internal_method_service'
+      module: #__beamtalk_meta
+      args: #()
     methodInfo := meta at: #method_info
     // The 'helper' method should be marked internal
     helperInfo := methodInfo at: #helper
@@ -103,7 +109,10 @@ TestCase subclass: InternalVisibilityTest
     self assert: (getCountInfo at: #visibility) equals: #public
 
   testDisambiguationMethodNotMarkedInternal =>
-    meta := Erlang erlang apply: #'bt@internal_disambig_service' module: #'__beamtalk_meta' args: #()
+    meta := Erlang erlang
+      apply: #'bt@internal_disambig_service'
+      module: #__beamtalk_meta
+      args: #()
     methodInfo := meta at: #method_info
     // The method NAMED 'internal' should have visibility => public (it is NOT an internal method)
     internalInfo := methodInfo at: #internal

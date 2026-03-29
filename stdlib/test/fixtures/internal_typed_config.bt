@@ -8,5 +8,4 @@ internal typed Actor subclass: InternalTypedConfig
 
   getSetting -> Integer => self.setting
 
-  setSetting: val :: Integer -> Integer =>
-    self.setting := val
+  setSetting: val :: Integer -> Integer => self.setting := val

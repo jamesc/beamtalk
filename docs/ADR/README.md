@@ -96,6 +96,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Accepted \| Implemented | 2026-03-21 |
 | [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Accepted | 2026-03-24 |
 | [0071](0071-class-visibility-internal-modifier.md) | Class Visibility — `internal` Modifier for Package-Scoped Access Control | Proposed | 2026-03-28 |
+| [0072](0072-user-erlang-sources-in-packages.md) | User Erlang Sources in Beamtalk Packages | Proposed | 2026-03-29 |
 
 ## Creating New ADRs
 
