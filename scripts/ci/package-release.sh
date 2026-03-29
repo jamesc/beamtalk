@@ -22,7 +22,7 @@ VERSION="${1:?Usage: package-release.sh <version> <platform>}"
 PLATFORM="${2:?Usage: package-release.sh <version> <platform>}"
 
 BINARIES=(beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp)
-OTP_APPS=(beamtalk_runtime beamtalk_workspace beamtalk_compiler beamtalk_stdlib jsx cowboy cowlib ranch gun yamerl)
+OTP_APPS=(beamtalk_runtime beamtalk_workspace beamtalk_compiler beamtalk_stdlib cowboy cowlib ranch gun yamerl telemetry telemetry_poller)
 
 if [ "${PLATFORM}" = "windows-x86_64" ]; then
     ARCHIVE="beamtalk-${VERSION}-${PLATFORM}.zip"

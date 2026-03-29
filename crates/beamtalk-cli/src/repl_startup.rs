@@ -45,8 +45,6 @@ pub struct BeamPaths {
     pub workspace_ebin: PathBuf,
     /// Path to the `beamtalk_compiler` application's `ebin/` directory.
     pub compiler_ebin: PathBuf,
-    /// Path to the `jsx` JSON library's `ebin/` directory.
-    pub jsx_ebin: PathBuf,
     /// Path to the `yamerl` YAML library's `ebin/` directory (BT-1122).
     pub yamerl_ebin: PathBuf,
     /// Path to the `beamtalk_stdlib` application's `ebin/` directory.
@@ -88,7 +86,6 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
                 runtime_ebin: build_lib_dir.join("beamtalk_runtime/ebin"),
                 workspace_ebin: build_lib_dir.join("beamtalk_workspace/ebin"),
                 compiler_ebin: build_lib_dir.join("beamtalk_compiler/ebin"),
-                jsx_ebin: build_lib_dir.join("jsx/ebin"),
                 yamerl_ebin: build_lib_dir.join("yamerl/ebin"),
                 cowboy_ebin: build_lib_dir.join("cowboy/ebin"),
                 cowlib_ebin: build_lib_dir.join("cowlib/ebin"),
@@ -108,7 +105,6 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
                 runtime_ebin: lib_dir.join("beamtalk_runtime/ebin"),
                 workspace_ebin: lib_dir.join("beamtalk_workspace/ebin"),
                 compiler_ebin: lib_dir.join("beamtalk_compiler/ebin"),
-                jsx_ebin: lib_dir.join("jsx/ebin"),
                 yamerl_ebin: lib_dir.join("yamerl/ebin"),
                 cowboy_ebin: lib_dir.join("cowboy/ebin"),
                 cowlib_ebin: lib_dir.join("cowlib/ebin"),
@@ -270,7 +266,6 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
         &paths.runtime_ebin,
         &paths.workspace_ebin,
         &paths.compiler_ebin,
-        &paths.jsx_ebin,
         &paths.yamerl_ebin,
         &paths.cowboy_ebin,
         &paths.cowlib_ebin,
@@ -519,10 +514,6 @@ mod tests {
             PathBuf::from("/rt/_build/default/lib/beamtalk_compiler/ebin")
         );
         assert_eq!(
-            paths.jsx_ebin,
-            PathBuf::from("/rt/_build/default/lib/jsx/ebin")
-        );
-        assert_eq!(
             paths.yamerl_ebin,
             PathBuf::from("/rt/_build/default/lib/yamerl/ebin")
         );
@@ -564,8 +555,8 @@ mod tests {
     fn beam_pa_args_alternates_flag_and_path() {
         let paths = beam_paths(Path::new("/rt"));
         let args = beam_pa_args(&paths);
-        // Should be 26 elements: 13 dirs × 2 (flag + path)
-        assert_eq!(args.len(), 26);
+        // Should be 24 elements: 12 dirs × 2 (flag + path)
+        assert_eq!(args.len(), 24);
         for i in (0..args.len()).step_by(2) {
             assert_eq!(args[i], "-pa");
         }
@@ -588,10 +579,6 @@ mod tests {
         assert_eq!(
             paths.compiler_ebin,
             PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_compiler/ebin")
-        );
-        assert_eq!(
-            paths.jsx_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/jsx/ebin")
         );
         assert_eq!(
             paths.yamerl_ebin,
@@ -634,7 +621,7 @@ mod tests {
     #[test]
     fn beam_paths_dev_uses_build_dir() {
         let paths = beam_paths_for_layout(Path::new("/rt"), RuntimeLayout::Dev);
-        // Dev layout uses _build/default/lib/ for runtime/workspace/jsx
+        // Dev layout uses _build/default/lib/ for runtime/workspace/etc.
         assert_eq!(
             paths.runtime_ebin,
             PathBuf::from("/rt/_build/default/lib/beamtalk_runtime/ebin")
