@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Class with a method named 'internal' for disambiguation testing (BT-1705, ADR 0071)
+// A bare `internal => ...` defines a unary method named `internal`, not a modifier.
+
+Actor subclass: InternalDisambigService
+  state: value = 7
+
+  // This is a method NAMED 'internal', not an internal method
+  internal => self.value
+
+  getValue => self.value

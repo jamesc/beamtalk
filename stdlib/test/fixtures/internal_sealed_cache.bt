@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Internal sealed class for testing modifier combinations (BT-1705, ADR 0071)
+
+internal sealed Actor subclass: InternalSealedCache
+  state: data = 0
+
+  store: val => self.data := val
+
+  retrieve => self.data
