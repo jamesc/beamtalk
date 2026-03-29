@@ -115,13 +115,14 @@ Naming: `[native.dependencies]` rather than `[erlang.dependencies]` because:
 
 ```
 Phase 1: Hex deps (if [native.dependencies] present)
-  → Generate _build/dev/rebar.config from beamtalk.toml
-  → Run rebar3 compile in _build/dev/
-  → Output: _build/dev/native_deps/lib/{dep}/ebin/*.beam
+  → Generate _build/dev/native_deps/rebar.config from beamtalk.toml
+  → Run REBAR_BASE_DIR=. rebar3 compile in _build/dev/native_deps/
+  → Output: _build/dev/native_deps/default/lib/{dep}/ebin/*.beam
 
 Phase 2: Native .erl files (if native/ directory exists)
   → Compile via extended build worker port (new compile:file/2 support)
-  → Include paths: native/include/, hex dep ebin dirs
+  → Code path: hex dep ebin dirs added via code:add_patha/1
+  → Include paths: native/include/, hex dep include dirs
   → Output: _build/dev/ebin/*.beam
 
 Phase 3: Beamtalk .bt files (existing pipeline)
@@ -158,15 +159,21 @@ compile:file("native/beamtalk_http_router.erl",
    {i, "native/include/"}]).
 ```
 
-For packages **with** hex deps, the include and code paths are extended:
+For packages **with** hex deps, the build worker must set up both the **Erlang code path** (for behaviours, parse transforms, and `-include_lib`) and **include paths** before compiling:
 
 ```erlang
+%% Add hex dep ebin dirs to code path (for behaviours, parse transforms, -include_lib)
+code:add_patha("_build/dev/native_deps/default/lib/gun/ebin"),
+code:add_patha("_build/dev/native_deps/default/lib/cowboy/ebin"),
+code:add_patha("_build/dev/native_deps/default/lib/ranch/ebin"),
+
+%% Compile with include paths
 compile:file("native/beamtalk_http.erl",
   [report_errors, report_warnings, debug_info,
    {outdir, "_build/dev/ebin/"},
    {i, "native/include/"},
-   {i, "_build/dev/native_deps/lib/gun/include/"},
-   {i, "_build/dev/native_deps/lib/cowboy/include/"}]).
+   {i, "_build/dev/native_deps/default/lib/gun/include/"},
+   {i, "_build/dev/native_deps/default/lib/cowboy/include/"}]).
 ```
 
 **When rebar3 is not needed:**
@@ -190,9 +197,9 @@ At runtime, `beamtalk` ensures all necessary ebin directories are on the code pa
 
 ```
 -pa _build/dev/ebin/                                    # package .beam files (bt + erl)
--pa _build/dev/native_deps/lib/gun/ebin/                # hex dep: gun
--pa _build/dev/native_deps/lib/cowboy/ebin/              # hex dep: cowboy
--pa _build/dev/native_deps/lib/ranch/ebin/               # hex dep: ranch (transitive)
+-pa _build/dev/native_deps/default/lib/gun/ebin/         # hex dep: gun
+-pa _build/dev/native_deps/default/lib/cowboy/ebin/      # hex dep: cowboy
+-pa _build/dev/native_deps/default/lib/ranch/ebin/       # hex dep: ranch (transitive)
 -pa {beamtalk_runtime_ebin}                              # core runtime
 ```
 
