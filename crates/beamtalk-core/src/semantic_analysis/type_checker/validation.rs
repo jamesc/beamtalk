@@ -243,7 +243,7 @@ impl TypeChecker {
         }
 
         let message: EcoString = format!(
-            "error[E0403]: Method '{selector}' is internal to package '{method_package}' and cannot be called from '{caller_package}'"
+            "Method '{selector}' is internal to package '{method_package}' and cannot be called from '{caller_package}'"
         )
         .into();
         let defined_in = &method.defined_in;

@@ -7485,12 +7485,12 @@ Base subclass: Child
         let e0403_errors: Vec<_> = checker
             .diagnostics()
             .iter()
-            .filter(|d| d.message.contains("E0403"))
+            .filter(|d| d.message.contains("is internal to package"))
             .collect();
         assert_eq!(
             e0403_errors.len(),
             1,
-            "Expected E0403 for cross-package internal method send, got: {e0403_errors:?}"
+            "Expected error for cross-package internal method send, got: {e0403_errors:?}"
         );
         assert!(e0403_errors[0].message.contains("buildHeaders:"));
         assert!(e0403_errors[0].message.contains("http"));
@@ -7513,11 +7513,11 @@ Base subclass: Child
         let e0403_errors: Vec<_> = checker
             .diagnostics()
             .iter()
-            .filter(|d| d.message.contains("E0403"))
+            .filter(|d| d.message.contains("is internal to package"))
             .collect();
         assert!(
             e0403_errors.is_empty(),
-            "Same-package send to internal method should not emit E0403, got: {e0403_errors:?}"
+            "Same-package send to internal method should not emit internal method error, got: {e0403_errors:?}"
         );
     }
 
@@ -7531,11 +7531,11 @@ Base subclass: Child
         let e0403_errors: Vec<_> = checker
             .diagnostics()
             .iter()
-            .filter(|d| d.message.contains("E0403"))
+            .filter(|d| d.message.contains("is internal to package"))
             .collect();
         assert!(
             e0403_errors.is_empty(),
-            "Public method send should not emit E0403, got: {e0403_errors:?}"
+            "Public method send should not emit internal method error, got: {e0403_errors:?}"
         );
     }
 
@@ -7555,11 +7555,11 @@ Base subclass: Child
         let e0403_errors: Vec<_> = checker
             .diagnostics()
             .iter()
-            .filter(|d| d.message.contains("E0403"))
+            .filter(|d| d.message.contains("is internal to package"))
             .collect();
         assert!(
             e0403_errors.is_empty(),
-            "No package context should skip E0403, got: {e0403_errors:?}"
+            "No package context should skip internal method checks, got: {e0403_errors:?}"
         );
     }
 
@@ -7581,12 +7581,12 @@ Base subclass: Child
         let e0403_errors: Vec<_> = checker
             .diagnostics()
             .iter()
-            .filter(|d| d.message.contains("E0403"))
+            .filter(|d| d.message.contains("is internal to package"))
             .collect();
         assert_eq!(
             e0403_errors.len(),
             1,
-            "Expected E0403 for cross-package internal class method, got: {e0403_errors:?}"
+            "Expected error for cross-package internal class method, got: {e0403_errors:?}"
         );
         assert!(e0403_errors[0].message.contains("internalFactory"));
     }
@@ -7606,11 +7606,11 @@ Base subclass: Child
         let e0403_errors: Vec<_> = checker
             .diagnostics()
             .iter()
-            .filter(|d| d.message.contains("E0403"))
+            .filter(|d| d.message.contains("is internal to package"))
             .collect();
         assert!(
             e0403_errors.is_empty(),
-            "Untyped dynamic send should not emit E0403, got: {e0403_errors:?}"
+            "Untyped dynamic send should not emit internal method error, got: {e0403_errors:?}"
         );
     }
 }

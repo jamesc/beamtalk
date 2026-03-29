@@ -269,7 +269,7 @@ fn check_cross_package_ref(
         diagnostics.push(
             Diagnostic::error(
                 format!(
-                    "error[E0401]: Class '{class_name}' is internal to package '{pkg}' \
+                    "Class '{class_name}' is internal to package '{pkg}' \
                      and cannot be referenced from '{current_pkg}'"
                 ),
                 span,
@@ -478,7 +478,7 @@ fn check_leaked_ref(
     diagnostics.push(
         Diagnostic::error(
             format!(
-                "error[E0402]: Internal class '{type_name}' appears in public signature of '{location}'"
+                "Internal class '{type_name}' appears in public signature of '{location}'"
             ),
             span,
         )
@@ -512,10 +512,9 @@ pub fn check_leaked_method_visibility(
         let class_name = &class.name.name;
 
         // Check each protocol the class might conform to
-        for (proto_name, proto_info) in protocol_registry.protocols() {
+        for (_proto_name, proto_info) in protocol_registry.protocols() {
             // Skip internal protocols — internal method implementing internal protocol is fine
             // (Protocols don't have is_internal yet, so all protocols are public for now)
-            let _ = proto_name;
 
             // Check instance methods
             for req in &proto_info.methods {
@@ -579,7 +578,7 @@ fn check_method_leaked_visibility(
             if conforms {
                 let proto_name = &proto_info.name;
                 let message: EcoString = format!(
-                    "error[E0402]: Internal method '{selector}' on '{class_name}' satisfies public protocol '{proto_name}' — make the method public"
+                    "Internal method '{selector}' on '{class_name}' satisfies public protocol '{proto_name}' — make the method public"
                 ).into();
                 diagnostics.push(
                     Diagnostic::error(message, method.span)
@@ -663,7 +662,7 @@ fn check_shadow_for_method(
 
     let defined_in = &super_method.defined_in;
     let message: EcoString = format!(
-        "warning[W0401]: Method '{selector}' on '{class_name}' shadows internal method from '{defined_in}'"
+        "Method '{selector}' on '{class_name}' shadows internal method from '{defined_in}'"
     )
     .into();
     diagnostics.push(
@@ -694,7 +693,7 @@ fn check_shadow_for_method_class_side(
 
     let defined_in = &super_method.defined_in;
     let message: EcoString = format!(
-        "warning[W0401]: Class method '{selector}' on '{class_name}' shadows internal class method from '{defined_in}'"
+        "Class method '{selector}' on '{class_name}' shadows internal class method from '{defined_in}'"
     )
     .into();
     diagnostics.push(
@@ -763,11 +762,11 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("E0401")
+                && d.message.contains("is internal to package")
                 && d.message.contains("ParserState")
                 && d.message.contains("json")
                 && d.message.contains("my_app")),
-            "Expected E0401 for cross-package superclass ref, got: {diags:?}"
+            "Expected error for cross-package superclass ref, got: {diags:?}"
         );
     }
 
@@ -785,11 +784,11 @@ mod tests {
 
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("E0401"))
+            .filter(|d| d.severity == Severity::Error && d.message.contains("is internal to package"))
             .collect();
         assert!(
             errors.is_empty(),
-            "Expected no E0401 for same-package ref, got: {errors:?}"
+            "Expected no error for same-package ref, got: {errors:?}"
         );
     }
 
@@ -842,9 +841,9 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("E0401")
+                && d.message.contains("is internal to package")
                 && d.message.contains("ParserState")),
-            "Expected E0401 for type annotation ref, got: {diags:?}"
+            "Expected error for type annotation ref, got: {diags:?}"
         );
     }
 
@@ -857,9 +856,9 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("E0401")
+                && d.message.contains("is internal to package")
                 && d.message.contains("ParserState")),
-            "Expected E0401 for return type ref, got: {diags:?}"
+            "Expected error for return type ref, got: {diags:?}"
         );
     }
 
@@ -885,9 +884,9 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("E0401")
+                && d.message.contains("is internal to package")
                 && d.message.contains("ParserState")),
-            "Expected E0401 for state type annotation ref, got: {diags:?}"
+            "Expected error for state type annotation ref, got: {diags:?}"
         );
     }
 
@@ -901,9 +900,9 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("E0401")
+                && d.message.contains("is internal to package")
                 && d.message.contains("ParserState")),
-            "Expected E0401 for class reference in expression, got: {diags:?}"
+            "Expected error for class reference in expression, got: {diags:?}"
         );
     }
 
@@ -917,9 +916,9 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("E0401")
+                && d.message.contains("is internal to package")
                 && d.message.contains("ParserState")),
-            "Expected E0401 for top-level class reference, got: {diags:?}"
+            "Expected error for top-level class reference, got: {diags:?}"
         );
     }
 
@@ -941,10 +940,10 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("E0402")
+                && d.message.contains("public signature") || d.message.contains("satisfies public protocol")
                 && d.message.contains("TokenBuffer")
                 && d.message.contains("Parser >> tokenize:")),
-            "Expected E0402 for leaked return type, got: {diags:?}"
+            "Expected leaked visibility error for leaked return type, got: {diags:?}"
         );
     }
 
@@ -963,10 +962,10 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("E0402")
+                && d.message.contains("public signature") || d.message.contains("satisfies public protocol")
                 && d.message.contains("TokenBuffer")
                 && d.message.contains("Parser >> process:")),
-            "Expected E0402 for leaked param type, got: {diags:?}"
+            "Expected leaked visibility error for leaked param type, got: {diags:?}"
         );
     }
 
@@ -985,10 +984,10 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("E0402")
+                && d.message.contains("public signature") || d.message.contains("satisfies public protocol")
                 && d.message.contains("TokenBuffer")
                 && d.message.contains("Parser")),
-            "Expected E0402 for leaked state type, got: {diags:?}"
+            "Expected leaked visibility error for leaked state type, got: {diags:?}"
         );
     }
 
@@ -1008,11 +1007,11 @@ mod tests {
 
         let leaked: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("E0402"))
+            .filter(|d| d.message.contains("public signature") || d.message.contains("satisfies public protocol"))
             .collect();
         assert!(
             leaked.is_empty(),
-            "Expected no E0402 for internal-on-internal, got: {leaked:?}"
+            "Expected no leaked visibility error for internal-on-internal, got: {leaked:?}"
         );
     }
 
@@ -1032,11 +1031,11 @@ mod tests {
 
         let leaked: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("E0402"))
+            .filter(|d| d.message.contains("public signature") || d.message.contains("satisfies public protocol"))
             .collect();
         assert!(
             leaked.is_empty(),
-            "Expected no E0402 for internal method on public class, got: {leaked:?}"
+            "Expected no leaked visibility error for internal method on public class, got: {leaked:?}"
         );
     }
 
@@ -1166,12 +1165,12 @@ mod tests {
 
         let w0401: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.message.contains("W0401"))
+            .filter(|d| d.message.contains("shadows internal"))
             .collect();
         assert_eq!(
             w0401.len(),
             1,
-            "Expected W0401 shadow warning, got: {w0401:?}"
+            "Expected shadow warning shadow warning, got: {w0401:?}"
         );
         assert!(w0401[0].message.contains("helper"));
         assert!(w0401[0].message.contains("Parent"));
@@ -1223,11 +1222,11 @@ mod tests {
 
         let w0401: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.message.contains("W0401"))
+            .filter(|d| d.message.contains("shadows internal"))
             .collect();
         assert!(
             w0401.is_empty(),
-            "No W0401 for public method override, got: {w0401:?}"
+            "No shadow warning for public method override, got: {w0401:?}"
         );
     }
 
@@ -1322,12 +1321,12 @@ mod tests {
 
         let e0402: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.message.contains("E0402"))
+            .filter(|d| d.message.contains("public signature") || d.message.contains("satisfies public protocol"))
             .collect();
         assert_eq!(
             e0402.len(),
             1,
-            "Expected E0402 for internal method satisfying public protocol, got: {e0402:?}"
+            "Expected leaked visibility error for internal method satisfying public protocol, got: {e0402:?}"
         );
         assert!(e0402[0].message.contains("asString"));
         assert!(e0402[0].message.contains("Printable"));
@@ -1379,11 +1378,11 @@ mod tests {
 
         let e0402: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.message.contains("E0402"))
+            .filter(|d| d.message.contains("public signature") || d.message.contains("satisfies public protocol"))
             .collect();
         assert!(
             e0402.is_empty(),
-            "Public method should not trigger E0402, got: {e0402:?}"
+            "Public method should not trigger leaked visibility error, got: {e0402:?}"
         );
     }
 }
