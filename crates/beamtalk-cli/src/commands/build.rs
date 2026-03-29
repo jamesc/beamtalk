@@ -1953,10 +1953,9 @@ mod tests {
 
         let path = result.unwrap();
         // When running in the dev repo, the path should be the bundled copy
-        let path_str = path.to_string_lossy();
         assert!(
-            path_str.ends_with("tools/rebar3"),
-            "Expected bundled rebar3 path ending in 'tools/rebar3', got: {path_str}"
+            path.ends_with("tools/rebar3"),
+            "Expected bundled rebar3 path ending in 'tools/rebar3', got: {path:?}"
         );
     }
 }
