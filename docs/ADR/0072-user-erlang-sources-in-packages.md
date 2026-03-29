@@ -47,7 +47,7 @@ Today, these Erlang modules live in `runtime/apps/beamtalk_stdlib/src/` and are 
 
 Native Erlang source files live in a `native/` directory, separate from `src/`:
 
-```
+```text
 packages/http/
   beamtalk.toml
   src/                              # Beamtalk sources
@@ -113,7 +113,7 @@ Naming: `[native.dependencies]` rather than `[erlang.dependencies]` because:
 
 `beamtalk build` extends to handle three compilation phases:
 
-```
+```text
 Phase 1: Hex deps (if [native.dependencies] present)
   → Generate _build/dev/native_deps/rebar.config from beamtalk.toml
   → Run REBAR_BASE_DIR=. rebar3 compile in _build/dev/native_deps/
@@ -144,7 +144,7 @@ When `[native.dependencies]` is present, `beamtalk build` generates a minimal `r
 {erl_opts, [debug_info]}.
 ```
 
-Then runs `rebar3 compile` in `_build/dev/`. The generated `rebar.config` and `rebar.lock` live in `_build/dev/` — they are build artifacts, not source files.
+Then runs `rebar3 compile` in `_build/dev/native_deps/` (with `REBAR_BASE_DIR=.`). The generated `rebar.config` and `rebar.lock` live in `_build/dev/native_deps/` — they are build artifacts, not source files.
 
 **However:** The hex lock information is recorded in `beamtalk.lock` alongside Beamtalk package locks (ADR 0070). On first build (no lockfile), rebar3 resolves version constraints and the selected versions are captured in `beamtalk.lock`. On subsequent builds, `beamtalk build` generates `rebar.config` with exact versions from `beamtalk.lock` to ensure reproducible builds. `beamtalk deps update` re-resolves constraints and updates the lock.
 
@@ -195,7 +195,7 @@ Rationale:
 
 At runtime, `beamtalk` ensures all necessary ebin directories are on the code path:
 
-```
+```bash
 -pa _build/dev/ebin/                                    # package .beam files (bt + erl)
 -pa _build/dev/native_deps/default/lib/gun/ebin/         # hex dep: gun
 -pa _build/dev/native_deps/default/lib/cowboy/ebin/      # hex dep: cowboy
@@ -221,7 +221,7 @@ The `.app` file for the package includes hex deps in its `applications` list:
 
 Packages ship source, following the universal BEAM convention:
 
-```
+```text
 http-0.1.0.tar.gz (hex tarball)
   ├── beamtalk.toml
   ├── src/
