@@ -402,8 +402,9 @@ fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDep
             )
         })?;
 
-        // Validate the constraint syntax
-        if let Err(msg) = validate_hex_constraint(constraint) {
+        // Validate the constraint syntax (use trimmed value)
+        let normalized = constraint.trim();
+        if let Err(msg) = validate_hex_constraint(normalized) {
             miette::bail!(
                 "Native dependency '{name}' has an invalid version constraint \
                  '{constraint}': {msg}"
@@ -414,7 +415,7 @@ fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDep
             name.clone(),
             NativeDependency {
                 name: name.clone(),
-                constraint: constraint.to_string(),
+                constraint: normalized.to_string(),
             },
         );
     }
