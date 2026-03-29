@@ -495,7 +495,7 @@ Rejected because:
 - Create `packages/http/` with `beamtalk.toml`
 - Move 7 `.bt` classes from `stdlib/src/` to `packages/http/src/`
 - Move 5 `.erl` modules from `runtime/apps/beamtalk_stdlib/src/` to `packages/http/native/`
-- Remove `gun` and `cowboy` from runtime `rebar.config`
+- Remove `gun` from runtime `rebar.config` (`cowboy` stays — used by `beamtalk_workspace` for WebSocket REPL)
 - Update stdlib tests
 
 ### Phase 4: REPL Hot-Loading
@@ -515,7 +515,7 @@ Rejected because:
 
 1. Create `packages/http/` with manifest, `.bt` classes, `native/` Erlang modules, and `native/test/` tests
 2. Remove HTTP classes from `stdlib/src/` and backing modules from `runtime/apps/beamtalk_stdlib/src/`
-3. Remove `gun` and `cowboy` from `runtime/rebar.config`
+3. Remove `gun` from `runtime/rebar.config` (`cowboy` stays — used by `beamtalk_workspace` for WebSocket REPL)
 4. Users who depend on HTTP classes add `http` to their `[dependencies]`
 
 ### For existing projects
