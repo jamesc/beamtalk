@@ -1040,6 +1040,8 @@ pub enum ExpectCategory {
     Deprecation,
     /// Suppress actor-new errors — using `new`/`new:` on an Actor subclass (BT-1559).
     ActorNew,
+    /// Suppress visibility errors/warnings — cross-package internal method access (ADR 0071, BT-1702).
+    Visibility,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -1055,6 +1057,7 @@ impl ExpectCategory {
             "dead_assignment" => Some(Self::DeadAssignment),
             "deprecation" => Some(Self::Deprecation),
             "actor_new" => Some(Self::ActorNew),
+            "visibility" => Some(Self::Visibility),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -1070,6 +1073,7 @@ impl ExpectCategory {
             Self::DeadAssignment => "dead_assignment",
             Self::Deprecation => "deprecation",
             Self::ActorNew => "actor_new",
+            Self::Visibility => "visibility",
             Self::All => "all",
         }
     }
@@ -1084,6 +1088,7 @@ impl ExpectCategory {
             "dead_assignment",
             "deprecation",
             "actor_new",
+            "visibility",
             "all",
         ]
     }

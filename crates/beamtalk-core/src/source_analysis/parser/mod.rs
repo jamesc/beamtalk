@@ -511,6 +511,8 @@ pub enum DiagnosticCategory {
     Deprecation,
     /// Actor-new error (BT-1559) — using `new`/`new:` on an Actor subclass.
     ActorNew,
+    /// Visibility error/warning (ADR 0071) — cross-package access to internal methods.
+    Visibility,
 }
 
 /// A secondary note attached to a diagnostic (BT-1588).

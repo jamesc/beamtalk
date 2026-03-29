@@ -380,7 +380,13 @@ fn analyse_full(
     let scope = name_resolver.into_scope();
 
     // Phase 2: Type Checking (ADR 0025 Phase 1 — zero-syntax inference)
-    let mut type_checker = TypeChecker::new();
+    // ADR 0071 Phase 3 (BT-1702): Create type checker with package context for
+    // internal method visibility enforcement (E0403).
+    let mut type_checker = if let Some(pkg) = current_package {
+        TypeChecker::with_package(pkg)
+    } else {
+        TypeChecker::new()
+    };
     type_checker.check_module_with_protocols(
         module,
         &result.class_hierarchy,
@@ -475,15 +481,32 @@ fn analyse_full(
         validators::check_package_qualifiers(module, &packages, &mut result.diagnostics);
     }
 
-    // Phase 8: Class visibility enforcement (ADR 0071, BT-1701)
-    // E0401: cross-package internal class references
-    // E0402: leaked visibility (internal class in public signature)
+    // Phase 8: Visibility enforcement (ADR 0071)
+    // E0401: cross-package internal class references (BT-1701)
+    // E0402: leaked visibility — internal class in public signature (BT-1701)
     validators::check_class_visibility(
         module,
         &result.class_hierarchy,
         current_package,
         &mut result.diagnostics,
     );
+    // E0402: internal method satisfying a public protocol requirement (BT-1702)
+    validators::check_leaked_method_visibility(
+        module,
+        &result.class_hierarchy,
+        &result.protocol_registry,
+        current_package,
+        &mut result.diagnostics,
+    );
+    // W0401: subclass method shadowing an internal superclass method (BT-1702)
+    // Only meaningful in a package context — skip for REPL/scripts
+    if current_package.is_some() {
+        validators::check_internal_method_shadow(
+            module,
+            &result.class_hierarchy,
+            &mut result.diagnostics,
+        );
+    }
 
     result
 }
