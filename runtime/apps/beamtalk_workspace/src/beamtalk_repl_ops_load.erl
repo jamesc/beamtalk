@@ -78,10 +78,22 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
                         end
                 end,
             %% BT-1716: Classify .erl and .bt files separately for correct ordering.
+            %% Filter PreviousMtimes by extension to prevent cross-contamination
+            %% of deleted-file detection between .erl and .bt files.
+            PrevErlMtimes =
+                maps:filter(
+                    fun(Path, _Mtime) -> filename:extension(Path) =:= ".erl" end,
+                    PreviousMtimes
+                ),
+            PrevBtMtimes =
+                maps:filter(
+                    fun(Path, _Mtime) -> filename:extension(Path) =:= ".bt" end,
+                    PreviousMtimes
+                ),
             {ChangedErl, UnchangedErl, DeletedErl} =
-                classify_files_by_change(AllErlFiles, PreviousMtimes),
+                classify_files_by_change(AllErlFiles, PrevErlMtimes),
             {ChangedBt, UnchangedBt, DeletedBt} =
-                classify_files_by_change(AllBtFiles, PreviousMtimes),
+                classify_files_by_change(AllBtFiles, PrevBtMtimes),
             %% Handle deleted .bt files: unregister their classes and modules.
             DeletedBtCount = handle_deleted_files(DeletedBt, SessionPid),
             %% Handle deleted .erl files: clean up their mtime entries.
