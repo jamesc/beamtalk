@@ -909,7 +909,7 @@ install PREFIX="/usr/local": build-release build-stdlib
     install -m 755 target/release/beamtalk-exec "${PREFIX}/bin/beamtalk-exec"
 
     # OTP application ebin directories
-    for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler beamtalk_stdlib cowboy cowlib ranch gun yamerl; do
+    for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler beamtalk_stdlib cowboy cowlib ranch gun yamerl telemetry telemetry_poller; do
         SRC="runtime/_build/default/lib/${app}/ebin"
         if ! ls "${SRC}"/*.beam 1>/dev/null 2>&1; then
             echo "❌ No .beam files found in ${SRC}. Run 'just build-erlang' first."
@@ -1024,7 +1024,7 @@ dist: build-release build-stdlib
     Copy-Item target/release/beamtalk-lsp.exe dist/bin/
     Copy-Item target/release/beamtalk-mcp.exe dist/bin/
     Copy-Item target/release/beamtalk-exec.exe dist/bin/
-    foreach ($app in @('beamtalk_runtime','beamtalk_workspace','beamtalk_compiler','cowboy','cowlib','ranch')) { $src = "runtime/_build/default/lib/$app/ebin"; if (!(Test-Path "$src/*.beam")) { Write-Error "No .beam files in $src"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$src/*.beam" "dist/lib/beamtalk/lib/$app/ebin/"; Copy-Item "$src/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction SilentlyContinue }
+    foreach ($app in @('beamtalk_runtime','beamtalk_workspace','beamtalk_compiler','cowboy','cowlib','ranch','gun','yamerl','telemetry','telemetry_poller')) { $src = "runtime/_build/default/lib/$app/ebin"; if (!(Test-Path "$src/*.beam")) { Write-Error "No .beam files in $src"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$src/*.beam" "dist/lib/beamtalk/lib/$app/ebin/"; Copy-Item "$src/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction SilentlyContinue }
     $stdlib = "runtime/apps/beamtalk_stdlib/ebin"; if (!(Test-Path "$stdlib/*.beam")) { Write-Error "No stdlib .beam files"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin" | Out-Null; Copy-Item "$stdlib/*.beam" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/"; Copy-Item "$stdlib/*.app" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/" -ErrorAction SilentlyContinue
     if (Test-Path "stdlib/src/*.bt") { New-Item -ItemType Directory -Force -Path "dist/share/beamtalk/stdlib/src" | Out-Null; Copy-Item "stdlib/src/*.bt" "dist/share/beamtalk/stdlib/src/" }
     just dist-vscode
