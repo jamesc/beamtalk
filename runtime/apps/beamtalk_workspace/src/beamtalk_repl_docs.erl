@@ -38,7 +38,7 @@
     format_metaclass_method_doc/1,
     metaclass_method_doc/1,
     format_selector_summary/2,
-    format_class_side_output/4,
+    format_class_side_output/5,
     extract_see_also/1,
     alternative_classes/1,
     format_see_also/1,
@@ -213,6 +213,14 @@ format_class_docs_class_side(ClassName) ->
             {error, {class_not_found, ClassName}};
         ClassPid ->
             try
+                %% ADR 0071 Phase 5: Read class-level visibility
+                IsInternal =
+                    try
+                        beamtalk_runtime_api:is_internal(ClassPid)
+                    catch
+                        _:_ -> false
+                    end,
+
                 %% User-defined class methods walked up the superclass chain
                 FlatCM = collect_flattened_class_methods(ClassName, ClassPid),
                 {OwnCM, InhCM} = maps:fold(
@@ -240,7 +248,8 @@ format_class_docs_class_side(ClassName) ->
                             )
                     end,
 
-                {ok, format_class_side_output(ClassName, OwnCMSorted, InhCMGrouped, ProtoGrouped)}
+                Modifiers = #{is_internal => IsInternal},
+                {ok, format_class_side_output(ClassName, Modifiers, OwnCMSorted, InhCMGrouped, ProtoGrouped)}
             catch
                 exit:{timeout, _} -> {error, {class_not_found, ClassName}};
                 exit:{noproc, _} -> {error, {class_not_found, ClassName}}
@@ -877,12 +886,18 @@ format_selector_summary(Count, Selectors) ->
     end.
 
 %% @doc Format the class-object side documentation output.
--spec format_class_side_output(atom(), [atom()], [{atom(), [atom()]}], [{atom(), [atom()]}]) ->
+-spec format_class_side_output(atom(), map(), [atom()], [{atom(), [atom()]}], [{atom(), [atom()]}]) ->
     binary().
-format_class_side_output(ClassName, OwnCM, InhCMGrouped, ProtoGrouped) ->
+format_class_side_output(ClassName, Modifiers, OwnCM, InhCMGrouped, ProtoGrouped) ->
     ClassNameBin = atom_to_binary(ClassName, utf8),
     Parts = [
         iolist_to_binary([<<"== ">>, ClassNameBin, <<" class ==">>]),
+
+        %% ADR 0071 Phase 5: Show [internal] modifier on class-side docs
+        case maps:get(is_internal, Modifiers, false) of
+            true -> <<"[internal]">>;
+            false -> <<>>
+        end,
 
         case OwnCM of
             [] ->

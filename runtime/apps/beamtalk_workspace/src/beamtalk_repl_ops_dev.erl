@@ -1253,7 +1253,7 @@ complete_class_methods(ClassName, Prefix) ->
     ProtoObjMethods = filter_hidden_methods(collect_all_methods('ProtoObject', 0)),
     ClassMethods = collect_all_class_methods(ClassName, 0),
     %% Filter internal class methods from the target class
-    FilteredClassMethods = filter_internal_methods(ClassMethods, ClassName),
+    FilteredClassMethods = filter_internal_methods(ClassMethods, ClassName, class),
     filter_by_prefix(FilteredClassMethods ++ ProtoObjMethods, Prefix).
 
 %% @private
@@ -1292,7 +1292,7 @@ get_methods_for_receiver(Receiver, Bindings) when is_binary(Receiver) ->
             ProtoObjMethods = filter_hidden_methods(collect_all_methods('ProtoObject', 0)),
             %% ADR 0071 Phase 5: Filter internal class methods from cross-package classes
             FilteredClassMethods = filter_internal_methods(
-                collect_all_class_methods(ClassName, 0), ClassName
+                collect_all_class_methods(ClassName, 0), ClassName, class
             ),
             FilteredClassMethods ++ ProtoObjMethods;
         {instance, ClassName} ->
@@ -1515,31 +1515,70 @@ is_cross_package_internal(Pid) ->
 %% Reads method visibility from __beamtalk_meta/0 and removes internal methods
 %% when the class belongs to a different package than the REPL.
 %%
+%% Walks the class hierarchy to also filter inherited internal methods from
+%% ancestor classes. Checks method_info for instance side and class_method_info
+%% for class side.
+%%
 %% Uses the class hierarchy table (ETS) for module lookup to avoid gen_server
 %% calls that can timeout on mock class processes in tests.
 -spec filter_internal_methods([atom()], atom()) -> [atom()].
 filter_internal_methods(Selectors, ClassName) ->
-    %% Use the module table for fast ETS lookup rather than gen_server calls
-    %% to avoid timeouts with mock class processes in tests.
+    filter_internal_methods(Selectors, ClassName, instance).
+
+-spec filter_internal_methods([atom()], atom(), instance | class) -> [atom()].
+filter_internal_methods(Selectors, ClassName, Side) ->
+    %% Collect all internal selectors from the class and its ancestors.
+    InternalSet = collect_internal_selectors(ClassName, Side, 0),
+    case maps:size(InternalSet) of
+        0 -> Selectors;
+        _ -> [S || S <- Selectors, not maps:is_key(S, InternalSet)]
+    end.
+
+%% @private
+%% @doc Walk the hierarchy collecting internal selectors from cross-package classes.
+-spec collect_internal_selectors(atom(), instance | class, non_neg_integer()) -> map().
+collect_internal_selectors(_ClassName, _Side, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    #{};
+collect_internal_selectors(ClassName, Side, Depth) ->
+    Local = collect_internal_selectors_for_class(ClassName, Side),
+    Super =
+        case
+            try beamtalk_class_hierarchy_table:lookup(ClassName) catch _:_ -> not_found end
+        of
+            not_found -> #{};
+            {ok, none} -> #{};
+            {ok, SuperName} -> collect_internal_selectors(SuperName, Side, Depth + 1)
+        end,
+    maps:merge(Super, Local).
+
+%% @private
+%% @doc Get internal selectors from a single class's meta (if cross-package).
+-spec collect_internal_selectors_for_class(atom(), instance | class) -> map().
+collect_internal_selectors_for_class(ClassName, Side) ->
     case
-        try
-            beamtalk_class_module_table:lookup(ClassName)
-        catch
-            _:_ -> not_found
-        end
+        try beamtalk_class_module_table:lookup(ClassName) catch _:_ -> not_found end
     of
         not_found ->
-            Selectors;
+            #{};
         {ok, Mod} ->
-            %% Quick check: only filter if the class belongs to a named package.
-            %% Classes with nil package share the REPL's implicit package.
             case extract_package_from_module_name(Mod) of
                 nil ->
-                    Selectors;
+                    #{};
                 _ ->
                     Meta = read_class_meta(Mod),
-                    MethodInfo = maps:get(method_info, Meta, #{}),
-                    [S || S <- Selectors, not is_method_internal(S, MethodInfo)]
+                    InfoKey = case Side of
+                        instance -> method_info;
+                        class -> class_method_info
+                    end,
+                    MethodInfo = maps:get(InfoKey, Meta, #{}),
+                    maps:filter(
+                        fun(_Sel, Info) when is_map(Info) ->
+                            maps:get(visibility, Info, public) =:= internal;
+                           (_Sel, _Info) ->
+                            false
+                        end,
+                        MethodInfo
+                    )
             end
     end.
 
@@ -1550,8 +1589,10 @@ filter_internal_methods(Selectors, ClassName) ->
 extract_package_from_module_name(ModuleName) when is_atom(ModuleName) ->
     ModStr = atom_to_list(ModuleName),
     case string:split(ModStr, "@", all) of
-        ["bt", Pkg | _Rest] when Pkg =/= [] ->
+        %% Qualified module name: bt@{pkg}@{class}[...]
+        ["bt", Pkg, _Class | _Rest] when Pkg =/= [] ->
             list_to_binary(Pkg);
+        %% Unqualified or non-standard names (bt@foo) have no explicit package.
         _ ->
             nil
     end.

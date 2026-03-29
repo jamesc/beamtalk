@@ -948,6 +948,14 @@ apply_class_info(State, ClassInfo) ->
     ),
     put(beamtalk_class_is_abstract, NewIsAbstract),
 
+    %% ADR 0071 Phase 5: Recompute is_internal on reload/redefinition.
+    %% Same logic as init/1 — keeps visibility in sync after hot-reload.
+    NewIsInternal =
+        case maps:get(visibility, Meta, maps:get(visibility, ClassInfo, public)) of
+            internal -> true;
+            _ -> maps:get(is_internal, Meta, maps:get(is_internal, ClassInfo, State#class_state.is_internal))
+        end,
+
     {NewInstanceMethods, NewMethodReturnTypes} = meta_to_methods(
         maps:get(method_info, Meta, undefined),
         maps:get(instance_methods, ClassInfo, State#class_state.instance_methods)
@@ -1015,5 +1023,6 @@ apply_class_info(State, ClassInfo) ->
         method_docs = maps:get(method_docs, ClassInfo, State#class_state.method_docs),
         class_method_docs = maps:get(
             class_method_docs, ClassInfo, State#class_state.class_method_docs
-        )
+        ),
+        is_internal = NewIsInternal
     }.
