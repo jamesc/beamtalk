@@ -477,9 +477,7 @@ fn check_leaked_ref(
 
     diagnostics.push(
         Diagnostic::error(
-            format!(
-                "Internal class '{type_name}' appears in public signature of '{location}'"
-            ),
+            format!("Internal class '{type_name}' appears in public signature of '{location}'"),
             span,
         )
         .with_hint(format!(
@@ -784,7 +782,9 @@ mod tests {
 
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("is internal to package"))
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("is internal to package")
+            })
             .collect();
         assert!(
             errors.is_empty(),
@@ -940,9 +940,10 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("public signature") || d.message.contains("satisfies public protocol")
-                && d.message.contains("TokenBuffer")
-                && d.message.contains("Parser >> tokenize:")),
+                && d.message.contains("public signature")
+                || d.message.contains("satisfies public protocol")
+                    && d.message.contains("TokenBuffer")
+                    && d.message.contains("Parser >> tokenize:")),
             "Expected leaked visibility error for leaked return type, got: {diags:?}"
         );
     }
@@ -962,9 +963,10 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("public signature") || d.message.contains("satisfies public protocol")
-                && d.message.contains("TokenBuffer")
-                && d.message.contains("Parser >> process:")),
+                && d.message.contains("public signature")
+                || d.message.contains("satisfies public protocol")
+                    && d.message.contains("TokenBuffer")
+                    && d.message.contains("Parser >> process:")),
             "Expected leaked visibility error for leaked param type, got: {diags:?}"
         );
     }
@@ -984,9 +986,10 @@ mod tests {
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
-                && d.message.contains("public signature") || d.message.contains("satisfies public protocol")
-                && d.message.contains("TokenBuffer")
-                && d.message.contains("Parser")),
+                && d.message.contains("public signature")
+                || d.message.contains("satisfies public protocol")
+                    && d.message.contains("TokenBuffer")
+                    && d.message.contains("Parser")),
             "Expected leaked visibility error for leaked state type, got: {diags:?}"
         );
     }
@@ -1007,7 +1010,10 @@ mod tests {
 
         let leaked: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("public signature") || d.message.contains("satisfies public protocol"))
+            .filter(|d| {
+                d.message.contains("public signature")
+                    || d.message.contains("satisfies public protocol")
+            })
             .collect();
         assert!(
             leaked.is_empty(),
@@ -1031,7 +1037,10 @@ mod tests {
 
         let leaked: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("public signature") || d.message.contains("satisfies public protocol"))
+            .filter(|d| {
+                d.message.contains("public signature")
+                    || d.message.contains("satisfies public protocol")
+            })
             .collect();
         assert!(
             leaked.is_empty(),
@@ -1321,7 +1330,10 @@ mod tests {
 
         let e0402: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.message.contains("public signature") || d.message.contains("satisfies public protocol"))
+            .filter(|d| {
+                d.message.contains("public signature")
+                    || d.message.contains("satisfies public protocol")
+            })
             .collect();
         assert_eq!(
             e0402.len(),
@@ -1378,7 +1390,10 @@ mod tests {
 
         let e0402: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.message.contains("public signature") || d.message.contains("satisfies public protocol"))
+            .filter(|d| {
+                d.message.contains("public signature")
+                    || d.message.contains("satisfies public protocol")
+            })
             .collect();
         assert!(
             e0402.is_empty(),
