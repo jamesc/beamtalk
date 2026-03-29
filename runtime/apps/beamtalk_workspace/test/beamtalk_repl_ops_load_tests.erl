@@ -30,12 +30,24 @@ make_temp_dir() ->
     ok = file:make_dir(Base),
     Base.
 
-%% Delete a temp directory and all its contents (files only — tests do not
-%% create nested subdirectories, so recursive removal is not needed here).
+%% Delete a temp directory and all its contents recursively.
 rm_temp_dir(Dir) ->
-    {ok, Entries} = file:list_dir(Dir),
-    lists:foreach(fun(F) -> file:delete(filename:join(Dir, F)) end, Entries),
-    file:del_dir(Dir).
+    case file:list_dir(Dir) of
+        {ok, Entries} ->
+            lists:foreach(
+                fun(F) ->
+                    Path = filename:join(Dir, F),
+                    case filelib:is_dir(Path) of
+                        true -> rm_temp_dir(Path);
+                        false -> file:delete(Path)
+                    end
+                end,
+                Entries
+            ),
+            file:del_dir(Dir);
+        {error, _} ->
+            ok
+    end.
 
 %%====================================================================
 %% find_bt_files/1
@@ -314,3 +326,166 @@ get_file_mtime_existing_file_test() ->
 get_file_mtime_missing_file_test() ->
     Mtime = beamtalk_repl_ops_load:get_file_mtime("/no/such/file.bt"),
     ?assertEqual({{0, 0, 0}, {0, 0, 0}}, Mtime).
+
+%%====================================================================
+%% find_erl_files/1 (BT-1716)
+%%====================================================================
+
+find_erl_files_nonexistent_dir_test() ->
+    Missing = "missing_native_test_" ++ integer_to_list(erlang:unique_integer([positive])),
+    ?assertEqual([], beamtalk_repl_ops_load:find_erl_files(Missing)).
+
+find_erl_files_empty_dir_test() ->
+    Dir = make_temp_dir(),
+    try
+        ?assertEqual([], beamtalk_repl_ops_load:find_erl_files(Dir))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+find_erl_files_finds_erl_only_test() ->
+    Dir = make_temp_dir(),
+    try
+        write_temp_file(Dir, "my_mod.erl", <<"-module(my_mod).">>),
+        write_temp_file(Dir, "readme.md", <<"docs">>),
+        write_temp_file(Dir, "something.bt", <<"Object subclass: X">>),
+        Found = beamtalk_repl_ops_load:find_erl_files(Dir),
+        ?assertEqual(1, length(Found)),
+        ?assert(lists:any(fun(F) -> lists:suffix("my_mod.erl", F) end, Found))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+find_erl_files_skips_test_dir_test() ->
+    Dir = make_temp_dir(),
+    try
+        write_temp_file(Dir, "my_mod.erl", <<"-module(my_mod).">>),
+        TestDir = filename:join(Dir, "test"),
+        ok = file:make_dir(TestDir),
+        write_temp_file(TestDir, "my_mod_tests.erl", <<"-module(my_mod_tests).">>),
+        Found = beamtalk_repl_ops_load:find_erl_files(Dir),
+        ?assertEqual(1, length(Found)),
+        ?assert(lists:any(fun(F) -> lists:suffix("my_mod.erl", F) end, Found)),
+        %% Test file should not be included.
+        ?assertNot(lists:any(fun(F) -> lists:suffix("my_mod_tests.erl", F) end, Found))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%%====================================================================
+%% compile_native_erl_files/2 (BT-1716)
+%%====================================================================
+
+compile_native_erl_files_empty_test() ->
+    {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([], "/tmp"),
+    ?assertEqual([], Errors),
+    ?assertEqual(0, Count).
+
+compile_native_erl_files_valid_module_test() ->
+    Dir = make_temp_dir(),
+    try
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        ErlSrc = <<
+            "-module(bt_native_test_valid_mod).\n"
+            "-export([hello/0]).\n"
+            "hello() -> world.\n"
+        >>,
+        ErlPath = write_temp_file(NativeDir, "bt_native_test_valid_mod.erl", ErlSrc),
+        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        ?assertEqual([], Errors),
+        ?assertEqual(1, Count),
+        %% Module should be loadable and callable.
+        ?assertEqual(world, bt_native_test_valid_mod:hello()),
+        %% Cleanup: purge test module.
+        code:purge(bt_native_test_valid_mod),
+        code:delete(bt_native_test_valid_mod)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+compile_native_erl_files_syntax_error_test() ->
+    Dir = make_temp_dir(),
+    try
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        ErlSrc = <<
+            "-module(bt_native_test_bad_mod).\n"
+            "-export([hello/0]).\n"
+            "hello( -> world.\n"
+        >>,
+        ErlPath = write_temp_file(NativeDir, "bt_native_test_bad_mod.erl", ErlSrc),
+        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        ?assertEqual(0, Count),
+        ?assert(length(Errors) > 0),
+        [ErrMap | _] = Errors,
+        ?assertEqual(<<"compile_error">>, maps:get(<<"kind">>, ErrMap)),
+        ?assert(is_binary(maps:get(<<"message">>, ErrMap)))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+compile_native_erl_files_with_include_test() ->
+    Dir = make_temp_dir(),
+    try
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        IncludeDir = filename:join(NativeDir, "include"),
+        ok = file:make_dir(IncludeDir),
+        %% Write a header file.
+        write_temp_file(
+            IncludeDir,
+            "bt_native_test_inc.hrl",
+            <<"-define(BT_TEST_VAL, 42).\n">>
+        ),
+        %% Write a module that uses the header.
+        ErlSrc = <<
+            "-module(bt_native_test_inc_mod).\n"
+            "-include(\"bt_native_test_inc.hrl\").\n"
+            "-export([val/0]).\n"
+            "val() -> ?BT_TEST_VAL.\n"
+        >>,
+        ErlPath = write_temp_file(NativeDir, "bt_native_test_inc_mod.erl", ErlSrc),
+        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        ?assertEqual([], Errors),
+        ?assertEqual(1, Count),
+        ?assertEqual(42, bt_native_test_inc_mod:val()),
+        %% Cleanup.
+        code:purge(bt_native_test_inc_mod),
+        code:delete(bt_native_test_inc_mod)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+compile_native_erl_files_multiple_test() ->
+    Dir = make_temp_dir(),
+    try
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        ErlSrc1 = <<
+            "-module(bt_native_test_multi1).\n"
+            "-export([a/0]).\n"
+            "a() -> one.\n"
+        >>,
+        ErlSrc2 = <<
+            "-module(bt_native_test_multi2).\n"
+            "-export([b/0]).\n"
+            "b() -> two.\n"
+        >>,
+        Path1 = write_temp_file(NativeDir, "bt_native_test_multi1.erl", ErlSrc1),
+        Path2 = write_temp_file(NativeDir, "bt_native_test_multi2.erl", ErlSrc2),
+        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files(
+            [Path1, Path2], Dir
+        ),
+        ?assertEqual([], Errors),
+        ?assertEqual(2, Count),
+        ?assertEqual(one, bt_native_test_multi1:a()),
+        ?assertEqual(two, bt_native_test_multi2:b()),
+        %% Cleanup.
+        code:purge(bt_native_test_multi1),
+        code:delete(bt_native_test_multi1),
+        code:purge(bt_native_test_multi2),
+        code:delete(bt_native_test_multi2)
+    after
+        rm_temp_dir(Dir)
+    end.
