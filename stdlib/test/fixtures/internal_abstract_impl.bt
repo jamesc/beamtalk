@@ -4,6 +4,5 @@
 // Concrete subclass of InternalAbstractBase for testing (BT-1705, ADR 0071)
 
 InternalAbstractBase subclass: InternalAbstractImpl
-  state: label = "impl"
 
   compute => 99
