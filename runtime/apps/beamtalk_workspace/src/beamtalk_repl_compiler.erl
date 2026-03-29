@@ -414,35 +414,20 @@ compile_standard_expression(CoreErlang, Warnings) ->
 
 %% Compile file via beamtalk_compiler OTP app (port backend).
 compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->
-    SourceBin = list_to_binary(Source),
-    Options0 = #{stdlib_mode => StdlibMode},
-    Options1 = apply_module_name_override(Options0, ModuleNameOverride),
-    Options2 = apply_source_path(Options1, Path),
-    Options = add_class_indexes(Options2),
-    wrap_compiler_errors(
-        fun() ->
-            case beamtalk_compiler:compile(SourceBin, Options) of
-                {ok, #{
-                    core_erlang := CoreErlang,
-                    module_name := ModNameBin,
-                    classes := Classes
-                }} ->
-                    ModuleName = binary_to_atom(ModNameBin, utf8),
-                    compile_file_core(CoreErlang, ModuleName, Classes);
-                {error, Diagnostics} ->
-                    {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
-            end
-        end,
-        wrapped
-    ).
+    compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, use_runtime_indexes).
 
 %% Compile file via beamtalk_compiler with pre-built class indexes (BT-1543).
+%% Pass `use_runtime_indexes` to derive indexes from the runtime registry.
 compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes) ->
     SourceBin = list_to_binary(Source),
     Options0 = #{stdlib_mode => StdlibMode},
     Options1 = apply_module_name_override(Options0, ModuleNameOverride),
     Options2 = apply_source_path(Options1, Path),
-    Options = maps:merge(Options2, PrebuiltIndexes),
+    Options =
+        case PrebuiltIndexes of
+            use_runtime_indexes -> add_class_indexes(Options2);
+            _ -> maps:merge(Options2, PrebuiltIndexes)
+        end,
     wrap_compiler_errors(
         fun() ->
             case beamtalk_compiler:compile(SourceBin, Options) of
