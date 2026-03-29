@@ -165,6 +165,8 @@ Phase 2: Beamtalk .bt files (existing pipeline)
 
 For packages without hex deps, `{deps, []}` is empty but rebar3 still compiles the `.erl` files — one code path for all cases.
 
+Packages may also declare `[native.dependencies]` **without** a `native/` directory — for example, to call a hex package directly via `(Erlang module)` FFI without any hand-written Erlang glue. In this case the generated `rebar.config` has deps but no `{src_dirs, [...]}`. rebar3 fetches and compiles the hex dep; `beamtalk build` puts its ebin on the code path.
+
 Then runs `rebar3 compile` in `_build/dev/native/` (with `REBAR_BASE_DIR=.`). The generated `rebar.config` and `rebar.lock` live in `_build/dev/native/` — they are build artifacts, not source files.
 
 rebar3 handles version resolution against hex.pm, transitive deps, include paths, code paths, compilation order, and incremental rebuilds automatically.
