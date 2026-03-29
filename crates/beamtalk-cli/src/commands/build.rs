@@ -9,6 +9,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::path::PathBuf;
 use std::time::SystemTime;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -927,6 +928,67 @@ pub(crate) fn build_class_module_index(
     }
 
     Ok((module_index, superclass_index, all_class_infos, cached_asts))
+}
+
+// ── Bundled rebar3 ────────────────────────────────────────────────
+
+/// Locate the rebar3 escript for compiling hex dependencies.
+///
+/// Resolution order:
+/// 1. **Bundled copy** — `runtime/tools/rebar3` relative to the runtime directory
+///    (found via [`beamtalk_cli::repl_startup::find_runtime_dir`]). This is the
+///    primary path and should always succeed in a standard Beamtalk installation.
+/// 2. **System `rebar3`** — falls back to `rebar3` on `$PATH` if the bundled
+///    copy is missing (e.g., when running from an unusual layout).
+///
+/// # Errors
+///
+/// Returns an error if neither the bundled copy nor a system `rebar3` is found.
+///
+/// # Version policy
+///
+/// The bundled rebar3 is pinned to 3.27.0. Update when:
+/// - A new rebar3 release adds features we need or fixes bugs we hit
+/// - OTP compatibility requires a newer version
+/// - Security advisories are published
+#[allow(dead_code)] // Will be called by rebar3 invocation in BT-1713 (Phase 2)
+pub(crate) fn rebar3_path() -> Result<PathBuf> {
+    // Try bundled copy relative to the runtime directory
+    if let Ok(runtime_dir) = beamtalk_cli::repl_startup::find_runtime_dir() {
+        let bundled = runtime_dir.join("tools").join("rebar3");
+        if bundled.exists() {
+            debug!(path = %bundled.display(), "Using bundled rebar3");
+            return Ok(bundled);
+        }
+    }
+
+    // Fall back to system rebar3 on $PATH
+    let system_candidates = if cfg!(windows) {
+        vec!["rebar3.cmd", "rebar3.exe", "rebar3"]
+    } else {
+        vec!["rebar3"]
+    };
+
+    for candidate in system_candidates {
+        if let Ok(output) = std::process::Command::new(candidate)
+            .arg("version")
+            .output()
+        {
+            if output.status.success() {
+                info!(
+                    rebar3 = candidate,
+                    "Using system rebar3 (bundled copy not found)"
+                );
+                return Ok(PathBuf::from(candidate));
+            }
+        }
+    }
+
+    Err(miette::miette!(
+        "rebar3 not found.\n\
+         Expected bundled copy at <runtime>/tools/rebar3.\n\
+         Install rebar3 or run from the repository root."
+    ))
 }
 
 #[cfg(test)]
@@ -1892,6 +1954,27 @@ mod tests {
         assert!(
             result.orphaned_beam_files.is_empty(),
             "Non-bt@ beam files should not be flagged as orphaned"
+        );
+    }
+
+    #[test]
+    fn test_rebar3_path_returns_bundled_when_exists() {
+        // When running from the repo root (or with BEAMTALK_RUNTIME_DIR set),
+        // rebar3_path() should find the bundled copy at runtime/tools/rebar3.
+        let result = rebar3_path();
+        // In CI or dev, the bundled rebar3 should be present.
+        // If neither bundled nor system rebar3 is available, this test will
+        // fail — that's intentional, as it means the vendored copy is missing.
+        assert!(
+            result.is_ok(),
+            "rebar3_path() should find rebar3: {result:?}"
+        );
+
+        let path = result.unwrap();
+        // When running in the dev repo, the path should be the bundled copy
+        assert!(
+            path.ends_with("tools/rebar3"),
+            "Expected bundled rebar3 path ending in 'tools/rebar3', got: {path:?}"
         );
     }
 
