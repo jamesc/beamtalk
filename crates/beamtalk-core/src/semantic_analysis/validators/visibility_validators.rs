@@ -492,8 +492,9 @@ fn check_leaked_ref(
 /// the method `internal`, that's a leaked visibility error — the protocol
 /// promises the method is part of the public API, but the method is hidden.
 ///
-/// An internal method satisfying an *internal* protocol is fine (both are
-/// package-scoped).
+/// Note: protocols do not currently have an `is_internal` flag, so all
+/// protocols are treated as public. When protocol visibility is added,
+/// internal methods satisfying internal protocols should be allowed.
 pub fn check_leaked_method_visibility(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -509,82 +510,76 @@ pub fn check_leaked_method_visibility(
     for class in &module.classes {
         let class_name = &class.name.name;
 
+        // Pre-compute selector names for internal methods to avoid repeated
+        // allocations inside the protocol × requirement loops.
+        let internal_instance: Vec<_> = class
+            .methods
+            .iter()
+            .filter(|m| m.is_internal)
+            .map(|m| (m.selector.name(), m.span))
+            .collect();
+        let internal_class: Vec<_> = class
+            .class_methods
+            .iter()
+            .filter(|m| m.is_internal)
+            .map(|m| (m.selector.name(), m.span))
+            .collect();
+
+        if internal_instance.is_empty() && internal_class.is_empty() {
+            continue;
+        }
+
         // Check each protocol the class might conform to
+        // (Protocols don't have is_internal yet, so all protocols are treated as public)
         for (_proto_name, proto_info) in protocol_registry.protocols() {
-            // Skip internal protocols — internal method implementing internal protocol is fine
-            // (Protocols don't have is_internal yet, so all protocols are public for now)
+            // Use the protocol registry's conformance check so we stay consistent
+            // with DNU-bypass, cross-file-parent, and inherited method handling.
+            if protocol_registry
+                .check_conformance(class_name, &proto_info.name, hierarchy)
+                .is_err()
+            {
+                continue; // Class doesn't conform — no leaked visibility
+            }
+
+            let proto_name = &proto_info.name;
 
             // Check instance methods
             for req in &proto_info.methods {
-                check_method_leaked_visibility(
-                    class,
-                    class_name,
-                    &req.selector,
-                    false,
-                    proto_info,
-                    hierarchy,
-                    diagnostics,
-                );
+                if let Some((_sel, span)) = internal_instance
+                    .iter()
+                    .find(|(sel, _)| *sel == req.selector)
+                {
+                    let selector = &req.selector;
+                    let message: EcoString = format!(
+                        "Internal method '{selector}' on '{class_name}' satisfies public protocol '{proto_name}' — make the method public"
+                    ).into();
+                    diagnostics.push(
+                        Diagnostic::error(message, *span)
+                            .with_hint(format!(
+                                "'{selector}' is required by protocol '{proto_name}' but declared 'internal'"
+                            ))
+                            .with_category(DiagnosticCategory::Visibility),
+                    );
+                }
             }
 
             // Check class methods
             for req in &proto_info.class_methods {
-                check_method_leaked_visibility(
-                    class,
-                    class_name,
-                    &req.selector,
-                    true,
-                    proto_info,
-                    hierarchy,
-                    diagnostics,
-                );
-            }
-        }
-    }
-}
-
-/// Helper: check a single selector for leaked visibility.
-fn check_method_leaked_visibility(
-    class: &crate::ast::ClassDefinition,
-    class_name: &EcoString,
-    selector: &EcoString,
-    is_class_side: bool,
-    proto_info: &crate::semantic_analysis::protocol_registry::ProtocolInfo,
-    hierarchy: &ClassHierarchy,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    // Check if this class actually has the selector (locally defined and internal)
-    let methods = if is_class_side {
-        &class.class_methods
-    } else {
-        &class.methods
-    };
-
-    for method in methods {
-        if method.selector.name() == *selector && method.is_internal {
-            // The class declares this method as internal, but a public protocol requires it.
-            // Verify the class actually conforms to the protocol (has all required methods).
-            let conforms = proto_info
-                .methods
-                .iter()
-                .all(|req| hierarchy.resolves_selector(class_name, &req.selector))
-                && proto_info
-                    .class_methods
-                    .iter()
-                    .all(|req| hierarchy.resolves_class_selector(class_name, &req.selector));
-
-            if conforms {
-                let proto_name = &proto_info.name;
-                let message: EcoString = format!(
-                    "Internal method '{selector}' on '{class_name}' satisfies public protocol '{proto_name}' — make the method public"
-                ).into();
-                diagnostics.push(
-                    Diagnostic::error(message, method.span)
-                        .with_hint(format!(
-                            "'{selector}' is required by protocol '{proto_name}' but declared 'internal'"
-                        ))
-                        .with_category(DiagnosticCategory::Visibility),
-                );
+                if let Some((_sel, span)) =
+                    internal_class.iter().find(|(sel, _)| *sel == req.selector)
+                {
+                    let selector = &req.selector;
+                    let message: EcoString = format!(
+                        "Internal class method '{selector}' on '{class_name}' satisfies public protocol '{proto_name}' — make the method public"
+                    ).into();
+                    diagnostics.push(
+                        Diagnostic::error(message, *span)
+                            .with_hint(format!(
+                                "'{selector}' is required by protocol '{proto_name}' but declared 'internal'"
+                            ))
+                            .with_category(DiagnosticCategory::Visibility),
+                    );
+                }
             }
         }
     }
