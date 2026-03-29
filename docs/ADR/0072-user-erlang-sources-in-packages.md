@@ -557,7 +557,13 @@ Rejected because:
 
 No migration needed — this is additive. Projects without `native/` or `[native.dependencies]` are unaffected.
 
+## Implementation Tracking
+
+**Epic:** BT-1708
+**Issues:** BT-1709, BT-1710, BT-1711, BT-1712, BT-1713, BT-1714, BT-1715, BT-1716, BT-1717, BT-1718, BT-1719
+**Status:** Planned
+
 ## References
-- Related issues: BT-1153
+- Related issues: BT-1153, BT-1708
 - Related ADRs: ADR 0026 (Project Manifest), ADR 0031 (Flat Namespace), ADR 0055 (Erlang-Backed Class Authoring), ADR 0056 (Native Erlang-Backed Actors), ADR 0058 (Platform Security Model), ADR 0070 (Package Namespaces and Dependencies), ADR 0071 (Class Visibility)
 - Prior art: [Gleam FFI](https://gleam.run/writing-gleam/gleam-toml/), [Mix.Tasks.Compile.Erlang](https://hexdocs.pm/mix/Mix.Tasks.Compile.Erlang.html), [rebar3 dependencies](https://rebar3.org/docs/configuration/dependencies/)
