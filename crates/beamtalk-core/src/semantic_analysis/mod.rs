@@ -491,11 +491,14 @@ fn analyse_full(
         &mut result.diagnostics,
     );
     // W0401: Subclass method shadowing an internal superclass method
-    validators::check_internal_method_shadow(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
+    // Only meaningful in a package context — skip for REPL/scripts
+    if current_package.is_some() {
+        validators::check_internal_method_shadow(
+            module,
+            &result.class_hierarchy,
+            &mut result.diagnostics,
+        );
+    }
 
     result
 }

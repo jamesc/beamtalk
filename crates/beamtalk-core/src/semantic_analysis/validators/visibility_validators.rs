@@ -106,7 +106,7 @@ fn check_method_leaked_visibility(
             if conforms {
                 let proto_name = &proto_info.name;
                 let message: EcoString = format!(
-                    "error[E0402]: Internal method '{selector}' on '{class_name}' satisfies public protocol '{proto_name}' — make the method public or the protocol internal"
+                    "error[E0402]: Internal method '{selector}' on '{class_name}' satisfies public protocol '{proto_name}' — make the method public"
                 ).into();
                 diagnostics.push(
                     Diagnostic::error(message, method.span)
