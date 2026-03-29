@@ -18,9 +18,9 @@
 
 use crate::ast::{Expression, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
-use crate::source_analysis::{Diagnostic, Span};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::DiagnosticCategory;
+use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 
 /// Checks all class-level visibility rules for the module.
