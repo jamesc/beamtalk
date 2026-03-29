@@ -123,12 +123,14 @@ runtime/tools/rebar3     # vendled escript, pinned version
 The build tool locates it automatically:
 
 ```rust
-fn rebar3_path() -> PathBuf {
+fn rebar3_path() -> miette::Result<PathBuf> {
     // Bundled copy next to runtime
     let bundled = runtime_dir().join("tools/rebar3");
-    if bundled.exists() { return bundled; }
+    if bundled.exists() { return Ok(bundled); }
     // Fall back to system rebar3
-    which::which("rebar3").unwrap_or_else(|_| panic!("rebar3 not found"))
+    which::which("rebar3")
+        .into_diagnostic()
+        .wrap_err("rebar3 not found — expected bundled copy at {bundled}")
 }
 ```
 
