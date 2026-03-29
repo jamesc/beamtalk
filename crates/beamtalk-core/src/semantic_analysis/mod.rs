@@ -307,6 +307,7 @@ pub fn analyse_with_packages(
 }
 
 /// Internal: full analysis with all knobs.
+#[allow(clippy::too_many_lines)] // orchestration function — length is proportional to analysis phases
 fn analyse_full(
     module: &Module,
     known_vars: &[&str],
@@ -379,7 +380,13 @@ fn analyse_full(
     let scope = name_resolver.into_scope();
 
     // Phase 2: Type Checking (ADR 0025 Phase 1 — zero-syntax inference)
-    let mut type_checker = TypeChecker::new();
+    // ADR 0071 Phase 3 (BT-1702): Create type checker with package context for
+    // internal method visibility enforcement (E0403).
+    let mut type_checker = if let Some(pkg) = current_package {
+        TypeChecker::with_package(pkg)
+    } else {
+        TypeChecker::new()
+    };
     type_checker.check_module_with_protocols(
         module,
         &result.class_hierarchy,
@@ -473,6 +480,22 @@ fn analyse_full(
     if let Some(packages) = known_packages {
         validators::check_package_qualifiers(module, &packages, &mut result.diagnostics);
     }
+
+    // Phase 8: Visibility validation (ADR 0071 Phase 3, BT-1702)
+    // E0402: Internal method satisfying a public protocol requirement
+    validators::check_leaked_method_visibility(
+        module,
+        &result.class_hierarchy,
+        &result.protocol_registry,
+        current_package,
+        &mut result.diagnostics,
+    );
+    // W0401: Subclass method shadowing an internal superclass method
+    validators::check_internal_method_shadow(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
 
     result
 }

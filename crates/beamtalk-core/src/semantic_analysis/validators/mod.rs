@@ -19,6 +19,7 @@ mod match_validators;
 mod native_validators;
 pub(crate) mod package_validators;
 mod supervision_validators;
+mod visibility_validators;
 
 // Re-export all validators so callers don't need to know the submodule structure.
 pub use class_validators::check_stdlib_name_shadowing;
@@ -36,4 +37,7 @@ pub(crate) use native_validators::{check_native_delegate_return_type, check_nati
 pub(crate) use package_validators::check_package_qualifiers;
 pub(crate) use supervision_validators::{
     check_children_supervision_policy, check_supervision_policy_override,
+};
+pub(crate) use visibility_validators::{
+    check_internal_method_shadow, check_leaked_method_visibility,
 };
