@@ -308,6 +308,13 @@ handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
                                 IsSealed = beamtalk_runtime_api:is_sealed(Pid),
                                 IsAbstract = beamtalk_runtime_api:is_abstract(Pid),
                                 ModName = beamtalk_runtime_api:module_name(Pid),
+                                %% ADR 0071 Phase 5: Include visibility in class listing
+                                IsInternal =
+                                    try
+                                        beamtalk_runtime_api:is_internal(Pid)
+                                    catch
+                                        _:_ -> false
+                                    end,
                                 case should_include_class(Name, Super, ModName, Filter) of
                                     true ->
                                         {true, #{
@@ -319,7 +326,8 @@ handle(<<"list-classes">>, Params, Msg, _SessionPid) ->
                                                 end,
                                             <<"doc">> => Doc,
                                             <<"sealed">> => IsSealed,
-                                            <<"abstract">> => IsAbstract
+                                            <<"abstract">> => IsAbstract,
+                                            <<"internal">> => IsInternal
                                         }};
                                     false ->
                                         false
@@ -709,11 +717,18 @@ get_completions(Prefix) when is_binary(Prefix) ->
         catch
             _:_ -> []
         end,
+    %% ADR 0071 Phase 5: Filter internal classes from cross-package completions.
+    %% The REPL runs in an implicit package (nil), so internal classes from any
+    %% named package (e.g. stdlib) are excluded. Internal classes with no package
+    %% (user-loaded) are kept since they share the REPL's nil package.
     ClassNames = lists:filtermap(
         fun(Pid) ->
             try
                 Name = beamtalk_runtime_api:class_name(Pid),
-                {true, atom_to_binary(Name, utf8)}
+                case is_cross_package_internal(Pid) of
+                    true -> false;
+                    false -> {true, atom_to_binary(Name, utf8)}
+                end
             catch
                 _:_ -> false
             end
@@ -1220,21 +1235,26 @@ filter_hidden_methods(Selectors) ->
 
 %% @private
 %% @doc Return all instance methods of a class filtered by the given prefix.
+%% ADR 0071 Phase 5: Also filters internal methods from cross-package classes.
 -spec complete_instance_methods(atom(), binary()) -> [binary()].
 complete_instance_methods(ClassName, Prefix) ->
     MethodSelectors = filter_hidden_methods(collect_all_methods(ClassName, 0)),
-    filter_by_prefix(MethodSelectors, Prefix).
+    Filtered = filter_internal_methods(MethodSelectors, ClassName),
+    filter_by_prefix(Filtered, Prefix).
 
 %% @private
 %% @doc Return all class-side methods of a class filtered by the given prefix.
 %%
 %% Includes class methods plus ProtoObject instance methods (e.g. `class`,
 %% `respondsTo:`) since class objects are also objects.
+%% ADR 0071 Phase 5: Also filters internal methods from cross-package classes.
 -spec complete_class_methods(atom(), binary()) -> [binary()].
 complete_class_methods(ClassName, Prefix) ->
     ProtoObjMethods = filter_hidden_methods(collect_all_methods('ProtoObject', 0)),
     ClassMethods = collect_all_class_methods(ClassName, 0),
-    filter_by_prefix(ClassMethods ++ ProtoObjMethods, Prefix).
+    %% Filter internal class methods from the target class
+    FilteredClassMethods = filter_internal_methods(ClassMethods, ClassName, class),
+    filter_by_prefix(FilteredClassMethods ++ ProtoObjMethods, Prefix).
 
 %% @private
 %% @doc Filter method selectors by a binary prefix, returning sorted binaries.
@@ -1270,9 +1290,15 @@ get_methods_for_receiver(Receiver, Bindings) when is_binary(Receiver) ->
             %% ProtoObject methods (e.g. `class`) are included because class objects ARE
             %% objects and `ClassName class` is meaningful (returns the metaclass).
             ProtoObjMethods = filter_hidden_methods(collect_all_methods('ProtoObject', 0)),
-            collect_all_class_methods(ClassName, 0) ++ ProtoObjMethods;
+            %% ADR 0071 Phase 5: Filter internal class methods from cross-package classes
+            FilteredClassMethods = filter_internal_methods(
+                collect_all_class_methods(ClassName, 0), ClassName, class
+            ),
+            FilteredClassMethods ++ ProtoObjMethods;
         {instance, ClassName} ->
-            filter_hidden_methods(collect_all_methods(ClassName, 0))
+            %% ADR 0071 Phase 5: Filter internal instance methods from cross-package classes
+            Selectors = filter_hidden_methods(collect_all_methods(ClassName, 0)),
+            filter_internal_methods(Selectors, ClassName)
     end.
 
 %% @private
@@ -1452,6 +1478,153 @@ collect_methods_with_fun(ClassName, Depth, Fun) ->
                     Super -> collect_methods_with_fun(Super, Depth + 1, Fun)
                 end,
             LocalMethods ++ InheritedMethods
+    end.
+
+%% @private
+%% @doc ADR 0071 Phase 5: Check if a class is internal and belongs to a different
+%% package than the REPL's implicit nil package. Returns true for internal classes
+%% from named packages (e.g. stdlib). Returns false for public classes and for
+%% internal classes with no package (user-loaded in REPL, same nil package).
+-spec is_cross_package_internal(pid()) -> boolean().
+is_cross_package_internal(Pid) ->
+    try
+        case beamtalk_runtime_api:is_internal(Pid) of
+            false ->
+                false;
+            true ->
+                %% Internal class — check if it belongs to a named package
+                %% using the ETS module table for fast lookup (avoids gen_server
+                %% calls that can timeout on mock class processes in tests).
+                ClassName = beamtalk_runtime_api:class_name(Pid),
+                case beamtalk_class_module_table:lookup(ClassName) of
+                    not_found ->
+                        false;
+                    {ok, Mod} ->
+                        case extract_package_from_module_name(Mod) of
+                            nil -> false;
+                            _ -> true
+                        end
+                end
+        end
+    catch
+        _:_ -> false
+    end.
+
+%% @private
+%% @doc ADR 0071 Phase 5: Filter internal methods from a list of method selectors.
+%% Reads method visibility from __beamtalk_meta/0 and removes internal methods
+%% when the class belongs to a different package than the REPL.
+%%
+%% Walks the class hierarchy to also filter inherited internal methods from
+%% ancestor classes. Checks method_info for instance side and class_method_info
+%% for class side.
+%%
+%% Uses the class hierarchy table (ETS) for module lookup to avoid gen_server
+%% calls that can timeout on mock class processes in tests.
+-spec filter_internal_methods([atom()], atom()) -> [atom()].
+filter_internal_methods(Selectors, ClassName) ->
+    filter_internal_methods(Selectors, ClassName, instance).
+
+-spec filter_internal_methods([atom()], atom(), instance | class) -> [atom()].
+filter_internal_methods(Selectors, ClassName, Side) ->
+    %% Collect all internal selectors from the class and its ancestors.
+    InternalSet = collect_internal_selectors(ClassName, Side, 0),
+    case maps:size(InternalSet) of
+        0 -> Selectors;
+        _ -> [S || S <- Selectors, not maps:is_key(S, InternalSet)]
+    end.
+
+%% @private
+%% @doc Walk the hierarchy collecting internal selectors from cross-package classes.
+-spec collect_internal_selectors(atom(), instance | class, non_neg_integer()) -> map().
+collect_internal_selectors(_ClassName, _Side, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    #{};
+collect_internal_selectors(ClassName, Side, Depth) ->
+    Local = collect_internal_selectors_for_class(ClassName, Side),
+    Super =
+        case
+            try beamtalk_class_hierarchy_table:lookup(ClassName) catch _:_ -> not_found end
+        of
+            not_found -> #{};
+            {ok, none} -> #{};
+            {ok, SuperName} -> collect_internal_selectors(SuperName, Side, Depth + 1)
+        end,
+    maps:merge(Super, Local).
+
+%% @private
+%% @doc Get internal selectors from a single class's meta (if cross-package).
+-spec collect_internal_selectors_for_class(atom(), instance | class) -> map().
+collect_internal_selectors_for_class(ClassName, Side) ->
+    case
+        try beamtalk_class_module_table:lookup(ClassName) catch _:_ -> not_found end
+    of
+        not_found ->
+            #{};
+        {ok, Mod} ->
+            case extract_package_from_module_name(Mod) of
+                nil ->
+                    #{};
+                _ ->
+                    Meta = read_class_meta(Mod),
+                    InfoKey = case Side of
+                        instance -> method_info;
+                        class -> class_method_info
+                    end,
+                    MethodInfo = maps:get(InfoKey, Meta, #{}),
+                    maps:filter(
+                        fun(_Sel, Info) when is_map(Info) ->
+                            maps:get(visibility, Info, public) =:= internal;
+                           (_Sel, _Info) ->
+                            false
+                        end,
+                        MethodInfo
+                    )
+            end
+    end.
+
+%% @private
+%% @doc Extract the package name from a BEAM module name.
+%% Returns a binary package name or nil.
+-spec extract_package_from_module_name(atom()) -> binary() | nil.
+extract_package_from_module_name(ModuleName) when is_atom(ModuleName) ->
+    ModStr = atom_to_list(ModuleName),
+    case string:split(ModStr, "@", all) of
+        %% Qualified module name: bt@{pkg}@{class}[...]
+        ["bt", Pkg, _Class | _Rest] when Pkg =/= [] ->
+            list_to_binary(Pkg);
+        %% Unqualified or non-standard names (bt@foo) have no explicit package.
+        _ ->
+            nil
+    end.
+
+%% @private
+%% @doc Check if a method selector is marked internal in the method info map.
+-spec is_method_internal(atom(), map()) -> boolean().
+is_method_internal(Selector, MethodInfo) ->
+    case maps:get(Selector, MethodInfo, undefined) of
+        undefined ->
+            false;
+        Info when is_map(Info) ->
+            maps:get(visibility, Info, public) =:= internal;
+        _ ->
+            false
+    end.
+
+%% @private
+%% @doc Read __beamtalk_meta/0 from a compiled module.
+%% Returns the meta map or #{} if unavailable.
+-spec read_class_meta(atom()) -> map().
+read_class_meta(Module) ->
+    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+        true ->
+            try Module:'__beamtalk_meta'() of
+                M when is_map(M) -> M;
+                _ -> #{}
+            catch
+                _:_ -> #{}
+            end;
+        false ->
+            #{}
     end.
 
 %% @private
