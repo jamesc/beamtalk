@@ -223,6 +223,25 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         Vec::new()
     };
 
+    // ADR 0072 Phase 1 (Path A): Compile native Erlang sources before .bt files.
+    // Native modules must be compiled first because .bt files may reference them
+    // via `(Erlang module)` FFI or `native:` annotations.
+    let _native_result = if pkg_manifest.is_some() {
+        use crate::beam_compiler::compile_native_erlang;
+        match compile_native_erlang(&project_root)? {
+            Some(result) => {
+                eprintln!(
+                    "Compiling {} native Erlang file(s)",
+                    result.beam_files.len()
+                );
+                Some(result)
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+
     // Determine the source root for computing relative module paths
     let src_dir = project_root.join("src");
     let source_root = if src_dir.exists() {
@@ -1956,6 +1975,95 @@ mod tests {
         assert!(
             path.ends_with("tools/rebar3"),
             "Expected bundled rebar3 path ending in 'tools/rebar3', got: {path:?}"
+        );
+    }
+
+    // ---- ADR 0072 Phase 1: native Erlang compilation in build ----
+
+    #[test]
+    fn test_build_without_native_dir_is_unaffected() {
+        // Packages without native/ should build exactly as before.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("main.bt"), "main := [42].");
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"no_native\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = build(project_path.as_str(), &default_options(), false);
+
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                eprintln!("Skipping test - escript not installed in CI environment");
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
+
+        // native ebin should NOT be created
+        let native_ebin = project_path
+            .join("_build")
+            .join("dev")
+            .join("native")
+            .join("ebin");
+        assert!(
+            !native_ebin.exists(),
+            "native ebin should not be created when no native/ directory exists"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires erlc"]
+    fn test_build_with_native_erlang() {
+        // ADR 0072 Phase 1: build should discover and compile native/*.erl files
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+
+        // Create beamtalk.toml
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"with_native\"\nversion = \"0.1.0\"\n",
+        );
+
+        // Create a .bt source file
+        write_test_file(&src_path.join("main.bt"), "main := [42].");
+
+        // Create native/ with an Erlang module
+        let native_dir = project_path.join("native");
+        fs::create_dir(&native_dir).unwrap();
+        write_test_file(
+            &native_dir.join("hello_native.erl"),
+            "-module(hello_native).\n-export([greet/0]).\ngreet() -> <<\"hello\">>.\n",
+        );
+
+        let result = build(project_path.as_str(), &default_options(), false);
+        assert!(result.is_ok(), "Build should succeed: {result:?}");
+
+        // Native BEAM file should exist in _build/dev/native/ebin/
+        let native_beam = project_path
+            .join("_build")
+            .join("dev")
+            .join("native")
+            .join("ebin")
+            .join("hello_native.beam");
+        assert!(
+            native_beam.exists(),
+            "Native BEAM file should be produced at {native_beam}"
+        );
+
+        // Regular .bt BEAM should also exist
+        let bt_beam = project_path
+            .join("_build")
+            .join("dev")
+            .join("ebin")
+            .join("bt@with_native@main.beam");
+        assert!(
+            bt_beam.exists(),
+            "Beamtalk BEAM file should be produced at {bt_beam}"
         );
     }
 }
