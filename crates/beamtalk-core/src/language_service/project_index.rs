@@ -199,15 +199,20 @@ impl ProjectIndex {
 
     /// Returns the package name for a file, if determinable.
     ///
-    /// Looks up class definitions contributed by the file and checks their
-    /// `package` field in the merged hierarchy. Returns the first non-`None`
-    /// package found. Returns `None` for REPL files, scripts, or files whose
-    /// classes have no package set (e.g., not yet compiled with a package context).
+    /// Uses the file-local hierarchy (not the merged hierarchy) so that
+    /// two files defining the same class name in different packages don't
+    /// contaminate each other's package resolution. Only checks classes
+    /// contributed by this file (from `file_classes`), ignoring builtins
+    /// that are always present in every hierarchy.
+    ///
+    /// Returns `None` for REPL files, scripts, or files whose classes have
+    /// no package set (e.g., not yet compiled with a package context).
     #[must_use]
     pub fn package_for_file(&self, file: &Utf8PathBuf) -> Option<EcoString> {
         let class_names = self.file_classes.get(file)?;
+        let file_hierarchy = self.file_hierarchies.get(file)?;
         for name in class_names {
-            if let Some(info) = self.merged_hierarchy.get_class(name.as_str()) {
+            if let Some(info) = file_hierarchy.classes().get(name.as_str()) {
                 if let Some(ref pkg) = info.package {
                     return Some(pkg.clone());
                 }

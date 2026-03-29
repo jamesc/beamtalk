@@ -612,16 +612,11 @@ impl LanguageService for SimpleLanguageService {
     fn hover(&self, file: &Utf8PathBuf, position: Position) -> Option<HoverInfo> {
         let file_data = self.get_file(file)?;
 
-        // Determine the current file's package for visibility annotation
-        // (ADR 0071, BT-1703).
-        let current_package = self.project_index.package_for_file(file);
-
         crate::queries::hover_provider::compute_hover(
             &file_data.module,
             &file_data.source,
             position,
             self.project_index.hierarchy(),
-            current_package.as_deref(),
         )
     }
 
