@@ -522,6 +522,42 @@ pub struct NativeCompilationResult {
     pub ebin_dir: Utf8PathBuf,
 }
 
+/// Discover native Erlang module names from a package's `native/` directory
+/// without compiling them.
+///
+/// ADR 0072 Phase 1: Used for collision detection across packages before
+/// compilation begins. Returns the list of module names (file stems of
+/// `native/*.erl` files), or an empty vec if no `native/` directory exists.
+///
+/// # Errors
+///
+/// Returns an error if the `native/` directory exists but cannot be read.
+pub fn discover_native_modules(project_root: &Utf8Path) -> Result<Vec<String>> {
+    let native_dir = project_root.join("native");
+
+    if !native_dir.exists() || !native_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let entries = std::fs::read_dir(&native_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read native directory '{native_dir}'"))?;
+
+    let mut module_names = Vec::new();
+    for entry in entries {
+        let entry = entry.into_diagnostic()?;
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                module_names.push(stem.to_string());
+            }
+        }
+    }
+
+    module_names.sort();
+    Ok(module_names)
+}
+
 /// Discover and compile native Erlang source files from a `native/` directory.
 ///
 /// ADR 0072 Phase 1 (Path A): Compiles `native/*.erl` via `erlc` with
@@ -1445,6 +1481,46 @@ end
         assert!(
             result.is_err(),
             "Object subclass with state: should be a compile error: {result:?}"
+        );
+    }
+
+    // ---- ADR 0072 Phase 1: discover_native_modules tests ----
+
+    #[test]
+    fn test_discover_native_modules_no_native_dir() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let result = discover_native_modules(&project_root).unwrap();
+        assert!(result.is_empty(), "No native/ dir should return empty vec");
+    }
+
+    #[test]
+    fn test_discover_native_modules_with_erl_files() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let native_dir = project_root.join("native");
+        std::fs::create_dir(&native_dir).unwrap();
+
+        std::fs::write(native_dir.join("alpha.erl"), "-module(alpha).").unwrap();
+        std::fs::write(native_dir.join("beta.erl"), "-module(beta).").unwrap();
+        std::fs::write(native_dir.join("readme.md"), "# Not an erl file").unwrap();
+
+        let result = discover_native_modules(&project_root).unwrap();
+        assert_eq!(result, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn test_discover_native_modules_empty_native_dir() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let native_dir = project_root.join("native");
+        std::fs::create_dir(&native_dir).unwrap();
+
+        let result = discover_native_modules(&project_root).unwrap();
+        assert!(
+            result.is_empty(),
+            "Empty native/ dir should return empty vec"
         );
     }
 

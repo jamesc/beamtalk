@@ -223,6 +223,13 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         Vec::new()
     };
 
+    // ADR 0072 Phase 1: Check for native Erlang module name collisions across
+    // packages before compilation. BEAM has a flat module namespace — only one
+    // version of any module can be loaded, so duplicates must be caught early.
+    if let Some(pkg) = pkg_manifest {
+        check_native_module_collisions(&project_root, &pkg.name, &resolved_deps)?;
+    }
+
     // ADR 0072 Phase 1 (Path A): Compile native Erlang sources before .bt files.
     // Native modules must be compiled first because .bt files may reference them
     // via `(Erlang module)` FFI or `native:` annotations.
@@ -989,6 +996,79 @@ pub(crate) fn rebar3_path() -> Result<PathBuf> {
          Expected bundled copy at <runtime>/tools/rebar3.\n\
          Install rebar3 or run from the repository root."
     ))
+}
+
+/// ADR 0072 Phase 1: Check for native Erlang module name collisions across
+/// packages in the dependency graph.
+///
+/// BEAM has a flat module namespace — only one version of any module can be
+/// loaded at runtime. If two packages define the same native module name
+/// (e.g., both have `native/utils.erl`), the last one loaded silently wins,
+/// causing subtle runtime breakage. This check runs before compilation to
+/// fail fast with a clear error naming both packages and the conflicting module.
+fn check_native_module_collisions(
+    project_root: &Utf8Path,
+    root_package_name: &str,
+    resolved_deps: &[super::deps::path::ResolvedDependency],
+) -> Result<()> {
+    use crate::beam_compiler::discover_native_modules;
+    use std::fmt::Write;
+
+    // Collect native modules from root package
+    let root_modules = discover_native_modules(project_root)?;
+
+    // Collect native modules from each dependency
+    let mut module_owners: HashMap<String, Vec<String>> = HashMap::new();
+
+    for module in &root_modules {
+        module_owners
+            .entry(module.clone())
+            .or_default()
+            .push(root_package_name.to_string());
+    }
+
+    for dep in resolved_deps {
+        let dep_modules = discover_native_modules(&dep.root)?;
+        for module in &dep_modules {
+            module_owners
+                .entry(module.clone())
+                .or_default()
+                .push(dep.name.clone());
+        }
+    }
+
+    // Find collisions: modules owned by more than one package
+    let mut collisions: Vec<(String, Vec<String>)> = module_owners
+        .into_iter()
+        .filter(|(_, owners)| owners.len() > 1)
+        .collect();
+    collisions.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    if collisions.is_empty() {
+        return Ok(());
+    }
+
+    // Build a clear error message listing all collisions
+    let mut msg = String::from(
+        "Native Erlang module name collision detected.\n\
+         BEAM has a flat module namespace — only one version of any module can be loaded.\n\n",
+    );
+
+    for (module, owners) in &collisions {
+        let _ = writeln!(
+            msg,
+            "  Module '{}' is defined by: {}",
+            module,
+            owners.join(", ")
+        );
+    }
+
+    msg.push_str(
+        "\nRename the conflicting module(s) to avoid silent runtime breakage. \
+         Convention: prefix native modules with the package name (e.g., 'mypackage_utils').",
+    );
+
+    miette::bail!("{msg}")
 }
 
 #[cfg(test)]
@@ -2064,6 +2144,209 @@ mod tests {
         assert!(
             bt_beam.exists(),
             "Beamtalk BEAM file should be produced at {bt_beam}"
+        );
+    }
+
+    // ---- ADR 0072 Phase 1: native module collision detection ----
+
+    #[test]
+    fn test_no_collision_single_package_no_native() {
+        // Packages without native/ should pass collision check trivially.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+
+        let result = check_native_module_collisions(&project_path, "test_pkg", &[]);
+        assert!(result.is_ok(), "No native dir should pass: {result:?}");
+    }
+
+    #[test]
+    fn test_no_collision_single_package_with_native() {
+        // A single package with native modules should not trigger collision.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        );
+
+        let native_dir = project_path.join("native");
+        fs::create_dir(&native_dir).unwrap();
+        write_test_file(
+            &native_dir.join("my_helper.erl"),
+            "-module(my_helper).\n-export([hello/0]).\nhello() -> ok.\n",
+        );
+
+        let result = check_native_module_collisions(&project_path, "my_pkg", &[]);
+        assert!(result.is_ok(), "Single package should pass: {result:?}");
+    }
+
+    #[test]
+    fn test_collision_between_root_and_dependency() {
+        // Root package and a dependency both define the same native module name.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"root_pkg\"\nversion = \"0.1.0\"\n",
+        );
+
+        // Root package has native/utils.erl
+        let root_native = project_path.join("native");
+        fs::create_dir(&root_native).unwrap();
+        write_test_file(
+            &root_native.join("utils.erl"),
+            "-module(utils).\n-export([]).\n",
+        );
+
+        // Dependency also has native/utils.erl
+        let dep_dir = temp.path().join("dep_pkg");
+        fs::create_dir_all(dep_dir.join("native")).unwrap();
+        fs::create_dir_all(dep_dir.join("src")).unwrap();
+        fs::write(
+            dep_dir.join("native").join("utils.erl"),
+            "-module(utils).\n-export([]).\n",
+        )
+        .unwrap();
+
+        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
+        let deps = vec![super::super::deps::path::ResolvedDependency {
+            name: "dep_pkg".to_string(),
+            root: dep_root.clone(),
+            ebin_path: dep_root.join("ebin"),
+            class_module_index: HashMap::new(),
+            is_direct: true,
+            via_chain: Vec::new(),
+        }];
+
+        let result = check_native_module_collisions(&project_path, "root_pkg", &deps);
+        assert!(result.is_err(), "Should detect collision");
+
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("utils"),
+            "Error should name the conflicting module: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("root_pkg"),
+            "Error should name the root package: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("dep_pkg"),
+            "Error should name the dependency: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_collision_between_two_dependencies() {
+        // Two dependencies define the same native module name (root has none).
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"root_pkg\"\nversion = \"0.1.0\"\n",
+        );
+
+        // first_dep has native/shared_mod.erl
+        let first_dep_dir = temp.path().join("dep_a");
+        fs::create_dir_all(first_dep_dir.join("native")).unwrap();
+        fs::create_dir_all(first_dep_dir.join("src")).unwrap();
+        fs::write(
+            first_dep_dir.join("native").join("shared_mod.erl"),
+            "-module(shared_mod).\n-export([]).\n",
+        )
+        .unwrap();
+
+        // second_dep also has native/shared_mod.erl
+        let second_dep_dir = temp.path().join("dep_b");
+        fs::create_dir_all(second_dep_dir.join("native")).unwrap();
+        fs::create_dir_all(second_dep_dir.join("src")).unwrap();
+        fs::write(
+            second_dep_dir.join("native").join("shared_mod.erl"),
+            "-module(shared_mod).\n-export([]).\n",
+        )
+        .unwrap();
+
+        let first_root = Utf8PathBuf::from_path_buf(first_dep_dir).unwrap();
+        let second_root = Utf8PathBuf::from_path_buf(second_dep_dir).unwrap();
+        let deps = vec![
+            super::super::deps::path::ResolvedDependency {
+                name: "dep_a".to_string(),
+                root: first_root.clone(),
+                ebin_path: first_root.join("ebin"),
+                class_module_index: HashMap::new(),
+                is_direct: true,
+                via_chain: Vec::new(),
+            },
+            super::super::deps::path::ResolvedDependency {
+                name: "dep_b".to_string(),
+                root: second_root.clone(),
+                ebin_path: second_root.join("ebin"),
+                class_module_index: HashMap::new(),
+                is_direct: true,
+                via_chain: Vec::new(),
+            },
+        ];
+
+        let result = check_native_module_collisions(&project_path, "root_pkg", &deps);
+        assert!(result.is_err(), "Should detect collision between deps");
+
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("shared_mod"),
+            "Error should name the module: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("dep_a"),
+            "Error should name dep_a: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("dep_b"),
+            "Error should name dep_b: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_no_collision_different_native_modules() {
+        // Root and dependency have native modules with different names — no collision.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"root_pkg\"\nversion = \"0.1.0\"\n",
+        );
+
+        // Root has native/root_utils.erl
+        let root_native = project_path.join("native");
+        fs::create_dir(&root_native).unwrap();
+        write_test_file(
+            &root_native.join("root_utils.erl"),
+            "-module(root_utils).\n-export([]).\n",
+        );
+
+        // Dependency has native/dep_utils.erl
+        let dep_dir = temp.path().join("dep_pkg");
+        fs::create_dir_all(dep_dir.join("native")).unwrap();
+        fs::create_dir_all(dep_dir.join("src")).unwrap();
+        fs::write(
+            dep_dir.join("native").join("dep_utils.erl"),
+            "-module(dep_utils).\n-export([]).\n",
+        )
+        .unwrap();
+
+        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
+        let deps = vec![super::super::deps::path::ResolvedDependency {
+            name: "dep_pkg".to_string(),
+            root: dep_root.clone(),
+            ebin_path: dep_root.join("ebin"),
+            class_module_index: HashMap::new(),
+            is_direct: true,
+            via_chain: Vec::new(),
+        }];
+
+        let result = check_native_module_collisions(&project_path, "root_pkg", &deps);
+        assert!(
+            result.is_ok(),
+            "Different module names should pass: {result:?}"
         );
     }
 }
