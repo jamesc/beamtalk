@@ -195,8 +195,8 @@ When two packages declare the same hex dep, Beamtalk takes the **tighter constra
 
 1. `beamtalk build` collects `[native.dependencies]` from all packages in the dependency graph
 2. Merges constraints — for each shared hex dep, computes the tightest compatible constraint
-3. Detects conflicts early (non-overlapping constraints) with helpful error messages
-4. On first build (no lockfile): passes merged constraints to rebar3, which resolves actual versions against hex.pm. Resolved versions are captured in `beamtalk.lock`
+3. Detects **direct** constraint conflicts early (non-overlapping constraints) with helpful error messages
+4. On first build (no lockfile): passes merged constraints to rebar3, which resolves actual versions against hex.pm — including **transitive** hex deps that Beamtalk has no visibility into. Transitive conflicts are caught and reported by rebar3. Resolved versions are captured in `beamtalk.lock`
 5. On subsequent builds: generates `rebar.config` with exact pinned versions from `beamtalk.lock`
 6. `beamtalk deps update` re-resolves constraints and updates the lock
 
