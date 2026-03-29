@@ -1208,14 +1208,21 @@ fn handle_compile(request: &Map) -> Term {
     // Uses the unified derive_class_module_name function.
     let module_name_override = map_get(request, "module_name").and_then(term_to_string);
 
-    let module_name = if let Some(first_class) = module.classes.first() {
-        derive_class_module_name(
-            &first_class.name.name,
-            module_name_override.as_deref(),
-            stdlib_mode,
-        )
-    } else {
-        return error_response(&["No class definition found in source".to_string()]);
+    // Derive module name from the first class or protocol.  BT-1666 ensures
+    // a file contains at most one kind (class OR protocol, never both).
+    let primary_name = module
+        .classes
+        .first()
+        .map(|c| c.name.name.as_str())
+        .or_else(|| module.protocols.first().map(|p| p.name.name.as_str()));
+
+    let module_name = match primary_name {
+        Some(name) => derive_class_module_name(name, module_name_override.as_deref(), stdlib_mode),
+        None => {
+            return error_response(
+                &["No class or protocol definition found in source".to_string()],
+            );
+        }
     };
 
     // Extract class info
@@ -1900,6 +1907,61 @@ mod tests {
         // The module name should use the override, not bt@my_thing
         let module_name = map_get(m, "module_name").and_then(term_to_string);
         assert_eq!(module_name.as_deref(), Some("bt@my_app@my_thing"));
+    }
+
+    /// Protocol-only file compilation succeeds and derives module name from protocol.
+    #[test]
+    fn compile_protocol_only_file() {
+        let request = Map::from([
+            (atom("command"), atom("compile")),
+            (atom("source"), binary("Protocol define: Awaitable")),
+        ]);
+
+        let response = handle_compile(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected a map response, got: {response:?}");
+        };
+
+        let status = map_get(m, "status").and_then(term_to_atom);
+        assert_eq!(
+            status.as_deref(),
+            Some("ok"),
+            "Protocol-only file should compile successfully"
+        );
+
+        let module_name = map_get(m, "module_name").and_then(term_to_string);
+        assert_eq!(module_name.as_deref(), Some("bt@awaitable"));
+
+        // Classes list should be present and empty for protocol-only files
+        let classes = map_get(m, "classes").expect("response should include 'classes' key");
+        let Term::List(list) = classes else {
+            panic!("Expected classes to be a list, got: {classes:?}");
+        };
+        assert!(
+            list.elements.is_empty(),
+            "Protocol-only file should have no classes"
+        );
+    }
+
+    /// Protocol-only file compilation with `module_name` override.
+    #[test]
+    fn compile_protocol_only_file_with_override() {
+        let request = Map::from([
+            (atom("command"), atom("compile")),
+            (atom("source"), binary("Protocol define: Awaitable")),
+            (atom("module_name"), binary("bt@exdura@awaitable")),
+        ]);
+
+        let response = handle_compile(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected a map response, got: {response:?}");
+        };
+
+        let status = map_get(m, "status").and_then(term_to_atom);
+        assert_eq!(status.as_deref(), Some("ok"));
+
+        let module_name = map_get(m, "module_name").and_then(term_to_string);
+        assert_eq!(module_name.as_deref(), Some("bt@exdura@awaitable"));
     }
 
     /// BT-1670: Inline class definition without override uses default `bt@` prefix.
