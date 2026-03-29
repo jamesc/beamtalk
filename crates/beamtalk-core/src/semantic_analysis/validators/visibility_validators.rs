@@ -1176,11 +1176,7 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("shadows internal"))
             .collect();
-        assert_eq!(
-            w0401.len(),
-            1,
-            "Expected shadow warning, got: {w0401:?}"
-        );
+        assert_eq!(w0401.len(), 1, "Expected shadow warning, got: {w0401:?}");
         assert!(w0401[0].message.contains("helper"));
         assert!(w0401[0].message.contains("Parent"));
     }
