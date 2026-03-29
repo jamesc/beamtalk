@@ -31,11 +31,57 @@ use crate::ast::{ClassDefinition, ClassKind, Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
 use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::queries::erlang_modules;
+use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::{ClassHierarchy, InferredType};
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
+
+/// Returns `true` if the class is internal and belongs to a different package
+/// than `current_package` (ADR 0071, BT-1703).
+///
+/// Internal classes should be excluded from cross-package completions.
+/// Returns `false` when:
+/// - The class is not internal
+/// - Either side has no package set (REPL/script context)
+/// - Both belong to the same package
+fn is_cross_package_internal_class(info: &ClassInfo, current_package: Option<&str>) -> bool {
+    if !info.is_internal {
+        return false;
+    }
+    let Some(class_pkg) = info.package.as_deref() else {
+        return false;
+    };
+    let Some(cur_pkg) = current_package else {
+        return false;
+    };
+    class_pkg != cur_pkg
+}
+
+/// Returns `true` if the method is internal and its defining class belongs to a
+/// different package than `current_package` (ADR 0071, BT-1703).
+///
+/// Internal methods should be excluded from cross-package completions.
+fn is_cross_package_internal_method(
+    method: &MethodInfo,
+    hierarchy: &ClassHierarchy,
+    current_package: Option<&str>,
+) -> bool {
+    if !method.is_internal {
+        return false;
+    }
+    let Some(cur_pkg) = current_package else {
+        return false;
+    };
+    let Some(class_info) = hierarchy.get_class(method.defined_in.as_str()) else {
+        return false;
+    };
+    let Some(class_pkg) = class_info.package.as_deref() else {
+        return false;
+    };
+    class_pkg != cur_pkg
+}
 
 /// The class context at the cursor position.
 #[derive(Debug, Clone)]
@@ -75,7 +121,7 @@ enum ClassContext<'a> {
 /// let (module, _) = parse(tokens);
 /// let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 ///
-/// let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
+/// let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy, None);
 /// assert!(!completions.is_empty());
 /// // Should include keywords like "self", "true", "false"
 /// assert!(completions.iter().any(|c| c.label == "self"));
@@ -86,6 +132,7 @@ pub fn compute_completions(
     source: &str,
     position: Position,
     hierarchy: &ClassHierarchy,
+    current_package: Option<&str>,
 ) -> Vec<Completion> {
     // Validate position is within bounds
     let offset = match position.to_offset(source) {
@@ -135,8 +182,8 @@ pub fn compute_completions(
     // Add identifiers from the current scope
     add_identifier_completions(module, &mut completions);
 
-    // Add class names as completions
-    add_class_name_completions(module, hierarchy, &mut completions);
+    // Add class names as completions (filtering internal classes from other packages)
+    add_class_name_completions(module, hierarchy, current_package, &mut completions);
 
     // Add message completions from class hierarchy (context-aware, type-filtered)
     add_hierarchy_completions(
@@ -144,6 +191,7 @@ pub fn compute_completions(
         hierarchy,
         &context,
         receiver_type.as_ref(),
+        current_package,
         &mut completions,
     );
 
@@ -418,11 +466,13 @@ fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
 fn add_class_name_completions(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    current_package: Option<&str>,
     completions: &mut Vec<Completion>,
 ) {
     let mut seen = HashSet::new();
 
     // Add user-defined classes from the module (with richer documentation)
+    // These are always visible (same-file classes are same-package by definition).
     for class in &module.classes {
         let name = &class.name.name;
         if seen.insert(name.clone()) {
@@ -436,19 +486,28 @@ fn add_class_name_completions(
         }
     }
 
-    // Add all known classes from the hierarchy (builtins + any others)
+    // Add all known classes from the hierarchy (builtins + any others),
+    // filtering out internal classes from other packages (ADR 0071, BT-1703).
     for class_name in hierarchy.class_names() {
         if seen.insert(class_name.clone()) {
-            let doc = hierarchy
-                .get_class(class_name.as_str())
-                .and_then(|info| info.superclass.as_ref())
-                .map_or_else(
+            if let Some(info) = hierarchy.get_class(class_name.as_str()) {
+                if is_cross_package_internal_class(info, current_package) {
+                    continue;
+                }
+                let doc = info.superclass.as_ref().map_or_else(
                     || format!("Class: {class_name}"),
                     |s| format!("Class: {class_name} (extends {s})"),
                 );
-            completions.push(
-                Completion::new(class_name.as_str(), CompletionKind::Class).with_documentation(doc),
-            );
+                completions.push(
+                    Completion::new(class_name.as_str(), CompletionKind::Class)
+                        .with_documentation(doc),
+                );
+            } else {
+                completions.push(
+                    Completion::new(class_name.as_str(), CompletionKind::Class)
+                        .with_documentation(format!("Class: {class_name}")),
+                );
+            }
         }
     }
 }
@@ -678,6 +737,7 @@ fn add_receiver_type_completions(
     hierarchy: &ClassHierarchy,
     receiver_type: Option<&ReceiverSide>,
     context: &ClassContext<'_>,
+    current_package: Option<&str>,
     completions: &mut Vec<Completion>,
 ) -> bool {
     let mut seen = HashSet::new();
@@ -691,6 +751,10 @@ fn add_receiver_type_completions(
                     Some(class_name),
                     hierarchy,
                 ) {
+                    continue;
+                }
+                // Filter internal methods from other packages (ADR 0071, BT-1703)
+                if is_cross_package_internal_method(&method, hierarchy, current_package) {
                     continue;
                 }
                 if seen.insert(method.selector.clone()) {
@@ -713,6 +777,10 @@ fn add_receiver_type_completions(
                     Some(class_name),
                     hierarchy,
                 ) {
+                    continue;
+                }
+                // Filter internal methods from other packages (ADR 0071, BT-1703)
+                if is_cross_package_internal_method(&method, hierarchy, current_package) {
                     continue;
                 }
                 if seen.insert(method.selector.clone()) {
@@ -818,15 +886,23 @@ fn should_exclude_delegate(
 /// When `receiver_type` is `Some`, completions are filtered to only show methods
 /// available on that type — instance methods for `Instance`, class-side methods
 /// for `Class` (type-aware completions).
+#[allow(clippy::too_many_lines)]
 fn add_hierarchy_completions(
     module: &Module,
     hierarchy: &ClassHierarchy,
     context: &ClassContext<'_>,
     receiver_type: Option<&ReceiverSide>,
+    current_package: Option<&str>,
     completions: &mut Vec<Completion>,
 ) {
     // If we have a known receiver type, show only methods for that type
-    if add_receiver_type_completions(hierarchy, receiver_type, context, completions) {
+    if add_receiver_type_completions(
+        hierarchy,
+        receiver_type,
+        context,
+        current_package,
+        completions,
+    ) {
         return;
     }
 
@@ -842,6 +918,7 @@ fn add_hierarchy_completions(
                 context,
                 None,
                 hierarchy,
+                current_package,
                 &mut seen,
                 completions,
             );
@@ -861,6 +938,7 @@ fn add_hierarchy_completions(
                 context,
                 None,
                 hierarchy,
+                current_package,
                 &mut seen,
                 completions,
             );
@@ -871,6 +949,7 @@ fn add_hierarchy_completions(
                 context,
                 None,
                 hierarchy,
+                current_package,
                 &mut seen,
                 completions,
             );
@@ -884,6 +963,7 @@ fn add_hierarchy_completions(
                 context,
                 None,
                 hierarchy,
+                current_package,
                 &mut seen,
                 completions,
             );
@@ -893,6 +973,7 @@ fn add_hierarchy_completions(
                 context,
                 None,
                 hierarchy,
+                current_package,
                 &mut seen,
                 completions,
             );
@@ -906,6 +987,7 @@ fn add_hierarchy_completions(
                     context,
                     None,
                     hierarchy,
+                    current_package,
                     &mut seen,
                     completions,
                 );
@@ -915,6 +997,7 @@ fn add_hierarchy_completions(
                     context,
                     None,
                     hierarchy,
+                    current_package,
                     &mut seen,
                     completions,
                 );
@@ -926,6 +1009,7 @@ fn add_hierarchy_completions(
                 context,
                 None,
                 hierarchy,
+                current_package,
                 &mut seen,
                 completions,
             );
@@ -933,13 +1017,16 @@ fn add_hierarchy_completions(
     }
 }
 
-/// Collects methods into completions, filtering out `delegate` where inappropriate.
+/// Collects methods into completions, filtering out `delegate` where inappropriate
+/// and internal methods from other packages (ADR 0071, BT-1703).
+#[allow(clippy::too_many_arguments)]
 fn collect_method_completions(
     methods: impl IntoIterator<Item = crate::semantic_analysis::class_hierarchy::MethodInfo>,
     is_class_side: bool,
     context: &ClassContext<'_>,
     receiver_class: Option<&str>,
     hierarchy: &ClassHierarchy,
+    current_package: Option<&str>,
     seen: &mut HashSet<EcoString>,
     completions: &mut Vec<Completion>,
 ) {
@@ -951,6 +1038,10 @@ fn collect_method_completions(
             receiver_class,
             hierarchy,
         ) {
+            continue;
+        }
+        // Filter internal methods from other packages (ADR 0071, BT-1703)
+        if is_cross_package_internal_method(&method, hierarchy, current_package) {
             continue;
         }
         if seen.insert(method.selector.clone()) {
@@ -1021,10 +1112,19 @@ mod tests {
 
     /// Parse source and compute completions with a fresh hierarchy.
     fn completions_at(source: &str, position: Position) -> Vec<Completion> {
+        completions_at_with_package(source, position, None)
+    }
+
+    /// Parse source and compute completions with a specific package context.
+    fn completions_at_with_package(
+        source: &str,
+        position: Position,
+        current_package: Option<&str>,
+    ) -> Vec<Completion> {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        compute_completions(&module, source, position, &hierarchy)
+        compute_completions(&module, source, position, &hierarchy, current_package)
     }
 
     #[test]
@@ -1144,7 +1244,8 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
+        let completions =
+            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None);
 
         // Should include inherited Actor methods (spawn)
         assert!(
@@ -1172,7 +1273,8 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         // Position at the method body (after "=> ")
-        let completions = compute_completions(&module, source, Position::new(3, 17), &hierarchy);
+        let completions =
+            compute_completions(&module, source, Position::new(3, 17), &hierarchy, None);
 
         // Should include the class's own method
         assert!(
@@ -1194,7 +1296,8 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         // Position inside the method body
-        let completions = compute_completions(&module, source, Position::new(3, 17), &hierarchy);
+        let completions =
+            compute_completions(&module, source, Position::new(3, 17), &hierarchy, None);
 
         // Should include state variable as field completion
         assert!(
@@ -1212,7 +1315,8 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-        let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
+        let completions =
+            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None);
 
         // Should include user-defined class
         assert!(
@@ -1238,7 +1342,8 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         // Position inside the class method body (line 3, after "=> ")
-        let completions = compute_completions(&module, source, Position::new(3, 22), &hierarchy);
+        let completions =
+            compute_completions(&module, source, Position::new(3, 22), &hierarchy, None);
 
         // Should include the class method itself
         assert!(
@@ -1258,7 +1363,8 @@ mod tests {
         // Position at top level (line 0 is part of class definition,
         // but completions at any position include all module methods)
         // Use Position(0, 0) which is before class keyword
-        let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
+        let completions =
+            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None);
 
         // Should include class-side methods from module classes
         assert!(
@@ -1900,7 +2006,8 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        let completions = compute_completions(&module, source, Position::new(3, 19), &hierarchy);
+        let completions =
+            compute_completions(&module, source, Position::new(3, 19), &hierarchy, None);
         assert!(
             !completions.iter().any(|c| c.label == "delegate"),
             "delegate should be excluded for non-native actors"
@@ -1916,10 +2023,354 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         // Position inside the method body (on "del" partial text)
-        let completions = compute_completions(&module, source, Position::new(3, 13), &hierarchy);
+        let completions =
+            compute_completions(&module, source, Position::new(3, 13), &hierarchy, None);
         assert!(
             completions.iter().any(|c| c.label == "delegate"),
             "delegate should be included for native actors"
+        );
+    }
+
+    // --- ADR 0071 / BT-1703: Cross-package visibility filtering ---
+
+    #[test]
+    fn internal_class_excluded_from_cross_package_completions() {
+        use std::collections::HashMap;
+
+        let source = "x := 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Inject an internal class from package "other_pkg"
+        hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
+            name: EcoString::from("SecretHelper"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: true,
+            package: Some(EcoString::from("other_pkg")),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        }]);
+
+        // From a different package: internal class should be filtered out
+        let completions = compute_completions(
+            &module,
+            source,
+            Position::new(0, 0),
+            &hierarchy,
+            Some("my_pkg"),
+        );
+        assert!(
+            !completions.iter().any(|c| c.label == "SecretHelper"),
+            "Internal class from other package should be excluded"
+        );
+    }
+
+    #[test]
+    fn internal_class_visible_in_same_package_completions() {
+        use std::collections::HashMap;
+
+        let source = "x := 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
+            name: EcoString::from("InternalHelper"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: true,
+            package: Some(EcoString::from("my_pkg")),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        }]);
+
+        // From the same package: internal class should be visible
+        let completions = compute_completions(
+            &module,
+            source,
+            Position::new(0, 0),
+            &hierarchy,
+            Some("my_pkg"),
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "InternalHelper"),
+            "Internal class from same package should be included"
+        );
+    }
+
+    #[test]
+    fn internal_class_visible_when_no_package_context() {
+        use std::collections::HashMap;
+
+        let source = "x := 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
+            name: EcoString::from("InternalHelper"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: true,
+            package: Some(EcoString::from("some_pkg")),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        }]);
+
+        // No package context (REPL/script): internal classes still visible
+        let completions =
+            compute_completions(&module, source, Position::new(0, 0), &hierarchy, None);
+        assert!(
+            completions.iter().any(|c| c.label == "InternalHelper"),
+            "Internal class should be visible when no package context"
+        );
+    }
+
+    #[test]
+    fn cross_package_internal_method_helper() {
+        use crate::ast::MethodKind;
+        use std::collections::HashMap;
+
+        let mut hierarchy = ClassHierarchy::with_builtins();
+
+        // Inject a class with both public and internal methods from "other_pkg"
+        hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
+            name: EcoString::from("RemoteService"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: Some(EcoString::from("other_pkg")),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo {
+                    selector: EcoString::from("publicMethod"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: EcoString::from("RemoteService"),
+                    is_sealed: false,
+                    is_internal: false,
+                    spawns_block: false,
+                    return_type: None,
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: EcoString::from("internalHelper"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: EcoString::from("RemoteService"),
+                    is_sealed: false,
+                    is_internal: true,
+                    spawns_block: false,
+                    return_type: None,
+                    param_types: vec![],
+                    doc: None,
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        }]);
+
+        let public_method = hierarchy
+            .find_method("RemoteService", "publicMethod")
+            .unwrap();
+        let internal_method = hierarchy
+            .find_method("RemoteService", "internalHelper")
+            .unwrap();
+
+        // Public method: never filtered
+        assert!(
+            !is_cross_package_internal_method(&public_method, &hierarchy, Some("my_pkg")),
+            "Public method should not be filtered"
+        );
+
+        // Internal method from other package: should be filtered
+        assert!(
+            is_cross_package_internal_method(&internal_method, &hierarchy, Some("my_pkg")),
+            "Internal method from other_pkg should be filtered for my_pkg"
+        );
+
+        // Internal method from same package: should NOT be filtered
+        assert!(
+            !is_cross_package_internal_method(&internal_method, &hierarchy, Some("other_pkg")),
+            "Internal method from same package should not be filtered"
+        );
+
+        // No package context (REPL): should NOT be filtered
+        assert!(
+            !is_cross_package_internal_method(&internal_method, &hierarchy, None),
+            "Internal method should not be filtered when no package context"
+        );
+    }
+
+    #[test]
+    fn cross_package_internal_class_helper() {
+        use std::collections::HashMap;
+
+        let internal_class = crate::semantic_analysis::class_hierarchy::ClassInfo {
+            name: EcoString::from("InternalClass"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: true,
+            package: Some(EcoString::from("other_pkg")),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        };
+
+        // Cross-package: should be filtered
+        assert!(
+            is_cross_package_internal_class(&internal_class, Some("my_pkg")),
+            "Internal class from other_pkg should be filtered for my_pkg"
+        );
+
+        // Same package: should NOT be filtered
+        assert!(
+            !is_cross_package_internal_class(&internal_class, Some("other_pkg")),
+            "Internal class from same package should not be filtered"
+        );
+
+        // No package context: should NOT be filtered
+        assert!(
+            !is_cross_package_internal_class(&internal_class, None),
+            "Internal class should not be filtered when no package context"
+        );
+
+        let public_class = crate::semantic_analysis::class_hierarchy::ClassInfo {
+            name: EcoString::from("PublicClass"),
+            is_internal: false,
+            package: Some(EcoString::from("other_pkg")),
+            ..internal_class.clone()
+        };
+
+        // Public class: never filtered
+        assert!(
+            !is_cross_package_internal_class(&public_class, Some("my_pkg")),
+            "Public class should never be filtered"
+        );
+    }
+
+    #[test]
+    fn internal_method_excluded_from_typed_receiver_completions() {
+        use crate::ast::MethodKind;
+        use std::collections::HashMap;
+
+        // Use source that references RemoteService with a typed variable
+        let source = "Object subclass: Client\n  doWork: svc :: RemoteService =>\n    svc pub";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Inject RemoteService with both public and internal methods
+        hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
+            name: EcoString::from("RemoteService"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: Some(EcoString::from("other_pkg")),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo {
+                    selector: EcoString::from("publicMethod"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: EcoString::from("RemoteService"),
+                    is_sealed: false,
+                    is_internal: false,
+                    spawns_block: false,
+                    return_type: None,
+                    param_types: vec![],
+                    doc: None,
+                },
+                MethodInfo {
+                    selector: EcoString::from("internalHelper"),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: EcoString::from("RemoteService"),
+                    is_sealed: false,
+                    is_internal: true,
+                    spawns_block: false,
+                    return_type: None,
+                    param_types: vec![],
+                    doc: None,
+                },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        }]);
+
+        // Completions from "my_pkg" — internal method should be excluded
+        let completions = compute_completions(
+            &module,
+            source,
+            Position::new(2, 8),
+            &hierarchy,
+            Some("my_pkg"),
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "publicMethod"),
+            "Public method should be included in typed receiver completions"
+        );
+        assert!(
+            !completions.iter().any(|c| c.label == "internalHelper"),
+            "Internal method from other package should be excluded from typed receiver completions"
         );
     }
 }
