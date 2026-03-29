@@ -60,11 +60,12 @@
 ]).
 
 %%% ===================================================================
-%%% Class Introspection (docs, sealing, abstractness)
+%%% Class Introspection (docs, sealing, abstractness, visibility)
 %%% ===================================================================
 -export([
     is_sealed/1,
-    is_abstract/1
+    is_abstract/1,
+    is_internal/1
 ]).
 
 %%% ===================================================================
@@ -258,6 +259,11 @@ is_sealed(ClassPid) ->
 -spec is_abstract(pid()) -> boolean().
 is_abstract(ClassPid) ->
     beamtalk_object_class:is_abstract(ClassPid).
+
+%% @doc ADR 0071 Phase 5: Check if a class has internal visibility.
+-spec is_internal(pid()) -> boolean().
+is_internal(ClassPid) ->
+    beamtalk_object_class:is_internal(ClassPid).
 
 %%% ====================================================================
 %%% Object Instances Delegators

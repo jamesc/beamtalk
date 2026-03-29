@@ -38,6 +38,7 @@
     instance_variables/1,
     is_sealed/1,
     is_abstract/1,
+    is_internal/1,
     is_constructible/1,
     class_name/1,
     module_name/1,
@@ -100,7 +101,9 @@
     doc = none :: binary() | none,
     method_docs = #{} :: #{selector() => binary()},
     %% BT-1634: Class method doc comments
-    class_method_docs = #{} :: #{selector() => binary()}
+    class_method_docs = #{} :: #{selector() => binary()},
+    %% ADR 0071 Phase 5: Class visibility (internal vs public)
+    is_internal = false :: boolean()
 }).
 
 %%====================================================================
@@ -276,6 +279,11 @@ local_call(Receiver, _Selector, _Args) ->
 method(ClassRef, Selector) ->
     beamtalk_method_resolver:resolve(ClassRef, Selector).
 
+%% @doc Check if a class is internal (ADR 0071).
+-spec is_internal(pid()) -> boolean().
+is_internal(ClassPid) ->
+    gen_server:call(ClassPid, is_internal).
+
 %% @doc Check if a class has a method (does not walk hierarchy).
 %% First checks the gen_server state (instance_methods map for compiled methods),
 %% then falls back to the module's has_method/1. The fallback is needed for
@@ -359,6 +367,13 @@ init({ClassName, ClassInfo}) ->
             M when is_map(M) -> M
         end,
     IsAbstract = maps:get(is_abstract, Meta, maps:get(is_abstract, ClassInfo, false)),
+    %% ADR 0071 Phase 5: Read visibility from meta (the codegen emits 'visibility' => public|internal).
+    %% Also support 'is_internal' boolean for direct ClassInfo usage.
+    IsInternal =
+        case maps:get(visibility, Meta, maps:get(visibility, ClassInfo, public)) of
+            internal -> true;
+            _ -> maps:get(is_internal, Meta, maps:get(is_internal, ClassInfo, false))
+        end,
     {InstanceMethods, MethodReturnTypes} = meta_to_methods(
         maps:get(method_info, Meta, undefined),
         maps:get(instance_methods, ClassInfo, #{})
@@ -416,7 +431,8 @@ init({ClassName, ClassInfo}) ->
         ),
         doc = maps:get(doc, ClassInfo, none),
         method_docs = maps:get(method_docs, ClassInfo, #{}),
-        class_method_docs = maps:get(class_method_docs, ClassInfo, #{})
+        class_method_docs = maps:get(class_method_docs, ClassInfo, #{}),
+        is_internal = IsInternal
     },
     {ok, State}.
 
@@ -617,6 +633,8 @@ handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->
     {reply, IVars, State};
 handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
     {reply, Sealed, State};
+handle_call(is_internal, _From, #class_state{is_internal = Internal} = State) ->
+    {reply, Internal, State};
 handle_call(is_abstract, _From, #class_state{is_abstract = Abstract} = State) ->
     {reply, Abstract, State};
 handle_call(
