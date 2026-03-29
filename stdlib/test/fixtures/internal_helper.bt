@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Internal class fixture for testing internal visibility (BT-1705, ADR 0071)
+// This class is marked internal — it should only be visible within the package
+
+internal Actor subclass: InternalHelper
+  state: value = 0
+
+  increment => self.value := self.value + 1
+
+  getValue => self.value
+
+  // Internal method on internal class (effectively internal regardless)
+  internal secret => 42
