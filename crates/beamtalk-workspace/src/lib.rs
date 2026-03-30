@@ -12,6 +12,8 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use std::fmt::Write;
+
 use miette::{IntoDiagnostic, Result, miette};
 use sha2::{Digest, Sha256};
 
@@ -34,12 +36,12 @@ pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
     hasher.update(path_str.as_bytes());
     let result = hasher.finalize();
 
-    // Use first 12 hex chars (6 bytes) for readability
-    Ok(result
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>()[..12]
-        .to_string())
+    // Use first 12 hex chars (6 bytes) for readability — take first 6 bytes
+    let hex = result.iter().take(6).fold(String::with_capacity(12), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    });
+    Ok(hex)
 }
 
 /// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).
