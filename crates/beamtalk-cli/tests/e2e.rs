@@ -987,6 +987,25 @@ impl ReplClient {
         Ok(completions.join(","))
     }
 
+    /// Sync the project (load-project op) and return a summary string.
+    ///
+    /// Uses the `tests/e2e/fixtures/incremental_project` fixture which has a
+    /// `beamtalk.toml` and `src/` with `.bt` files.
+    fn sync_project(&mut self) -> Result<String, String> {
+        let root = workspace_root();
+        let project_path = root.join("tests/e2e/fixtures/incremental_project");
+        let response = self.send_op(&serde_json::json!({
+            "op": "load-project",
+            "id": "e2e-sync",
+            "path": project_path.to_string_lossy()
+        }))?;
+        let summary = response
+            .get("summary")
+            .and_then(|s| s.as_str())
+            .unwrap_or("Synced");
+        Ok(summary.to_string())
+    }
+
     /// Load a file or directory and return a formatted string for test assertions.
     fn load_and_report(&mut self, path: &str) -> Result<String, String> {
         self.load_and_report_with_verb(path, "Loaded")
@@ -1346,6 +1365,8 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
             client.get_bindings()
         } else if case.expression == ":actors" {
             client.get_actors()
+        } else if case.expression == ":sync" || case.expression == ":s" {
+            client.sync_project()
         } else if case.expression.starts_with(":load ") || case.expression.starts_with(":l ") {
             let path = case
                 .expression

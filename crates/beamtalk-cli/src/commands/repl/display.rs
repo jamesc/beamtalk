@@ -80,9 +80,9 @@ pub(crate) fn print_help() {
     println!("  :exit, :q       Exit the REPL");
     println!("  :clear          Clear all variable bindings");
     println!("  :bindings       Show current variable bindings");
-    println!("  :load <path>    Load a .bt file or directory (→ Workspace load: \"path\")");
-    println!("  :reload         Reload the last loaded file or directory");
-    println!("  :reload <Class> Reload a class by name (→ ClassName reload)");
+    println!(
+        "  :sync, :s       Sync workspace with project in current dir (requires beamtalk.toml)"
+    );
     println!("  :unload <Class> Unload a class from the workspace");
     println!("  :test           Run all test classes (→ Workspace test)");
     println!("  :test <Class>   Run a test class (→ Workspace test: ClassName)");

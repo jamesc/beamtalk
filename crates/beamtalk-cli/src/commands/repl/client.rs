@@ -347,6 +347,18 @@ impl ReplClient {
         }))
     }
 
+    /// Load/sync a project from its `beamtalk.toml` (BT-1707).
+    ///
+    /// Uses `send_request_no_retry` because `load-project` is not idempotent —
+    /// a partial load followed by a retry would cause duplicate loads.
+    pub(crate) fn load_project(&mut self, path: &str) -> Result<ReplResponse> {
+        self.inner.send_request::<ReplResponse>(&serde_json::json!({
+            "op": "load-project",
+            "id": protocol::next_msg_id(),
+            "path": path
+        }))
+    }
+
     /// Unload a class from the workspace by name (BT-1243).
     pub(crate) fn unload(&mut self, class_name: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
