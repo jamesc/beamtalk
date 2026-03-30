@@ -107,9 +107,7 @@ proptest! {
         // Skip whitespace-only and comment-only input — these legitimately
         // produce empty modules with no diagnostics.
         let trimmed = input.trim();
-        if trimmed.is_empty() || trimmed.starts_with("//") {
-            return Ok(());
-        }
+        prop_assume!(!trimmed.is_empty() && !trimmed.starts_with("//"));
 
         let tokens = lex_with_eof(&input);
         let (module, diags) = parse(tokens);
