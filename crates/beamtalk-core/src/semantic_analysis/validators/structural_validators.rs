@@ -11,7 +11,7 @@
 //! - Unresolved FFI modules — `Erlang <module>` with unknown module
 //! - Arity mismatches — known Erlang functions called with wrong argument count
 
-use crate::ast::{ClassDefinition, Expression, MessageSelector, Module};
+use crate::ast::{Expression, MessageSelector, Module};
 use crate::ast_walker::walk_module;
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
@@ -71,7 +71,7 @@ fn visit_unresolved_class(
             )
             .with_hint(
                 "This class is not defined in the current compilation unit or standard library. \
-                 Suppress with @expect #unresolved_class if it exists at runtime.",
+                 Suppress with @expect unresolved_class if it exists at runtime.",
             )
             .with_category(DiagnosticCategory::UnresolvedClass),
         );
@@ -140,10 +140,8 @@ const KNOWN_OTP_MODULES: &[&str] = &[
 
 /// BT-1726: Warn on unresolved Erlang FFI module references.
 ///
-/// Detects two patterns:
-/// 1. `Erlang <module> <selector>` — the direct FFI call pattern where
-///    `<module>` is used as a unary message to `Erlang`.
-/// 2. `native: <module>` on class declarations — the backing module.
+/// Detects the `Erlang <module> <selector>` FFI call pattern where
+/// `<module>` is used as a unary message to `Erlang`.
 pub(crate) fn check_unresolved_ffi_modules(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     // Collect Erlang source files in the project (their module names are valid).
     // We don't have access to the filesystem here, so we only check the static list.
@@ -152,10 +150,6 @@ pub(crate) fn check_unresolved_ffi_modules(module: &Module, diagnostics: &mut Ve
         visit_unresolved_ffi(expr, diagnostics);
     });
 
-    // Also check `native:` backing modules on class definitions.
-    for class in &module.classes {
-        check_backing_module(class, diagnostics);
-    }
 }
 
 /// Visitor for Erlang FFI module references in expressions.
@@ -183,7 +177,7 @@ fn visit_unresolved_ffi(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
                         )
                         .with_hint(
                             "This module is not in the known OTP module list. \
-                             Suppress with @expect #unresolved_ffi if the module exists at runtime.",
+                             Suppress with @expect unresolved_ffi if the module exists at runtime.",
                         )
                         .with_category(DiagnosticCategory::UnresolvedFfi),
                     );
@@ -193,12 +187,6 @@ fn visit_unresolved_ffi(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Check `native: <module>` backing module on a class definition.
-fn check_backing_module(_class: &ClassDefinition, _diagnostics: &mut Vec<Diagnostic>) {
-    // Native backing modules are typically project-specific (e.g., beamtalk_runtime_*),
-    // so we skip this check — the real value is in checking Erlang FFI calls.
-    // Future: could validate against project .erl files if we get filesystem access.
-}
 
 fn is_known_erlang_module(name: &str) -> bool {
     KNOWN_OTP_MODULES.contains(&name) || name.starts_with("beamtalk_")
@@ -225,14 +213,18 @@ const KNOWN_ARITIES: &[(&str, &str, usize)] = &[
     ("lists", "member", 2),
     ("lists", "nth", 2),
     ("lists", "reverse", 1),
+    ("lists", "reverse", 2),
     ("lists", "seq", 2),
+    ("lists", "seq", 3),
     ("lists", "sort", 1),
+    ("lists", "sort", 2),
     ("lists", "zip", 2),
     // maps
     ("maps", "find", 2),
     ("maps", "fold", 3),
     ("maps", "from_list", 1),
     ("maps", "get", 2),
+    ("maps", "get", 3),
     ("maps", "is_key", 2),
     ("maps", "keys", 1),
     ("maps", "map", 2),
@@ -402,7 +394,7 @@ fn visit_ffi_arity(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
                         .with_hint(format!(
                             "The Erlang function `{module_name}:{function_name}` \
                              expects {expected} argument(s), but {arity} provided. \
-                             Suppress with @expect #arity_mismatch.",
+                             Suppress with @expect arity_mismatch.",
                         ))
                         .with_category(DiagnosticCategory::ArityMismatch),
                     );
@@ -574,7 +566,7 @@ mod tests {
 
     #[test]
     fn test_arity_mismatch_warns_on_wrong_count() {
-        // Erlang lists reverse: a to: b — arity 2, but lists:reverse is arity 1
+        // Erlang lists flatten: a extra: b — arity 2, but lists:flatten is arity 1 only
         let inner_send = Expression::MessageSend {
             receiver: Box::new(class_ref("Erlang")),
             selector: MessageSelector::Unary("lists".into()),
@@ -584,7 +576,7 @@ mod tests {
         };
         let outer_send = Expression::MessageSend {
             receiver: Box::new(inner_send),
-            selector: MessageSelector::Keyword(vec![kwpart("reverse:"), kwpart("to:")]),
+            selector: MessageSelector::Keyword(vec![kwpart("flatten:"), kwpart("extra:")]),
             arguments: vec![
                 Expression::Identifier(ident("a")),
                 Expression::Identifier(ident("b")),
@@ -598,7 +590,7 @@ mod tests {
         check_ffi_arity(&module, &mut diags);
 
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("lists:reverse/2"));
+        assert!(diags[0].message.contains("lists:flatten/2"));
         assert!(diags[0].message.contains("expected arity 1"));
         assert_eq!(diags[0].category, Some(DiagnosticCategory::ArityMismatch));
     }
