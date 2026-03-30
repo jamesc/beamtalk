@@ -68,6 +68,10 @@ use declarations::DoubleColonSkip;
 #[cfg(test)]
 mod property_tests;
 
+// Error recovery property tests (ADR 0011 Phase 2)
+#[cfg(test)]
+mod error_recovery_tests;
+
 // Unit tests (extracted from mod.rs for maintainability)
 #[cfg(test)]
 mod tests;

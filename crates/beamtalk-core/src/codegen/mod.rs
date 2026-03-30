@@ -17,3 +17,7 @@ pub mod core_erlang;
 // Property-based tests for code generation (ADR 0011 Phase 2)
 #[cfg(test)]
 mod property_tests;
+
+// Property-based tests for Core Erlang output validity (ADR 0011 Phase 2)
+#[cfg(test)]
+mod core_erlang_validity_tests;

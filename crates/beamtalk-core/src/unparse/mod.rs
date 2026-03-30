@@ -1648,6 +1648,10 @@ fn join_docs_vec(docs: Vec<Document<'static>>, sep: &'static str) -> Vec<Documen
 
 // --- Tests ---
 
+// Property-based tests for the unparser (ADR 0011 Phase 2)
+#[cfg(test)]
+mod property_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
