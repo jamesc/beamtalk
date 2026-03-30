@@ -149,7 +149,6 @@ pub(crate) fn check_unresolved_ffi_modules(module: &Module, diagnostics: &mut Ve
     walk_module(module, &mut |expr| {
         visit_unresolved_ffi(expr, diagnostics);
     });
-
 }
 
 /// Visitor for Erlang FFI module references in expressions.
@@ -186,7 +185,6 @@ fn visit_unresolved_ffi(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         }
     }
 }
-
 
 fn is_known_erlang_module(name: &str) -> bool {
     KNOWN_OTP_MODULES.contains(&name) || name.starts_with("beamtalk_")
@@ -407,7 +405,9 @@ fn visit_ffi_arity(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{ExpressionStatement, Identifier, KeywordPart};
+    use crate::ast::{
+        ClassDefinition, ExpressionStatement, Identifier, KeywordPart, TypeParamDecl,
+    };
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
     use crate::source_analysis::Span;
 
@@ -646,5 +646,78 @@ mod tests {
             diags.is_empty(),
             "Unknown functions should not trigger arity warnings"
         );
+    }
+
+    #[test]
+    fn test_unresolved_class_skips_type_params() {
+        // A class Container(T) referencing T should not warn.
+        let mut module = empty_module_with_exprs(vec![class_ref("T")]);
+        let mut class_def = ClassDefinition::new(
+            ident("Container"),
+            ident("Object"),
+            vec![],
+            vec![],
+            test_span(),
+        );
+        class_def.type_params.push(TypeParamDecl {
+            name: ident("T"),
+            bound: None,
+            span: test_span(),
+        });
+        module.classes.push(class_def);
+
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
+        let hierarchy = hierarchy.unwrap();
+        let mut diags = Vec::new();
+
+        check_unresolved_classes(&module, &hierarchy, &mut diags);
+
+        assert!(
+            diags.is_empty(),
+            "Type parameters should not trigger unresolved class warnings"
+        );
+    }
+
+    #[test]
+    fn test_arity_multi_arity_display() {
+        // Erlang lists reverse: a extra: b extra2: c — arity 3
+        // lists:reverse has arities 1 and 2, so message should say "1 or 2"
+        let inner_send = Expression::MessageSend {
+            receiver: Box::new(class_ref("Erlang")),
+            selector: MessageSelector::Unary("lists".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: test_span(),
+        };
+        let outer_send = Expression::MessageSend {
+            receiver: Box::new(inner_send),
+            selector: MessageSelector::Keyword(vec![
+                kwpart("reverse:"),
+                kwpart("extra:"),
+                kwpart("extra2:"),
+            ]),
+            arguments: vec![
+                Expression::Identifier(ident("a")),
+                Expression::Identifier(ident("b")),
+                Expression::Identifier(ident("c")),
+            ],
+            is_cast: false,
+            span: test_span(),
+        };
+        let module = empty_module_with_exprs(vec![outer_send]);
+        let mut diags = Vec::new();
+
+        check_ffi_arity(&module, &mut diags);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("lists:reverse/3"));
+        assert!(diags[0].message.contains("1 or 2"));
+    }
+
+    #[test]
+    fn test_beamtalk_prefix_accepted() {
+        assert!(is_known_erlang_module("beamtalk_extensions"));
+        assert!(is_known_erlang_module("beamtalk_runtime"));
+        assert!(!is_known_erlang_module("my_custom_module"));
     }
 }
