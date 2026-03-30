@@ -14,6 +14,9 @@
 
 -export([handle/4, resolve_class_to_module/1, resolve_module_atoms/2]).
 
+%% BT-1719: Exported for demand-driven native .erl compilation from classReload.
+-export([find_project_root/1, maybe_recompile_native_deps/2]).
+
 %% Export internals for white-box testing of load-project helpers.
 -ifdef(TEST).
 -export([
@@ -154,6 +157,19 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
     end;
 handle(<<"load-file">>, Params, Msg, SessionPid) ->
     Path = binary_to_list(maps:get(<<"path">>, Params, <<>>)),
+    %% BT-1719: Demand-driven native .erl compilation on initial load.
+    %% Same as do_reload/4 — if the .bt file references native Erlang modules,
+    %% compile them before loading the .bt file.
+    case maybe_recompile_native_deps(Path, find_project_root(Path)) of
+        {ok, _Count} ->
+            ok;
+        {error, NativeErrors} ->
+            ?LOG_ERROR(
+                "load-file: native .erl compilation failed for ~s: ~p",
+                [Path, NativeErrors],
+                #{domain => [beamtalk, runtime]}
+            )
+    end,
     case beamtalk_repl_shell:load_file(SessionPid, Path) of
         {ok, Classes} ->
             Warnings = collect_load_warnings(Classes),
@@ -425,11 +441,15 @@ compile_native_erl_files(ErlFiles, ProjectRoot) ->
                 [ErlPath],
                 #{domain => [beamtalk, runtime]}
             ),
+            %% BT-1719: Snapshot the .erl file's mtime before compiling so
+            %% is_native_erl_stale/2 can compare against it later.
+            ErlMtimeSnapshot = get_file_mtime(ErlPath),
             case compile:file(ErlPath, IncludeOpts) of
                 {ok, ModName, Binary, Warnings} ->
                     %% Load the compiled binary into the VM.
                     case code:load_binary(ModName, ErlPath, Binary) of
                         {module, ModName} ->
+                            set_native_compile_mtime(ModName, ErlMtimeSnapshot),
                             log_erl_warnings(ErlPath, Warnings),
                             {ErrsAcc, CountAcc + 1};
                         {error, LoadErr} ->
@@ -445,6 +465,7 @@ compile_native_erl_files(ErlFiles, ProjectRoot) ->
                 {ok, ModName, Binary} ->
                     case code:load_binary(ModName, ErlPath, Binary) of
                         {module, ModName} ->
+                            set_native_compile_mtime(ModName, ErlMtimeSnapshot),
                             {ErrsAcc, CountAcc + 1};
                         {error, LoadErr} ->
                             ErrMap = #{
@@ -1042,13 +1063,42 @@ is_native_erl_stale(ErlFile, ModBin) ->
             BeamMtime =
                 case is_list(BeamPath) of
                     true ->
-                        get_file_mtime(BeamPath);
+                        %% BT-1719: When loaded via code:load_binary/3 the stored
+                        %% path is the .erl source, not a .beam file. Comparing
+                        %% its mtime against itself always yields "not stale".
+                        %% Use the mtime snapshot taken at compile time instead.
+                        case filename:extension(BeamPath) of
+                            ".erl" ->
+                                get_native_compile_mtime(ModAtom);
+                            _ ->
+                                get_file_mtime(BeamPath)
+                        end;
                     false ->
                         %% BeamPath may be 'preloaded' or a cover-compiled atom.
                         %% In those cases, treat as stale to be safe.
                         {{0, 0, 0}, {0, 0, 0}}
                 end,
             ErlMtime > BeamMtime
+    end.
+
+%% @private
+%% @doc Record the .erl file's mtime when a native module is compiled in-memory.
+%% Used by is_native_erl_stale/2 to detect changes since last compilation.
+-spec set_native_compile_mtime(atom(), calendar:datetime()) -> ok.
+set_native_compile_mtime(ModAtom, Mtime) ->
+    persistent_term:put({beamtalk_native_mtime, ModAtom}, Mtime),
+    ok.
+
+%% @private
+%% @doc Retrieve the .erl file's mtime that was recorded at compilation time.
+%% Returns epoch if no mtime was recorded (triggers recompilation).
+-spec get_native_compile_mtime(atom()) -> calendar:datetime().
+get_native_compile_mtime(ModAtom) ->
+    try
+        persistent_term:get({beamtalk_native_mtime, ModAtom})
+    catch
+        error:badarg ->
+            {{0, 0, 0}, {0, 0, 0}}
     end.
 
 %%% ===================================================================
