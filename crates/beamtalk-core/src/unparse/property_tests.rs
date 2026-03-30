@@ -90,8 +90,9 @@ fn proptest_config() -> ProptestConfig {
         // The round-trip test filters out inputs with parse errors via
         // `prop_assume!`, so the rejection rate can be high. Scale the
         // global-reject cap with the case count to avoid "too many rejects"
-        // failures when running with large PROPTEST_CASES values.
-        max_global_rejects: cases * 2,
+        // failures when running with large PROPTEST_CASES values, while
+        // still respecting any higher env/default `max_global_rejects`.
+        max_global_rejects: default.max_global_rejects.max(cases * 2),
         ..default
     }
 }

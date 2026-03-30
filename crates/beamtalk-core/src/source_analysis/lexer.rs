@@ -1924,6 +1924,26 @@ mod tests {
     }
 
     #[test]
+    fn lex_unterminated_block_comment_is_error() {
+        // Unterminated block comment at top level must produce an error token,
+        // not silently vanish as trivia.
+        let kinds = lex_kinds("/*");
+        assert_eq!(kinds.len(), 1);
+        assert!(matches!(kinds[0], TokenKind::Error(_)));
+
+        // Also with content inside
+        let kinds = lex_kinds("/* hello world");
+        assert_eq!(kinds.len(), 1);
+        assert!(matches!(kinds[0], TokenKind::Error(_)));
+
+        // Code before the unterminated comment should still lex
+        let kinds = lex_kinds("x /*");
+        assert_eq!(kinds.len(), 2);
+        assert!(matches!(kinds[0], TokenKind::Identifier(_)));
+        assert!(matches!(kinds[1], TokenKind::Error(_)));
+    }
+
+    #[test]
     fn lex_spans_are_correct() {
         let tokens = lex("foo bar");
         assert_eq!(tokens[0].span().start(), 0);
