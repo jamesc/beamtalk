@@ -520,6 +520,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             .as_ref()
             .map(|r| r.module_names.clone())
             .unwrap_or_default();
+        // ADR 0072 §7: Direct hex dep names for the {applications, [...]} list
+        let hex_dep_names: Vec<String> = full_manifest
+            .as_ref()
+            .map(|m| m.native_dependencies.keys().cloned().collect())
+            .unwrap_or_default();
         generate_package_outputs(
             &build_dir,
             &project_root,
@@ -527,6 +532,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             &module_names,
             &class_module_index,
             &native_module_names,
+            &hex_dep_names,
             &all_class_infos,
             &source_files,
         )?;
@@ -551,6 +557,7 @@ fn generate_package_outputs(
     module_names: &[String],
     class_module_index: &HashMap<String, String>,
     native_module_names: &[String],
+    hex_dep_names: &[String],
     all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     source_files: &[Utf8PathBuf],
 ) -> Result<()> {
@@ -605,6 +612,7 @@ fn generate_package_outputs(
         &class_metadata,
         app_callback_module.as_deref(),
         native_module_names,
+        hex_dep_names,
     )?;
     info!(name = %pkg.name, "Generated .app file");
 
@@ -1318,12 +1326,17 @@ fn aggregate_native_dependencies(
 /// When `locked_versions` is provided (from `beamtalk.lock`), the generated
 /// config uses exact pinned versions instead of constraints for reproducible
 /// builds (ADR 0072 §5).
+///
+/// BT-1724: `resolved_bt_deps` is used to add transitive dependencies'
+/// `native/` directories to `src_dirs` and `include_dirs`, replacing the
+/// separate `compile_dep_native_erlang()` step with a single rebar3 pass.
 fn generate_rebar_config(
     project_root: &Utf8Path,
     native_deps: &NativeDependencyMap,
     locked_versions: Option<
         &std::collections::BTreeMap<String, super::deps::lockfile::NativePackageLock>,
     >,
+    resolved_bt_deps: &[super::deps::path::ResolvedDependency],
 ) -> Result<Utf8PathBuf> {
     let native_dir = project_root.join("native");
     let has_native_dir = native_dir.exists() && native_dir.is_dir();
@@ -1358,13 +1371,58 @@ fn generate_rebar_config(
     config.push_str(&dep_entries.join(",\n"));
     config.push_str("\n]}.\n");
 
-    // rebar3 runs from _build/dev/native/, so src_dirs/include_dirs need
-    // relative paths back to the project root's native/ directory.
+    // Collect all src_dirs and include_dirs.
+    // rebar3 runs from _build/dev/native/, so the root project's native/ directory
+    // uses a relative path. Transitive BT dependency native/ dirs use absolute paths
+    // since they may be at arbitrary filesystem locations (path dependencies).
+    let mut src_dirs: Vec<String> = Vec::new();
+    let mut incl_dirs: Vec<String> = Vec::new();
+
     if has_native_dir {
-        config.push_str("{src_dirs, [\"../../../native\"]}.\n");
+        src_dirs.push("\"../../../native\"".to_string());
     }
     if has_include_dir {
-        config.push_str("{include_dirs, [\"../../../native/include\"]}.\n");
+        incl_dirs.push("\"../../../native/include\"".to_string());
+    }
+
+    // BT-1724: Add transitive BT dependencies' native/ dirs to src_dirs/include_dirs
+    for dep in resolved_bt_deps {
+        let dep_native = dep.root.join("native");
+        if dep_native.exists() && dep_native.is_dir() {
+            let abs_path = std::fs::canonicalize(dep_native.as_std_path())
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!(
+                        "Failed to canonicalize native dir for dependency '{}'",
+                        dep.name
+                    )
+                })?;
+            let abs_str = abs_path.to_string_lossy().replace('\\', "/");
+            src_dirs.push(format!("\"{abs_str}\""));
+
+            let dep_include = dep_native.join("include");
+            if dep_include.exists() && dep_include.is_dir() {
+                let abs_inc = std::fs::canonicalize(dep_include)
+                    .into_diagnostic()
+                    .wrap_err_with(|| {
+                        format!(
+                            "Failed to canonicalize native include dir for dependency '{}'",
+                            dep.name
+                        )
+                    })?;
+                let abs_inc_str = abs_inc.to_string_lossy().replace('\\', "/");
+                incl_dirs.push(format!("\"{abs_inc_str}\""));
+            }
+        }
+    }
+
+    if !src_dirs.is_empty() {
+        use std::fmt::Write;
+        let _ = writeln!(config, "{{src_dirs, [{}]}}.", src_dirs.join(", "));
+    }
+    if !incl_dirs.is_empty() {
+        use std::fmt::Write;
+        let _ = writeln!(config, "{{include_dirs, [{}]}}.", incl_dirs.join(", "));
     }
 
     config.push_str("{erl_opts, [debug_info]}.\n");
@@ -1416,7 +1474,8 @@ fn compile_with_rebar3(
     }
 
     // Generate the rebar.config in _build/dev/native/
-    let config_path = generate_rebar_config(project_root, native_deps, locked_versions)?;
+    let config_path =
+        generate_rebar_config(project_root, native_deps, locked_versions, resolved_bt_deps)?;
 
     let rebar_base_dir = project_root.join("_build").join("dev").join("native");
 
@@ -1454,7 +1513,7 @@ fn compile_with_rebar3(
     }
 
     // Collect all ebin directories produced by rebar3
-    let mut ebin_paths = collect_rebar3_ebin_paths(&rebar_base_dir);
+    let ebin_paths = collect_rebar3_ebin_paths(&rebar_base_dir);
 
     info!(ebin_count = ebin_paths.len(), "rebar3 compilation complete");
 
@@ -1486,127 +1545,14 @@ fn compile_with_rebar3(
         discover_native_modules(project_root)?
     };
 
-    // Compile native .erl files from transitive Beamtalk dependencies.
-    compile_dep_native_erlang(resolved_bt_deps, &rebar_base_dir, &mut ebin_paths)?;
+    // BT-1724: Transitive BT dependency native .erl files are now compiled
+    // by rebar3 via src_dirs in the generated rebar.config, replacing the
+    // separate compile_dep_native_erlang() step.
 
     Ok(Rebar3Result {
         ebin_paths,
         module_names,
     })
-}
-
-/// Compile native `.erl` files from transitive Beamtalk dependencies.
-///
-/// After rebar3 fetches hex deps (cowboy, gun, etc.), this compiles each
-/// dependency's `native/*.erl` files via `erlc`, passing include paths for
-/// both hex dep headers and the beamtalk runtime.
-fn compile_dep_native_erlang(
-    resolved_bt_deps: &[super::deps::path::ResolvedDependency],
-    rebar_base_dir: &Utf8Path,
-    ebin_paths: &mut Vec<Utf8PathBuf>,
-) -> Result<()> {
-    let runtime_apps_dir = beamtalk_cli::repl_startup::find_runtime_dir()
-        .ok()
-        .map(|d| d.join("apps"))
-        .filter(|d| d.exists());
-
-    for dep in resolved_bt_deps {
-        let dep_native_dir = dep.root.join("native");
-        if !dep_native_dir.exists() || !dep_native_dir.is_dir() {
-            continue;
-        }
-
-        // Discover .erl files in this dependency's native/ dir
-        let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
-        let entries = std::fs::read_dir(&dep_native_dir)
-            .into_diagnostic()
-            .wrap_err_with(|| {
-                format!(
-                    "Failed to read native directory for dependency '{}'",
-                    dep.name
-                )
-            })?;
-        for entry_result in entries {
-            let entry = entry_result.into_diagnostic().wrap_err_with(|| {
-                format!(
-                    "Failed to read entry in native directory for dependency '{}'",
-                    dep.name
-                )
-            })?;
-            let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
-                if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
-                    erl_files.push(utf8);
-                }
-            }
-        }
-
-        if erl_files.is_empty() {
-            continue;
-        }
-
-        erl_files.sort();
-
-        // Output to the same native ebin dir
-        let dep_ebin = rebar_base_dir.join("ebin");
-        std::fs::create_dir_all(&dep_ebin)
-            .into_diagnostic()
-            .wrap_err("Failed to create native ebin directory")?;
-
-        info!(
-            dep = %dep.name,
-            count = erl_files.len(),
-            "Compiling native Erlang files from dependency"
-        );
-
-        let mut cmd = std::process::Command::new("erlc");
-        cmd.arg("+debug_info");
-        cmd.arg("-o").arg(dep_ebin.as_str());
-
-        // Add -I paths so erlc can resolve -include_lib for hex deps
-        // (cowboy, gun) and the beamtalk runtime (beamtalk_runtime/include/beamtalk.hrl).
-        let lib_dir = rebar_base_dir.join("default").join("lib");
-        if lib_dir.exists() {
-            cmd.arg("-I").arg(lib_dir.as_str());
-        }
-        if let Some(apps_dir) = &runtime_apps_dir {
-            cmd.arg("-I").arg(apps_dir);
-        }
-
-        // Add the dep's own include dir if present
-        let dep_include = dep_native_dir.join("include");
-        if dep_include.exists() && dep_include.is_dir() {
-            cmd.arg("-I").arg(dep_include.as_str());
-        }
-
-        for erl_file in &erl_files {
-            cmd.arg(erl_file.as_str());
-        }
-
-        let output = cmd.output().into_diagnostic().wrap_err_with(|| {
-            format!(
-                "Failed to compile native Erlang files from dependency '{}'",
-                dep.name
-            )
-        })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            miette::bail!(
-                "erlc failed for native files in dependency '{}':\n{}",
-                dep.name,
-                format!("{stdout}{stderr}").trim_end()
-            );
-        }
-
-        // Ensure the dep ebin is in ebin_paths
-        if !ebin_paths.contains(&dep_ebin) {
-            ebin_paths.push(dep_ebin);
-        }
-    }
-
-    Ok(())
 }
 
 /// Collect ebin directories from rebar3's output tree.
@@ -3032,7 +2978,7 @@ mod tests {
             },
         );
 
-        let config_path = generate_rebar_config(&project_path, &deps, None).unwrap();
+        let config_path = generate_rebar_config(&project_path, &deps, None, &[]).unwrap();
 
         assert!(config_path.exists(), "rebar.config should be created");
         let content = fs::read_to_string(&config_path).unwrap();
@@ -3081,7 +3027,7 @@ mod tests {
             },
         );
 
-        let config_path = generate_rebar_config(&project_path, &deps, None).unwrap();
+        let config_path = generate_rebar_config(&project_path, &deps, None, &[]).unwrap();
         let content = fs::read_to_string(&config_path).unwrap();
 
         assert!(
@@ -3115,7 +3061,7 @@ mod tests {
             },
         );
 
-        let config_path = generate_rebar_config(&project_path, &deps, None).unwrap();
+        let config_path = generate_rebar_config(&project_path, &deps, None, &[]).unwrap();
         let content = fs::read_to_string(&config_path).unwrap();
 
         assert!(
@@ -3213,7 +3159,7 @@ mod tests {
             },
         );
 
-        let config_path = generate_rebar_config(&project_path, &deps, None).unwrap();
+        let config_path = generate_rebar_config(&project_path, &deps, None, &[]).unwrap();
 
         // Config should be in _build/dev/native/
         let expected_suffix = Utf8PathBuf::from("_build/dev/native/rebar.config");
@@ -3265,7 +3211,7 @@ mod tests {
             },
         );
 
-        let config_path = generate_rebar_config(&project_path, &deps, Some(&locked)).unwrap();
+        let config_path = generate_rebar_config(&project_path, &deps, Some(&locked), &[]).unwrap();
         let content = fs::read_to_string(&config_path).unwrap();
 
         // Should use exact locked versions, not constraints
@@ -3318,7 +3264,7 @@ mod tests {
             },
         );
 
-        let config_path = generate_rebar_config(&project_path, &deps, Some(&locked)).unwrap();
+        let config_path = generate_rebar_config(&project_path, &deps, Some(&locked), &[]).unwrap();
         let content = fs::read_to_string(&config_path).unwrap();
 
         assert!(

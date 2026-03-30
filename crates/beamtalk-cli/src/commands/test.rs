@@ -791,6 +791,8 @@ struct TestPipeline {
     package_ebin_dirs: Vec<Utf8PathBuf>,
     /// Max concurrent test classes (0 = auto, 1 = sequential).
     jobs: usize,
+    /// ADR 0072: Hex dependency names that need OTP app startup before tests.
+    hex_dep_names: Vec<String>,
 }
 
 /// Run `BUnit` tests.
@@ -950,6 +952,7 @@ fn initialize_pipeline(
         package_modules: Vec::new(),
         package_ebin_dirs: Vec::new(),
         jobs,
+        hex_dep_names: Vec::new(),
     })
 }
 
@@ -1275,6 +1278,13 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
             pipeline.package_ebin_dirs.push(ebin);
         }
+
+        // ADR 0072: Collect hex dep names from lockfile (includes transitive deps)
+        for name in super::deps::lockfile::Lockfile::collect_hex_dep_names(pkg_root)? {
+            if !pipeline.hex_dep_names.contains(&name) {
+                pipeline.hex_dep_names.push(name);
+            }
+        }
     }
 
     Ok(())
@@ -1344,9 +1354,14 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
             + ", "
     };
 
+    // ADR 0072: Start hex dep OTP applications before tests
+    let hex_deps_start_cmd =
+        beamtalk_cli::repl_startup::hex_deps_start_fragment(&pipeline.hex_dep_names);
+
     // Call beamtalk_test_runner:run_all(Jobs) and serialize result to JSON
     let eval_cmd = format!(
         "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+         {hex_deps_start_cmd}\
          {package_load_cmd}\
          {fixture_load_cmd}\
          {test_load_cmd}\

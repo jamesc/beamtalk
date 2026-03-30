@@ -295,6 +295,18 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// Collect hex dep names from the lockfile for a project directory.
+///
+/// Returns an empty vec if the path is not valid UTF-8 or the lockfile
+/// doesn't exist. Propagates lockfile parse errors so REPL startup
+/// doesn't silently miss required OTP apps.
+fn collect_hex_dep_names_for_project(project_root: &std::path::Path) -> Result<Vec<String>> {
+    let Some(root) = camino::Utf8Path::from_path(project_root) else {
+        return Ok(Vec::new());
+    };
+    crate::commands::deps::lockfile::Lockfile::collect_hex_dep_names(root)
+}
+
 /// Read the Erlang default cookie from ~/.erlang.cookie.
 /// Used for foreground mode where no workspace cookie exists.
 fn read_erlang_cookie() -> Option<String> {
@@ -410,6 +422,9 @@ pub fn run(
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
 
+        // ADR 0072: Collect hex dep names from lockfile (includes transitive deps)
+        let hex_dep_names = collect_hex_dep_names_for_project(&project_root)?;
+
         let mut child = start_beam_node(
             port,
             node_name.as_ref(),
@@ -417,6 +432,7 @@ pub fn run(
             Some(bind_addr),
             web_port,
             otp_app_name.as_deref(),
+            &hex_dep_names,
         )?;
 
         // Discover the actual port from the BEAM node's stdout.
@@ -466,6 +482,10 @@ pub fn run(
         // Auto-compile package if beamtalk.toml is present (BT-606)
         let extra_code_paths = auto_compile_package(&project_root);
 
+        // ADR 0072: Collect hex dep names AFTER auto-compile, which may
+        // create/update beamtalk.lock with resolved native packages.
+        let hex_dep_names = collect_hex_dep_names_for_project(&project_root)?;
+
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,
             workspace_name,
@@ -477,6 +497,7 @@ pub fn run(
             Some(bind_addr),
             web_port,
             otp_app_name.as_deref(),
+            &hex_dep_names,
         )?;
 
         let actual_port = node_info.port;

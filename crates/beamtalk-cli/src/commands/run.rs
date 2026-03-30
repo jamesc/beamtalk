@@ -182,8 +182,16 @@ fn run_script(
     let pid = std::process::id();
     let workspace_id = format!("run_{pid}");
 
-    let eval_cmd =
-        build_script_eval_cmd(&workspace_id, &project_path_escaped, class_name, selector);
+    // ADR 0072: Collect all hex dep names from lockfile (includes transitive BT deps' native deps)
+    let hex_dep_names = super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root)?;
+
+    let eval_cmd = build_script_eval_cmd(
+        &workspace_id,
+        &project_path_escaped,
+        class_name,
+        selector,
+        &hex_dep_names,
+    );
 
     let mut args = repl_startup::beam_pa_args(&paths);
 
@@ -232,6 +240,21 @@ fn run_script(
         }
     }
 
+    // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
+    let rebar_base_dir = project_root.join("_build").join("dev").join("native");
+    for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
+        args.push(OsString::from("-pa"));
+        #[cfg(windows)]
+        {
+            let ebin_path = ebin.as_str().replace('\\', "/");
+            args.push(OsString::from(ebin_path));
+        }
+        #[cfg(not(windows))]
+        {
+            args.push(OsString::from(ebin.as_str()));
+        }
+    }
+
     args.push(OsString::from("-eval"));
     args.push(OsString::from(&eval_cmd));
 
@@ -275,14 +298,22 @@ fn run_script(
 ///
 /// Separated from `run_script` so the generated code can be unit-tested without
 /// needing a full Erlang runtime or compiled project.
+///
+/// ADR 0072: When the package has `[native.dependencies]`, the corresponding
+/// OTP applications (gun, cowboy, etc.) are started before the workspace so
+/// that FFI calls into hex deps work at runtime.
 fn build_script_eval_cmd(
     workspace_id: &str,
     project_path_escaped: &str,
     class_name: &str,
     selector: &str,
+    hex_dep_names: &[String],
 ) -> String {
+    let hex_deps_start = repl_startup::hex_deps_start_fragment(hex_dep_names);
+
     format!(
-        "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+        "{hex_deps_start}\
+         {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(\
          #{{workspace_id => <<\"{workspace_id}\">>, \
          project_path => <<\"{project_path_escaped}\">>, \
@@ -364,6 +395,10 @@ fn run_package_as_otp_application(
         extra_code_paths.push(ebin.into_std_path_buf());
     }
 
+    // ADR 0072: Collect all hex dep names from lockfile (includes transitive BT deps' native deps)
+    let service_hex_dep_names =
+        super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root)?;
+
     let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
         project_root.as_std_path(),
         None,
@@ -375,6 +410,7 @@ fn run_package_as_otp_application(
         None,  // bind_addr: loopback default
         None,  // web_port
         Some(&pkg.name),
+        &service_hex_dep_names,
     )?;
 
     if !is_new {
@@ -737,7 +773,7 @@ mod tests {
     fn test_script_eval_cmd_no_erlang_comments() {
         // Regression: Erlang %% comments in a -eval string comment out
         // everything to end-of-line, which is the entire eval string.
-        let cmd = build_script_eval_cmd("run_42", "/tmp/foo", "SmokeTest", "answer");
+        let cmd = build_script_eval_cmd("run_42", "/tmp/foo", "SmokeTest", "answer", &[]);
         assert!(
             !cmd.contains("%%"),
             "Eval string must not contain Erlang line comments: {cmd}"
@@ -750,7 +786,7 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_contains_dispatch_and_halt() {
-        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run");
+        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[]);
         assert!(
             cmd.contains("class_send(ClassPid, run, [])"),
             "Eval should dispatch the selector: {cmd}"
@@ -784,7 +820,7 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_interpolates_parameters() {
-        let cmd = build_script_eval_cmd("run_99", "/my/project", "Counter", "increment");
+        let cmd = build_script_eval_cmd("run_99", "/my/project", "Counter", "increment", &[]);
         assert!(cmd.contains("run_99"), "workspace_id not interpolated");
         assert!(cmd.contains("/my/project"), "project_path not interpolated");
         assert!(
@@ -794,6 +830,38 @@ mod tests {
         assert!(
             cmd.contains("increment"),
             "selector not interpolated: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_starts_hex_deps() {
+        let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
+        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &hex_deps);
+        assert!(
+            cmd.contains("application:ensure_all_started(cowboy)"),
+            "Should start cowboy: {cmd}"
+        );
+        assert!(
+            cmd.contains("application:ensure_all_started(gun)"),
+            "Should start gun: {cmd}"
+        );
+        // Hex deps should be started before the workspace
+        let cowboy_pos = cmd.find("ensure_all_started(cowboy)").unwrap();
+        let workspace_pos = cmd.find("ensure_all_started(beamtalk_workspace)").unwrap();
+        assert!(
+            cowboy_pos < workspace_pos,
+            "Hex deps should start before workspace: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_no_hex_deps_unchanged() {
+        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[]);
+        // Should only have one ensure_all_started call (for workspace)
+        let count = cmd.matches("ensure_all_started").count();
+        assert_eq!(
+            count, 1,
+            "Should only start workspace when no hex deps: {cmd}"
         );
     }
 }

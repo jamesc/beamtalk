@@ -163,6 +163,24 @@ impl Lockfile {
         self.native_packages.clear();
     }
 
+    /// Collect all native (hex) dependency names from the lockfile.
+    ///
+    /// ADR 0072 (BT-1724): After a build with `[native.dependencies]`,
+    /// `beamtalk.lock` contains all resolved hex packages — including
+    /// transitive hex deps (e.g., ranch via cowboy) and hex deps from
+    /// transitive BT dependencies. This is the authoritative source for
+    /// which OTP applications need startup at runtime.
+    ///
+    /// Returns an empty vec if no lockfile exists. Propagates read/parse
+    /// errors so callers can surface lockfile corruption instead of
+    /// silently skipping OTP app startup.
+    pub fn collect_hex_dep_names(project_root: &Utf8Path) -> Result<Vec<String>> {
+        match Self::read(project_root)? {
+            Some(lock) => Ok(lock.native_packages.keys().cloned().collect()),
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Read a lockfile from disk.
     ///
     /// Returns `None` if the file does not exist. Returns an error if the

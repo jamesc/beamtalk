@@ -320,7 +320,7 @@ fn beam_eval_cmd(
         )
     } else {
         // Port 0 = OS-assigned ephemeral port; build_eval_cmd already prints BEAMTALK_PORT.
-        repl_startup::build_eval_cmd(0, None, None, None)
+        repl_startup::build_eval_cmd(0, None, None, None, &[])
     }
 }
 
