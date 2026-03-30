@@ -811,48 +811,51 @@ fn handle_bindings(client: &mut ReplClient) {
 fn handle_sync(client: &mut ReplClient) {
     match client.load_project(".") {
         Ok(response) => {
-            if response.is_error() {
-                if let Some(msg) = response.error_message() {
-                    eprintln!("{}", display::format_error(msg));
-                }
-            } else {
-                // Display per-file errors
-                for err in &response.errors {
-                    if let Some(msg) = err.get("message").and_then(|m| m.as_str()) {
-                        let path = err
-                            .get("path")
-                            .and_then(|p| p.as_str())
-                            .unwrap_or("unknown");
-                        let line = err.get("line").and_then(serde_json::Value::as_u64);
-                        let hint = err.get("hint").and_then(serde_json::Value::as_str);
-                        let painted = color::paint(color::RED, &format!("Error: {msg}"));
-                        match (line, hint) {
-                            (Some(ln), Some(h)) => {
-                                eprintln!("  {painted} in {path} at line {ln} ({h})");
-                            }
-                            (Some(ln), None) => {
-                                eprintln!("  {painted} in {path} at line {ln}");
-                            }
-                            (None, Some(h)) => {
-                                eprintln!("  {painted} in {path} ({h})");
-                            }
-                            (None, None) => {
-                                eprintln!("  {painted} in {path}");
-                            }
+            // Always display per-file errors (present on both success and error responses)
+            for err in &response.errors {
+                if let Some(msg) = err.get("message").and_then(|m| m.as_str()) {
+                    let path = err
+                        .get("path")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("unknown");
+                    let line = err.get("line").and_then(serde_json::Value::as_u64);
+                    let hint = err.get("hint").and_then(serde_json::Value::as_str);
+                    let painted = color::paint(color::RED, &format!("Error: {msg}"));
+                    match (line, hint) {
+                        (Some(ln), Some(h)) => {
+                            eprintln!("  {painted} in {path} at line {ln} ({h})");
+                        }
+                        (Some(ln), None) => {
+                            eprintln!("  {painted} in {path} at line {ln}");
+                        }
+                        (None, Some(h)) => {
+                            eprintln!("  {painted} in {path} ({h})");
+                        }
+                        (None, None) => {
+                            eprintln!("  {painted} in {path}");
                         }
                     }
                 }
-                // Display compiler warnings
-                if let Some(ref warns) = response.warnings {
-                    for w in warns {
-                        eprintln!("{}", color::paint(color::YELLOW, &format!("Warning: {w}")));
+            }
+            // Always display compiler warnings
+            if let Some(ref warns) = response.warnings {
+                for w in warns {
+                    eprintln!("{}", color::paint(color::YELLOW, &format!("Warning: {w}")));
+                }
+            }
+
+            if response.is_error() {
+                // Show generic error message only when no structured diagnostics were printed
+                if response.errors.is_empty() {
+                    if let Some(msg) = response.error_message() {
+                        eprintln!("{}", display::format_error(msg));
                     }
                 }
-                // Display summary
+            } else {
+                // Display summary and classes only on success
                 if let Some(ref summary) = response.summary {
                     println!("{summary}");
                 }
-                // Display loaded classes
                 if let Some(ref classes) = response.classes {
                     if !classes.is_empty() {
                         println!("Classes: {}", classes.join(", "));
