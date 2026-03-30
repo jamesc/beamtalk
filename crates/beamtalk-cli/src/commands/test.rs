@@ -1269,6 +1269,12 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         if native_ebin.exists() {
             pipeline.package_ebin_dirs.push(native_ebin);
         }
+
+        // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
+        let rebar_base_dir = pkg_root.join("_build").join("dev").join("native");
+        for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
+            pipeline.package_ebin_dirs.push(ebin);
+        }
     }
 
     Ok(())
