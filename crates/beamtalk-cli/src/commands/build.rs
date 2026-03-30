@@ -1360,7 +1360,6 @@ fn generate_rebar_config(
         &std::collections::BTreeMap<String, super::deps::lockfile::NativePackageLock>,
     >,
 ) -> Result<Utf8PathBuf> {
-
     let rebar_dir = project_root.join("_build").join("dev").join("native");
     fs::create_dir_all(&rebar_dir)
         .into_diagnostic()
@@ -1443,8 +1442,7 @@ fn compile_with_rebar3(
     }
 
     // Generate the rebar.config in _build/dev/native/
-    let config_path =
-        generate_rebar_config(project_root, native_deps, locked_versions)?;
+    let config_path = generate_rebar_config(project_root, native_deps, locked_versions)?;
 
     let rebar_base_dir = project_root.join("_build").join("dev").join("native");
 
@@ -1518,10 +1516,7 @@ fn compile_with_rebar3(
     // rebar3 only handles hex deps; native Erlang sources need separate
     // compilation because rebar3 won't compile src_dirs without a top-level
     // .app.src, and generating one conflicts with the package's own .app.
-    let native_ebin = compile_native_erlang_with_deps(
-        project_root,
-        resolved_bt_deps,
-    )?;
+    let native_ebin = compile_native_erlang_with_deps(project_root, resolved_bt_deps)?;
     let mut all_ebin_paths = ebin_paths;
     if let Some(ebin) = native_ebin {
         all_ebin_paths.push(ebin);
