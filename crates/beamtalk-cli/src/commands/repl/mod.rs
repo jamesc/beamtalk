@@ -84,6 +84,17 @@ use process::{
     resolve_node_name, resolve_port, start_beam_node,
 };
 
+/// Deserialize a JSON `null` or missing field as an empty `Vec`.
+fn deserialize_null_as_empty_vec<'de, D, T>(
+    deserializer: D,
+) -> std::result::Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Option::<Vec<T>>::deserialize(deserializer).map(Option::unwrap_or_default)
+}
+
 /// JSON response from the REPL backend.
 /// Supports both legacy format (type field) and new protocol format (status field).
 #[derive(Debug, Deserialize)]
@@ -135,7 +146,7 @@ pub(crate) struct ReplResponse {
     /// Incremental load summary (BT-1707: :sync command)
     pub(crate) summary: Option<String>,
     /// Per-file load errors (BT-1707: :sync command)
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_as_empty_vec")]
     pub(crate) errors: Vec<serde_json::Value>,
 }
 
