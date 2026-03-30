@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0736cdfa8574ffea0991407036b54b5bb940994a935d120b6750398d0b0f12cd # shrinks to input = "\"@@@hello\""
+cc 95377434dc4274071a5624ce8155b731733195104654be497a321e3902a5e24a # shrinks to input = "42\nsubclass subclass subclass\n42"
+cc 4dacf2d12ed8c0ad10910f330ca014c1a9078222c516e563a6ea1692599477fc # shrinks to input = "//"

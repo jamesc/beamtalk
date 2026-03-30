@@ -59,6 +59,10 @@ pub use value_objects::{
     DocumentSymbolKind, HoverInfo, Location, ParameterInfo, Position, SignatureHelp, SignatureInfo,
 };
 
+// Property-based tests for language service operations (ADR 0011 Phase 2)
+#[cfg(test)]
+mod property_tests;
+
 use crate::ast::{Expression, Identifier, Module, TypeAnnotation};
 use crate::source_analysis::Span;
 use camino::Utf8PathBuf;
