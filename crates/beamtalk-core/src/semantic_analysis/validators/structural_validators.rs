@@ -11,8 +11,8 @@
 //! - Unresolved FFI modules — `Erlang <module>` with unknown module
 //! - Arity mismatches — known Erlang functions called with wrong argument count
 
-use crate::ast::{Expression, MessageSelector, Module};
-use crate::ast_walker::walk_module;
+use crate::ast::{Expression, ExpressionStatement, MessageSelector, Module};
+use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
@@ -28,16 +28,46 @@ pub(crate) fn check_unresolved_classes(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Collect type parameter names from all classes to skip false positives.
-    let type_param_names: Vec<&str> = module
-        .classes
-        .iter()
-        .flat_map(|c| c.type_params.iter().map(|tp| tp.name.name.as_str()))
-        .collect();
+    let empty_params: Vec<&str> = Vec::new();
 
-    walk_module(module, &mut |expr| {
-        visit_unresolved_class(expr, hierarchy, &type_param_names, diagnostics);
-    });
+    // Module-level expressions: no type parameters in scope.
+    walk_stmts(&module.expressions, hierarchy, &empty_params, diagnostics);
+
+    // Per-class: only that class's type parameters are in scope.
+    for class in &module.classes {
+        let class_type_params: Vec<&str> = class
+            .type_params
+            .iter()
+            .map(|tp| tp.name.name.as_str())
+            .collect();
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            walk_stmts(&method.body, hierarchy, &class_type_params, diagnostics);
+        }
+    }
+
+    // Standalone method definitions: no type parameters in scope.
+    for standalone in &module.method_definitions {
+        walk_stmts(
+            &standalone.method.body,
+            hierarchy,
+            &empty_params,
+            diagnostics,
+        );
+    }
+}
+
+/// Walk a slice of expression statements, checking each for unresolved class references.
+fn walk_stmts(
+    stmts: &[ExpressionStatement],
+    hierarchy: &ClassHierarchy,
+    type_param_names: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for stmt in stmts {
+        walk_expression(&stmt.expression, &mut |expr| {
+            visit_unresolved_class(expr, hierarchy, type_param_names, diagnostics);
+        });
+    }
 }
 
 /// Names that should never trigger unresolved-class warnings.
@@ -151,6 +181,23 @@ pub(crate) fn check_unresolved_ffi_modules(module: &Module, diagnostics: &mut Ve
     });
 }
 
+/// Class-protocol selectors that are NOT Erlang module names.
+///
+/// Mirrors `CLASS_PROTOCOL_SELECTORS` in codegen so that `Erlang class`,
+/// `Erlang new`, etc. are not treated as FFI module lookups.
+const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
+    "new",
+    "spawn",
+    "class",
+    "methods",
+    "superclass",
+    "subclasses",
+    "allSubclasses",
+    "class_name",
+    "module_name",
+    "printString",
+];
+
 /// Visitor for Erlang FFI module references in expressions.
 ///
 /// Matches the pattern: `Erlang <module>` as a unary message send where
@@ -168,7 +215,11 @@ fn visit_unresolved_ffi(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         } = receiver.as_ref()
         {
             if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
-                if name.name == "Erlang" && !is_known_erlang_module(module_name.as_str()) {
+                // Skip class-protocol selectors (class, new, methods, etc.)
+                if name.name == "Erlang"
+                    && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str())
+                    && !is_known_erlang_module(module_name.as_str())
+                {
                     diagnostics.push(
                         Diagnostic::warning(
                             format!("Unknown Erlang module `{module_name}` in FFI call"),
@@ -343,9 +394,9 @@ fn erlang_function_name(selector: &MessageSelector) -> Option<String> {
 
 /// Computes the Erlang arity for a message send.
 ///
-/// For direct Erlang FFI calls, the arity is the number of Beamtalk arguments.
-/// Keyword messages like `seq: 1 to: 10` have arity 2, unary messages have arity 1
-/// (the module proxy is the receiver, so the first "argument" is the first real arg).
+/// For direct Erlang FFI calls, the arity is the number of Beamtalk arguments
+/// for keyword messages (e.g. `seq: 1 to: 10` has arity 2), and 0 for unary
+/// messages (they lower to zero-argument Erlang function calls).
 fn erlang_arity(selector: &MessageSelector, argument_count: usize) -> usize {
     match selector {
         MessageSelector::Unary(_) => 0,
@@ -406,7 +457,8 @@ fn visit_ffi_arity(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 mod tests {
     use super::*;
     use crate::ast::{
-        ClassDefinition, ExpressionStatement, Identifier, KeywordPart, TypeParamDecl,
+        ClassDefinition, CommentAttachment, ExpressionStatement, Identifier, KeywordPart,
+        MethodDefinition, MethodKind, TypeParamDecl,
     };
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
     use crate::source_analysis::Span;
@@ -648,9 +700,55 @@ mod tests {
         );
     }
 
+    fn make_method(body_expr: Expression) -> MethodDefinition {
+        MethodDefinition {
+            selector: MessageSelector::Unary("test".into()),
+            parameters: vec![],
+            body: vec![ExpressionStatement::bare(body_expr)],
+            return_type: None,
+            is_sealed: false,
+            is_internal: false,
+            kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        }
+    }
+
     #[test]
-    fn test_unresolved_class_skips_type_params() {
-        // A class Container(T) referencing T should not warn.
+    fn test_unresolved_class_skips_type_params_in_class() {
+        // A class Container(T) with a method referencing T should not warn.
+        let mut module = empty_module_with_exprs(vec![]);
+        let mut class_def = ClassDefinition::new(
+            ident("Container"),
+            ident("Object"),
+            vec![],
+            vec![],
+            test_span(),
+        );
+        class_def.type_params.push(TypeParamDecl {
+            name: ident("T"),
+            bound: None,
+            span: test_span(),
+        });
+        class_def.methods.push(make_method(class_ref("T")));
+        module.classes.push(class_def);
+
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
+        let hierarchy = hierarchy.unwrap();
+        let mut diags = Vec::new();
+
+        check_unresolved_classes(&module, &hierarchy, &mut diags);
+
+        assert!(
+            diags.is_empty(),
+            "Type parameters should not trigger unresolved class warnings within their class"
+        );
+    }
+
+    #[test]
+    fn test_unresolved_class_warns_type_param_outside_class() {
+        // T referenced at module level should warn even if a class defines T as a type param.
         let mut module = empty_module_with_exprs(vec![class_ref("T")]);
         let mut class_def = ClassDefinition::new(
             ident("Container"),
@@ -672,9 +770,10 @@ mod tests {
 
         check_unresolved_classes(&module, &hierarchy, &mut diags);
 
-        assert!(
-            diags.is_empty(),
-            "Type parameters should not trigger unresolved class warnings"
+        assert_eq!(
+            diags.len(),
+            1,
+            "Type param T used outside its class should warn"
         );
     }
 

@@ -986,9 +986,10 @@ pub(crate) fn compile_source_with_bindings(
 
     // Check for errors (and optionally treat warnings/hints as errors).
     // Deprecation-category warnings (BT-1529) and structural validation warnings
-    // (BT-1726: UnresolvedClass, UnresolvedFfi) are excluded from warnings-as-errors
-    // because they can produce false positives when compiling single files that
-    // reference classes or FFI modules defined in other compilation units.
+    // (BT-1726: UnresolvedClass, UnresolvedFfi, ArityMismatch) are excluded from
+    // warnings-as-errors because they can produce false positives when compiling
+    // single files that reference classes, FFI modules, or arities defined in
+    // other compilation units.
     let has_errors = diagnostics.iter().any(|d| {
         d.severity == beamtalk_core::source_analysis::Severity::Error
             || (options.warnings_as_errors
