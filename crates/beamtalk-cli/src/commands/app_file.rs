@@ -51,8 +51,15 @@ pub fn generate_app_file(
     module_names: &[String],
     class_metadata: &[ClassMetadata],
     app_callback_module: Option<&str>,
+    native_module_names: &[String],
 ) -> Result<()> {
-    let app_content = format_app_file(manifest, module_names, class_metadata, app_callback_module);
+    let app_content = format_app_file(
+        manifest,
+        module_names,
+        class_metadata,
+        app_callback_module,
+        native_module_names,
+    );
     let app_path = build_dir.join(format!("{}.app", manifest.name));
 
     fs::write(&app_path, app_content)
@@ -68,6 +75,7 @@ fn format_app_file(
     module_names: &[String],
     class_metadata: &[ClassMetadata],
     app_callback_module: Option<&str>,
+    native_module_names: &[String],
 ) -> String {
     let description = escape_erlang_string(
         manifest
@@ -79,6 +87,7 @@ fn format_app_file(
 
     let modules_list = format_modules_list(module_names);
     let classes_list = format_classes_list(class_metadata);
+    let native_modules_entry = format_native_modules_entry(native_module_names);
 
     let mod_entry = match app_callback_module {
         Some(cb_module) => format!("\n    {{mod, {{{cb_module}, []}}}},"),
@@ -93,7 +102,7 @@ fn format_app_file(
     {{registered, []}},
     {{applications, [kernel, stdlib, beamtalk_runtime]}},{mod_entry}
     {{env, [
-        {{classes, [{classes}]}}
+        {{classes, [{classes}]}}{native_modules}
     ]}}
 ]}}.
 "#,
@@ -103,6 +112,7 @@ fn format_app_file(
         modules = modules_list,
         classes = classes_list,
         mod_entry = mod_entry,
+        native_modules = native_modules_entry,
     )
 }
 
@@ -117,6 +127,22 @@ fn format_modules_list(module_names: &[String]) -> String {
         .map(|m| format!("'{m}'"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Format the `{native_modules, [...]}` entry for the `.app` `env` section.
+///
+/// ADR 0072 Phase 1: When a package has `native/*.erl` files, their module
+/// names are listed here so OTP tooling and runtime code can discover them.
+/// Returns an empty string when there are no native modules (packages without
+/// `native/` are unaffected).
+fn format_native_modules_entry(native_module_names: &[String]) -> String {
+    if native_module_names.is_empty() {
+        return String::new();
+    }
+    let mut sorted = native_module_names.to_vec();
+    sorted.sort();
+    let modules = sorted.join(", ");
+    format!(",\n        {{native_modules, [{modules}]}}")
 }
 
 /// Format the class metadata list for the `.app` file.
@@ -187,7 +213,7 @@ mod tests {
         ];
         let classes = vec![];
 
-        let result = format_app_file(&manifest, &modules, &classes, None);
+        let result = format_app_file(&manifest, &modules, &classes, None, &[]);
 
         assert!(result.contains("{application, my_app, ["));
         assert!(result.contains("{description, \"A test app\"}"));
@@ -203,7 +229,7 @@ mod tests {
     #[test]
     fn test_format_app_file_default_description() {
         let manifest = test_manifest("my_app", "0.1.0", None);
-        let result = format_app_file(&manifest, &[], &[], None);
+        let result = format_app_file(&manifest, &[], &[], None, &[]);
 
         assert!(result.contains("{description, \"A beamtalk package\"}"));
     }
@@ -221,7 +247,7 @@ mod tests {
             type_params: vec![],
         }];
 
-        let result = format_app_file(&manifest, &modules, &classes, None);
+        let result = format_app_file(&manifest, &modules, &classes, None, &[]);
 
         assert!(
             result.contains("name => 'Counter'"),
@@ -263,7 +289,7 @@ mod tests {
         let modules = vec!["bt@my_app@main".to_string()];
         let classes = vec![];
 
-        generate_app_file(&build_dir, &manifest, &modules, &classes, None).unwrap();
+        generate_app_file(&build_dir, &manifest, &modules, &classes, None, &[]).unwrap();
 
         let app_path = build_dir.join("my_app.app");
         assert!(app_path.exists());
@@ -319,21 +345,21 @@ mod tests {
     #[test]
     fn test_format_app_file_escapes_description() {
         let manifest = test_manifest("my_app", "0.1.0", Some(r#"A "quoted" app"#));
-        let result = format_app_file(&manifest, &[], &[], None);
+        let result = format_app_file(&manifest, &[], &[], None, &[]);
         assert!(result.contains(r#"{description, "A \"quoted\" app"}"#));
     }
 
     #[test]
     fn test_format_app_file_with_mod_entry() {
         let manifest = test_manifest("my_app", "0.1.0", Some("An OTP app"));
-        let result = format_app_file(&manifest, &[], &[], Some("beamtalk_my_app_app"));
+        let result = format_app_file(&manifest, &[], &[], Some("beamtalk_my_app_app"), &[]);
         assert!(result.contains("{mod, {beamtalk_my_app_app, []}}"));
     }
 
     #[test]
     fn test_format_app_file_without_mod_entry() {
         let manifest = test_manifest("my_app", "0.1.0", None);
-        let result = format_app_file(&manifest, &[], &[], None);
+        let result = format_app_file(&manifest, &[], &[], None, &[]);
         assert!(!result.contains("{mod,"));
     }
 
@@ -352,10 +378,69 @@ mod tests {
             &modules,
             &classes,
             Some("beamtalk_my_app_app"),
+            &[],
         )
         .unwrap();
 
         let content = std::fs::read_to_string(build_dir.join("my_app.app")).unwrap();
         assert!(content.contains("{mod, {beamtalk_my_app_app, []}}"));
+    }
+
+    #[test]
+    fn test_format_native_modules_entry_empty() {
+        let result = format_native_modules_entry(&[]);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_format_native_modules_entry_sorted() {
+        let modules = vec!["zebra_mod".to_string(), "alpha_mod".to_string()];
+        let result = format_native_modules_entry(&modules);
+        assert!(
+            result.contains("{native_modules, [alpha_mod, zebra_mod]}"),
+            "native_modules should be sorted. Got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_native_modules_entry_single() {
+        let modules = vec!["hello_native".to_string()];
+        let result = format_native_modules_entry(&modules);
+        assert!(
+            result.contains("{native_modules, [hello_native]}"),
+            "Got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_app_file_with_native_modules() {
+        let manifest = test_manifest("http", "0.1.0", Some("HTTP package"));
+        let modules = vec!["bt@http@client".to_string()];
+        let native_modules = vec![
+            "beamtalk_http_server".to_string(),
+            "beamtalk_http".to_string(),
+        ];
+
+        let result = format_app_file(&manifest, &modules, &[], None, &native_modules);
+
+        assert!(
+            result.contains("{native_modules, [beamtalk_http, beamtalk_http_server]}"),
+            "Should contain sorted native_modules in env. Got: {result}"
+        );
+        assert!(
+            result.contains("{classes, []}"),
+            "Should still contain classes. Got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_app_file_without_native_modules_unchanged() {
+        let manifest = test_manifest("my_app", "0.1.0", Some("No native"));
+        let result = format_app_file(&manifest, &[], &[], None, &[]);
+
+        assert!(
+            !result.contains("native_modules"),
+            "Should not contain native_modules when empty. Got: {result}"
+        );
     }
 }
