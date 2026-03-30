@@ -250,6 +250,7 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 /// cross-file references and class hierarchy resolution work correctly — in
 /// particular, Value sub-subclasses are recognized as value types rather than
 /// defaulting to actor codegen (BT-1564).
+#[allow(clippy::type_complexity)]
 fn build_fixture_class_indexes(
     fixture_files: &[Utf8PathBuf],
 ) -> Result<(
