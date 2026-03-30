@@ -114,6 +114,7 @@ pub fn start_detached_node(
     bind_addr: Option<Ipv4Addr>,
     web_port: Option<u16>,
     otp_app_name: Option<&str>,
+    hex_dep_names: &[String],
 ) -> Result<NodeInfo> {
     // Generate node name
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
@@ -178,6 +179,20 @@ pub fn start_detached_node(
         None => "undefined".to_string(),
     };
 
+    // ADR 0072 (BT-1724): Start hex dep OTP applications before the OTP app supervisor.
+    let hex_deps_start = if hex_dep_names.is_empty() {
+        String::new()
+    } else {
+        let mut sorted = hex_dep_names.to_vec();
+        sorted.sort();
+        sorted
+            .iter()
+            .map(|name| format!("{{ok, _}} = application:ensure_all_started({name})"))
+            .collect::<Vec<_>>()
+            .join(", ")
+            + ", "
+    };
+
     // If an OTP app name is provided, start it after workspace bootstrap so that
     // all project classes are registered before the OTP supervisor's init/1 runs (BT-1319).
     let otp_app_start = match otp_app_name {
@@ -194,6 +209,7 @@ pub fn start_detached_node(
         &bind_addr_erl,
         auto_cleanup,
         idle_timeout,
+        &hex_deps_start,
         &otp_app_start,
     );
 
@@ -511,6 +527,7 @@ fn build_workspace_eval_cmd(
     bind_addr_erl: &str,
     auto_cleanup: bool,
     idle_timeout: u64,
+    hex_deps_start: &str,
     otp_app_start: &str,
 ) -> String {
     format!(
@@ -529,6 +546,7 @@ fn build_workspace_eval_cmd(
          auto_cleanup => {auto_cleanup}, \
          max_idle_seconds => {idle_timeout}}}), \
          logger:remove_handler(default), \
+         {hex_deps_start}\
          {otp_app_start}\
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"Workspace {workspace_id} started on port ~B~n\", [ActualPort]), \

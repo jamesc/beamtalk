@@ -398,6 +398,16 @@ pub fn run(
             }
         });
 
+    // ADR 0072: Collect hex dep names for OTP app startup in REPL
+    let hex_dep_names: Vec<String> = camino::Utf8Path::from_path(&project_root)
+        .and_then(|root| {
+            crate::commands::manifest::find_manifest_full(root)
+                .ok()
+                .flatten()
+        })
+        .map(|m| m.native_dependencies.keys().cloned().collect())
+        .unwrap_or_default();
+
     // Choose startup mode: workspace (default) or foreground (debug)
     let (beam_guard_opt, is_new_workspace, workspace_id_opt, connect_host, connect_port, cookie): (
         Option<BeamChildGuard>,
@@ -417,6 +427,7 @@ pub fn run(
             Some(bind_addr),
             web_port,
             otp_app_name.as_deref(),
+            &hex_dep_names,
         )?;
 
         // Discover the actual port from the BEAM node's stdout.
@@ -477,6 +488,7 @@ pub fn run(
             Some(bind_addr),
             web_port,
             otp_app_name.as_deref(),
+            &hex_dep_names,
         )?;
 
         let actual_port = node_info.port;

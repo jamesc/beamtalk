@@ -106,6 +106,7 @@ pub fn get_or_start_workspace(
     bind_addr: Option<Ipv4Addr>,
     web_port: Option<u16>,
     otp_app_name: Option<&str>,
+    hex_dep_names: &[String],
 ) -> Result<(NodeInfo, bool, String)> {
     let workspace_id = workspace_id_for(project_path, workspace_name)?;
 
@@ -165,6 +166,7 @@ pub fn get_or_start_workspace(
             bind_addr,
             web_port,
             otp_app_name,
+            hex_dep_names,
         ) {
             Ok(node_info) => return Ok((node_info, true, workspace_id)),
             Err(e) => {

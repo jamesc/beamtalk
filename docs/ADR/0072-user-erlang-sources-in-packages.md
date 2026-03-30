@@ -294,6 +294,40 @@ The `.app` file for the package lists **direct** hex deps in its `applications` 
 ]}.
 ```
 
+### 7a. Runtime Boot Sequence (BT-1724)
+
+Hex deps are OTP applications with supervision trees that must be started before use. The build system generates the `.app` file with hex dep names in `{applications}`, and the runtime ensures they are started before user code runs.
+
+**Script mode** (`beamtalk run ClassName selector`):
+
+```erlang
+%% 1. Start each hex dep OTP application
+{ok, _} = application:ensure_all_started(cowboy),
+{ok, _} = application:ensure_all_started(gun),
+%% 2. Start workspace (bootstraps class registry)
+{ok, _} = application:ensure_all_started(beamtalk_workspace),
+{ok, _} = beamtalk_workspace_sup:start_link(#{...}),
+%% 3. Dispatch to user class
+beamtalk_class_dispatch:class_send(ClassPid, selector, []).
+```
+
+**Service mode** (`beamtalk run .`):
+
+The workspace node starts the package's OTP application via `application:ensure_all_started(PackageName)`. Since the generated `.app` file lists hex deps in `{applications}`, OTP automatically starts them in dependency order before the package's supervisor tree.
+
+**Test mode** (`beamtalk test`):
+
+Each hex dep is started individually before test execution:
+
+```erlang
+{ok, _} = application:ensure_all_started(beamtalk_stdlib),
+{ok, _} = application:ensure_all_started(cowboy),
+{ok, _} = application:ensure_all_started(gun),
+%% ... load packages, fixtures, tests, then run
+```
+
+`ensure_all_started/1` is idempotent — calling it for an already-running application is a no-op, so duplicate calls across transitive dependency graphs are safe.
+
 ### 8. Package Distribution
 
 Packages ship source, following the universal BEAM convention:

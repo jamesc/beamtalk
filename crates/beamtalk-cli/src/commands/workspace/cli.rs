@@ -368,6 +368,7 @@ fn run_create_background(
         Some(bind_addr),
         web_port,
         None,
+        &[], // No hex deps for standalone workspace CLI
     )?;
 
     println!("Workspace '{workspace_id}' started");
