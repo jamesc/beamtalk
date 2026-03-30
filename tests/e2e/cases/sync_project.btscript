@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for :sync REPL command (BT-1707).
+//
+// Tests that :sync loads a project via the load-project protocol op
+// and returns an incremental summary. Uses the incremental_project
+// fixture which has beamtalk.toml and src/ with .bt files.
+
+// ===========================================================================
+// :sync — INITIAL PROJECT LOAD
+// ===========================================================================
+
+// First sync loads all project files from the fixture
+:sync
+// => Reloaded 2 of 2 files
+
+// After sync, fixture classes should be available
+Greeter new greet
+// => Hello, World
+
+// ===========================================================================
+// :s — SHORT ALIAS (incremental, no changes)
+// ===========================================================================
+
+// Second sync is incremental — no files changed since last sync
+:s
+// => Reloaded 0 of 2 files (2 unchanged)
