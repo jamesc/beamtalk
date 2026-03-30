@@ -200,38 +200,35 @@ const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
 
 /// Visitor for Erlang FFI module references in expressions.
 ///
-/// Matches the pattern: `Erlang <module>` as a unary message send where
-/// the receiver is `ClassReference("Erlang")` and the selector is the module name.
-/// Then checks the outer send for the actual function call.
+/// Matches `Erlang <module>` — a `MessageSend` whose receiver is
+/// `ClassReference("Erlang")` with a `Unary` selector naming the module.
+/// This catches both standalone proxy construction (`Erlang typo_mod`)
+/// and calls like `Erlang typo_mod reverse: xs` (the inner send).
 fn visit_unresolved_ffi(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
-    // Match: outer send where receiver is (Erlang module) — i.e., the receiver
-    // is itself a MessageSend with Erlang as the receiver.
-    if let Expression::MessageSend { receiver, .. } = expr {
-        if let Expression::MessageSend {
-            receiver: inner_receiver,
-            selector: MessageSelector::Unary(module_name),
-            span,
-            ..
-        } = receiver.as_ref()
-        {
-            if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
-                // Skip class-protocol selectors (class, new, methods, etc.)
-                if name.name == "Erlang"
-                    && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str())
-                    && !is_known_erlang_module(module_name.as_str())
-                {
-                    diagnostics.push(
-                        Diagnostic::warning(
-                            format!("Unknown Erlang module `{module_name}` in FFI call"),
-                            *span,
-                        )
-                        .with_hint(
-                            "This module is not in the known OTP module list. \
-                             Suppress with @expect unresolved_ffi if the module exists at runtime.",
-                        )
-                        .with_category(DiagnosticCategory::UnresolvedFfi),
-                    );
-                }
+    if let Expression::MessageSend {
+        receiver,
+        selector: MessageSelector::Unary(module_name),
+        span,
+        ..
+    } = expr
+    {
+        if let Expression::ClassReference { name, .. } = receiver.as_ref() {
+            // Skip class-protocol selectors (class, new, methods, etc.)
+            if name.name == "Erlang"
+                && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str())
+                && !is_known_erlang_module(module_name.as_str())
+            {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        format!("Unknown Erlang module `{module_name}` in FFI call"),
+                        *span,
+                    )
+                    .with_hint(
+                        "This module is not in the known OTP module list. \
+                         Suppress with @expect unresolved_ffi if the module exists at runtime.",
+                    )
+                    .with_category(DiagnosticCategory::UnresolvedFfi),
+                );
             }
         }
     }
@@ -360,11 +357,23 @@ pub(crate) fn check_ffi_arity(module: &Module, diagnostics: &mut Vec<Diagnostic>
     });
 }
 
+/// Unwraps `Parenthesized` wrappers to get the inner expression.
+///
+/// `(Erlang lists)` parses as `Parenthesized { expression: MessageSend { ... } }`.
+/// This strips the parentheses so pattern matching sees the send underneath.
+fn unwrap_parens(mut expr: &Expression) -> &Expression {
+    while let Expression::Parenthesized { expression, .. } = expr {
+        expr = expression;
+    }
+    expr
+}
+
 /// Extracts the Erlang module name from an FFI proxy expression.
 ///
-/// Matches `(Erlang <module>)` — a `MessageSend` whose receiver is
-/// `ClassReference("Erlang")` with a `Unary` selector.
+/// Matches `Erlang <module>` or `(Erlang <module>)` — a `MessageSend`
+/// whose receiver is `ClassReference("Erlang")` with a `Unary` selector.
 fn extract_erlang_module(expr: &Expression) -> Option<&str> {
+    let expr = unwrap_parens(expr);
     if let Expression::MessageSend {
         receiver,
         selector: MessageSelector::Unary(module_name),
@@ -701,6 +710,62 @@ mod tests {
             diags.is_empty(),
             "Unknown functions should not trigger arity warnings"
         );
+    }
+
+    #[test]
+    fn test_ffi_standalone_proxy_warns() {
+        // `Erlang typo_mod` as a standalone expression should warn
+        let proxy = Expression::MessageSend {
+            receiver: Box::new(class_ref("Erlang")),
+            selector: MessageSelector::Unary("typo_mod".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: test_span(),
+        };
+        let module = empty_module_with_exprs(vec![proxy]);
+        let mut diags = Vec::new();
+
+        check_unresolved_ffi_modules(&module, &mut diags);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("typo_mod"));
+    }
+
+    #[test]
+    fn test_arity_check_with_parenthesized_receiver() {
+        // (Erlang lists) flatten: a extra: b — arity 2, but lists:flatten is arity 1
+        let inner_send = Expression::MessageSend {
+            receiver: Box::new(class_ref("Erlang")),
+            selector: MessageSelector::Unary("lists".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: test_span(),
+        };
+        let parens = Expression::Parenthesized {
+            expression: Box::new(inner_send),
+            span: test_span(),
+        };
+        let outer_send = Expression::MessageSend {
+            receiver: Box::new(parens),
+            selector: MessageSelector::Keyword(vec![kwpart("flatten:"), kwpart("extra:")]),
+            arguments: vec![
+                Expression::Identifier(ident("a")),
+                Expression::Identifier(ident("b")),
+            ],
+            is_cast: false,
+            span: test_span(),
+        };
+        let module = empty_module_with_exprs(vec![outer_send]);
+        let mut diags = Vec::new();
+
+        check_ffi_arity(&module, &mut diags);
+
+        assert_eq!(
+            diags.len(),
+            1,
+            "Parenthesized receiver should not bypass arity check"
+        );
+        assert!(diags[0].message.contains("lists:flatten/2"));
     }
 
     fn make_method(body_expr: Expression) -> MethodDefinition {
