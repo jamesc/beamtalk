@@ -1270,8 +1270,12 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         pipeline.package_modules.extend(modules);
         pipeline.package_ebin_dirs.push(ebin_dir);
 
-        // ADR 0070: Add dependency ebin directories to code path
+        // ADR 0070: Add dependency ebin directories to code path and load
+        // dep modules so their on_load hooks register classes before tests run.
         for dep_ebin in super::deps::collect_dep_ebin_paths(pkg_root) {
+            if let Ok(dep_modules) = collect_beam_module_names(&dep_ebin) {
+                pipeline.package_modules.extend(dep_modules);
+            }
             pipeline.package_ebin_dirs.push(dep_ebin);
         }
 
