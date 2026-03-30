@@ -61,7 +61,7 @@ signal-hook = "0.4"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 
 # Line editing
-rustyline = { version = "17", features = ["derive"] }
+rustyline = { version = "18", features = ["derive"] }
 
 # LSP
 tower-lsp = "0.20"
