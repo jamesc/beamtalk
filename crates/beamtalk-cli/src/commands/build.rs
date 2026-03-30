@@ -15,6 +15,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use super::app_file;
 use super::manifest;
+use super::manifest::NativeDependencyMap;
 
 /// Result of per-file change detection.
 ///
@@ -230,10 +231,33 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         check_native_module_collisions(&project_root, &pkg.name, &resolved_deps)?;
     }
 
-    // ADR 0072 Phase 1 (Path A): Compile native Erlang sources before .bt files.
+    // ADR 0072: Compile native Erlang sources before .bt files.
     // Native modules must be compiled first because .bt files may reference them
     // via `(Erlang module)` FFI or `native:` annotations.
-    let native_result = if pkg_manifest.is_some() {
+    //
+    // Two paths based on presence of [native.dependencies]:
+    // - Path A (no hex deps): compile native/*.erl directly via erlc
+    // - Path B (with hex deps): generate rebar.config, invoke rebar3 compile
+    let has_native_deps = full_manifest
+        .as_ref()
+        .is_some_and(|m| !m.native_dependencies.is_empty());
+
+    let native_result = if pkg_manifest.is_some() && has_native_deps {
+        // Path B: rebar3 handles both hex deps and native/*.erl
+        let native_deps = &full_manifest.as_ref().unwrap().native_dependencies;
+
+        // Aggregate native dependencies from all packages in the dependency graph
+        let aggregated = aggregate_native_dependencies(native_deps, &resolved_deps);
+
+        let rebar3_result = compile_with_rebar3(&project_root, &aggregated)?;
+        eprintln!(
+            "Compiled native deps via rebar3 ({} package(s), {} ebin dir(s))",
+            aggregated.len(),
+            rebar3_result.ebin_paths.len()
+        );
+        Some(rebar3_result)
+    } else if pkg_manifest.is_some() {
+        // Path A: compile native/*.erl directly via erlc (no hex deps)
         use crate::beam_compiler::compile_native_erlang;
         match compile_native_erlang(&project_root)? {
             Some(result) => {
@@ -241,7 +265,10 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
                     "Compiling {} native Erlang file(s)",
                     result.beam_files.len()
                 );
-                Some(result)
+                Some(Rebar3Result {
+                    ebin_paths: vec![result.ebin_dir],
+                    module_names: result.module_names,
+                })
             }
             None => None,
         }
@@ -965,7 +992,6 @@ pub(crate) fn build_class_module_index(
 /// - A new rebar3 release adds features we need or fixes bugs we hit
 /// - OTP compatibility requires a newer version
 /// - Security advisories are published
-#[allow(dead_code)] // Will be called by rebar3 invocation in BT-1713 (Phase 2)
 pub(crate) fn rebar3_path() -> Result<PathBuf> {
     // Try bundled copy relative to the runtime directory
     if let Ok(runtime_dir) = beamtalk_cli::repl_startup::find_runtime_dir() {
@@ -1003,6 +1029,225 @@ pub(crate) fn rebar3_path() -> Result<PathBuf> {
          Expected bundled copy at <runtime>/tools/rebar3.\n\
          Install rebar3 or run from the repository root."
     ))
+}
+
+// ── ADR 0072 Phase 2: rebar3 integration ──────────────────────────
+
+/// Result of a rebar3 compilation step.
+///
+/// Contains the ebin paths that must be added to the BEAM code path
+/// for subsequent `.bt` compilation and at runtime.
+#[derive(Debug)]
+pub(crate) struct Rebar3Result {
+    /// Ebin directories produced by rebar3 (one per compiled hex dep,
+    /// plus the package's own native modules if `native/` exists).
+    /// Used by `run.rs` and `repl/mod.rs` via `collect_rebar3_ebin_paths`.
+    #[allow(dead_code)] // Informational; code paths are collected from filesystem
+    pub ebin_paths: Vec<Utf8PathBuf>,
+    /// Erlang module names compiled from native sources.
+    /// Used for `.app.src` module list generation.
+    pub module_names: Vec<String>,
+}
+
+/// Aggregate native (hex) dependencies from the root package and all
+/// resolved Beamtalk dependencies in the dependency graph.
+///
+/// ADR 0072 §5: Because BEAM has a flat module namespace, all hex deps
+/// across all packages must be resolved in a single rebar3 invocation.
+/// Constraints from different packages for the same hex dep are both
+/// included — rebar3's resolver handles the intersection.
+fn aggregate_native_dependencies(
+    root_native_deps: &NativeDependencyMap,
+    resolved_bt_deps: &[super::deps::path::ResolvedDependency],
+) -> NativeDependencyMap {
+    let mut aggregated = root_native_deps.clone();
+
+    // Walk each resolved Beamtalk dependency and collect its [native.dependencies]
+    for dep in resolved_bt_deps {
+        let manifest_path = dep.root.join("beamtalk.toml");
+        if !manifest_path.exists() {
+            continue;
+        }
+        let Ok(parsed) = manifest::parse_manifest_full(&manifest_path) else {
+            debug!(
+                dep = %dep.name,
+                "Failed to parse manifest for native dep aggregation — skipping"
+            );
+            continue;
+        };
+        for (name, native_dep) in &parsed.native_dependencies {
+            if !aggregated.contains_key(name) {
+                debug!(
+                    dep = %dep.name,
+                    hex_pkg = %name,
+                    constraint = %native_dep.constraint,
+                    "Aggregating native dependency from transitive package"
+                );
+                aggregated.insert(name.clone(), native_dep.clone());
+            }
+            // If the same hex dep is already present (from root or another dep),
+            // we keep the first constraint. rebar3 resolves transitive deps
+            // itself; duplicates in the deps list are not supported.
+        }
+    }
+
+    aggregated
+}
+
+/// Generate a `rebar.config` file for compiling hex dependencies and
+/// (optionally) native Erlang sources.
+///
+/// The generated file lives at `_build/dev/native/rebar.config` and is a
+/// build artifact — it should not be checked in.
+///
+/// rebar3 reads `rebar.config` from its current working directory
+/// (it has no `--config` flag). We run rebar3 from `_build/dev/native/`
+/// so the config lives there, and use `../../../native` relative paths
+/// for `src_dirs`/`include_dirs` to point back to the project root.
+fn generate_rebar_config(
+    project_root: &Utf8Path,
+    native_deps: &NativeDependencyMap,
+) -> Result<Utf8PathBuf> {
+    let native_dir = project_root.join("native");
+    let has_native_dir = native_dir.exists() && native_dir.is_dir();
+    let include_dir = native_dir.join("include");
+    let has_include_dir = include_dir.exists() && include_dir.is_dir();
+
+    let rebar_dir = project_root.join("_build").join("dev").join("native");
+    fs::create_dir_all(&rebar_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create rebar3 build directory '{rebar_dir}'"))?;
+
+    let config_path = rebar_dir.join("rebar.config");
+
+    let mut config = String::new();
+    config.push_str("%% Auto-generated by beamtalk build — do not edit\n");
+
+    // Generate {deps, [...]}.
+    config.push_str("{deps, [\n");
+    let dep_entries: Vec<String> = native_deps
+        .iter()
+        .map(|(name, dep)| format!("    {{{name}, \"{}\"}}", dep.constraint))
+        .collect();
+    config.push_str(&dep_entries.join(",\n"));
+    config.push_str("\n]}.\n");
+
+    // rebar3 runs from _build/dev/native/, so src_dirs/include_dirs need
+    // relative paths back to the project root's native/ directory.
+    if has_native_dir {
+        config.push_str("{src_dirs, [\"../../../native\"]}.\n");
+    }
+    if has_include_dir {
+        config.push_str("{include_dirs, [\"../../../native/include\"]}.\n");
+    }
+
+    config.push_str("{erl_opts, [debug_info]}.\n");
+
+    debug!(path = %config_path, "Writing rebar.config");
+    fs::write(&config_path, &config)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write rebar.config at '{config_path}'"))?;
+
+    Ok(config_path)
+}
+
+/// Invoke `rebar3 compile` to fetch and compile hex dependencies
+/// (and optionally the package's own `native/*.erl` files).
+///
+/// ADR 0072 §4 Path B: rebar3 runs from `_build/dev/native/` where the
+/// generated `rebar.config` lives. `REBAR_BASE_DIR` is set to the same
+/// directory so all output stays in the build tree. `{src_dirs}` and
+/// `{include_dirs}` use relative paths back to the project root.
+#[instrument(skip_all, fields(project_root = %project_root))]
+fn compile_with_rebar3(
+    project_root: &Utf8Path,
+    native_deps: &NativeDependencyMap,
+) -> Result<Rebar3Result> {
+    let rebar3 = rebar3_path()?;
+
+    // Generate the rebar.config in _build/dev/native/
+    let config_path = generate_rebar_config(project_root, native_deps)?;
+
+    let rebar_base_dir = project_root.join("_build").join("dev").join("native");
+
+    info!(
+        rebar3 = %rebar3.display(),
+        config = %config_path,
+        base_dir = %rebar_base_dir,
+        deps = native_deps.len(),
+        "Invoking rebar3 compile"
+    );
+
+    let mut cmd = std::process::Command::new(&rebar3);
+    cmd.arg("compile");
+    // rebar3 reads rebar.config from cwd — run from _build/dev/native/
+    cmd.current_dir(rebar_base_dir.as_std_path());
+    // Keep all rebar3 output in the same build directory
+    cmd.env("REBAR_BASE_DIR", rebar_base_dir.as_str());
+
+    let output = cmd
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run rebar3 compile.\nIs Erlang/OTP installed?")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let combined = format!("{stdout}{stderr}");
+        // Surface rebar3 errors with context
+        miette::bail!("rebar3 compile failed:\n{}", combined.trim_end());
+    }
+
+    // Collect all ebin directories produced by rebar3
+    let ebin_paths = collect_rebar3_ebin_paths(&rebar_base_dir);
+
+    info!(ebin_count = ebin_paths.len(), "rebar3 compilation complete");
+
+    // Discover native module names from the project's native/ directory
+    let module_names = {
+        use crate::beam_compiler::discover_native_modules;
+        discover_native_modules(project_root)?
+    };
+
+    Ok(Rebar3Result {
+        ebin_paths,
+        module_names,
+    })
+}
+
+/// Collect ebin directories from rebar3's output tree.
+///
+/// rebar3 places compiled output at `_build/dev/native/default/lib/{app}/ebin/`.
+/// This scans for all such directories and returns them.
+pub(crate) fn collect_rebar3_ebin_paths(rebar_base_dir: &Utf8Path) -> Vec<Utf8PathBuf> {
+    let lib_dir = rebar_base_dir.join("default").join("lib");
+
+    let mut paths = Vec::new();
+
+    if !lib_dir.exists() {
+        return paths;
+    }
+
+    let Ok(entries) = fs::read_dir(&lib_dir) else {
+        return paths;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let ebin = path.join("ebin");
+        if ebin.exists() && ebin.is_dir() {
+            if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
+                debug!(ebin = %utf8, "Found rebar3 ebin directory");
+                paths.push(utf8);
+            }
+        }
+    }
+
+    paths.sort();
+    paths
 }
 
 /// ADR 0072 Phase 1: Check for native Erlang module name collisions across
@@ -2367,6 +2612,220 @@ mod tests {
         assert!(
             result.is_ok(),
             "Different module names should pass: {result:?}"
+        );
+    }
+
+    // ---- ADR 0072 Phase 2: rebar3 integration tests ----
+
+    #[test]
+    fn test_generate_rebar_config_basic() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let mut deps = NativeDependencyMap::new();
+        deps.insert(
+            "gun".to_string(),
+            manifest::NativeDependency {
+                name: "gun".to_string(),
+                constraint: "~> 2.1".to_string(),
+            },
+        );
+        deps.insert(
+            "cowboy".to_string(),
+            manifest::NativeDependency {
+                name: "cowboy".to_string(),
+                constraint: "~> 2.12".to_string(),
+            },
+        );
+
+        let config_path = generate_rebar_config(&project_path, &deps).unwrap();
+
+        assert!(config_path.exists(), "rebar.config should be created");
+        let content = fs::read_to_string(&config_path).unwrap();
+        assert!(
+            content.contains("Auto-generated by beamtalk build"),
+            "Should have header comment"
+        );
+        assert!(
+            content.contains("{gun, \"~> 2.1\"}"),
+            "Should contain gun dep"
+        );
+        assert!(
+            content.contains("{cowboy, \"~> 2.12\"}"),
+            "Should contain cowboy dep"
+        );
+        assert!(
+            content.contains("{erl_opts, [debug_info]}"),
+            "Should include debug_info"
+        );
+        // No native/ directory — should NOT include src_dirs
+        assert!(
+            !content.contains("src_dirs"),
+            "Should not include src_dirs without native/"
+        );
+        assert!(
+            !content.contains("include_dirs"),
+            "Should not include include_dirs without native/include/"
+        );
+    }
+
+    #[test]
+    fn test_generate_rebar_config_with_native_dir() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create native/ directory
+        let native_dir = project_path.join("native");
+        fs::create_dir(&native_dir).unwrap();
+
+        let mut deps = NativeDependencyMap::new();
+        deps.insert(
+            "jason".to_string(),
+            manifest::NativeDependency {
+                name: "jason".to_string(),
+                constraint: "~> 1.4".to_string(),
+            },
+        );
+
+        let config_path = generate_rebar_config(&project_path, &deps).unwrap();
+        let content = fs::read_to_string(&config_path).unwrap();
+
+        assert!(
+            content.contains("{src_dirs, [\"../../../native\"]}"),
+            "Should include src_dirs with relative path when native/ exists"
+        );
+        // No include/ subdir
+        assert!(
+            !content.contains("include_dirs"),
+            "Should not include include_dirs without native/include/"
+        );
+    }
+
+    #[test]
+    fn test_generate_rebar_config_with_native_include() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create native/ and native/include/
+        let native_dir = project_path.join("native");
+        fs::create_dir(&native_dir).unwrap();
+        let include_dir = native_dir.join("include");
+        fs::create_dir(&include_dir).unwrap();
+
+        let mut deps = NativeDependencyMap::new();
+        deps.insert(
+            "gun".to_string(),
+            manifest::NativeDependency {
+                name: "gun".to_string(),
+                constraint: "~> 2.1".to_string(),
+            },
+        );
+
+        let config_path = generate_rebar_config(&project_path, &deps).unwrap();
+        let content = fs::read_to_string(&config_path).unwrap();
+
+        assert!(
+            content.contains("{src_dirs, [\"../../../native\"]}"),
+            "Should include src_dirs with relative path"
+        );
+        assert!(
+            content.contains("{include_dirs, [\"../../../native/include\"]}"),
+            "Should include include_dirs with relative path when native/include/ exists"
+        );
+    }
+
+    #[test]
+    fn test_collect_rebar3_ebin_paths_empty() {
+        let temp = TempDir::new().unwrap();
+        let base_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let paths = collect_rebar3_ebin_paths(&base_dir);
+        assert!(paths.is_empty(), "Should return empty for nonexistent tree");
+    }
+
+    #[test]
+    fn test_collect_rebar3_ebin_paths_finds_deps() {
+        let temp = TempDir::new().unwrap();
+        let base_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create rebar3-style output tree
+        let gun_ebin = base_dir
+            .join("default")
+            .join("lib")
+            .join("gun")
+            .join("ebin");
+        let cowboy_ebin = base_dir
+            .join("default")
+            .join("lib")
+            .join("cowboy")
+            .join("ebin");
+        let ranch_ebin = base_dir
+            .join("default")
+            .join("lib")
+            .join("ranch")
+            .join("ebin");
+        fs::create_dir_all(&gun_ebin).unwrap();
+        fs::create_dir_all(&cowboy_ebin).unwrap();
+        fs::create_dir_all(&ranch_ebin).unwrap();
+
+        let paths = collect_rebar3_ebin_paths(&base_dir);
+        assert_eq!(paths.len(), 3, "Should find 3 ebin directories");
+
+        // Verify all paths end with /ebin and contain expected app names
+        let path_strs: Vec<&str> = paths.iter().map(|p| p.as_str()).collect();
+        assert!(
+            path_strs.iter().any(|p| p.contains("cowboy")),
+            "Should find cowboy ebin"
+        );
+        assert!(
+            path_strs.iter().any(|p| p.contains("gun")),
+            "Should find gun ebin"
+        );
+        assert!(
+            path_strs.iter().any(|p| p.contains("ranch")),
+            "Should find ranch ebin"
+        );
+    }
+
+    #[test]
+    fn test_aggregate_native_dependencies_root_only() {
+        let mut root_deps = NativeDependencyMap::new();
+        root_deps.insert(
+            "gun".to_string(),
+            manifest::NativeDependency {
+                name: "gun".to_string(),
+                constraint: "~> 2.1".to_string(),
+            },
+        );
+
+        let resolved: Vec<super::super::deps::path::ResolvedDependency> = Vec::new();
+        let aggregated = aggregate_native_dependencies(&root_deps, &resolved);
+
+        assert_eq!(aggregated.len(), 1);
+        assert_eq!(aggregated["gun"].constraint, "~> 2.1");
+    }
+
+    #[test]
+    fn test_generate_rebar_config_path_lives_in_build_tree() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let mut deps = NativeDependencyMap::new();
+        deps.insert(
+            "gun".to_string(),
+            manifest::NativeDependency {
+                name: "gun".to_string(),
+                constraint: "~> 2.1".to_string(),
+            },
+        );
+
+        let config_path = generate_rebar_config(&project_path, &deps).unwrap();
+
+        // Config should be in _build/dev/native/
+        let expected_suffix = Utf8PathBuf::from("_build/dev/native/rebar.config");
+        assert!(
+            config_path.ends_with(&expected_suffix),
+            "Config should live in build tree, got: {config_path}"
         );
     }
 }
