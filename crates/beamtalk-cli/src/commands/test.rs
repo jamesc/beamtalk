@@ -931,6 +931,18 @@ fn initialize_pipeline(
                 all_class_infos.extend(class_infos);
             }
         }
+
+        // Load dependency class metadata so the type checker and validator
+        // can resolve cross-package class references in test files.
+        let dep_options = beamtalk_core::CompilerOptions::default();
+        if let Ok(resolved_deps) = super::deps::ensure_deps_resolved(pkg_root, &dep_options) {
+            for dep in &resolved_deps {
+                for (class_name, module_name) in &dep.class_module_index {
+                    class_module_index.insert(class_name.clone(), module_name.clone());
+                }
+                all_class_infos.extend(dep.class_infos.clone());
+            }
+        }
     }
 
     Ok(TestPipeline {
