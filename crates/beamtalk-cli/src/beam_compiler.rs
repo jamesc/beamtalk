@@ -985,8 +985,11 @@ pub(crate) fn compile_source_with_bindings(
     beamtalk_core::queries::diagnostic_provider::apply_expect_directives(&module, &mut diagnostics);
 
     // Check for errors (and optionally treat warnings/hints as errors).
-    // Deprecation-category warnings (BT-1529) are excluded from warnings-as-errors
-    // to allow gradual migration during the deprecation period.
+    // Deprecation-category warnings (BT-1529) and structural validation warnings
+    // (BT-1726: UnresolvedClass, UnresolvedFfi, ArityMismatch) are excluded from
+    // warnings-as-errors because they can produce false positives when compiling
+    // single files that reference classes, FFI modules, or arities defined in
+    // other compilation units.
     let has_errors = diagnostics.iter().any(|d| {
         d.severity == beamtalk_core::source_analysis::Severity::Error
             || (options.warnings_as_errors
@@ -995,8 +998,15 @@ pub(crate) fn compile_source_with_bindings(
                     beamtalk_core::source_analysis::Severity::Warning
                         | beamtalk_core::source_analysis::Severity::Hint
                 )
-                && d.category
-                    != Some(beamtalk_core::source_analysis::DiagnosticCategory::Deprecation))
+                && !matches!(
+                    d.category,
+                    Some(
+                        beamtalk_core::source_analysis::DiagnosticCategory::Deprecation
+                            | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass
+                            | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedFfi
+                            | beamtalk_core::source_analysis::DiagnosticCategory::ArityMismatch
+                    )
+                ))
     });
 
     if !diagnostics.is_empty() {

@@ -1042,6 +1042,12 @@ pub enum ExpectCategory {
     ActorNew,
     /// Suppress visibility errors/warnings — cross-package internal method access (ADR 0071, BT-1702).
     Visibility,
+    /// Suppress unresolved class warnings (BT-1726).
+    UnresolvedClass,
+    /// Suppress unresolved FFI module warnings (BT-1726).
+    UnresolvedFfi,
+    /// Suppress arity mismatch warnings (BT-1726).
+    ArityMismatch,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -1058,6 +1064,9 @@ impl ExpectCategory {
             "deprecation" => Some(Self::Deprecation),
             "actor_new" => Some(Self::ActorNew),
             "visibility" => Some(Self::Visibility),
+            "unresolved_class" => Some(Self::UnresolvedClass),
+            "unresolved_ffi" => Some(Self::UnresolvedFfi),
+            "arity_mismatch" => Some(Self::ArityMismatch),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -1074,6 +1083,9 @@ impl ExpectCategory {
             Self::Deprecation => "deprecation",
             Self::ActorNew => "actor_new",
             Self::Visibility => "visibility",
+            Self::UnresolvedClass => "unresolved_class",
+            Self::UnresolvedFfi => "unresolved_ffi",
+            Self::ArityMismatch => "arity_mismatch",
             Self::All => "all",
         }
     }
@@ -1089,6 +1101,9 @@ impl ExpectCategory {
             "deprecation",
             "actor_new",
             "visibility",
+            "unresolved_class",
+            "unresolved_ffi",
+            "arity_mismatch",
             "all",
         ]
     }

@@ -18,6 +18,7 @@ mod lint_validators;
 mod match_validators;
 mod native_validators;
 pub(crate) mod package_validators;
+mod structural_validators;
 mod supervision_validators;
 mod visibility_validators;
 
@@ -35,6 +36,9 @@ pub(crate) use lint_validators::{
 pub(crate) use match_validators::{check_match_exhaustiveness, warn_assignment_in_match_arms};
 pub(crate) use native_validators::{check_native_delegate_return_type, check_native_state_fields};
 pub(crate) use package_validators::check_package_qualifiers;
+pub(crate) use structural_validators::{
+    check_ffi_arity, check_unresolved_classes, check_unresolved_ffi_modules,
+};
 pub(crate) use supervision_validators::{
     check_children_supervision_policy, check_supervision_policy_override,
 };

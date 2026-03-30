@@ -331,6 +331,10 @@ fn analyse_full(
         result.class_hierarchy.stamp_package(pkg);
     }
 
+    // BT-1726: Remember whether cross-file class metadata was provided so the
+    // structural validator can decide whether unresolved-class warnings are useful.
+    let has_cross_file_classes = !pre_loaded_classes.is_empty();
+
     // ADR 0050 Phase 4: inject REPL-session class metadata before TypeChecking
     if !pre_loaded_classes.is_empty() {
         result
@@ -471,6 +475,22 @@ fn analyse_full(
         &mut result.diagnostics,
         skip_module_expression_lint,
     );
+
+    // Phase 5b: Structural validation (BT-1726)
+    // Only check unresolved classes when cross-file metadata has been loaded
+    // (pre_loaded_classes non-empty). Without it, any class reference might
+    // be a cross-file dependency that we simply don't know about yet.
+    if has_cross_file_classes {
+        validators::check_unresolved_classes(
+            module,
+            &result.class_hierarchy,
+            &mut result.diagnostics,
+        );
+    }
+    // Warn on Erlang FFI calls to unknown modules.
+    validators::check_unresolved_ffi_modules(module, &mut result.diagnostics);
+    // Warn on Erlang FFI calls with wrong arity for known functions.
+    validators::check_ffi_arity(module, &mut result.diagnostics);
 
     // Phase 6: Module-level validation (BT-349, BT-1666)
     let module_diags = module_validator::validate_single_definition(module);
