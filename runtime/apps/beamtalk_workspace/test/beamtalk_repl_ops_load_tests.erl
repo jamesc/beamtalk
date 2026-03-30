@@ -489,3 +489,275 @@ compile_native_erl_files_multiple_test() ->
     after
         rm_temp_dir(Dir)
     end.
+
+%%====================================================================
+%% extract_native_refs/1 (BT-1717)
+%%====================================================================
+
+extract_native_refs_native_annotation_test() ->
+    Dir = make_temp_dir(),
+    try
+        Path = write_temp_file(
+            Dir,
+            "server.bt",
+            <<
+                "Actor subclass: HTTPServer native: beamtalk_http_server\n"
+                "  start => self\n"
+            >>
+        ),
+        Refs = beamtalk_repl_ops_load:extract_native_refs(Path),
+        ?assertEqual([<<"beamtalk_http_server">>], Refs)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+extract_native_refs_ffi_reference_test() ->
+    Dir = make_temp_dir(),
+    try
+        Path = write_temp_file(
+            Dir,
+            "datetime.bt",
+            <<
+                "Object subclass: DateTime\n"
+                "  now => (Erlang beamtalk_datetime) now\n"
+                "  year => (Erlang beamtalk_datetime) year: self\n"
+            >>
+        ),
+        Refs = beamtalk_repl_ops_load:extract_native_refs(Path),
+        %% Should be deduplicated.
+        ?assertEqual([<<"beamtalk_datetime">>], Refs)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+extract_native_refs_both_native_and_ffi_test() ->
+    Dir = make_temp_dir(),
+    try
+        Path = write_temp_file(
+            Dir,
+            "mixed.bt",
+            <<
+                "Actor subclass: MyActor native: my_native_mod\n"
+                "  helper => (Erlang my_ffi_mod) doStuff\n"
+            >>
+        ),
+        Refs = beamtalk_repl_ops_load:extract_native_refs(Path),
+        ?assertEqual([<<"my_ffi_mod">>, <<"my_native_mod">>], Refs)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+extract_native_refs_no_refs_test() ->
+    Dir = make_temp_dir(),
+    try
+        Path = write_temp_file(
+            Dir,
+            "pure.bt",
+            <<
+                "Object subclass: Counter\n"
+                "  state: count = 0\n"
+                "  increment => self.count := self.count + 1\n"
+            >>
+        ),
+        Refs = beamtalk_repl_ops_load:extract_native_refs(Path),
+        ?assertEqual([], Refs)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+extract_native_refs_missing_file_test() ->
+    Refs = beamtalk_repl_ops_load:extract_native_refs("/no/such/file.bt"),
+    ?assertEqual([], Refs).
+
+%%====================================================================
+%% find_project_root/1 (BT-1717)
+%%====================================================================
+
+find_project_root_with_manifest_test() ->
+    Dir = make_temp_dir(),
+    try
+        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"test\"\n">>),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        BtFile = filename:join(SrcDir, "Counter.bt"),
+        ok = file:write_file(BtFile, <<"Object subclass: Counter">>),
+        AbsDir = filename:absname(Dir),
+        ?assertEqual(AbsDir, beamtalk_repl_ops_load:find_project_root(BtFile))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+find_project_root_no_manifest_test() ->
+    %% A path with no beamtalk.toml anywhere up the tree should return undefined.
+    %% Use a file path that is deep enough to not hit any real beamtalk.toml.
+    ?assertEqual(undefined, beamtalk_repl_ops_load:find_project_root("/tmp/no_project/src/X.bt")).
+
+%%====================================================================
+%% maybe_recompile_native_deps/2 (BT-1717)
+%%====================================================================
+
+maybe_recompile_native_deps_no_project_root_test() ->
+    ?assertEqual(
+        {ok, 0},
+        beamtalk_repl_ops_load:maybe_recompile_native_deps("/src/X.bt", undefined)
+    ).
+
+maybe_recompile_native_deps_no_refs_test() ->
+    Dir = make_temp_dir(),
+    try
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        BtPath = write_temp_file(
+            SrcDir,
+            "Pure.bt",
+            <<"Object subclass: Pure\n  hello => \"world\"\n">>
+        ),
+        ?assertEqual(
+            {ok, 0},
+            beamtalk_repl_ops_load:maybe_recompile_native_deps(BtPath, Dir)
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+maybe_recompile_native_deps_compiles_stale_test() ->
+    Dir = make_temp_dir(),
+    try
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        %% Write native .erl module.
+        ErlSrc = <<
+            "-module(bt_native_test_demand_mod).\n"
+            "-export([greet/0]).\n"
+            "greet() -> hello.\n"
+        >>,
+        write_temp_file(NativeDir, "bt_native_test_demand_mod.erl", ErlSrc),
+        %% Write .bt file referencing it via native: annotation.
+        BtPath = write_temp_file(
+            SrcDir,
+            "MyActor.bt",
+            <<
+                "Actor subclass: MyActor native: bt_native_test_demand_mod\n"
+                "  start => self\n"
+            >>
+        ),
+        %% Module is not loaded — should trigger compilation.
+        code:purge(bt_native_test_demand_mod),
+        code:delete(bt_native_test_demand_mod),
+        ?assertEqual(
+            {ok, 1},
+            beamtalk_repl_ops_load:maybe_recompile_native_deps(BtPath, Dir)
+        ),
+        %% Module should now be callable.
+        ?assertEqual(hello, bt_native_test_demand_mod:greet()),
+        %% Cleanup.
+        code:purge(bt_native_test_demand_mod),
+        code:delete(bt_native_test_demand_mod)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+maybe_recompile_native_deps_skips_unchanged_test() ->
+    Dir = make_temp_dir(),
+    try
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        %% Write and compile native .erl module.
+        ErlSrc = <<
+            "-module(bt_native_test_nochange_mod).\n"
+            "-export([val/0]).\n"
+            "val() -> 42.\n"
+        >>,
+        ErlPath = write_temp_file(NativeDir, "bt_native_test_nochange_mod.erl", ErlSrc),
+        %% Pre-compile it so it's already loaded.
+        {[], 1} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        %% Write .bt file referencing it.
+        BtPath = write_temp_file(
+            SrcDir,
+            "MyActor2.bt",
+            <<
+                "Actor subclass: MyActor2 native: bt_native_test_nochange_mod\n"
+                "  start => self\n"
+            >>
+        ),
+        %% The module is already loaded from the same .erl file, and the .erl file
+        %% has not been modified — should not recompile.
+        %% Note: Since compile_native_erl_files uses code:load_binary which sets
+        %% the file path as the .erl source, and the .erl file hasn't changed,
+        %% the mtime comparison should show it's not stale.
+        Result = beamtalk_repl_ops_load:maybe_recompile_native_deps(BtPath, Dir),
+        ?assertEqual({ok, 0}, Result),
+        %% Cleanup.
+        code:purge(bt_native_test_nochange_mod),
+        code:delete(bt_native_test_nochange_mod)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+maybe_recompile_native_deps_no_erl_file_test() ->
+    Dir = make_temp_dir(),
+    try
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        %% .bt references a module but no .erl exists in native/.
+        BtPath = write_temp_file(
+            SrcDir,
+            "Missing.bt",
+            <<
+                "Actor subclass: Missing native: bt_nonexistent_mod\n"
+                "  start => self\n"
+            >>
+        ),
+        ?assertEqual(
+            {ok, 0},
+            beamtalk_repl_ops_load:maybe_recompile_native_deps(BtPath, Dir)
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+maybe_recompile_native_deps_ffi_ref_compiles_test() ->
+    Dir = make_temp_dir(),
+    try
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        %% Write native .erl module.
+        ErlSrc = <<
+            "-module(bt_native_test_ffi_demand).\n"
+            "-export([work/0]).\n"
+            "work() -> done.\n"
+        >>,
+        write_temp_file(NativeDir, "bt_native_test_ffi_demand.erl", ErlSrc),
+        %% Write .bt file referencing it via (Erlang ...) FFI.
+        BtPath = write_temp_file(
+            SrcDir,
+            "Worker.bt",
+            <<
+                "Object subclass: Worker\n"
+                "  doWork => (Erlang bt_native_test_ffi_demand) work\n"
+            >>
+        ),
+        %% Module is not loaded — should trigger compilation.
+        code:purge(bt_native_test_ffi_demand),
+        code:delete(bt_native_test_ffi_demand),
+        ?assertEqual(
+            {ok, 1},
+            beamtalk_repl_ops_load:maybe_recompile_native_deps(BtPath, Dir)
+        ),
+        ?assertEqual(done, bt_native_test_ffi_demand:work()),
+        %% Cleanup.
+        code:purge(bt_native_test_ffi_demand),
+        code:delete(bt_native_test_ffi_demand)
+    after
+        rm_temp_dir(Dir)
+    end.

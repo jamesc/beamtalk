@@ -26,7 +26,10 @@
     format_collision_warning/3,
     extract_package_from_module/1,
     classify_files_by_change/2,
-    get_file_mtime/1
+    get_file_mtime/1,
+    extract_native_refs/1,
+    find_project_root/1,
+    maybe_recompile_native_deps/2
 ]).
 -endif.
 
@@ -760,6 +763,19 @@ extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
 -spec do_reload(string(), atom() | undefined, beamtalk_repl_protocol:protocol_msg(), pid()) ->
     binary().
 do_reload(Path, ModuleAtom, Msg, SessionPid) ->
+    %% BT-1717: Demand-driven native .erl recompilation on single-file reload.
+    %% Before compiling the .bt file, check if it references native Erlang modules
+    %% (via native: annotation or (Erlang module) FFI) and recompile them if stale.
+    case maybe_recompile_native_deps(Path, find_project_root(Path)) of
+        {ok, _Count} ->
+            ok;
+        {error, NativeErrors} ->
+            ?LOG_ERROR(
+                "reload: native .erl compilation failed for ~s: ~p",
+                [Path, NativeErrors],
+                #{domain => [beamtalk, runtime]}
+            )
+    end,
     case beamtalk_repl_shell:load_file(SessionPid, Path) of
         {ok, Classes} ->
             %% BT-737: Collect any cross-package collision warnings from this load.
@@ -899,6 +915,141 @@ module_to_class_name_map() ->
         #{},
         Pids
     ).
+
+%%% ===================================================================
+%%% BT-1717: Demand-driven native .erl recompilation on single-file reload
+%%% ===================================================================
+
+%% @private
+%% @doc Extract native module references from a .bt source file.
+%% Returns a deduplicated list of Erlang module name binaries referenced via:
+%%   - `native: module_name` annotation in the class header
+%%   - `(Erlang module_name)` FFI calls in method bodies
+-spec extract_native_refs(string()) -> [binary()].
+extract_native_refs(Path) ->
+    case file:read_file(Path) of
+        {ok, Bin} ->
+            NativeRefs =
+                case
+                    re:run(
+                        Bin,
+                        <<"(?:native:\\s+(\\w+))">>,
+                        [{capture, [1], binary}, global]
+                    )
+                of
+                    {match, Matches} -> [M || [M] <- Matches];
+                    nomatch -> []
+                end,
+            FfiRefs =
+                case
+                    re:run(
+                        Bin,
+                        <<"\\(Erlang\\s+(\\w+)\\)">>,
+                        [{capture, [1], binary}, global]
+                    )
+                of
+                    {match, FfiMatches} -> [M || [M] <- FfiMatches];
+                    nomatch -> []
+                end,
+            lists:usort(NativeRefs ++ FfiRefs);
+        {error, _} ->
+            []
+    end.
+
+%% @private
+%% @doc Find the project root by walking up from a file path to find beamtalk.toml.
+%% Returns the directory containing beamtalk.toml, or undefined if not found.
+-spec find_project_root(string()) -> string() | undefined.
+find_project_root(Path) ->
+    Dir = filename:dirname(filename:absname(Path)),
+    find_project_root_walk(Dir).
+
+%% @private
+-spec find_project_root_walk(string()) -> string() | undefined.
+find_project_root_walk("/") ->
+    undefined;
+find_project_root_walk(Dir) ->
+    case filelib:is_file(filename:join(Dir, "beamtalk.toml")) of
+        true -> Dir;
+        false -> find_project_root_walk(filename:dirname(Dir))
+    end.
+
+%% @private
+%% @doc Check native module references from a .bt file and recompile stale .erl files.
+%% For each native module referenced, checks if native/{module}.erl exists in the
+%% project and if it's newer than its loaded .beam. If so, recompiles via compile:file/2.
+%% Returns {ok, RecompiledCount} or {error, Errors}.
+-spec maybe_recompile_native_deps(string(), string() | undefined) ->
+    {ok, non_neg_integer()} | {error, [map()]}.
+maybe_recompile_native_deps(_Path, undefined) ->
+    {ok, 0};
+maybe_recompile_native_deps(Path, ProjectRoot) ->
+    NativeRefs = extract_native_refs(Path),
+    case NativeRefs of
+        [] ->
+            {ok, 0};
+        _ ->
+            NativeDir = filename:join(ProjectRoot, "native"),
+            StaleFiles = lists:filtermap(
+                fun(ModBin) ->
+                    ErlFile = filename:join(
+                        NativeDir,
+                        binary_to_list(ModBin) ++ ".erl"
+                    ),
+                    case filelib:is_file(ErlFile) of
+                        false ->
+                            false;
+                        true ->
+                            case is_native_erl_stale(ErlFile, ModBin) of
+                                true -> {true, ErlFile};
+                                false -> false
+                            end
+                    end
+                end,
+                NativeRefs
+            ),
+            case StaleFiles of
+                [] ->
+                    {ok, 0};
+                _ ->
+                    ?LOG_INFO(
+                        "reload: demand-compiling ~B stale native .erl file(s) for ~s",
+                        [length(StaleFiles), Path],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    {Errors, Count} = compile_native_erl_files(StaleFiles, ProjectRoot),
+                    case Errors of
+                        [] -> {ok, Count};
+                        _ -> {error, Errors}
+                    end
+            end
+    end.
+
+%% @private
+%% @doc Check if a native .erl file is newer than its loaded .beam counterpart.
+%% Returns true if:
+%%   - The module is not loaded at all (needs compilation)
+%%   - The .erl file's mtime is newer than the .beam file's mtime
+-spec is_native_erl_stale(string(), binary()) -> boolean().
+is_native_erl_stale(ErlFile, ModBin) ->
+    ModAtom = binary_to_atom(ModBin, utf8),
+    case code:is_loaded(ModAtom) of
+        false ->
+            %% Module not loaded — needs compilation.
+            true;
+        {file, BeamPath} ->
+            ErlMtime = get_file_mtime(ErlFile),
+            BeamMtime =
+                case is_list(BeamPath) of
+                    true ->
+                        get_file_mtime(BeamPath);
+                    false ->
+                        %% BeamPath may be 'preloaded' or a cover-compiled atom.
+                        %% In those cases, treat as stale to be safe.
+                        {{0, 0, 0}, {0, 0, 0}}
+                end,
+            ErlMtime > BeamMtime
+    end.
 
 %%% ===================================================================
 %%% BT-1685: Incremental load-project helpers
