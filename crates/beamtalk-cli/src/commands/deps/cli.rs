@@ -364,7 +364,11 @@ fn shorten_git_url(url: &str) -> String {
 // deps update
 // ---------------------------------------------------------------------------
 
-/// Update git dependencies to the latest matching their spec.
+/// Update dependencies to the latest matching their spec.
+///
+/// For git deps: re-fetches and resolves to the latest SHA.
+/// For native (hex) deps: clears locked versions so the next build
+/// re-resolves against hex.pm via rebar3 (ADR 0072 Phase 2).
 fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
     let manifest_path = project_root.join("beamtalk.toml");
     let manifest = manifest::parse_manifest_full(&manifest_path)?;
@@ -382,6 +386,8 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         })
         .collect();
 
+    let has_native_deps = !manifest.native_dependencies.is_empty();
+
     if let Some(target_name) = name {
         // Update a single dep — check existence before emptiness
         if !manifest.dependencies.contains_key(target_name) {
@@ -398,13 +404,28 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         update_single_git_dep(target_name, url, reference, project_root)?;
     } else {
         // Update all git deps
-        if git_deps.is_empty() {
-            println!("No git dependencies to update");
+        let has_git_deps = !git_deps.is_empty();
+        if !has_git_deps && !has_native_deps {
+            println!("No git or native dependencies to update");
             return Ok(());
         }
 
         for (dep_name, (url, reference)) in &git_deps {
             update_single_git_dep(dep_name, url, reference, project_root)?;
+        }
+
+        // Clear native package locks so the next build re-resolves via rebar3
+        if has_native_deps {
+            let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
+            if lockfile.has_native_packages() {
+                lockfile.clear_native_packages();
+                lockfile.write(project_root)?;
+                println!(
+                    "Cleared native package locks — next build will re-resolve against hex.pm"
+                );
+            } else {
+                println!("No native packages locked — next build will resolve against hex.pm");
+            }
         }
     }
 
