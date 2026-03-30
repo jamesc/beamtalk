@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// NativeCalc -- test fixture for native package E2E test (BT-1719).
+///
+/// Uses (Erlang native_calc) FFI to call a user-authored native Erlang module
+/// in the package's native/ directory.
+Object subclass: NativeCalc
+
+  /// Add two integers via native Erlang.
+  class add: a with: b => (Erlang native_calc) add: a with: b
+
+  /// Multiply two integers via native Erlang.
+  class multiply: a with: b => (Erlang native_calc) multiply: a with: b
+
+  /// Return the version string from the native module.
+  class version => (Erlang native_calc) version

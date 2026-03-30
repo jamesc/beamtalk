@@ -23341,6 +23341,25 @@
       "explanation": ""
     },
     {
+      "id": "tests-e2e-fixtures-native-package-project-src-nativecalc",
+      "title": "NativeCalc",
+      "category": "e2e-fixtures",
+      "tags": [
+        "NativeCalc",
+        "Object",
+        "add:with:",
+        "extends",
+        "inherit",
+        "inheritance",
+        "multiply:with:",
+        "object",
+        "subclassing",
+        "version"
+      ],
+      "source": "/// NativeCalc -- test fixture for native package E2E test (BT-1719).\n///\n/// Uses (Erlang native_calc) FFI to call a user-authored native Erlang module\n/// in the package's native/ directory.\nObject subclass: NativeCalc\n\n  /// Add two integers via native Erlang.\n  class add: a with: b => (Erlang native_calc) add: a with: b\n\n  /// Multiply two integers via native Erlang.\n  class multiply: a with: b => (Erlang native_calc) multiply: a with: b\n\n  /// Return the version string from the native module.\n  class version => (Erlang native_calc) version",
+      "explanation": ""
+    },
+    {
       "id": "tests-e2e-fixtures-nested-dir-tag",
       "title": "Tag",
       "category": "e2e-fixtures",
