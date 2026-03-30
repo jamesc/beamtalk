@@ -1209,7 +1209,10 @@ fn compile_with_rebar3(
         discover_native_modules(project_root)?
     };
 
-    Ok(Rebar3Result { ebin_paths, module_names })
+    Ok(Rebar3Result {
+        ebin_paths,
+        module_names,
+    })
 }
 
 /// Collect ebin directories from rebar3's output tree.
@@ -2826,4 +2829,3 @@ mod tests {
         );
     }
 }
-
