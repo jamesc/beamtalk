@@ -41,7 +41,7 @@ toml = "1.0"
 dirs = "6"
 
 # Cryptography
-sha2 = "0.10"
+sha2 = "0.11"
 rand = "0.10"
 base64 = "0.22"
 
