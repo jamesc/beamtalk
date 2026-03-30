@@ -80,7 +80,9 @@ pub(crate) fn print_help() {
     println!("  :exit, :q       Exit the REPL");
     println!("  :clear          Clear all variable bindings");
     println!("  :bindings       Show current variable bindings");
-    println!("  :sync, :s       Sync workspace with project on disk (incremental)");
+    println!(
+        "  :sync, :s       Sync workspace with project in current dir (requires beamtalk.toml)"
+    );
     println!("  :unload <Class> Unload a class from the workspace");
     println!("  :test           Run all test classes (→ Workspace test)");
     println!("  :test <Class>   Run a test class (→ Workspace test: ClassName)");

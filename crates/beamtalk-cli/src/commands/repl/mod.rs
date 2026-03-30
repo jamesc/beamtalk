@@ -808,10 +808,23 @@ fn handle_sync(client: &mut ReplClient) {
                             .get("path")
                             .and_then(|p| p.as_str())
                             .unwrap_or("unknown");
-                        eprintln!(
-                            "  {} in {path}",
-                            color::paint(color::RED, &format!("Error: {msg}"))
-                        );
+                        let line = err.get("line").and_then(|l| l.as_u64());
+                        let hint = err.get("hint").and_then(|h| h.as_str());
+                        let painted = color::paint(color::RED, &format!("Error: {msg}"));
+                        match (line, hint) {
+                            (Some(ln), Some(h)) => {
+                                eprintln!("  {painted} in {path} at line {ln} ({h})");
+                            }
+                            (Some(ln), None) => {
+                                eprintln!("  {painted} in {path} at line {ln}");
+                            }
+                            (None, Some(h)) => {
+                                eprintln!("  {painted} in {path} ({h})");
+                            }
+                            (None, None) => {
+                                eprintln!("  {painted} in {path}");
+                            }
+                        }
                     }
                 }
                 // Display summary
