@@ -1280,7 +1280,7 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         }
 
         // ADR 0072: Collect hex dep names from lockfile (includes transitive deps)
-        for name in super::deps::lockfile::Lockfile::collect_hex_dep_names(pkg_root) {
+        for name in super::deps::lockfile::Lockfile::collect_hex_dep_names(pkg_root)? {
             if !pipeline.hex_dep_names.contains(&name) {
                 pipeline.hex_dep_names.push(name);
             }

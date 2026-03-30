@@ -171,12 +171,14 @@ impl Lockfile {
     /// transitive BT dependencies. This is the authoritative source for
     /// which OTP applications need startup at runtime.
     ///
-    /// Returns an empty vec if no lockfile exists or it has no native packages.
-    pub fn collect_hex_dep_names(project_root: &Utf8Path) -> Vec<String> {
-        let Ok(Some(lock)) = Self::read(project_root) else {
-            return Vec::new();
-        };
-        lock.native_packages.keys().cloned().collect()
+    /// Returns an empty vec if no lockfile exists. Propagates read/parse
+    /// errors so callers can surface lockfile corruption instead of
+    /// silently skipping OTP app startup.
+    pub fn collect_hex_dep_names(project_root: &Utf8Path) -> Result<Vec<String>> {
+        match Self::read(project_root)? {
+            Some(lock) => Ok(lock.native_packages.keys().cloned().collect()),
+            None => Ok(Vec::new()),
+        }
     }
 
     /// Read a lockfile from disk.

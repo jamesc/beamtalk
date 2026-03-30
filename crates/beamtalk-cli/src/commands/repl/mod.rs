@@ -295,6 +295,24 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// Collect hex dep names from the lockfile for a project directory.
+///
+/// Returns an empty vec if the path is not valid UTF-8, the lockfile
+/// doesn't exist, or the project has no native dependencies. Lockfile
+/// parse errors are logged but not propagated to avoid blocking the REPL.
+fn collect_hex_dep_names_for_project(project_root: &std::path::Path) -> Vec<String> {
+    let Some(root) = camino::Utf8Path::from_path(project_root) else {
+        return Vec::new();
+    };
+    match crate::commands::deps::lockfile::Lockfile::collect_hex_dep_names(root) {
+        Ok(names) => names,
+        Err(e) => {
+            tracing::warn!("Failed to read beamtalk.lock for hex deps: {e}");
+            Vec::new()
+        }
+    }
+}
+
 /// Read the Erlang default cookie from ~/.erlang.cookie.
 /// Used for foreground mode where no workspace cookie exists.
 fn read_erlang_cookie() -> Option<String> {
@@ -398,11 +416,6 @@ pub fn run(
             }
         });
 
-    // ADR 0072: Collect hex dep names from lockfile (includes transitive deps)
-    let hex_dep_names: Vec<String> = camino::Utf8Path::from_path(&project_root)
-        .map(crate::commands::deps::lockfile::Lockfile::collect_hex_dep_names)
-        .unwrap_or_default();
-
     // Choose startup mode: workspace (default) or foreground (debug)
     let (beam_guard_opt, is_new_workspace, workspace_id_opt, connect_host, connect_port, cookie): (
         Option<BeamChildGuard>,
@@ -414,6 +427,9 @@ pub fn run(
     ) = if foreground {
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
+
+        // ADR 0072: Collect hex dep names from lockfile (includes transitive deps)
+        let hex_dep_names = collect_hex_dep_names_for_project(&project_root);
 
         let mut child = start_beam_node(
             port,
@@ -471,6 +487,10 @@ pub fn run(
 
         // Auto-compile package if beamtalk.toml is present (BT-606)
         let extra_code_paths = auto_compile_package(&project_root);
+
+        // ADR 0072: Collect hex dep names AFTER auto-compile, which may
+        // create/update beamtalk.lock with resolved native packages.
+        let hex_dep_names = collect_hex_dep_names_for_project(&project_root);
 
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,

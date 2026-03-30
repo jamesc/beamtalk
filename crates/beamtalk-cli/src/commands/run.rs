@@ -183,7 +183,7 @@ fn run_script(
     let workspace_id = format!("run_{pid}");
 
     // ADR 0072: Collect all hex dep names from lockfile (includes transitive BT deps' native deps)
-    let hex_dep_names = super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root);
+    let hex_dep_names = super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root)?;
 
     let eval_cmd = build_script_eval_cmd(
         &workspace_id,
@@ -397,7 +397,7 @@ fn run_package_as_otp_application(
 
     // ADR 0072: Collect all hex dep names from lockfile (includes transitive BT deps' native deps)
     let service_hex_dep_names =
-        super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root);
+        super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root)?;
 
     let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
         project_root.as_std_path(),
