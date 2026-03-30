@@ -199,6 +199,18 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::Visibility,
                     Some(DiagnosticCategory::Visibility)
                 )
+                | (
+                    ExpectCategory::UnresolvedClass,
+                    Some(DiagnosticCategory::UnresolvedClass)
+                )
+                | (
+                    ExpectCategory::UnresolvedFfi,
+                    Some(DiagnosticCategory::UnresolvedFfi)
+                )
+                | (
+                    ExpectCategory::ArityMismatch,
+                    Some(DiagnosticCategory::ArityMismatch)
+                )
         )
 }
 

@@ -517,6 +517,12 @@ pub enum DiagnosticCategory {
     ActorNew,
     /// Visibility error/warning (ADR 0071) — cross-package access to internal methods.
     Visibility,
+    /// Unresolved class reference (BT-1726) — class not found in hierarchy.
+    UnresolvedClass,
+    /// Unresolved FFI module (BT-1726) — Erlang module not in known OTP set.
+    UnresolvedFfi,
+    /// Arity mismatch (BT-1726) — wrong argument count for known Erlang function.
+    ArityMismatch,
 }
 
 /// A secondary note attached to a diagnostic (BT-1588).
