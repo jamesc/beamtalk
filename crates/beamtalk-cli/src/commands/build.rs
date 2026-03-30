@@ -240,7 +240,15 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     // - Path B (with hex deps): generate rebar.config, invoke rebar3 compile
     let has_native_deps = full_manifest
         .as_ref()
-        .is_some_and(|m| !m.native_dependencies.is_empty());
+        .is_some_and(|m| !m.native_dependencies.is_empty())
+        || resolved_deps.iter().any(|dep| {
+            let manifest_path = dep.root.join("beamtalk.toml");
+            manifest_path
+                .exists()
+                .then(|| manifest::parse_manifest_full(&manifest_path).ok())
+                .flatten()
+                .is_some_and(|m| !m.native_dependencies.is_empty())
+        });
 
     let native_result = if pkg_manifest.is_some() && has_native_deps {
         // Path B: rebar3 handles both hex deps and native/*.erl
@@ -249,7 +257,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         // Aggregate native dependencies from all packages in the dependency graph
         let aggregated = aggregate_native_dependencies(native_deps, &resolved_deps);
 
-        let rebar3_result = compile_with_rebar3(&project_root, &aggregated, false)?;
+        let rebar3_result = compile_with_rebar3(&project_root, &aggregated, false, &resolved_deps)?;
         eprintln!(
             "Compiled native deps via rebar3 ({} package(s), {} ebin dir(s))",
             aggregated.len(),
@@ -1382,6 +1390,7 @@ fn compile_with_rebar3(
     project_root: &Utf8Path,
     native_deps: &NativeDependencyMap,
     force_resolve: bool,
+    resolved_bt_deps: &[super::deps::path::ResolvedDependency],
 ) -> Result<Rebar3Result> {
     use super::deps::lockfile::{self, Lockfile};
 
@@ -1419,8 +1428,13 @@ fn compile_with_rebar3(
     cmd.arg("compile");
     // rebar3 reads rebar.config from cwd — run from _build/dev/native/
     cmd.current_dir(rebar_base_dir.as_std_path());
-    // Keep all rebar3 output in the same build directory
-    cmd.env("REBAR_BASE_DIR", rebar_base_dir.as_str());
+    // Keep all rebar3 output in the same build directory.
+    // REBAR_BASE_DIR must be absolute — rebar3 resolves it relative to cwd,
+    // and cwd is already rebar_base_dir, so a relative path would nest.
+    let abs_base_dir = std::fs::canonicalize(rebar_base_dir.as_std_path())
+        .into_diagnostic()
+        .wrap_err("Failed to canonicalize rebar base dir")?;
+    cmd.env("REBAR_BASE_DIR", &abs_base_dir);
 
     let output = cmd
         .output()
@@ -1436,7 +1450,7 @@ fn compile_with_rebar3(
     }
 
     // Collect all ebin directories produced by rebar3
-    let ebin_paths = collect_rebar3_ebin_paths(&rebar_base_dir);
+    let mut ebin_paths = collect_rebar3_ebin_paths(&rebar_base_dir);
 
     info!(ebin_count = ebin_paths.len(), "rebar3 compilation complete");
 
@@ -1460,15 +1474,133 @@ fn compile_with_rebar3(
     }
 
     // Discover native module names from the project's native/ directory
-    let module_names = {
+    let mut module_names = {
         use crate::beam_compiler::discover_native_modules;
         discover_native_modules(project_root)?
     };
+
+    // Compile native .erl files from transitive Beamtalk dependencies.
+    compile_dep_native_erlang(
+        resolved_bt_deps,
+        &rebar_base_dir,
+        &mut ebin_paths,
+        &mut module_names,
+    )?;
 
     Ok(Rebar3Result {
         ebin_paths,
         module_names,
     })
+}
+
+/// Compile native `.erl` files from transitive Beamtalk dependencies.
+///
+/// After rebar3 fetches hex deps (cowboy, gun, etc.), this compiles each
+/// dependency's `native/*.erl` files via `erlc`, passing include paths for
+/// both hex dep headers and the beamtalk runtime.
+fn compile_dep_native_erlang(
+    resolved_bt_deps: &[super::deps::path::ResolvedDependency],
+    rebar_base_dir: &Utf8Path,
+    ebin_paths: &mut Vec<Utf8PathBuf>,
+    module_names: &mut Vec<String>,
+) -> Result<()> {
+    let runtime_apps_dir = beamtalk_cli::repl_startup::find_runtime_dir()
+        .ok()
+        .map(|d| d.join("apps"))
+        .filter(|d| d.exists());
+
+    for dep in resolved_bt_deps {
+        let dep_native_dir = dep.root.join("native");
+        if !dep_native_dir.exists() || !dep_native_dir.is_dir() {
+            continue;
+        }
+
+        // Discover .erl files in this dependency's native/ dir
+        let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&dep_native_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
+                    if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
+                        erl_files.push(utf8);
+                    }
+                }
+            }
+        }
+
+        if erl_files.is_empty() {
+            continue;
+        }
+
+        erl_files.sort();
+
+        // Output to the same native ebin dir
+        let dep_ebin = rebar_base_dir.join("ebin");
+        std::fs::create_dir_all(&dep_ebin)
+            .into_diagnostic()
+            .wrap_err("Failed to create native ebin directory")?;
+
+        info!(
+            dep = %dep.name,
+            count = erl_files.len(),
+            "Compiling native Erlang files from dependency"
+        );
+
+        let mut cmd = std::process::Command::new("erlc");
+        cmd.arg("+debug_info");
+        cmd.arg("-o").arg(dep_ebin.as_str());
+
+        // Add -I paths so erlc can resolve -include_lib for hex deps
+        // (cowboy, gun) and the beamtalk runtime (beamtalk_runtime/include/beamtalk.hrl).
+        let lib_dir = rebar_base_dir.join("default").join("lib");
+        if lib_dir.exists() {
+            cmd.arg("-I").arg(lib_dir.as_str());
+        }
+        if let Some(apps_dir) = &runtime_apps_dir {
+            cmd.arg("-I").arg(apps_dir);
+        }
+
+        // Add the dep's own include dir if present
+        let dep_include = dep_native_dir.join("include");
+        if dep_include.exists() && dep_include.is_dir() {
+            cmd.arg("-I").arg(dep_include.as_str());
+        }
+
+        for erl_file in &erl_files {
+            cmd.arg(erl_file.as_str());
+        }
+
+        let output = cmd.output().into_diagnostic().wrap_err_with(|| {
+            format!(
+                "Failed to compile native Erlang files from dependency '{}'",
+                dep.name
+            )
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            miette::bail!(
+                "erlc failed for native files in dependency '{}':\n{}",
+                dep.name,
+                format!("{stdout}{stderr}").trim_end()
+            );
+        }
+
+        // Add dep's native modules to module_names
+        for erl_file in &erl_files {
+            if let Some(stem) = erl_file.file_stem() {
+                module_names.push(stem.to_string());
+            }
+        }
+
+        // Ensure the dep ebin is in ebin_paths
+        if !ebin_paths.contains(&dep_ebin) {
+            ebin_paths.push(dep_ebin);
+        }
+    }
+
+    Ok(())
 }
 
 /// Collect ebin directories from rebar3's output tree.
@@ -3289,6 +3421,150 @@ mod tests {
         assert!(
             !class_corpus_path.exists(),
             "class_corpus.json should not be created for internal-only classes"
+        );
+    }
+
+    // ---- Transitive native dependency detection tests (ADR 0072) ----
+
+    /// Helper: create a minimal beamtalk.toml with native deps in a temp dir.
+    fn write_dep_manifest(dir: &std::path::Path, name: &str, native_deps: &[(&str, &str)]) {
+        let manifest_dir = dir.join(name);
+        fs::create_dir_all(&manifest_dir).unwrap();
+        let mut toml =
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[native.dependencies]\n");
+        for (dep_name, constraint) in native_deps {
+            use std::fmt::Write;
+            let _ = writeln!(toml, "{dep_name} = \"{constraint}\"");
+        }
+        fs::write(manifest_dir.join("beamtalk.toml"), toml).unwrap();
+    }
+
+    /// Helper: create a `ResolvedDependency` pointing at a temp dir.
+    fn make_resolved_dep(
+        root: &std::path::Path,
+        name: &str,
+    ) -> super::super::deps::path::ResolvedDependency {
+        super::super::deps::path::ResolvedDependency {
+            name: name.to_string(),
+            root: Utf8PathBuf::from_path_buf(root.join(name)).unwrap(),
+            ebin_path: Utf8PathBuf::from_path_buf(root.join(name).join("ebin")).unwrap(),
+            class_module_index: std::collections::HashMap::new(),
+            is_direct: true,
+            via_chain: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_aggregate_native_deps_from_transitive_dep() {
+        let temp = TempDir::new().unwrap();
+        write_dep_manifest(
+            temp.path(),
+            "http",
+            &[("cowboy", "~> 2.12"), ("gun", "~> 2.1")],
+        );
+
+        let root_deps = NativeDependencyMap::new(); // root has NO native deps
+        let resolved = [make_resolved_dep(temp.path(), "http")];
+
+        let aggregated = aggregate_native_dependencies(&root_deps, &resolved);
+
+        assert_eq!(
+            aggregated.len(),
+            2,
+            "Should aggregate 2 native deps from transitive dep"
+        );
+        assert_eq!(aggregated["cowboy"].constraint, "~> 2.12");
+        assert_eq!(aggregated["gun"].constraint, "~> 2.1");
+    }
+
+    #[test]
+    fn test_aggregate_native_deps_root_takes_precedence() {
+        let temp = TempDir::new().unwrap();
+        write_dep_manifest(temp.path(), "http", &[("cowboy", "~> 2.10")]);
+
+        let mut root_deps = NativeDependencyMap::new();
+        root_deps.insert(
+            "cowboy".to_string(),
+            manifest::NativeDependency {
+                name: "cowboy".to_string(),
+                constraint: "~> 2.12".to_string(),
+            },
+        );
+
+        let resolved = [make_resolved_dep(temp.path(), "http")];
+        let aggregated = aggregate_native_dependencies(&root_deps, &resolved);
+
+        assert_eq!(aggregated.len(), 1);
+        assert_eq!(
+            aggregated["cowboy"].constraint, "~> 2.12",
+            "Root constraint should take precedence over transitive dep"
+        );
+    }
+
+    #[test]
+    fn test_aggregate_native_deps_dep_without_manifest() {
+        let temp = TempDir::new().unwrap();
+        // Create dep dir with NO beamtalk.toml
+        fs::create_dir(temp.path().join("orphan")).unwrap();
+
+        let root_deps = NativeDependencyMap::new();
+        let resolved = [make_resolved_dep(temp.path(), "orphan")];
+        let aggregated = aggregate_native_dependencies(&root_deps, &resolved);
+
+        assert!(aggregated.is_empty(), "Should skip deps without manifests");
+    }
+
+    #[test]
+    fn test_has_native_deps_detects_transitive() {
+        // Simulates the has_native_deps check from build() — verifies that
+        // transitive deps with [native.dependencies] are detected even when
+        // the root project has none.
+        let temp = TempDir::new().unwrap();
+        write_dep_manifest(temp.path(), "http", &[("gun", "~> 2.1")]);
+
+        let resolved = [make_resolved_dep(temp.path(), "http")];
+
+        let has_native_deps = resolved.iter().any(|dep| {
+            let manifest_path = dep.root.join("beamtalk.toml");
+            manifest_path
+                .exists()
+                .then(|| manifest::parse_manifest_full(&manifest_path).ok())
+                .flatten()
+                .is_some_and(|m| !m.native_dependencies.is_empty())
+        });
+
+        assert!(
+            has_native_deps,
+            "Should detect native deps from transitive dependency"
+        );
+    }
+
+    #[test]
+    fn test_has_native_deps_false_when_no_native_anywhere() {
+        let temp = TempDir::new().unwrap();
+        // Dep with NO native.dependencies section
+        let dep_dir = temp.path().join("utils");
+        fs::create_dir(&dep_dir).unwrap();
+        fs::write(
+            dep_dir.join("beamtalk.toml"),
+            "[package]\nname = \"utils\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let resolved = [make_resolved_dep(temp.path(), "utils")];
+
+        let has_native_deps = resolved.iter().any(|dep| {
+            let manifest_path = dep.root.join("beamtalk.toml");
+            manifest_path
+                .exists()
+                .then(|| manifest::parse_manifest_full(&manifest_path).ok())
+                .flatten()
+                .is_some_and(|m| !m.native_dependencies.is_empty())
+        });
+
+        assert!(
+            !has_native_deps,
+            "Should be false when no native deps anywhere"
         );
     }
 }
