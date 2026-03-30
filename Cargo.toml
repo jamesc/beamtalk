@@ -83,7 +83,7 @@ similar = "2"
 # Testing
 insta = { version = "1", features = ["yaml"] }
 proptest = "1"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
