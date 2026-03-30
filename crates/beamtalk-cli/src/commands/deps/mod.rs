@@ -103,8 +103,7 @@ fn collect_fresh_deps(
             .join("ebin");
 
         // Rebuild class module index from source files (fast — no compilation)
-        let (class_module_index, class_infos) =
-            path::build_dep_class_index(&dep_root, dep_name)?;
+        let (class_module_index, class_infos) = path::build_dep_class_index(&dep_root, dep_name)?;
 
         debug!(
             dep = %dep_name,
