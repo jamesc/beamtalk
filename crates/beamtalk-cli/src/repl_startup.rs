@@ -205,7 +205,10 @@ pub fn format_bind_addr_erl(bind_addr: Option<Ipv4Addr>) -> String {
 /// OTP applications must be started before user code can call into them.
 /// Returns `{ok, _} = application:ensure_all_started(dep), ...` for each
 /// hex dep, or an empty string when there are no hex deps.
-fn hex_deps_start_fragment(hex_dep_names: &[String]) -> String {
+///
+/// Used by all startup paths: script mode, test mode, REPL (foreground +
+/// detached workspace).
+pub fn hex_deps_start_fragment(hex_dep_names: &[String]) -> String {
     if hex_dep_names.is_empty() {
         return String::new();
     }
@@ -522,6 +525,41 @@ mod tests {
         let cmd = build_eval_cmd_with_node(9000, "mynode", None, None, Some("my_app"), &[]);
         assert!(cmd.contains("application:ensure_all_started(my_app)"));
         assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
+    }
+
+    #[test]
+    fn eval_cmd_with_hex_deps_starts_them_before_workspace() {
+        let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
+        let cmd = build_eval_cmd(9000, None, None, None, &hex_deps);
+        assert!(
+            cmd.contains("ensure_all_started(cowboy)"),
+            "Should start cowboy: {cmd}"
+        );
+        assert!(
+            cmd.contains("ensure_all_started(gun)"),
+            "Should start gun: {cmd}"
+        );
+        // Hex deps should come after workspace startup but before get_port
+        let cowboy_pos = cmd.find("ensure_all_started(cowboy)").unwrap();
+        let port_pos = cmd.find("beamtalk_repl_server:get_port()").unwrap();
+        assert!(
+            cowboy_pos < port_pos,
+            "Hex deps should start before port query: {cmd}"
+        );
+    }
+
+    #[test]
+    fn eval_cmd_with_node_and_hex_deps() {
+        let hex_deps = vec!["hackney".to_string()];
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None, None, None, &hex_deps);
+        assert!(
+            cmd.contains("ensure_all_started(hackney)"),
+            "Should start hackney: {cmd}"
+        );
+        assert!(
+            cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"),
+            "Should set node name: {cmd}"
+        );
     }
 
     #[test]

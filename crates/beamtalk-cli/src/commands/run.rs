@@ -182,10 +182,8 @@ fn run_script(
     let pid = std::process::id();
     let workspace_id = format!("run_{pid}");
 
-    // ADR 0072: Read native dependency names for OTP app startup
-    let hex_dep_names: Vec<String> = manifest::find_manifest_full(project_root)?
-        .map(|m| m.native_dependencies.keys().cloned().collect())
-        .unwrap_or_default();
+    // ADR 0072: Collect all hex dep names from lockfile (includes transitive BT deps' native deps)
+    let hex_dep_names = super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root);
 
     let eval_cmd = build_script_eval_cmd(
         &workspace_id,
@@ -311,19 +309,7 @@ fn build_script_eval_cmd(
     selector: &str,
     hex_dep_names: &[String],
 ) -> String {
-    // Start each hex dep OTP application before the workspace
-    let hex_deps_start = if hex_dep_names.is_empty() {
-        String::new()
-    } else {
-        let mut sorted = hex_dep_names.to_vec();
-        sorted.sort();
-        sorted
-            .iter()
-            .map(|name| format!("{{ok, _}} = application:ensure_all_started({name})"))
-            .collect::<Vec<_>>()
-            .join(", ")
-            + ", "
-    };
+    let hex_deps_start = repl_startup::hex_deps_start_fragment(hex_dep_names);
 
     format!(
         "{hex_deps_start}\
@@ -409,10 +395,9 @@ fn run_package_as_otp_application(
         extra_code_paths.push(ebin.into_std_path_buf());
     }
 
-    // ADR 0072: Read hex dep names for OTP app startup in workspace
-    let service_hex_dep_names: Vec<String> = manifest::find_manifest_full(project_root)?
-        .map(|m| m.native_dependencies.keys().cloned().collect())
-        .unwrap_or_default();
+    // ADR 0072: Collect all hex dep names from lockfile (includes transitive BT deps' native deps)
+    let service_hex_dep_names =
+        super::deps::lockfile::Lockfile::collect_hex_dep_names(project_root);
 
     let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
         project_root.as_std_path(),

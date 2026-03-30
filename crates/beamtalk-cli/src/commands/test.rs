@@ -1279,12 +1279,10 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
             pipeline.package_ebin_dirs.push(ebin);
         }
 
-        // ADR 0072: Collect hex dep names for OTP app startup before tests
-        if let Some(full) = manifest::find_manifest_full(pkg_root)? {
-            for name in full.native_dependencies.keys() {
-                if !pipeline.hex_dep_names.contains(name) {
-                    pipeline.hex_dep_names.push(name.clone());
-                }
+        // ADR 0072: Collect hex dep names from lockfile (includes transitive deps)
+        for name in super::deps::lockfile::Lockfile::collect_hex_dep_names(pkg_root) {
+            if !pipeline.hex_dep_names.contains(&name) {
+                pipeline.hex_dep_names.push(name);
             }
         }
     }
@@ -1357,18 +1355,8 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     };
 
     // ADR 0072: Start hex dep OTP applications before tests
-    let hex_deps_start_cmd = if pipeline.hex_dep_names.is_empty() {
-        String::new()
-    } else {
-        let mut sorted = pipeline.hex_dep_names.clone();
-        sorted.sort();
-        sorted
-            .iter()
-            .map(|name| format!("{{ok, _}} = application:ensure_all_started({name})"))
-            .collect::<Vec<_>>()
-            .join(", ")
-            + ", "
-    };
+    let hex_deps_start_cmd =
+        beamtalk_cli::repl_startup::hex_deps_start_fragment(&pipeline.hex_dep_names);
 
     // Call beamtalk_test_runner:run_all(Jobs) and serialize result to JSON
     let eval_cmd = format!(

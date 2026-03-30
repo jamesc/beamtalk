@@ -398,14 +398,9 @@ pub fn run(
             }
         });
 
-    // ADR 0072: Collect hex dep names for OTP app startup in REPL
+    // ADR 0072: Collect hex dep names from lockfile (includes transitive deps)
     let hex_dep_names: Vec<String> = camino::Utf8Path::from_path(&project_root)
-        .and_then(|root| {
-            crate::commands::manifest::find_manifest_full(root)
-                .ok()
-                .flatten()
-        })
-        .map(|m| m.native_dependencies.keys().cloned().collect())
+        .map(crate::commands::deps::lockfile::Lockfile::collect_hex_dep_names)
         .unwrap_or_default();
 
     // Choose startup mode: workspace (default) or foreground (debug)

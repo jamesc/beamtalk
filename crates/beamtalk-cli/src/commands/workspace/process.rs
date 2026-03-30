@@ -180,18 +180,7 @@ pub fn start_detached_node(
     };
 
     // ADR 0072 (BT-1724): Start hex dep OTP applications before the OTP app supervisor.
-    let hex_deps_start = if hex_dep_names.is_empty() {
-        String::new()
-    } else {
-        let mut sorted = hex_dep_names.to_vec();
-        sorted.sort();
-        sorted
-            .iter()
-            .map(|name| format!("{{ok, _}} = application:ensure_all_started({name})"))
-            .collect::<Vec<_>>()
-            .join(", ")
-            + ", "
-    };
+    let hex_deps_start = beamtalk_cli::repl_startup::hex_deps_start_fragment(hex_dep_names);
 
     // If an OTP app name is provided, start it after workspace bootstrap so that
     // all project classes are registered before the OTP supervisor's init/1 runs (BT-1319).
