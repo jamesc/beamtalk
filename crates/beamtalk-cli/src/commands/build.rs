@@ -241,14 +241,18 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     let has_native_deps = full_manifest
         .as_ref()
         .is_some_and(|m| !m.native_dependencies.is_empty())
-        || resolved_deps.iter().any(|dep| {
-            let manifest_path = dep.root.join("beamtalk.toml");
-            manifest_path
-                .exists()
-                .then(|| manifest::parse_manifest_full(&manifest_path).ok())
-                .flatten()
-                .is_some_and(|m| !m.native_dependencies.is_empty())
-        });
+        || resolved_deps
+            .iter()
+            .try_fold(false, |acc, dep| -> Result<bool> {
+                let manifest_path = dep.root.join("beamtalk.toml");
+                if !manifest_path.exists() {
+                    return Ok(acc);
+                }
+                let m = manifest::parse_manifest_full(&manifest_path).wrap_err_with(|| {
+                    format!("Failed to parse dependency manifest at {manifest_path}")
+                })?;
+                Ok(acc || !m.native_dependencies.is_empty())
+            })?;
 
     let native_result = if pkg_manifest.is_some() && has_native_deps {
         // Path B: rebar3 handles both hex deps and native/*.erl
@@ -1473,19 +1477,17 @@ fn compile_with_rebar3(
         debug!("Updated beamtalk.lock with native package entries");
     }
 
-    // Discover native module names from the project's native/ directory
-    let mut module_names = {
+    // Discover native module names from the project's native/ directory.
+    // Only root package modules go into `module_names`; dependency native
+    // modules are tracked separately so the root `.app` doesn't claim
+    // ownership of modules that belong to dependencies.
+    let module_names = {
         use crate::beam_compiler::discover_native_modules;
         discover_native_modules(project_root)?
     };
 
     // Compile native .erl files from transitive Beamtalk dependencies.
-    compile_dep_native_erlang(
-        resolved_bt_deps,
-        &rebar_base_dir,
-        &mut ebin_paths,
-        &mut module_names,
-    )?;
+    compile_dep_native_erlang(resolved_bt_deps, &rebar_base_dir, &mut ebin_paths)?;
 
     Ok(Rebar3Result {
         ebin_paths,
@@ -1502,7 +1504,6 @@ fn compile_dep_native_erlang(
     resolved_bt_deps: &[super::deps::path::ResolvedDependency],
     rebar_base_dir: &Utf8Path,
     ebin_paths: &mut Vec<Utf8PathBuf>,
-    module_names: &mut Vec<String>,
 ) -> Result<()> {
     let runtime_apps_dir = beamtalk_cli::repl_startup::find_runtime_dir()
         .ok()
@@ -1517,13 +1518,25 @@ fn compile_dep_native_erlang(
 
         // Discover .erl files in this dependency's native/ dir
         let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&dep_native_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
-                    if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
-                        erl_files.push(utf8);
-                    }
+        let entries = std::fs::read_dir(&dep_native_dir)
+            .into_diagnostic()
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to read native directory for dependency '{}'",
+                    dep.name
+                )
+            })?;
+        for entry_result in entries {
+            let entry = entry_result.into_diagnostic().wrap_err_with(|| {
+                format!(
+                    "Failed to read entry in native directory for dependency '{}'",
+                    dep.name
+                )
+            })?;
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
+                if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
+                    erl_files.push(utf8);
                 }
             }
         }
@@ -1585,13 +1598,6 @@ fn compile_dep_native_erlang(
                 dep.name,
                 format!("{stdout}{stderr}").trim_end()
             );
-        }
-
-        // Add dep's native modules to module_names
-        for erl_file in &erl_files {
-            if let Some(stem) = erl_file.file_stem() {
-                module_names.push(stem.to_string());
-            }
         }
 
         // Ensure the dep ebin is in ebin_paths
