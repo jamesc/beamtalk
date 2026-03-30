@@ -84,6 +84,17 @@ use process::{
     resolve_node_name, resolve_port, start_beam_node,
 };
 
+/// Deserialize a JSON `null` or missing field as an empty `Vec`.
+fn deserialize_null_as_empty_vec<'de, D, T>(
+    deserializer: D,
+) -> std::result::Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Option::<Vec<T>>::deserialize(deserializer).map(Option::unwrap_or_default)
+}
+
 /// JSON response from the REPL backend.
 /// Supports both legacy format (type field) and new protocol format (status field).
 #[derive(Debug, Deserialize)]
@@ -132,6 +143,11 @@ pub(crate) struct ReplResponse {
     pub(crate) affected_actors: Option<u32>,
     /// Number of actors that failed code migration (BT-266)
     pub(crate) migration_failures: Option<u32>,
+    /// Incremental load summary (BT-1707: :sync command)
+    pub(crate) summary: Option<String>,
+    /// Per-file load errors (BT-1707: :sync command)
+    #[serde(default, deserialize_with = "deserialize_null_as_empty_vec")]
+    pub(crate) errors: Vec<serde_json::Value>,
 }
 
 impl ReplResponse {
@@ -658,11 +674,7 @@ enum CommandResult {
 /// Extracted from the main loop to reduce nesting depth. Returns
 /// [`CommandResult::NotACommand`] when the line is not a recognised command
 /// so the caller can fall through to expression accumulation/evaluation.
-fn handle_repl_command(
-    line: &str,
-    client: &mut ReplClient,
-    last_loaded_path: &mut Option<(String, bool)>,
-) -> CommandResult {
+fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
     match line {
         ":exit" | ":quit" | ":q" => return CommandResult::Exit,
         ":help" | ":h" | ":?" => {
@@ -684,15 +696,12 @@ fn handle_repl_command(
             handle_bindings(client);
             return CommandResult::Handled;
         }
-        _ if line.starts_with(":load ") || line.starts_with(":l ") => {
-            handle_load(line, client, last_loaded_path);
+        ":sync" | ":s" => {
+            handle_sync(client);
             return CommandResult::Handled;
         }
-        _ if line.starts_with(":reload ") || line.starts_with(":r ") => {
-            let raw = extract_command_arg(line, ":reload ", Some(":r "));
-            let class_name = strip_path_quotes(raw);
-            let expr = format!("{class_name} reload");
-            eval_and_display(client, &expr);
+        _ if line.starts_with(":sync ") || line.starts_with(":s ") => {
+            eprintln!(":sync takes no arguments — it syncs the project from beamtalk.toml");
             return CommandResult::Handled;
         }
         _ if line.starts_with(":unload ") => {
@@ -711,10 +720,6 @@ fn handle_repl_command(
         }
         ":unload" => {
             eprintln!("Usage: :unload <ClassName>");
-            return CommandResult::Handled;
-        }
-        ":reload" | ":r" => {
-            handle_reload_last(client, last_loaded_path.as_ref());
             return CommandResult::Handled;
         }
         _ if line.starts_with(":test ") || line.starts_with(":t ") => {
@@ -798,38 +803,67 @@ fn handle_bindings(client: &mut ReplClient) {
     }
 }
 
-/// Handle `:load <path>` -- load a file or directory.
-fn handle_load(line: &str, client: &mut ReplClient, last_loaded_path: &mut Option<(String, bool)>) {
-    let raw = extract_command_arg(line, ":load ", Some(":l "));
-    let path = strip_path_quotes(raw);
+/// Handle `:sync` -- sync the workspace with the project on disk.
+///
+/// Sends a `load-project` op to the backend, which finds `beamtalk.toml` in
+/// the current directory, scans `src/` and `native/`, and incrementally
+/// compiles changed files.
+fn handle_sync(client: &mut ReplClient) {
+    match client.load_project(".") {
+        Ok(response) => {
+            // Always display per-file errors (present on both success and error responses)
+            for err in &response.errors {
+                if let Some(msg) = err.get("message").and_then(|m| m.as_str()) {
+                    let path = err
+                        .get("path")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("unknown");
+                    let line = err.get("line").and_then(serde_json::Value::as_u64);
+                    let hint = err.get("hint").and_then(serde_json::Value::as_str);
+                    let painted = color::paint(color::RED, &format!("Error: {msg}"));
+                    match (line, hint) {
+                        (Some(ln), Some(h)) => {
+                            eprintln!("  {painted} in {path} at line {ln} ({h})");
+                        }
+                        (Some(ln), None) => {
+                            eprintln!("  {painted} in {path} at line {ln}");
+                        }
+                        (None, Some(h)) => {
+                            eprintln!("  {painted} in {path} ({h})");
+                        }
+                        (None, None) => {
+                            eprintln!("  {painted} in {path}");
+                        }
+                    }
+                }
+            }
+            // Always display compiler warnings
+            if let Some(ref warns) = response.warnings {
+                for w in warns {
+                    eprintln!("{}", color::paint(color::YELLOW, &format!("Warning: {w}")));
+                }
+            }
 
-    if path.is_empty() {
-        eprintln!("Usage: :load <path>");
-        return;
-    }
-
-    if Path::new(path).is_dir() {
-        load_directory(client, path, false);
-        *last_loaded_path = Some((path.to_string(), true));
-    } else {
-        let expr = format!("Workspace load: \"{}\"", escape_for_string_literal(path));
-        eval_and_display(client, &expr);
-        *last_loaded_path = Some((path.to_string(), false));
-    }
-}
-
-/// Handle `:reload` with no argument -- reload the last loaded path.
-fn handle_reload_last(client: &mut ReplClient, last_loaded_path: Option<&(String, bool)>) {
-    let Some((path, is_directory)) = last_loaded_path else {
-        eprintln!("No file or directory loaded yet. Use :load <path> first.");
-        return;
-    };
-    if *is_directory {
-        let display_path = path.trim_end_matches('/');
-        load_directory(client, display_path, true);
-    } else {
-        let expr = format!("Workspace load: \"{}\"", escape_for_string_literal(path));
-        eval_and_display(client, &expr);
+            if response.is_error() {
+                // Show generic error message only when no structured diagnostics were printed
+                if response.errors.is_empty() {
+                    if let Some(msg) = response.error_message() {
+                        eprintln!("{}", display::format_error(msg));
+                    }
+                }
+            } else {
+                // Display summary and classes only on success
+                if let Some(ref summary) = response.summary {
+                    println!("{summary}");
+                }
+                if let Some(ref classes) = response.classes {
+                    if !classes.is_empty() {
+                        println!("Classes: {}", classes.join(", "));
+                    }
+                }
+            }
+        }
+        Err(e) => eprintln!("Error: {e}"),
     }
 }
 
@@ -1005,7 +1039,6 @@ pub(crate) fn repl_loop(
 
     // Main REPL loop
     let mut line_buffer: Vec<String> = Vec::new();
-    let mut last_loaded_path: Option<(String, bool)> = None; // (path, is_directory)
     loop {
         let prompt = if line_buffer.is_empty() { "> " } else { "..> " };
         let readline = rl.readline(prompt);
@@ -1067,7 +1100,7 @@ pub(crate) fn repl_loop(
                 let _ = rl.add_history_entry(line);
             }
 
-            match handle_repl_command(line, client, &mut last_loaded_path) {
+            match handle_repl_command(line, client) {
                 CommandResult::Handled => continue,
                 CommandResult::Exit => {
                     println!("Goodbye!");
@@ -1101,14 +1134,6 @@ pub(crate) fn repl_loop(
     Ok(())
 }
 
-/// Escape a string for use as a Beamtalk string literal.
-///
-/// Escapes backslashes and double-quotes so the result can be safely embedded
-/// inside a `"..."` string literal in a generated Beamtalk expression.
-pub(crate) fn escape_for_string_literal(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
 /// Extracts the argument from a REPL command with long and optional short forms.
 ///
 /// Returns the trimmed argument string, or an empty string if the command
@@ -1122,130 +1147,6 @@ pub(crate) fn extract_command_arg<'a>(
         .or_else(|| short_prefix.and_then(|s| line.strip_prefix(s)))
         .unwrap_or("")
         .trim()
-}
-
-/// Strip surrounding double-quotes from a path argument.
-///
-/// Handles both quoted (`"path/to/file.bt"`) and unquoted (`path/to/file.bt`) forms.
-/// Quoted paths support spaces in the path; unquoted paths remain unchanged.
-pub(crate) fn strip_path_quotes(arg: &str) -> &str {
-    if arg.len() >= 2 && arg.starts_with('"') && arg.ends_with('"') {
-        &arg[1..arg.len() - 1]
-    } else {
-        arg
-    }
-}
-
-/// Recursively discover all `.bt` files under a directory, sorted by full path.
-///
-/// Returns file paths relative to the current directory (or absolute if the input was absolute).
-/// Hidden directories (starting with `.`) are skipped.
-fn discover_bt_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-    discover_bt_files_recursive(dir, &mut files)?;
-    files.sort();
-    Ok(files)
-}
-
-/// Recursive helper for [`discover_bt_files`].
-fn discover_bt_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    let mut entries: Vec<_> = std::fs::read_dir(dir)?
-        .filter_map(std::result::Result::ok)
-        .collect();
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-
-    for entry in entries {
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-
-        // Skip hidden entries
-        if name_str.starts_with('.') {
-            continue;
-        }
-
-        let path = entry.path();
-        let file_type = entry.file_type()?;
-
-        if file_type.is_dir() {
-            discover_bt_files_recursive(&path, files)?;
-        } else if file_type.is_file() && path.extension().is_some_and(|ext| ext == "bt") {
-            files.push(path);
-        }
-    }
-    Ok(())
-}
-
-/// Load all `.bt` files from a directory into the REPL via `Workspace load:` eval requests.
-///
-/// Reports per-file success/failure and a final summary.
-fn load_directory(client: &mut ReplClient, dir_path: &str, is_reload: bool) {
-    let dir = Path::new(dir_path);
-
-    let files = match discover_bt_files(dir) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("Error reading directory {dir_path}: {e}");
-            return;
-        }
-    };
-
-    if files.is_empty() {
-        println!("No .bt files found in {dir_path}");
-        return;
-    }
-
-    let mut loaded: usize = 0;
-    let mut failed: Vec<String> = Vec::new();
-
-    for file in &files {
-        let file_str = file.to_string_lossy();
-        let expr = format!(
-            "Workspace load: \"{}\"",
-            escape_for_string_literal(&file_str)
-        );
-        let file_name = file
-            .file_name()
-            .map_or_else(|| file_str.to_string(), |n| n.to_string_lossy().to_string());
-        match client.eval(&expr) {
-            Ok(response) => {
-                if response.is_error() {
-                    if let Some(msg) = response.error_message() {
-                        eprintln!("  Error in {file_name}: {msg}");
-                    }
-                    failed.push(file_name);
-                } else {
-                    loaded += 1;
-                }
-            }
-            Err(e) => {
-                eprintln!("  Error loading {file_name}: {e}");
-                failed.push(file_name);
-            }
-        }
-    }
-
-    // Summary
-    if failed.is_empty() {
-        let word = if loaded == 1 { "file" } else { "files" };
-        let verb = if is_reload { "Reloaded" } else { "Loaded" };
-        println!("{verb} {loaded} {word} from {dir_path}");
-    } else if loaded > 0 {
-        let word = if loaded == 1 { "file" } else { "files" };
-        println!("  \u{2713} {loaded} {word} loaded");
-        let fail_word = if failed.len() == 1 { "file" } else { "files" };
-        println!(
-            "  \u{2717} {} {fail_word} failed ({})",
-            failed.len(),
-            failed.join(", ")
-        );
-    } else {
-        let word = if failed.len() == 1 { "file" } else { "files" };
-        println!(
-            "  \u{2717} {} {word} failed ({})",
-            failed.len(),
-            failed.join(", ")
-        );
-    }
 }
 
 #[cfg(test)]
@@ -1711,142 +1612,5 @@ mod tests {
     #[test]
     fn extract_command_arg_whitespace_only_argument() {
         assert_eq!(extract_command_arg(":inspect   ", ":inspect ", None), "");
-    }
-
-    #[test]
-    fn strip_path_quotes_removes_surrounding_quotes() {
-        assert_eq!(
-            strip_path_quotes("\"examples/counter.bt\""),
-            "examples/counter.bt"
-        );
-    }
-
-    #[test]
-    fn strip_path_quotes_removes_quotes_with_spaces() {
-        assert_eq!(
-            strip_path_quotes("\"path with spaces/file.bt\""),
-            "path with spaces/file.bt"
-        );
-    }
-
-    #[test]
-    fn strip_path_quotes_unquoted_unchanged() {
-        assert_eq!(
-            strip_path_quotes("examples/counter.bt"),
-            "examples/counter.bt"
-        );
-    }
-
-    #[test]
-    fn strip_path_quotes_empty_string() {
-        assert_eq!(strip_path_quotes(""), "");
-    }
-
-    #[test]
-    fn strip_path_quotes_only_opening_quote() {
-        assert_eq!(strip_path_quotes("\"foo.bt"), "\"foo.bt");
-    }
-
-    #[test]
-    fn strip_path_quotes_only_closing_quote() {
-        assert_eq!(strip_path_quotes("foo.bt\""), "foo.bt\"");
-    }
-
-    #[test]
-    fn strip_path_quotes_empty_quoted() {
-        assert_eq!(strip_path_quotes("\"\""), "");
-    }
-
-    // === discover_bt_files tests ===
-
-    #[test]
-    fn discover_bt_files_finds_bt_files_sorted() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("beta.bt"), "// beta").unwrap();
-        std::fs::write(dir.path().join("alpha.bt"), "// alpha").unwrap();
-        std::fs::write(dir.path().join("readme.md"), "# readme").unwrap();
-
-        let files = discover_bt_files(dir.path()).unwrap();
-        assert_eq!(files.len(), 2);
-        assert!(files[0].ends_with("alpha.bt"));
-        assert!(files[1].ends_with("beta.bt"));
-    }
-
-    #[test]
-    fn discover_bt_files_recursive() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("top.bt"), "// top").unwrap();
-        let sub = dir.path().join("sub");
-        std::fs::create_dir(&sub).unwrap();
-        std::fs::write(sub.join("nested.bt"), "// nested").unwrap();
-
-        let files = discover_bt_files(dir.path()).unwrap();
-        assert_eq!(files.len(), 2);
-        // sub/nested.bt sorts before top.bt
-        assert!(files[0].ends_with("nested.bt"));
-        assert!(files[1].ends_with("top.bt"));
-    }
-
-    #[test]
-    fn discover_bt_files_skips_hidden_dirs() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("visible.bt"), "// vis").unwrap();
-        let hidden = dir.path().join(".hidden");
-        std::fs::create_dir(&hidden).unwrap();
-        std::fs::write(hidden.join("secret.bt"), "// secret").unwrap();
-
-        let files = discover_bt_files(dir.path()).unwrap();
-        assert_eq!(files.len(), 1);
-        assert!(files[0].ends_with("visible.bt"));
-    }
-
-    #[test]
-    fn discover_bt_files_empty_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let files = discover_bt_files(dir.path()).unwrap();
-        assert!(files.is_empty());
-    }
-
-    #[test]
-    fn discover_bt_files_nonexistent_dir() {
-        let result = discover_bt_files(Path::new("/nonexistent/path/abc123"));
-        assert!(result.is_err());
-    }
-
-    // === escape_for_string_literal tests ===
-
-    #[test]
-    fn escape_plain_path() {
-        assert_eq!(
-            escape_for_string_literal("examples/counter.bt"),
-            "examples/counter.bt"
-        );
-    }
-
-    #[test]
-    fn escape_path_with_backslash() {
-        assert_eq!(
-            escape_for_string_literal("path\\to\\file.bt"),
-            "path\\\\to\\\\file.bt"
-        );
-    }
-
-    #[test]
-    fn escape_path_with_double_quote() {
-        assert_eq!(
-            escape_for_string_literal("path with \"spaces\".bt"),
-            "path with \\\"spaces\\\".bt"
-        );
-    }
-
-    #[test]
-    fn escape_empty_string() {
-        assert_eq!(escape_for_string_literal(""), "");
-    }
-
-    #[test]
-    fn escape_both_backslash_and_quote() {
-        // Backslash must be escaped first to avoid double-escaping quotes
-        assert_eq!(escape_for_string_literal("a\\\"b"), "a\\\\\\\"b");
     }
 }

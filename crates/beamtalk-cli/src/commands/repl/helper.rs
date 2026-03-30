@@ -13,7 +13,6 @@
 
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::path::Path;
 use std::time::Duration;
 
 use rustyline::completion::{Completer, Pair};
@@ -43,16 +42,18 @@ const REPL_COMMANDS: &[&str] = &[
     ":clear",
     ":bindings",
     ":b",
-    ":load",
-    ":l",
-    ":reload",
-    ":r",
+    ":sync",
+    ":s",
     ":unload",
     ":actors",
     ":a",
     ":kill",
     ":inspect",
     ":sessions",
+    ":test",
+    ":t",
+    ":show-codegen",
+    ":sc",
 ];
 
 /// REPL helper providing tab completion and syntax highlighting.
@@ -181,109 +182,6 @@ fn parse_class_expr_command_prefix(line: &str) -> Option<usize> {
         .find_map(|prefix| line.strip_prefix(prefix).map(|_| prefix.len()))
 }
 
-/// Detect if `line` is `:reload`/`:r` followed by a class-name argument
-/// (i.e. the first non-whitespace character after the command is uppercase).
-///
-/// When true, we do class-name completion rather than file-path completion.
-/// `:reload src/counter.bt` (arg starts lowercase / `/`) is left for
-/// `parse_load_prefix` to handle as a file path.
-fn parse_reload_class_prefix(line: &str) -> Option<usize> {
-    for prefix in &[":reload ", ":r "] {
-        if let Some(rest) = line.strip_prefix(prefix) {
-            let ws_len = rest.len() - rest.trim_start().len();
-            let trimmed = &rest[ws_len..];
-            if trimmed.starts_with(|c: char| c.is_ascii_uppercase()) {
-                return Some(prefix.len() + ws_len);
-            }
-        }
-    }
-    None
-}
-
-/// Detect if the line-so-far is a `:load`/`:l`/`:reload`/`:r` command and extract the path.
-///
-/// Returns `(quoted, partial_path, path_start_byte)` where:
-/// - `quoted` — the path was opened with a `"` (add closing `"` to completions)
-/// - `partial_path` — the partial path typed so far
-/// - `path_start_byte` — byte offset in `line` where the path starts (for rustyline replacement)
-fn parse_load_prefix(line: &str) -> Option<(bool, &str, usize)> {
-    for prefix in &[":load ", ":l ", ":reload ", ":r "] {
-        if let Some(rest) = line.strip_prefix(prefix) {
-            let cmd_end = prefix.len();
-            if let Some(stripped) = rest.strip_prefix('"') {
-                // Quoted: path starts after the opening quote
-                return Some((true, stripped, cmd_end + 1));
-            }
-            return Some((false, rest, cmd_end));
-        }
-    }
-    None
-}
-
-/// Build file-path completions for a partial path.
-///
-/// Lists `.bt` files and directories under the directory portion of `partial`,
-/// filtering entries to those whose names start with the file-name prefix.
-/// Directories always appear (with trailing `/`); only `.bt` files are shown.
-/// When `quoted` is true, completed file paths get a closing `"` appended.
-fn complete_path(partial: &str, quoted: bool) -> Vec<Pair> {
-    // Split partial into directory prefix and file-name prefix
-    let (dir, file_prefix) = match partial.rfind('/') {
-        Some(slash) => (&partial[..=slash], &partial[slash + 1..]),
-        None => ("", partial),
-    };
-
-    let search_dir = if dir.is_empty() { "." } else { dir };
-
-    let Ok(entries) = std::fs::read_dir(search_dir) else {
-        return Vec::new();
-    };
-
-    let mut completions: Vec<Pair> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy().into_owned();
-
-            // Skip hidden files unless the user explicitly typed a dot prefix
-            if name_str.starts_with('.') && !file_prefix.starts_with('.') {
-                return None;
-            }
-
-            if !name_str.starts_with(file_prefix) {
-                return None;
-            }
-
-            let file_type = entry.file_type().ok()?;
-
-            if file_type.is_dir() {
-                let full = format!("{dir}{name_str}/");
-                Some(Pair {
-                    display: format!("{name_str}/"),
-                    replacement: full,
-                })
-            } else if file_type.is_file()
-                && Path::new(&name_str).extension().is_some_and(|e| e == "bt")
-            {
-                let full = if quoted {
-                    format!("{dir}{name_str}\"")
-                } else {
-                    format!("{dir}{name_str}")
-                };
-                Some(Pair {
-                    display: name_str,
-                    replacement: full,
-                })
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    completions.sort_by(|a, b| a.display.cmp(&b.display));
-    completions
-}
-
 impl Completer for ReplHelper {
     type Candidate = Pair;
 
@@ -312,8 +210,7 @@ impl Completer for ReplHelper {
         // expression argument: :h, :help, :?, :test, :t, :sc, :show-codegen.
         // Strip the command prefix and query the backend with only the argument so
         // it can perform the same receiver-aware completion as for bare expressions.
-        let class_expr_arg_start = parse_class_expr_command_prefix(line_to_pos)
-            .or_else(|| parse_reload_class_prefix(line_to_pos));
+        let class_expr_arg_start = parse_class_expr_command_prefix(line_to_pos);
 
         if let Some(arg_start) = class_expr_arg_start {
             let arg = &line_to_pos[arg_start..];
@@ -332,13 +229,6 @@ impl Completer for ReplHelper {
                 })
                 .collect();
             return Ok((arg_start + arg_word_start, candidates));
-        }
-
-        // File path completion for :load/:l/:reload/:r commands (file-path arguments).
-        // Note: :reload with an uppercase class-name arg is handled above.
-        if let Some((quoted, partial, path_start)) = parse_load_prefix(line_to_pos) {
-            let candidates = complete_path(partial, quoted);
-            return Ok((path_start, candidates));
         }
 
         // Find the start of the current word (identifier boundary).
@@ -538,8 +428,6 @@ fn highlight_line(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use tempfile::TempDir;
 
     /// Helper: extract word start position from a line (same logic as Completer).
     fn find_word_start(line: &str) -> usize {
@@ -567,9 +455,12 @@ mod tests {
 
     #[test]
     fn test_repl_command_completion_multiple_matches() {
-        let candidates = command_completions(":r");
-        assert!(candidates.contains(&":reload".to_string()));
-        assert!(candidates.contains(&":r".to_string()));
+        let candidates = command_completions(":s");
+        assert!(candidates.contains(&":sync".to_string()));
+        assert!(candidates.contains(&":s".to_string()));
+        assert!(candidates.contains(&":sessions".to_string()));
+        assert!(candidates.contains(&":show-codegen".to_string()));
+        assert!(candidates.contains(&":sc".to_string()));
     }
 
     #[test]
@@ -739,158 +630,6 @@ mod tests {
         assert!(result.contains(" + ") || result.contains(' '));
     }
 
-    // === parse_load_prefix tests ===
-
-    #[test]
-    fn test_parse_load_prefix_load_unquoted() {
-        let result = parse_load_prefix(":load examples/");
-        assert_eq!(result, Some((false, "examples/", 6)));
-    }
-
-    #[test]
-    fn test_parse_load_prefix_load_quoted() {
-        let result = parse_load_prefix(":load \"examples/");
-        assert_eq!(result, Some((true, "examples/", 7)));
-    }
-
-    #[test]
-    fn test_parse_load_prefix_l_shorthand() {
-        let result = parse_load_prefix(":l foo");
-        assert_eq!(result, Some((false, "foo", 3)));
-    }
-
-    #[test]
-    fn test_parse_load_prefix_reload_quoted() {
-        let result = parse_load_prefix(":reload \"stdlib/");
-        assert_eq!(result, Some((true, "stdlib/", 9)));
-    }
-
-    #[test]
-    fn test_parse_load_prefix_r_shorthand_quoted() {
-        let result = parse_load_prefix(":r \"foo");
-        assert_eq!(result, Some((true, "foo", 4)));
-    }
-
-    #[test]
-    fn test_parse_load_prefix_non_load_command_is_none() {
-        assert_eq!(parse_load_prefix(":help"), None);
-        assert_eq!(parse_load_prefix(":bindings"), None);
-        assert_eq!(parse_load_prefix("Counter spawn"), None);
-    }
-
-    #[test]
-    fn test_parse_load_prefix_command_only_no_space_is_none() {
-        // ":load" without trailing space is command completion, not path
-        assert_eq!(parse_load_prefix(":load"), None);
-    }
-
-    #[test]
-    fn test_parse_load_prefix_empty_path_after_space() {
-        let result = parse_load_prefix(":load ");
-        assert_eq!(result, Some((false, "", 6)));
-    }
-
-    #[test]
-    fn test_parse_load_prefix_empty_quoted_path() {
-        let result = parse_load_prefix(":load \"");
-        assert_eq!(result, Some((true, "", 7)));
-    }
-
-    // === complete_path tests ===
-
-    fn make_test_dir() -> TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("counter.bt"), "").unwrap();
-        fs::write(dir.path().join("fibonacci.bt"), "").unwrap();
-        fs::write(dir.path().join("main.rs"), "").unwrap(); // should be excluded
-        fs::create_dir(dir.path().join("examples")).unwrap();
-        dir
-    }
-
-    #[test]
-    fn test_complete_path_lists_bt_files_and_dirs() {
-        let dir = make_test_dir();
-        let path_str = format!("{}/", dir.path().to_string_lossy());
-        let candidates = complete_path(&path_str, false);
-        let names: Vec<&str> = candidates.iter().map(|p| p.display.as_str()).collect();
-        assert!(
-            names.contains(&"counter.bt"),
-            "expected counter.bt in {names:?}"
-        );
-        assert!(names.contains(&"fibonacci.bt"));
-        assert!(names.contains(&"examples/"));
-        assert!(!names.contains(&"main.rs"), "main.rs should not appear");
-    }
-
-    #[test]
-    fn test_complete_path_filters_by_prefix() {
-        let dir = make_test_dir();
-        let path_str = format!("{}/co", dir.path().to_string_lossy());
-        let candidates = complete_path(&path_str, false);
-        let names: Vec<&str> = candidates.iter().map(|p| p.display.as_str()).collect();
-        assert!(names.contains(&"counter.bt"));
-        assert!(!names.contains(&"fibonacci.bt"));
-    }
-
-    #[test]
-    fn test_complete_path_quoted_appends_closing_quote() {
-        let dir = make_test_dir();
-        let path_str = format!("{}/counter.bt", dir.path().to_string_lossy());
-        let candidates = complete_path(&path_str, true);
-        // Should find counter.bt and its replacement should end with `"`
-        let counter = candidates.iter().find(|p| p.display == "counter.bt");
-        assert!(counter.is_some(), "expected counter.bt");
-        assert!(counter.unwrap().replacement.ends_with('"'));
-    }
-
-    #[test]
-    fn test_complete_path_unquoted_no_closing_quote() {
-        let dir = make_test_dir();
-        let path_str = format!("{}/counter.bt", dir.path().to_string_lossy());
-        let candidates = complete_path(&path_str, false);
-        let counter = candidates.iter().find(|p| p.display == "counter.bt");
-        assert!(counter.is_some());
-        assert!(!counter.unwrap().replacement.ends_with('"'));
-    }
-
-    #[test]
-    fn test_complete_path_dir_has_trailing_slash() {
-        let dir = make_test_dir();
-        let path_str = format!("{}/ex", dir.path().to_string_lossy());
-        let candidates = complete_path(&path_str, false);
-        let example = candidates.iter().find(|p| p.display == "examples/");
-        assert!(example.is_some());
-        assert!(example.unwrap().replacement.ends_with('/'));
-    }
-
-    #[test]
-    fn test_complete_path_dir_quoted_no_closing_quote() {
-        let dir = make_test_dir();
-        let path_str = format!("{}/ex", dir.path().to_string_lossy());
-        let candidates = complete_path(&path_str, true);
-        let example = candidates.iter().find(|p| p.display == "examples/");
-        assert!(example.is_some());
-        assert!(example.unwrap().replacement.ends_with('/'));
-        assert!(!example.unwrap().replacement.ends_with('"'));
-    }
-
-    #[test]
-    fn test_complete_path_nonexistent_dir_returns_empty() {
-        let candidates = complete_path("/this/path/does/not/exist/", false);
-        assert!(candidates.is_empty());
-    }
-
-    #[test]
-    fn test_complete_path_sorted_alphabetically() {
-        let dir = make_test_dir();
-        let path_str = format!("{}/", dir.path().to_string_lossy());
-        let candidates = complete_path(&path_str, false);
-        let names: Vec<&str> = candidates.iter().map(|p| p.display.as_str()).collect();
-        let mut sorted = names.clone();
-        sorted.sort_unstable();
-        assert_eq!(names, sorted, "completions should be sorted alphabetically");
-    }
-
     // === parse_class_expr_command_prefix tests ===
 
     #[test]
@@ -928,44 +667,9 @@ mod tests {
     }
 
     #[test]
-    fn test_class_expr_prefix_no_match_for_load() {
-        assert_eq!(parse_class_expr_command_prefix(":load foo.bt"), None);
-        assert_eq!(parse_class_expr_command_prefix(":reload Counter"), None);
+    fn test_class_expr_prefix_no_match_for_non_commands() {
+        assert_eq!(parse_class_expr_command_prefix(":sync"), None);
         assert_eq!(parse_class_expr_command_prefix("Counter spawn"), None);
-    }
-
-    // === parse_reload_class_prefix tests ===
-
-    #[test]
-    fn test_reload_class_prefix_uppercase_arg() {
-        assert_eq!(parse_reload_class_prefix(":reload Counter"), Some(8));
-        assert_eq!(parse_reload_class_prefix(":r Counter"), Some(3));
-    }
-
-    #[test]
-    fn test_reload_class_prefix_partial_uppercase() {
-        assert_eq!(parse_reload_class_prefix(":reload Coun"), Some(8));
-    }
-
-    #[test]
-    fn test_reload_class_prefix_extra_spaces() {
-        // Multiple spaces after command: offset skips all whitespace
-        assert_eq!(parse_reload_class_prefix(":reload  Counter"), Some(9));
-        assert_eq!(parse_reload_class_prefix(":r  Counter"), Some(4));
-    }
-
-    #[test]
-    fn test_reload_class_no_match_file_path() {
-        // File paths start lowercase or with / . ~ — should not match
-        assert_eq!(parse_reload_class_prefix(":reload src/counter.bt"), None);
-        assert_eq!(parse_reload_class_prefix(":reload ./counter.bt"), None);
-        assert_eq!(parse_reload_class_prefix(":r src/foo.bt"), None);
-    }
-
-    #[test]
-    fn test_reload_class_no_match_non_reload_command() {
-        assert_eq!(parse_reload_class_prefix(":load Counter"), None);
-        assert_eq!(parse_reload_class_prefix("Counter reload"), None);
     }
 
     // --- REPL_COMMANDS: verify :modules and :m were removed ---
