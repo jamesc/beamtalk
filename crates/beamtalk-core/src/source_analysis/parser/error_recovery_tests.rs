@@ -79,9 +79,8 @@ fn garbage_string() -> impl Strategy<Value = String> {
 /// garbage becomes valid content. Concatenating garbage *between* fragments
 /// avoids this and reliably triggers parse errors.
 fn inject_error() -> impl Strategy<Value = String> {
-    (valid_fragment(), garbage_string(), valid_fragment()).prop_map(|(before, garbage, after)| {
-        format!("{before}\n{garbage}\n{after}")
-    })
+    (valid_fragment(), garbage_string(), valid_fragment())
+        .prop_map(|(before, garbage, after)| format!("{before}\n{garbage}\n{after}"))
 }
 
 // ============================================================================

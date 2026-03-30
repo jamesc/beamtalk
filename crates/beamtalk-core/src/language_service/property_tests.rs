@@ -89,7 +89,10 @@ fn position_from_source(source: &str, byte_offset: usize) -> Position {
     let line = u32::try_from(prefix.matches('\n').count()).unwrap_or(u32::MAX);
     let last_newline = prefix.rfind('\n').map_or(0, |pos| pos + 1);
     let character = u32::try_from(clamped - last_newline).unwrap_or(u32::MAX);
-    Position { line, column: character }
+    Position {
+        line,
+        column: character,
+    }
 }
 
 // ============================================================================
