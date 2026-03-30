@@ -3,7 +3,7 @@
     {vsn, {cmd, "escript ../../../scripts/version.escript"}},
     {modules, []},
     {registered, []},
-    {applications, [kernel, stdlib, ssl, gun, beamtalk_runtime]},
+    {applications, [kernel, stdlib, beamtalk_runtime]},
     {env, [
         {classes, [
             #{name => 'Actor', module => 'bt@stdlib@actor', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
@@ -34,13 +34,6 @@
             #{name => 'File', module => 'bt@stdlib@file', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'FileHandle', module => 'bt@stdlib@file_handle', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Float', module => 'bt@stdlib@float', parent => 'Number', package => 'stdlib', kind => object, type_params => []},
-            #{name => 'HTTPClient', module => 'bt@stdlib@httpclient', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},
-            #{name => 'HTTPRequest', module => 'bt@stdlib@httprequest', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
-            #{name => 'HTTPResponse', module => 'bt@stdlib@httpresponse', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
-            #{name => 'HTTPRoute', module => 'bt@stdlib@httproute', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
-            #{name => 'HTTPRouteBuilder', module => 'bt@stdlib@httproute_builder', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},
-            #{name => 'HTTPRouter', module => 'bt@stdlib@httprouter', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
-            #{name => 'HTTPServer', module => 'bt@stdlib@httpserver', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},
             #{name => 'InstantiationError', module => 'bt@stdlib@instantiation_error', parent => 'Error', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Integer', module => 'bt@stdlib@integer', parent => 'Number', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Interval', module => 'bt@stdlib@interval', parent => 'Collection', package => 'stdlib', kind => object, type_params => []},

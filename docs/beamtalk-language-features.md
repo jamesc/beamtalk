@@ -2323,7 +2323,7 @@ Class names must be globally unique. A module/import system is planned for a fut
 | **DateTime**, **Time** | Date/time operations |
 | **Random** | Random number generation |
 
-**Networking:**
+**Networking** (in `packages/http`):
 
 | Class | Description |
 |-------|-------------|

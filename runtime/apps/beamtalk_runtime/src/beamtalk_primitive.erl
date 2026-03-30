@@ -423,8 +423,6 @@ module_for_value(X) when is_map(X) ->
         'ErlangModule' -> beamtalk_erlang_proxy;
         'FileHandle' -> beamtalk_file_handle;
         'Erlang' -> beamtalk_erlang_class;
-        'Http' -> beamtalk_http;
-        'HTTPResponse' -> 'bt@stdlib@httpresponse';
         'BeamtalkInterface' -> 'bt@stdlib@beamtalk_interface';
         'WorkspaceInterface' -> 'bt@stdlib@workspace_interface';
         undefined -> 'bt@stdlib@dictionary';
