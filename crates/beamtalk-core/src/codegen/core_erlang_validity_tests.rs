@@ -163,14 +163,14 @@ proptest! {
                 trimmed.starts_with("module"),
                 "Core Erlang output does not start with 'module' for input {:?}:\n{}",
                 input,
-                &trimmed[..trimmed.len().min(200)],
+                &trimmed[..trimmed.floor_char_boundary(200)],
             );
 
             prop_assert!(
                 trimmed.ends_with("end"),
                 "Core Erlang output does not end with 'end' for input {:?}:\n...{}",
                 input,
-                &trimmed[trimmed.len().saturating_sub(200)..],
+                &trimmed[trimmed.ceil_char_boundary(trimmed.len().saturating_sub(200))..],
             );
 
             prop_assert!(
@@ -191,7 +191,7 @@ proptest! {
                 output.contains("'prop_name_test'"),
                 "Core Erlang output missing module name 'prop_name_test' for input {:?}:\n{}",
                 input,
-                &output[..output.len().min(300)],
+                &output[..output.floor_char_boundary(300)],
             );
         }
     }
@@ -211,7 +211,7 @@ proptest! {
                     "Core Erlang output contains format artifact {:?} for input {:?}:\n{}",
                     pattern,
                     input,
-                    &output[..output.len().min(500)],
+                    &output[..output.floor_char_boundary(500)],
                 );
             }
         }
