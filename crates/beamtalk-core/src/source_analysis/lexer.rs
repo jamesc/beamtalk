@@ -157,7 +157,11 @@ impl<'src> Lexer<'src> {
                     self.lex_line_comment();
                 }
                 Some('/') if self.peek_char_n(1) == Some('*') => {
-                    self.lex_block_comment();
+                    if self.lex_block_comment() {
+                        // Unterminated block comment — break out of trivia loop
+                        // so the error token we pushed gets returned.
+                        break;
+                    }
                 }
                 _ => break,
             }
@@ -191,14 +195,20 @@ impl<'src> Lexer<'src> {
     }
 
     /// Lexes a block comment: `/* ... */`
-    fn lex_block_comment(&mut self) {
+    ///
+    /// Returns `true` if the comment was unterminated (hit EOF).
+    fn lex_block_comment(&mut self) -> bool {
         let start = self.current_position();
         self.advance(); // /
         self.advance(); // *
 
+        let mut unterminated = false;
         loop {
             match self.peek_char() {
-                None => break, // Unterminated - recover gracefully
+                None => {
+                    unterminated = true;
+                    break;
+                }
                 Some('*') if self.peek_char_n(1) == Some('/') => {
                     self.advance(); // *
                     self.advance(); // /
@@ -210,9 +220,23 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        let text = self.text_for(self.span_from(start));
-        self.pending_trivia
-            .push(Trivia::BlockComment(EcoString::from(text)));
+        let span = self.span_from(start);
+        let text = self.text_for(span);
+
+        if unterminated {
+            let leading_trivia = std::mem::take(&mut self.pending_trivia);
+            self.pending_tokens.push(Token::with_trivia(
+                TokenKind::Error(EcoString::from(text)),
+                span,
+                leading_trivia,
+                Vec::new(),
+            ));
+        } else {
+            self.pending_trivia
+                .push(Trivia::BlockComment(EcoString::from(text)));
+        }
+
+        unterminated
     }
 
     /// Lexes the next token.
@@ -223,6 +247,13 @@ impl<'src> Lexer<'src> {
         }
 
         self.skip_trivia();
+
+        // Check again after skip_trivia — an unterminated block comment
+        // may have pushed an error token.
+        if let Some(token) = self.pending_tokens.pop() {
+            return token;
+        }
+
         let leading_trivia = std::mem::take(&mut self.pending_trivia);
 
         let start = self.current_position();
