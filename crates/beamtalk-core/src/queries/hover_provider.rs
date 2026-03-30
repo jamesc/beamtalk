@@ -326,6 +326,10 @@ fn method_declaration_selector_hover_info(
     if method.is_sealed {
         meta.push_str(", sealed");
     }
+    // Show visibility annotation for internal methods (ADR 0071, BT-1703)
+    if method.is_internal {
+        meta.push_str(", internal");
+    }
     doc_parts.push(format!("_{meta}_"));
 
     hover = hover.with_documentation(doc_parts.join("\n\n"));
@@ -1003,6 +1007,10 @@ fn resolved_selector_hover_info(
     if method.is_sealed {
         meta.push_str(", sealed");
     }
+    // Show visibility annotation for internal methods (ADR 0071, BT-1703)
+    if method.is_internal {
+        meta.push_str(", internal");
+    }
     let meta_line = format!("_{meta}_");
     let doc = match method.doc.as_deref() {
         Some(existing) => format!("{existing}\n\n{resolution_context}\n\n{meta_line}"),
@@ -1144,6 +1152,13 @@ fn class_reference_hover_info(
 
     let mut info = format!("Class: `{class_name}`");
 
+    // Show visibility annotation for internal classes (ADR 0071, BT-1703)
+    if let Some(class_info) = hierarchy.get_class(class_name.as_str()) {
+        if class_info.is_internal {
+            let _ = write!(info, " (internal)");
+        }
+    }
+
     // Show package provenance for dependency classes (ADR 0070 Phase 5)
     if let Some(pkg) = package {
         let _ = write!(info, " (from package `{pkg}`)");
@@ -1190,7 +1205,12 @@ fn class_reference_hover_info(
             let total_instance = class_info.methods.len();
             for method in class_info.methods.iter().take(MAX_METHODS) {
                 let sig = method_info_signature(method);
-                let _ = write!(info, "\n- `{sig}`");
+                let internal_tag = if method.is_internal {
+                    " (internal)"
+                } else {
+                    ""
+                };
+                let _ = write!(info, "\n- `{sig}`{internal_tag}");
             }
             if total_instance > MAX_METHODS {
                 let _ = write!(
@@ -1208,7 +1228,8 @@ fn class_reference_hover_info(
             let total_class = class_info.class_methods.len();
             for method in class_info.class_methods.iter().take(class_display) {
                 let sig = method_info_signature(method);
-                let _ = write!(info, "\n- `{sig}` (class)");
+                let internal_tag = if method.is_internal { ", internal" } else { "" };
+                let _ = write!(info, "\n- `{sig}` (class{internal_tag})");
             }
             if total_class > class_display {
                 let _ = write!(
@@ -2059,6 +2080,48 @@ mod tests {
         assert!(
             hover.unwrap().contents.contains("42"),
             "Hover for RHS should mention the literal value"
+        );
+    }
+
+    // --- ADR 0071 / BT-1703: Visibility annotations in hover ---
+
+    #[test]
+    fn hover_on_internal_class_shows_visibility_annotation() {
+        // internal before "subclass:" marks the class as internal
+        let source = "Object subclass: Foo internal\n  helper => 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Hover over "Foo" (class name declaration at offset 17)
+        let pos = Position::new(0, 17);
+        let hover = compute_hover(&module, source, pos, &hierarchy);
+        assert!(hover.is_some(), "Should hover on internal class name");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("(internal)"),
+            "Hover on internal class should show '(internal)'. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_internal_method_declaration_shows_visibility() {
+        let source = "Object subclass: Foo\n  internal helper => 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Hover over "helper" method selector
+        let helper_offset = source.find("helper").unwrap();
+        let pos = Position::from_offset(source, helper_offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy);
+        assert!(hover.is_some(), "Should hover on internal method selector");
+        let hover = hover.unwrap();
+        let doc = hover.documentation.as_deref().unwrap_or("");
+        assert!(
+            doc.contains("internal"),
+            "Hover on internal method should show 'internal' in docs. Got: {doc}",
         );
     }
 }

@@ -196,6 +196,30 @@ impl ProjectIndex {
     pub fn classes_in_file(&self, file: &Utf8PathBuf) -> Option<&[EcoString]> {
         self.file_classes.get(file).map(Vec::as_slice)
     }
+
+    /// Returns the package name for a file, if determinable.
+    ///
+    /// Uses the file-local hierarchy (not the merged hierarchy) so that
+    /// two files defining the same class name in different packages don't
+    /// contaminate each other's package resolution. Only checks classes
+    /// contributed by this file (from `file_classes`), ignoring builtins
+    /// that are always present in every hierarchy.
+    ///
+    /// Returns `None` for REPL files, scripts, or files whose classes have
+    /// no package set (e.g., not yet compiled with a package context).
+    #[must_use]
+    pub fn package_for_file(&self, file: &Utf8PathBuf) -> Option<EcoString> {
+        let class_names = self.file_classes.get(file)?;
+        let file_hierarchy = self.file_hierarchies.get(file)?;
+        for name in class_names {
+            if let Some(info) = file_hierarchy.classes().get(name.as_str()) {
+                if let Some(ref pkg) = info.package {
+                    return Some(pkg.clone());
+                }
+            }
+        }
+        None
+    }
 }
 
 impl Default for ProjectIndex {
@@ -382,5 +406,48 @@ mod tests {
         assert!(index.hierarchy().has_class("Counter"));
         let class = index.hierarchy().get_class("Counter").unwrap();
         assert!(class.methods.iter().any(|m| m.selector == "increment"));
+    }
+
+    #[test]
+    fn package_for_file_returns_package_from_hierarchy() {
+        let mut index = ProjectIndex::new();
+        let file = Utf8PathBuf::from("packages/my_app/src/MyClass.bt");
+
+        let tokens = lex_with_eof("Object subclass: MyClass\n  doStuff => 1");
+        let (module, _) = parse(tokens);
+        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        // Stamp the package on the hierarchy (simulating build pipeline behaviour)
+        hierarchy.stamp_package("my_app");
+        index.update_file(file.clone(), &hierarchy);
+
+        assert_eq!(
+            index.package_for_file(&file).as_deref(),
+            Some("my_app"),
+            "package_for_file should return the package from the hierarchy"
+        );
+    }
+
+    #[test]
+    fn package_for_file_returns_none_without_package() {
+        let mut index = ProjectIndex::new();
+        let file = Utf8PathBuf::from("scratch.bt");
+
+        let tokens = lex_with_eof("Object subclass: Scratch\n  run => 1");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(file.clone(), &hierarchy);
+
+        assert_eq!(
+            index.package_for_file(&file),
+            None,
+            "package_for_file should return None when no package is set"
+        );
+    }
+
+    #[test]
+    fn package_for_file_returns_none_for_unknown_file() {
+        let index = ProjectIndex::new();
+        let file = Utf8PathBuf::from("nonexistent.bt");
+        assert_eq!(index.package_for_file(&file), None);
     }
 }

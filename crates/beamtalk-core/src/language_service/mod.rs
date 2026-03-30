@@ -595,12 +595,17 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
+        // Determine the current file's package for cross-package visibility filtering
+        // (ADR 0071, BT-1703).
+        let current_package = self.project_index.package_for_file(file);
+
         // Use project-wide hierarchy for completions (cross-file class awareness)
         crate::queries::completion_provider::compute_completions(
             &file_data.module,
             &file_data.source,
             position,
             self.project_index.hierarchy(),
+            current_package.as_deref(),
         )
     }
 
