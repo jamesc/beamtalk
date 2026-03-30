@@ -117,7 +117,7 @@ fn has_balanced_delimiters(s: &str) -> bool {
             _ => {}
         }
     }
-    stack.is_empty()
+    stack.is_empty() && !in_single_quote && !in_double_quote
 }
 
 /// Patterns that should never appear in valid Core Erlang output.
