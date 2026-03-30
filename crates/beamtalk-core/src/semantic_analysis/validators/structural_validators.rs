@@ -249,6 +249,7 @@ fn is_known_erlang_module(name: &str) -> bool {
 /// mismatches are a frequent source of bugs when using the Beamtalk FFI.
 const KNOWN_ARITIES: &[(&str, &str, usize)] = &[
     // lists
+    ("lists", "append", 1),
     ("lists", "append", 2),
     ("lists", "filter", 2),
     ("lists", "flatten", 1),
@@ -321,6 +322,7 @@ const KNOWN_ARITIES: &[(&str, &str, usize)] = &[
     // file
     ("file", "read_file", 1),
     ("file", "write_file", 2),
+    ("file", "write_file", 3),
     // os
     ("os", "cmd", 1),
     ("os", "getenv", 1),
@@ -331,6 +333,7 @@ const KNOWN_ARITIES: &[(&str, &str, usize)] = &[
     ("math", "pi", 0),
     // re
     ("re", "compile", 1),
+    ("re", "compile", 2),
     ("re", "run", 2),
     ("re", "run", 3),
     // ets
