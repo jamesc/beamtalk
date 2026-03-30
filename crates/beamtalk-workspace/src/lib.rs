@@ -35,7 +35,11 @@ pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
     let result = hasher.finalize();
 
     // Use first 12 hex chars (6 bytes) for readability
-    Ok(format!("{result:x}")[..12].to_string())
+    Ok(result
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()[..12]
+        .to_string())
 }
 
 /// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).
