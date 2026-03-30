@@ -37,10 +37,13 @@ pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
     let result = hasher.finalize();
 
     // Use first 12 hex chars (6 bytes) for readability — take first 6 bytes
-    let hex = result.iter().take(6).fold(String::with_capacity(12), |mut s, b| {
-        let _ = write!(s, "{b:02x}");
-        s
-    });
+    let hex = result
+        .iter()
+        .take(6)
+        .fold(String::with_capacity(12), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        });
     Ok(hex)
 }
 
