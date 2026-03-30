@@ -108,6 +108,7 @@ fn ensure_runtime_built(
 /// Starts a fresh run-mode workspace (no REPL server, not registered in
 /// `~/.beamtalk/workspaces/`), bootstraps all project classes, dispatches the
 /// class message, and exits when it returns.
+#[allow(clippy::too_many_lines)] // code path setup for native + deps makes this slightly over limit
 fn run_script(
     project_root: &Utf8PathBuf,
     _pkg: &manifest::PackageManifest,
@@ -209,6 +210,25 @@ fn run_script(
         #[cfg(not(windows))]
         {
             args.push(OsString::from(dep_ebin.as_str()));
+        }
+    }
+
+    // ADR 0072: Add native Erlang ebin to code path if present
+    let native_ebin = project_root
+        .join("_build")
+        .join("dev")
+        .join("native")
+        .join("ebin");
+    if native_ebin.exists() {
+        args.push(OsString::from("-pa"));
+        #[cfg(windows)]
+        {
+            let native_ebin_path = native_ebin.as_str().replace('\\', "/");
+            args.push(OsString::from(native_ebin_path));
+        }
+        #[cfg(not(windows))]
+        {
+            args.push(OsString::from(native_ebin.as_str()));
         }
     }
 
@@ -325,6 +345,23 @@ fn run_package_as_otp_application(
     // ADR 0070: Add dependency ebin directories to code path
     for dep_ebin in super::deps::collect_dep_ebin_paths(project_root) {
         extra_code_paths.push(dep_ebin.into_std_path_buf());
+    }
+
+    // ADR 0072: Add native Erlang ebin to code path if present (Path A)
+    let native_ebin_dir: PathBuf = project_root
+        .join("_build")
+        .join("dev")
+        .join("native")
+        .join("ebin")
+        .into_std_path_buf();
+    if native_ebin_dir.exists() {
+        extra_code_paths.push(native_ebin_dir);
+    }
+
+    // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
+    let rebar_base_dir = project_root.join("_build").join("dev").join("native");
+    for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
+        extra_code_paths.push(ebin.into_std_path_buf());
     }
 
     let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(

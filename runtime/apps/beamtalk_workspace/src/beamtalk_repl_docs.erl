@@ -249,7 +249,10 @@ format_class_docs_class_side(ClassName) ->
                     end,
 
                 Modifiers = #{is_internal => IsInternal},
-                {ok, format_class_side_output(ClassName, Modifiers, OwnCMSorted, InhCMGrouped, ProtoGrouped)}
+                {ok,
+                    format_class_side_output(
+                        ClassName, Modifiers, OwnCMSorted, InhCMGrouped, ProtoGrouped
+                    )}
             catch
                 exit:{timeout, _} -> {error, {class_not_found, ClassName}};
                 exit:{noproc, _} -> {error, {class_not_found, ClassName}}

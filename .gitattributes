@@ -38,6 +38,8 @@ Dockerfile text eol=lf
 
 # Binary files
 *.beam binary
+# Vendored rebar3 escript (ADR 0072 — pinned to 3.27.0)
+runtime/tools/rebar3 binary
 
 # GitHub Linguist - mark files for proper detection
 *.env.example linguist-generated=false

@@ -9,11 +9,13 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::path::PathBuf;
 use std::time::SystemTime;
 use tracing::{debug, error, info, instrument, warn};
 
 use super::app_file;
 use super::manifest;
+use super::manifest::NativeDependencyMap;
 
 /// Result of per-file change detection.
 ///
@@ -220,6 +222,58 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         super::deps::ensure_deps_resolved(&project_root, options)?
     } else {
         Vec::new()
+    };
+
+    // ADR 0072 Phase 1: Check for native Erlang module name collisions across
+    // packages before compilation. BEAM has a flat module namespace — only one
+    // version of any module can be loaded, so duplicates must be caught early.
+    if let Some(pkg) = pkg_manifest {
+        check_native_module_collisions(&project_root, &pkg.name, &resolved_deps)?;
+    }
+
+    // ADR 0072: Compile native Erlang sources before .bt files.
+    // Native modules must be compiled first because .bt files may reference them
+    // via `(Erlang module)` FFI or `native:` annotations.
+    //
+    // Two paths based on presence of [native.dependencies]:
+    // - Path A (no hex deps): compile native/*.erl directly via erlc
+    // - Path B (with hex deps): generate rebar.config, invoke rebar3 compile
+    let has_native_deps = full_manifest
+        .as_ref()
+        .is_some_and(|m| !m.native_dependencies.is_empty());
+
+    let native_result = if pkg_manifest.is_some() && has_native_deps {
+        // Path B: rebar3 handles both hex deps and native/*.erl
+        let native_deps = &full_manifest.as_ref().unwrap().native_dependencies;
+
+        // Aggregate native dependencies from all packages in the dependency graph
+        let aggregated = aggregate_native_dependencies(native_deps, &resolved_deps);
+
+        let rebar3_result = compile_with_rebar3(&project_root, &aggregated)?;
+        eprintln!(
+            "Compiled native deps via rebar3 ({} package(s), {} ebin dir(s))",
+            aggregated.len(),
+            rebar3_result.ebin_paths.len()
+        );
+        Some(rebar3_result)
+    } else if pkg_manifest.is_some() {
+        // Path A: compile native/*.erl directly via erlc (no hex deps)
+        use crate::beam_compiler::compile_native_erlang;
+        match compile_native_erlang(&project_root)? {
+            Some(result) => {
+                eprintln!(
+                    "Compiling {} native Erlang file(s)",
+                    result.beam_files.len()
+                );
+                Some(Rebar3Result {
+                    ebin_paths: vec![result.ebin_dir],
+                    module_names: result.module_names,
+                })
+            }
+            None => None,
+        }
+    } else {
+        None
     };
 
     // Determine the source root for computing relative module paths
@@ -450,12 +504,17 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             .map(|(_, module_name, _)| build_dir.join(format!("{module_name}.beam")))
             .collect();
         clean_stale_artifacts(&build_dir, &all_expected_beams, &pkg.name)?;
+        let native_module_names: Vec<String> = native_result
+            .as_ref()
+            .map(|r| r.module_names.clone())
+            .unwrap_or_default();
         generate_package_outputs(
             &build_dir,
             &project_root,
             pkg,
             &module_names,
             &class_module_index,
+            &native_module_names,
         )?;
     }
 
@@ -476,6 +535,7 @@ fn generate_package_outputs(
     pkg: &manifest::PackageManifest,
     module_names: &[String],
     class_module_index: &HashMap<String, String>,
+    native_module_names: &[String],
 ) -> Result<()> {
     // TODO: Extract class metadata from compiled modules in a future issue.
     let class_metadata: Vec<app_file::ClassMetadata> = Vec::new();
@@ -527,6 +587,7 @@ fn generate_package_outputs(
         &all_modules,
         &class_metadata,
         app_callback_module.as_deref(),
+        native_module_names,
     )?;
     info!(name = %pkg.name, "Generated .app file");
     Ok(())
@@ -908,6 +969,358 @@ pub(crate) fn build_class_module_index(
     }
 
     Ok((module_index, superclass_index, all_class_infos, cached_asts))
+}
+
+// ── Bundled rebar3 ────────────────────────────────────────────────
+
+/// Locate the rebar3 escript for compiling hex dependencies.
+///
+/// Resolution order:
+/// 1. **Bundled copy** — `runtime/tools/rebar3` relative to the runtime directory
+///    (found via [`beamtalk_cli::repl_startup::find_runtime_dir`]). This is the
+///    primary path and should always succeed in a standard Beamtalk installation.
+/// 2. **System `rebar3`** — falls back to `rebar3` on `$PATH` if the bundled
+///    copy is missing (e.g., when running from an unusual layout).
+///
+/// # Errors
+///
+/// Returns an error if neither the bundled copy nor a system `rebar3` is found.
+///
+/// # Version policy
+///
+/// The bundled rebar3 is pinned to 3.27.0. Update when:
+/// - A new rebar3 release adds features we need or fixes bugs we hit
+/// - OTP compatibility requires a newer version
+/// - Security advisories are published
+pub(crate) fn rebar3_path() -> Result<PathBuf> {
+    // Try bundled copy relative to the runtime directory
+    if let Ok(runtime_dir) = beamtalk_cli::repl_startup::find_runtime_dir() {
+        let bundled = runtime_dir.join("tools").join("rebar3");
+        if bundled.exists() {
+            debug!(path = %bundled.display(), "Using bundled rebar3");
+            return Ok(bundled);
+        }
+    }
+
+    // Fall back to system rebar3 on $PATH
+    let system_candidates = if cfg!(windows) {
+        vec!["rebar3.cmd", "rebar3.exe", "rebar3"]
+    } else {
+        vec!["rebar3"]
+    };
+
+    for candidate in system_candidates {
+        if let Ok(output) = std::process::Command::new(candidate)
+            .arg("version")
+            .output()
+        {
+            if output.status.success() {
+                info!(
+                    rebar3 = candidate,
+                    "Using system rebar3 (bundled copy not found)"
+                );
+                return Ok(PathBuf::from(candidate));
+            }
+        }
+    }
+
+    Err(miette::miette!(
+        "rebar3 not found.\n\
+         Expected bundled copy at <runtime>/tools/rebar3.\n\
+         Install rebar3 or run from the repository root."
+    ))
+}
+
+// ── ADR 0072 Phase 2: rebar3 integration ──────────────────────────
+
+/// Result of a rebar3 compilation step.
+///
+/// Contains the ebin paths that must be added to the BEAM code path
+/// for subsequent `.bt` compilation and at runtime.
+#[derive(Debug)]
+pub(crate) struct Rebar3Result {
+    /// Ebin directories produced by rebar3 (one per compiled hex dep,
+    /// plus the package's own native modules if `native/` exists).
+    /// Used by `run.rs` and `repl/mod.rs` via `collect_rebar3_ebin_paths`.
+    #[allow(dead_code)] // Informational; code paths are collected from filesystem
+    pub ebin_paths: Vec<Utf8PathBuf>,
+    /// Erlang module names compiled from native sources.
+    /// Used for `.app.src` module list generation.
+    pub module_names: Vec<String>,
+}
+
+/// Aggregate native (hex) dependencies from the root package and all
+/// resolved Beamtalk dependencies in the dependency graph.
+///
+/// ADR 0072 §5: Because BEAM has a flat module namespace, all hex deps
+/// across all packages must be resolved in a single rebar3 invocation.
+/// Constraints from different packages for the same hex dep are both
+/// included — rebar3's resolver handles the intersection.
+fn aggregate_native_dependencies(
+    root_native_deps: &NativeDependencyMap,
+    resolved_bt_deps: &[super::deps::path::ResolvedDependency],
+) -> NativeDependencyMap {
+    let mut aggregated = root_native_deps.clone();
+
+    // Walk each resolved Beamtalk dependency and collect its [native.dependencies]
+    for dep in resolved_bt_deps {
+        let manifest_path = dep.root.join("beamtalk.toml");
+        if !manifest_path.exists() {
+            continue;
+        }
+        let Ok(parsed) = manifest::parse_manifest_full(&manifest_path) else {
+            debug!(
+                dep = %dep.name,
+                "Failed to parse manifest for native dep aggregation — skipping"
+            );
+            continue;
+        };
+        for (name, native_dep) in &parsed.native_dependencies {
+            if !aggregated.contains_key(name) {
+                debug!(
+                    dep = %dep.name,
+                    hex_pkg = %name,
+                    constraint = %native_dep.constraint,
+                    "Aggregating native dependency from transitive package"
+                );
+                aggregated.insert(name.clone(), native_dep.clone());
+            }
+            // If the same hex dep is already present (from root or another dep),
+            // we keep the first constraint. rebar3 resolves transitive deps
+            // itself; duplicates in the deps list are not supported.
+        }
+    }
+
+    aggregated
+}
+
+/// Generate a `rebar.config` file for compiling hex dependencies and
+/// (optionally) native Erlang sources.
+///
+/// The generated file lives at `_build/dev/native/rebar.config` and is a
+/// build artifact — it should not be checked in.
+///
+/// rebar3 reads `rebar.config` from its current working directory
+/// (it has no `--config` flag). We run rebar3 from `_build/dev/native/`
+/// so the config lives there, and use `../../../native` relative paths
+/// for `src_dirs`/`include_dirs` to point back to the project root.
+fn generate_rebar_config(
+    project_root: &Utf8Path,
+    native_deps: &NativeDependencyMap,
+) -> Result<Utf8PathBuf> {
+    let native_dir = project_root.join("native");
+    let has_native_dir = native_dir.exists() && native_dir.is_dir();
+    let include_dir = native_dir.join("include");
+    let has_include_dir = include_dir.exists() && include_dir.is_dir();
+
+    let rebar_dir = project_root.join("_build").join("dev").join("native");
+    fs::create_dir_all(&rebar_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create rebar3 build directory '{rebar_dir}'"))?;
+
+    let config_path = rebar_dir.join("rebar.config");
+
+    let mut config = String::new();
+    config.push_str("%% Auto-generated by beamtalk build — do not edit\n");
+
+    // Generate {deps, [...]}.
+    config.push_str("{deps, [\n");
+    let dep_entries: Vec<String> = native_deps
+        .iter()
+        .map(|(name, dep)| format!("    {{{name}, \"{}\"}}", dep.constraint))
+        .collect();
+    config.push_str(&dep_entries.join(",\n"));
+    config.push_str("\n]}.\n");
+
+    // rebar3 runs from _build/dev/native/, so src_dirs/include_dirs need
+    // relative paths back to the project root's native/ directory.
+    if has_native_dir {
+        config.push_str("{src_dirs, [\"../../../native\"]}.\n");
+    }
+    if has_include_dir {
+        config.push_str("{include_dirs, [\"../../../native/include\"]}.\n");
+    }
+
+    config.push_str("{erl_opts, [debug_info]}.\n");
+
+    debug!(path = %config_path, "Writing rebar.config");
+    fs::write(&config_path, &config)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write rebar.config at '{config_path}'"))?;
+
+    Ok(config_path)
+}
+
+/// Invoke `rebar3 compile` to fetch and compile hex dependencies
+/// (and optionally the package's own `native/*.erl` files).
+///
+/// ADR 0072 §4 Path B: rebar3 runs from `_build/dev/native/` where the
+/// generated `rebar.config` lives. `REBAR_BASE_DIR` is set to the same
+/// directory so all output stays in the build tree. `{src_dirs}` and
+/// `{include_dirs}` use relative paths back to the project root.
+#[instrument(skip_all, fields(project_root = %project_root))]
+fn compile_with_rebar3(
+    project_root: &Utf8Path,
+    native_deps: &NativeDependencyMap,
+) -> Result<Rebar3Result> {
+    let rebar3 = rebar3_path()?;
+
+    // Generate the rebar.config in _build/dev/native/
+    let config_path = generate_rebar_config(project_root, native_deps)?;
+
+    let rebar_base_dir = project_root.join("_build").join("dev").join("native");
+
+    info!(
+        rebar3 = %rebar3.display(),
+        config = %config_path,
+        base_dir = %rebar_base_dir,
+        deps = native_deps.len(),
+        "Invoking rebar3 compile"
+    );
+
+    let mut cmd = std::process::Command::new(&rebar3);
+    cmd.arg("compile");
+    // rebar3 reads rebar.config from cwd — run from _build/dev/native/
+    cmd.current_dir(rebar_base_dir.as_std_path());
+    // Keep all rebar3 output in the same build directory
+    cmd.env("REBAR_BASE_DIR", rebar_base_dir.as_str());
+
+    let output = cmd
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run rebar3 compile.\nIs Erlang/OTP installed?")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let combined = format!("{stdout}{stderr}");
+        // Surface rebar3 errors with context
+        miette::bail!("rebar3 compile failed:\n{}", combined.trim_end());
+    }
+
+    // Collect all ebin directories produced by rebar3
+    let ebin_paths = collect_rebar3_ebin_paths(&rebar_base_dir);
+
+    info!(ebin_count = ebin_paths.len(), "rebar3 compilation complete");
+
+    // Discover native module names from the project's native/ directory
+    let module_names = {
+        use crate::beam_compiler::discover_native_modules;
+        discover_native_modules(project_root)?
+    };
+
+    Ok(Rebar3Result {
+        ebin_paths,
+        module_names,
+    })
+}
+
+/// Collect ebin directories from rebar3's output tree.
+///
+/// rebar3 places compiled output at `_build/dev/native/default/lib/{app}/ebin/`.
+/// This scans for all such directories and returns them.
+pub(crate) fn collect_rebar3_ebin_paths(rebar_base_dir: &Utf8Path) -> Vec<Utf8PathBuf> {
+    let lib_dir = rebar_base_dir.join("default").join("lib");
+
+    let mut paths = Vec::new();
+
+    if !lib_dir.exists() {
+        return paths;
+    }
+
+    let Ok(entries) = fs::read_dir(&lib_dir) else {
+        return paths;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let ebin = path.join("ebin");
+        if ebin.exists() && ebin.is_dir() {
+            if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
+                debug!(ebin = %utf8, "Found rebar3 ebin directory");
+                paths.push(utf8);
+            }
+        }
+    }
+
+    paths.sort();
+    paths
+}
+
+/// ADR 0072 Phase 1: Check for native Erlang module name collisions across
+/// packages in the dependency graph.
+///
+/// BEAM has a flat module namespace — only one version of any module can be
+/// loaded at runtime. If two packages define the same native module name
+/// (e.g., both have `native/utils.erl`), the last one loaded silently wins,
+/// causing subtle runtime breakage. This check runs before compilation to
+/// fail fast with a clear error naming both packages and the conflicting module.
+fn check_native_module_collisions(
+    project_root: &Utf8Path,
+    root_package_name: &str,
+    resolved_deps: &[super::deps::path::ResolvedDependency],
+) -> Result<()> {
+    use crate::beam_compiler::discover_native_modules;
+    use std::fmt::Write;
+
+    // Collect native modules from root package
+    let root_modules = discover_native_modules(project_root)?;
+
+    // Collect native modules from each dependency
+    let mut module_owners: HashMap<String, Vec<String>> = HashMap::new();
+
+    for module in &root_modules {
+        module_owners
+            .entry(module.clone())
+            .or_default()
+            .push(root_package_name.to_string());
+    }
+
+    for dep in resolved_deps {
+        let dep_modules = discover_native_modules(&dep.root)?;
+        for module in &dep_modules {
+            module_owners
+                .entry(module.clone())
+                .or_default()
+                .push(dep.name.clone());
+        }
+    }
+
+    // Find collisions: modules owned by more than one package
+    let mut collisions: Vec<(String, Vec<String>)> = module_owners
+        .into_iter()
+        .filter(|(_, owners)| owners.len() > 1)
+        .collect();
+    collisions.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    if collisions.is_empty() {
+        return Ok(());
+    }
+
+    // Build a clear error message listing all collisions
+    let mut msg = String::from(
+        "Native Erlang module name collision detected.\n\
+         BEAM has a flat module namespace — only one version of any module can be loaded.\n\n",
+    );
+
+    for (module, owners) in &collisions {
+        let _ = writeln!(
+            msg,
+            "  Module '{}' is defined by: {}",
+            module,
+            owners.join(", ")
+        );
+    }
+
+    msg.push_str(
+        "\nRename the conflicting module(s) to avoid silent runtime breakage. \
+         Convention: prefix native modules with the package name (e.g., 'mypackage_utils').",
+    );
+
+    miette::bail!("{msg}")
 }
 
 #[cfg(test)]
@@ -1873,6 +2286,546 @@ mod tests {
         assert!(
             result.orphaned_beam_files.is_empty(),
             "Non-bt@ beam files should not be flagged as orphaned"
+        );
+    }
+
+    #[test]
+    fn test_rebar3_path_returns_bundled_when_exists() {
+        // When running from the repo root (or with BEAMTALK_RUNTIME_DIR set),
+        // rebar3_path() should find the bundled copy at runtime/tools/rebar3.
+        let result = rebar3_path();
+        // In CI or dev, the bundled rebar3 should be present.
+        // If neither bundled nor system rebar3 is available, this test will
+        // fail — that's intentional, as it means the vendored copy is missing.
+        assert!(
+            result.is_ok(),
+            "rebar3_path() should find rebar3: {result:?}"
+        );
+
+        let path = result.unwrap();
+        // When running in the dev repo, the path should be the bundled copy
+        assert!(
+            path.ends_with("tools/rebar3"),
+            "Expected bundled rebar3 path ending in 'tools/rebar3', got: {path:?}"
+        );
+    }
+
+    // ---- ADR 0072 Phase 1: native Erlang compilation in build ----
+
+    #[test]
+    fn test_build_without_native_dir_is_unaffected() {
+        // Packages without native/ should build exactly as before.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+        write_test_file(&src_path.join("main.bt"), "main := [42].");
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"no_native\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = build(project_path.as_str(), &default_options(), false);
+
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                eprintln!("Skipping test - escript not installed in CI environment");
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
+
+        // native ebin should NOT be created
+        let native_ebin = project_path
+            .join("_build")
+            .join("dev")
+            .join("native")
+            .join("ebin");
+        assert!(
+            !native_ebin.exists(),
+            "native ebin should not be created when no native/ directory exists"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires erlc"]
+    fn test_build_with_native_erlang() {
+        // ADR 0072 Phase 1: build should discover and compile native/*.erl files
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        let src_path = project_path.join("src");
+
+        // Create beamtalk.toml
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"with_native\"\nversion = \"0.1.0\"\n",
+        );
+
+        // Create a .bt source file
+        write_test_file(&src_path.join("main.bt"), "main := [42].");
+
+        // Create native/ with an Erlang module
+        let native_dir = project_path.join("native");
+        fs::create_dir(&native_dir).unwrap();
+        write_test_file(
+            &native_dir.join("hello_native.erl"),
+            "-module(hello_native).\n-export([greet/0]).\ngreet() -> <<\"hello\">>.\n",
+        );
+
+        let result = build(project_path.as_str(), &default_options(), false);
+        assert!(result.is_ok(), "Build should succeed: {result:?}");
+
+        // Native BEAM file should exist in _build/dev/native/ebin/
+        let native_beam = project_path
+            .join("_build")
+            .join("dev")
+            .join("native")
+            .join("ebin")
+            .join("hello_native.beam");
+        assert!(
+            native_beam.exists(),
+            "Native BEAM file should be produced at {native_beam}"
+        );
+
+        // Regular .bt BEAM should also exist
+        let bt_beam = project_path
+            .join("_build")
+            .join("dev")
+            .join("ebin")
+            .join("bt@with_native@main.beam");
+        assert!(
+            bt_beam.exists(),
+            "Beamtalk BEAM file should be produced at {bt_beam}"
+        );
+
+        // ADR 0072: .app file should include native_modules in env
+        let app_file = project_path
+            .join("_build")
+            .join("dev")
+            .join("ebin")
+            .join("with_native.app");
+        assert!(app_file.exists(), "Expected .app file at {app_file}");
+        let app_content = fs::read_to_string(&app_file).unwrap();
+        assert!(
+            app_content.contains("{native_modules, [hello_native]}"),
+            "Generated .app should contain native_modules. Got: {app_content}"
+        );
+    }
+
+    // ---- ADR 0072 Phase 1: native module collision detection ----
+
+    #[test]
+    fn test_no_collision_single_package_no_native() {
+        // Packages without native/ should pass collision check trivially.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+
+        let result = check_native_module_collisions(&project_path, "test_pkg", &[]);
+        assert!(result.is_ok(), "No native dir should pass: {result:?}");
+    }
+
+    #[test]
+    fn test_no_collision_single_package_with_native() {
+        // A single package with native modules should not trigger collision.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        );
+
+        let native_dir = project_path.join("native");
+        fs::create_dir(&native_dir).unwrap();
+        write_test_file(
+            &native_dir.join("my_helper.erl"),
+            "-module(my_helper).\n-export([hello/0]).\nhello() -> ok.\n",
+        );
+
+        let result = check_native_module_collisions(&project_path, "my_pkg", &[]);
+        assert!(result.is_ok(), "Single package should pass: {result:?}");
+    }
+
+    #[test]
+    fn test_collision_between_root_and_dependency() {
+        // Root package and a dependency both define the same native module name.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"root_pkg\"\nversion = \"0.1.0\"\n",
+        );
+
+        // Root package has native/utils.erl
+        let root_native = project_path.join("native");
+        fs::create_dir(&root_native).unwrap();
+        write_test_file(
+            &root_native.join("utils.erl"),
+            "-module(utils).\n-export([]).\n",
+        );
+
+        // Dependency also has native/utils.erl
+        let dep_dir = temp.path().join("dep_pkg");
+        fs::create_dir_all(dep_dir.join("native")).unwrap();
+        fs::create_dir_all(dep_dir.join("src")).unwrap();
+        fs::write(
+            dep_dir.join("native").join("utils.erl"),
+            "-module(utils).\n-export([]).\n",
+        )
+        .unwrap();
+
+        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
+        let deps = vec![super::super::deps::path::ResolvedDependency {
+            name: "dep_pkg".to_string(),
+            root: dep_root.clone(),
+            ebin_path: dep_root.join("ebin"),
+            class_module_index: HashMap::new(),
+            is_direct: true,
+            via_chain: Vec::new(),
+        }];
+
+        let result = check_native_module_collisions(&project_path, "root_pkg", &deps);
+        assert!(result.is_err(), "Should detect collision");
+
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("utils"),
+            "Error should name the conflicting module: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("root_pkg"),
+            "Error should name the root package: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("dep_pkg"),
+            "Error should name the dependency: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_collision_between_two_dependencies() {
+        // Two dependencies define the same native module name (root has none).
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"root_pkg\"\nversion = \"0.1.0\"\n",
+        );
+
+        // first_dep has native/shared_mod.erl
+        let first_dep_dir = temp.path().join("dep_a");
+        fs::create_dir_all(first_dep_dir.join("native")).unwrap();
+        fs::create_dir_all(first_dep_dir.join("src")).unwrap();
+        fs::write(
+            first_dep_dir.join("native").join("shared_mod.erl"),
+            "-module(shared_mod).\n-export([]).\n",
+        )
+        .unwrap();
+
+        // second_dep also has native/shared_mod.erl
+        let second_dep_dir = temp.path().join("dep_b");
+        fs::create_dir_all(second_dep_dir.join("native")).unwrap();
+        fs::create_dir_all(second_dep_dir.join("src")).unwrap();
+        fs::write(
+            second_dep_dir.join("native").join("shared_mod.erl"),
+            "-module(shared_mod).\n-export([]).\n",
+        )
+        .unwrap();
+
+        let first_root = Utf8PathBuf::from_path_buf(first_dep_dir).unwrap();
+        let second_root = Utf8PathBuf::from_path_buf(second_dep_dir).unwrap();
+        let deps = vec![
+            super::super::deps::path::ResolvedDependency {
+                name: "dep_a".to_string(),
+                root: first_root.clone(),
+                ebin_path: first_root.join("ebin"),
+                class_module_index: HashMap::new(),
+                is_direct: true,
+                via_chain: Vec::new(),
+            },
+            super::super::deps::path::ResolvedDependency {
+                name: "dep_b".to_string(),
+                root: second_root.clone(),
+                ebin_path: second_root.join("ebin"),
+                class_module_index: HashMap::new(),
+                is_direct: true,
+                via_chain: Vec::new(),
+            },
+        ];
+
+        let result = check_native_module_collisions(&project_path, "root_pkg", &deps);
+        assert!(result.is_err(), "Should detect collision between deps");
+
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("shared_mod"),
+            "Error should name the module: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("dep_a"),
+            "Error should name dep_a: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("dep_b"),
+            "Error should name dep_b: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_no_collision_different_native_modules() {
+        // Root and dependency have native modules with different names — no collision.
+        let temp = TempDir::new().unwrap();
+        let project_path = create_test_project(&temp);
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"root_pkg\"\nversion = \"0.1.0\"\n",
+        );
+
+        // Root has native/root_utils.erl
+        let root_native = project_path.join("native");
+        fs::create_dir(&root_native).unwrap();
+        write_test_file(
+            &root_native.join("root_utils.erl"),
+            "-module(root_utils).\n-export([]).\n",
+        );
+
+        // Dependency has native/dep_utils.erl
+        let dep_dir = temp.path().join("dep_pkg");
+        fs::create_dir_all(dep_dir.join("native")).unwrap();
+        fs::create_dir_all(dep_dir.join("src")).unwrap();
+        fs::write(
+            dep_dir.join("native").join("dep_utils.erl"),
+            "-module(dep_utils).\n-export([]).\n",
+        )
+        .unwrap();
+
+        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
+        let deps = vec![super::super::deps::path::ResolvedDependency {
+            name: "dep_pkg".to_string(),
+            root: dep_root.clone(),
+            ebin_path: dep_root.join("ebin"),
+            class_module_index: HashMap::new(),
+            is_direct: true,
+            via_chain: Vec::new(),
+        }];
+
+        let result = check_native_module_collisions(&project_path, "root_pkg", &deps);
+        assert!(
+            result.is_ok(),
+            "Different module names should pass: {result:?}"
+        );
+    }
+
+    // ---- ADR 0072 Phase 2: rebar3 integration tests ----
+
+    #[test]
+    fn test_generate_rebar_config_basic() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let mut deps = NativeDependencyMap::new();
+        deps.insert(
+            "gun".to_string(),
+            manifest::NativeDependency {
+                name: "gun".to_string(),
+                constraint: "~> 2.1".to_string(),
+            },
+        );
+        deps.insert(
+            "cowboy".to_string(),
+            manifest::NativeDependency {
+                name: "cowboy".to_string(),
+                constraint: "~> 2.12".to_string(),
+            },
+        );
+
+        let config_path = generate_rebar_config(&project_path, &deps).unwrap();
+
+        assert!(config_path.exists(), "rebar.config should be created");
+        let content = fs::read_to_string(&config_path).unwrap();
+        assert!(
+            content.contains("Auto-generated by beamtalk build"),
+            "Should have header comment"
+        );
+        assert!(
+            content.contains("{gun, \"~> 2.1\"}"),
+            "Should contain gun dep"
+        );
+        assert!(
+            content.contains("{cowboy, \"~> 2.12\"}"),
+            "Should contain cowboy dep"
+        );
+        assert!(
+            content.contains("{erl_opts, [debug_info]}"),
+            "Should include debug_info"
+        );
+        // No native/ directory — should NOT include src_dirs
+        assert!(
+            !content.contains("src_dirs"),
+            "Should not include src_dirs without native/"
+        );
+        assert!(
+            !content.contains("include_dirs"),
+            "Should not include include_dirs without native/include/"
+        );
+    }
+
+    #[test]
+    fn test_generate_rebar_config_with_native_dir() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create native/ directory
+        let native_dir = project_path.join("native");
+        fs::create_dir(&native_dir).unwrap();
+
+        let mut deps = NativeDependencyMap::new();
+        deps.insert(
+            "jason".to_string(),
+            manifest::NativeDependency {
+                name: "jason".to_string(),
+                constraint: "~> 1.4".to_string(),
+            },
+        );
+
+        let config_path = generate_rebar_config(&project_path, &deps).unwrap();
+        let content = fs::read_to_string(&config_path).unwrap();
+
+        assert!(
+            content.contains("{src_dirs, [\"../../../native\"]}"),
+            "Should include src_dirs with relative path when native/ exists"
+        );
+        // No include/ subdir
+        assert!(
+            !content.contains("include_dirs"),
+            "Should not include include_dirs without native/include/"
+        );
+    }
+
+    #[test]
+    fn test_generate_rebar_config_with_native_include() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create native/ and native/include/
+        let native_dir = project_path.join("native");
+        fs::create_dir(&native_dir).unwrap();
+        let include_dir = native_dir.join("include");
+        fs::create_dir(&include_dir).unwrap();
+
+        let mut deps = NativeDependencyMap::new();
+        deps.insert(
+            "gun".to_string(),
+            manifest::NativeDependency {
+                name: "gun".to_string(),
+                constraint: "~> 2.1".to_string(),
+            },
+        );
+
+        let config_path = generate_rebar_config(&project_path, &deps).unwrap();
+        let content = fs::read_to_string(&config_path).unwrap();
+
+        assert!(
+            content.contains("{src_dirs, [\"../../../native\"]}"),
+            "Should include src_dirs with relative path"
+        );
+        assert!(
+            content.contains("{include_dirs, [\"../../../native/include\"]}"),
+            "Should include include_dirs with relative path when native/include/ exists"
+        );
+    }
+
+    #[test]
+    fn test_collect_rebar3_ebin_paths_empty() {
+        let temp = TempDir::new().unwrap();
+        let base_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let paths = collect_rebar3_ebin_paths(&base_dir);
+        assert!(paths.is_empty(), "Should return empty for nonexistent tree");
+    }
+
+    #[test]
+    fn test_collect_rebar3_ebin_paths_finds_deps() {
+        let temp = TempDir::new().unwrap();
+        let base_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create rebar3-style output tree
+        let gun_ebin = base_dir
+            .join("default")
+            .join("lib")
+            .join("gun")
+            .join("ebin");
+        let cowboy_ebin = base_dir
+            .join("default")
+            .join("lib")
+            .join("cowboy")
+            .join("ebin");
+        let ranch_ebin = base_dir
+            .join("default")
+            .join("lib")
+            .join("ranch")
+            .join("ebin");
+        fs::create_dir_all(&gun_ebin).unwrap();
+        fs::create_dir_all(&cowboy_ebin).unwrap();
+        fs::create_dir_all(&ranch_ebin).unwrap();
+
+        let paths = collect_rebar3_ebin_paths(&base_dir);
+        assert_eq!(paths.len(), 3, "Should find 3 ebin directories");
+
+        // Verify all paths end with /ebin and contain expected app names
+        let path_strs: Vec<&str> = paths.iter().map(|p| p.as_str()).collect();
+        assert!(
+            path_strs.iter().any(|p| p.contains("cowboy")),
+            "Should find cowboy ebin"
+        );
+        assert!(
+            path_strs.iter().any(|p| p.contains("gun")),
+            "Should find gun ebin"
+        );
+        assert!(
+            path_strs.iter().any(|p| p.contains("ranch")),
+            "Should find ranch ebin"
+        );
+    }
+
+    #[test]
+    fn test_aggregate_native_dependencies_root_only() {
+        let mut root_deps = NativeDependencyMap::new();
+        root_deps.insert(
+            "gun".to_string(),
+            manifest::NativeDependency {
+                name: "gun".to_string(),
+                constraint: "~> 2.1".to_string(),
+            },
+        );
+
+        let resolved: Vec<super::super::deps::path::ResolvedDependency> = Vec::new();
+        let aggregated = aggregate_native_dependencies(&root_deps, &resolved);
+
+        assert_eq!(aggregated.len(), 1);
+        assert_eq!(aggregated["gun"].constraint, "~> 2.1");
+    }
+
+    #[test]
+    fn test_generate_rebar_config_path_lives_in_build_tree() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let mut deps = NativeDependencyMap::new();
+        deps.insert(
+            "gun".to_string(),
+            manifest::NativeDependency {
+                name: "gun".to_string(),
+                constraint: "~> 2.1".to_string(),
+            },
+        );
+
+        let config_path = generate_rebar_config(&project_path, &deps).unwrap();
+
+        // Config should be in _build/dev/native/
+        let expected_suffix = Utf8PathBuf::from("_build/dev/native/rebar.config");
+        assert!(
+            config_path.ends_with(&expected_suffix),
+            "Config should live in build tree, got: {config_path}"
         );
     }
 }

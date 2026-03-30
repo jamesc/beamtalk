@@ -17,6 +17,25 @@ use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 
+/// A map of native (hex.pm) dependency names to their version constraints.
+pub type NativeDependencyMap = BTreeMap<String, NativeDependency>;
+
+/// A native (hex.pm) dependency with a version constraint.
+///
+/// Declared in the `[native.dependencies]` section of `beamtalk.toml`.
+/// Version constraints follow hex.pm conventions:
+/// - `"~> 2.1"` — `>= 2.1.0 and < 3.0.0`
+/// - `"~> 2.1.0"` — `>= 2.1.0 and < 2.2.0`
+/// - `">= 1.0.0 and < 2.0.0"` — explicit range
+/// - `"2.12.0"` — exact version
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeDependency {
+    /// The hex package name.
+    pub name: String,
+    /// The version constraint string (passed through to rebar.config verbatim).
+    pub constraint: String,
+}
+
 /// The top-level manifest structure parsed from `beamtalk.toml`.
 #[derive(Debug, Deserialize)]
 pub struct Manifest {
@@ -28,6 +47,20 @@ pub struct Manifest {
     /// The optional `[dependencies]` section — stored as raw TOML for lazy parsing.
     ///
     /// Use [`parse_manifest_full`] to get validated [`DependencySpec`] values.
+    #[serde(default)]
+    dependencies: Option<toml::Value>,
+    /// The optional `[native]` section containing `dependencies` for hex packages.
+    #[serde(default)]
+    native: Option<NativeSection>,
+}
+
+/// The `[native]` section of `beamtalk.toml`.
+///
+/// Contains an optional `dependencies` sub-table declaring hex.pm package
+/// dependencies for native Erlang code.
+#[derive(Debug, Deserialize, Default)]
+struct NativeSection {
+    /// The `[native.dependencies]` table — hex package name to version constraint.
     #[serde(default)]
     dependencies: Option<toml::Value>,
 }
@@ -195,6 +228,201 @@ fn parse_dependencies(deps: Option<&toml::Value>) -> Result<DependencyMap> {
     Ok(result)
 }
 
+/// Validate a hex.pm version constraint string.
+///
+/// Accepted forms:
+/// - Exact version: `"2.12.0"`, `"1.0"`, `"3"`
+/// - Pessimistic (tilde-arrow): `"~> 2.1"`, `"~> 2.1.0"`
+/// - Comparison operators: `">= 1.0.0"`, `"> 1.0"`, `"< 2.0.0"`, `"<= 3.0"`
+/// - Compound constraints: `">= 1.0.0 and < 2.0.0"`
+///
+/// Version segments must be non-negative integers separated by dots (max 3 segments).
+fn validate_hex_constraint(constraint: &str) -> Result<(), String> {
+    let trimmed = constraint.trim();
+    if trimmed.is_empty() {
+        return Err("version constraint must not be empty".to_string());
+    }
+
+    // Check for compound constraints with "and"
+    if trimmed.contains(" and ") {
+        let parts: Vec<&str> = trimmed.split(" and ").collect();
+        if parts.len() != 2 {
+            return Err(
+                "compound constraints must have exactly two parts separated by 'and'".to_string(),
+            );
+        }
+        for part in &parts {
+            validate_single_constraint(part.trim())?;
+            // Compound parts must use comparison operators, not ~> or exact versions
+            let p = part.trim();
+            if p.starts_with("~>") {
+                return Err(
+                    "'~>' (pessimistic) constraints cannot be used in compound expressions"
+                        .to_string(),
+                );
+            }
+            if !p.starts_with(">=")
+                && !p.starts_with('>')
+                && !p.starts_with("<=")
+                && !p.starts_with('<')
+            {
+                return Err(
+                    "compound constraints must use comparison operators (>=, >, <, <=)".to_string(),
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    validate_single_constraint(trimmed)
+}
+
+/// Validate a single (non-compound) version constraint.
+fn validate_single_constraint(s: &str) -> Result<(), String> {
+    if let Some(rest) = s.strip_prefix("~>") {
+        let version = rest.trim();
+        if version.is_empty() {
+            return Err("'~>' must be followed by a version number".to_string());
+        }
+        validate_version_string(version)?;
+        // ~> requires at least 2 segments (e.g. ~> 2.1, not ~> 2)
+        let segments: Vec<&str> = version.split('.').collect();
+        if segments.len() < 2 {
+            return Err("'~>' requires at least a major.minor version (e.g. '~> 2.1')".to_string());
+        }
+        Ok(())
+    } else if let Some(rest) = s.strip_prefix(">=") {
+        let version = rest.trim();
+        if version.is_empty() {
+            return Err("'>=' must be followed by a version number".to_string());
+        }
+        validate_version_string(version)
+    } else if let Some(rest) = s.strip_prefix("<=") {
+        let version = rest.trim();
+        if version.is_empty() {
+            return Err("'<=' must be followed by a version number".to_string());
+        }
+        validate_version_string(version)
+    } else if let Some(rest) = s.strip_prefix('>') {
+        let version = rest.trim();
+        if version.is_empty() {
+            return Err("'>' must be followed by a version number".to_string());
+        }
+        validate_version_string(version)
+    } else if let Some(rest) = s.strip_prefix('<') {
+        let version = rest.trim();
+        if version.is_empty() {
+            return Err("'<' must be followed by a version number".to_string());
+        }
+        validate_version_string(version)
+    } else {
+        // Must be an exact version
+        validate_version_string(s)
+    }
+}
+
+/// Validate a bare version string like `"2.1.0"`, `"2.1"`, or `"2"`.
+///
+/// Segments must be non-negative integers, 1–3 segments allowed.
+fn validate_version_string(version: &str) -> Result<(), String> {
+    let trimmed = version.trim();
+    if trimmed.is_empty() {
+        return Err("version must not be empty".to_string());
+    }
+
+    let segments: Vec<&str> = trimmed.split('.').collect();
+    if segments.len() > 3 {
+        return Err(format!(
+            "version '{trimmed}' has too many segments (max 3: major.minor.patch)"
+        ));
+    }
+
+    for (i, segment) in segments.iter().enumerate() {
+        if segment.is_empty() {
+            return Err(format!(
+                "version '{trimmed}' has an empty segment at position {i}"
+            ));
+        }
+        if segment.parse::<u64>().is_err() {
+            return Err(format!(
+                "version '{trimmed}' has non-numeric segment '{segment}'"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Parse and validate the `[native.dependencies]` section of a manifest.
+///
+/// Returns an empty map if the section is missing or empty.
+fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDependencyMap> {
+    let Some(section) = native else {
+        return Ok(BTreeMap::new());
+    };
+
+    let Some(raw_value) = &section.dependencies else {
+        return Ok(BTreeMap::new());
+    };
+
+    let table = raw_value.as_table().ok_or_else(|| {
+        miette::miette!(
+            "[native.dependencies] must be a table, not a {}",
+            value_type_name(raw_value)
+        )
+    })?;
+
+    if table.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut result = NativeDependencyMap::new();
+    for (name, value) in table {
+        // Validate the package name: hex package names use lowercase + underscores
+        if name.is_empty() {
+            miette::bail!("Native dependency name must not be empty");
+        }
+        if !name.starts_with(|c: char| c.is_ascii_lowercase()) {
+            miette::bail!("Native dependency '{name}' must start with a lowercase letter");
+        }
+        for c in name.chars() {
+            if !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+                miette::bail!(
+                    "Native dependency '{name}' contains invalid character '{c}' — \
+                     hex package names must contain only lowercase letters, digits, and underscores"
+                );
+            }
+        }
+
+        // Value must be a string (the version constraint)
+        let constraint = value.as_str().ok_or_else(|| {
+            miette::miette!(
+                "Native dependency '{name}' must be a version constraint string, not a {}",
+                value_type_name(value)
+            )
+        })?;
+
+        // Validate the constraint syntax (use trimmed value)
+        let normalized = constraint.trim();
+        if let Err(msg) = validate_hex_constraint(normalized) {
+            miette::bail!(
+                "Native dependency '{name}' has an invalid version constraint \
+                 '{constraint}': {msg}"
+            );
+        }
+
+        result.insert(
+            name.clone(),
+            NativeDependency {
+                name: name.clone(),
+                constraint: normalized.to_string(),
+            },
+        );
+    }
+
+    Ok(result)
+}
+
 /// Return a human-readable TOML type name for error messages.
 fn value_type_name(value: &toml::Value) -> &'static str {
     match value {
@@ -231,6 +459,10 @@ pub struct ParsedManifest {
     pub application: Option<ApplicationConfig>,
     /// The parsed and validated dependencies (empty if `[dependencies]` is absent).
     pub dependencies: DependencyMap,
+    /// The parsed and validated native (hex) dependencies (empty if
+    /// `[native.dependencies]` is absent).
+    #[allow(dead_code)] // Used by tests; will be used for rebar.config generation
+    pub native_dependencies: NativeDependencyMap,
 }
 
 /// Parse a `beamtalk.toml` manifest file.
@@ -262,10 +494,14 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
     let dependencies = parse_dependencies(manifest.dependencies.as_ref())
         .wrap_err_with(|| format!("Failed to parse [dependencies] in '{path}'"))?;
 
+    let native_dependencies = parse_native_dependencies(manifest.native.as_ref())
+        .wrap_err_with(|| format!("Failed to parse [native.dependencies] in '{path}'"))?;
+
     Ok(ParsedManifest {
         package: manifest.package,
         application: manifest.application,
         dependencies,
+        native_dependencies,
     })
 }
 
@@ -1398,5 +1634,441 @@ utils = { path = "../utils" }
         assert!(manifest.application.is_some());
         assert_eq!(manifest.application.unwrap().supervisor, "AppSup");
         assert_eq!(manifest.dependencies.len(), 1);
+    }
+
+    // --- Native dependency parsing tests ---
+
+    #[test]
+    fn test_parse_native_deps_pessimistic_major_minor() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+gun = "~> 2.1"
+cowboy = "~> 2.12"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.native_dependencies.len(), 2);
+        let gun = &manifest.native_dependencies["gun"];
+        assert_eq!(gun.name, "gun");
+        assert_eq!(gun.constraint, "~> 2.1");
+        let cowboy = &manifest.native_dependencies["cowboy"];
+        assert_eq!(cowboy.name, "cowboy");
+        assert_eq!(cowboy.constraint, "~> 2.12");
+    }
+
+    #[test]
+    fn test_parse_native_deps_pessimistic_patch() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+jason = "~> 1.4.0"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.native_dependencies["jason"].constraint, "~> 1.4.0");
+    }
+
+    #[test]
+    fn test_parse_native_deps_exact_version() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+cowboy = "2.12.0"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.native_dependencies["cowboy"].constraint, "2.12.0");
+    }
+
+    #[test]
+    fn test_parse_native_deps_compound_constraint() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+ranch = ">= 1.0.0 and < 2.0.0"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(
+            manifest.native_dependencies["ranch"].constraint,
+            ">= 1.0.0 and < 2.0.0"
+        );
+    }
+
+    #[test]
+    fn test_parse_native_deps_comparison_operators() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+dep_ge = ">= 1.0"
+dep_gt = "> 1.0"
+dep_le = "<= 3.0"
+dep_lt = "< 2.0.0"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.native_dependencies.len(), 4);
+        assert_eq!(manifest.native_dependencies["dep_ge"].constraint, ">= 1.0");
+        assert_eq!(manifest.native_dependencies["dep_gt"].constraint, "> 1.0");
+        assert_eq!(manifest.native_dependencies["dep_le"].constraint, "<= 3.0");
+        assert_eq!(manifest.native_dependencies["dep_lt"].constraint, "< 2.0.0");
+    }
+
+    #[test]
+    fn test_parse_no_native_deps_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.native_dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_parse_empty_native_deps_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.native_dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_reject_native_dep_non_string_value() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+gun = 42
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("version constraint string"),
+            "should mention string type: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_native_dep_empty_constraint() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+gun = ""
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("must not be empty"),
+            "should mention empty constraint: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_native_dep_invalid_version() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+gun = "abc"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("non-numeric"),
+            "should mention non-numeric segment: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_native_dep_too_many_segments() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+gun = "1.2.3.4"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("too many segments"),
+            "should mention too many segments: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_native_dep_tilde_without_minor() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+gun = "~> 2"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("major.minor"),
+            "should mention ~> needs minor: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_native_dep_invalid_name_uppercase() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+Gun = "~> 2.1"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("lowercase"),
+            "should mention lowercase requirement: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_native_dep_invalid_name_dash() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+my-dep = "~> 1.0"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("invalid character"),
+            "should mention invalid character: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_native_dep_tilde_in_compound() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[native.dependencies]
+gun = "~> 2.1 and < 3.0"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("pessimistic"),
+            "should mention ~> in compound not allowed: {err}"
+        );
+    }
+
+    #[test]
+    fn test_native_deps_do_not_affect_regular_deps() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+utils = { path = "../utils" }
+
+[native.dependencies]
+gun = "~> 2.1"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.dependencies.len(), 1);
+        assert!(manifest.dependencies.contains_key("utils"));
+        assert_eq!(manifest.native_dependencies.len(), 1);
+        assert!(manifest.native_dependencies.contains_key("gun"));
+    }
+
+    #[test]
+    fn test_packages_without_native_deps_unaffected() {
+        // A manifest with only regular dependencies should still parse correctly
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+description = "Regular app without native deps"
+
+[dependencies]
+json = { git = "https://github.com/jamesc/beamtalk-json", tag = "v1.0.0" }
+utils = { path = "../utils" }
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.dependencies.len(), 2);
+        assert!(manifest.native_dependencies.is_empty());
+    }
+
+    // --- Hex constraint validation unit tests ---
+
+    #[test]
+    fn test_validate_hex_constraint_valid() {
+        let valid = [
+            "2.12.0",
+            "1.0",
+            "3",
+            "~> 2.1",
+            "~> 2.1.0",
+            ">= 1.0.0",
+            "> 1.0",
+            "< 2.0.0",
+            "<= 3.0",
+            ">= 1.0.0 and < 2.0.0",
+            ">= 0.1 and <= 1.0",
+        ];
+        for c in valid {
+            assert!(
+                validate_hex_constraint(c).is_ok(),
+                "expected '{c}' to be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_hex_constraint_invalid() {
+        let invalid = [
+            ("", "empty"),
+            ("abc", "non-numeric"),
+            ("1.2.3.4", "too many segments"),
+            ("~> 2", "major.minor"),
+            ("~>", "must be followed"),
+            (">=", "must be followed"),
+            (">= 1.0.0 and ~> 2.0", "pessimistic"),
+            (">= 1.0 and 2.0", "comparison operators"),
+        ];
+        for (constraint, expected_msg) in invalid {
+            let result = validate_hex_constraint(constraint);
+            assert!(result.is_err(), "expected '{constraint}' to be invalid");
+            let err = result.unwrap_err();
+            assert!(
+                err.contains(expected_msg),
+                "error for '{constraint}' should contain '{expected_msg}', got: {err}"
+            );
+        }
     }
 }

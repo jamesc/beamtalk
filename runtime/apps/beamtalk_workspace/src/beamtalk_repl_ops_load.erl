@@ -18,6 +18,8 @@
 -ifdef(TEST).
 -export([
     find_bt_files/1,
+    find_erl_files/1,
+    compile_native_erl_files/2,
     extract_bt_class_info/1,
     sort_bt_files_by_deps/1,
     structured_file_errors/2,
@@ -58,7 +60,11 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
                     true -> find_bt_files(filename:join(AbsPath, "test"));
                     false -> []
                 end,
-            AllFiles = SrcFiles ++ TestFiles,
+            AllBtFiles = SrcFiles ++ TestFiles,
+            %% BT-1716: Scan native/ for .erl files (before .bt compilation).
+            NativeDir = filename:join(AbsPath, "native"),
+            AllErlFiles = find_erl_files(NativeDir),
+            AllFiles = AllErlFiles ++ AllBtFiles,
             %% BT-1685: Incremental reload — classify files by change status.
             PreviousMtimes =
                 case Force of
@@ -71,20 +77,56 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
                             {error, _} -> #{}
                         end
                 end,
-            {Changed, Unchanged, Deleted} = classify_files_by_change(AllFiles, PreviousMtimes),
-            %% Handle deleted files: unregister their classes and modules.
-            DeletedCount = handle_deleted_files(Deleted, SessionPid),
-            %% Only compile changed/new files, but sort them for dependency order.
-            SortedChanged = sort_bt_files_by_deps(Changed),
+            %% BT-1716: Classify .erl and .bt files separately for correct ordering.
+            %% Filter PreviousMtimes by extension to prevent cross-contamination
+            %% of deleted-file detection between .erl and .bt files.
+            PrevErlMtimes =
+                maps:filter(
+                    fun(Path, _Mtime) -> filename:extension(Path) =:= ".erl" end,
+                    PreviousMtimes
+                ),
+            PrevBtMtimes =
+                maps:filter(
+                    fun(Path, _Mtime) -> filename:extension(Path) =:= ".bt" end,
+                    PreviousMtimes
+                ),
+            {ChangedErl, UnchangedErl, DeletedErl} =
+                classify_files_by_change(AllErlFiles, PrevErlMtimes),
+            {ChangedBt, UnchangedBt, DeletedBt} =
+                classify_files_by_change(AllBtFiles, PrevBtMtimes),
+            %% Handle deleted .bt files: unregister their classes and modules.
+            DeletedBtCount = handle_deleted_files(DeletedBt, SessionPid),
+            %% Handle deleted .erl files: clean up their mtime entries.
+            lists:foreach(
+                fun(Path) ->
+                    ?LOG_INFO(
+                        "load-project: native .erl file deleted: ~s",
+                        [Path],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    beamtalk_workspace_meta:remove_file_mtime(Path)
+                end,
+                DeletedErl
+            ),
+            DeletedCount = DeletedBtCount + length(DeletedErl),
+            %% BT-1716: Compile changed native .erl files first, before .bt files.
+            %% Include paths set to native/include/ if present.
+            ErlPreLoadMtimes = snapshot_file_mtimes(ChangedErl),
+            {NativeErrors, _NativeCompiledCount} =
+                compile_native_erl_files(ChangedErl, AbsPath),
+            record_file_mtimes_from_snapshot(ErlPreLoadMtimes),
+            %% Only compile changed/new .bt files, but sort them for dependency order.
+            SortedChanged = sort_bt_files_by_deps(ChangedBt),
             %% BT-1685: Snapshot mtimes *before* compiling so that if a file
             %% is modified during compilation we don't record the stale mtime.
             %% We record these mtimes below after successful load.
             PreLoadMtimes = snapshot_file_mtimes(SortedChanged),
-            {AllClasses, Errors} = load_files_sequential(SortedChanged, SessionPid),
+            {AllClasses, BtErrors} = load_files_sequential(SortedChanged, SessionPid),
             %% BT-1685: Record the pre-load mtimes for all files we attempted.
             %% activate_module (called within load_files_sequential) already
             %% triggers hot reload for actors, so no separate hot reload needed.
             record_file_mtimes_from_snapshot(PreLoadMtimes),
+            Errors = lists:reverse(NativeErrors) ++ BtErrors,
             ClassNames =
                 [
                     case maps:get(name, C, "") of
@@ -94,8 +136,8 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
                  || C <- AllClasses
                 ],
             TotalFiles = length(AllFiles) + DeletedCount,
-            ChangedCount = length(Changed),
-            UnchangedCount = length(Unchanged),
+            ChangedCount = length(ChangedBt) + length(ChangedErl),
+            UnchangedCount = length(UnchangedBt) + length(UnchangedErl),
             Base = beamtalk_repl_protocol:base_response(Msg),
             Response = Base#{
                 <<"status">> => [<<"done">>],
@@ -340,6 +382,154 @@ find_bt_files(Dir) ->
         true ->
             filelib:fold_files(Dir, ".*\\.bt$", true, fun(F, Acc) -> [F | Acc] end, [])
     end.
+
+%% @private
+%% @doc Find all .erl files in a directory, recursively but skipping test/.
+%% Returns an empty list if the directory does not exist.
+-spec find_erl_files(string()) -> [string()].
+find_erl_files(Dir) ->
+    case filelib:is_dir(Dir) of
+        false ->
+            [];
+        true ->
+            %% Recursively find all .erl files but skip native/test/ — those are
+            %% EUnit tests, not runtime modules that should be loaded into the VM.
+            AllErl = filelib:fold_files(Dir, ".*\\.erl$", true, fun(F, Acc) -> [F | Acc] end, []),
+            TestPrefix = filename:join(Dir, "test") ++ "/",
+            [F || F <- AllErl, not lists:prefix(TestPrefix, F)]
+    end.
+
+%% @private
+%% @doc Compile a list of native .erl files via compile:file/2.
+%% Returns {Errors, CompiledCount} where Errors is a list of structured error maps.
+%% Include paths are set to native/include/ if present.
+-spec compile_native_erl_files([string()], string()) -> {[map()], non_neg_integer()}.
+compile_native_erl_files([], _ProjectRoot) ->
+    {[], 0};
+compile_native_erl_files(ErlFiles, ProjectRoot) ->
+    NativeDir = filename:join(ProjectRoot, "native"),
+    IncludeDir = filename:join(NativeDir, "include"),
+    BaseOpts = [debug_info, return_errors, return_warnings, binary],
+    IncludeOpts =
+        case filelib:is_dir(IncludeDir) of
+            true -> [{i, IncludeDir} | BaseOpts];
+            false -> BaseOpts
+        end,
+    lists:foldl(
+        fun(ErlPath, {ErrsAcc, CountAcc}) ->
+            ?LOG_INFO(
+                "load-project: compiling native .erl file: ~s",
+                [ErlPath],
+                #{domain => [beamtalk, runtime]}
+            ),
+            case compile:file(ErlPath, IncludeOpts) of
+                {ok, ModName, Binary, Warnings} ->
+                    %% Load the compiled binary into the VM.
+                    case code:load_binary(ModName, ErlPath, Binary) of
+                        {module, ModName} ->
+                            log_erl_warnings(ErlPath, Warnings),
+                            {ErrsAcc, CountAcc + 1};
+                        {error, LoadErr} ->
+                            ErrMap = #{
+                                <<"path">> => list_to_binary(ErlPath),
+                                <<"kind">> => <<"load_error">>,
+                                <<"message">> => iolist_to_binary(
+                                    io_lib:format("Failed to load compiled module: ~p", [LoadErr])
+                                )
+                            },
+                            {[ErrMap | ErrsAcc], CountAcc}
+                    end;
+                {ok, ModName, Binary} ->
+                    case code:load_binary(ModName, ErlPath, Binary) of
+                        {module, ModName} ->
+                            {ErrsAcc, CountAcc + 1};
+                        {error, LoadErr} ->
+                            ErrMap = #{
+                                <<"path">> => list_to_binary(ErlPath),
+                                <<"kind">> => <<"load_error">>,
+                                <<"message">> => iolist_to_binary(
+                                    io_lib:format("Failed to load compiled module: ~p", [LoadErr])
+                                )
+                            },
+                            {[ErrMap | ErrsAcc], CountAcc}
+                    end;
+                {error, CompileErrors, Warnings} ->
+                    log_erl_warnings(ErlPath, Warnings),
+                    ErrMaps = format_erl_compile_errors(ErlPath, CompileErrors),
+                    {ErrMaps ++ ErrsAcc, CountAcc};
+                error ->
+                    ErrMap = #{
+                        <<"path">> => list_to_binary(ErlPath),
+                        <<"kind">> => <<"compile_error">>,
+                        <<"message">> => <<"Erlang compilation failed">>
+                    },
+                    {[ErrMap | ErrsAcc], CountAcc}
+            end
+        end,
+        {[], 0},
+        ErlFiles
+    ).
+
+%% @private
+%% @doc Format Erlang compile errors into structured error maps.
+-spec format_erl_compile_errors(string(), [{string(), [term()]}]) -> [map()].
+format_erl_compile_errors(ErlPath, CompileErrors) ->
+    PathBin = list_to_binary(ErlPath),
+    lists:flatmap(
+        fun({_ErrFile, FileErrors}) ->
+            lists:map(
+                fun
+                    ({Line, Module, Desc}) ->
+                        Msg = iolist_to_binary(Module:format_error(Desc)),
+                        ErrMap = #{
+                            <<"path">> => PathBin,
+                            <<"kind">> => <<"compile_error">>,
+                            <<"message">> => Msg
+                        },
+                        case Line of
+                            L when is_integer(L), L > 0 -> ErrMap#{<<"line">> => L};
+                            _ -> ErrMap
+                        end;
+                    (Other) ->
+                        #{
+                            <<"path">> => PathBin,
+                            <<"kind">> => <<"compile_error">>,
+                            <<"message">> => iolist_to_binary(
+                                io_lib:format("~p", [Other])
+                            )
+                        }
+                end,
+                FileErrors
+            )
+        end,
+        CompileErrors
+    ).
+
+%% @private
+%% @doc Log Erlang compilation warnings.
+-spec log_erl_warnings(string(), [{string(), [term()]}]) -> ok.
+log_erl_warnings(_ErlPath, []) ->
+    ok;
+log_erl_warnings(ErlPath, Warnings) ->
+    lists:foreach(
+        fun({_WarnFile, FileWarnings}) ->
+            lists:foreach(
+                fun
+                    ({Line, Module, Desc}) ->
+                        Msg = Module:format_error(Desc),
+                        ?LOG_WARNING(
+                            "load-project: ~s:~p: ~s",
+                            [ErlPath, Line, Msg],
+                            #{domain => [beamtalk, runtime]}
+                        );
+                    (_Other) ->
+                        ok
+                end,
+                FileWarnings
+            )
+        end,
+        Warnings
+    ).
 
 %% @private
 %% @doc Extract the declared class name and superclass from a .bt source file.
