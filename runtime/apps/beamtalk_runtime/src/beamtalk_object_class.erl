@@ -952,8 +952,14 @@ apply_class_info(State, ClassInfo) ->
     %% Same logic as init/1 — keeps visibility in sync after hot-reload.
     NewIsInternal =
         case maps:get(visibility, Meta, maps:get(visibility, ClassInfo, public)) of
-            internal -> true;
-            _ -> maps:get(is_internal, Meta, maps:get(is_internal, ClassInfo, State#class_state.is_internal))
+            internal ->
+                true;
+            _ ->
+                maps:get(
+                    is_internal,
+                    Meta,
+                    maps:get(is_internal, ClassInfo, State#class_state.is_internal)
+                )
         end,
 
     {NewInstanceMethods, NewMethodReturnTypes} = meta_to_methods(
