@@ -329,6 +329,7 @@ fn compile_dependency(
 /// The `prior_deps` parameter provides class module indexes from dependencies
 /// that have already been compiled (in topological order), allowing this
 /// dependency's source to reference classes from its own dependencies.
+#[allow(clippy::too_many_lines)] // Step-by-step compilation pipeline — splitting would obscure the flow
 fn compile_dependency_with_context(
     project_root: &Utf8Path,
     dep_root: &Utf8Path,
@@ -454,6 +455,16 @@ fn compile_dependency_with_context(
         None,
         // TODO(ADR 0072): Wire up native module discovery for path dependencies
         &[],
+    )?;
+
+    // BT-1722: Generate per-package corpus files for MCP discovery.
+    // Place corpus alongside the dep's ebin dir (in _build/deps/{name}/).
+    let corpus_dir = ebin_path.parent().unwrap_or(&ebin_path);
+    crate::commands::build::generate_package_corpus(
+        corpus_dir,
+        dep_name,
+        &all_class_infos,
+        &source_files,
     )?;
 
     info!(dep = %dep_name, "Dependency compiled successfully");

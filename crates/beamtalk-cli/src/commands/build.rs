@@ -515,6 +515,8 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             &module_names,
             &class_module_index,
             &native_module_names,
+            &all_class_infos,
+            &source_files,
         )?;
     }
 
@@ -529,6 +531,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
 /// `class_module_index` maps Beamtalk class names to their compiled Erlang module
 /// names (e.g. `"AppSup"` → `"bt@my_app@supervision@app_sup"`). Used to resolve
 /// the supervisor class's actual module regardless of source file path.
+#[allow(clippy::too_many_arguments)]
 fn generate_package_outputs(
     build_dir: &Utf8Path,
     project_root: &Utf8PathBuf,
@@ -536,6 +539,8 @@ fn generate_package_outputs(
     module_names: &[String],
     class_module_index: &HashMap<String, String>,
     native_module_names: &[String],
+    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    source_files: &[Utf8PathBuf],
 ) -> Result<()> {
     // TODO: Extract class metadata from compiled modules in a future issue.
     let class_metadata: Vec<app_file::ClassMetadata> = Vec::new();
@@ -590,7 +595,200 @@ fn generate_package_outputs(
         native_module_names,
     )?;
     info!(name = %pkg.name, "Generated .app file");
+
+    // BT-1722: Generate per-package corpus files for MCP discovery.
+    // The corpus_dir is _build/dev/ (parent of ebin/) so MCP can find it
+    // alongside the build output.
+    let corpus_dir = build_dir.parent().unwrap_or(build_dir);
+    generate_package_corpus(corpus_dir, &pkg.name, all_class_infos, source_files)?;
+
     Ok(())
+}
+
+/// Generate per-package corpus files for MCP discovery (BT-1722).
+///
+/// Produces two files in `corpus_dir`:
+/// - `class_corpus.json` — class metadata (name, superclass, methods, doc)
+/// - `corpus.json` — source code examples from the package's `.bt` files
+///
+/// These are loaded at runtime by the MCP server to augment the bundled
+/// stdlib corpus with package-specific classes and examples.
+pub(crate) fn generate_package_corpus(
+    corpus_dir: &Utf8Path,
+    package_name: &str,
+    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    source_files: &[Utf8PathBuf],
+) -> Result<()> {
+    generate_class_corpus(corpus_dir, all_class_infos)?;
+    generate_example_corpus(corpus_dir, package_name, source_files)?;
+    Ok(())
+}
+
+/// Generate `class_corpus.json` from parsed class metadata.
+fn generate_class_corpus(
+    corpus_dir: &Utf8Path,
+    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+) -> Result<()> {
+    let class_entries: Vec<serde_json::Value> = all_class_infos
+        .iter()
+        .filter(|ci| !ci.is_internal) // Skip internal classes (ADR 0071)
+        .map(|ci| {
+            let methods: Vec<String> = ci
+                .methods
+                .iter()
+                .chain(ci.class_methods.iter())
+                .filter(|m| !m.is_internal)
+                .map(|m| m.selector.to_string())
+                .collect();
+            serde_json::json!({
+                "name": ci.name.as_str(),
+                "superclass": ci.superclass.as_deref().unwrap_or("Object"),
+                "doc": serde_json::Value::Null,
+                "methods": methods,
+                "is_sealed": ci.is_sealed,
+                "is_abstract": ci.is_abstract,
+            })
+        })
+        .collect();
+
+    if !class_entries.is_empty() {
+        let class_json = serde_json::to_string_pretty(&class_entries).into_diagnostic()?;
+        let class_corpus_path = corpus_dir.join("class_corpus.json");
+        fs::write(&class_corpus_path, format!("{class_json}\n"))
+            .into_diagnostic()
+            .wrap_err("Failed to write class_corpus.json")?;
+        info!(
+            path = %class_corpus_path,
+            count = class_entries.len(),
+            "Generated package class corpus"
+        );
+    }
+    Ok(())
+}
+
+/// Generate `corpus.json` from package source files.
+#[allow(clippy::too_many_lines)] // Entry extraction loop — splitting further would obscure the flow
+fn generate_example_corpus(
+    corpus_dir: &Utf8Path,
+    package_name: &str,
+    source_files: &[Utf8PathBuf],
+) -> Result<()> {
+    let mut corpus_entries: Vec<serde_json::Value> = Vec::new();
+    for file in source_files {
+        let Ok(source) = fs::read_to_string(file.as_std_path()) else {
+            continue;
+        };
+        let stem = file.file_stem().unwrap_or_default();
+
+        // Strip license header from source
+        let clean_source = source
+            .lines()
+            .skip_while(|line| {
+                let trimmed = line.trim();
+                trimmed.starts_with("// Copyright")
+                    || trimmed.starts_with("// SPDX")
+                    || trimmed.is_empty()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string();
+        if clean_source.is_empty() {
+            continue;
+        }
+
+        // Extract leading doc comments as explanation
+        let explanation = extract_leading_comments(&source);
+
+        // Parse the source to extract class names for tags and title
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        let mut tags: Vec<String> = Vec::new();
+        let mut class_names: Vec<String> = Vec::new();
+        for class in &module.classes {
+            class_names.push(class.name.name.to_string());
+            tags.push(class.name.name.to_string());
+            if let Some(ref superclass) = class.superclass {
+                tags.push(superclass.name.to_string());
+            }
+            for method in &class.methods {
+                let name = method.selector.name();
+                if !name.is_empty() {
+                    tags.push(name.to_string());
+                }
+            }
+        }
+        tags.push(package_name.to_string());
+        tags.sort();
+        tags.dedup();
+
+        let title = if class_names.is_empty() {
+            stem.replace(['_', '-'], " ")
+        } else {
+            class_names.join(", ")
+        };
+
+        let id = format!(
+            "pkg-{}-{}",
+            package_name,
+            stem.to_lowercase()
+                .replace(|c: char| !c.is_alphanumeric() && c != '-', "-")
+        );
+
+        corpus_entries.push(serde_json::json!({
+            "id": id,
+            "title": title,
+            "category": format!("package-{package_name}"),
+            "tags": tags,
+            "source": clean_source,
+            "explanation": explanation,
+        }));
+    }
+
+    if !corpus_entries.is_empty() {
+        corpus_entries.sort_by(|a, b| {
+            let a_id = a["id"].as_str().unwrap_or("");
+            let b_id = b["id"].as_str().unwrap_or("");
+            a_id.cmp(b_id)
+        });
+        let corpus = serde_json::json!({ "entries": corpus_entries });
+        let json = serde_json::to_string_pretty(&corpus).into_diagnostic()?;
+        let corpus_path = corpus_dir.join("corpus.json");
+        fs::write(&corpus_path, format!("{json}\n"))
+            .into_diagnostic()
+            .wrap_err("Failed to write corpus.json")?;
+        info!(
+            path = %corpus_path,
+            count = corpus_entries.len(),
+            "Generated package example corpus"
+        );
+    }
+    Ok(())
+}
+
+/// Extract leading doc comments from source, skipping license headers.
+fn extract_leading_comments(source: &str) -> String {
+    source
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.starts_with("// Copyright") && !trimmed.starts_with("// SPDX")
+        })
+        .skip_while(|line| line.trim().is_empty())
+        .take_while(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("// ") || trimmed == "//"
+        })
+        .map(|line| {
+            line.trim()
+                .strip_prefix("// ")
+                .or_else(|| line.trim().strip_prefix("//"))
+                .unwrap_or("")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
 }
 
 /// Generate an OTP application callback module (`beamtalk_{appname}_app.erl`).
@@ -2992,6 +3190,105 @@ mod tests {
         assert!(
             content.contains("{cowboy, \"~> 2.12\"}"),
             "Should use constraint for unlocked cowboy"
+        );
+    }
+
+    /// BT-1722: Verify that `generate_package_corpus` produces `class_corpus.json`
+    /// and `corpus.json` in the output directory.
+    #[test]
+    fn test_generate_package_corpus_creates_files() {
+        let temp = TempDir::new().unwrap();
+        let corpus_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = corpus_dir.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+
+        // Write a simple .bt source file
+        let bt_file = src_dir.join("greeter.bt");
+        write_test_file(
+            &bt_file,
+            "// A simple greeter class.\nObject subclass: Greeter\n  greet: name => \"Hello, \" ++ name\n",
+        );
+
+        // Use build_class_module_index to extract ClassInfo from source
+        let source_files = vec![bt_file];
+        let (_module_index, _superclass_index, class_infos, _cached_asts) =
+            build_class_module_index(&source_files, Some(&src_dir), "my_pkg").unwrap();
+
+        let result = generate_package_corpus(&corpus_dir, "my_pkg", &class_infos, &source_files);
+        assert!(result.is_ok(), "generate_package_corpus should succeed");
+
+        // Verify class_corpus.json was created
+        let class_corpus_path = corpus_dir.join("class_corpus.json");
+        assert!(
+            class_corpus_path.exists(),
+            "Expected class_corpus.json at {class_corpus_path}"
+        );
+        let class_content = fs::read_to_string(&class_corpus_path).unwrap();
+        let class_entries: Vec<serde_json::Value> = serde_json::from_str(&class_content).unwrap();
+        assert_eq!(class_entries.len(), 1);
+        assert_eq!(class_entries[0]["name"], "Greeter");
+        assert_eq!(class_entries[0]["superclass"], "Object");
+        assert!(
+            class_entries[0]["methods"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m == "greet:")
+        );
+
+        // Verify corpus.json was created
+        let corpus_path = corpus_dir.join("corpus.json");
+        assert!(
+            corpus_path.exists(),
+            "Expected corpus.json at {corpus_path}"
+        );
+        let corpus_content = fs::read_to_string(&corpus_path).unwrap();
+        let corpus: serde_json::Value = serde_json::from_str(&corpus_content).unwrap();
+        let entries = corpus["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["category"], "package-my_pkg");
+        assert!(
+            entries[0]["tags"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t == "my_pkg")
+        );
+    }
+
+    /// BT-1722: Internal classes should be excluded from the generated class corpus.
+    #[test]
+    fn test_generate_package_corpus_excludes_internal_classes() {
+        let temp = TempDir::new().unwrap();
+        let corpus_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = corpus_dir.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+
+        // Write a .bt file with an internal class
+        let bt_file = src_dir.join("internal_helper.bt");
+        write_test_file(
+            &bt_file,
+            "internal Object subclass: InternalHelper\n  help => nil\n",
+        );
+
+        let source_files = vec![bt_file];
+        let (_module_index, _superclass_index, class_infos, _cached_asts) =
+            build_class_module_index(&source_files, Some(&src_dir), "my_pkg").unwrap();
+
+        // Verify the class was parsed as internal
+        assert!(
+            class_infos.iter().all(|ci| ci.is_internal),
+            "All classes should be internal"
+        );
+
+        let result = generate_package_corpus(&corpus_dir, "my_pkg", &class_infos, &[]);
+        assert!(result.is_ok());
+
+        // class_corpus.json should not be created (no non-internal classes)
+        let class_corpus_path = corpus_dir.join("class_corpus.json");
+        assert!(
+            !class_corpus_path.exists(),
+            "class_corpus.json should not be created for internal-only classes"
         );
     }
 }

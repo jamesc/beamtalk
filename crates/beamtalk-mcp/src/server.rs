@@ -66,6 +66,90 @@ pub struct BeamtalkMcp {
     tool_router: ToolRouter<Self>,
 }
 
+/// Discover package corpus files from the working directory's `_build/` tree.
+///
+/// Looks for `corpus.json` and `class_corpus.json` in:
+/// - `_build/dev/` (root package)
+/// - `_build/deps/*/` (dependencies, resolved via their `_build/dev/`)
+///
+/// Returns `(example_corpora, class_corpora)` loaded from disk.
+fn discover_package_corpora() -> (
+    Vec<beamtalk_examples::Corpus>,
+    Vec<beamtalk_examples::ClassCorpus>,
+) {
+    let mut example_corpora = Vec::new();
+    let mut class_corpora = Vec::new();
+
+    let Ok(cwd) = std::env::current_dir() else {
+        return (example_corpora, class_corpora);
+    };
+
+    // Find project root by walking up to find beamtalk.toml
+    let project_root = {
+        let mut dir = cwd.as_path();
+        loop {
+            if dir.join("beamtalk.toml").exists() {
+                break Some(dir.to_path_buf());
+            }
+            match dir.parent() {
+                Some(parent) => dir = parent,
+                None => break None,
+            }
+        }
+    };
+
+    let Some(root) = project_root else {
+        return (example_corpora, class_corpora);
+    };
+
+    // Root package corpus
+    let dev_dir = root.join("_build").join("dev");
+    if let Some(corpus) = beamtalk_examples::load_corpus_from_file(&dev_dir.join("corpus.json")) {
+        tracing::debug!(path = %dev_dir.display(), "Loaded root package corpus");
+        example_corpora.push(corpus);
+    }
+    if let Some(corpus) =
+        beamtalk_examples::load_class_corpus_from_file(&dev_dir.join("class_corpus.json"))
+    {
+        tracing::debug!(path = %dev_dir.display(), "Loaded root package class corpus");
+        class_corpora.push(corpus);
+    }
+
+    // Dependency corpora
+    let deps_dir = root.join("_build").join("deps");
+    if let Ok(entries) = std::fs::read_dir(&deps_dir) {
+        for entry in entries.flatten() {
+            let dep_path = entry.path();
+            if !dep_path.is_dir() {
+                continue;
+            }
+            // Dependencies build their corpus in their own _build/dev/ during compilation,
+            // but the corpus is also placed alongside ebin in the dep's checkout.
+            // Check both the dep's _build/dev/ and the dep root itself.
+            for search_dir in [dep_path.join("_build").join("dev"), dep_path.clone()] {
+                if let Some(corpus) =
+                    beamtalk_examples::load_corpus_from_file(&search_dir.join("corpus.json"))
+                {
+                    tracing::debug!(path = %search_dir.display(), "Loaded dependency corpus");
+                    example_corpora.push(corpus);
+                    break;
+                }
+            }
+            for search_dir in [dep_path.join("_build").join("dev"), dep_path.clone()] {
+                if let Some(corpus) = beamtalk_examples::load_class_corpus_from_file(
+                    &search_dir.join("class_corpus.json"),
+                ) {
+                    tracing::debug!(path = %search_dir.display(), "Loaded dependency class corpus");
+                    class_corpora.push(corpus);
+                    break;
+                }
+            }
+        }
+    }
+
+    (example_corpora, class_corpora)
+}
+
 /// Create an error `CallToolResult` with `is_error` set to true.
 fn error_result(msg: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![Content::text(msg.into())])
@@ -1102,7 +1186,18 @@ impl BeamtalkMcp {
         let mut timer = ToolTimer::new("search_examples");
         tracing::debug!(tool = "search_examples", limit = ?params.limit, "tool invoked");
         let start = std::time::Instant::now();
-        let results = beamtalk_examples::search(&params.query, params.limit);
+
+        // BT-1722: Aggregate package corpora with the bundled corpus.
+        let (pkg_corpora, _) = discover_package_corpora();
+        let merged;
+        let corpus_ref = if pkg_corpora.is_empty() {
+            &*beamtalk_examples::corpus::CORPUS
+        } else {
+            merged =
+                beamtalk_examples::merge_corpora(&beamtalk_examples::corpus::CORPUS, &pkg_corpora);
+            &merged
+        };
+        let results = beamtalk_examples::search_in(corpus_ref, &params.query, params.limit);
         let duration_us = start.elapsed().as_micros();
 
         let result_count = results.len();
@@ -1165,7 +1260,20 @@ impl BeamtalkMcp {
         let mut timer = ToolTimer::new("search_classes");
         tracing::debug!(tool = "search_classes", limit = ?params.limit, "tool invoked");
         let start = std::time::Instant::now();
-        let results = beamtalk_examples::search_classes(&params.query, params.limit);
+
+        // BT-1722: Aggregate package class corpora with the bundled corpus.
+        let (_, pkg_class_corpora) = discover_package_corpora();
+        let merged;
+        let corpus_ref = if pkg_class_corpora.is_empty() {
+            &*beamtalk_examples::class_corpus::CLASS_CORPUS
+        } else {
+            merged = beamtalk_examples::merge_class_corpora(
+                &beamtalk_examples::class_corpus::CLASS_CORPUS,
+                &pkg_class_corpora,
+            );
+            &merged
+        };
+        let results = beamtalk_examples::search_classes_in(corpus_ref, &params.query, params.limit);
         let duration_us = start.elapsed().as_micros();
 
         let result_count = results.len();

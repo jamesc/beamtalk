@@ -36,3 +36,92 @@ pub static CLASS_CORPUS: LazyLock<ClassCorpus> = LazyLock::new(|| {
         .expect("embedded class_corpus.json must be valid");
     ClassCorpus { entries }
 });
+
+/// Load a class corpus from a JSON file on disk.
+///
+/// Returns `None` if the file does not exist or cannot be parsed.
+pub fn load_class_corpus_from_file(path: &std::path::Path) -> Option<ClassCorpus> {
+    let bytes = std::fs::read(path).ok()?;
+    let entries: Vec<ClassEntry> = serde_json::from_slice(&bytes).ok()?;
+    Some(ClassCorpus { entries })
+}
+
+/// Merge multiple class corpora into a single corpus, deduplicating by class name.
+///
+/// Entries from later corpora override earlier ones with the same name.
+pub fn merge_class_corpora(base: &ClassCorpus, extras: &[ClassCorpus]) -> ClassCorpus {
+    let mut entries_by_name: std::collections::HashMap<&str, &ClassEntry> =
+        std::collections::HashMap::new();
+
+    for entry in &base.entries {
+        entries_by_name.insert(&entry.name, entry);
+    }
+    for corpus in extras {
+        for entry in &corpus.entries {
+            entries_by_name.insert(&entry.name, entry);
+        }
+    }
+
+    let mut entries: Vec<ClassEntry> = entries_by_name.values().map(|e| (*e).clone()).collect();
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    ClassCorpus { entries }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn make_class(name: &str) -> ClassEntry {
+        ClassEntry {
+            name: name.to_string(),
+            superclass: "Object".to_string(),
+            doc: None,
+            methods: vec![],
+            is_sealed: false,
+            is_abstract: false,
+        }
+    }
+
+    #[test]
+    fn merge_empty_extras() {
+        let base = ClassCorpus {
+            entries: vec![make_class("Foo")],
+        };
+        let merged = merge_class_corpora(&base, &[]);
+        assert_eq!(merged.entries.len(), 1);
+    }
+
+    #[test]
+    fn merge_adds_new_classes() {
+        let base = ClassCorpus {
+            entries: vec![make_class("Foo")],
+        };
+        let extra = ClassCorpus {
+            entries: vec![make_class("Bar")],
+        };
+        let merged = merge_class_corpora(&base, &[extra]);
+        assert_eq!(merged.entries.len(), 2);
+    }
+
+    #[test]
+    fn merge_deduplicates_by_name() {
+        let base = ClassCorpus {
+            entries: vec![make_class("Foo")],
+        };
+        let mut updated = make_class("Foo");
+        updated.methods = vec!["greet:".to_string()];
+        let extra = ClassCorpus {
+            entries: vec![updated],
+        };
+        let merged = merge_class_corpora(&base, &[extra]);
+        assert_eq!(merged.entries.len(), 1);
+        assert_eq!(merged.entries[0].methods, vec!["greet:"]);
+    }
+
+    #[test]
+    fn load_from_nonexistent_file_returns_none() {
+        let result =
+            load_class_corpus_from_file(std::path::Path::new("/nonexistent/class_corpus.json"));
+        assert!(result.is_none());
+    }
+}
