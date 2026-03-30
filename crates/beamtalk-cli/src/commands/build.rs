@@ -269,18 +269,22 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         );
         Some(rebar3_result)
     } else if pkg_manifest.is_some() {
-        // Path A: compile native/*.erl directly via erlc (no hex deps)
-        use crate::beam_compiler::compile_native_erlang;
-        match compile_native_erlang(&project_root)? {
-            Some(result) => {
-                eprintln!(
-                    "Compiling {} native Erlang file(s)",
-                    result.beam_files.len()
-                );
-                Some(Rebar3Result {
-                    ebin_paths: vec![result.ebin_dir],
-                    module_names: result.module_names,
-                })
+        // Path A: compile native/*.erl directly via erlc (no hex deps).
+        // Uses compile_native_erlang_with_deps to also compile transitive
+        // BT dependency native sources (same as Path B's post-rebar3 step).
+        let native_ebin = compile_native_erlang_with_deps(&project_root, &resolved_deps)?;
+        let module_names = {
+            use crate::beam_compiler::discover_native_modules;
+            discover_native_modules(&project_root)?
+        };
+        match native_ebin {
+            Some(ebin) => Some(Rebar3Result {
+                ebin_paths: vec![ebin],
+                module_names,
+            }),
+            None if !module_names.is_empty() => {
+                // Native modules discovered but no ebin produced — shouldn't happen
+                None
             }
             None => None,
         }
@@ -1549,6 +1553,9 @@ fn compile_native_erlang_with_deps(
     if erl_files.is_empty() {
         return Ok(None);
     }
+
+    // Sort for deterministic compilation order across platforms.
+    erl_files.sort();
 
     // Create output directory
     let ebin_dir = project_root
