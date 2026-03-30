@@ -358,31 +358,10 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             );
             class_module_index.insert(class_name.clone(), module_name.clone());
         }
-        // BT-1726 fix: Add stub ClassInfo for dependency classes so the
-        // unresolved-class validator recognises them during compilation.
-        for class_name in dep.class_module_index.keys() {
-            all_class_infos.push(
-                beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
-                    name: class_name.as_str().into(),
-                    superclass: None,
-                    is_sealed: false,
-                    is_abstract: false,
-                    is_typed: false,
-                    is_internal: false,
-                    package: Some(dep.name.as_str().into()),
-                    is_value: false,
-                    is_native: false,
-                    state: Vec::new(),
-                    state_types: HashMap::new(),
-                    methods: Vec::new(),
-                    class_methods: Vec::new(),
-                    class_variables: Vec::new(),
-                    type_params: Vec::new(),
-                    type_param_bounds: Vec::new(),
-                    superclass_type_args: Vec::new(),
-                },
-            );
-        }
+        // BT-1726 fix: Add dependency ClassInfo so the unresolved-class
+        // validator and type checker can resolve cross-package references
+        // (superclass chains, method signatures, etc.).
+        all_class_infos.extend(dep.class_infos.clone());
     }
 
     // BT-1653 / ADR 0070 Phase 3: Eagerly check stdlib reservation violations.
@@ -2923,6 +2902,7 @@ mod tests {
             root: dep_root.clone(),
             ebin_path: dep_root.join("ebin"),
             class_module_index: HashMap::new(),
+            class_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
         }];
@@ -2983,6 +2963,7 @@ mod tests {
                 root: first_root.clone(),
                 ebin_path: first_root.join("ebin"),
                 class_module_index: HashMap::new(),
+                class_infos: Vec::new(),
                 is_direct: true,
                 via_chain: Vec::new(),
             },
@@ -2991,6 +2972,7 @@ mod tests {
                 root: second_root.clone(),
                 ebin_path: second_root.join("ebin"),
                 class_module_index: HashMap::new(),
+                class_infos: Vec::new(),
                 is_direct: true,
                 via_chain: Vec::new(),
             },
@@ -3048,6 +3030,7 @@ mod tests {
             root: dep_root.clone(),
             ebin_path: dep_root.join("ebin"),
             class_module_index: HashMap::new(),
+            class_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
         }];
@@ -3505,6 +3488,7 @@ mod tests {
             root: Utf8PathBuf::from_path_buf(root.join(name)).unwrap(),
             ebin_path: Utf8PathBuf::from_path_buf(root.join(name).join("ebin")).unwrap(),
             class_module_index: std::collections::HashMap::new(),
+            class_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
         }
