@@ -613,6 +613,20 @@ classReload(Self) ->
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg));
         SourcePath ->
             SourcePathStr = binary_to_list(SourcePath),
+            %% BT-1719: Demand-driven native .erl compilation before reload.
+            %% Uses dynamic dispatch to avoid compile-time dep on beamtalk_workspace.
+            try
+                ProjectRoot = erlang:apply(
+                    beamtalk_repl_ops_load, find_project_root, [SourcePathStr]
+                ),
+                _ = erlang:apply(
+                    beamtalk_repl_ops_load,
+                    maybe_recompile_native_deps,
+                    [SourcePathStr, ProjectRoot]
+                )
+            catch
+                error:undef -> ok
+            end,
             try erlang:apply(beamtalk_repl_eval, reload_class_file, [SourcePathStr, ClassName]) of
                 {ok, _Classes} ->
                     Self;
