@@ -808,8 +808,8 @@ fn handle_sync(client: &mut ReplClient) {
                             .get("path")
                             .and_then(|p| p.as_str())
                             .unwrap_or("unknown");
-                        let line = err.get("line").and_then(|l| l.as_u64());
-                        let hint = err.get("hint").and_then(|h| h.as_str());
+                        let line = err.get("line").and_then(serde_json::Value::as_u64);
+                        let hint = err.get("hint").and_then(serde_json::Value::as_str);
                         let painted = color::paint(color::RED, &format!("Error: {msg}"));
                         match (line, hint) {
                             (Some(ln), Some(h)) => {
