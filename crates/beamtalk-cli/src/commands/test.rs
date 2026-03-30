@@ -1285,6 +1285,113 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
                 pipeline.hex_dep_names.push(name);
             }
         }
+
+        // Compile native/test/*.erl test helpers via erlc.
+        // These are Erlang modules only needed during test runs (e.g. test
+        // servers, mocks). They go into the same native ebin directory.
+        let native_test_dir = pkg_root.join("native").join("test");
+        if native_test_dir.exists() && native_test_dir.is_dir() {
+            compile_native_test_erlang(pkg_root, &native_test_dir, &pipeline.package_ebin_dirs)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Compile native Erlang test helpers from `native/test/` via erlc.
+///
+/// These modules (test servers, mocks, etc.) are only needed during test runs.
+/// Output goes to `_build/dev/native/ebin/` alongside the regular native modules.
+fn compile_native_test_erlang(
+    pkg_root: &Utf8Path,
+    native_test_dir: &Utf8Path,
+    ebin_dirs: &[Utf8PathBuf],
+) -> Result<()> {
+    use std::fs;
+
+    let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
+    let entries = fs::read_dir(native_test_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read {native_test_dir}"))?;
+    for entry in entries {
+        let entry = entry.into_diagnostic()?;
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
+            let utf8 = Utf8PathBuf::from_path_buf(path)
+                .map_err(|p| miette::miette!("Non-UTF-8 path: {}", p.display()))?;
+            erl_files.push(utf8);
+        }
+    }
+
+    if erl_files.is_empty() {
+        return Ok(());
+    }
+
+    let ebin_dir = pkg_root
+        .join("_build")
+        .join("dev")
+        .join("native")
+        .join("ebin");
+    fs::create_dir_all(&ebin_dir)
+        .into_diagnostic()
+        .wrap_err("Failed to create native ebin dir for test helpers")?;
+
+    let mut cmd = std::process::Command::new("erlc");
+    cmd.arg("+debug_info");
+    cmd.arg("-o").arg(ebin_dir.as_str());
+
+    // Add rebar3 lib dir to ERL_LIBS so -include_lib can find hex dep headers.
+    let rebar_lib_dir = pkg_root
+        .join("_build")
+        .join("dev")
+        .join("native")
+        .join("default")
+        .join("lib");
+    if rebar_lib_dir.exists() {
+        cmd.env("ERL_LIBS", rebar_lib_dir.as_str());
+    }
+
+    // Add all existing ebin dirs to code path so test helpers can find
+    // both the package's native modules and hex dep modules.
+    for ebin in ebin_dirs {
+        cmd.arg("-pa").arg(ebin.as_str());
+    }
+
+    // Add runtime includes for -include_lib("beamtalk_runtime/...")
+    if let Ok(runtime_dir) = beamtalk_cli::repl_startup::find_runtime_dir() {
+        let apps_dir: std::path::PathBuf = runtime_dir.join("apps");
+        if apps_dir.exists() {
+            cmd.arg("-I").arg(&apps_dir);
+        }
+    }
+
+    // Add native/include if present
+    let include_dir = pkg_root.join("native").join("include");
+    if include_dir.exists() {
+        cmd.arg("-I").arg(include_dir.as_str());
+    }
+
+    for erl_file in &erl_files {
+        cmd.arg(erl_file.as_str());
+    }
+
+    debug!(
+        count = erl_files.len(),
+        "Compiling native test Erlang helpers"
+    );
+
+    let output = cmd
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run erlc for native test helpers")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        miette::bail!(
+            "Native test Erlang compilation failed:\n{}",
+            format!("{stdout}{stderr}").trim_end()
+        );
     }
 
     Ok(())
