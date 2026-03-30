@@ -700,6 +700,10 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
             handle_sync(client);
             return CommandResult::Handled;
         }
+        _ if line.starts_with(":sync ") || line.starts_with(":s ") => {
+            eprintln!(":sync takes no arguments — it syncs the project from beamtalk.toml");
+            return CommandResult::Handled;
+        }
         _ if line.starts_with(":unload ") => {
             let class_name = extract_command_arg(line, ":unload ", None)
                 .trim()
@@ -836,6 +840,12 @@ fn handle_sync(client: &mut ReplClient) {
                                 eprintln!("  {painted} in {path}");
                             }
                         }
+                    }
+                }
+                // Display compiler warnings
+                if let Some(ref warns) = response.warnings {
+                    for w in warns {
+                        eprintln!("{}", color::paint(color::YELLOW, &format!("Warning: {w}")));
                     }
                 }
                 // Display summary
