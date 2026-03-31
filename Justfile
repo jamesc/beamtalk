@@ -959,12 +959,12 @@ install PREFIX="/usr/local": build-release build-stdlib
     done
 
     # Bundled rebar3 escript (ADR 0072 — needed for `beamtalk build` hex deps)
-    if [ -f "runtime/tools/rebar3" ]; then
-        install -d "${PREFIX}/lib/beamtalk/tools"
-        install -m 755 "runtime/tools/rebar3" "${PREFIX}/lib/beamtalk/tools/rebar3"
-    else
-        echo "⚠️  runtime/tools/rebar3 not found — dist will require system rebar3"
+    if [ ! -f "runtime/tools/rebar3" ]; then
+        echo "❌ Bundled rebar3 not found at runtime/tools/rebar3."
+        exit 1
     fi
+    install -d "${PREFIX}/lib/beamtalk/tools"
+    install -m 755 "runtime/tools/rebar3" "${PREFIX}/lib/beamtalk/tools/rebar3"
 
     # Stdlib sources for LSP/tooling navigation
     STDLIB_SOURCE_SRC="stdlib/src"
@@ -1068,7 +1068,7 @@ dist: build-release build-stdlib
     Copy-Item target/release/beamtalk-mcp.exe dist/bin/
     Copy-Item target/release/beamtalk-exec.exe dist/bin/
     $appCount = 0; foreach ($ebinDir in (Get-ChildItem -Directory "runtime/_build/default/lib/*/ebin" -ErrorAction SilentlyContinue)) { $app = $ebinDir.Parent.Name; $appRoot = $ebinDir.Parent.FullName; if (!(Get-ChildItem "$($ebinDir.FullName)/*.beam" -ErrorAction SilentlyContinue)) { continue }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$($ebinDir.FullName)/*.beam" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction Stop; if (Get-ChildItem "$($ebinDir.FullName)/*.app" -ErrorAction SilentlyContinue) { Copy-Item "$($ebinDir.FullName)/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction Stop }; $privSrc = Join-Path $appRoot "priv"; if (Test-Path $privSrc) { New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/priv" | Out-Null; Copy-Item "$privSrc/*" "dist/lib/beamtalk/lib/$app/priv/" -Recurse }; $appCount++ }; if ($appCount -eq 0) { Write-Error "No OTP apps found in runtime/_build/default/lib/. Run 'just build-erlang' first."; exit 1 }
-    if (Test-Path "runtime/tools/rebar3") { New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/tools" | Out-Null; Copy-Item "runtime/tools/rebar3" "dist/lib/beamtalk/tools/rebar3" } else { Write-Warning "runtime/tools/rebar3 not found — dist will require system rebar3" }
+    if (!(Test-Path "runtime/tools/rebar3")) { Write-Error "Bundled rebar3 not found at runtime/tools/rebar3."; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/tools" | Out-Null; Copy-Item "runtime/tools/rebar3" "dist/lib/beamtalk/tools/rebar3"
     if (Test-Path "stdlib/src/*.bt") { New-Item -ItemType Directory -Force -Path "dist/share/beamtalk/stdlib/src" | Out-Null; Copy-Item "stdlib/src/*.bt" "dist/share/beamtalk/stdlib/src/" }
     just dist-vscode
     @echo "✅ Distribution ready in dist/"
