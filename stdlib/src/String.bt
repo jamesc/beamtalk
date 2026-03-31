@@ -67,6 +67,15 @@ sealed typed Binary subclass: String
   /// ```
   =:= other -> Boolean => @primitive "=:="
 
+  /// Test strict inequality with another string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "abc" =/= "xyz"      // => true
+  /// "abc" =/= "abc"      // => false
+  /// ```
+  =/= other -> Boolean => @primitive "=/="
+
   /// Test inequality with another string.
   ///
   /// ## Examples

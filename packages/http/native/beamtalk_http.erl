@@ -26,7 +26,7 @@
 %%% ## Response Format
 %%%
 %%% All requests return an `HTTPResponse` value object constructed via the
-%%% generated keyword constructor `'bt@stdlib@httpresponse':'class_status:headers:body:'/5`.
+%%% generated keyword constructor `'bt@http@httpresponse':'class_status:headers:body:'/5`.
 %%% Fields: `status` (integer), `headers` (list of [Name, Value] binary pairs),
 %%% `body` (String).
 %%%
@@ -375,17 +375,16 @@ collect_response(ConnPid, StreamRef, MRef, Deadline, Selector) ->
 %% This provides compile-time arity safety: if a field is added or removed from
 %% HTTPResponse, the arity of this call changes and the compiler catches the mismatch.
 %%
-%% `bt@stdlib@httpresponse` lives in `beamtalk_stdlib`, which depends on
-%% `beamtalk_runtime` and is therefore absent from the runtime Dialyzer PLT.
-%% The suppression below silences the resulting "unknown function" warning;
-%% the call is safe because the module is always loaded before HTTP requests
-%% can be made (beamtalk_stdlib starts after beamtalk_runtime).
+%% `bt@http@httpresponse` is a generated BEAM module whose abstract code
+%% cannot be analysed by Dialyzer. The suppression below silences the
+%% resulting "unknown function" warning; the call is safe because the
+%% module is always loaded before HTTP requests can be made.
 -dialyzer({nowarn_function, make_response/3}).
 -spec make_response(non_neg_integer(), list(), binary()) -> map().
 
 make_response(Status, GunHeaders, Body) ->
     BtHeaders = from_gun_headers(GunHeaders),
-    'bt@stdlib@httpresponse':'class_status:headers:body:'(
+    'bt@http@httpresponse':'class_status:headers:body:'(
         undefined, undefined, Status, BtHeaders, Body
     ).
 

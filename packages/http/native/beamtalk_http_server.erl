@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 %%%
 %%% Manages cowboy listener lifecycle for the `HTTPServer` Actor class.
-%%% The compiled facade module (`bt@stdlib@httpserver`) handles class/instance
+%%% The compiled facade module (`bt@http@httpserver`) handles class/instance
 %%% dispatch; this module exports `start_link/1` and gen_server callbacks.
 %%%
 %%% Each HTTPServer actor owns a cowboy listener identified by a unique

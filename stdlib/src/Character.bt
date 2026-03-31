@@ -32,6 +32,15 @@ sealed Integer subclass: Character
   /// ```
   =:= other :: Character -> Boolean => @primitive "=:="
 
+  /// Test strict inequality with another character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A =/= $B                  // => true
+  /// $A =/= $A                  // => false
+  /// ```
+  =/= other :: Character -> Boolean => @primitive "=/="
+
   /// Test inequality with another character.
   ///
   /// ## Examples

@@ -83,7 +83,7 @@ build_request(Req0) ->
     Headers = [[Name, Value] || {Name, Value} <- HeadersList],
     {Body, Req1} = read_body(Req0),
     QsMap = parse_query_params(Req1),
-    HttpRequest = 'bt@stdlib@httprequest':'class_method:path:headers:body:queryParams:params:'(
+    HttpRequest = 'bt@http@httprequest':'class_method:path:headers:body:queryParams:params:'(
         undefined, undefined, Method, Path, Headers, Body, QsMap, #{}
     ),
     {HttpRequest, Req1}.

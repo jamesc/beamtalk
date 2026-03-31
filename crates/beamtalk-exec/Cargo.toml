@@ -30,5 +30,9 @@ tracing-subscriber = { workspace = true }
 # why: process group management (setsid, kill) on Unix
 libc = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+# why: Win32 Job Object APIs for process group isolation on Windows (BT-1133)
+windows-sys.workspace = true
+
 [lints]
 workspace = true

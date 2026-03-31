@@ -89,6 +89,15 @@ sealed Number subclass: Float
   /// ```
   =:= other :: Number -> Boolean => @primitive "=:="
 
+  /// Test strict inequality with another number.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1.0 =/= 2.0        // => true
+  /// 3.14 =/= 3.14      // => false
+  /// ```
+  =/= other :: Number -> Boolean => @primitive "=/="
+
   /// Test inequality with another number.
   ///
   /// ## Examples

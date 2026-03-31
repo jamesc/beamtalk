@@ -33,6 +33,12 @@ pub struct ResolvedDependency {
     /// Maps class names to compiled BEAM module names for this dependency.
     /// E.g., `"Helper"` -> `"bt@utils@helper"`.
     pub class_module_index: HashMap<String, String>,
+    /// Full class metadata from the dependency's source files.
+    ///
+    /// Used by the type checker and structural validator to resolve cross-package
+    /// class references (superclass chains, method signatures, etc.).
+    /// Empty when metadata is unavailable (e.g., compiled-only dependencies).
+    pub class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     /// Whether this is a direct dependency of the root package (ADR 0070 Phase 3).
     /// `false` means it is a transitive dependency.
     pub is_direct: bool,
@@ -218,9 +224,12 @@ fn resolve_single_path_dep(
 
     resolved.push(ResolvedDependency {
         name: name.to_string(),
-        root: dep_root,
+        root: dep_root.clone(),
         ebin_path,
         class_module_index: dep_class_module_index,
+        class_infos: build_dep_class_index(&dep_root, name)
+            .map(|(_, infos)| infos)
+            .unwrap_or_default(),
         is_direct: true, // Legacy path — all treated as direct
         via_chain: Vec::new(),
     });
@@ -305,6 +314,9 @@ pub(crate) fn compile_dependency_at(
         root: dep_root.to_path_buf(),
         ebin_path,
         class_module_index,
+        class_infos: build_dep_class_index(dep_root, dep_name)
+            .map(|(_, infos)| infos)
+            .unwrap_or_default(),
         is_direct: false, // Caller sets this based on graph knowledge
         via_chain: Vec::new(),
     })
@@ -484,7 +496,10 @@ fn compile_dependency_with_context(
 pub(crate) fn build_dep_class_index(
     dep_root: &Utf8Path,
     dep_name: &str,
-) -> Result<HashMap<String, String>> {
+) -> Result<(
+    HashMap<String, String>,
+    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+)> {
     let src_dir = dep_root.join("src");
     let search_dir = if src_dir.exists() {
         src_dir.clone()
@@ -494,7 +509,7 @@ pub(crate) fn build_dep_class_index(
 
     let source_files = crate::commands::build::collect_source_files_from_dir(&search_dir)?;
     if source_files.is_empty() {
-        return Ok(HashMap::new());
+        return Ok((HashMap::new(), Vec::new()));
     }
 
     let source_root = if src_dir.exists() {
@@ -503,13 +518,13 @@ pub(crate) fn build_dep_class_index(
         None
     };
 
-    let (class_module_index, _, _, _) = crate::commands::build::build_class_module_index(
+    let (class_module_index, _, class_infos, _) = crate::commands::build::build_class_module_index(
         &source_files,
         source_root.as_deref(),
         dep_name,
     )?;
 
-    Ok(class_module_index)
+    Ok((class_module_index, class_infos))
 }
 
 #[cfg(test)]

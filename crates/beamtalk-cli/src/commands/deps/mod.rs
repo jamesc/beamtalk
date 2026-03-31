@@ -103,7 +103,7 @@ fn collect_fresh_deps(
             .join("ebin");
 
         // Rebuild class module index from source files (fast — no compilation)
-        let class_module_index = path::build_dep_class_index(&dep_root, dep_name)?;
+        let (class_module_index, class_infos) = path::build_dep_class_index(&dep_root, dep_name)?;
 
         debug!(
             dep = %dep_name,
@@ -116,6 +116,7 @@ fn collect_fresh_deps(
             root: dep_root,
             ebin_path,
             class_module_index,
+            class_infos,
             is_direct: true, // collect_fresh_deps only processes direct deps
             via_chain: Vec::new(),
         });

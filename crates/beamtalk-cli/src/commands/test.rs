@@ -250,11 +250,17 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 /// cross-file references and class hierarchy resolution work correctly — in
 /// particular, Value sub-subclasses are recognized as value types rather than
 /// defaulting to actor codegen (BT-1564).
+#[allow(clippy::type_complexity)]
 fn build_fixture_class_indexes(
     fixture_files: &[Utf8PathBuf],
-) -> Result<(HashMap<String, String>, HashMap<String, String>)> {
+) -> Result<(
+    HashMap<String, String>,
+    HashMap<String, String>,
+    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+)> {
     let mut module_index = HashMap::new();
     let mut superclass_index = HashMap::new();
+    let mut class_infos = Vec::new();
 
     for file in fixture_files {
         let module_name = fixture_module_name(file)?;
@@ -263,6 +269,10 @@ fn build_fixture_class_indexes(
         };
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
         let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+
+        // Extract full ClassInfo for validator/type checker resolution.
+        class_infos
+            .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
 
         for class in &module.classes {
             let class_name = class.name.name.to_string();
@@ -274,7 +284,7 @@ fn build_fixture_class_indexes(
         }
     }
 
-    Ok((module_index, superclass_index))
+    Ok((module_index, superclass_index, class_infos))
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -908,7 +918,11 @@ fn initialize_pipeline(
     let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
     let mut class_module_index: HashMap<String, String> = HashMap::new();
     let mut class_superclass_index: HashMap<String, String> = HashMap::new();
-    let mut all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
+    // BT-1733: Collect source and dep ClassInfos separately, then merge
+    // via collect_all_class_infos for a single unified collection point.
+    let mut source_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
+        Vec::new();
+    let mut dep_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
         Vec::new();
     for (pkg_root, pkg) in &discovered_packages {
         let src_dir = pkg_root.join("src");
@@ -927,11 +941,42 @@ fn initialize_pipeline(
                 );
                 class_module_index.extend(pkg_class_map);
                 class_superclass_index.extend(pkg_super_map);
-                // BT-1559: Collect cross-file class metadata for type checker resolution.
-                all_class_infos.extend(class_infos);
+                source_class_infos.extend(class_infos);
+            }
+        }
+
+        // Load dependency class metadata so the type checker and validator
+        // can resolve cross-package class references in test files.
+        let dep_options = beamtalk_core::CompilerOptions::default();
+        match super::deps::ensure_deps_resolved(pkg_root, &dep_options) {
+            Ok(resolved_deps) => {
+                for dep in &resolved_deps {
+                    for (class_name, module_name) in &dep.class_module_index {
+                        class_module_index.insert(class_name.clone(), module_name.clone());
+                    }
+                    dep_class_infos.extend(dep.class_infos.clone());
+                }
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "Failed to resolve dependencies for test pipeline; \
+                     dependency classes may not be available"
+                );
             }
         }
     }
+
+    // BT-1733: Single unified collection of all ClassInfo from all sources.
+    // Fixture ClassInfo is deliberately excluded: compile_fixtures() builds
+    // fixture class indexes (merged into class_module_index) but drops
+    // fixture_class_infos because duplicate class names across fixture files
+    // (e.g. two `Shape` classes in test/fixtures/) cause false DNU and
+    // actor-new compile errors. See build_fixture_class_indexes() and the
+    // drop(fixture_class_infos) call in compile_fixtures().
+    // To add a new .bt source location, add its ClassInfo slice here.
+    let all_class_infos =
+        super::build::collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
 
     Ok(TestPipeline {
         test_path,
@@ -976,18 +1021,25 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     // where cross-package and cross-fixture references are allowed.
     // BT-1564: Also build a fixture superclass index so the class hierarchy
     // resolves correctly for Value sub-subclasses defined across fixture files.
-    let (fixture_class_index, fixture_superclass_index) = if fixtures_dir.is_dir() {
-        let fixture_files = find_test_files(&fixtures_dir)?;
-        build_fixture_class_indexes(&fixture_files)?
-    } else {
-        (HashMap::new(), HashMap::new())
-    };
+    let (fixture_class_index, fixture_superclass_index, fixture_class_infos) =
+        if fixtures_dir.is_dir() {
+            let fixture_files = find_test_files(&fixtures_dir)?;
+            build_fixture_class_indexes(&fixture_files)?
+        } else {
+            (HashMap::new(), HashMap::new(), Vec::new())
+        };
     pipeline
         .class_module_index
         .extend(fixture_class_index.clone());
     pipeline
         .class_superclass_index
         .extend(fixture_superclass_index);
+    // BT-1733: Fixture ClassInfo is not yet added to all_class_infos because
+    // duplicate class names across fixtures (e.g. two `Shape` classes) cause
+    // false DNU errors. The class_module_index merge above is sufficient for
+    // the unresolved-class validator. Adding fixture ClassInfo requires
+    // deduplication or scoping logic to avoid cross-fixture conflicts.
+    drop(fixture_class_infos);
 
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,
@@ -1258,8 +1310,12 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         pipeline.package_modules.extend(modules);
         pipeline.package_ebin_dirs.push(ebin_dir);
 
-        // ADR 0070: Add dependency ebin directories to code path
+        // ADR 0070: Add dependency ebin directories to code path and load
+        // dep modules so their on_load hooks register classes before tests run.
         for dep_ebin in super::deps::collect_dep_ebin_paths(pkg_root) {
+            if let Ok(dep_modules) = collect_beam_module_names(&dep_ebin) {
+                pipeline.package_modules.extend(dep_modules);
+            }
             pipeline.package_ebin_dirs.push(dep_ebin);
         }
 
@@ -1285,6 +1341,121 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
                 pipeline.hex_dep_names.push(name);
             }
         }
+
+        // Compile native/test/*.erl test helpers via erlc.
+        // These are Erlang modules only needed during test runs (e.g. test
+        // servers, mocks). They go into the same native ebin directory.
+        let native_test_dir = pkg_root.join("native").join("test");
+        if native_test_dir.exists() && native_test_dir.is_dir() {
+            compile_native_test_erlang(pkg_root, &native_test_dir, &pipeline.package_ebin_dirs)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Compile native Erlang test helpers from `native/test/` via erlc.
+///
+/// These modules (test servers, mocks, etc.) are only needed during test runs.
+/// Output goes to `_build/dev/native/ebin/` alongside the regular native modules.
+fn compile_native_test_erlang(
+    pkg_root: &Utf8Path,
+    native_test_dir: &Utf8Path,
+    ebin_dirs: &[Utf8PathBuf],
+) -> Result<()> {
+    use std::fs;
+
+    let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
+    let entries = fs::read_dir(native_test_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read {native_test_dir}"))?;
+    for entry in entries {
+        let entry = entry.into_diagnostic()?;
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
+            let utf8 = Utf8PathBuf::from_path_buf(path)
+                .map_err(|p| miette::miette!("Non-UTF-8 path: {}", p.display()))?;
+            erl_files.push(utf8);
+        }
+    }
+
+    if erl_files.is_empty() {
+        return Ok(());
+    }
+
+    // Sort for deterministic compilation order across platforms.
+    erl_files.sort();
+
+    let ebin_dir = pkg_root
+        .join("_build")
+        .join("dev")
+        .join("native")
+        .join("ebin");
+    fs::create_dir_all(&ebin_dir)
+        .into_diagnostic()
+        .wrap_err("Failed to create native ebin dir for test helpers")?;
+
+    let mut cmd = std::process::Command::new("erlc");
+    cmd.arg("+debug_info");
+    cmd.arg("-o").arg(ebin_dir.as_str());
+
+    // Add rebar3 lib dir to ERL_LIBS so -include_lib can find hex dep headers.
+    let rebar_lib_dir = pkg_root
+        .join("_build")
+        .join("dev")
+        .join("native")
+        .join("default")
+        .join("lib");
+    if rebar_lib_dir.exists() {
+        cmd.env("ERL_LIBS", rebar_lib_dir.as_str());
+    }
+
+    // Add all existing ebin dirs to code path so test helpers can find
+    // both the package's native modules and hex dep modules.
+    for ebin in ebin_dirs {
+        cmd.arg("-pa").arg(ebin.as_str());
+    }
+
+    // Add beamtalk runtime include dir for -include_lib("beamtalk_runtime/...")
+    //   Dev layout:       -I runtime/apps/
+    //   Installed layout:  -I PREFIX/lib/beamtalk/lib/
+    if let Ok((runtime_dir, layout)) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout() {
+        let include_parent = match layout {
+            beamtalk_cli::repl_startup::RuntimeLayout::Dev => runtime_dir.join("apps"),
+            beamtalk_cli::repl_startup::RuntimeLayout::Installed => runtime_dir.join("lib"),
+        };
+        if include_parent.exists() {
+            cmd.arg("-I").arg(&include_parent);
+        }
+    }
+
+    // Add native/include if present
+    let include_dir = pkg_root.join("native").join("include");
+    if include_dir.exists() {
+        cmd.arg("-I").arg(include_dir.as_str());
+    }
+
+    for erl_file in &erl_files {
+        cmd.arg(erl_file.as_str());
+    }
+
+    debug!(
+        count = erl_files.len(),
+        "Compiling native test Erlang helpers"
+    );
+
+    let output = cmd
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run erlc for native test helpers")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        miette::bail!(
+            "Native test Erlang compilation failed:\n{}",
+            format!("{stdout}{stderr}").trim_end()
+        );
     }
 
     Ok(())
@@ -1661,7 +1832,8 @@ mod tests {
         .unwrap();
 
         let files = vec![dir.join("counter.bt")];
-        let (module_index, superclass_index) = build_fixture_class_indexes(&files).unwrap();
+        let (module_index, superclass_index, _class_infos) =
+            build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("Counter").map(String::as_str),
             Some("bt@counter")
@@ -1686,7 +1858,8 @@ mod tests {
 
         // fixture_module_name uses the file stem only, so env.bt → bt@env
         let files = vec![subdir.join("env.bt")];
-        let (module_index, superclass_index) = build_fixture_class_indexes(&files).unwrap();
+        let (module_index, superclass_index, _class_infos) =
+            build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("SchemeEnv").map(String::as_str),
             Some("bt@env")

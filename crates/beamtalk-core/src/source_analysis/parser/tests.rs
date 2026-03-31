@@ -2081,6 +2081,23 @@ fn parse_arrow_method_with_keyword_typed_param() {
 }
 
 #[test]
+fn parse_gtgt_as_binary_method_selector() {
+    // BT-1735: `>>` (GtGt token) is a valid binary method selector in class bodies
+    let module = parse_ok(
+        "Object subclass: Behaviour
+  sealed >> aSelector :: Symbol -> CompiledMethod => @primitive \"methodLookup\"",
+    );
+
+    let method = &module.classes[0].methods[0];
+    assert_eq!(method.selector.name(), ">>");
+    assert_eq!(method.parameters.len(), 1);
+    assert_eq!(method.parameters[0].name.name, "aSelector");
+    assert!(method.parameters[0].type_annotation.is_some());
+    assert!(method.return_type.is_some());
+    assert!(method.is_sealed);
+}
+
+#[test]
 fn parse_binary_method_with_union_typed_param() {
     // BT-1136/Copilot: `+ other :: Integer | Nil =>` — union type in binary param
     let module = parse_ok(

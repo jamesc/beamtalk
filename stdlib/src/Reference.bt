@@ -42,6 +42,14 @@ sealed Object subclass: Reference
   /// ```
   =:= other -> Boolean => @primitive "=:="
 
+  /// Test strict inequality with another reference.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ref1 =/= ref2          // => true
+  /// ```
+  =/= other -> Boolean => @primitive "=/="
+
   /// Test inequality with another reference.
   ///
   /// ## Examples

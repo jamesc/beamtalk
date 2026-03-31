@@ -9,5 +9,5 @@ description = "HTTP client and server for Beamtalk"
 [dependencies]
 
 [native.dependencies]
-gun = "~> 2.1"
+gun = "2.1.0"
 cowboy = "~> 2.12"

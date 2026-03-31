@@ -419,7 +419,8 @@ impl Parser {
             }
             // Binary method: `+ other =>` or `+ other -> Type =>` or `+ other :: Type =>`
             // Arrow (`->`) is also a valid binary method selector (ADR 0047).
-            Some(TokenKind::BinarySelector(_) | TokenKind::Arrow) => {
+            // GtGt (`>>`) is also a valid binary method selector (BT-1735).
+            Some(TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt) => {
                 if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
                     return false;
                 }
@@ -974,23 +975,16 @@ impl Parser {
                 self.advance();
                 Some((selector, Vec::new()))
             }
-            // Binary method: `+ other` or `+ other :: Type`
-            // Arrow (`->`) is a valid binary method selector (ADR 0047).
-            TokenKind::Arrow => {
-                let selector = MessageSelector::Binary("->".into());
-                self.advance();
-
-                let param_name =
-                    self.parse_identifier("Expected parameter name after binary selector");
-                let type_annotation = self.parse_optional_param_type();
-                let param = match type_annotation {
-                    Some(ta) => ParameterDefinition::with_type(param_name, ta),
-                    None => ParameterDefinition::new(param_name),
+            // Binary method: `+ other`, `-> other` (ADR 0047), `>> other` (BT-1735)
+            // Arrow and GtGt are separate token kinds but valid binary selectors.
+            TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt => {
+                let op_name = match self.current_kind() {
+                    TokenKind::BinarySelector(op) => op.clone(),
+                    TokenKind::Arrow => "->".into(),
+                    TokenKind::GtGt => ">>".into(),
+                    _ => unreachable!(),
                 };
-                Some((selector, vec![param]))
-            }
-            TokenKind::BinarySelector(op) => {
-                let selector = MessageSelector::Binary(op.clone());
+                let selector = MessageSelector::Binary(op_name);
                 self.advance();
 
                 let param_name =
@@ -1467,23 +1461,16 @@ impl Parser {
                 self.advance();
                 (selector, Vec::new())
             }
-            // Binary: `+ other`, `< other`, etc.
-            TokenKind::BinarySelector(op) => {
-                let selector = MessageSelector::Binary(op.clone());
-                self.advance();
-
-                let param_name =
-                    self.parse_identifier("Expected parameter name after binary selector");
-                let type_annotation = self.parse_optional_param_type();
-                let param = match type_annotation {
-                    Some(ta) => ParameterDefinition::with_type(param_name, ta),
-                    None => ParameterDefinition::new(param_name),
+            // Binary: `+ other`, `< other`, `-> other` (ADR 0047), `>> other` (BT-1735)
+            // Arrow and GtGt are separate token kinds but valid binary selectors.
+            TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt => {
+                let op_name = match self.current_kind() {
+                    TokenKind::BinarySelector(op) => op.clone(),
+                    TokenKind::Arrow => "->".into(),
+                    TokenKind::GtGt => ">>".into(),
+                    _ => unreachable!(),
                 };
-                (selector, vec![param])
-            }
-            // Arrow (`->`) is also a valid binary method selector (ADR 0047)
-            TokenKind::Arrow => {
-                let selector = MessageSelector::Binary("->".into());
+                let selector = MessageSelector::Binary(op_name);
                 self.advance();
 
                 let param_name =

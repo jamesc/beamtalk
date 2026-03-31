@@ -106,7 +106,7 @@ handler_receives_request_and_returns_response_test() ->
 %% @private Build a minimal HTTPResponse map for testing.
 %%
 %% This constructs a raw map matching the HTTPResponse field layout,
-%% bypassing the bt@stdlib@httpresponse constructor (which may not be
+%% bypassing the bt@http@httpresponse constructor (which may not be
 %% loaded during EUnit tests).
 -spec make_simple_response(non_neg_integer(), binary()) -> map().
 make_simple_response(Status, Body) ->
