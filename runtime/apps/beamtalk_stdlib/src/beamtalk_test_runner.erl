@@ -774,7 +774,9 @@ ensure_loaded_or_warn(Module) ->
         {module, _} ->
             ok;
         {error, Reason} ->
-            ?LOG_WARNING(#{event => test_module_load_failed, module => Module, reason => Reason},
-                         #{domain => [beamtalk, stdlib]}),
+            ?LOG_WARNING(
+                #{event => test_module_load_failed, module => Module, reason => Reason},
+                #{domain => [beamtalk, stdlib]}
+            ),
             ok
     end.
