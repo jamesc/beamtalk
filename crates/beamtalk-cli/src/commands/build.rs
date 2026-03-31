@@ -3124,14 +3124,14 @@ mod tests {
         let config_path = generate_rebar_config(&project_path, &deps, None).unwrap();
         let content = fs::read_to_string(&config_path).unwrap();
 
+        // rebar3 only handles hex deps — native/*.erl compiled separately via erlc
         assert!(
-            content.contains("{src_dirs, [\"../../../native\"]}"),
-            "Should include src_dirs with relative path when native/ exists"
+            !content.contains("src_dirs"),
+            "rebar.config should not contain src_dirs (native .erl compiled via erlc)"
         );
-        // No include/ subdir
         assert!(
             !content.contains("include_dirs"),
-            "Should not include include_dirs without native/include/"
+            "rebar.config should not contain include_dirs"
         );
     }
 
@@ -3158,13 +3158,14 @@ mod tests {
         let config_path = generate_rebar_config(&project_path, &deps, None).unwrap();
         let content = fs::read_to_string(&config_path).unwrap();
 
+        // rebar3 only handles hex deps — native/*.erl compiled separately via erlc
         assert!(
-            content.contains("{src_dirs, [\"../../../native\"]}"),
-            "Should include src_dirs with relative path"
+            !content.contains("src_dirs"),
+            "rebar.config should not contain src_dirs (native .erl compiled via erlc)"
         );
         assert!(
-            content.contains("{include_dirs, [\"../../../native/include\"]}"),
-            "Should include include_dirs with relative path when native/include/ exists"
+            !content.contains("include_dirs"),
+            "rebar.config should not contain include_dirs (resolved via -I in erlc)"
         );
     }
 

@@ -1011,7 +1011,11 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     pipeline
         .class_superclass_index
         .extend(fixture_superclass_index);
-    pipeline.all_class_infos.extend(fixture_class_infos);
+    // Note: fixture ClassInfo is intentionally NOT added to all_class_infos.
+    // The class_module_index merge above is sufficient for the unresolved-class
+    // validator. Adding full ClassInfo would cause false DNU/actor-new errors
+    // in tests that intentionally test error paths (e.g., Counter new).
+    drop(fixture_class_infos);
 
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,
