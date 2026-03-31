@@ -11,87 +11,29 @@
 //!
 //! Supports commands: `compile_expression`, `compile`, `diagnostics`, `version`.
 
-use std::io::{self, Read, Write};
+use std::io;
 
+use beamtalk_etf::{
+    self as etf, atom, binary_from_str as binary, map_get, term_to_atom, term_to_bool,
+    term_to_string, term_to_string_list, term_to_usize,
+};
 use clap::{ArgAction, Parser};
 use tracing_subscriber::{self, EnvFilter};
 
-use eetf::{Atom, Binary, List, Map, Term};
+use eetf::{List, Map, Term};
 
-/// Read a {packet, 4} framed message from stdin.
-fn read_packet(stdin: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
-    let mut len_buf = [0u8; 4];
-    match stdin.read_exact(&mut len_buf) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(e),
-    }
-    let len = u32::from_be_bytes(len_buf) as usize;
-    // Guard against unreasonably large packets (>64 MiB)
-    if len > 64 * 1024 * 1024 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("packet too large: {len} bytes"),
-        ));
-    }
-    let mut buf = vec![0u8; len];
-    stdin.read_exact(&mut buf)?;
-    Ok(Some(buf))
-}
+// ────────────────────────────────────────────────────────────────
+// Domain-specific ETF helpers (not shared via beamtalk-etf)
+//
+// The compiler port's `term_to_string_map` needs richer error reporting
+// than the generic `Option`-based version in beamtalk-etf, so it remains
+// local.
 
-/// Write a `{packet, 4}` framed message to stdout.
-fn write_packet(stdout: &mut impl Write, data: &[u8]) -> io::Result<()> {
-    let len = u32::try_from(data.len())
-        .expect("packet too large for {packet, 4} framing")
-        .to_be_bytes();
-    stdout.write_all(&len)?;
-    stdout.write_all(data)?;
-    stdout.flush()
-}
-
-/// Helper to create an atom Term.
-fn atom(name: &str) -> Term {
-    Term::from(Atom::from(name))
-}
-
-/// Helper to create a binary Term from a string.
-fn binary(s: &str) -> Term {
-    Term::from(Binary::from(s.as_bytes()))
-}
-
-/// Extract a binary string value from a Term.
-fn term_to_string(term: &Term) -> Option<String> {
-    match term {
-        Term::Binary(b) => String::from_utf8(b.bytes.clone()).ok(),
-        // Erlang may send short strings as ByteList
-        Term::ByteList(bl) => String::from_utf8(bl.bytes.clone()).ok(),
-        _ => None,
-    }
-}
-
-/// Extract a list of strings from a Term (for `known_vars`).
-fn term_to_string_list(term: &Term) -> Option<Vec<String>> {
-    match term {
-        Term::List(list) => {
-            let mut result = Vec::new();
-            for elem in &list.elements {
-                result.push(term_to_string(elem)?);
-            }
-            Some(result)
-        }
-        _ => None,
-    }
-}
-
-/// Look up a key (atom) in an ETF map.
-fn map_get<'a>(map: &'a Map, key: &str) -> Option<&'a Term> {
-    map.map.get(&atom(key))
-}
-
-/// Extract a string→string map from a Term.
+/// Extract a string->string map from a Term with descriptive errors.
+///
 /// Returns `Err` if the term is present but contains non-string keys or values,
 /// so callers can surface the problem rather than silently falling back.
-fn term_to_string_map(
+fn term_to_string_map_checked(
     term: &Term,
     field_name: &str,
 ) -> Result<std::collections::HashMap<String, String>, String> {
@@ -109,36 +51,8 @@ fn term_to_string_map(
             Ok(result)
         }
         _ => Err(format!(
-            "{field_name} must be a map of string→string, got: {term:?}"
+            "{field_name} must be a map of string->string, got: {term:?}"
         )),
-    }
-}
-
-/// Extract a boolean value from a Term.
-fn term_to_bool(term: &Term) -> Option<bool> {
-    match term {
-        Term::Atom(a) => match a.name.as_str() {
-            "true" => Some(true),
-            "false" => Some(false),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// Extract an atom name string from a Term.
-fn term_to_atom(term: &Term) -> Option<String> {
-    match term {
-        Term::Atom(a) => Some(a.name.clone()),
-        _ => None,
-    }
-}
-
-/// Extract an unsigned integer from a Term (`FixInteger` only).
-fn term_to_usize(term: &Term) -> Option<usize> {
-    match term {
-        Term::FixInteger(n) => usize::try_from(n.value).ok(),
-        _ => None,
     }
 }
 
@@ -376,7 +290,7 @@ fn extract_optional_string_map(
 ) -> Result<std::collections::HashMap<String, String>, Term> {
     match map_get(request, key) {
         None => Ok(std::collections::HashMap::new()),
-        Some(term) => term_to_string_map(term, key).map_err(|e| error_response(&[e])),
+        Some(term) => term_to_string_map_checked(term, key).map_err(|e| error_response(&[e])),
     }
 }
 
@@ -1417,7 +1331,7 @@ fn run() {
 
     loop {
         // Read next request
-        let packet = match read_packet(&mut stdin) {
+        let packet = match etf::read_packet(&mut stdin) {
             Ok(Some(data)) => data,
             Ok(None) => break, // EOF — port closed
             Err(e) => {
@@ -1434,7 +1348,7 @@ fn run() {
                 let response = error_response(&[format!("ETF decode error: {e}")]);
                 let mut buf = Vec::new();
                 if response.encode(&mut buf).is_ok() {
-                    let _ = write_packet(&mut stdout, &buf);
+                    let _ = etf::write_packet(&mut stdout, &buf);
                 }
                 continue;
             }
@@ -1447,7 +1361,7 @@ fn run() {
         let mut buf = Vec::new();
         match response.encode(&mut buf) {
             Ok(()) => {
-                if let Err(e) = write_packet(&mut stdout, &buf) {
+                if let Err(e) = etf::write_packet(&mut stdout, &buf) {
                     eprintln!("Failed to write response: {e}");
                     break;
                 }
