@@ -244,9 +244,9 @@ API metadata is **not** included in the tarball. The tarball ships source; the c
 
 #### MCP discovery
 
-MCP already discovers corpora from `_build/deps/*/` (implemented in `crates/beamtalk-mcp/src/server.rs:119-155`). After `beamtalk build` compiles dependencies, each dependency's `class_corpus.json` lands in `_build/deps/{name}/class_corpus.json`. No new MCP code is needed — the existing discovery mechanism works.
+MCP already discovers corpora from the `_build/` tree (implemented in `crates/beamtalk-mcp/src/server.rs`), including `_build/dev/` for the root package and `_build/deps/*/` for dependencies (with fallback search paths). After `beamtalk build`, each package's `class_corpus.json` is discovered from these existing locations. No new MCP code is needed.
 
-**Visibility:** `class_corpus.json` includes only public classes and their public methods. When the `internal` class modifier lands (ADR 0071), internal classes are excluded.
+**Visibility:** Visibility is enforced at corpus generation time — the build step that creates `class_corpus.json` includes only public classes and their public methods. MCP consumes the generated corpus as-is. When the `internal` class modifier lands (ADR 0071), internal classes are excluded from generated `class_corpus.json`.
 
 #### Remote package search (future)
 
@@ -330,7 +330,7 @@ The hex tarball format (Phase 2+) is standard. Private repos work with rebar3's 
 
 ### Tool author (MCP/LSP)
 
-`class_corpus.json` is generated on build for every package, and MCP discovers it automatically from `_build/deps/*/` (`server.rs:119-155`). No changes needed across any phase.
+`class_corpus.json` is generated on build for every package, and MCP discovers it automatically from the `_build/` tree (`_build/dev/` for root, `_build/deps/*/` for dependencies). No changes needed across any phase.
 
 ## Steelman Analysis
 
