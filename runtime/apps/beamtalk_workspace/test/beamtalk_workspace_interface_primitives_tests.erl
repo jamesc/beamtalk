@@ -29,15 +29,37 @@ fake_self(Pid) ->
 %% Cross-platform temporary directory (Windows has no /tmp).
 tmp_dir() ->
     case os:type() of
-        {win32, _} -> os:getenv("TEMP");
-        _ -> "/tmp"
+        {win32, _} ->
+            case os:getenv("TEMP") of
+                false ->
+                    case os:getenv("TMP") of
+                        false -> ".";
+                        Tmp -> Tmp
+                    end;
+                Temp ->
+                    Temp
+            end;
+        _ ->
+            "/tmp"
     end.
 
-%% Cross-platform recursive directory removal.
+%% Create a unique empty directory under tmp_dir().
+make_empty_tmp_dir(Prefix) ->
+    Dir = filename:join(
+        tmp_dir(), Prefix ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = filelib:ensure_dir(filename:join(Dir, "dummy")),
+    Dir.
+
+%% Cross-platform recursive directory removal using pure Erlang.
 rm_rf(Dir) ->
-    case os:type() of
-        {win32, _} -> os:cmd("rmdir /s /q \"" ++ Dir ++ "\"");
-        _ -> os:cmd("rm -rf " ++ Dir)
+    case filelib:is_dir(Dir) of
+        true ->
+            {ok, Entries} = file:list_dir(Dir),
+            lists:foreach(fun(E) -> rm_rf(filename:join(Dir, E)) end, Entries),
+            file:del_dir(Dir);
+        false ->
+            file:delete(Dir)
     end.
 
 %% Start the actor registry defensively — tolerates already-started.
@@ -475,9 +497,10 @@ root_supervisor_returns_registered_value_test() ->
 
 sync_dispatch_raises_when_no_manifest_test() ->
     %% sync from a directory without beamtalk.toml should raise file_not_found.
-    %% Use a temp dir as a path guaranteed to have no beamtalk.toml.
+    %% Create a unique empty dir to guarantee no beamtalk.toml is present.
+    EmptyDir = make_empty_tmp_dir("bt_no_manifest_dispatch_"),
     OldCwd = file:get_cwd(),
-    ok = file:set_cwd(tmp_dir()),
+    ok = file:set_cwd(EmptyDir),
     try
         beamtalk_workspace_interface_primitives:dispatch(sync, [], fake_self(self())),
         ?assert(false)
@@ -487,13 +510,15 @@ sync_dispatch_raises_when_no_manifest_test() ->
             ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class)
     after
         {ok, Cwd} = OldCwd,
-        file:set_cwd(Cwd)
+        file:set_cwd(Cwd),
+        rm_rf(EmptyDir)
     end.
 
 sync_direct_raises_when_no_manifest_test() ->
     %% Direct call to sync/0 should raise file_not_found when no beamtalk.toml.
+    EmptyDir = make_empty_tmp_dir("bt_no_manifest_direct_"),
     OldCwd = file:get_cwd(),
-    ok = file:set_cwd(tmp_dir()),
+    ok = file:set_cwd(EmptyDir),
     try
         beamtalk_workspace_interface_primitives:sync(),
         ?assert(false)
@@ -503,16 +528,15 @@ sync_direct_raises_when_no_manifest_test() ->
             ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class)
     after
         {ok, Cwd} = OldCwd,
-        file:set_cwd(Cwd)
+        file:set_cwd(Cwd),
+        rm_rf(EmptyDir)
     end.
 
 sync_returns_map_with_expected_keys_test() ->
     %% When run from a directory with beamtalk.toml, sync/0 returns a map
     %% with the expected keys.
     %% Create a temporary project directory with beamtalk.toml and src/.
-    TmpDir = filename:join(
-        tmp_dir(), "bt_sync_test_" ++ integer_to_list(erlang:unique_integer([positive]))
-    ),
+    TmpDir = make_empty_tmp_dir("bt_sync_test_"),
     ok = filelib:ensure_dir(filename:join([TmpDir, "src", "dummy"])),
     ok = file:write_file(
         filename:join(TmpDir, "beamtalk.toml"), <<"[package]\nname = \"test\"\n">>
