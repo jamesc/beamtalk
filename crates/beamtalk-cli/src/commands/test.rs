@@ -367,6 +367,31 @@ struct TestResultDetail {
     error: Option<String>,
 }
 
+/// Result from running native `EUnit` tests.
+#[derive(Debug, Default)]
+struct NativeEunitResult {
+    /// Total number of native `EUnit` tests (passed + failed + skipped).
+    total: usize,
+    /// Number of passing tests.
+    passed: usize,
+    /// Number of failing tests.
+    failed: usize,
+    /// Number of skipped tests.
+    #[allow(dead_code)] // populated for future skip-reason display
+    skipped: usize,
+    /// Per-module results: `(module_name, passed, failed, skipped)`.
+    modules: Vec<(String, usize, usize, usize)>,
+    /// Captured `EUnit` output (failures, errors).
+    output: String,
+}
+
+/// Combined test results from `BUnit` and native `EUnit` runs.
+#[derive(Debug)]
+struct TestResults {
+    bunit: Option<BunitResult>,
+    native: Option<NativeEunitResult>,
+}
+
 /// Build the effective class index for a test file: base classes + fixtures.
 ///
 /// For single-package runs, uses the merged index. For multi-package runs,
@@ -775,6 +800,8 @@ struct TestPipeline {
     jobs: usize,
     /// ADR 0072: Hex dependency names that need OTP app startup before tests.
     hex_dep_names: Vec<String>,
+    /// Native `EUnit` test module names (modules ending in `_test` or `_tests`).
+    native_test_modules: Vec<String>,
 }
 
 /// Run `BUnit` tests.
@@ -791,16 +818,13 @@ pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize) -> Result<()
 
     let test_path = Utf8PathBuf::from(path);
 
-    // Determine if path is a single file or directory
+    // Determine if path is a single file or directory.
+    // Allow empty test_files — native-only packages have no .bt test files
+    // but still have native/test/*.erl to discover later.
     let test_files = if test_path.is_file() {
         vec![test_path.clone()]
     } else if test_path.is_dir() {
-        let files = find_test_files(&test_path)?;
-        if files.is_empty() {
-            println!("No test files found in '{test_path}'");
-            return Ok(());
-        }
-        files
+        find_test_files(&test_path)?
     } else {
         miette::bail!("Test path '{}' not found", test_path);
     };
@@ -817,17 +841,37 @@ pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize) -> Result<()
     compile_fixtures(&mut pipeline)?;
     discover_and_compile_tests(&mut pipeline)?;
 
-    if pipeline.compiled_tests.is_empty() && pipeline.compiled_doc_tests.is_empty() {
+    // Cheap pre-scan: check if any package might have native test files
+    // so we can skip build_packages entirely when there are no tests at all.
+    let has_native_test_dir = pipeline.discovered_packages.iter().any(|(pkg_root, _)| {
+        let native_test_dir = pkg_root.join("native").join("test");
+        native_test_dir.is_dir()
+    });
+
+    if pipeline.compiled_tests.is_empty()
+        && pipeline.compiled_doc_tests.is_empty()
+        && !has_native_test_dir
+    {
         println!("No tests found");
         return Ok(());
     }
 
     build_packages(&mut pipeline)?;
-    let result = execute_tests(&pipeline)?;
-    report_results(&pipeline, &result, start_time)
+
+    if pipeline.compiled_tests.is_empty()
+        && pipeline.compiled_doc_tests.is_empty()
+        && pipeline.native_test_modules.is_empty()
+    {
+        println!("No tests found");
+        return Ok(());
+    }
+
+    let results = execute_tests(&pipeline)?;
+    report_results(&pipeline, &results, start_time)
 }
 
 /// Initialize the test pipeline: discover packages and build class indexes.
+#[allow(clippy::too_many_lines)]
 fn initialize_pipeline(
     test_path: Utf8PathBuf,
     test_files: Vec<Utf8PathBuf>,
@@ -851,6 +895,17 @@ fn initialize_pipeline(
         let cwd = canonical_path(Utf8Path::new("."));
         if seen.insert(cwd.clone()) {
             roots.push(cwd);
+        }
+
+        // Also seed from the test_path itself when it's a directory.
+        // This ensures `beamtalk test path/to/pkg` from a parent directory
+        // discovers the package even when it has no .bt test files
+        // (native-only packages).
+        if test_path.is_dir() {
+            let tp = canonical_path(&test_path);
+            if seen.insert(tp.clone()) {
+                roots.push(tp);
+            }
         }
 
         // Walk up from each test file to find its package root
@@ -966,6 +1021,7 @@ fn initialize_pipeline(
         package_ebin_dirs: Vec::new(),
         jobs,
         hex_dep_names: Vec::new(),
+        native_test_modules: Vec::new(),
     })
 }
 
@@ -1312,6 +1368,33 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         let native_test_dir = pkg_root.join("native").join("test");
         if native_test_dir.exists() && native_test_dir.is_dir() {
             compile_native_test_erlang(pkg_root, &native_test_dir, &pipeline.package_ebin_dirs)?;
+
+            // Discover native EUnit test modules (_test or _tests suffix)
+            // from source files to avoid picking up stale .beam artifacts.
+            // Skip duplicates (BEAM code path is global, first module wins).
+            for erl_file in fs::read_dir(&native_test_dir)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to read {native_test_dir}"))?
+            {
+                let entry = erl_file.into_diagnostic()?;
+                let path = entry.path();
+                if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        if stem.ends_with("_test") || stem.ends_with("_tests") {
+                            let module = stem.to_string();
+                            if pipeline.native_test_modules.contains(&module) {
+                                eprintln!(
+                                    "Warning: duplicate native test module '{}' in package \
+                                     '{}' — skipping (already discovered in another package)",
+                                    module, pkg.name
+                                );
+                            } else {
+                                pipeline.native_test_modules.push(module);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1373,15 +1456,27 @@ fn compile_native_test_erlang(
     Ok(())
 }
 
-/// Phase 3: Run all tests via `beamtalk_test_runner:run_all(Jobs)`.
+/// Phase 3: Run all tests (`BUnit` + native `EUnit`).
 ///
-/// Replaces `EUnit` wrapper compilation and execution with direct
-/// calls to the `BUnit` runner, which handles test discovery and execution
-/// in the Erlang runtime and returns structured JSON results.
-fn execute_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
+/// Runs `BUnit` tests via `beamtalk_test_runner:run_all(Jobs)` if any `BUnit`
+/// tests were compiled, then runs native `EUnit` test modules if any were
+/// discovered in `native/test/`.
+fn execute_tests(pipeline: &TestPipeline) -> Result<TestResults> {
     println!("Running tests...\n");
 
-    run_bunit_tests(pipeline)
+    let bunit = if pipeline.compiled_tests.is_empty() && pipeline.compiled_doc_tests.is_empty() {
+        None
+    } else {
+        Some(run_bunit_tests(pipeline)?)
+    };
+
+    let native = if pipeline.native_test_modules.is_empty() {
+        None
+    } else {
+        Some(run_native_eunit_tests(pipeline)?)
+    };
+
+    Ok(TestResults { bunit, native })
 }
 
 /// Run tests via `beamtalk_test_runner:run_all(Jobs)` in a single BEAM process.
@@ -1566,71 +1661,318 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     })
 }
 
+/// Parse `EUnit`'s summary line from verbose output to extract test counts.
+///
+/// `EUnit` outputs one of two summary formats:
+/// - `"  N tests passed."` — all passed
+/// - `"  Failed: F.  Skipped: S.  Passed: P."` — mixed results
+///
+/// Returns `(passed, failed, skipped)`. Falls back to `(0, 0, 0)` if no summary found.
+fn parse_eunit_summary(output: &str) -> (usize, usize, usize) {
+    for line in output.lines().rev() {
+        let trimmed = line.trim();
+
+        // "All N tests passed.", "N tests passed.", or "Test passed." (single test)
+        if trimmed.ends_with("tests passed.") || trimmed == "Test passed." {
+            if trimmed == "Test passed." {
+                return (1, 0, 0);
+            }
+            if let Some(n_str) = trimmed
+                .strip_suffix(" tests passed.")
+                .and_then(|s| s.strip_prefix("All ").or(Some(s)))
+            {
+                if let Ok(n) = n_str.parse::<usize>() {
+                    return (n, 0, 0);
+                }
+            }
+        }
+
+        // "Failed: F.  Skipped: S.  Passed: P."
+        if trimmed.starts_with("Failed:") && trimmed.contains("Passed:") {
+            let mut passed = 0;
+            let mut failed = 0;
+            let mut skipped = 0;
+            for segment in trimmed.split('.') {
+                let seg = segment.trim();
+                if let Some(val) = seg.strip_prefix("Failed:") {
+                    failed = val.trim().parse().unwrap_or(0);
+                } else if let Some(val) = seg.strip_prefix("Passed:") {
+                    passed = val.trim().parse().unwrap_or(0);
+                } else if let Some(val) = seg.strip_prefix("Skipped:") {
+                    skipped = val.trim().parse().unwrap_or(0);
+                }
+            }
+            return (passed, failed, skipped);
+        }
+    }
+    (0, 0, 0)
+}
+
+/// Run native `EUnit` test modules in a BEAM process.
+///
+/// Executes `eunit:test/2` for each discovered native test module and
+/// collects per-module pass/fail counts by parsing `EUnit`'s verbose
+/// summary output.
+#[allow(clippy::too_many_lines)]
+fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> {
+    debug!(
+        count = pipeline.native_test_modules.len(),
+        "Running native EUnit tests"
+    );
+
+    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()
+        .wrap_err("Cannot find Erlang runtime directory")?;
+    let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
+
+    // ADR 0072: Start hex dep OTP applications before tests
+    let hex_deps_start_cmd =
+        beamtalk_cli::repl_startup::hex_deps_start_fragment(&pipeline.hex_dep_names);
+
+    // Build a list of module atoms for EUnit
+    let module_list = pipeline
+        .native_test_modules
+        .iter()
+        .map(|m| format!("'{m}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // Inline Erlang: run EUnit per module with `verbose` so per-test
+    // pass/fail output is printed to stdout. After each module completes,
+    // emit a `NATIVE_EUNIT_DONE:<module>` marker line. The Rust side
+    // parses EUnit's own summary lines to get exact pass/fail counts
+    // (e.g. "  2 tests passed." or "  Failed: 1.  Skipped: 0.  Passed: 2.")
+    // rather than relying on the coarse ok/error return value.
+    let eval_cmd = format!(
+        "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+         {hex_deps_start_cmd}\
+         Mods = [{module_list}], \
+         HasFailed = lists:foldl(fun(M, Acc) -> \
+             Res = eunit:test(M, [verbose]), \
+             io:format(\"NATIVE_EUNIT_DONE:~s~n\", [M]), \
+             case Res of ok -> Acc; _ -> true end \
+         end, false, Mods), \
+         init:stop(case HasFailed of true -> 1; false -> 0 end)."
+    );
+
+    let mut cmd = std::process::Command::new("erl");
+    #[cfg(windows)]
+    {
+        let build_dir_path = pipeline.build_dir.as_str().replace('\\', "/");
+        cmd.arg("-noshell").arg("-pa").arg(build_dir_path);
+    }
+    #[cfg(not(windows))]
+    {
+        cmd.arg("-noshell")
+            .arg("-pa")
+            .arg(pipeline.build_dir.as_str());
+    }
+
+    for ebin_dir in &pipeline.package_ebin_dirs {
+        #[cfg(windows)]
+        {
+            let ebin_dir_path = ebin_dir.as_str().replace('\\', "/");
+            cmd.arg("-pa").arg(ebin_dir_path);
+        }
+        #[cfg(not(windows))]
+        {
+            cmd.arg("-pa").arg(ebin_dir.as_str());
+        }
+    }
+
+    for arg in &pa_args {
+        cmd.arg(arg);
+    }
+
+    cmd.arg("-eval").arg(&eval_cmd);
+
+    let output = cmd
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run native EUnit tests")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    debug!("Native EUnit stdout: {}", stdout);
+    debug!("Native EUnit stderr: {}", stderr);
+
+    // Parse EUnit's summary lines to get exact per-module pass/fail counts.
+    // EUnit outputs one of two summary formats per module:
+    //   "  N tests passed."                          (all passed)
+    //   "  Failed: F.  Skipped: S.  Passed: P."      (some failed)
+    // We split stdout by our NATIVE_EUNIT_DONE markers to attribute
+    // each summary to the correct module.
+    let mut modules = Vec::new();
+    let mut total_passed: usize = 0;
+    let mut total_failed: usize = 0;
+    let mut total_skipped: usize = 0;
+    let mut eunit_output = String::new();
+
+    // Split output into per-module sections using the marker lines
+    let mut current_section = String::new();
+    let mut module_idx = 0;
+    for line in stdout.lines() {
+        if let Some(module_name) = line.strip_prefix("NATIVE_EUNIT_DONE:") {
+            // Parse the section for this module's EUnit summary
+            let (passed, mut failed, skipped) = parse_eunit_summary(&current_section);
+
+            // If EUnit crashed before printing a summary (e.g. {error, Reason}),
+            // parse_eunit_summary returns (0, 0, 0). Detect this by checking the
+            // exit status — if the process failed and no tests were counted, treat
+            // the module as having 1 failure.
+            if passed == 0 && failed == 0 && skipped == 0 && !output.status.success() {
+                // Check if the section contains EUnit error indicators
+                if current_section.contains("*failed*")
+                    || current_section.contains("Error in")
+                    || current_section.contains("{error,")
+                {
+                    failed = 1;
+                }
+            }
+
+            modules.push((module_name.to_string(), passed, failed, skipped));
+            total_passed += passed;
+            total_failed += failed;
+            total_skipped += skipped;
+
+            if failed > 0 {
+                eunit_output.push_str(&current_section);
+            }
+
+            current_section.clear();
+            module_idx += 1;
+        } else {
+            current_section.push_str(line);
+            current_section.push('\n');
+        }
+    }
+
+    // If no markers found, fall back to counting test modules as all-passed or all-failed
+    if module_idx == 0 && !pipeline.native_test_modules.is_empty() {
+        warn!("No NATIVE_EUNIT_DONE markers found in EUnit output");
+        let all_passed = output.status.success();
+        for module_name in &pipeline.native_test_modules {
+            if all_passed {
+                modules.push((module_name.clone(), 1, 0, 0));
+                total_passed += 1;
+            } else {
+                modules.push((module_name.clone(), 0, 1, 0));
+                total_failed += 1;
+            }
+        }
+        eunit_output = stdout.to_string();
+    }
+
+    Ok(NativeEunitResult {
+        total: total_passed + total_failed + total_skipped,
+        passed: total_passed,
+        failed: total_failed,
+        skipped: total_skipped,
+        modules,
+        output: eunit_output,
+    })
+}
+
 /// Phase 4: Aggregate and report test results.
 ///
 /// BT-1631: Displays results from `beamtalk_test_runner:run_all/1` with
 /// Beamtalk class names (not Erlang module names) and per-class summary.
+/// Also reports native `EUnit` test results when present.
 fn report_results(
     pipeline: &TestPipeline,
-    result: &BunitResult,
+    results: &TestResults,
     start_time: Instant,
 ) -> Result<()> {
     let mut failed_details = Vec::new();
+    let mut total_tests: usize = 0;
+    let mut total_passed: usize = 0;
+    let mut total_failed: usize = 0;
 
-    // Group test results by class name (prefix of test name)
-    let mut class_results: HashMap<String, (usize, usize, usize)> = HashMap::new();
+    // Report BUnit results
+    if let Some(result) = &results.bunit {
+        // Group test results by class name (prefix of test name)
+        let mut class_results: HashMap<String, (usize, usize, usize)> = HashMap::new();
 
-    for test in &result.tests {
-        let test_name = &test.name;
-        // Extract class name from test name (class method names are formed as "ClassName testMethod")
-        let class_name = if let Some(first_word) = test_name.split_whitespace().next() {
-            first_word.to_string()
-        } else {
-            test_name.clone()
-        };
+        for test in &result.tests {
+            let test_name = &test.name;
+            // Extract class name from test name (class method names are formed as "ClassName testMethod")
+            let class_name = if let Some(first_word) = test_name.split_whitespace().next() {
+                first_word.to_string()
+            } else {
+                test_name.clone()
+            };
 
-        let (passed, failed, skipped) =
-            class_results.entry(class_name.clone()).or_insert((0, 0, 0));
+            let (passed, failed, skipped) =
+                class_results.entry(class_name.clone()).or_insert((0, 0, 0));
 
-        match test.status.as_str() {
-            "pass" => *passed += 1,
-            "fail" => {
-                *failed += 1;
-                if let Some(error) = &test.error {
-                    failed_details.push(format!("FAIL {test_name}: {error}"));
+            match test.status.as_str() {
+                "pass" => *passed += 1,
+                "fail" => {
+                    *failed += 1;
+                    if let Some(error) = &test.error {
+                        failed_details.push(format!("FAIL {test_name}: {error}"));
+                    }
+                }
+                "skip" => *skipped += 1,
+                _ => {}
+            }
+        }
+
+        // Print results per class (matches BUnit output format)
+        for compiled in &pipeline.compiled_tests {
+            let class_name = &compiled.test_class.class_name;
+            if let Some((passed, failed, skipped)) = class_results.get(class_name) {
+                let total = passed + failed + skipped;
+                if *failed > 0 {
+                    println!(
+                        "  {class_name}: {total} tests, {passed} passed, {failed} failed \u{2717}"
+                    );
+                } else {
+                    println!("  {class_name}: {total} tests, {total} passed \u{2713}");
                 }
             }
-            "skip" => *skipped += 1,
-            _ => {}
         }
+
+        total_tests += result.total;
+        total_passed += result.passed;
+        total_failed += result.failed;
     }
 
-    // Print results per class (matches BUnit output format)
-    for compiled in &pipeline.compiled_tests {
-        let class_name = &compiled.test_class.class_name;
-        if let Some((passed, failed, skipped)) = class_results.get(class_name) {
+    // Report native EUnit results
+    if let Some(native) = &results.native {
+        for (module, passed, failed, skipped) in &native.modules {
             let total = passed + failed + skipped;
             if *failed > 0 {
                 println!(
-                    "  {class_name}: {total} tests, {passed} passed, {failed} failed \u{2717}"
+                    "  {module} (native): {total} tests, {passed} passed, {failed} failed \u{2717}"
+                );
+            } else if *skipped > 0 {
+                println!(
+                    "  {module} (native): {total} tests, {passed} passed, {skipped} skipped \u{2713}"
                 );
             } else {
-                println!("  {class_name}: {total} tests, {total} passed \u{2713}");
+                println!("  {module} (native): {total} tests, {total} passed \u{2713}");
             }
         }
+
+        if native.failed > 0 && !native.output.is_empty() {
+            failed_details.push(native.output.clone());
+        }
+
+        total_tests += native.total;
+        total_passed += native.passed;
+        total_failed += native.failed;
     }
 
+    let file_count = pipeline.test_files.len() + pipeline.native_test_modules.len();
     let elapsed = start_time.elapsed();
     let elapsed_secs = elapsed.as_secs_f64();
 
     println!();
-    if result.failed == 0 {
+    if total_failed == 0 {
         println!(
-            "{} file(s), {} tests, {} passed, 0 failed ({:.1}s)",
-            pipeline.test_files.len(),
-            result.total,
-            result.passed,
-            elapsed_secs,
+            "{file_count} file(s), {total_tests} tests, {total_passed} passed, 0 failed ({elapsed_secs:.1}s)",
         );
     } else {
         for detail in &failed_details {
@@ -1638,14 +1980,9 @@ fn report_results(
         }
         eprintln!();
         eprintln!(
-            "{} file(s), {} tests, {} passed, {} failed ({:.1}s)",
-            pipeline.test_files.len(),
-            result.total,
-            result.passed,
-            result.failed,
-            elapsed_secs,
+            "{file_count} file(s), {total_tests} tests, {total_passed} passed, {total_failed} failed ({elapsed_secs:.1}s)",
         );
-        miette::bail!("{} test(s) failed", result.failed);
+        miette::bail!("{total_failed} test(s) failed");
     }
 
     Ok(())
@@ -2115,5 +2452,48 @@ mod tests {
 
             assert_eq!(test_classes[0].module_name, expected_module);
         }
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_all_passed() {
+        let output = "======================== EUnit ========================\n\
+                      module 'foo_tests'\n\
+                        foo_tests: bar_test...ok\n\
+                        foo_tests: baz_test...ok\n\
+                        [done in 0.006 s]\n\
+                      =======================================================\n\
+                        All 2 tests passed.\n";
+        assert_eq!(parse_eunit_summary(output), (2, 0, 0));
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_single_test_passed() {
+        let output = "  Test passed.\n";
+        assert_eq!(parse_eunit_summary(output), (1, 0, 0));
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_mixed_results() {
+        let output = "=======================================================\n\
+                        Failed: 1.  Skipped: 0.  Passed: 2.\n";
+        assert_eq!(parse_eunit_summary(output), (2, 1, 0));
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_with_skipped() {
+        let output = "=======================================================\n\
+                        Failed: 1.  Skipped: 3.  Passed: 5.\n";
+        assert_eq!(parse_eunit_summary(output), (5, 1, 3));
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_no_summary() {
+        assert_eq!(parse_eunit_summary("some random output\n"), (0, 0, 0));
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_61_passed() {
+        let output = "  All 61 tests passed.\n";
+        assert_eq!(parse_eunit_summary(output), (61, 0, 0));
     }
 }
