@@ -1672,57 +1672,25 @@ fn offset_to_line(source: &str, offset: usize) -> u32 {
     line
 }
 
-/// Recursively collect all `.bt` files under `dir`.
-///
-/// Returns an error if the directory cannot be read (e.g. permission denied),
-/// preventing silent false-clean results.
-fn collect_bt_files(dir: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
-    let mut out = Vec::new();
-    let entries = std::fs::read_dir(dir)?;
-    let mut entries: Vec<_> = entries.collect::<std::io::Result<Vec<_>>>()?;
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    for entry in entries {
-        let path = entry.path();
-        if path.is_symlink() {
-            continue;
-        }
-        if path.is_dir() {
-            out.extend(collect_bt_files(&path)?);
-        } else if path.extension().is_some_and(|e| e == "bt") {
-            out.push(path);
-        }
-    }
-    Ok(out)
-}
-
 /// Resolve `path` to a list of `.bt` source files, or return a `LintResult`
 /// containing a single error diagnostic explaining why no files could be found.
 ///
 /// Returns `Vec<PathBuf>` (not `Utf8PathBuf`) so that files with non-UTF-8
 /// names are preserved rather than silently dropped.
 fn resolve_source_files(path: &str) -> Result<Vec<std::path::PathBuf>, LintResult> {
+    use beamtalk_core::file_walker::FileWalker;
+
     let source_path = std::path::Path::new(path);
-    if source_path.is_file() {
-        if source_path.extension().is_some_and(|e| e == "bt") {
-            return Ok(vec![source_path.to_path_buf()]);
-        }
+    let files = FileWalker::lint_files()
+        .walk_pathbuf(source_path)
+        .map_err(|e| lint_error(path, e.to_string()))?;
+    if files.is_empty() {
         return Err(lint_error(
             path,
-            format!("'{path}' is not a .bt source file"),
+            format!("No .bt source files found in '{path}'"),
         ));
     }
-    if source_path.is_dir() {
-        let files = collect_bt_files(source_path)
-            .map_err(|e| lint_error(path, format!("Failed to read directory '{path}': {e}")))?;
-        if files.is_empty() {
-            return Err(lint_error(
-                path,
-                format!("No .bt source files found in '{path}'"),
-            ));
-        }
-        return Ok(files);
-    }
-    Err(lint_error(path, format!("Path '{path}' does not exist")))
+    Ok(files)
 }
 
 /// Build a `LintResult` containing a single file-level error diagnostic.
@@ -1922,7 +1890,7 @@ mod tests {
         let _ = std::fs::remove_file(path.as_std_path());
         assert_eq!(result.total, 1);
         assert!(result.errors.len() == 1);
-        assert!(result.errors[0].message.contains(".bt source file"));
+        assert!(result.errors[0].message.contains(".bt file"));
     }
 
     #[test]
