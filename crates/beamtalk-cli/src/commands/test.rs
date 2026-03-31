@@ -918,7 +918,11 @@ fn initialize_pipeline(
     let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
     let mut class_module_index: HashMap<String, String> = HashMap::new();
     let mut class_superclass_index: HashMap<String, String> = HashMap::new();
-    let mut all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
+    // BT-1733: Collect source and dep ClassInfos separately, then merge
+    // via collect_all_class_infos for a single unified collection point.
+    let mut source_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
+        Vec::new();
+    let mut dep_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
         Vec::new();
     for (pkg_root, pkg) in &discovered_packages {
         let src_dir = pkg_root.join("src");
@@ -937,8 +941,7 @@ fn initialize_pipeline(
                 );
                 class_module_index.extend(pkg_class_map);
                 class_superclass_index.extend(pkg_super_map);
-                // BT-1559: Collect cross-file class metadata for type checker resolution.
-                all_class_infos.extend(class_infos);
+                source_class_infos.extend(class_infos);
             }
         }
 
@@ -951,7 +954,7 @@ fn initialize_pipeline(
                     for (class_name, module_name) in &dep.class_module_index {
                         class_module_index.insert(class_name.clone(), module_name.clone());
                     }
-                    all_class_infos.extend(dep.class_infos.clone());
+                    dep_class_infos.extend(dep.class_infos.clone());
                 }
             }
             Err(e) => {
@@ -963,6 +966,17 @@ fn initialize_pipeline(
             }
         }
     }
+
+    // BT-1733: Single unified collection of all ClassInfo from all sources.
+    // Fixture ClassInfo is deliberately excluded: compile_fixtures() builds
+    // fixture class indexes (merged into class_module_index) but drops
+    // fixture_class_infos because duplicate class names across fixture files
+    // (e.g. two `Shape` classes in test/fixtures/) cause false DNU and
+    // actor-new compile errors. See build_fixture_class_indexes() and the
+    // drop(fixture_class_infos) call in compile_fixtures().
+    // To add a new .bt source location, add its ClassInfo slice here.
+    let all_class_infos =
+        super::build::collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
 
     Ok(TestPipeline {
         test_path,
@@ -1020,10 +1034,11 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     pipeline
         .class_superclass_index
         .extend(fixture_superclass_index);
-    // Fixture ClassInfo is intentionally NOT added to all_class_infos.
-    // The class_module_index merge above is sufficient for the unresolved-class
-    // validator. Full ClassInfo injection requires resolving inherited methods
-    // and class protocol methods (>>, doc, etc.) which is tracked in BT-1733.
+    // BT-1733: Fixture ClassInfo is not yet added to all_class_infos because
+    // duplicate class names across fixtures (e.g. two `Shape` classes) cause
+    // false DNU errors. The class_module_index merge above is sufficient for
+    // the unresolved-class validator. Adding fixture ClassInfo requires
+    // deduplication or scoping logic to avoid cross-fixture conflicts.
     drop(fixture_class_infos);
 
     let precompiled = compile_fixtures_directory(

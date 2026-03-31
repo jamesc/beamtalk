@@ -311,7 +311,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     } else {
         None
     };
-    let (mut class_module_index, class_superclass_index, mut all_class_infos, cached_asts) =
+    let (mut class_module_index, class_superclass_index, source_class_infos, cached_asts) =
         if let Some(pkg) = pkg_manifest {
             let result = super::build_cache::incremental_build_class_module_index(
                 &source_files,
@@ -352,6 +352,9 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
     let dep_registry =
         beamtalk_core::semantic_analysis::build_dependency_registry_with_graph(&dep_infos);
 
+    // Collect dependency ClassInfo separately, then merge with source ClassInfo
+    // via collect_all_class_infos (BT-1733).
+    let mut dep_class_infos = Vec::new();
     for dep in &resolved_deps {
         for (class_name, module_name) in &dep.class_module_index {
             debug!(
@@ -362,11 +365,12 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
             );
             class_module_index.insert(class_name.clone(), module_name.clone());
         }
-        // BT-1726 fix: Add dependency ClassInfo so the unresolved-class
-        // validator and type checker can resolve cross-package references
-        // (superclass chains, method signatures, etc.).
-        all_class_infos.extend(dep.class_infos.clone());
+        dep_class_infos.extend(dep.class_infos.clone());
     }
+
+    // BT-1733: Single unified collection of all ClassInfo from all sources.
+    // To add a new .bt source location, add its ClassInfo slice here.
+    let all_class_infos = collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
 
     // BT-1653 / ADR 0070 Phase 3: Eagerly check stdlib reservation violations.
     // Dependencies must not export classes with stdlib-reserved names.
@@ -1195,6 +1199,26 @@ pub(crate) fn build_class_module_index(
     }
 
     Ok((module_index, superclass_index, all_class_infos, cached_asts))
+}
+
+/// Collect `ClassInfo` from multiple sources into a single unified vector.
+///
+/// BT-1733: This is the single entry point for gathering all `ClassInfo`
+/// metadata across the project. Callers provide `ClassInfo` slices from each
+/// source (package sources, dependencies, fixtures, etc.) and get back a
+/// merged vector suitable for the type checker and structural validator.
+///
+/// Adding a new `.bt` source location only requires adding its `ClassInfo`
+/// slice to the input list — no separate wiring needed.
+pub(crate) fn collect_all_class_infos(
+    sources: &[&[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo]],
+) -> Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> {
+    let total_len: usize = sources.iter().map(|s| s.len()).sum();
+    let mut result = Vec::with_capacity(total_len);
+    for source in sources {
+        result.extend_from_slice(source);
+    }
+    result
 }
 
 // ── Bundled rebar3 ────────────────────────────────────────────────
