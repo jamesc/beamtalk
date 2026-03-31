@@ -464,6 +464,12 @@ Each phase adds new capabilities. The tooling is backwards-compatible, but **con
 - **Phase 2:** Consumers change from git dep to registry dep: `http = "~> 0.1"`. Git deps continue to work for packages not yet on the registry.
 - **Phase 3:** No consumer change — registry deps resolve from hex.pm instead of the static registry (URL change in `[repos]`, or removed entirely if hex.pm is the default).
 
+## Implementation Tracking
+
+**Epic:** BT-1739
+**Issues:** BT-1738 (Justfile/--app), BT-1740 (extract HTTP repo), BT-1741 (monorepo git dep), BT-1742 (cross-repo CI)
+**Status:** Planned
+
 ## References
 - Related issues: BT-1721 (MCP discovery), BT-1727 (private hex repo setup), BT-1728 (repo field in native deps), BT-1729 (publish first-party packages)
 - Related ADRs: ADR 0026 (package manifest), ADR 0070 (package namespaces and dependencies), ADR 0071 (class visibility), ADR 0072 (native Erlang in packages)
