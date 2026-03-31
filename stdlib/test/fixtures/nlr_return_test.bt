@@ -3,7 +3,7 @@
 
 // BT-754: NlrReturnTest — ifTrue: non-local return fixture
 
-Object subclass: NlrReturnTest
+Value subclass: NlrReturnTest
 
   test: x =>
     x isEmpty ifTrue: [^"empty"]

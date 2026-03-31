@@ -10,12 +10,7 @@ ValueBaseShape subclass: ValueSubCircle
   field: radius = 1.0
 
   // Class-side factory using new:
-  class withRadius: r =>
-    // DNU false positive: new: is on Value ancestor, resolved via cross-file hierarchy
-    // at runtime. Fixture compilation doesn't inject sibling fixture class infos to
-    // avoid cascading DNU warnings across unrelated fixtures (e.g. >> operator).
-    @expect dnu
-    self new: #{#radius => r}
+  class withRadius: r => self new: #{#radius => r}
 
   // User-defined method using both inherited and own fields
   describe => "{self.color} circle r={self.radius}"

@@ -3,7 +3,7 @@
 
 // NlrMatch — non-local return inside match arm bodies
 
-Object subclass: NlrMatch
+Value subclass: NlrMatch
 
   // ^ in a match arm should exit the method early
   findStatus: status =>
