@@ -25,7 +25,7 @@ pub use path::collect_dep_ebin_paths;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use tracing::{debug, info};
 
 use crate::commands::build_layout::BuildLayout;
@@ -74,6 +74,8 @@ struct DiscoveredDep {
     name: String,
     root: Utf8PathBuf,
     is_direct: bool,
+    /// Whether this is a path dep (true) or git dep (false).
+    is_path_dep: bool,
     /// For transitive deps, the chain of intermediate dep names.
     via_chain: Vec<String>,
 }
@@ -86,7 +88,7 @@ struct DiscoveredDep {
 fn discover_all_dep_roots(
     project_root: &Utf8Path,
     manifest: &manifest::ParsedManifest,
-) -> Vec<DiscoveredDep> {
+) -> Result<Vec<DiscoveredDep>> {
     use beamtalk_core::compilation::DependencySource;
 
     let layout = BuildLayout::new(project_root);
@@ -94,33 +96,38 @@ fn discover_all_dep_roots(
         manifest.dependencies.keys().map(String::as_str).collect();
 
     // BFS queue: (parent_root, deps_map, via_chain)
-    let mut queue: Vec<(
+    let mut queue: VecDeque<(
         Utf8PathBuf,
         BTreeMap<String, beamtalk_core::compilation::DependencySpec>,
         Vec<String>,
-    )> = vec![(
+    )> = VecDeque::from([(
         project_root.to_path_buf(),
         manifest.dependencies.clone(),
         Vec::new(),
-    )];
+    )]);
     let mut visited = std::collections::HashSet::new();
     let mut result = Vec::new();
 
-    while let Some((parent_root, deps, via_chain)) = queue.pop() {
+    while let Some((parent_root, deps, via_chain)) = queue.pop_front() {
         for (dep_name, spec) in &deps {
             if !visited.insert(dep_name.clone()) {
                 continue; // Already discovered (diamond deps)
             }
 
-            let dep_root = match &spec.source {
+            let (dep_root, is_path_dep) = match &spec.source {
                 DependencySource::Path { path } => {
-                    if let Some(relative_utf8) = camino::Utf8Path::from_path(path) {
-                        path::canonicalize_dep_path(&parent_root, relative_utf8)
-                    } else {
-                        continue;
-                    }
+                    let relative_utf8 = camino::Utf8Path::from_path(path).ok_or_else(|| {
+                        miette::miette!(
+                            "Dependency '{dep_name}' has a non-UTF-8 path: {}",
+                            path.display()
+                        )
+                    })?;
+                    (
+                        path::canonicalize_dep_path(&parent_root, relative_utf8),
+                        true,
+                    )
                 }
-                DependencySource::Git { .. } => layout.dep_checkout_dir(dep_name),
+                DependencySource::Git { .. } => (layout.dep_checkout_dir(dep_name), false),
             };
 
             let is_direct = direct_names.contains(dep_name.as_str());
@@ -129,6 +136,7 @@ fn discover_all_dep_roots(
                 name: dep_name.clone(),
                 root: dep_root.clone(),
                 is_direct,
+                is_path_dep,
                 via_chain: if is_direct {
                     Vec::new()
                 } else {
@@ -142,13 +150,13 @@ fn discover_all_dep_roots(
                 if !dep_parsed.dependencies.is_empty() {
                     let mut child_chain = via_chain.clone();
                     child_chain.push(dep_name.clone());
-                    queue.push((dep_root, dep_parsed.dependencies, child_chain));
+                    queue.push_back((dep_root, dep_parsed.dependencies, child_chain));
                 }
             }
         }
     }
 
-    result
+    Ok(result)
 }
 
 /// Collect `ResolvedDependency` structs for already-compiled dependencies.
@@ -161,7 +169,7 @@ fn collect_fresh_deps(
     parsed: &manifest::ParsedManifest,
 ) -> Result<Vec<path::ResolvedDependency>> {
     let layout = BuildLayout::new(project_root);
-    let all_deps = discover_all_dep_roots(project_root, parsed);
+    let all_deps = discover_all_dep_roots(project_root, parsed)?;
     let mut resolved = Vec::new();
 
     for dep in &all_deps {
@@ -231,8 +239,15 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
         }
     }
 
-    // Discover all deps (direct + transitive) and check their ebin directories
-    let all_deps = discover_all_dep_roots(project_root, manifest);
+    // Discover all deps (direct + transitive) and check their ebin directories.
+    // If discovery itself fails (e.g. non-UTF-8 path), treat as stale.
+    let all_deps = match discover_all_dep_roots(project_root, manifest) {
+        Ok(deps) => deps,
+        Err(e) => {
+            debug!(error = %e, "Failed to discover dep roots — deps are stale");
+            return false;
+        }
+    };
     let layout = BuildLayout::new(project_root);
 
     for dep in &all_deps {
@@ -258,12 +273,9 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
 
         // For path deps, check if source files are newer than compiled output.
         // Git deps don't need mtime checking — the lockfile handles freshness.
-        if dep.root.exists() && !dep.root.starts_with(layout.deps_dir()) {
-            // Not under _build/deps/ → it's a path dep
-            if path_dep_source_newer_than_ebin(&dep.root, &ebin_dir) {
-                debug!(dep = %dep.name, "Path dependency source is newer than compiled output — deps are stale");
-                return false;
-            }
+        if dep.is_path_dep && path_dep_source_newer_than_ebin(&dep.root, &ebin_dir) {
+            debug!(dep = %dep.name, "Path dependency source is newer than compiled output — deps are stale");
+            return false;
         }
     }
 

@@ -233,35 +233,25 @@ fn discover_deps(
                 )?;
             }
             DependencySource::Git { url, reference } => {
-                // Git deps are cloned to {project_root}/_build/deps/{name}/
-                // If not yet cloned, fetch them now.
-                let checkout_root =
-                    if let Some(existing) = find_git_checkout(ctx.project_root, dep_name) {
-                        existing
-                    } else {
-                        info!(
-                            dep = %dep_name,
-                            url = %url,
-                            "Git dependency not yet cloned, fetching..."
-                        );
-                        let lock_entry = ctx.lockfile.get(dep_name);
-                        let resolved = super::git::resolve_git_dep(
-                            dep_name,
-                            url,
-                            reference,
-                            ctx.project_root,
-                            lock_entry,
-                        )
-                        .wrap_err_with(|| {
-                            format!(
-                                "Failed to fetch git dependency '{dep_name}' \
-                                 (required by '{parent_name}')"
-                            )
-                        })?;
-                        let checkout = resolved.checkout_path.clone();
-                        ctx.new_git_resolutions.push(resolved);
-                        checkout
-                    };
+                // Always resolve via resolve_git_dep so existing checkouts are
+                // verified against the lockfile SHA / requested ref. The function
+                // already skips re-cloning when verify_checkout matches.
+                let lock_entry = ctx.lockfile.get(dep_name);
+                let resolved = super::git::resolve_git_dep(
+                    dep_name,
+                    url,
+                    reference,
+                    ctx.project_root,
+                    lock_entry,
+                )
+                .wrap_err_with(|| {
+                    format!(
+                        "Failed to resolve git dependency '{dep_name}' \
+                         (required by '{parent_name}')"
+                    )
+                })?;
+                let checkout_root = resolved.checkout_path.clone();
+                ctx.new_git_resolutions.push(resolved);
 
                 discover_single_dep(
                     ctx,
@@ -274,17 +264,6 @@ fn discover_deps(
         }
     }
     Ok(())
-}
-
-/// Find the checkout path for a git dependency if it has already been cloned.
-fn find_git_checkout(project_root: &Utf8Path, dep_name: &str) -> Option<Utf8PathBuf> {
-    let checkout =
-        crate::commands::build_layout::BuildLayout::new(project_root).dep_checkout_dir(dep_name);
-    if checkout.join("beamtalk.toml").exists() {
-        Some(checkout)
-    } else {
-        None
-    }
 }
 
 /// Discover a single dependency from its root directory.
