@@ -21,8 +21,7 @@ set -euo pipefail
 VERSION="${1:?Usage: package-release.sh <version> <platform>}"
 PLATFORM="${2:?Usage: package-release.sh <version> <platform>}"
 
-BINARIES=(beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp)
-OTP_APPS=(beamtalk_runtime beamtalk_workspace beamtalk_compiler beamtalk_stdlib cowboy cowlib ranch gun yamerl telemetry telemetry_poller)
+BINARIES=(beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp beamtalk-exec)
 
 if [ "${PLATFORM}" = "windows-x86_64" ]; then
     ARCHIVE="beamtalk-${VERSION}-${PLATFORM}.zip"
@@ -36,17 +35,22 @@ if [ "${PLATFORM}" = "windows-x86_64" ]; then
         cp "target/release/${bin}.exe" "${STAGING}/bin/"
     done
 
-    # OTP application ebin directories
-    for app in "${OTP_APPS[@]}"; do
-        SRC="runtime/_build/default/lib/${app}/ebin"
-        if [ ! -d "${SRC}" ] || ! ls "${SRC}"/*.beam 1>/dev/null 2>&1; then
-            echo "❌ No .beam files found in ${SRC}. Erlang build may have failed."
-            exit 1
+    # OTP application ebin directories (discovered from rebar3 build output)
+    OTP_APP_COUNT=0
+    for ebin_dir in runtime/_build/default/lib/*/ebin; do
+        app="$(basename "$(dirname "${ebin_dir}")")"
+        if ! ls "${ebin_dir}"/*.beam 1>/dev/null 2>&1; then
+            continue
         fi
         mkdir -p "${STAGING}/lib/beamtalk/lib/${app}/ebin"
-        cp "${SRC}"/*.beam "${STAGING}/lib/beamtalk/lib/${app}/ebin/"
-        cp "${SRC}"/*.app "${STAGING}/lib/beamtalk/lib/${app}/ebin/" 2>/dev/null || true
+        cp "${ebin_dir}"/*.beam "${STAGING}/lib/beamtalk/lib/${app}/ebin/"
+        cp "${ebin_dir}"/*.app "${STAGING}/lib/beamtalk/lib/${app}/ebin/" 2>/dev/null || true
+        OTP_APP_COUNT=$((OTP_APP_COUNT + 1))
     done
+    if [ "${OTP_APP_COUNT}" -eq 0 ]; then
+        echo "❌ No OTP apps found in runtime/_build/default/lib/. Run 'just build-erlang' first."
+        exit 1
+    fi
 
     # OTP application include directories (for native Erlang compilation)
     for app in beamtalk_runtime; do

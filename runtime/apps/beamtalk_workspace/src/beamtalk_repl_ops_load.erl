@@ -1095,12 +1095,17 @@ find_project_root(Path) ->
 
 %% @private
 -spec find_project_root_walk(string()) -> string() | undefined.
-find_project_root_walk("/") ->
-    undefined;
 find_project_root_walk(Dir) ->
-    case filelib:is_file(filename:join(Dir, "beamtalk.toml")) of
-        true -> Dir;
-        false -> find_project_root_walk(filename:dirname(Dir))
+    Parent = filename:dirname(Dir),
+    case Parent =:= Dir of
+        true ->
+            %% Reached filesystem root (/ on Unix, X:/ on Windows)
+            undefined;
+        false ->
+            case filelib:is_file(filename:join(Dir, "beamtalk.toml")) of
+                true -> Dir;
+                false -> find_project_root_walk(Parent)
+            end
     end.
 
 %% @private
