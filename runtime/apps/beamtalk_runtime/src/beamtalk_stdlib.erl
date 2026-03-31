@@ -156,9 +156,9 @@ load_compiled_stdlib_modules() ->
 %% @doc Find the stdlib ebin directory (for fallback loading).
 -spec find_stdlib_ebin() -> file:filename().
 find_stdlib_ebin() ->
-    case code:lib_dir(beamtalk_stdlib, ebin) of
+    case code:lib_dir(beamtalk_stdlib) of
         {error, _} -> "runtime/apps/beamtalk_stdlib/ebin";
-        Dir -> Dir
+        Dir -> filename:join(Dir, "ebin")
     end.
 
 %% @private
