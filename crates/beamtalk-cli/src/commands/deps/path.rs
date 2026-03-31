@@ -387,15 +387,19 @@ fn compile_dependency_with_context(
         None
     };
 
-    let (mut class_module_index, class_superclass_index, all_class_infos, cached_asts) =
+    let (own_class_module_index, class_superclass_index, all_class_infos, cached_asts) =
         crate::commands::build::build_class_module_index(
             &source_files,
             source_root.as_deref(),
             dep_name,
         )?;
 
-    // Merge class indexes from already-compiled dependencies so that
-    // cross-dependency class references resolve during compilation.
+    // Build a compilation index that includes this dep's own classes plus
+    // classes from already-compiled dependencies, so cross-dependency class
+    // references resolve during compilation.  The *own* index is kept
+    // separate so we only export this dep's classes to dependents — not
+    // transitive imports that happen to be compiled earlier.
+    let mut class_module_index = own_class_module_index.clone();
     for prior in prior_deps {
         for (class_name, module_name) in &prior.class_module_index {
             class_module_index
@@ -483,7 +487,7 @@ fn compile_dependency_with_context(
 
     info!(dep = %dep_name, "Dependency compiled successfully");
 
-    Ok((ebin_path, class_module_index))
+    Ok((ebin_path, own_class_module_index))
 }
 
 /// Build a class module index for a dependency without compiling.
