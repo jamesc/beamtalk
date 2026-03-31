@@ -396,9 +396,22 @@ init({ClassName, ClassInfo}) ->
     %% ADR 0050 Phase 3: Notify compiler server of this class registration.
     %% Cast is fire-and-forget — silently dropped if the compiler server is not running.
     %% Use Meta map availability (not function_exported, which returns false during on_load).
+    %% BT-1732: Wrap in try/catch so an undef crash (e.g., beamtalk_compiler_server
+    %% not on code path) doesn't kill the class process during on_load.
     case Meta of
         CompilerMeta when is_map(CompilerMeta), map_size(CompilerMeta) > 0 ->
-            beamtalk_compiler_server:register_class(ClassName, CompilerMeta);
+            try
+                beamtalk_compiler_server:register_class(ClassName, CompilerMeta)
+            catch
+                error:undef ->
+                    ?LOG_WARNING(#{
+                        event => register_class_undef,
+                        class => ClassName,
+                        reason => "beamtalk_compiler_server:register_class/2 not available",
+                        domain => [beamtalk, runtime]
+                    }),
+                    ok
+            end;
         _ ->
             ok
     end,

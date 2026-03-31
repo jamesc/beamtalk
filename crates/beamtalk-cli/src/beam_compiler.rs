@@ -950,6 +950,37 @@ pub(crate) fn compile_source_with_bindings(
     );
     diagnostics.extend(analysis_result.diagnostics);
 
+    // BT-1732: Enrich unresolved class warnings with dependency package hints.
+    // When a class is unresolved but exists in a declared dependency's class_module_index,
+    // update the hint to suggest the dependency package.
+    if let Some(registry) = dep_registry {
+        for diag in &mut diagnostics {
+            if diag.category
+                == Some(beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass)
+            {
+                // Extract class name from message "Unresolved class `ClassName`"
+                if let Some(class_name) = diag
+                    .message
+                    .strip_prefix("Unresolved class `")
+                    .and_then(|s| s.strip_suffix('`'))
+                {
+                    if let Some(exports) = registry.lookup(class_name) {
+                        if let Some(export) = exports.first() {
+                            diag.hint = Some(
+                                format!(
+                                    "Did you mean `{class_name}` from dependency '{}'? \
+                                     Ensure the dependency is declared in beamtalk.toml.",
+                                    export.package
+                                )
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // BT-738: Warn when user code shadows a stdlib class name.
     // Only applies to non-stdlib compilation (stdlib defines these names legitimately).
     if !options.stdlib_mode {
