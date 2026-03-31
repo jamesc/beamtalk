@@ -1609,13 +1609,17 @@ fn compile_native_erlang_with_deps(
     }
 
     // Add beamtalk runtime include dir for -include_lib("beamtalk_runtime/...")
-    // The runtime apps/ dir may not have ebin/ (not compiled), so use -I
-    // pointing to the parent of beamtalk_runtime/ so the include_lib path
-    // resolves as a relative path from -I.
-    if let Ok(runtime_dir) = beamtalk_cli::repl_startup::find_runtime_dir() {
-        let runtime_apps: std::path::PathBuf = runtime_dir.join("apps");
-        if runtime_apps.exists() {
-            cmd.arg("-I").arg(&runtime_apps);
+    // The -I path must be the parent of `beamtalk_runtime/` so that
+    // `-include_lib("beamtalk_runtime/include/beamtalk.hrl")` resolves.
+    //   Dev layout:       -I runtime/apps/
+    //   Installed layout:  -I PREFIX/lib/beamtalk/lib/
+    if let Ok((runtime_dir, layout)) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout() {
+        let include_parent = match layout {
+            beamtalk_cli::repl_startup::RuntimeLayout::Dev => runtime_dir.join("apps"),
+            beamtalk_cli::repl_startup::RuntimeLayout::Installed => runtime_dir.join("lib"),
+        };
+        if include_parent.exists() {
+            cmd.arg("-I").arg(&include_parent);
         }
     }
 

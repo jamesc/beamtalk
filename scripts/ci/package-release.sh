@@ -48,6 +48,15 @@ if [ "${PLATFORM}" = "windows-x86_64" ]; then
         cp "${SRC}"/*.app "${STAGING}/lib/beamtalk/lib/${app}/ebin/" 2>/dev/null || true
     done
 
+    # OTP application include directories (for native Erlang compilation)
+    for app in beamtalk_runtime; do
+        INC_SRC="runtime/apps/${app}/include"
+        if [ -d "${INC_SRC}" ]; then
+            mkdir -p "${STAGING}/lib/beamtalk/lib/${app}/include"
+            cp "${INC_SRC}"/*.hrl "${STAGING}/lib/beamtalk/lib/${app}/include/"
+        fi
+    done
+
     # Create zip
     (cd "beamtalk-staging" && 7z a "../${ARCHIVE}" "${TOPLEVEL}")
     rm -rf "beamtalk-staging"

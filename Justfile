@@ -474,12 +474,27 @@ test-install: build-release build-stdlib
     test -d "$RUNTIME_DIR"
     echo "✅ Stdlib and runtime directories present"
 
-    # 3. Scaffold a project, add a class, and run it end-to-end
+    # 3. Verify runtime include headers are present
+    test -f "$TMPDIR/lib/beamtalk/lib/beamtalk_runtime/include/beamtalk.hrl"
+    echo "✅ Runtime include headers present"
+
+    # 4. Scaffold a project, add a class, and run it end-to-end
     (cd "$TMPDIR" && "$TMPDIR/bin/beamtalk" new smoke_project)
     echo "✅ beamtalk new smoke_project OK"
     printf 'Object subclass: SmokeTest\n  class run => 21 + 21\n' > "$TMPDIR/smoke_project/src/SmokeTest.bt"
     (cd "$TMPDIR/smoke_project" && "$TMPDIR/bin/beamtalk" run SmokeTest run)
     echo "✅ beamtalk run SmokeTest>>run OK"
+
+    # 5. Verify native Erlang with -include_lib compiles in installed layout
+    mkdir -p "$TMPDIR/smoke_project/native"
+    cat > "$TMPDIR/smoke_project/native/smoke_native.erl" <<'ERLEOF'
+    -module(smoke_native).
+    -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+    -export([ok/0]).
+    ok() -> ok.
+    ERLEOF
+    (cd "$TMPDIR/smoke_project" && "$TMPDIR/bin/beamtalk" build)
+    echo "✅ Native Erlang with -include_lib compiles in installed layout"
 
     echo "✅ All smoke tests passed"
 
@@ -920,6 +935,15 @@ install PREFIX="/usr/local": build-release build-stdlib
         # Copy .app file if present
         if ls "${SRC}"/*.app 1>/dev/null 2>&1; then
             install -m 644 "${SRC}"/*.app "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
+        fi
+    done
+
+    # OTP application include directories (for native Erlang compilation)
+    for app in beamtalk_runtime; do
+        INC_SRC="runtime/apps/${app}/include"
+        if [ -d "${INC_SRC}" ]; then
+            install -d "${PREFIX}/lib/beamtalk/lib/${app}/include"
+            install -m 644 "${INC_SRC}"/*.hrl "${PREFIX}/lib/beamtalk/lib/${app}/include/"
         fi
     done
 

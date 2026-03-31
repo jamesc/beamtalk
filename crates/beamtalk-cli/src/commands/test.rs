@@ -1416,11 +1416,16 @@ fn compile_native_test_erlang(
         cmd.arg("-pa").arg(ebin.as_str());
     }
 
-    // Add runtime includes for -include_lib("beamtalk_runtime/...")
-    if let Ok(runtime_dir) = beamtalk_cli::repl_startup::find_runtime_dir() {
-        let apps_dir: std::path::PathBuf = runtime_dir.join("apps");
-        if apps_dir.exists() {
-            cmd.arg("-I").arg(&apps_dir);
+    // Add beamtalk runtime include dir for -include_lib("beamtalk_runtime/...")
+    //   Dev layout:       -I runtime/apps/
+    //   Installed layout:  -I PREFIX/lib/beamtalk/lib/
+    if let Ok((runtime_dir, layout)) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout() {
+        let include_parent = match layout {
+            beamtalk_cli::repl_startup::RuntimeLayout::Dev => runtime_dir.join("apps"),
+            beamtalk_cli::repl_startup::RuntimeLayout::Installed => runtime_dir.join("lib"),
+        };
+        if include_parent.exists() {
+            cmd.arg("-I").arg(&include_parent);
         }
     }
 
