@@ -26,7 +26,7 @@
 %%% ## Response Format
 %%%
 %%% All requests return an `HTTPResponse` value object constructed via the
-%%% generated keyword constructor `'bt@http@httpresponse':'class_status:headers:body:'/5`.
+%%% generated keyword constructor `?BT_CLASS_MODULE_HTTPResponse:'class_status:headers:body:'/5`.
 %%% Fields: `status` (integer), `headers` (list of [Name, Value] binary pairs),
 %%% `body` (String).
 %%%
@@ -72,6 +72,7 @@
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
+-include("beamtalk_classes.hrl").
 
 -define(DEFAULT_TIMEOUT, 30000).
 
@@ -375,16 +376,20 @@ collect_response(ConnPid, StreamRef, MRef, Deadline, Selector) ->
 %% This provides compile-time arity safety: if a field is added or removed from
 %% HTTPResponse, the arity of this call changes and the compiler catches the mismatch.
 %%
-%% `bt@http@httpresponse` is a generated BEAM module whose abstract code
-%% cannot be analysed by Dialyzer. The suppression below silences the
-%% resulting "unknown function" warning; the call is safe because the
-%% module is always loaded before HTTP requests can be made.
+%% BT-1730: Uses ?BT_CLASS_MODULE_HTTPResponse macro from beamtalk_classes.hrl
+%% instead of hardcoding the module atom. This ensures the reference stays
+%% correct if HTTPResponse moves between packages.
+%%
+%% The generated BEAM module's abstract code cannot be analysed by Dialyzer.
+%% The suppression below silences the resulting "unknown function" warning;
+%% the call is safe because the module is always loaded before HTTP requests
+%% can be made.
 -dialyzer({nowarn_function, make_response/3}).
 -spec make_response(non_neg_integer(), list(), binary()) -> map().
 
 make_response(Status, GunHeaders, Body) ->
     BtHeaders = from_gun_headers(GunHeaders),
-    'bt@http@httpresponse':'class_status:headers:body:'(
+    ?BT_CLASS_MODULE_HTTPResponse:'class_status:headers:body:'(
         undefined, undefined, Status, BtHeaders, Body
     ).
 
