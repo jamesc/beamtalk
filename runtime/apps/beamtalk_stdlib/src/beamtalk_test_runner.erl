@@ -18,6 +18,7 @@
 
 -module(beamtalk_test_runner).
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([
     %% TestRunner class-side primitives
@@ -773,10 +774,7 @@ ensure_loaded_or_warn(Module) ->
         {module, _} ->
             ok;
         {error, Reason} ->
-            io:format(
-                standard_error,
-                "Warning: failed to load module '~s' (on_load): ~p~n",
-                [Module, Reason]
-            ),
+            ?LOG_WARNING(#{event => test_module_load_failed, module => Module, reason => Reason},
+                         #{domain => [beamtalk, stdlib]}),
             ok
     end.
