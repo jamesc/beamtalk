@@ -39,6 +39,9 @@
 %% FFI shims for (Erlang beamtalk_test_case) dispatch
 -export([should/2, runAll/1, runClass/2, skipTest/1, suiteFixture/1]).
 
+%% BT-1743: Exported for testing stack trace formatting
+-export([format_stacktrace/1, ensure_test_context/4]).
+
 %% @doc Assert that a block raises an error of the specified kind.
 %%
 %% Executes the block and verifies that it raises an error with the
@@ -408,17 +411,17 @@ decode_beam_error(Other) ->
 %% @doc Format a BEAM stacktrace for display in test failure messages.
 %%
 %% Filters out internal test runner and OTP frames; shows up to 3 user frames.
-%% Caller frames are shown first (most useful for jumping to the failing line),
-%% with assertion/library frames below.
+%% Error location (innermost frame) is shown first, with callers going outward.
 %% Returns an empty binary when no relevant frames exist.
 -spec format_stacktrace(list()) -> binary().
 format_stacktrace([]) ->
     <<>>;
 format_stacktrace(Frames) ->
-    %% BEAM stacktraces are most-recent-first. Reverse to caller-first, then
-    %% take up to 3 so the test method (outermost caller) is always included.
-    CallerFirst = lists:reverse(filter_stackframes(Frames)),
-    Relevant = lists:sublist(CallerFirst, 3),
+    %% BEAM stacktraces are most-recent-first (innermost/error frame at head).
+    %% Keep that order so the error location appears first in output, then take
+    %% up to 3 frames.
+    Filtered = filter_stackframes(Frames),
+    Relevant = lists:sublist(Filtered, 3),
     case Relevant of
         [] ->
             <<>>;
@@ -557,10 +560,10 @@ format_test_error(Class, Reason, Stacktrace) ->
 %% always sees where the failing test is defined.
 -spec ensure_test_context(binary(), atom(), atom(), list()) -> binary().
 ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
-    %% Check the rendered frames (after filter + reverse + limit), not the full
-    %% stack. A helper from the same module doesn't count — we need the actual
+    %% Check the rendered frames (after filter + limit), not the full stack.
+    %% A helper from the same module doesn't count — we need the actual
     %% test method frame to be visible.
-    Rendered = lists:sublist(lists:reverse(filter_stackframes(Stacktrace)), 3),
+    Rendered = lists:sublist(filter_stackframes(Stacktrace), 3),
     HasTestFrame = lists:any(
         fun({Mod, Fun, _Arity, _Loc}) ->
             Mod =:= Module andalso Fun =:= MethodName
