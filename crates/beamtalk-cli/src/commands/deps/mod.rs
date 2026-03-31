@@ -668,4 +668,134 @@ mod tests {
         let shared = result.iter().find(|r| r.name == "shared").unwrap();
         assert!(!shared.is_direct, "shared should be marked as transitive");
     }
+
+    #[test]
+    fn test_discover_all_dep_roots_diamond_dedup() {
+        // Diamond: my_app -> A, my_app -> B, A -> shared, B -> shared
+        // shared should appear only once
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let shared_dir = temp.path().join("shared");
+        fs::create_dir_all(&shared_dir).unwrap();
+        write_manifest(&shared_dir, "shared", "");
+
+        let a_dir = temp.path().join("pkg_a");
+        fs::create_dir_all(&a_dir).unwrap();
+        write_manifest(
+            &a_dir,
+            "pkg_a",
+            "[dependencies]\nshared = { path = \"../shared\" }",
+        );
+
+        let b_dir = temp.path().join("pkg_b");
+        fs::create_dir_all(&b_dir).unwrap();
+        write_manifest(
+            &b_dir,
+            "pkg_b",
+            "[dependencies]\nshared = { path = \"../shared\" }",
+        );
+
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "[dependencies]\npkg_a = { path = \"pkg_a\" }\npkg_b = { path = \"pkg_b\" }",
+        );
+
+        let manifest_path = root.join("beamtalk.toml");
+        let parsed = manifest::parse_manifest_full(&manifest_path).unwrap();
+
+        let deps = discover_all_dep_roots(&root, &parsed).unwrap();
+        let shared_count = deps.iter().filter(|d| d.name == "shared").count();
+        assert_eq!(
+            shared_count, 1,
+            "Diamond dep 'shared' should appear exactly once, got {shared_count}"
+        );
+        assert_eq!(deps.len(), 3, "Should have pkg_a, pkg_b, shared");
+    }
+
+    #[test]
+    fn test_deps_fresh_with_git_dep_and_lockfile() {
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create compiled ebin for git dep
+        create_dep_ebin_with_beam(temp.path(), "json");
+
+        // Create a fake git checkout dir (so discover_all_dep_roots finds it)
+        let layout = BuildLayout::new(&root);
+        let checkout = layout.dep_checkout_dir("json");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            checkout.join("beamtalk.toml"),
+            "[package]\nname = \"json\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "[dependencies]\njson = { git = \"https://example.com/json\", tag = \"v1.0\" }",
+        );
+
+        // Create a lockfile newer than the manifest
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(
+            temp.path().join("beamtalk.lock"),
+            "# lockfile\n[[package]]\nname = \"json\"\nurl = \"https://example.com/json\"\nref = \"tag:v1.0\"\nsha = \"abc123\"\n",
+        )
+        .unwrap();
+
+        let manifest_path = root.join("beamtalk.toml");
+        let parsed = manifest::parse_manifest_full(&manifest_path).unwrap();
+
+        // Git dep with lockfile + compiled ebin should be fresh
+        assert!(
+            deps_are_fresh(&root, &parsed),
+            "Git dep with lockfile and ebin should be fresh"
+        );
+    }
+
+    #[test]
+    fn test_deps_are_fresh_false_when_manifest_newer_than_lock() {
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create compiled ebin
+        create_dep_ebin_with_beam(temp.path(), "json");
+
+        // Create checkout
+        let layout = BuildLayout::new(&root);
+        let checkout = layout.dep_checkout_dir("json");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            checkout.join("beamtalk.toml"),
+            "[package]\nname = \"json\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+
+        // Create lockfile first
+        fs::write(
+            temp.path().join("beamtalk.lock"),
+            "# lockfile\n[[package]]\nname = \"json\"\nurl = \"https://example.com/json\"\nref = \"tag:v1.0\"\nsha = \"abc123\"\n",
+        )
+        .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Then create manifest (newer than lockfile)
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "[dependencies]\njson = { git = \"https://example.com/json\", tag = \"v1.0\" }",
+        );
+
+        let manifest_path = root.join("beamtalk.toml");
+        let parsed = manifest::parse_manifest_full(&manifest_path).unwrap();
+
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "Should be stale when manifest is newer than lockfile"
+        );
+    }
 }

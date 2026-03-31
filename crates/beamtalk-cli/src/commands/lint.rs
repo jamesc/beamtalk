@@ -364,6 +364,54 @@ mod tests {
     }
 
     #[test]
+    fn find_package_root_from_subdir() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+
+        let root_utf8 = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
+        let src_utf8 = camino::Utf8PathBuf::from_path_buf(src.clone()).unwrap();
+
+        // From subdir, should find parent
+        assert_eq!(find_package_root(&src_utf8), Some(root_utf8.clone()));
+
+        // From root itself, should find it directly
+        assert_eq!(find_package_root(&root_utf8), Some(root_utf8.clone()));
+    }
+
+    #[test]
+    fn find_package_root_from_file() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("foo.bt"), "Object subclass: Foo\n").unwrap();
+
+        let file_utf8 = camino::Utf8PathBuf::from_path_buf(src.join("foo.bt")).unwrap();
+        let root_utf8 = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
+
+        assert_eq!(find_package_root(&file_utf8), Some(root_utf8));
+    }
+
+    #[test]
+    fn find_package_root_none_without_manifest() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        assert_eq!(find_package_root(&dir), None);
+    }
+
+    #[test]
     fn expect_all_stale_without_cross_file_actor_class() {
         // Without cross-file class info, lint can't know MyActor is an Actor,
         // so `@expect all` would be stale (no diagnostic emitted).
