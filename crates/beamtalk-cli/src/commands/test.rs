@@ -15,6 +15,7 @@
 //! Part of ADR 0014 (Beamtalk Test Framework), Phase 2.
 
 use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
+use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
@@ -411,12 +412,7 @@ fn class_index_for_file(
 
 /// Find all `.bt` files in a directory.
 fn find_test_files(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let mut files = Vec::new();
-
-    find_test_files_recursive(dir, &mut files)?;
-
-    files.sort();
-    Ok(files)
+    FileWalker::test_files().walk(dir)
 }
 
 /// Collect BEAM module names from `.beam` files in a directory.
@@ -494,31 +490,6 @@ fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
         }
         current = current.parent()?.to_owned();
     }
-}
-
-/// Recursively collect `.bt` files from `dir` into `files`.
-fn find_test_files_recursive(dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read directory '{dir}'"))?
-    {
-        let entry = entry.into_diagnostic()?;
-        let path = Utf8PathBuf::from_path_buf(entry.path())
-            .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", dir))?;
-
-        if path.is_dir() {
-            // Skip the fixtures/ subdirectory — fixtures are pre-compiled in Phase 0
-            // and should not be treated as test files.
-            if path.file_name() == Some("fixtures") {
-                continue;
-            }
-            find_test_files_recursive(&path, files)?;
-        } else if path.extension() == Some("bt") {
-            files.push(path);
-        }
-    }
-
-    Ok(())
 }
 
 // ──────────────────────────────────────────────────────────────────────────

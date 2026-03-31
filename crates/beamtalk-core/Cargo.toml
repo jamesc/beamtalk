@@ -27,6 +27,7 @@ serde = { workspace = true, optional = true }
 insta.workspace = true
 proptest.workspace = true
 criterion.workspace = true
+tempfile = "3.14"
 
 [[bench]]
 name = "compiler_pipeline"

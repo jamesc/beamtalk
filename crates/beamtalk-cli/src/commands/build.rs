@@ -5,7 +5,7 @@
 
 use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
 use crate::commands::build_layout::BuildLayout;
-use crate::commands::util;
+use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
@@ -994,10 +994,7 @@ fn clean_stale_artifacts(
 /// to the directory itself.
 fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     if path.is_file() {
-        if path.extension() == Some("bt") {
-            return Ok(vec![path.to_path_buf()]);
-        }
-        miette::bail!("File '{}' is not a .bt source file", path);
+        return FileWalker::source_files().walk(path);
     }
 
     if !path.exists() {
@@ -1012,20 +1009,14 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
         path.to_path_buf()
     };
 
-    let mut files = Vec::new();
-    util::collect_files_recursive(&search_dir, &["bt"], &mut files)?;
-    files.sort();
-    Ok(files)
+    FileWalker::source_files().walk(&search_dir)
 }
 
 /// Collect all `.bt` source files from a directory tree.
 ///
 /// Returns an error if the directory does not exist or cannot be read.
 pub fn collect_source_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let mut files = Vec::new();
-    util::collect_files_recursive(dir, &["bt"], &mut files)?;
-    files.sort();
-    Ok(files)
+    FileWalker::source_files().walk(dir)
 }
 
 /// Collect all `.bt` and `.btscript` source files from a directory tree.
@@ -1033,10 +1024,7 @@ pub fn collect_source_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>>
 /// Used by `beamtalk fmt` to find all formattable files when given a directory
 /// path. Returns an error if the directory does not exist or cannot be read.
 pub fn collect_formattable_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let mut files = Vec::new();
-    util::collect_files_recursive(dir, &["bt", "btscript"], &mut files)?;
-    files.sort();
-    Ok(files)
+    FileWalker::format_files().walk(dir)
 }
 
 /// Compute the relative module path from a source file.
