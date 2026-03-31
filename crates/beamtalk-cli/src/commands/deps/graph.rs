@@ -232,7 +232,8 @@ fn discover_deps(
 
 /// Find the checkout path for a git dependency if it has already been cloned.
 fn find_git_checkout(project_root: &Utf8Path, dep_name: &str) -> Option<Utf8PathBuf> {
-    let checkout = project_root.join("_build").join("deps").join(dep_name);
+    let checkout =
+        crate::commands::build_layout::BuildLayout::new(project_root).dep_checkout_dir(dep_name);
     if checkout.join("beamtalk.toml").exists() {
         Some(checkout)
     } else {

@@ -26,6 +26,7 @@ use tracing::{info, instrument};
 
 use beamtalk_cli::repl_startup;
 
+use super::build_layout::BuildLayout;
 use super::manifest;
 use super::workspace;
 
@@ -161,7 +162,8 @@ fn run_script(
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
     ensure_runtime_built(&runtime_dir, layout, &paths)?;
 
-    let ebin_dir = project_root.join("_build").join("dev").join("ebin");
+    let layout = BuildLayout::new(project_root);
+    let ebin_dir = layout.ebin_dir();
 
     println!("\nRunning {class_name}>>{selector}...");
 
@@ -222,11 +224,7 @@ fn run_script(
     }
 
     // ADR 0072: Add native Erlang ebin to code path if present
-    let native_ebin = project_root
-        .join("_build")
-        .join("dev")
-        .join("native")
-        .join("ebin");
+    let native_ebin = layout.native_ebin_dir();
     if native_ebin.exists() {
         args.push(OsString::from("-pa"));
         #[cfg(windows)]
@@ -241,7 +239,7 @@ fn run_script(
     }
 
     // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
-    let rebar_base_dir = project_root.join("_build").join("dev").join("native");
+    let rebar_base_dir = layout.native_dir();
     for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
         args.push(OsString::from("-pa"));
         #[cfg(windows)]
@@ -366,11 +364,8 @@ fn run_package_as_otp_application(
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
     ensure_runtime_built(&runtime_dir, layout, &paths)?;
 
-    let ebin_dir: PathBuf = project_root
-        .join("_build")
-        .join("dev")
-        .join("ebin")
-        .into_std_path_buf();
+    let layout = BuildLayout::new(project_root);
+    let ebin_dir: PathBuf = layout.ebin_dir().into_std_path_buf();
     let mut extra_code_paths = vec![ebin_dir.clone()];
 
     // ADR 0070: Add dependency ebin directories to code path
@@ -379,18 +374,13 @@ fn run_package_as_otp_application(
     }
 
     // ADR 0072: Add native Erlang ebin to code path if present (Path A)
-    let native_ebin_dir: PathBuf = project_root
-        .join("_build")
-        .join("dev")
-        .join("native")
-        .join("ebin")
-        .into_std_path_buf();
+    let native_ebin_dir: PathBuf = layout.native_ebin_dir().into_std_path_buf();
     if native_ebin_dir.exists() {
         extra_code_paths.push(native_ebin_dir);
     }
 
     // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
-    let rebar_base_dir = project_root.join("_build").join("dev").join("native");
+    let rebar_base_dir = layout.native_dir();
     for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
         extra_code_paths.push(ebin.into_std_path_buf());
     }

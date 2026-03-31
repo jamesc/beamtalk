@@ -4,6 +4,7 @@
 //! Build beamtalk projects.
 
 use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
+use crate::commands::build_layout::BuildLayout;
 use crate::commands::util;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -204,8 +205,9 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
 
     // Create build directory relative to project root
     // ADR 0026 §5: Package mode outputs to _build/dev/ebin/, single-file mode keeps build/
+    let layout = BuildLayout::new(&project_root);
     let build_dir = if pkg_manifest.is_some() {
-        project_root.join("_build").join("dev").join("ebin")
+        layout.ebin_dir()
     } else {
         project_root.join("build")
     };
@@ -1367,7 +1369,8 @@ fn generate_rebar_config(
         &std::collections::BTreeMap<String, super::deps::lockfile::NativePackageLock>,
     >,
 ) -> Result<Utf8PathBuf> {
-    let rebar_dir = project_root.join("_build").join("dev").join("native");
+    let layout = BuildLayout::new(project_root);
+    let rebar_dir = layout.native_dir();
     fs::create_dir_all(&rebar_dir)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create rebar3 build directory '{rebar_dir}'"))?;
@@ -1451,7 +1454,7 @@ fn compile_with_rebar3(
     // Generate the rebar.config in _build/dev/native/
     let config_path = generate_rebar_config(project_root, native_deps, locked_versions)?;
 
-    let rebar_base_dir = project_root.join("_build").join("dev").join("native");
+    let rebar_base_dir = BuildLayout::new(project_root).native_dir();
 
     info!(
         rebar3 = %rebar3.display(),
@@ -1582,11 +1585,8 @@ fn compile_native_erlang_with_deps(
     erl_files.sort();
 
     // Create output directory
-    let ebin_dir = project_root
-        .join("_build")
-        .join("dev")
-        .join("native")
-        .join("ebin");
+    let build_layout = BuildLayout::new(project_root);
+    let ebin_dir = build_layout.native_ebin_dir();
     fs::create_dir_all(&ebin_dir)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create native ebin directory '{ebin_dir}'"))?;
@@ -1598,12 +1598,7 @@ fn compile_native_erlang_with_deps(
     // Add rebar3 lib dir to ERL_LIBS so -include_lib can find hex dep headers.
     // ERL_LIBS requires each app to have an ebin/ subdirectory — hex deps
     // compiled by rebar3 satisfy this.
-    let rebar_lib_dir = project_root
-        .join("_build")
-        .join("dev")
-        .join("native")
-        .join("default")
-        .join("lib");
+    let rebar_lib_dir = build_layout.rebar_lib_dir();
     if rebar_lib_dir.exists() {
         cmd.env("ERL_LIBS", rebar_lib_dir.as_str());
     }
@@ -2799,11 +2794,8 @@ mod tests {
         }
 
         // native ebin should NOT be created
-        let native_ebin = project_path
-            .join("_build")
-            .join("dev")
-            .join("native")
-            .join("ebin");
+        let test_layout = BuildLayout::new(&project_path);
+        let native_ebin = test_layout.native_ebin_dir();
         assert!(
             !native_ebin.exists(),
             "native ebin should not be created when no native/ directory exists"
@@ -2839,34 +2831,22 @@ mod tests {
         assert!(result.is_ok(), "Build should succeed: {result:?}");
 
         // Native BEAM file should exist in _build/dev/native/ebin/
-        let native_beam = project_path
-            .join("_build")
-            .join("dev")
-            .join("native")
-            .join("ebin")
-            .join("hello_native.beam");
+        let test_layout = BuildLayout::new(&project_path);
+        let native_beam = test_layout.native_ebin_dir().join("hello_native.beam");
         assert!(
             native_beam.exists(),
             "Native BEAM file should be produced at {native_beam}"
         );
 
         // Regular .bt BEAM should also exist
-        let bt_beam = project_path
-            .join("_build")
-            .join("dev")
-            .join("ebin")
-            .join("bt@with_native@main.beam");
+        let bt_beam = test_layout.ebin_dir().join("bt@with_native@main.beam");
         assert!(
             bt_beam.exists(),
             "Beamtalk BEAM file should be produced at {bt_beam}"
         );
 
         // ADR 0072: .app file should include native_modules in env
-        let app_file = project_path
-            .join("_build")
-            .join("dev")
-            .join("ebin")
-            .join("with_native.app");
+        let app_file = test_layout.ebin_dir().join("with_native.app");
         assert!(app_file.exists(), "Expected .app file at {app_file}");
         let app_content = fs::read_to_string(&app_file).unwrap();
         assert!(

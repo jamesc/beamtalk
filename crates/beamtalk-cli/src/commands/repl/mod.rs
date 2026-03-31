@@ -242,7 +242,8 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
     let options = beamtalk_core::CompilerOptions::default();
     match crate::commands::build::build(project_root_utf8.as_str(), &options, false) {
         Ok(()) => {
-            let ebin_path = project_root_utf8.join("_build").join("dev").join("ebin");
+            let repl_layout = crate::commands::build_layout::BuildLayout::new(project_root_utf8);
+            let ebin_path = repl_layout.ebin_dir();
             // Count .beam files for summary
             let beam_count = std::fs::read_dir(&ebin_path)
                 .map(|entries| {
@@ -270,17 +271,13 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
 
             // ADR 0072: Add native Erlang ebin to code path if present (Path A).
             // build() already compiled native/*.erl; add their output dir.
-            let native_ebin = project_root_utf8
-                .join("_build")
-                .join("dev")
-                .join("native")
-                .join("ebin");
+            let native_ebin = repl_layout.native_ebin_dir();
             if native_ebin.exists() {
                 code_paths.push(native_ebin.into_std_path_buf());
             }
 
             // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths (Path B).
-            let rebar_base_dir = project_root_utf8.join("_build").join("dev").join("native");
+            let rebar_base_dir = repl_layout.native_dir();
             for ebin in crate::commands::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
                 code_paths.push(ebin.into_std_path_buf());
             }

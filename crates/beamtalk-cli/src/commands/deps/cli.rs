@@ -339,7 +339,9 @@ fn dep_version(project_root: &Utf8Path, name: &str, source: &DependencySource) -
             let utf8 = Utf8PathBuf::from(path.to_string_lossy().to_string());
             project_root.join(&utf8)
         }
-        DependencySource::Git { .. } => project_root.join("_build").join("deps").join(name),
+        DependencySource::Git { .. } => {
+            crate::commands::build_layout::BuildLayout::new(project_root).dep_checkout_dir(name)
+        }
     };
 
     let manifest_path = dep_root.join("beamtalk.toml");

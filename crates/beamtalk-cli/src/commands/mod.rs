@@ -7,6 +7,7 @@ pub mod app_file;
 pub mod attach;
 pub mod build;
 pub(crate) mod build_cache;
+pub mod build_layout;
 pub mod build_stdlib;
 pub mod deps;
 pub mod doc;
