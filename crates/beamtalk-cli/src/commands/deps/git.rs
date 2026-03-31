@@ -243,7 +243,12 @@ mod tests {
         // Get the commit SHA
         let sha = get_git_sha(repo_path);
 
-        let url = format!("file://{}", repo_path.display());
+        // file:// URLs need forward slashes and three slashes before the drive
+        // letter on Windows (e.g. file:///C:/Users/...), otherwise git treats
+        // the drive letter as a hostname and fails with "Unable to read current
+        // working directory" (BT-1737).
+        let path_str = repo_path.display().to_string().replace('\\', "/");
+        let url = format!("file:///{path_str}");
         (repo_dir, url, sha)
     }
 
