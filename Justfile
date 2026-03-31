@@ -941,10 +941,12 @@ install PREFIX="/usr/local": build-release build-stdlib
     # OTP application include directories (for native Erlang compilation)
     for app in beamtalk_runtime; do
         INC_SRC="runtime/apps/${app}/include"
-        if [ -d "${INC_SRC}" ]; then
-            install -d "${PREFIX}/lib/beamtalk/lib/${app}/include"
-            install -m 644 "${INC_SRC}"/*.hrl "${PREFIX}/lib/beamtalk/lib/${app}/include/"
+        if [ ! -d "${INC_SRC}" ] || ! ls "${INC_SRC}"/*.hrl 1>/dev/null 2>&1; then
+            echo "❌ No .hrl headers found in ${INC_SRC}. Run 'just build-erlang' first."
+            exit 1
         fi
+        install -d "${PREFIX}/lib/beamtalk/lib/${app}/include"
+        install -m 644 "${INC_SRC}"/*.hrl "${PREFIX}/lib/beamtalk/lib/${app}/include/"
     done
 
     # Stdlib sources for LSP/tooling navigation
