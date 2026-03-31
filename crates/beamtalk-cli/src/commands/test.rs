@@ -871,6 +871,7 @@ pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize) -> Result<()
 }
 
 /// Initialize the test pipeline: discover packages and build class indexes.
+#[allow(clippy::too_many_lines)]
 fn initialize_pipeline(
     test_path: Utf8PathBuf,
     test_files: Vec<Utf8PathBuf>,
@@ -894,6 +895,17 @@ fn initialize_pipeline(
         let cwd = canonical_path(Utf8Path::new("."));
         if seen.insert(cwd.clone()) {
             roots.push(cwd);
+        }
+
+        // Also seed from the test_path itself when it's a directory.
+        // This ensures `beamtalk test path/to/pkg` from a parent directory
+        // discovers the package even when it has no .bt test files
+        // (native-only packages).
+        if test_path.is_dir() {
+            let tp = canonical_path(&test_path);
+            if seen.insert(tp.clone()) {
+                roots.push(tp);
+            }
         }
 
         // Walk up from each test file to find its package root
