@@ -21,7 +21,6 @@
 ///
 /// @see System (for environment variables and OS information)
 /// @see Json (for reading/writing JSON files)
-/// @see Yaml (for reading/writing YAML files)
 Object subclass: File
 
   /// Test if a file exists at the given path (class method).
