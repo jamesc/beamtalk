@@ -271,6 +271,15 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
             return false;
         }
 
+        // Check if the dep's beamtalk.toml is newer than compiled output.
+        // This catches transitive manifest changes (e.g., a dep changing its
+        // own git dep to a new tag) that wouldn't be caught by root mtime checks.
+        let dep_manifest = dep.root.join("beamtalk.toml");
+        if manifest_newer_than_ebin(&dep_manifest, &ebin_dir) {
+            debug!(dep = %dep.name, manifest = %dep_manifest, "Dependency manifest is newer than compiled output — deps are stale");
+            return false;
+        }
+
         // For path deps, check if source files are newer than compiled output.
         // Git deps don't need mtime checking — the lockfile handles freshness.
         if dep.is_path_dep && path_dep_source_newer_than_ebin(&dep.root, &ebin_dir) {
@@ -280,6 +289,33 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
     }
 
     true
+}
+
+/// Check if any `.bt` source file in a path dependency is newer than the
+/// oldest `.beam` file in its ebin directory.
+///
+/// Returns `true` if recompilation is needed.
+fn manifest_newer_than_ebin(manifest_path: &Utf8Path, ebin_dir: &Utf8Path) -> bool {
+    let Ok(manifest_meta) = std::fs::metadata(manifest_path.as_std_path()) else {
+        return false; // No manifest → can't determine, not stale on this check
+    };
+    let Ok(manifest_mtime) = manifest_meta.modified() else {
+        return false;
+    };
+
+    let oldest_beam = std::fs::read_dir(ebin_dir.as_std_path())
+        .into_iter()
+        .flatten()
+        .filter_map(std::result::Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+        .filter_map(|e| e.metadata().ok()?.modified().ok())
+        .min();
+
+    let Some(oldest_beam_mtime) = oldest_beam else {
+        return true; // No beam files → stale
+    };
+
+    manifest_mtime > oldest_beam_mtime
 }
 
 /// Check if any `.bt` source file in a path dependency is newer than the
@@ -796,6 +832,56 @@ mod tests {
         assert!(
             !deps_are_fresh(&root, &parsed),
             "Should be stale when manifest is newer than lockfile"
+        );
+    }
+
+    #[test]
+    fn test_deps_stale_transitive_manifest_changed() {
+        // root -> middle(path) -> leaf(path)
+        // All ebin compiled, but then middle's beamtalk.toml is modified
+        // (e.g. changing leaf's path). Should detect as stale.
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create leaf dep
+        let leaf_dir = temp.path().join("leaf");
+        fs::create_dir_all(&leaf_dir).unwrap();
+        write_manifest(&leaf_dir, "leaf", "");
+
+        // Create middle dep (depends on leaf)
+        let middle_dir = temp.path().join("middle");
+        fs::create_dir_all(&middle_dir).unwrap();
+        write_manifest(
+            &middle_dir,
+            "middle",
+            "[dependencies]\nleaf = { path = \"../leaf\" }",
+        );
+
+        // Create compiled ebin for both FIRST (older mtime)
+        create_dep_ebin_with_beam(temp.path(), "middle");
+        create_dep_ebin_with_beam(temp.path(), "leaf");
+
+        // Small delay then modify middle's manifest (newer mtime)
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        write_manifest(
+            &middle_dir,
+            "middle",
+            "[dependencies]\nleaf = { path = \"../leaf\" }  # changed",
+        );
+
+        // Root manifest
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "[dependencies]\nmiddle = { path = \"middle\" }",
+        );
+
+        let manifest_path = root.join("beamtalk.toml");
+        let parsed = manifest::parse_manifest_full(&manifest_path).unwrap();
+
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "Should detect transitive manifest change as stale"
         );
     }
 }
