@@ -622,37 +622,13 @@ pub fn compile_native_erlang(project_root: &Utf8Path) -> Result<Option<NativeCom
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create native ebin directory '{ebin_dir}'"))?;
 
-    // Build erlc command
-    let mut cmd = std::process::Command::new("erlc");
-    cmd.arg("+debug_info");
-    cmd.arg("-o").arg(ebin_dir.as_str());
-
-    // Add include path if native/include/ exists
-    let include_dir = native_dir.join("include");
-    if include_dir.exists() && include_dir.is_dir() {
-        debug!(include_dir = %include_dir, "Adding native include path");
-        cmd.arg("-I").arg(include_dir.as_str());
-    }
-
-    // Add all .erl files
-    for erl_file in &erl_files {
-        cmd.arg(erl_file.as_str());
-    }
-
+    // Build and run erlc command
     debug!("Running erlc for native Erlang files");
-    let output = cmd
-        .output()
-        .into_diagnostic()
-        .wrap_err("Failed to run erlc for native Erlang compilation.\nIs Erlang/OTP installed?")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        // erlc outputs file:line:column formatted errors — pass them through
-        // so users see standard Erlang error formatting.
-        let combined = format!("{stdout}{stderr}");
-        miette::bail!("Native Erlang compilation failed:\n{}", combined.trim_end());
-    }
+    beamtalk_cli::erlc::ErlcInvocation::new(&ebin_dir)
+        .debug_info()
+        .include_dir(native_dir.join("include"))
+        .source_files(&erl_files)
+        .run("Native Erlang compilation")?;
 
     // Collect produced .beam files
     let beam_files: Vec<Utf8PathBuf> = module_names

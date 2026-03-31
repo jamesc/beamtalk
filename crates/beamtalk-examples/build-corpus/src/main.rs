@@ -234,24 +234,15 @@ fn explanation_from_comments(source: &str) -> String {
 
 /// Walk a directory for .bt files in sorted order.
 fn walk_bt_files(dir: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
+    use beamtalk_core::file_walker::FileWalker;
+
     if !dir.exists() {
-        return files;
+        return Vec::new();
     }
-    let Ok(entries) = fs::read_dir(dir) else {
-        eprintln!("warning: cannot read directory {}", dir.display());
-        return files;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "bt") {
-            files.push(path);
-        } else if path.is_dir() {
-            files.extend(walk_bt_files(&path));
-        }
-    }
-    files.sort();
-    files
+    FileWalker::source_files()
+        .strict_errors(false)
+        .walk_pathbuf(dir)
+        .unwrap_or_default()
 }
 
 /// Extract .bt files from a directory as whole-file corpus entries.

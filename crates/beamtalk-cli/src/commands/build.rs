@@ -5,7 +5,7 @@
 
 use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
 use crate::commands::build_layout::BuildLayout;
-use crate::commands::util;
+use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
@@ -887,20 +887,9 @@ fn generate_otp_app_callback(
         .wrap_err_with(|| format!("Failed to write OTP app callback '{erl_path}'"))?;
 
     // Compile the generated .erl with erlc
-    let status = std::process::Command::new("erlc")
-        .arg("-o")
-        .arg(build_dir.as_str())
-        .arg(erl_path.as_str())
-        .status()
-        .into_diagnostic()
-        .wrap_err("Failed to run erlc for OTP app callback")?;
-
-    if !status.success() {
-        miette::bail!(
-            "erlc failed to compile OTP app callback '{}'. Is Erlang/OTP installed?",
-            cb_module_name
-        );
-    }
+    beamtalk_cli::erlc::ErlcInvocation::new(build_dir)
+        .source_file(erl_path)
+        .run_status(&format!("OTP app callback '{cb_module_name}' compilation"))?;
 
     Ok(())
 }
@@ -994,10 +983,7 @@ fn clean_stale_artifacts(
 /// to the directory itself.
 fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     if path.is_file() {
-        if path.extension() == Some("bt") {
-            return Ok(vec![path.to_path_buf()]);
-        }
-        miette::bail!("File '{}' is not a .bt source file", path);
+        return FileWalker::source_files().walk(path);
     }
 
     if !path.exists() {
@@ -1012,20 +998,14 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
         path.to_path_buf()
     };
 
-    let mut files = Vec::new();
-    util::collect_files_recursive(&search_dir, &["bt"], &mut files)?;
-    files.sort();
-    Ok(files)
+    FileWalker::source_files().walk(&search_dir)
 }
 
 /// Collect all `.bt` source files from a directory tree.
 ///
 /// Returns an error if the directory does not exist or cannot be read.
 pub fn collect_source_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let mut files = Vec::new();
-    util::collect_files_recursive(dir, &["bt"], &mut files)?;
-    files.sort();
-    Ok(files)
+    FileWalker::source_files().walk(dir)
 }
 
 /// Collect all `.bt` and `.btscript` source files from a directory tree.
@@ -1033,10 +1013,7 @@ pub fn collect_source_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>>
 /// Used by `beamtalk fmt` to find all formattable files when given a directory
 /// path. Returns an error if the directory does not exist or cannot be read.
 pub fn collect_formattable_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let mut files = Vec::new();
-    util::collect_files_recursive(dir, &["bt", "btscript"], &mut files)?;
-    files.sort();
-    Ok(files)
+    FileWalker::format_files().walk(dir)
 }
 
 /// Compute the relative module path from a source file.
@@ -1764,54 +1741,18 @@ fn compile_native_erlang_with_deps(
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create native ebin directory '{ebin_dir}'"))?;
 
-    let mut cmd = std::process::Command::new("erlc");
-    cmd.arg("+debug_info");
-    cmd.arg("-o").arg(ebin_dir.as_str());
+    let mut invocation = beamtalk_cli::erlc::ErlcInvocation::new(&ebin_dir)
+        .debug_info()
+        .erl_libs(&build_layout.rebar_lib_dir())
+        .runtime_include()
+        // BT-1730: generated include dir for beamtalk_classes.hrl
+        .include_dir(build_layout.native_dir().join("include"));
 
-    // Add rebar3 lib dir to ERL_LIBS so -include_lib can find hex dep headers.
-    // ERL_LIBS requires each app to have an ebin/ subdirectory — hex deps
-    // compiled by rebar3 satisfy this.
-    let rebar_lib_dir = build_layout.rebar_lib_dir();
-    if rebar_lib_dir.exists() {
-        cmd.env("ERL_LIBS", rebar_lib_dir.as_str());
-    }
-
-    // Add beamtalk runtime include dir for -include_lib("beamtalk_runtime/...")
-    // The -I path must be the parent of `beamtalk_runtime/` so that
-    // `-include_lib("beamtalk_runtime/include/beamtalk.hrl")` resolves.
-    //   Dev layout:       -I runtime/apps/
-    //   Installed layout:  -I PREFIX/lib/beamtalk/lib/
-    if let Ok((runtime_dir, layout)) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout() {
-        let include_parent = match layout {
-            beamtalk_cli::repl_startup::RuntimeLayout::Dev => runtime_dir.join("apps"),
-            beamtalk_cli::repl_startup::RuntimeLayout::Installed => runtime_dir.join("lib"),
-        };
-        if include_parent.exists() {
-            cmd.arg("-I").arg(&include_parent);
-        }
-    }
-
-    // BT-1730: Add generated include dir for beamtalk_classes.hrl.
-    // This header provides ?BT_CLASS_MODULE macros that native .erl files
-    // should use instead of hardcoding bt@<pkg>@<class> module atoms.
-    let generated_include_dir = project_root
-        .join("_build")
-        .join("dev")
-        .join("native")
-        .join("include");
-    if generated_include_dir.exists() {
-        cmd.arg("-I").arg(generated_include_dir.as_str());
-    }
-
-    // Add explicit include dirs
     for inc in &include_dirs {
-        cmd.arg("-I").arg(inc.as_str());
+        invocation = invocation.include_dir(inc);
     }
 
-    // Add all .erl files
-    for erl_file in &erl_files {
-        cmd.arg(erl_file.as_str());
-    }
+    invocation = invocation.source_files(&erl_files);
 
     info!(
         count = erl_files.len(),
@@ -1819,19 +1760,7 @@ fn compile_native_erlang_with_deps(
         "Compiling native Erlang files via erlc"
     );
 
-    let output = cmd
-        .output()
-        .into_diagnostic()
-        .wrap_err("Failed to run erlc for native Erlang compilation")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        miette::bail!(
-            "Native Erlang compilation failed:\n{}",
-            format!("{stdout}{stderr}").trim_end()
-        );
-    }
+    invocation.run("Native Erlang compilation")?;
 
     // BT-1732: User-visible output confirming native Erlang compilation.
     let count = erl_files.len();

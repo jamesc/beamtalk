@@ -992,10 +992,13 @@ fn path_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
 }
 
 fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
+    use beamtalk_core::file_walker::FileWalker;
+
     let PreloadConfig { roots, stdlib_dirs } = config;
     let mut user_paths = Vec::new();
-    let mut stdlib_path_list = Vec::new();
     let mut remaining_budget = PRELOAD_MAX_FILES;
+
+    let preload_walker = FileWalker::preload_files(remaining_budget);
 
     for root in &roots {
         if remaining_budget == 0 {
@@ -1003,15 +1006,30 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
         }
         let src_dir = root.join("src");
         if src_dir.is_dir() {
-            collect_beamtalk_files_recursive(&src_dir, &mut user_paths, &mut remaining_budget);
+            if let Ok(found) = preload_walker
+                .clone()
+                .max_files(remaining_budget)
+                .walk_pathbuf(&src_dir)
+            {
+                remaining_budget = remaining_budget.saturating_sub(found.len());
+                user_paths.extend(found);
+            }
         }
     }
 
+    let mut stdlib_path_list = Vec::new();
     for dir in &stdlib_dirs {
         if remaining_budget == 0 {
             break;
         }
-        collect_beamtalk_files_recursive(dir, &mut stdlib_path_list, &mut remaining_budget);
+        if let Ok(found) = preload_walker
+            .clone()
+            .max_files(remaining_budget)
+            .walk_pathbuf(dir)
+        {
+            remaining_budget = remaining_budget.saturating_sub(found.len());
+            stdlib_path_list.extend(found);
+        }
     }
 
     // Build the stdlib set first so user files that overlap with stdlib are
@@ -1046,52 +1064,6 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
     PreloadedFiles {
         user_files,
         stdlib_files,
-    }
-}
-
-fn is_beamtalk_file(path: &Path) -> bool {
-    path.is_file() && path.extension().is_some_and(|ext| ext == "bt")
-}
-
-fn collect_beamtalk_files_recursive(
-    dir: &Path,
-    files: &mut Vec<PathBuf>,
-    remaining_budget: &mut usize,
-) {
-    if *remaining_budget == 0 {
-        return;
-    }
-
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
-        if *remaining_budget == 0 {
-            return;
-        }
-
-        let path = entry.path();
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-
-        if file_type.is_symlink() {
-            continue;
-        }
-
-        if file_type.is_dir() {
-            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if matches!(name, ".git" | "target" | "node_modules" | "_build") {
-                continue;
-            }
-            collect_beamtalk_files_recursive(&path, files, remaining_budget);
-        } else if is_beamtalk_file(&path) {
-            files.push(path);
-            *remaining_budget = remaining_budget.saturating_sub(1);
-        }
     }
 }
 
