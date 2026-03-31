@@ -23,6 +23,7 @@ use std::fs;
 use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
 
+use super::build_layout::BuildLayout;
 use super::manifest;
 
 /// Per-package class module indexes: package root → (`class_module_index`, `class_superclass_index`).
@@ -1285,7 +1286,8 @@ fn resolve_load_directives(
 /// will register them in the class registry when loaded during the test run.
 fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
     for (pkg_root, pkg) in &pipeline.discovered_packages {
-        let ebin_dir = pkg_root.join("_build").join("dev").join("ebin");
+        let pkg_layout = BuildLayout::new(pkg_root);
+        let ebin_dir = pkg_layout.ebin_dir();
         println!("Building package '{}'...", pkg.name);
         let build_options = beamtalk_core::CompilerOptions {
             stdlib_mode: false,
@@ -1315,17 +1317,13 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         }
 
         // ADR 0072: Add native Erlang ebin to code path if present
-        let native_ebin = pkg_root
-            .join("_build")
-            .join("dev")
-            .join("native")
-            .join("ebin");
+        let native_ebin = pkg_layout.native_ebin_dir();
         if native_ebin.exists() {
             pipeline.package_ebin_dirs.push(native_ebin);
         }
 
         // ADR 0072 Phase 2: Add rebar3 hex dep ebin paths to code path (Path B)
-        let rebar_base_dir = pkg_root.join("_build").join("dev").join("native");
+        let rebar_base_dir = pkg_layout.native_dir();
         for ebin in super::build::collect_rebar3_ebin_paths(&rebar_base_dir) {
             pipeline.package_ebin_dirs.push(ebin);
         }
@@ -1381,11 +1379,8 @@ fn compile_native_test_erlang(
     // Sort for deterministic compilation order across platforms.
     erl_files.sort();
 
-    let ebin_dir = pkg_root
-        .join("_build")
-        .join("dev")
-        .join("native")
-        .join("ebin");
+    let test_layout = BuildLayout::new(pkg_root);
+    let ebin_dir = test_layout.native_ebin_dir();
     fs::create_dir_all(&ebin_dir)
         .into_diagnostic()
         .wrap_err("Failed to create native ebin dir for test helpers")?;
@@ -1395,12 +1390,7 @@ fn compile_native_test_erlang(
     cmd.arg("-o").arg(ebin_dir.as_str());
 
     // Add rebar3 lib dir to ERL_LIBS so -include_lib can find hex dep headers.
-    let rebar_lib_dir = pkg_root
-        .join("_build")
-        .join("dev")
-        .join("native")
-        .join("default")
-        .join("lib");
+    let rebar_lib_dir = test_layout.rebar_lib_dir();
     if rebar_lib_dir.exists() {
         cmd.env("ERL_LIBS", rebar_lib_dir.as_str());
     }

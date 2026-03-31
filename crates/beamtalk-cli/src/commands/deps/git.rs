@@ -54,7 +54,7 @@ pub fn resolve_git_dep(
     project_root: &Utf8Path,
     lock_entry: Option<&LockEntry>,
 ) -> Result<ResolvedGitDep> {
-    let deps_dir = project_root.join("_build").join("deps");
+    let deps_dir = crate::commands::build_layout::BuildLayout::new(project_root).deps_dir();
     let checkout_path = deps_dir.join(name);
 
     // Check if we can skip re-clone based on lockfile

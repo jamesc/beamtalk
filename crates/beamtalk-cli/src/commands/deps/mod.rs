@@ -27,6 +27,7 @@ use camino::Utf8Path;
 use miette::Result;
 use tracing::{debug, info};
 
+use crate::commands::build_layout::BuildLayout;
 use crate::commands::manifest;
 
 /// Ensure dependencies are resolved and compiled, with staleness detection.
@@ -77,6 +78,7 @@ fn collect_fresh_deps(
 ) -> Result<Vec<path::ResolvedDependency>> {
     use beamtalk_core::compilation::DependencySource;
 
+    let layout = BuildLayout::new(project_root);
     let mut resolved = Vec::new();
 
     for (dep_name, spec) in &parsed.dependencies {
@@ -92,15 +94,11 @@ fn collect_fresh_deps(
             }
             DependencySource::Git { .. } => {
                 // Git deps are cloned to _build/deps/{name}/
-                project_root.join("_build").join("deps").join(dep_name)
+                layout.dep_checkout_dir(dep_name)
             }
         };
 
-        let ebin_path = project_root
-            .join("_build")
-            .join("deps")
-            .join(dep_name)
-            .join("ebin");
+        let ebin_path = layout.dep_ebin_dir(dep_name);
 
         // Rebuild class module index from source files (fast — no compilation)
         let (class_module_index, class_infos) = path::build_dep_class_index(&dep_root, dep_name)?;
@@ -165,12 +163,9 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
     }
 
     // Check that all dependency ebin directories exist and are up-to-date
+    let layout = BuildLayout::new(project_root);
     for (dep_name, spec) in &manifest.dependencies {
-        let ebin_dir = project_root
-            .join("_build")
-            .join("deps")
-            .join(dep_name)
-            .join("ebin");
+        let ebin_dir = layout.dep_ebin_dir(dep_name);
         if !ebin_dir.exists() {
             debug!(dep = %dep_name, "Dependency ebin directory missing — deps are stale");
             return false;
@@ -279,11 +274,9 @@ mod tests {
     }
 
     fn create_dep_ebin_with_beam(project_root: &std::path::Path, dep_name: &str) {
-        let ebin_dir = project_root
-            .join("_build")
-            .join("deps")
-            .join(dep_name)
-            .join("ebin");
+        let root_utf8 = camino::Utf8PathBuf::from_path_buf(project_root.to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root_utf8);
+        let ebin_dir = layout.dep_ebin_dir(dep_name);
         fs::create_dir_all(&ebin_dir).unwrap();
         // Create a fake .beam file
         fs::write(ebin_dir.join(format!("bt@{dep_name}@helper.beam")), b"BEAM").unwrap();
@@ -376,12 +369,8 @@ mod tests {
         write_manifest(&dep_dir, "utils", "");
 
         // Create ebin dir but no .beam files
-        let ebin_dir = temp
-            .path()
-            .join("_build")
-            .join("deps")
-            .join("utils")
-            .join("ebin");
+        let test_layout = BuildLayout::new(&root);
+        let ebin_dir = test_layout.dep_ebin_dir("utils");
         fs::create_dir_all(&ebin_dir).unwrap();
 
         write_manifest(

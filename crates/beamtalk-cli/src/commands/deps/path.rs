@@ -18,6 +18,7 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, info};
 
+use crate::commands::build_layout::BuildLayout;
 use crate::commands::manifest::{self, ParsedManifest};
 
 /// A resolved dependency with its compiled ebin path and class index.
@@ -100,7 +101,7 @@ pub fn resolve_path_dependencies(
 /// Used by commands (run, test) that need to add dependency ebin paths to the
 /// BEAM code path without re-resolving/re-compiling.
 pub fn collect_dep_ebin_paths(project_root: &Utf8Path) -> Vec<Utf8PathBuf> {
-    let deps_dir = project_root.join("_build").join("deps");
+    let deps_dir = BuildLayout::new(project_root).deps_dir();
     let mut paths = Vec::new();
 
     if let Ok(entries) = std::fs::read_dir(&deps_dir) {
@@ -349,11 +350,7 @@ fn compile_dependency_with_context(
     options: &beamtalk_core::CompilerOptions,
     prior_deps: &[ResolvedDependency],
 ) -> Result<(Utf8PathBuf, HashMap<String, String>)> {
-    let ebin_path = project_root
-        .join("_build")
-        .join("deps")
-        .join(dep_name)
-        .join("ebin");
+    let ebin_path = BuildLayout::new(project_root).dep_ebin_dir(dep_name);
 
     // Create the ebin directory
     std::fs::create_dir_all(&ebin_path)
@@ -756,12 +753,8 @@ utils = { path = "utils" }"#,
         let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
         // Create _build/deps/utils/ebin/
-        let ebin_dir = temp
-            .path()
-            .join("_build")
-            .join("deps")
-            .join("utils")
-            .join("ebin");
+        let test_layout = BuildLayout::new(&project_root);
+        let ebin_dir = test_layout.dep_ebin_dir("utils");
         fs::create_dir_all(&ebin_dir).unwrap();
 
         let paths = collect_dep_ebin_paths(&project_root);

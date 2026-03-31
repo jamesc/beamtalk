@@ -616,11 +616,8 @@ pub fn compile_native_erlang(project_root: &Utf8Path) -> Result<Option<NativeCom
         .collect();
 
     // Create output directory: _build/dev/native/ebin/
-    let ebin_dir = project_root
-        .join("_build")
-        .join("dev")
-        .join("native")
-        .join("ebin");
+    let layout = crate::commands::build_layout::BuildLayout::new(project_root);
+    let ebin_dir = layout.native_ebin_dir();
     std::fs::create_dir_all(&ebin_dir)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create native ebin directory '{ebin_dir}'"))?;
