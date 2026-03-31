@@ -84,23 +84,7 @@ fn discover_package_corpora() -> (
         return (example_corpora, class_corpora);
     };
 
-    // Find project root by walking up to find beamtalk.toml
-    let project_root = {
-        let mut dir = cwd.as_path();
-        loop {
-            if dir.join("beamtalk.toml").exists() {
-                break Some(dir.to_path_buf());
-            }
-            match dir.parent() {
-                Some(parent) => dir = parent,
-                None => break None,
-            }
-        }
-    };
-
-    let Some(root) = project_root else {
-        return (example_corpora, class_corpora);
-    };
+    let root = beamtalk_core::project::discover_project_root(&cwd);
 
     // Root package corpus
     let dev_dir = root.join("_build").join("dev");
