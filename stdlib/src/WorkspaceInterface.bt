@@ -83,8 +83,9 @@ sealed Object subclass: WorkspaceInterface
 
   /// Sync the project: incrementally compile all changed files.
   ///
-  /// Scans the project directory for `.bt` and `.erl` files, compiles
-  /// changed files in dependency order, and returns a result Dictionary.
+  /// Scans the current working directory for a `beamtalk.toml` project
+  /// manifest, then finds `.bt` and `.erl` files, compiles changed files
+  /// in dependency order, and returns a result Dictionary.
   ///
   /// The result Dictionary contains:
   ///   - `#summary` — human-readable summary String
@@ -96,7 +97,7 @@ sealed Object subclass: WorkspaceInterface
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace sync           // => #{summary => "Reloaded 2 of 5 files (3 unchanged)", ...}
+  /// Workspace sync           // => #{#summary => "Reloaded 2 of 5 files (3 unchanged)", ...}
   /// (Workspace sync) at: #summary  // => "Reloaded 2 of 5 files (3 unchanged)"
   /// ```
   sync -> Dictionary => (Erlang beamtalk_workspace_interface_primitives) sync

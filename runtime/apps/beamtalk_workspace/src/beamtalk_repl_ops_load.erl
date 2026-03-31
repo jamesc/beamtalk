@@ -102,15 +102,9 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
     AllErlFiles = find_erl_files(NativeDir),
     AllFiles = AllErlFiles ++ AllBtFiles,
     PreviousMtimes =
-        case Force of
-            true ->
-                beamtalk_workspace_meta:clear_file_mtimes(),
-                #{};
-            false ->
-                case beamtalk_workspace_meta:get_file_mtimes() of
-                    {ok, Mtimes} -> Mtimes;
-                    {error, _} -> #{}
-                end
+        case beamtalk_workspace_meta:get_file_mtimes() of
+            {ok, Mtimes} -> Mtimes;
+            {error, _} -> #{}
         end,
     PrevErlMtimes =
         maps:filter(
@@ -123,9 +117,21 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
             PreviousMtimes
         ),
     {ChangedErl, UnchangedErl, DeletedErl} =
-        classify_files_by_change(AllErlFiles, PrevErlMtimes),
+        case Force of
+            true ->
+                {_, _, DelErl} = classify_files_by_change(AllErlFiles, PrevErlMtimes),
+                {AllErlFiles, [], DelErl};
+            false ->
+                classify_files_by_change(AllErlFiles, PrevErlMtimes)
+        end,
     {ChangedBt, UnchangedBt, DeletedBt} =
-        classify_files_by_change(AllBtFiles, PrevBtMtimes),
+        case Force of
+            true ->
+                {_, _, DelBt} = classify_files_by_change(AllBtFiles, PrevBtMtimes),
+                {AllBtFiles, [], DelBt};
+            false ->
+                classify_files_by_change(AllBtFiles, PrevBtMtimes)
+        end,
     DeletedBtCount = handle_deleted_files(DeletedBt, SessionPid),
     lists:foreach(
         fun(P) ->
@@ -134,6 +140,16 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
                 [P],
                 #{domain => [beamtalk, runtime]}
             ),
+            %% Unload the native module from the VM before removing the mtime.
+            ModName = list_to_atom(filename:basename(P, ".erl")),
+            case code:is_loaded(ModName) of
+                false ->
+                    ok;
+                {file, _} ->
+                    code:purge(ModName),
+                    code:delete(ModName),
+                    code:purge(ModName)
+            end,
             beamtalk_workspace_meta:remove_file_mtime(P)
         end,
         DeletedErl
@@ -142,7 +158,17 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
     ErlPreLoadMtimes = snapshot_file_mtimes(ChangedErl),
     {NativeErrors, _NativeCompiledCount} =
         compile_native_erl_files(ChangedErl, AbsPath),
-    record_file_mtimes_from_snapshot(ErlPreLoadMtimes),
+    %% Only record mtimes for .erl files that compiled successfully (no error entry).
+    ErlErrorPaths = sets:from_list([
+        binary_to_list(maps:get(<<"path">>, E))
+     || E <- NativeErrors
+    ]),
+    SuccessfulErlMtimes = [
+        {P, M}
+     || {P, M} <- ErlPreLoadMtimes,
+        not sets:is_element(P, ErlErrorPaths)
+    ],
+    record_file_mtimes_from_snapshot(SuccessfulErlMtimes),
     SortedChanged = sort_bt_files_by_deps(ChangedBt),
     PreLoadMtimes = snapshot_file_mtimes(SortedChanged),
     {AllClasses, BtErrors} =
@@ -152,7 +178,17 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
             _ ->
                 load_files_sequential(SortedChanged, SessionPid)
         end,
-    record_file_mtimes_from_snapshot(PreLoadMtimes),
+    %% Only record mtimes for .bt files that compiled successfully (no error entry).
+    BtErrorPaths = sets:from_list([
+        binary_to_list(maps:get(<<"path">>, E))
+     || E <- BtErrors
+    ]),
+    SuccessfulBtMtimes = [
+        {P, M}
+     || {P, M} <- PreLoadMtimes,
+        not sets:is_element(P, BtErrorPaths)
+    ],
+    record_file_mtimes_from_snapshot(SuccessfulBtMtimes),
     Errors = lists:reverse(NativeErrors) ++ BtErrors,
     ClassNames =
         [
