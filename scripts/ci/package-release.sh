@@ -70,6 +70,14 @@ if [ "${PLATFORM}" = "windows-x86_64" ]; then
         cp "${INC_SRC}"/*.hrl "${STAGING}/lib/beamtalk/lib/${app}/include/"
     done
 
+    # Bundled rebar3 escript (ADR 0072 — needed for `beamtalk build` hex deps)
+    if [ ! -f "runtime/tools/rebar3" ]; then
+        echo "❌ Bundled rebar3 not found at runtime/tools/rebar3."
+        exit 1
+    fi
+    mkdir -p "${STAGING}/lib/beamtalk/tools"
+    cp "runtime/tools/rebar3" "${STAGING}/lib/beamtalk/tools/rebar3"
+
     # Create zip
     (cd "beamtalk-staging" && 7z a "../${ARCHIVE}" "${TOPLEVEL}")
     rm -rf "beamtalk-staging"
