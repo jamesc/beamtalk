@@ -143,7 +143,7 @@ beamtalk package build
 beamtalk package registry build registry/ --name=beamtalk --private-key=key.pem
 ```
 
-**Version constraint solving — PubGrub.** Registry deps require a constraint solver. Beamtalk uses the **PubGrub** algorithm via the `pubgrub` Rust crate — the same algorithm used by Gleam (Rust), Dart/pub, and Elixir/Mix (via `hex_solver`). Gleam's `compiler-core/src/dependency.rs` is the reference implementation. Implementation details deferred to the Phase 2 implementation issue.
+**Version constraint solving — PubGrub (Phase 2+).** Registry deps will require a constraint solver. Beamtalk will use the **PubGrub** algorithm via the `pubgrub` Rust crate — the same algorithm used by Gleam (Rust), Dart/pub, and Elixir/Mix (via `hex_solver`). Gleam's `compiler-core/src/dependency.rs` is the reference implementation. Implementation details deferred to the Phase 2 implementation issue.
 
 **Native dep version conflicts.** `[native.dependencies]` are resolved by rebar3, which uses depth-first "first wins" — not PubGrub. If two Beamtalk packages declare conflicting hex dep versions (e.g., `gun = "~> 2.1"` vs `gun = "~> 2.0"`), rebar3 may silently pick one. The Beamtalk resolver has no visibility into rebar3's choices. Mitigation: `beamtalk build` should compare declared native dep versions across packages and warn on potential conflicts before invoking rebar3.
 
@@ -236,7 +236,7 @@ The `source` field disambiguates from git-source entries.
 
 #### Generated on build, not shipped in tarballs
 
-`beamtalk build` already generates `class_corpus.json` into `_build/dev/` for every compiled package (see `build.rs:631-681`). This file contains structured metadata for all public classes: name, kind, superclass, methods with selectors, parameters, return types, and doc comments.
+`beamtalk build` already generates `class_corpus.json` into `_build/dev/` for every compiled package (see `build.rs:647-686`). Currently this file contains: class `name`, `superclass`, `methods` (selector strings), `is_sealed`, `is_abstract`, and a `doc` field (currently always null). Richer metadata (class kind, method parameters, return types, doc comments) is a future enhancement — the corpus format is extensible.
 
 Since ADR 0070 established implicit fetch-and-compile on build (the Cargo model), dependencies are always compiled before they can be used. The `class_corpus.json` is generated as a build artifact — there is no window where a dependency is resolved but not compiled.
 
