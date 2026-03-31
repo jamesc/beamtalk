@@ -171,22 +171,15 @@ write_stdin_cat_test() ->
 %%% ============================================================================
 
 kill_child_sleep_test() ->
-    case os:type() of
-        {win32, _} ->
-            %% Windows kill semantics only close stdin (no SIGTERM equivalent).
-            %% Process group kill via Job Objects is pending (BT-1133).
-            {skip, "Windows kill semantics via Job Objects are pending (BT-1133)"};
-        _ ->
-            {SleepExe, SleepArgs} = sleep_cmd(),
-            Port = beamtalk_exec_port:open(),
-            beamtalk_exec_port:spawn_child(Port, 4, SleepExe, SleepArgs),
-            beamtalk_exec_port:kill_child(Port, 4),
-            % Should receive exit event (SIGTERM -> exit)
-            ExitCode = receive_exit(Port, 4, 5000),
-            beamtalk_exec_port:close(Port),
-            % SIGTERM exit codes are system-dependent; just assert we got an exit event.
-            ?assert(is_integer(ExitCode))
-    end.
+    {SleepExe, SleepArgs} = sleep_cmd(),
+    Port = beamtalk_exec_port:open(),
+    beamtalk_exec_port:spawn_child(Port, 4, SleepExe, SleepArgs),
+    beamtalk_exec_port:kill_child(Port, 4),
+    %% Should receive exit event (SIGTERM on Unix, TerminateJobObject on Windows).
+    ExitCode = receive_exit(Port, 4, 5000),
+    beamtalk_exec_port:close(Port),
+    %% Exit codes are system-dependent; just assert we got an exit event.
+    ?assert(is_integer(ExitCode)).
 
 %%% ============================================================================
 %%% Internal helpers

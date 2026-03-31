@@ -27,6 +27,8 @@
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -37,6 +39,72 @@ use clap::{ArgAction, Parser};
 use eetf::{Atom, Binary, FixInteger, Map, Term, Tuple};
 use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
+
+// ────────────────────────────────────────────────────────────────
+// Windows Job Object support (BT-1133)
+
+#[cfg(windows)]
+mod job_object {
+    use std::io;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, TerminateJobObject,
+    };
+
+    /// RAII wrapper for a Win32 Job Object handle.
+    ///
+    /// Closes the handle on drop. The Job Object itself is destroyed by the OS
+    /// when all handles to it are closed and no processes remain assigned.
+    pub(crate) struct JobObject {
+        handle: HANDLE,
+    }
+
+    // SAFETY: Win32 HANDLEs are plain pointer-sized values with no thread
+    // affinity — they can be used from any thread and sent between threads.
+    unsafe impl Send for JobObject {}
+    // SAFETY: see Send impl above — HANDLEs have no thread affinity.
+    unsafe impl Sync for JobObject {}
+
+    impl JobObject {
+        /// Create an anonymous Job Object.
+        pub(crate) fn create() -> io::Result<Self> {
+            // SAFETY: CreateJobObjectW with null name/security creates an anonymous job.
+            let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+            if handle == INVALID_HANDLE_VALUE || handle.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self { handle })
+        }
+
+        /// Assign a process (by raw handle) to this Job Object.
+        pub(crate) fn assign_process(&self, process_handle: HANDLE) -> io::Result<()> {
+            // SAFETY: Both handles are valid at this point.
+            let rc = unsafe { AssignProcessToJobObject(self.handle, process_handle) };
+            if rc == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+
+        /// Terminate all processes in the Job Object with the given exit code.
+        pub(crate) fn terminate(&self, exit_code: u32) -> io::Result<()> {
+            // SAFETY: Valid job handle.
+            let rc = unsafe { TerminateJobObject(self.handle, exit_code) };
+            if rc == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+    }
+
+    impl Drop for JobObject {
+        fn drop(&mut self) {
+            // SAFETY: CloseHandle on a valid handle is always safe.
+            unsafe { CloseHandle(self.handle) };
+        }
+    }
+}
 
 // ────────────────────────────────────────────────────────────────
 // {packet, 4} framing
@@ -198,6 +266,10 @@ struct ChildEntry {
     /// Process group ID (Unix only). After `setsid()`, pgid == child PID.
     #[cfg(unix)]
     pgid: libc::pid_t,
+    /// Job Object handle (Windows only). All child processes are assigned to
+    /// this Job Object so they can be terminated as a group.
+    #[cfg(windows)]
+    job: job_object::JobObject,
 }
 
 type ChildMap = Arc<Mutex<HashMap<u32, ChildEntry>>>;
@@ -307,6 +379,18 @@ fn handle_spawn_piped(
     #[allow(clippy::cast_possible_wrap)]
     let pgid = child.id() as libc::pid_t;
 
+    // On Windows, create a Job Object and assign the child to it so the entire
+    // process tree can be terminated as a group (BT-1133).
+    #[cfg(windows)]
+    let job = {
+        let job =
+            job_object::JobObject::create().map_err(|e| format!("CreateJobObject failed: {e}"))?;
+        let process_handle = child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+        job.assign_process(process_handle)
+            .map_err(|e| format!("AssignProcessToJobObject failed: {e}"))?;
+        job
+    };
+
     // Insert entry before spawning threads, so kill/write_stdin can find it.
     // Reject duplicate child_id to avoid silently orphaning the old process.
     {
@@ -326,6 +410,8 @@ fn handle_spawn_piped(
                 stdin_closed: false,
                 #[cfg(unix)]
                 pgid,
+                #[cfg(windows)]
+                job,
             },
         );
     }
@@ -493,18 +579,20 @@ fn handle_kill(request: &Map, children: &ChildMap) -> Result<(), String> {
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        // Windows: process group kill via Job Objects is out of scope for Phase 1.
-        // Close stdin to signal EOF to the child; the reaper will collect the exit.
-        if let Ok(mut map) = children.lock() {
-            if let Some(entry) = map.get_mut(&child_id) {
-                entry.stdin = None;
-            } else {
-                return Err(format!("child {child_id} not found"));
+        // Terminate all processes in the Job Object (BT-1133).
+        let map = children
+            .lock()
+            .map_err(|e| format!("children lock poisoned: {e}"))?;
+        match map.get(&child_id) {
+            Some(entry) => {
+                if let Err(e) = entry.job.terminate(1) {
+                    warn!("TerminateJobObject failed for child {child_id}: {e}");
+                }
             }
+            None => return Err(format!("child {child_id} not found")),
         }
-        warn!("kill command on non-Unix: stdin closed, no SIGTERM sent");
     }
 
     Ok(())
@@ -623,16 +711,15 @@ fn kill_all_children(children: &ChildMap) {
         }
     }
 
-    // Windows: Job Object termination is tracked in BT-1133.
-    // For now, close all stdin pipes to signal EOF; orphaned processes will
-    // be cleaned up by the OS when the helper exits.
-    #[cfg(not(unix))]
+    // Windows: terminate all Job Objects to kill all process trees (BT-1133).
+    #[cfg(windows)]
     {
-        let count = children.lock().map(|m| m.len()).unwrap_or(0);
-        if count > 0 {
-            warn!(
-                "kill_all_children: {count} subprocess(es) not forcefully terminated on Windows (see BT-1133)"
-            );
+        if let Ok(map) = children.lock() {
+            for (child_id, entry) in map.iter() {
+                if let Err(e) = entry.job.terminate(1) {
+                    warn!("TerminateJobObject failed for child {child_id}: {e}");
+                }
+            }
         }
     }
 }
@@ -904,7 +991,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn write_stdin_to_nonexistent_child_returns_error() {
         let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
         let req = Map::from([
@@ -916,11 +1002,48 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn kill_nonexistent_child_returns_error() {
         let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
         let req = Map::from([(atom("child_id"), int_term(999))]);
         let result = handle_kill(&req, &children);
         assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn spawn_cmd_exit_zero_succeeds_on_windows() {
+        use eetf::List;
+        use std::time::{Duration, Instant};
+
+        let writer: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+        let children: ChildMap = Arc::new(Mutex::new(HashMap::new()));
+
+        let args_term = Term::from(List::from(vec![binary_term(b"/c"), binary_term(b"exit 0")]));
+        let env_term = Term::from(Map::from(HashMap::<Term, Term>::new()));
+        let req = Term::from(Map::from([
+            (atom("command"), atom("spawn")),
+            (atom("child_id"), int_term(1)),
+            (atom("executable"), binary_term(b"cmd")),
+            (atom("args"), args_term),
+            (atom("env"), env_term),
+        ]));
+
+        let result = handle_command(&req, &writer, &children);
+        assert!(
+            result.is_ok(),
+            "spawn `cmd /c exit 0` should succeed: {result:?}"
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            {
+                let map = children.lock().unwrap();
+                if !map.contains_key(&1) {
+                    break;
+                }
+            }
+            assert!(Instant::now() < deadline, "child 1 not reaped within 5s");
+            thread::sleep(Duration::from_millis(50));
+        }
     }
 }
