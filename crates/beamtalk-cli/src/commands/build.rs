@@ -8,6 +8,7 @@ use crate::commands::util;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -231,13 +232,10 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
         check_native_module_collisions(&project_root, &pkg.name, &resolved_deps)?;
     }
 
-    // ADR 0072: Compile native Erlang sources before .bt files.
-    // Native modules must be compiled first because .bt files may reference them
-    // via `(Erlang module)` FFI or `native:` annotations.
-    //
-    // Two paths based on presence of [native.dependencies]:
-    // - Path A (no hex deps): compile native/*.erl directly via erlc
-    // - Path B (with hex deps): generate rebar.config, invoke rebar3 compile
+    // ADR 0072: Determine whether native hex deps exist (needed to choose
+    // the compilation path later). The actual native compilation is deferred
+    // until after Pass 1 so we can generate the beamtalk_classes.hrl header
+    // (BT-1730) that native .erl files can include.
     let has_native_deps = full_manifest
         .as_ref()
         .is_some_and(|m| !m.native_dependencies.is_empty())
@@ -253,44 +251,6 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
                 })?;
                 Ok(acc || !m.native_dependencies.is_empty())
             })?;
-
-    let native_result = if pkg_manifest.is_some() && has_native_deps {
-        // Path B: rebar3 handles both hex deps and native/*.erl
-        let native_deps = &full_manifest.as_ref().unwrap().native_dependencies;
-
-        // Aggregate native dependencies from all packages in the dependency graph
-        let aggregated = aggregate_native_dependencies(native_deps, &resolved_deps);
-
-        let rebar3_result = compile_with_rebar3(&project_root, &aggregated, false, &resolved_deps)?;
-        eprintln!(
-            "Compiled native deps via rebar3 ({} package(s), {} ebin dir(s))",
-            aggregated.len(),
-            rebar3_result.ebin_paths.len()
-        );
-        Some(rebar3_result)
-    } else if pkg_manifest.is_some() {
-        // Path A: compile native/*.erl directly via erlc (no hex deps).
-        // Uses compile_native_erlang_with_deps to also compile transitive
-        // BT dependency native sources (same as Path B's post-rebar3 step).
-        let native_ebin = compile_native_erlang_with_deps(&project_root, &resolved_deps)?;
-        let module_names = {
-            use crate::beam_compiler::discover_native_modules;
-            discover_native_modules(&project_root)?
-        };
-        match native_ebin {
-            Some(ebin) => Some(Rebar3Result {
-                ebin_paths: vec![ebin],
-                module_names,
-            }),
-            None if !module_names.is_empty() => {
-                // Native modules discovered but no ebin produced — shouldn't happen
-                None
-            }
-            None => None,
-        }
-    } else {
-        None
-    };
 
     // Determine the source root for computing relative module paths
     let src_dir = project_root.join("src");
@@ -400,6 +360,67 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, mut force: bo
                 miette::bail!("{}", messages.join("\n"));
             }
         }
+    }
+
+    // BT-1730: Generate beamtalk_classes.hrl before native Erlang compilation.
+    // This header provides ?BT_CLASS_MODULE macros so native .erl files can
+    // reference Beamtalk class modules without hardcoding bt@<pkg>@<class> atoms.
+    if pkg_manifest.is_some() {
+        let hrl_dir = project_root
+            .join("_build")
+            .join("dev")
+            .join("native")
+            .join("include");
+        generate_class_header(&hrl_dir, &class_module_index)?;
+    }
+
+    // ADR 0072: Compile native Erlang sources after Pass 1.
+    // Native modules must be compiled before .bt files (Pass 2) because .bt
+    // files may reference them via `(Erlang module)` FFI or `native:` annotations.
+    // Moved after Pass 1 so the generated beamtalk_classes.hrl is available.
+    let native_result = if pkg_manifest.is_some() && has_native_deps {
+        // Path B: rebar3 handles both hex deps and native/*.erl
+        let native_deps = &full_manifest.as_ref().unwrap().native_dependencies;
+
+        // Aggregate native dependencies from all packages in the dependency graph
+        let aggregated = aggregate_native_dependencies(native_deps, &resolved_deps);
+
+        let rebar3_result = compile_with_rebar3(&project_root, &aggregated, false, &resolved_deps)?;
+        eprintln!(
+            "Compiled native deps via rebar3 ({} package(s), {} ebin dir(s))",
+            aggregated.len(),
+            rebar3_result.ebin_paths.len()
+        );
+        Some(rebar3_result)
+    } else if pkg_manifest.is_some() {
+        // Path A: compile native/*.erl directly via erlc (no hex deps).
+        // Uses compile_native_erlang_with_deps to also compile transitive
+        // BT dependency native sources (same as Path B's post-rebar3 step).
+        let native_ebin = compile_native_erlang_with_deps(&project_root, &resolved_deps)?;
+        let module_names = {
+            use crate::beam_compiler::discover_native_modules;
+            discover_native_modules(&project_root)?
+        };
+        match native_ebin {
+            Some(ebin) => Some(Rebar3Result {
+                ebin_paths: vec![ebin],
+                module_names,
+            }),
+            None if !module_names.is_empty() => {
+                // Native modules discovered but no ebin produced — shouldn't happen
+                None
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+
+    // BT-1730: Validate native .erl files for hardcoded bt@<pkg>@ module references.
+    // Warns at compile time so moving a class between packages doesn't cause
+    // silent runtime failures.
+    if let Some(pkg) = pkg_manifest {
+        validate_native_class_references(&project_root, &pkg.name, &class_module_index)?;
     }
 
     for file in &source_files {
@@ -1201,6 +1222,156 @@ pub(crate) fn build_class_module_index(
     Ok((module_index, superclass_index, all_class_infos, cached_asts))
 }
 
+// ── BT-1730: Class module header generation ─────────────────────────────────
+
+/// Generate a `beamtalk_classes.hrl` header file with Erlang preprocessor
+/// macros that map Beamtalk class names to their compiled BEAM module atoms.
+///
+/// For each entry in the `class_module_index`, emits:
+/// ```erlang
+/// -define(BT_CLASS_MODULE_HTTPResponse, 'bt@http@httpresponse').
+/// ```
+///
+/// Native `.erl` files include this header and use `?BT_CLASS_MODULE_ClassName`
+/// instead of hardcoding `'bt@<pkg>@<class>'` atoms. When a class moves
+/// between packages, the macro value updates automatically on rebuild.
+///
+/// The header is written to `_build/dev/native/include/beamtalk_classes.hrl`
+/// and is added to the erlc include path during native compilation.
+fn generate_class_header(
+    include_dir: &Utf8Path,
+    class_module_index: &HashMap<String, String>,
+) -> Result<()> {
+    fs::create_dir_all(include_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create native include directory '{include_dir}'"))?;
+
+    let hrl_path = include_dir.join("beamtalk_classes.hrl");
+
+    let mut content = String::new();
+    content.push_str("%% Generated by beamtalk build — do not edit.\n");
+    content.push_str("%% BT-1730: Maps Beamtalk class names to compiled BEAM module atoms.\n");
+    content.push_str("%%\n");
+    content.push_str("%% Usage in native .erl files:\n");
+    content.push_str("%%   -include(\"beamtalk_classes.hrl\").\n");
+    content.push_str("%%   ?BT_CLASS_MODULE_HTTPResponse:some_function(Args).\n\n");
+    content.push_str("-ifndef(BEAMTALK_CLASSES_HRL).\n");
+    content.push_str("-define(BEAMTALK_CLASSES_HRL, true).\n\n");
+
+    // Sort for deterministic output across builds.
+    let mut entries: Vec<(&String, &String)> = class_module_index.iter().collect();
+    entries.sort_by_key(|(class_name, _)| class_name.as_str());
+
+    for (class_name, module_name) in &entries {
+        let _ = writeln!(
+            content,
+            "-define(BT_CLASS_MODULE_{class_name}, '{module_name}')."
+        );
+    }
+
+    content.push_str("\n-endif. %% BEAMTALK_CLASSES_HRL\n");
+
+    fs::write(&hrl_path, &content)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write {hrl_path}"))?;
+
+    info!(
+        path = %hrl_path,
+        count = entries.len(),
+        "Generated beamtalk_classes.hrl"
+    );
+
+    Ok(())
+}
+
+/// Scan native `.erl` files for hardcoded `bt@<pkg>@<class>` module references
+/// and warn when they should use `?BT_CLASS_MODULE_*` macros instead.
+///
+/// This catches the footgun where native code directly references a compiled
+/// Beamtalk module atom. If the class moves between packages (or the package
+/// is renamed), the hardcoded atom becomes stale and causes silent runtime
+/// failures.
+///
+/// Detects two categories:
+/// 1. Any `'bt@<current_pkg>@...'` atom — these should always use macros.
+/// 2. Any `'bt@<other_pkg>@...'` atom that matches a known class in the
+///    `class_module_index` — catches stale references from a class move.
+///
+/// Only warns about references in code (not comments or doc strings).
+fn validate_native_class_references(
+    project_root: &Utf8Path,
+    pkg_name: &str,
+    class_module_index: &HashMap<String, String>,
+) -> Result<()> {
+    let native_dir = project_root.join("native");
+    if !native_dir.exists() || !native_dir.is_dir() {
+        return Ok(());
+    }
+
+    // Build a set of known module names for reverse-lookup.
+    let known_modules: HashSet<&str> = class_module_index.values().map(String::as_str).collect();
+
+    // Build a reverse index: module_name -> class_name for reporting.
+    let module_to_class: HashMap<&str, &str> = class_module_index
+        .iter()
+        .map(|(class, module)| (module.as_str(), class.as_str()))
+        .collect();
+
+    let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
+    collect_erl_files(&native_dir, &mut erl_files)?;
+
+    for erl_file in &erl_files {
+        let Ok(source) = fs::read_to_string(erl_file) else {
+            continue;
+        };
+
+        for (line_no, line) in source.lines().enumerate() {
+            let trimmed = line.trim();
+            // Skip comments and empty lines.
+            if trimmed.starts_with('%') || trimmed.is_empty() {
+                continue;
+            }
+
+            // Find all 'bt@...' atom references on this line.
+            let mut search_from = 0;
+            while let Some(offset) = line[search_from..].find("'bt@") {
+                let pos = search_from + offset;
+                let after_quote = &line[pos + 1..]; // skip leading quote
+                if let Some(end) = after_quote.find('\'') {
+                    let module_atom = &after_quote[..end];
+
+                    // Category 1: current package reference — always warn
+                    let is_current_pkg = module_atom.starts_with(&format!("bt@{pkg_name}@"));
+                    // Category 2: known class from any package — warn about hardcoding
+                    let is_known_module = known_modules.contains(module_atom);
+
+                    if is_current_pkg || is_known_module {
+                        let class_hint = module_to_class
+                            .get(module_atom)
+                            .map(|c| format!(" (class {c})"))
+                            .unwrap_or_default();
+                        eprintln!(
+                            "warning: {}:{}:{}: hardcoded Beamtalk module reference \
+                             '{module_atom}'{class_hint}; use ?BT_CLASS_MODULE_* macro \
+                             from beamtalk_classes.hrl instead (BT-1730)",
+                            erl_file,
+                            line_no + 1,
+                            pos + 1,
+                        );
+                    }
+
+                    // Advance past this atom to find more on the same line.
+                    search_from = pos + 1 + end + 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Collect `ClassInfo` from multiple sources into a single unified vector.
 ///
 /// BT-1733: This is the single entry point for gathering all `ClassInfo`
@@ -1617,6 +1788,18 @@ fn compile_native_erlang_with_deps(
         if runtime_apps.exists() {
             cmd.arg("-I").arg(&runtime_apps);
         }
+    }
+
+    // BT-1730: Add generated include dir for beamtalk_classes.hrl.
+    // This header provides ?BT_CLASS_MODULE macros that native .erl files
+    // should use instead of hardcoding bt@<pkg>@<class> module atoms.
+    let generated_include_dir = project_root
+        .join("_build")
+        .join("dev")
+        .join("native")
+        .join("include");
+    if generated_include_dir.exists() {
+        cmd.arg("-I").arg(generated_include_dir.as_str());
     }
 
     // Add explicit include dirs
@@ -3638,5 +3821,132 @@ mod tests {
             !has_native_deps,
             "Should be false when no native deps anywhere"
         );
+    }
+
+    // ── BT-1730: Class module header tests ──────────────────────────────────
+
+    #[test]
+    fn test_generate_class_header_creates_hrl_with_macros() {
+        let temp = TempDir::new().unwrap();
+        let include_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let mut index = HashMap::new();
+        index.insert(
+            "HTTPResponse".to_string(),
+            "bt@http@httpresponse".to_string(),
+        );
+        index.insert("HTTPRequest".to_string(), "bt@http@httprequest".to_string());
+
+        generate_class_header(&include_dir, &index).unwrap();
+
+        let hrl_path = include_dir.join("beamtalk_classes.hrl");
+        assert!(hrl_path.exists(), "Header file should be created");
+
+        let content = fs::read_to_string(&hrl_path).unwrap();
+        assert!(
+            content.contains("-define(BT_CLASS_MODULE_HTTPRequest, 'bt@http@httprequest')."),
+            "Should contain HTTPRequest macro"
+        );
+        assert!(
+            content.contains("-define(BT_CLASS_MODULE_HTTPResponse, 'bt@http@httpresponse')."),
+            "Should contain HTTPResponse macro"
+        );
+        assert!(
+            content.contains("-ifndef(BEAMTALK_CLASSES_HRL)."),
+            "Should have include guard"
+        );
+    }
+
+    #[test]
+    fn test_generate_class_header_sorted_deterministic() {
+        let temp = TempDir::new().unwrap();
+        let include_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let mut index = HashMap::new();
+        index.insert("Zeta".to_string(), "bt@pkg@zeta".to_string());
+        index.insert("Alpha".to_string(), "bt@pkg@alpha".to_string());
+        index.insert("Middle".to_string(), "bt@pkg@middle".to_string());
+
+        generate_class_header(&include_dir, &index).unwrap();
+
+        let content = fs::read_to_string(include_dir.join("beamtalk_classes.hrl")).unwrap();
+        let alpha_pos = content.find("BT_CLASS_MODULE_Alpha").unwrap();
+        let middle_pos = content.find("BT_CLASS_MODULE_Middle").unwrap();
+        let zeta_pos = content.find("BT_CLASS_MODULE_Zeta").unwrap();
+        assert!(
+            alpha_pos < middle_pos && middle_pos < zeta_pos,
+            "Macros should be sorted alphabetically"
+        );
+    }
+
+    #[test]
+    fn test_generate_class_header_empty_index() {
+        let temp = TempDir::new().unwrap();
+        let include_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let index = HashMap::new();
+        generate_class_header(&include_dir, &index).unwrap();
+
+        let content = fs::read_to_string(include_dir.join("beamtalk_classes.hrl")).unwrap();
+        assert!(
+            content.contains("-ifndef(BEAMTALK_CLASSES_HRL)."),
+            "Should still have include guard even with empty index"
+        );
+        assert!(
+            !content.contains("-define(BT_CLASS_MODULE_"),
+            "Should have no macro definitions with empty index"
+        );
+    }
+
+    #[test]
+    fn test_validate_native_class_references_warns_on_hardcoded() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let native_dir = project_root.join("native");
+        fs::create_dir_all(&native_dir).unwrap();
+
+        // Write a .erl file with a hardcoded reference
+        fs::write(
+            native_dir.join("test_mod.erl"),
+            "-module(test_mod).\n\
+             -export([f/0]).\n\
+             f() -> 'bt@mypkg@myclass':hello().\n",
+        )
+        .unwrap();
+
+        let mut index = HashMap::new();
+        index.insert("MyClass".to_string(), "bt@mypkg@myclass".to_string());
+
+        // Should not error (just warns to stderr)
+        validate_native_class_references(&project_root, "mypkg", &index).unwrap();
+    }
+
+    #[test]
+    fn test_validate_native_class_references_skips_comments() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let native_dir = project_root.join("native");
+        fs::create_dir_all(&native_dir).unwrap();
+
+        // Write a .erl file with reference only in a comment
+        fs::write(
+            native_dir.join("test_mod.erl"),
+            "-module(test_mod).\n\
+             %% This references 'bt@mypkg@myclass' but only in a comment.\n",
+        )
+        .unwrap();
+
+        let index = HashMap::new();
+        // Should not warn (comment-only references are fine)
+        validate_native_class_references(&project_root, "mypkg", &index).unwrap();
+    }
+
+    #[test]
+    fn test_validate_native_class_references_no_native_dir() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        // No native/ directory — should be a no-op
+        let index = HashMap::new();
+        validate_native_class_references(&project_root, "mypkg", &index).unwrap();
     }
 }

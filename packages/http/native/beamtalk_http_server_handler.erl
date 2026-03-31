@@ -22,6 +22,7 @@
 -export([init/2]).
 
 -include_lib("kernel/include/logger.hrl").
+-include("beamtalk_classes.hrl").
 
 %% @doc Handle a cowboy HTTP request by delegating to the Beamtalk handler.
 %%
@@ -83,7 +84,7 @@ build_request(Req0) ->
     Headers = [[Name, Value] || {Name, Value} <- HeadersList],
     {Body, Req1} = read_body(Req0),
     QsMap = parse_query_params(Req1),
-    HttpRequest = 'bt@http@httprequest':'class_method:path:headers:body:queryParams:params:'(
+    HttpRequest = ?BT_CLASS_MODULE_HTTPRequest:'class_method:path:headers:body:queryParams:params:'(
         undefined, undefined, Method, Path, Headers, Body, QsMap, #{}
     ),
     {HttpRequest, Req1}.
