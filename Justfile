@@ -923,10 +923,11 @@ install PREFIX="/usr/local": build-release build-stdlib
     install -m 755 target/release/beamtalk-mcp "${PREFIX}/bin/beamtalk-mcp"
     install -m 755 target/release/beamtalk-exec "${PREFIX}/bin/beamtalk-exec"
 
-    # OTP application ebin directories (discovered from rebar3 build output)
+    # OTP application directories (discovered from rebar3 build output)
     OTP_APP_COUNT=0
     for ebin_dir in runtime/_build/default/lib/*/ebin; do
-        app="$(basename "$(dirname "${ebin_dir}")")"
+        app_dir="$(dirname "${ebin_dir}")"
+        app="$(basename "${app_dir}")"
         if ! ls "${ebin_dir}"/*.beam 1>/dev/null 2>&1; then
             continue
         fi
@@ -934,6 +935,10 @@ install PREFIX="/usr/local": build-release build-stdlib
         install -m 644 "${ebin_dir}"/*.beam "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
         if ls "${ebin_dir}"/*.app 1>/dev/null 2>&1; then
             install -m 644 "${ebin_dir}"/*.app "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
+        fi
+        # Copy priv/ directory if present (e.g. beamtalk_workspace browser UI)
+        if [ -d "${app_dir}/priv" ]; then
+            cp -rL "${app_dir}/priv" "${PREFIX}/lib/beamtalk/lib/${app}/priv"
         fi
         OTP_APP_COUNT=$((OTP_APP_COUNT + 1))
     done
@@ -1054,7 +1059,7 @@ dist: build-release build-stdlib
     Copy-Item target/release/beamtalk-lsp.exe dist/bin/
     Copy-Item target/release/beamtalk-mcp.exe dist/bin/
     Copy-Item target/release/beamtalk-exec.exe dist/bin/
-    $appCount = 0; foreach ($ebinDir in (Get-ChildItem -Directory "runtime/_build/default/lib/*/ebin" -ErrorAction SilentlyContinue)) { $app = $ebinDir.Parent.Name; if (!(Get-ChildItem "$($ebinDir.FullName)/*.beam" -ErrorAction SilentlyContinue)) { continue }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$($ebinDir.FullName)/*.beam" "dist/lib/beamtalk/lib/$app/ebin/"; Copy-Item "$($ebinDir.FullName)/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction SilentlyContinue; $appCount++ }; if ($appCount -eq 0) { Write-Error "No OTP apps found in runtime/_build/default/lib/. Run 'just build-erlang' first."; exit 1 }
+    $appCount = 0; foreach ($ebinDir in (Get-ChildItem -Directory "runtime/_build/default/lib/*/ebin" -ErrorAction SilentlyContinue)) { $app = $ebinDir.Parent.Name; $appRoot = $ebinDir.Parent.FullName; if (!(Get-ChildItem "$($ebinDir.FullName)/*.beam" -ErrorAction SilentlyContinue)) { continue }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$($ebinDir.FullName)/*.beam" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction Stop; if (Get-ChildItem "$($ebinDir.FullName)/*.app" -ErrorAction SilentlyContinue) { Copy-Item "$($ebinDir.FullName)/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction Stop }; $privSrc = Join-Path $appRoot "priv"; if (Test-Path $privSrc) { New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/priv" | Out-Null; Copy-Item "$privSrc/*" "dist/lib/beamtalk/lib/$app/priv/" -Recurse }; $appCount++ }; if ($appCount -eq 0) { Write-Error "No OTP apps found in runtime/_build/default/lib/. Run 'just build-erlang' first."; exit 1 }
     if (Test-Path "stdlib/src/*.bt") { New-Item -ItemType Directory -Force -Path "dist/share/beamtalk/stdlib/src" | Out-Null; Copy-Item "stdlib/src/*.bt" "dist/share/beamtalk/stdlib/src/" }
     just dist-vscode
     @echo "✅ Distribution ready in dist/"

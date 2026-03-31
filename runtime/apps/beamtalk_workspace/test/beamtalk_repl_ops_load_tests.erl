@@ -589,14 +589,18 @@ find_project_root_with_manifest_test() ->
 
 find_project_root_no_manifest_test() ->
     %% A path with no beamtalk.toml anywhere up the tree should return undefined.
-    %% Use a platform-appropriate temp path to avoid hangs on Windows.
-    FakePath = filename:join([
-        filename:basedir(user_cache, "beamtalk_test"),
-        "no_project",
-        "src",
-        "X.bt"
-    ]),
-    ?assertEqual(undefined, beamtalk_repl_ops_load:find_project_root(FakePath)).
+    %% Use an isolated temp directory to avoid stray manifests in ancestor dirs.
+    Dir = make_temp_dir(),
+    try
+        NoProjectDir = filename:join(Dir, "no_project"),
+        ok = file:make_dir(NoProjectDir),
+        SrcDir = filename:join(NoProjectDir, "src"),
+        ok = file:make_dir(SrcDir),
+        FakePath = write_temp_file(SrcDir, "X.bt", <<"">>),
+        ?assertEqual(undefined, beamtalk_repl_ops_load:find_project_root(FakePath))
+    after
+        rm_temp_dir(Dir)
+    end.
 
 %%====================================================================
 %% maybe_recompile_native_deps/2 (BT-1717)

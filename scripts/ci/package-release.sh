@@ -35,16 +35,23 @@ if [ "${PLATFORM}" = "windows-x86_64" ]; then
         cp "target/release/${bin}.exe" "${STAGING}/bin/"
     done
 
-    # OTP application ebin directories (discovered from rebar3 build output)
+    # OTP application directories (discovered from rebar3 build output)
     OTP_APP_COUNT=0
     for ebin_dir in runtime/_build/default/lib/*/ebin; do
-        app="$(basename "$(dirname "${ebin_dir}")")"
+        app_dir="$(dirname "${ebin_dir}")"
+        app="$(basename "${app_dir}")"
         if ! ls "${ebin_dir}"/*.beam 1>/dev/null 2>&1; then
             continue
         fi
         mkdir -p "${STAGING}/lib/beamtalk/lib/${app}/ebin"
         cp "${ebin_dir}"/*.beam "${STAGING}/lib/beamtalk/lib/${app}/ebin/"
-        cp "${ebin_dir}"/*.app "${STAGING}/lib/beamtalk/lib/${app}/ebin/" 2>/dev/null || true
+        if ls "${ebin_dir}"/*.app 1>/dev/null 2>&1; then
+            cp "${ebin_dir}"/*.app "${STAGING}/lib/beamtalk/lib/${app}/ebin/"
+        fi
+        # Copy priv/ directory if present (e.g. beamtalk_workspace browser UI)
+        if [ -d "${app_dir}/priv" ]; then
+            cp -rL "${app_dir}/priv" "${STAGING}/lib/beamtalk/lib/${app}/priv"
+        fi
         OTP_APP_COUNT=$((OTP_APP_COUNT + 1))
     done
     if [ "${OTP_APP_COUNT}" -eq 0 ]; then
