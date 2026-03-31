@@ -47,9 +47,11 @@ use tracing_subscriber::EnvFilter;
 mod job_object {
     use std::io;
 
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, TerminateJobObject,
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject,
     };
 
     /// RAII wrapper for a Win32 Job Object handle.
@@ -67,13 +69,42 @@ mod job_object {
     unsafe impl Sync for JobObject {}
 
     impl JobObject {
-        /// Create an anonymous Job Object.
+        /// Create an anonymous Job Object with `KILL_ON_JOB_CLOSE` enabled.
+        ///
+        /// `KILL_ON_JOB_CLOSE` ensures that if `beamtalk-exec` crashes or exits
+        /// before `kill_all_children` runs, closing the last handle still terminates
+        /// all assigned processes — preventing orphaned subprocess trees.
         pub(crate) fn create() -> io::Result<Self> {
             // SAFETY: CreateJobObjectW with null name/security creates an anonymous job.
             let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-            if handle == INVALID_HANDLE_VALUE || handle.is_null() {
+            // CreateJobObjectW returns NULL on failure (not INVALID_HANDLE_VALUE).
+            if handle.is_null() {
                 return Err(io::Error::last_os_error());
             }
+
+            // Enable KILL_ON_JOB_CLOSE so orphaned children are terminated when
+            // the handle is closed (e.g. if the helper crashes).
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION =
+                // SAFETY: zero-initializing a plain-old-data struct is valid.
+                unsafe { std::mem::zeroed() };
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            // SAFETY: valid job handle, correctly sized struct.
+            let rc = unsafe {
+                SetInformationJobObject(
+                    handle,
+                    JobObjectExtendedLimitInformation,
+                    std::ptr::addr_of!(info).cast(),
+                    u32::try_from(std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
+                        .expect("JOBOBJECT_EXTENDED_LIMIT_INFORMATION fits in u32"),
+                )
+            };
+            if rc == 0 {
+                let err = io::Error::last_os_error();
+                // SAFETY: CloseHandle on a valid handle.
+                unsafe { CloseHandle(handle) };
+                return Err(err);
+            }
+
             Ok(Self { handle })
         }
 
