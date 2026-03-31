@@ -23,9 +23,15 @@ use miette::{IntoDiagnostic, Result};
 /// Gathers lint-severity diagnostics from parsing and lint passes, plus
 /// DNU hint diagnostics from semantic analysis (BT-1547), then applies
 /// `@expect` directives.
+///
+/// `cross_file_classes` provides class metadata from other files in the same
+/// project so that cross-file type/DNU diagnostics match what `build` emits.
+/// Without this, `@expect type` / `@expect all` annotations that suppress real
+/// diagnostics during build would be reported as stale by lint.
 fn collect_diagnostics(
     module: &beamtalk_core::ast::Module,
     parse_diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    cross_file_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
     // plus AST-level lint passes.
@@ -41,7 +47,14 @@ fn collect_diagnostics(
     // reported as stale by lint. We include every diagnostic that has a category
     // (Type, Dnu, Unused, etc.) — this keeps lint in sync with `category_matches`
     // in diagnostic_provider.rs without manually mirroring its match arms.
-    let analysis_result = beamtalk_core::semantic_analysis::analyse(module);
+    //
+    // Pass cross-file class info so lint sees the same class hierarchy as build,
+    // matching diagnostics for actor instantiation, type errors, etc.
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
+        module,
+        &beamtalk_core::CompilerOptions::default(),
+        cross_file_classes,
+    );
     lint_diags.extend(
         analysis_result
             .diagnostics
@@ -79,7 +92,17 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         miette::bail!("No .bt source files found in '{path}'");
     }
 
-    let mut total_lint_count = 0usize;
+    // Pass 1: Parse all files and extract class metadata so that cross-file
+    // type/DNU diagnostics in Pass 2 match what `build` emits. Without this,
+    // `@expect` annotations that suppress real cross-file diagnostics during
+    // build would be reported as stale by lint.
+    let mut all_class_infos = Vec::new();
+    let mut parsed_files: Vec<(
+        Utf8PathBuf,
+        String,
+        beamtalk_core::ast::Module,
+        Vec<beamtalk_core::source_analysis::Diagnostic>,
+    )> = Vec::new();
 
     for file in &source_files {
         let source = std::fs::read_to_string(file)
@@ -89,13 +112,36 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
 
-        let lint_diags = collect_diagnostics(&module, parse_diags);
+        all_class_infos.extend(
+            beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module),
+        );
+
+        parsed_files.push((file.clone(), source, module, parse_diags));
+    }
+
+    // Pass 2: Analyse each file with cross-file class context.
+    let mut total_lint_count = 0usize;
+
+    for (file, source, module, parse_diags) in &parsed_files {
+        // Exclude classes defined in this file from the cross-file set.
+        let current_file_classes: std::collections::HashSet<&str> = module
+            .classes
+            .iter()
+            .map(|c| c.name.name.as_str())
+            .collect();
+        let cross_file_classes: Vec<_> = all_class_infos
+            .iter()
+            .filter(|ci| !current_file_classes.contains(ci.name.as_str()))
+            .cloned()
+            .collect();
+
+        let lint_diags = collect_diagnostics(module, parse_diags.clone(), cross_file_classes);
 
         for diag in &lint_diags {
             match format {
                 OutputFormat::Text => {
                     let compile_diag =
-                        CompileDiagnostic::from_core_diagnostic(diag, file.as_str(), &source);
+                        CompileDiagnostic::from_core_diagnostic(diag, file.as_str(), source);
                     eprintln!("{:?}", miette::Report::new(compile_diag));
                 }
                 OutputFormat::Json => {
@@ -173,7 +219,7 @@ impl std::str::FromStr for OutputFormat {
 fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     let tokens = lex_with_eof(source);
     let (module, parse_diags) = parse(tokens);
-    collect_diagnostics(&module, parse_diags)
+    collect_diagnostics(&module, parse_diags, vec![])
 }
 
 #[cfg(test)]
@@ -236,6 +282,51 @@ mod tests {
         assert!(
             stale,
             "@expect type on `42` must emit stale warning, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn expect_all_not_stale_with_cross_file_actor_class() {
+        // When cross-file class info tells lint that MyActor is an Actor,
+        // `@expect all` on `MyActor new` should not be stale — the
+        // instantiation_error diagnostic is emitted.
+        let actor_source = "Actor subclass: MyActor\n  run => 42\n";
+        let actor_tokens = lex_with_eof(actor_source);
+        let (actor_module, _) = parse(actor_tokens);
+        let cross_file_classes =
+            beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&actor_module);
+
+        let test_source = r#"Object subclass: TestFile
+
+  class demo =>
+    @expect all
+    MyActor new
+"#;
+        let tokens = lex_with_eof(test_source);
+        let (module, parse_diags) = parse(tokens);
+        let diags = collect_diagnostics(&module, parse_diags, cross_file_classes);
+        let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
+        assert!(
+            !stale,
+            "@expect all should not be stale when cross-file Actor class info is provided, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn expect_all_stale_without_cross_file_actor_class() {
+        // Without cross-file class info, lint can't know MyActor is an Actor,
+        // so `@expect all` would be stale (no diagnostic emitted).
+        let test_source = r#"Object subclass: TestFile2
+
+  class demo =>
+    @expect all
+    MyActor new
+"#;
+        let diags = collect_lint_diagnostics(test_source);
+        let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
+        assert!(
+            stale,
+            "@expect all should be stale without cross-file class info, got: {diags:?}"
         );
     }
 }
