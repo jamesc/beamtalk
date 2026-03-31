@@ -968,7 +968,12 @@ fn initialize_pipeline(
     }
 
     // BT-1733: Single unified collection of all ClassInfo from all sources.
-    // Fixture ClassInfo is added later in compile_fixtures() once fixtures are parsed.
+    // Fixture ClassInfo is deliberately excluded: compile_fixtures() builds
+    // fixture class indexes (merged into class_module_index) but drops
+    // fixture_class_infos because duplicate class names across fixture files
+    // (e.g. two `Shape` classes in test/fixtures/) cause false DNU and
+    // actor-new compile errors. See build_fixture_class_indexes() and the
+    // drop(fixture_class_infos) call in compile_fixtures().
     // To add a new .bt source location, add its ClassInfo slice here.
     let all_class_infos =
         super::build::collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
