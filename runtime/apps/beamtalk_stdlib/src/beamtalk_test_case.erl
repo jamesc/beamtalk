@@ -39,6 +39,11 @@
 %% FFI shims for (Erlang beamtalk_test_case) dispatch
 -export([should/2, runAll/1, runClass/2, skipTest/1, suiteFixture/1]).
 
+-ifdef(TEST).
+%% BT-1743: Exported for testing stack trace formatting
+-export([format_stacktrace/1, ensure_test_context/4]).
+-endif.
+
 %% @doc Assert that a block raises an error of the specified kind.
 %%
 %% Executes the block and verifies that it raises an error with the
@@ -408,17 +413,18 @@ decode_beam_error(Other) ->
 %% @doc Format a BEAM stacktrace for display in test failure messages.
 %%
 %% Filters out internal test runner and OTP frames; shows up to 3 user frames.
-%% Caller frames are shown first (most useful for jumping to the failing line),
-%% with assertion/library frames below.
+%% Error location (innermost frame) is shown first, with callers going outward.
 %% Returns an empty binary when no relevant frames exist.
 -spec format_stacktrace(list()) -> binary().
 format_stacktrace([]) ->
     <<>>;
 format_stacktrace(Frames) ->
-    %% BEAM stacktraces are most-recent-first. Reverse to caller-first, then
-    %% take up to 3 so the test method (outermost caller) is always included.
-    CallerFirst = lists:reverse(filter_stackframes(Frames)),
-    Relevant = lists:sublist(CallerFirst, 3),
+    %% BEAM stacktraces are most-recent-first (innermost/error frame at head).
+    %% Keep that order so the error location appears first in output.
+    %% When more than 3 frames exist, show the 2 innermost plus the outermost
+    %% (test method) so the caller with file/line info is preserved.
+    Filtered = filter_stackframes(Frames),
+    Relevant = select_frames(Filtered),
     case Relevant of
         [] ->
             <<>>;
@@ -526,6 +532,18 @@ filter_stackframes(Frames) ->
         Frames
     ).
 
+%% @doc Select up to 3 representative frames from a filtered stacktrace.
+%%
+%% When 3 or fewer frames exist, return all of them. When more than 3,
+%% keep the 2 innermost (error site) plus the outermost (test method)
+%% so the caller's file/line info is preserved rather than being truncated
+%% and replaced by a synthetic frame from ensure_test_context/4.
+-spec select_frames(list()) -> list().
+select_frames(Frames) when length(Frames) =< 3 ->
+    Frames;
+select_frames([First, Second | _] = Frames) ->
+    [First, Second, lists:last(Frames)].
+
 %% @doc Format a test failure message combining error description and stacktrace.
 -spec format_test_error(atom(), term(), list()) -> binary().
 format_test_error(error, Reason, Stacktrace) ->
@@ -557,10 +575,10 @@ format_test_error(Class, Reason, Stacktrace) ->
 %% always sees where the failing test is defined.
 -spec ensure_test_context(binary(), atom(), atom(), list()) -> binary().
 ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
-    %% Check the rendered frames (after filter + reverse + limit), not the full
-    %% stack. A helper from the same module doesn't count — we need the actual
+    %% Check the rendered frames (after filter + select), not the full stack.
+    %% A helper from the same module doesn't count — we need the actual
     %% test method frame to be visible.
-    Rendered = lists:sublist(lists:reverse(filter_stackframes(Stacktrace)), 3),
+    Rendered = select_frames(filter_stackframes(Stacktrace)),
     HasTestFrame = lists:any(
         fun({Mod, Fun, _Arity, _Loc}) ->
             Mod =:= Module andalso Fun =:= MethodName
@@ -579,20 +597,14 @@ ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
             inject_test_context(FailMsg, Context)
     end.
 
-%% @doc Insert the test context line after the error message, before any stacktrace.
+%% @doc Insert the test context line after existing stacktrace frames.
 %%
-%% If FailMsg already contains "\n  at " lines, the context is inserted
-%% before them (so it appears first). Otherwise it is appended.
+%% With innermost-first ordering, the synthetic test context (outermost
+%% caller) should appear after the existing frames, not before them.
+%% If no "\n  at " lines exist yet, appends directly.
 -spec inject_test_context(binary(), binary()) -> binary().
 inject_test_context(FailMsg, Context) ->
-    case binary:match(FailMsg, <<"\n  at ">>) of
-        {Pos, _Len} ->
-            Head = binary:part(FailMsg, 0, Pos),
-            Tail = binary:part(FailMsg, Pos, byte_size(FailMsg) - Pos),
-            <<Head/binary, Context/binary, Tail/binary>>;
-        nomatch ->
-            <<FailMsg/binary, Context/binary>>
-    end.
+    <<FailMsg/binary, Context/binary>>.
 
 %% @doc Extract the error kind from an exception.
 %%

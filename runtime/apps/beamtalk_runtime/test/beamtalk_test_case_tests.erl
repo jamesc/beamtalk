@@ -259,3 +259,90 @@ is_valid_setUp_result_no_class_key_test() ->
 is_valid_setUp_result_actor_instance_test() ->
     Instance = #beamtalk_object{class = 'MyTest', class_mod = my_test, pid = self()},
     ?assertNot(beamtalk_test_case:is_valid_setUp_result(Instance, nil)).
+
+%%% ============================================================================
+%%% format_stacktrace/1 Tests (BT-1743: frame ordering)
+%%% ============================================================================
+
+%% Empty stacktrace returns empty binary.
+format_stacktrace_empty_test() ->
+    ?assertEqual(<<>>, beamtalk_test_case:format_stacktrace([])).
+
+%% Stacktrace with only non-bt@ frames returns empty binary.
+format_stacktrace_no_relevant_frames_test() ->
+    Frames = [
+        {erl_eval, expr, 3, [{file, "erl_eval.erl"}, {line, 100}]},
+        {gen_server, call, 2, [{file, "gen_server.erl"}, {line, 200}]}
+    ],
+    ?assertEqual(<<>>, beamtalk_test_case:format_stacktrace(Frames)).
+
+%% Multi-frame stacktrace preserves most-recent-first order (innermost first).
+%% BEAM stacktraces have the error location at the head — format_stacktrace
+%% must keep that ordering so the error frame appears first in the output.
+format_stacktrace_preserves_innermost_first_test() ->
+    %% Simulate a BEAM stacktrace: innermost (error site) first
+    Frames = [
+        {'bt@user@HttpServerTest', baseUrl, 0, [{file, "test/http_server_test.bt"}, {line, 20}]},
+        {'bt@user@HttpServerTest', dispatch, 1, []},
+        {'bt@user@HttpServerTest', testNotFound, 0, [
+            {file, "test/http_server_test.bt"}, {line, 73}
+        ]}
+    ],
+    Result = beamtalk_test_case:format_stacktrace(Frames),
+    %% The innermost frame (baseUrl, line 20) must appear before the
+    %% outermost frame (testNotFound, line 73) in the output.
+    BaseurlPos = binary:match(Result, <<"baseUrl">>),
+    TestNotFoundPos = binary:match(Result, <<"testNotFound">>),
+    ?assertNotEqual(nomatch, BaseurlPos),
+    ?assertNotEqual(nomatch, TestNotFoundPos),
+    {BaseurlIdx, _} = BaseurlPos,
+    {TestNotFoundIdx, _} = TestNotFoundPos,
+    ?assert(BaseurlIdx < TestNotFoundIdx).
+
+%% At most 3 frames are shown: first 2 innermost + outermost when >3 exist.
+format_stacktrace_selects_first_two_plus_last_test() ->
+    Frames = [
+        {'bt@user@A', m1, 0, [{file, "a.bt"}, {line, 1}]},
+        {'bt@user@A', m2, 0, [{file, "a.bt"}, {line, 2}]},
+        {'bt@user@A', m3, 0, [{file, "a.bt"}, {line, 3}]},
+        {'bt@user@A', m4, 0, [{file, "a.bt"}, {line, 4}]}
+    ],
+    Result = beamtalk_test_case:format_stacktrace(Frames),
+    %% First 2 (m1, m2) + last (m4) are shown; m3 is dropped
+    ?assertNotEqual(nomatch, binary:match(Result, <<"m1">>)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"m2">>)),
+    ?assertEqual(nomatch, binary:match(Result, <<"m3">>)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"m4">>)).
+
+%%% ============================================================================
+%%% ensure_test_context/4 Tests (BT-1743: frame ordering)
+%%% ============================================================================
+
+%% When the test method is already in the rendered frames, message is unchanged.
+ensure_test_context_has_test_frame_test() ->
+    FailMsg = <<"FAIL testFoo: some error\n  at A>>helper\n  at A>>testFoo">>,
+    Stacktrace = [
+        {'bt@user@A', helper, 0, []},
+        {'bt@user@A', testFoo, 0, []}
+    ],
+    Result = beamtalk_test_case:ensure_test_context(
+        FailMsg, 'bt@user@A', testFoo, Stacktrace
+    ),
+    ?assertEqual(FailMsg, Result).
+
+%% When the test method is NOT in the rendered frames, context is appended
+%% after existing stacktrace lines (innermost-first ordering preserved).
+ensure_test_context_appends_context_test() ->
+    FailMsg = <<"FAIL testBar: some error\n  at A>>helper">>,
+    Stacktrace = [
+        {'bt@user@A', helper, 0, []},
+        {'bt@user@A', deepHelper, 0, []}
+    ],
+    Result = beamtalk_test_case:ensure_test_context(
+        FailMsg, 'bt@user@A', testBar, Stacktrace
+    ),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"testBar">>)),
+    %% The synthetic test context should appear after the existing "at" line
+    {HelperPos, _} = binary:match(Result, <<"helper">>),
+    {TestBarPos, _} = binary:match(Result, <<"testBar">>),
+    ?assert(HelperPos < TestBarPos).
