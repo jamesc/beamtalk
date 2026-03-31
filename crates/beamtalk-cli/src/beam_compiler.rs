@@ -905,17 +905,11 @@ pub(crate) fn compile_source_with_bindings(
     // BT-1523: Inject cross-file class metadata so the type checker can resolve
     // methods from parent classes defined in other files. Filter out classes
     // from the current file to avoid duplicates (they'll be added by build()).
-    let current_file_classes: std::collections::HashSet<&str> = module
-        .classes
-        .iter()
-        .map(|c| c.name.name.as_str())
-        .collect();
-    let cross_file_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
-        pre_loaded_classes
-            .iter()
-            .filter(|ci| !current_file_classes.contains(ci.name.as_str()))
-            .cloned()
-            .collect();
+    let cross_file_classes =
+        beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
+            pre_loaded_classes,
+            &module,
+        );
     let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
         &module,
         options,
