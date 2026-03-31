@@ -86,7 +86,8 @@ jobs:
       - name: Install compiler on PATH
         run: |
           # Make the freshly-built beamtalk binary available system-wide
-          sudo cp target/release/beamtalk /usr/local/bin/beamtalk
+          # just build produces a debug build
+          sudo cp target/debug/beamtalk /usr/local/bin/beamtalk
           beamtalk --version
 
       - name: Checkout beamtalk-http
