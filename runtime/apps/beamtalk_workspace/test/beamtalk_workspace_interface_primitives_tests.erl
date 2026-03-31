@@ -26,6 +26,20 @@
 fake_self(Pid) ->
     {beamtalk_object, 'WorkspaceInterface', 'bt@stdlib@workspace_interface', Pid}.
 
+%% Cross-platform temporary directory (Windows has no /tmp).
+tmp_dir() ->
+    case os:type() of
+        {win32, _} -> os:getenv("TEMP");
+        _ -> "/tmp"
+    end.
+
+%% Cross-platform recursive directory removal.
+rm_rf(Dir) ->
+    case os:type() of
+        {win32, _} -> os:cmd("rmdir /s /q \"" ++ Dir ++ "\"");
+        _ -> os:cmd("rm -rf " ++ Dir)
+    end.
+
 %% Start the actor registry defensively — tolerates already-started.
 ensure_registry_started() ->
     case beamtalk_repl_actors:start_link(registered) of
@@ -461,9 +475,9 @@ root_supervisor_returns_registered_value_test() ->
 
 sync_dispatch_raises_when_no_manifest_test() ->
     %% sync from a directory without beamtalk.toml should raise file_not_found.
-    %% Use /tmp as a path guaranteed to have no beamtalk.toml.
+    %% Use a temp dir as a path guaranteed to have no beamtalk.toml.
     OldCwd = file:get_cwd(),
-    ok = file:set_cwd("/tmp"),
+    ok = file:set_cwd(tmp_dir()),
     try
         beamtalk_workspace_interface_primitives:dispatch(sync, [], fake_self(self())),
         ?assert(false)
@@ -479,7 +493,7 @@ sync_dispatch_raises_when_no_manifest_test() ->
 sync_direct_raises_when_no_manifest_test() ->
     %% Direct call to sync/0 should raise file_not_found when no beamtalk.toml.
     OldCwd = file:get_cwd(),
-    ok = file:set_cwd("/tmp"),
+    ok = file:set_cwd(tmp_dir()),
     try
         beamtalk_workspace_interface_primitives:sync(),
         ?assert(false)
@@ -497,7 +511,7 @@ sync_returns_map_with_expected_keys_test() ->
     %% with the expected keys.
     %% Create a temporary project directory with beamtalk.toml and src/.
     TmpDir = filename:join(
-        "/tmp", "bt_sync_test_" ++ integer_to_list(erlang:unique_integer([positive]))
+        tmp_dir(), "bt_sync_test_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
     ok = filelib:ensure_dir(filename:join([TmpDir, "src", "dummy"])),
     ok = file:write_file(
@@ -522,5 +536,5 @@ sync_returns_map_with_expected_keys_test() ->
     after
         {ok, Cwd} = OldCwd,
         file:set_cwd(Cwd),
-        os:cmd("rm -rf " ++ TmpDir)
+        rm_rf(TmpDir)
     end.
