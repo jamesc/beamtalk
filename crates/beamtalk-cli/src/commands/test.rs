@@ -370,14 +370,17 @@ struct TestResultDetail {
 /// Result from running native `EUnit` tests.
 #[derive(Debug, Default)]
 struct NativeEunitResult {
-    /// Total number of native `EUnit` tests.
+    /// Total number of native `EUnit` tests (passed + failed + skipped).
     total: usize,
     /// Number of passing tests.
     passed: usize,
     /// Number of failing tests.
     failed: usize,
-    /// Per-module results: `(module_name, passed, failed)`.
-    modules: Vec<(String, usize, usize)>,
+    /// Number of skipped tests.
+    #[allow(dead_code)] // populated for future skip-reason display
+    skipped: usize,
+    /// Per-module results: `(module_name, passed, failed, skipped)`.
+    modules: Vec<(String, usize, usize, usize)>,
     /// Captured `EUnit` output (failures, errors).
     output: String,
 }
@@ -815,16 +818,13 @@ pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize) -> Result<()
 
     let test_path = Utf8PathBuf::from(path);
 
-    // Determine if path is a single file or directory
+    // Determine if path is a single file or directory.
+    // Allow empty test_files — native-only packages have no .bt test files
+    // but still have native/test/*.erl to discover later.
     let test_files = if test_path.is_file() {
         vec![test_path.clone()]
     } else if test_path.is_dir() {
-        let files = find_test_files(&test_path)?;
-        if files.is_empty() {
-            println!("No test files found in '{test_path}'");
-            return Ok(());
-        }
-        files
+        find_test_files(&test_path)?
     } else {
         miette::bail!("Test path '{}' not found", test_path);
     };
@@ -1358,19 +1358,28 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
             compile_native_test_erlang(pkg_root, &native_test_dir, &pipeline.package_ebin_dirs)?;
 
             // Discover native EUnit test modules (_test or _tests suffix)
-            // in the native ebin dir after compilation. Skip duplicates
-            // (BEAM code path is global, first module wins).
-            let native_ebin = pkg_layout.native_ebin_dir();
-            for module in collect_beam_module_names(&native_ebin)? {
-                if module.ends_with("_test") || module.ends_with("_tests") {
-                    if pipeline.native_test_modules.contains(&module) {
-                        warn!(
-                            "Duplicate native test module '{}' in package '{}' — skipping \
-                             (already discovered in another package)",
-                            module, pkg.name
-                        );
-                    } else {
-                        pipeline.native_test_modules.push(module);
+            // from source files to avoid picking up stale .beam artifacts.
+            // Skip duplicates (BEAM code path is global, first module wins).
+            for erl_file in fs::read_dir(&native_test_dir)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to read {native_test_dir}"))?
+            {
+                let entry = erl_file.into_diagnostic()?;
+                let path = entry.path();
+                if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        if stem.ends_with("_test") || stem.ends_with("_tests") {
+                            let module = stem.to_string();
+                            if pipeline.native_test_modules.contains(&module) {
+                                eprintln!(
+                                    "Warning: duplicate native test module '{}' in package \
+                                     '{}' — skipping (already discovered in another package)",
+                                    module, pkg.name
+                                );
+                            } else {
+                                pipeline.native_test_modules.push(module);
+                            }
+                        }
                     }
                 }
             }
@@ -1640,28 +1649,28 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     })
 }
 
-/// Parse `EUnit`'s summary line from verbose output to extract pass/fail counts.
+/// Parse `EUnit`'s summary line from verbose output to extract test counts.
 ///
 /// `EUnit` outputs one of two summary formats:
 /// - `"  N tests passed."` — all passed
 /// - `"  Failed: F.  Skipped: S.  Passed: P."` — mixed results
 ///
-/// Returns `(passed, failed)`. Falls back to `(0, 0)` if no summary found.
-fn parse_eunit_summary(output: &str) -> (usize, usize) {
+/// Returns `(passed, failed, skipped)`. Falls back to `(0, 0, 0)` if no summary found.
+fn parse_eunit_summary(output: &str) -> (usize, usize, usize) {
     for line in output.lines().rev() {
         let trimmed = line.trim();
 
         // "All N tests passed.", "N tests passed.", or "Test passed." (single test)
         if trimmed.ends_with("tests passed.") || trimmed == "Test passed." {
             if trimmed == "Test passed." {
-                return (1, 0);
+                return (1, 0, 0);
             }
             if let Some(n_str) = trimmed
                 .strip_suffix(" tests passed.")
                 .and_then(|s| s.strip_prefix("All ").or(Some(s)))
             {
                 if let Ok(n) = n_str.parse::<usize>() {
-                    return (n, 0);
+                    return (n, 0, 0);
                 }
             }
         }
@@ -1670,18 +1679,21 @@ fn parse_eunit_summary(output: &str) -> (usize, usize) {
         if trimmed.starts_with("Failed:") && trimmed.contains("Passed:") {
             let mut passed = 0;
             let mut failed = 0;
+            let mut skipped = 0;
             for segment in trimmed.split('.') {
                 let seg = segment.trim();
                 if let Some(val) = seg.strip_prefix("Failed:") {
                     failed = val.trim().parse().unwrap_or(0);
                 } else if let Some(val) = seg.strip_prefix("Passed:") {
                     passed = val.trim().parse().unwrap_or(0);
+                } else if let Some(val) = seg.strip_prefix("Skipped:") {
+                    skipped = val.trim().parse().unwrap_or(0);
                 }
             }
-            return (passed, failed);
+            return (passed, failed, skipped);
         }
     }
-    (0, 0)
+    (0, 0, 0)
 }
 
 /// Run native `EUnit` test modules in a BEAM process.
@@ -1782,6 +1794,7 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     let mut modules = Vec::new();
     let mut total_passed: usize = 0;
     let mut total_failed: usize = 0;
+    let mut total_skipped: usize = 0;
     let mut eunit_output = String::new();
 
     // Split output into per-module sections using the marker lines
@@ -1790,10 +1803,11 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     for line in stdout.lines() {
         if let Some(module_name) = line.strip_prefix("NATIVE_EUNIT_DONE:") {
             // Parse the section for this module's EUnit summary
-            let (passed, failed) = parse_eunit_summary(&current_section);
-            modules.push((module_name.to_string(), passed, failed));
+            let (passed, failed, skipped) = parse_eunit_summary(&current_section);
+            modules.push((module_name.to_string(), passed, failed, skipped));
             total_passed += passed;
             total_failed += failed;
+            total_skipped += skipped;
 
             if failed > 0 {
                 eunit_output.push_str(&current_section);
@@ -1813,10 +1827,10 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
         let all_passed = output.status.success();
         for module_name in &pipeline.native_test_modules {
             if all_passed {
-                modules.push((module_name.clone(), 1, 0));
+                modules.push((module_name.clone(), 1, 0, 0));
                 total_passed += 1;
             } else {
-                modules.push((module_name.clone(), 0, 1));
+                modules.push((module_name.clone(), 0, 1, 0));
                 total_failed += 1;
             }
         }
@@ -1824,9 +1838,10 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     }
 
     Ok(NativeEunitResult {
-        total: total_passed + total_failed,
+        total: total_passed + total_failed + total_skipped,
         passed: total_passed,
         failed: total_failed,
+        skipped: total_skipped,
         modules,
         output: eunit_output,
     })
@@ -1899,11 +1914,15 @@ fn report_results(
 
     // Report native EUnit results
     if let Some(native) = &results.native {
-        for (module, passed, failed) in &native.modules {
-            let total = passed + failed;
+        for (module, passed, failed, skipped) in &native.modules {
+            let total = passed + failed + skipped;
             if *failed > 0 {
                 println!(
                     "  {module} (native): {total} tests, {passed} passed, {failed} failed \u{2717}"
+                );
+            } else if *skipped > 0 {
+                println!(
+                    "  {module} (native): {total} tests, {passed} passed, {skipped} skipped \u{2713}"
                 );
             } else {
                 println!("  {module} (native): {total} tests, {total} passed \u{2713}");
@@ -2417,30 +2436,37 @@ mod tests {
                         [done in 0.006 s]\n\
                       =======================================================\n\
                         All 2 tests passed.\n";
-        assert_eq!(parse_eunit_summary(output), (2, 0));
+        assert_eq!(parse_eunit_summary(output), (2, 0, 0));
     }
 
     #[test]
     fn test_parse_eunit_summary_single_test_passed() {
         let output = "  Test passed.\n";
-        assert_eq!(parse_eunit_summary(output), (1, 0));
+        assert_eq!(parse_eunit_summary(output), (1, 0, 0));
     }
 
     #[test]
     fn test_parse_eunit_summary_mixed_results() {
         let output = "=======================================================\n\
                         Failed: 1.  Skipped: 0.  Passed: 2.\n";
-        assert_eq!(parse_eunit_summary(output), (2, 1));
+        assert_eq!(parse_eunit_summary(output), (2, 1, 0));
+    }
+
+    #[test]
+    fn test_parse_eunit_summary_with_skipped() {
+        let output = "=======================================================\n\
+                        Failed: 1.  Skipped: 3.  Passed: 5.\n";
+        assert_eq!(parse_eunit_summary(output), (5, 1, 3));
     }
 
     #[test]
     fn test_parse_eunit_summary_no_summary() {
-        assert_eq!(parse_eunit_summary("some random output\n"), (0, 0));
+        assert_eq!(parse_eunit_summary("some random output\n"), (0, 0, 0));
     }
 
     #[test]
     fn test_parse_eunit_summary_61_passed() {
         let output = "  All 61 tests passed.\n";
-        assert_eq!(parse_eunit_summary(output), (61, 0));
+        assert_eq!(parse_eunit_summary(output), (61, 0, 0));
     }
 }
