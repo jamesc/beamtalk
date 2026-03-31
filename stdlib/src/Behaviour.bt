@@ -29,12 +29,12 @@ abstract Object subclass: Behaviour
   /// Look up a method by selector, returning a CompiledMethod object.
   ///
   /// Follows Smalltalk-80 convention: `Behaviour >> #selector` returns a
-  /// CompiledMethod with selector, source, and arity metadata.
+  /// CompiledMethod with selector, source, and argument count metadata.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Integer >> #+) selector         // => +
-  /// (Integer >> #+) arity            // => 1
+  /// (Integer >> #+) selector         // => #+
+  /// (Integer >> #+) argumentCount    // => 1
   /// ```
   sealed >> aSelector :: Symbol -> CompiledMethod => @primitive "methodLookup"
 
