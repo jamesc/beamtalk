@@ -47,20 +47,8 @@ pub fn load_corpus_from_file(path: &std::path::Path) -> Option<Corpus> {
 ///
 /// Entries from later corpora override earlier ones with the same ID.
 pub fn merge_corpora(base: &Corpus, extras: &[Corpus]) -> Corpus {
-    let mut entries_by_id: std::collections::HashMap<&str, &CorpusEntry> =
-        std::collections::HashMap::new();
-
-    for entry in &base.entries {
-        entries_by_id.insert(&entry.id, entry);
-    }
-    for corpus in extras {
-        for entry in &corpus.entries {
-            entries_by_id.insert(&entry.id, entry);
-        }
-    }
-
-    let mut entries: Vec<CorpusEntry> = entries_by_id.values().map(|e| (*e).clone()).collect();
-    entries.sort_by(|a, b| a.id.cmp(&b.id));
+    let extra_slices: Vec<&[CorpusEntry]> = extras.iter().map(|c| c.entries.as_slice()).collect();
+    let entries = crate::merge_by_key(&base.entries, &extra_slices, |e| e.id.as_str());
     Corpus { entries }
 }
 

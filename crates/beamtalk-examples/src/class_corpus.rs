@@ -50,20 +50,8 @@ pub fn load_class_corpus_from_file(path: &std::path::Path) -> Option<ClassCorpus
 ///
 /// Entries from later corpora override earlier ones with the same name.
 pub fn merge_class_corpora(base: &ClassCorpus, extras: &[ClassCorpus]) -> ClassCorpus {
-    let mut entries_by_name: std::collections::HashMap<&str, &ClassEntry> =
-        std::collections::HashMap::new();
-
-    for entry in &base.entries {
-        entries_by_name.insert(&entry.name, entry);
-    }
-    for corpus in extras {
-        for entry in &corpus.entries {
-            entries_by_name.insert(&entry.name, entry);
-        }
-    }
-
-    let mut entries: Vec<ClassEntry> = entries_by_name.values().map(|e| (*e).clone()).collect();
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    let extra_slices: Vec<&[ClassEntry]> = extras.iter().map(|c| c.entries.as_slice()).collect();
+    let entries = crate::merge_by_key(&base.entries, &extra_slices, |e| e.name.as_str());
     ClassCorpus { entries }
 }
 
