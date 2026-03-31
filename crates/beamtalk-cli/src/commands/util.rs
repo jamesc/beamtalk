@@ -5,9 +5,9 @@
 //!
 //! **DDD Context:** CLI
 
+use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
-use miette::{Context, IntoDiagnostic, Result};
-use std::fs;
+use miette::Result;
 
 /// What a test assertion expects: a value or an error.
 ///
@@ -27,78 +27,12 @@ pub(crate) enum Expected {
 /// - If `path` does not exist, returns an error.
 ///
 /// This is a **non-recursive** scan. For recursive directory walking, use
-/// [`collect_files_recursive`].
+/// [`FileWalker`](beamtalk_core::file_walker::FileWalker) directly.
 pub fn find_files(path: &Utf8Path, extensions: &[&str]) -> Result<Vec<Utf8PathBuf>> {
-    if path.is_file() {
-        if path
-            .extension()
-            .is_some_and(|ext| extensions.contains(&ext))
-        {
-            return Ok(vec![path.to_path_buf()]);
-        }
-        let ext_list = extensions.join(", .");
-        miette::bail!("Expected a .{ext_list} file, got '{path}'");
-    }
-
-    if !path.exists() {
-        miette::bail!("Path '{path}' does not exist");
-    }
-
-    let mut files = Vec::new();
-
-    for entry in fs::read_dir(path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read directory '{path}'"))?
-    {
-        let entry = entry.into_diagnostic()?;
-        let entry_path = Utf8PathBuf::from_path_buf(entry.path())
-            .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", path))?;
-
-        if entry_path.is_file()
-            && entry_path
-                .extension()
-                .is_some_and(|ext| extensions.contains(&ext))
-        {
-            files.push(entry_path);
-        }
-    }
-
-    files.sort();
-    Ok(files)
-}
-
-/// Recursively collect all files with the given extensions from a directory tree.
-///
-/// Symlinks are skipped to avoid potential infinite recursion from circular links.
-/// Results are sorted after collection.
-pub fn collect_files_recursive(
-    dir: &Utf8Path,
-    extensions: &[&str],
-    files: &mut Vec<Utf8PathBuf>,
-) -> Result<()> {
-    for entry in fs::read_dir(dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read directory '{dir}'"))?
-    {
-        let entry = entry.into_diagnostic()?;
-        let file_type = entry.file_type().into_diagnostic()?;
-        if file_type.is_symlink() {
-            continue;
-        }
-        let entry_path = Utf8PathBuf::from_path_buf(entry.path())
-            .map_err(|_| miette::miette!("Non-UTF-8 path"))?;
-
-        if file_type.is_dir() {
-            collect_files_recursive(&entry_path, extensions, files)?;
-        } else if file_type.is_file()
-            && entry_path
-                .extension()
-                .is_some_and(|ext| extensions.contains(&ext))
-        {
-            files.push(entry_path);
-        }
-    }
-    Ok(())
+    FileWalker::new()
+        .extensions(extensions)
+        .recursive(false)
+        .walk(path)
 }
 
 #[cfg(test)]
@@ -157,21 +91,6 @@ mod tests {
         fs::write(dir_path.join("c.txt"), "").unwrap();
 
         let files = find_files(dir_path, &["bt", "btscript"]).unwrap();
-        assert_eq!(files.len(), 2);
-    }
-
-    #[test]
-    fn test_collect_files_recursive_basic() {
-        let dir = tempfile::tempdir().unwrap();
-        let dir_path = Utf8Path::from_path(dir.path()).unwrap();
-        fs::create_dir(dir_path.join("sub")).unwrap();
-        fs::write(dir_path.join("a.bt"), "").unwrap();
-        fs::write(dir_path.join("sub/b.bt"), "").unwrap();
-        fs::write(dir_path.join("sub/c.txt"), "").unwrap();
-
-        let mut files = Vec::new();
-        collect_files_recursive(dir_path, &["bt"], &mut files).unwrap();
-        files.sort();
         assert_eq!(files.len(), 2);
     }
 }

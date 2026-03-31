@@ -36,8 +36,10 @@ pub(super) const PID_DISCOVERY_INITIAL_DELAY_MS: u64 = 500;
 pub(super) const PID_DISCOVERY_RETRY_DELAY_MS: u64 = 500;
 
 /// Maximum number of PID discovery attempts.
-/// Total worst-case: 500ms initial + 30 × 500ms = 15.5s.
-pub(super) const PID_DISCOVERY_MAX_RETRIES: usize = 30;
+/// Total worst-case: 500ms initial + 59 × 500ms = 30.0s.
+/// The higher budget accommodates loaded CI runners where concurrent workspace
+/// starts cause resource contention that slows BEAM VM boot.
+pub(super) const PID_DISCOVERY_MAX_RETRIES: usize = 60;
 
 /// Check if a BEAM node is actually running (handle stale node.info files).
 ///

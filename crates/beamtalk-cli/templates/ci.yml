@@ -1,0 +1,42 @@
+# Copyright 2026 {{project_name}} authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+
+      - name: Install Beamtalk
+        run: |
+          curl -fsSL https://beamtalk.dev/install.sh | sudo sh -s -- --nightly --prefix /usr/local
+          beamtalk --version
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Format check
+        run: just fmt
+
+      - name: Lint
+        run: just lint
+        continue-on-error: true
+
+      - name: Build
+        run: just build
+
+      - name: Test
+        run: just test
