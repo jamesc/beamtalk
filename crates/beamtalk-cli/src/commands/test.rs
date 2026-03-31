@@ -1507,10 +1507,12 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     debug!("BUnit stderr: {}", stderr);
 
     // Extract JSON from stdout — skip any Erlang error/info reports that may precede it.
-    // The JSON line starts with `{` and contains our result keys.
+    // The JSON line starts with `{"` (a JSON object key). Using `{"` instead of just `{`
+    // avoids matching Erlang error tuples like `{error, {beamtalk_error,...}}` which also
+    // start with `{` but are not valid JSON.
     let json_line = stdout
         .lines()
-        .find(|line| line.starts_with('{'))
+        .find(|line| line.starts_with("{\""))
         .ok_or_else(|| {
             let combined = format!("{stdout}\n{stderr}");
             miette::miette!("No JSON output from BUnit runner:\n{combined}")
