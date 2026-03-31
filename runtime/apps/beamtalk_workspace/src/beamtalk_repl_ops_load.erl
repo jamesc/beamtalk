@@ -14,6 +14,9 @@
 
 -export([handle/4, resolve_class_to_module/1, resolve_module_atoms/2]).
 
+%% BT-1723: Shared sync logic callable from both protocol handler and primitives.
+-export([sync_project/2]).
+
 %% BT-1719: Exported for demand-driven native .erl compilation from classReload.
 -export([find_project_root/1, maybe_recompile_native_deps/2]).
 
@@ -36,6 +39,144 @@
 ]).
 -endif.
 
+%%% ============================================================================
+%%% sync_project/2 — shared incremental sync logic (BT-1723)
+%%% ============================================================================
+
+%% @doc Perform an incremental project sync.
+%%
+%% Scans the project at `Path` for `.bt` and `.erl` files, classifies them
+%% as changed/unchanged/deleted by mtime, compiles changed files in dependency
+%% order, and returns a result map with summary statistics.
+%%
+%% `Options` is a map with optional keys:
+%%   - `include_tests` (boolean, default false) — include test/ directory
+%%   - `force` (boolean, default false) — recompile all files regardless of mtime
+%%   - `session_pid` (pid() | undefined) — REPL session for module tracking
+%%
+%% Returns `{ok, ResultMap}` where ResultMap contains:
+%%   - `classes` — list of loaded class name binaries
+%%   - `errors` — list of structured error maps
+%%   - `summary` — human-readable summary binary
+%%   - `changed_count` — number of files reloaded
+%%   - `unchanged_count` — number of unchanged files
+%%   - `deleted_count` — number of deleted files
+%%   - `total_files` — total file count including deleted
+%%
+%% Returns `{error, #beamtalk_error{}}` if no beamtalk.toml found.
+-spec sync_project(string(), map()) ->
+    {ok, map()} | {error, #beamtalk_error{}}.
+sync_project(Path, Options) ->
+    IncludeTests = maps:get(include_tests, Options, false),
+    Force = maps:get(force, Options, false),
+    SessionPid = maps:get(session_pid, Options, undefined),
+    AbsPath = filename:absname(Path),
+    ManifestPath = filename:join(AbsPath, "beamtalk.toml"),
+    case filelib:is_file(ManifestPath) of
+        false ->
+            Err0 = beamtalk_error:new(file_not_found, 'WorkspaceInterface'),
+            Err1 = beamtalk_error:with_message(
+                Err0,
+                iolist_to_binary(["No beamtalk.toml found in: ", AbsPath])
+            ),
+            {error,
+                beamtalk_error:with_hint(
+                    Err1,
+                    <<"Provide a directory path containing beamtalk.toml">>
+                )};
+        true ->
+            do_sync_project(AbsPath, IncludeTests, Force, SessionPid)
+    end.
+
+%% @private Core sync logic, called after validating beamtalk.toml exists.
+-spec do_sync_project(string(), boolean(), boolean(), pid() | undefined) -> {ok, map()}.
+do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
+    SrcFiles = find_bt_files(filename:join(AbsPath, "src")),
+    TestFiles =
+        case IncludeTests of
+            true -> find_bt_files(filename:join(AbsPath, "test"));
+            false -> []
+        end,
+    AllBtFiles = SrcFiles ++ TestFiles,
+    NativeDir = filename:join(AbsPath, "native"),
+    AllErlFiles = find_erl_files(NativeDir),
+    AllFiles = AllErlFiles ++ AllBtFiles,
+    PreviousMtimes =
+        case Force of
+            true ->
+                beamtalk_workspace_meta:clear_file_mtimes(),
+                #{};
+            false ->
+                case beamtalk_workspace_meta:get_file_mtimes() of
+                    {ok, Mtimes} -> Mtimes;
+                    {error, _} -> #{}
+                end
+        end,
+    PrevErlMtimes =
+        maps:filter(
+            fun(P, _Mtime) -> filename:extension(P) =:= ".erl" end,
+            PreviousMtimes
+        ),
+    PrevBtMtimes =
+        maps:filter(
+            fun(P, _Mtime) -> filename:extension(P) =:= ".bt" end,
+            PreviousMtimes
+        ),
+    {ChangedErl, UnchangedErl, DeletedErl} =
+        classify_files_by_change(AllErlFiles, PrevErlMtimes),
+    {ChangedBt, UnchangedBt, DeletedBt} =
+        classify_files_by_change(AllBtFiles, PrevBtMtimes),
+    DeletedBtCount = handle_deleted_files(DeletedBt, SessionPid),
+    lists:foreach(
+        fun(P) ->
+            ?LOG_INFO(
+                "sync-project: native .erl file deleted: ~s",
+                [P],
+                #{domain => [beamtalk, runtime]}
+            ),
+            beamtalk_workspace_meta:remove_file_mtime(P)
+        end,
+        DeletedErl
+    ),
+    DeletedCount = DeletedBtCount + length(DeletedErl),
+    ErlPreLoadMtimes = snapshot_file_mtimes(ChangedErl),
+    {NativeErrors, _NativeCompiledCount} =
+        compile_native_erl_files(ChangedErl, AbsPath),
+    record_file_mtimes_from_snapshot(ErlPreLoadMtimes),
+    SortedChanged = sort_bt_files_by_deps(ChangedBt),
+    PreLoadMtimes = snapshot_file_mtimes(SortedChanged),
+    {AllClasses, BtErrors} =
+        case SessionPid of
+            undefined ->
+                load_files_stateless(SortedChanged);
+            _ ->
+                load_files_sequential(SortedChanged, SessionPid)
+        end,
+    record_file_mtimes_from_snapshot(PreLoadMtimes),
+    Errors = lists:reverse(NativeErrors) ++ BtErrors,
+    ClassNames =
+        [
+            case maps:get(name, C, "") of
+                N when is_binary(N) -> N;
+                N -> list_to_binary(N)
+            end
+         || C <- AllClasses
+        ],
+    TotalFiles = length(AllFiles) + DeletedCount,
+    ChangedCount = length(ChangedBt) + length(ChangedErl),
+    UnchangedCount = length(UnchangedBt) + length(UnchangedErl),
+    {ok, #{
+        classes => ClassNames,
+        errors => Errors,
+        summary => build_incremental_summary(
+            ChangedCount, TotalFiles, UnchangedCount, DeletedCount
+        ),
+        changed_count => ChangedCount,
+        unchanged_count => UnchangedCount,
+        deleted_count => DeletedCount,
+        total_files => TotalFiles
+    }}.
+
 %% @doc Handle load/reload/unload/modules ops.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"load-project">>, Params, Msg, SessionPid) ->
@@ -43,115 +184,23 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
     Path = binary_to_list(PathBin),
     IncludeTests = maps:get(<<"include_tests">>, Params, false),
     Force = maps:get(<<"force">>, Params, false),
-    AbsPath = filename:absname(Path),
-    ManifestPath = filename:join(AbsPath, "beamtalk.toml"),
-    case filelib:is_file(ManifestPath) of
-        false ->
-            Err0 = beamtalk_error:new(file_not_found, 'REPL'),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary(["No beamtalk.toml found in: ", AbsPath])
-            ),
-            Err2 = beamtalk_error:with_hint(
-                Err1,
-                <<"Provide a directory path containing beamtalk.toml">>
-            ),
+    Options = #{
+        include_tests => IncludeTests,
+        force => Force,
+        session_pid => SessionPid
+    },
+    case sync_project(Path, Options) of
+        {error, Err} ->
             beamtalk_repl_protocol:encode_error(
-                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+                Err, Msg, fun beamtalk_repl_json:format_error_message/1
             );
-        true ->
-            SrcFiles = find_bt_files(filename:join(AbsPath, "src")),
-            TestFiles =
-                case IncludeTests of
-                    true -> find_bt_files(filename:join(AbsPath, "test"));
-                    false -> []
-                end,
-            AllBtFiles = SrcFiles ++ TestFiles,
-            %% BT-1716: Scan native/ for .erl files (before .bt compilation).
-            NativeDir = filename:join(AbsPath, "native"),
-            AllErlFiles = find_erl_files(NativeDir),
-            AllFiles = AllErlFiles ++ AllBtFiles,
-            %% BT-1685: Incremental reload — classify files by change status.
-            PreviousMtimes =
-                case Force of
-                    true ->
-                        beamtalk_workspace_meta:clear_file_mtimes(),
-                        #{};
-                    false ->
-                        case beamtalk_workspace_meta:get_file_mtimes() of
-                            {ok, Mtimes} -> Mtimes;
-                            {error, _} -> #{}
-                        end
-                end,
-            %% BT-1716: Classify .erl and .bt files separately for correct ordering.
-            %% Filter PreviousMtimes by extension to prevent cross-contamination
-            %% of deleted-file detection between .erl and .bt files.
-            PrevErlMtimes =
-                maps:filter(
-                    fun(Path, _Mtime) -> filename:extension(Path) =:= ".erl" end,
-                    PreviousMtimes
-                ),
-            PrevBtMtimes =
-                maps:filter(
-                    fun(Path, _Mtime) -> filename:extension(Path) =:= ".bt" end,
-                    PreviousMtimes
-                ),
-            {ChangedErl, UnchangedErl, DeletedErl} =
-                classify_files_by_change(AllErlFiles, PrevErlMtimes),
-            {ChangedBt, UnchangedBt, DeletedBt} =
-                classify_files_by_change(AllBtFiles, PrevBtMtimes),
-            %% Handle deleted .bt files: unregister their classes and modules.
-            DeletedBtCount = handle_deleted_files(DeletedBt, SessionPid),
-            %% Handle deleted .erl files: clean up their mtime entries.
-            lists:foreach(
-                fun(Path) ->
-                    ?LOG_INFO(
-                        "load-project: native .erl file deleted: ~s",
-                        [Path],
-                        #{domain => [beamtalk, runtime]}
-                    ),
-                    beamtalk_workspace_meta:remove_file_mtime(Path)
-                end,
-                DeletedErl
-            ),
-            DeletedCount = DeletedBtCount + length(DeletedErl),
-            %% BT-1716: Compile changed native .erl files first, before .bt files.
-            %% Include paths set to native/include/ if present.
-            ErlPreLoadMtimes = snapshot_file_mtimes(ChangedErl),
-            {NativeErrors, _NativeCompiledCount} =
-                compile_native_erl_files(ChangedErl, AbsPath),
-            record_file_mtimes_from_snapshot(ErlPreLoadMtimes),
-            %% Only compile changed/new .bt files, but sort them for dependency order.
-            SortedChanged = sort_bt_files_by_deps(ChangedBt),
-            %% BT-1685: Snapshot mtimes *before* compiling so that if a file
-            %% is modified during compilation we don't record the stale mtime.
-            %% We record these mtimes below after successful load.
-            PreLoadMtimes = snapshot_file_mtimes(SortedChanged),
-            {AllClasses, BtErrors} = load_files_sequential(SortedChanged, SessionPid),
-            %% BT-1685: Record the pre-load mtimes for all files we attempted.
-            %% activate_module (called within load_files_sequential) already
-            %% triggers hot reload for actors, so no separate hot reload needed.
-            record_file_mtimes_from_snapshot(PreLoadMtimes),
-            Errors = lists:reverse(NativeErrors) ++ BtErrors,
-            ClassNames =
-                [
-                    case maps:get(name, C, "") of
-                        N when is_binary(N) -> N;
-                        N -> list_to_binary(N)
-                    end
-                 || C <- AllClasses
-                ],
-            TotalFiles = length(AllFiles) + DeletedCount,
-            ChangedCount = length(ChangedBt) + length(ChangedErl),
-            UnchangedCount = length(UnchangedBt) + length(UnchangedErl),
+        {ok, Result} ->
             Base = beamtalk_repl_protocol:base_response(Msg),
             Response = Base#{
                 <<"status">> => [<<"done">>],
-                <<"classes">> => ClassNames,
-                <<"errors">> => Errors,
-                <<"summary">> => build_incremental_summary(
-                    ChangedCount, TotalFiles, UnchangedCount, DeletedCount
-                )
+                <<"classes">> => maps:get(classes, Result),
+                <<"errors">> => maps:get(errors, Result),
+                <<"summary">> => maps:get(summary, Result)
             },
             iolist_to_binary(json:encode(Response))
     end;
@@ -644,6 +693,29 @@ load_files_sequential(Files, SessionPid) ->
                 end
             end,
             {[], [], Indexes0},
+            Files
+        ),
+    {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
+
+%% @private
+%% @doc Load files without a session (BT-1723).
+%% Uses beamtalk_repl_loader:reload_class_file/1 for stateless compilation.
+%% Called by sync_project when no SessionPid is available (e.g., from
+%% the Workspace sync primitive).
+-spec load_files_stateless([string()]) -> {[map()], [map()]}.
+load_files_stateless(Files) ->
+    {RevClasses, RevErrors} =
+        lists:foldl(
+            fun(Path, {ClassesAcc, ErrorsAcc}) ->
+                case beamtalk_repl_loader:reload_class_file(Path) of
+                    {ok, Classes} ->
+                        {lists:reverse(Classes, ClassesAcc), ErrorsAcc};
+                    {error, Reason} ->
+                        ErrMaps = structured_file_errors(Path, Reason),
+                        {ClassesAcc, lists:reverse(ErrMaps, ErrorsAcc)}
+                end
+            end,
+            {[], []},
             Files
         ),
     {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
@@ -1173,7 +1245,7 @@ record_file_mtimes_from_snapshot(Snapshot) ->
 %% @doc Handle files that were previously loaded but have been deleted.
 %% Unregisters their classes from the class registry and unloads their BEAM modules.
 %% Returns the count of deleted files processed.
--spec handle_deleted_files([string()], pid()) -> non_neg_integer().
+-spec handle_deleted_files([string()], pid() | undefined) -> non_neg_integer().
 handle_deleted_files([], _SessionPid) ->
     0;
 handle_deleted_files(DeletedFiles, SessionPid) ->
@@ -1201,7 +1273,7 @@ handle_deleted_files(DeletedFiles, SessionPid) ->
 
 %% @private
 %% @doc Find and unload all modules that were loaded from a given source path.
--spec unload_modules_for_path(string(), pid(), #{atom() => binary()}, [
+-spec unload_modules_for_path(string(), pid() | undefined, #{atom() => binary()}, [
     {atom(), string() | undefined}
 ]) -> ok.
 unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules) ->
@@ -1225,7 +1297,10 @@ unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules) ->
                             ok
                     end,
                     beamtalk_workspace_meta:unregister_module(ModuleName),
-                    beamtalk_repl_shell:remove_from_tracker(SessionPid, ModuleName);
+                    case SessionPid of
+                        undefined -> ok;
+                        _ -> beamtalk_repl_shell:remove_from_tracker(SessionPid, ModuleName)
+                    end;
                 false ->
                     ok
             end

@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Workspace sync method (BT-1723).
+//
+// Tests that `Workspace sync` is available as a Beamtalk-native method
+// on the WorkspaceInterface singleton. The REPL e2e environment does not
+// have a beamtalk.toml in its CWD, so we verify the method exists and
+// returns the expected error. The :sync REPL command tests (sync_project.btscript)
+// cover the success path via the protocol handler.
+
+// ===========================================================================
+// WORKSPACE SYNC — METHOD EXISTS
+// ===========================================================================
+
+// Workspace responds to #sync
+Workspace respondsTo: #sync
+// => true
+
+// ===========================================================================
+// WORKSPACE SYNC — ERROR HANDLING
+// ===========================================================================
+
+// Workspace sync raises file_not_found when no beamtalk.toml exists in CWD.
+// The try/catch verifies the method dispatches correctly and returns
+// a structured error.
+[Workspace sync] on: Error do: [:e | e kind]
+// => file_not_found

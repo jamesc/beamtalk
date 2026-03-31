@@ -1961,6 +1961,7 @@ The REPL `:` commands are convenience aliases that desugar to the native message
 
 | REPL shortcut | Beamtalk native equivalent |
 |---------------|---------------------------|
+| `:sync` | `Workspace sync` |
 | `:load path` | `Workspace load: "path"` |
 | `:reload Counter` | `Counter reload` |
 | `:test` | `Workspace test` |

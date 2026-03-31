@@ -81,6 +81,26 @@ sealed Object subclass: WorkspaceInterface
   globals -> Dictionary =>
     (Erlang beamtalk_workspace_interface_primitives) globals
 
+  /// Sync the project: incrementally compile all changed files.
+  ///
+  /// Scans the project directory for `.bt` and `.erl` files, compiles
+  /// changed files in dependency order, and returns a result Dictionary.
+  ///
+  /// The result Dictionary contains:
+  ///   - `#summary` — human-readable summary String
+  ///   - `#classes` — List of loaded class name Strings
+  ///   - `#errors` — List of error Dictionaries (empty on success)
+  ///   - `#changedCount` — number of files reloaded
+  ///   - `#unchangedCount` — number of unchanged files
+  ///   - `#deletedCount` — number of deleted files
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace sync           // => #{summary => "Reloaded 2 of 5 files (3 unchanged)", ...}
+  /// (Workspace sync) at: #summary  // => "Reloaded 2 of 5 files (3 unchanged)"
+  /// ```
+  sync -> Dictionary => (Erlang beamtalk_workspace_interface_primitives) sync
+
   /// Compile and load a .bt file, registering the class.
   /// Returns a List of loaded class objects (empty if none resolved).
   /// Returns a structured error if path is not a String or the file cannot be loaded.

@@ -454,3 +454,73 @@ root_supervisor_returns_registered_value_test() ->
     ),
     ?assertEqual(SupTuple, beamtalk_workspace_interface_primitives:rootSupervisor()),
     catch ets:delete(beamtalk_root_supervisor).
+
+%%====================================================================
+%% sync Tests (BT-1723)
+%%====================================================================
+
+sync_dispatch_raises_when_no_manifest_test() ->
+    %% sync from a directory without beamtalk.toml should raise file_not_found.
+    %% Use /tmp as a path guaranteed to have no beamtalk.toml.
+    OldCwd = file:get_cwd(),
+    ok = file:set_cwd("/tmp"),
+    try
+        beamtalk_workspace_interface_primitives:dispatch(sync, [], fake_self(self())),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(file_not_found, Err#beamtalk_error.kind),
+            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class)
+    after
+        {ok, Cwd} = OldCwd,
+        file:set_cwd(Cwd)
+    end.
+
+sync_direct_raises_when_no_manifest_test() ->
+    %% Direct call to sync/0 should raise file_not_found when no beamtalk.toml.
+    OldCwd = file:get_cwd(),
+    ok = file:set_cwd("/tmp"),
+    try
+        beamtalk_workspace_interface_primitives:sync(),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(file_not_found, Err#beamtalk_error.kind),
+            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class)
+    after
+        {ok, Cwd} = OldCwd,
+        file:set_cwd(Cwd)
+    end.
+
+sync_returns_map_with_expected_keys_test() ->
+    %% When run from a directory with beamtalk.toml, sync/0 returns a map
+    %% with the expected keys.
+    %% Create a temporary project directory with beamtalk.toml and src/.
+    TmpDir = filename:join(
+        "/tmp", "bt_sync_test_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = filelib:ensure_dir(filename:join([TmpDir, "src", "dummy"])),
+    ok = file:write_file(
+        filename:join(TmpDir, "beamtalk.toml"), <<"[package]\nname = \"test\"\n">>
+    ),
+    OldCwd = file:get_cwd(),
+    ok = file:set_cwd(TmpDir),
+    try
+        Result = beamtalk_workspace_interface_primitives:sync(),
+        ?assert(is_map(Result)),
+        ?assert(maps:is_key(summary, Result)),
+        ?assert(maps:is_key(classes, Result)),
+        ?assert(maps:is_key(errors, Result)),
+        ?assert(maps:is_key(changedCount, Result)),
+        ?assert(maps:is_key(unchangedCount, Result)),
+        ?assert(maps:is_key(deletedCount, Result)),
+        %% With empty src/ directory, counts should be zero
+        ?assertEqual(0, maps:get(changedCount, Result)),
+        ?assertEqual(0, maps:get(unchangedCount, Result)),
+        ?assertEqual([], maps:get(classes, Result)),
+        ?assertEqual([], maps:get(errors, Result))
+    after
+        {ok, Cwd} = OldCwd,
+        file:set_cwd(Cwd),
+        os:cmd("rm -rf " ++ TmpDir)
+    end.

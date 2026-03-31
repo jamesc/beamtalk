@@ -587,6 +587,7 @@ Add BUnit tests for all new facade and Behaviour methods. Add e2e tests exercisi
 
 | Before | After (also works) | Shortcut still works? |
 |--------|--------------------|-----------------------|
+| `:sync` | `Workspace sync` | Yes |
 | `:load examples/counter.bt` | `Workspace load: "examples/counter.bt"` | Yes |
 | `:reload` | `Counter reload` (class-based) | Yes (desugars to last-loaded class) |
 | `:reload Counter` | `Counter reload` | Yes |
