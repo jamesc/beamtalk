@@ -367,6 +367,28 @@ struct TestResultDetail {
     error: Option<String>,
 }
 
+/// Result from running native `EUnit` tests.
+#[derive(Debug, Default)]
+struct NativeEunitResult {
+    /// Total number of native `EUnit` tests.
+    total: usize,
+    /// Number of passing tests.
+    passed: usize,
+    /// Number of failing tests.
+    failed: usize,
+    /// Per-module results: `(module_name, passed, failed)`.
+    modules: Vec<(String, usize, usize)>,
+    /// Captured `EUnit` output (failures, errors).
+    output: String,
+}
+
+/// Combined test results from `BUnit` and native `EUnit` runs.
+#[derive(Debug)]
+struct TestResults {
+    bunit: Option<BunitResult>,
+    native: Option<NativeEunitResult>,
+}
+
 /// Build the effective class index for a test file: base classes + fixtures.
 ///
 /// For single-package runs, uses the merged index. For multi-package runs,
@@ -775,6 +797,8 @@ struct TestPipeline {
     jobs: usize,
     /// ADR 0072: Hex dependency names that need OTP app startup before tests.
     hex_dep_names: Vec<String>,
+    /// Native `EUnit` test module names (modules ending in `_test` or `_tests`).
+    native_test_modules: Vec<String>,
 }
 
 /// Run `BUnit` tests.
@@ -816,15 +840,18 @@ pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize) -> Result<()
         initialize_pipeline(test_path, test_files, build_dir, warnings_as_errors, jobs)?;
     compile_fixtures(&mut pipeline)?;
     discover_and_compile_tests(&mut pipeline)?;
+    build_packages(&mut pipeline)?;
 
-    if pipeline.compiled_tests.is_empty() && pipeline.compiled_doc_tests.is_empty() {
+    if pipeline.compiled_tests.is_empty()
+        && pipeline.compiled_doc_tests.is_empty()
+        && pipeline.native_test_modules.is_empty()
+    {
         println!("No tests found");
         return Ok(());
     }
 
-    build_packages(&mut pipeline)?;
-    let result = execute_tests(&pipeline)?;
-    report_results(&pipeline, &result, start_time)
+    let results = execute_tests(&pipeline)?;
+    report_results(&pipeline, &results, start_time)
 }
 
 /// Initialize the test pipeline: discover packages and build class indexes.
@@ -966,6 +993,7 @@ fn initialize_pipeline(
         package_ebin_dirs: Vec::new(),
         jobs,
         hex_dep_names: Vec::new(),
+        native_test_modules: Vec::new(),
     })
 }
 
@@ -1312,6 +1340,15 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         let native_test_dir = pkg_root.join("native").join("test");
         if native_test_dir.exists() && native_test_dir.is_dir() {
             compile_native_test_erlang(pkg_root, &native_test_dir, &pipeline.package_ebin_dirs)?;
+
+            // Discover native EUnit test modules (_test or _tests suffix)
+            // in the native ebin dir after compilation.
+            let native_ebin = pkg_layout.native_ebin_dir();
+            for module in collect_beam_module_names(&native_ebin)? {
+                if module.ends_with("_test") || module.ends_with("_tests") {
+                    pipeline.native_test_modules.push(module);
+                }
+            }
         }
     }
 
@@ -1373,15 +1410,27 @@ fn compile_native_test_erlang(
     Ok(())
 }
 
-/// Phase 3: Run all tests via `beamtalk_test_runner:run_all(Jobs)`.
+/// Phase 3: Run all tests (`BUnit` + native `EUnit`).
 ///
-/// Replaces `EUnit` wrapper compilation and execution with direct
-/// calls to the `BUnit` runner, which handles test discovery and execution
-/// in the Erlang runtime and returns structured JSON results.
-fn execute_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
+/// Runs `BUnit` tests via `beamtalk_test_runner:run_all(Jobs)` if any `BUnit`
+/// tests were compiled, then runs native `EUnit` test modules if any were
+/// discovered in `native/test/`.
+fn execute_tests(pipeline: &TestPipeline) -> Result<TestResults> {
     println!("Running tests...\n");
 
-    run_bunit_tests(pipeline)
+    let bunit = if pipeline.compiled_tests.is_empty() && pipeline.compiled_doc_tests.is_empty() {
+        None
+    } else {
+        Some(run_bunit_tests(pipeline)?)
+    };
+
+    let native = if pipeline.native_test_modules.is_empty() {
+        None
+    } else {
+        Some(run_native_eunit_tests(pipeline)?)
+    };
+
+    Ok(TestResults { bunit, native })
 }
 
 /// Run tests via `beamtalk_test_runner:run_all(Jobs)` in a single BEAM process.
@@ -1566,71 +1615,264 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     })
 }
 
+/// Run native `EUnit` test modules in a BEAM process.
+///
+/// Executes `eunit:test/2` for each discovered native test module and
+/// collects per-module pass/fail counts via a small inline Erlang snippet
+/// that introspects `EUnit` results.
+#[allow(clippy::too_many_lines)]
+fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> {
+    debug!(
+        count = pipeline.native_test_modules.len(),
+        "Running native EUnit tests"
+    );
+
+    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()
+        .wrap_err("Cannot find Erlang runtime directory")?;
+    let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
+
+    // ADR 0072: Start hex dep OTP applications before tests
+    let hex_deps_start_cmd =
+        beamtalk_cli::repl_startup::hex_deps_start_fragment(&pipeline.hex_dep_names);
+
+    // Build a list of module atoms for EUnit
+    let module_list = pipeline
+        .native_test_modules
+        .iter()
+        .map(|m| format!("'{m}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // Inline Erlang: run EUnit per module with `verbose` so per-test
+    // pass/fail output is printed to stdout. Count test functions from
+    // module_info(exports) for the total. EUnit returns ok | error but
+    // no per-test counts, so on `error` we report all tests as failed —
+    // the verbose output above shows exactly which ones failed.
+    let eval_cmd = format!(
+        "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+         {hex_deps_start_cmd}\
+         Mods = [{module_list}], \
+         Results = lists:map(fun(M) -> \
+             Count = length([F || {{F, 0}} <- M:module_info(exports), \
+                 lists:suffix(\"_test\", atom_to_list(F)) orelse \
+                 lists:suffix(\"_test_\", atom_to_list(F))]), \
+             Res = eunit:test(M, [verbose]), \
+             case Res of \
+                 ok -> {{M, Count, 0}}; \
+                 error -> {{M, 0, Count}} \
+             end \
+         end, Mods), \
+         JsonMods = lists:map(fun({{M, P, F}}) -> \
+             io_lib:format(\"{{\\\"module\\\": \\\"~s\\\", \\\"passed\\\": ~B, \\\"failed\\\": ~B}}\", [M, P, F]) \
+         end, Results), \
+         Total = lists:sum([P + F || {{_, P, F}} <- Results]), \
+         Passed = lists:sum([P || {{_, P, _}} <- Results]), \
+         Failed = lists:sum([F || {{_, _, F}} <- Results]), \
+         Json = io_lib:format(\"{{\\\"native_total\\\": ~B, \\\"native_passed\\\": ~B, \\\"native_failed\\\": ~B, \\\"modules\\\": [~s]}}\", \
+             [Total, Passed, Failed, lists:join(\", \", JsonMods)]), \
+         io:format(\"~s~n\", [Json]), \
+         init:stop(case Failed of 0 -> 0; _ -> 1 end)."
+    );
+
+    let mut cmd = std::process::Command::new("erl");
+    #[cfg(windows)]
+    {
+        let build_dir_path = pipeline.build_dir.as_str().replace('\\', "/");
+        cmd.arg("-noshell").arg("-pa").arg(build_dir_path);
+    }
+    #[cfg(not(windows))]
+    {
+        cmd.arg("-noshell")
+            .arg("-pa")
+            .arg(pipeline.build_dir.as_str());
+    }
+
+    for ebin_dir in &pipeline.package_ebin_dirs {
+        #[cfg(windows)]
+        {
+            let ebin_dir_path = ebin_dir.as_str().replace('\\', "/");
+            cmd.arg("-pa").arg(ebin_dir_path);
+        }
+        #[cfg(not(windows))]
+        {
+            cmd.arg("-pa").arg(ebin_dir.as_str());
+        }
+    }
+
+    for arg in &pa_args {
+        cmd.arg(arg);
+    }
+
+    cmd.arg("-eval").arg(&eval_cmd);
+
+    let output = cmd
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run native EUnit tests")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    debug!("Native EUnit stdout: {}", stdout);
+    debug!("Native EUnit stderr: {}", stderr);
+
+    // Extract JSON summary line
+    let json_line = stdout
+        .lines()
+        .find(|line| line.starts_with("{\"native_"))
+        .ok_or_else(|| {
+            let combined = format!("{stdout}\n{stderr}");
+            miette::miette!("No JSON output from native EUnit runner:\n{combined}")
+        })?;
+
+    let result_json: serde_json::Value = serde_json::from_str(json_line)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to parse native EUnit JSON: {json_line}"))?;
+
+    let total = result_json["native_total"]
+        .as_u64()
+        .unwrap_or(0)
+        .try_into()
+        .unwrap_or(0);
+    let passed = result_json["native_passed"]
+        .as_u64()
+        .unwrap_or(0)
+        .try_into()
+        .unwrap_or(0);
+    let failed = result_json["native_failed"]
+        .as_u64()
+        .unwrap_or(0)
+        .try_into()
+        .unwrap_or(0);
+
+    let modules = result_json["modules"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|m| {
+                    let name = m["module"].as_str().unwrap_or("unknown").to_string();
+                    let p =
+                        usize::try_from(m["passed"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
+                    let f =
+                        usize::try_from(m["failed"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
+                    (name, p, f)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Capture EUnit verbose output (everything before the JSON line) for failure reporting
+    let eunit_output: String = stdout
+        .lines()
+        .take_while(|line| !line.starts_with("{\"native_"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(NativeEunitResult {
+        total,
+        passed,
+        failed,
+        modules,
+        output: eunit_output,
+    })
+}
+
 /// Phase 4: Aggregate and report test results.
 ///
 /// BT-1631: Displays results from `beamtalk_test_runner:run_all/1` with
 /// Beamtalk class names (not Erlang module names) and per-class summary.
+/// Also reports native `EUnit` test results when present.
 fn report_results(
     pipeline: &TestPipeline,
-    result: &BunitResult,
+    results: &TestResults,
     start_time: Instant,
 ) -> Result<()> {
     let mut failed_details = Vec::new();
+    let mut total_tests: usize = 0;
+    let mut total_passed: usize = 0;
+    let mut total_failed: usize = 0;
 
-    // Group test results by class name (prefix of test name)
-    let mut class_results: HashMap<String, (usize, usize, usize)> = HashMap::new();
+    // Report BUnit results
+    if let Some(result) = &results.bunit {
+        // Group test results by class name (prefix of test name)
+        let mut class_results: HashMap<String, (usize, usize, usize)> = HashMap::new();
 
-    for test in &result.tests {
-        let test_name = &test.name;
-        // Extract class name from test name (class method names are formed as "ClassName testMethod")
-        let class_name = if let Some(first_word) = test_name.split_whitespace().next() {
-            first_word.to_string()
-        } else {
-            test_name.clone()
-        };
+        for test in &result.tests {
+            let test_name = &test.name;
+            // Extract class name from test name (class method names are formed as "ClassName testMethod")
+            let class_name = if let Some(first_word) = test_name.split_whitespace().next() {
+                first_word.to_string()
+            } else {
+                test_name.clone()
+            };
 
-        let (passed, failed, skipped) =
-            class_results.entry(class_name.clone()).or_insert((0, 0, 0));
+            let (passed, failed, skipped) =
+                class_results.entry(class_name.clone()).or_insert((0, 0, 0));
 
-        match test.status.as_str() {
-            "pass" => *passed += 1,
-            "fail" => {
-                *failed += 1;
-                if let Some(error) = &test.error {
-                    failed_details.push(format!("FAIL {test_name}: {error}"));
+            match test.status.as_str() {
+                "pass" => *passed += 1,
+                "fail" => {
+                    *failed += 1;
+                    if let Some(error) = &test.error {
+                        failed_details.push(format!("FAIL {test_name}: {error}"));
+                    }
+                }
+                "skip" => *skipped += 1,
+                _ => {}
+            }
+        }
+
+        // Print results per class (matches BUnit output format)
+        for compiled in &pipeline.compiled_tests {
+            let class_name = &compiled.test_class.class_name;
+            if let Some((passed, failed, skipped)) = class_results.get(class_name) {
+                let total = passed + failed + skipped;
+                if *failed > 0 {
+                    println!(
+                        "  {class_name}: {total} tests, {passed} passed, {failed} failed \u{2717}"
+                    );
+                } else {
+                    println!("  {class_name}: {total} tests, {total} passed \u{2713}");
                 }
             }
-            "skip" => *skipped += 1,
-            _ => {}
         }
+
+        total_tests += result.total;
+        total_passed += result.passed;
+        total_failed += result.failed;
     }
 
-    // Print results per class (matches BUnit output format)
-    for compiled in &pipeline.compiled_tests {
-        let class_name = &compiled.test_class.class_name;
-        if let Some((passed, failed, skipped)) = class_results.get(class_name) {
-            let total = passed + failed + skipped;
+    // Report native EUnit results
+    if let Some(native) = &results.native {
+        for (module, passed, failed) in &native.modules {
+            let total = passed + failed;
             if *failed > 0 {
                 println!(
-                    "  {class_name}: {total} tests, {passed} passed, {failed} failed \u{2717}"
+                    "  {module} (native): {total} tests, {passed} passed, {failed} failed \u{2717}"
                 );
             } else {
-                println!("  {class_name}: {total} tests, {total} passed \u{2713}");
+                println!("  {module} (native): {total} tests, {total} passed \u{2713}");
             }
         }
+
+        if native.failed > 0 && !native.output.is_empty() {
+            failed_details.push(native.output.clone());
+        }
+
+        total_tests += native.total;
+        total_passed += native.passed;
+        total_failed += native.failed;
     }
 
+    let file_count = pipeline.test_files.len() + pipeline.native_test_modules.len();
     let elapsed = start_time.elapsed();
     let elapsed_secs = elapsed.as_secs_f64();
 
     println!();
-    if result.failed == 0 {
+    if total_failed == 0 {
         println!(
-            "{} file(s), {} tests, {} passed, 0 failed ({:.1}s)",
-            pipeline.test_files.len(),
-            result.total,
-            result.passed,
-            elapsed_secs,
+            "{file_count} file(s), {total_tests} tests, {total_passed} passed, 0 failed ({elapsed_secs:.1}s)",
         );
     } else {
         for detail in &failed_details {
@@ -1638,14 +1880,9 @@ fn report_results(
         }
         eprintln!();
         eprintln!(
-            "{} file(s), {} tests, {} passed, {} failed ({:.1}s)",
-            pipeline.test_files.len(),
-            result.total,
-            result.passed,
-            result.failed,
-            elapsed_secs,
+            "{file_count} file(s), {total_tests} tests, {total_passed} passed, {total_failed} failed ({elapsed_secs:.1}s)",
         );
-        miette::bail!("{} test(s) failed", result.failed);
+        miette::bail!("{total_failed} test(s) failed");
     }
 
     Ok(())
